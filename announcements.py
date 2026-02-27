@@ -95,10 +95,23 @@ async def afternoon_post(channel):
             for i, m in enumerate(top5)
         )
 
+        war = cr_api.get_current_war()
+        war_str = ""
+        if war and war.get("state") not in (None, "notInWar"):
+            participants = war.get("clan", {}).get("participants", [])
+            fame = war.get("clan", {}).get("fame", 0)
+            unused = [p["name"] for p in participants if p.get("decksUsedToday", 0) == 0]
+            used = len(participants) - len(unused)
+            war_str = f"\n\n⚔️ **River Race:** {fame:,} fame | {used}/{len(participants)} battled today"
+            if unused:
+                nudge = ", ".join(unused[:3])
+                war_str += f" — still need to battle: **{nudge}**{'...' if len(unused) > 3 else ''}"
+
         msg = (
             f"🏆 **Afternoon Trophy Report** — POAP KINGS leaderboard!\n\n"
-            f"{lines}\n\n"
-            f"Push those trophies before war season ends! 🧪"
+            f"{lines}"
+            f"{war_str}\n\n"
+            f"Push those trophies! 🧪"
         )
         await channel.send(msg)
     except Exception as e:
