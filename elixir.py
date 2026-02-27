@@ -3,6 +3,7 @@ import os
 import logging
 import asyncio
 from datetime import datetime
+import json
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -72,6 +73,39 @@ def _inactive_members(members):
 
 # ── Bot events ────────────────────────────────────────────────────────────────
 
+
+async def _check_new_members():
+    """Poll for new clan members and post welcome messages."""
+    snapshot_path = os.path.join(os.path.dirname(__file__), "member_snapshot.json")
+    try:
+        clan = cr_api.get_clan()
+        current = {m["tag"]: m["name"] for m in clan.get("memberList", [])}
+
+        if os.path.exists(snapshot_path):
+            known = json.load(open(snapshot_path))
+        else:
+            known = {}
+
+        new_members = {tag: name for tag, name in current.items() if tag not in known}
+
+        if new_members:
+            channel = bot.get_channel(ANNOUNCEMENTS_CHANNEL_ID)
+            if channel:
+                for tag, name in new_members.items():
+                    msg = (
+                        f"👑 **Welcome to POAP KINGS, {name}!** 👑\n\n"
+                        f"Glad to have you in the clan! Donate cards, battle hard, and let's climb together. "
+                        f"If you have questions, leadership is in #leader-lounge. Let's go! 🧪"
+                    )
+                    await channel.send(msg)
+                    log.info(f"Welcomed new member: {name} ({tag})")
+
+        # Update snapshot
+        json.dump(current, open(snapshot_path, "w"), indent=2)
+
+    except Exception as e:
+        log.error(f"_check_new_members error: {e}")
+
 @bot.event
 async def on_ready():
     log.info(f"Elixir online as {bot.user} 🧪")
@@ -83,6 +117,7 @@ async def on_ready():
     scheduler.add_job(lambda: asyncio.ensure_future(_run_post("evening")), "cron", hour=21, minute=0)
     scheduler.start()
     log.info("Scheduler started — posts at 7am, 12pm, 5pm, 9pm Chicago time")
+    scheduler.add_job(lambda: asyncio.ensure_future(_check_new_members()), "interval", minutes=30)
 
 
 async def _run_post(kind):
