@@ -108,6 +108,24 @@ async def on_message(message):
     if bot.user not in message.mentions:
         log.info(f"Ignoring — bot not mentioned")
         return
+    # Allow manual trigger in announcements channel
+    if message.channel.id == ANNOUNCEMENTS_CHANNEL_ID:
+        content_lower = message.content.lower()
+        if any(w in content_lower for w in ["update", "post", "report", "status"]):
+            async with message.channel.typing():
+                now = datetime.now(CHICAGO).hour
+                if now < 10:
+                    await announcements.morning_post(message.channel)
+                elif now < 14:
+                    await announcements.noon_post(message.channel)
+                elif now < 19:
+                    await announcements.afternoon_post(message.channel)
+                else:
+                    await announcements.evening_post(message.channel)
+        else:
+            await message.channel.send("Try: `@Elixir update`, `@Elixir post`, or `@Elixir report` 🧪")
+        return
+
     if message.channel.id != LEADERSHIP_CHANNEL_ID:
         log.info(f"Ignoring — wrong channel {message.channel.id} != {LEADERSHIP_CHANNEL_ID}")
         return
