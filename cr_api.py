@@ -22,13 +22,18 @@ def get_clan():
 
 
 def get_current_war():
-    url = f"{API_BASE}/clans/%23{CLAN_TAG}/currentwar"
-    try:
-        r = requests.get(url, headers=_headers(), timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except Exception:
-        return None
+    # Try River Race first (current format), fall back to legacy war endpoint
+    for endpoint in ["currentriverrace", "currentwar"]:
+        url = f"{API_BASE}/clans/%23{CLAN_TAG}/{endpoint}"
+        try:
+            r = requests.get(url, headers=_headers(), timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            if data:
+                return data
+        except Exception:
+            continue
+    return None
 
 
 def get_river_race_log():
