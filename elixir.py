@@ -111,7 +111,34 @@ async def on_message(message):
     # Allow manual trigger in announcements channel
     if message.channel.id == ANNOUNCEMENTS_CHANNEL_ID:
         content_lower = message.content.lower()
-        if any(w in content_lower for w in ["update", "post", "report", "status"]):
+        if any(w in content_lower for w in ["war", "battle", "river race"]):
+            async with message.channel.typing():
+                try:
+                    war = cr_api.get_current_war()
+                    if not war or war.get("state") in (None, "notInWar"):
+                        await message.channel.send("No active River Race right now. Rest up! \U0001f9ea")
+                    else:
+                        parts = war.get("clan", {}).get("participants", [])
+                        fame = war.get("clan", {}).get("fame", 0)
+                        state = war.get("state", "active")
+                        used = [p for p in parts if p.get("decksUsedToday", 0) > 0]
+                        unused = [p for p in parts if p.get("decksUsedToday", 0) == 0]
+                        used_names = ", ".join("**" + p["name"] + "**" for p in used[:5])
+                        unused_names = ", ".join("**" + p["name"] + "**" for p in unused[:5])
+                        lines = ["\u2694\ufe0f **River Race Report \u2014 POAP KINGS**\n"]
+                        lines.append("State: **" + state + "** | Fame: **" + f"{fame:,}" + "** \u26a1")
+                        lines.append("Decks used today: **" + str(len(used)) + "/" + str(len(parts)) + "**\n")
+                        if used_names:
+                            lines.append("\U0001f525 Battled: " + used_names)
+                        if unused_names:
+                            extra = "..." if len(unused) > 5 else ""
+                            lines.append("\U0001f634 Still need to battle: " + unused_names + extra)
+                        lines.append("\n\U0001f9ea Let's finish strong, kings!")
+                        await message.channel.send("\n".join(lines))
+                except Exception as e:
+                    log.error(f"war post error: {e}")
+                    await message.channel.send("Could not fetch war data. Try again in a moment. \U0001f9ea")
+        elif any(w in content_lower for w in ["update", "post", "report", "status"]):
             async with message.channel.typing():
                 now = datetime.now(CHICAGO).hour
                 if now < 10:
@@ -123,7 +150,7 @@ async def on_message(message):
                 else:
                     await announcements.evening_post(message.channel)
         else:
-            await message.channel.send("Try: `@Elixir update`, `@Elixir post`, or `@Elixir report` 🧪")
+            await message.channel.send("Try: `@Elixir update`, `@Elixir war`, or `@Elixir report` \U0001f9ea")
         return
 
     if message.channel.id != LEADERSHIP_CHANNEL_ID:
