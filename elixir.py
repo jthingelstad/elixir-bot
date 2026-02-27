@@ -102,11 +102,14 @@ async def _run_post(kind):
 
 @bot.event
 async def on_message(message):
+    log.info(f"Message received: channel={message.channel.id} author={message.author} mentions={[u.id for u in message.mentions]}")
     if message.author.bot:
         return
     if bot.user not in message.mentions:
+        log.info(f"Ignoring — bot not mentioned")
         return
     if message.channel.id != LEADERSHIP_CHANNEL_ID:
+        log.info(f"Ignoring — wrong channel {message.channel.id} != {LEADERSHIP_CHANNEL_ID}")
         return
 
     content = message.content.lower()
@@ -177,6 +180,7 @@ async def on_message(message):
                 war = cr_api.get_current_war()
                 war_str = "No active war" if not war or war.get("state") in (None, "notInWar") else f"War active — {war.get('state')}"
 
+                health_msg = "Looking strong! Keep it up." if donations > 500 else "We can do better on donations — keep pushing!"
                 reply = (
                     f"📊 **POAP KINGS — Clan Status**\n\n"
                     f"👥 Members: **{clan.get('members',0)}/50**\n"
@@ -185,7 +189,7 @@ async def on_message(message):
                     f"⚔️ War: **{war_str}**\n\n"
                     f"🥇 Top donor: **{top_donor[0]['name']}** ({top_donor[0].get('donations',0)})\n"
                     f"🥇 Trophy leader: **{top_trophy[0]['name']}** ({top_trophy[0].get('trophies',0):,})\n\n"
-                    f"🧪 Overall: {'Looking strong! Keep it up.' if donations > 500 else 'We can do better on donations — let's push!'}"
+                    f"🧪 Overall: {health_msg}"
                 )
 
             elif any(w in content for w in ["war", "battle"]):
