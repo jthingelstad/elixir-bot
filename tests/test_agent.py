@@ -259,6 +259,39 @@ def test_respond_to_leader_share(_mock_openai_client):
     assert "#elixir" in result["content"]
 
 
+def test_reception_system_prompt():
+    """RECEPTION_SYSTEM prompt describes onboarding instructions."""
+    assert "server nickname" in elixir_agent.RECEPTION_SYSTEM.lower()
+    assert "Clash Royale" in elixir_agent.RECEPTION_SYSTEM
+    assert "reception_response" in elixir_agent.RECEPTION_SYSTEM
+
+
+def test_respond_in_reception(_mock_openai_client):
+    """Reception Q&A returns a helpful onboarding response."""
+    final = json.dumps({
+        "event_type": "reception_response",
+        "content": "Hey! I can see **King Levy** in our roster. Set that as your server nickname and I'll get you in! 🧪",
+    })
+    mock_resp = _make_mock_response(content=final)
+    _mock_openai_client.chat.completions.create.return_value = mock_resp
+
+    result = elixir_agent.respond_in_reception(
+        question="My name is King Levy",
+        author_name="NewUser",
+        clan_data={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
+    )
+
+    assert result["event_type"] == "reception_response"
+    assert "King Levy" in result["content"]
+
+    # Verify roster appeared in user message
+    call_args = _mock_openai_client.chat.completions.create.call_args
+    messages = call_args.kwargs.get("messages") or call_args[1].get("messages")
+    user_msg = messages[1]["content"]
+    assert "King Levy" in user_msg
+    assert "#ABC" in user_msg
+
+
 def test_execute_tool_war_champ_standings():
     """War Champ standings tool returns serialized results."""
     with patch("elixir_agent.db") as mock_db:
