@@ -220,8 +220,30 @@ async def on_message(message):
                 if result is None:
                     await message.reply("Something went wrong on my end — try again? 🧪")
                     return
-                # NOTE: leader-lounge responses are NOT written to elixir.json (private)
+
                 content = result.get("content", result.get("summary", ""))
+
+                # If the leader asked to share something with the clan, post to #elixir
+                if result.get("event_type") == "leader_share":
+                    share_content = result.get("share_content", "")
+                    if share_content:
+                        elixir_channel = bot.get_channel(ANNOUNCEMENTS_CHANNEL_ID)
+                        if elixir_channel:
+                            share_entry = {
+                                "event_type": "leader_share",
+                                "member_tags": result.get("member_tags", []),
+                                "member_names": result.get("member_names", []),
+                                "summary": result.get("summary", ""),
+                                "content": share_content,
+                                "metadata": {
+                                    "shared_by": message.author.display_name,
+                                },
+                            }
+                            saved = await _write_and_push(
+                                share_entry,
+                                f"Elixir: leader share from {message.author.display_name}",
+                            )
+                            await _post_to_elixir(elixir_channel, saved)
 
                 # Save Elixir's response to conversation memory
                 db.save_conversation_turn(
