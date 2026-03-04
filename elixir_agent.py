@@ -62,9 +62,21 @@ LEADER_SYSTEM = (
     "You may be provided with recent conversation history with this leader. "
     "Use it for context — reference earlier questions and answers naturally. "
     "Don't repeat yourself if you already covered a topic recently.\n\n"
+    "## Sharing to the clan\n"
+    "A leader may ask you to share a point, insight, or announcement with the whole clan "
+    "(e.g. \"share that with the clan\", \"post that to #elixir\", \"announce that\"). "
+    "When they do, use event_type \"leader_share\" and include a \"share_content\" field "
+    "with a message crafted for the whole clan in #elixir. The \"content\" field should be "
+    "your reply to the leader confirming what you shared. "
+    "The share_content should be written for a general clan audience — motivational, clear, "
+    "and without referencing the private leader-lounge discussion.\n\n"
     "Respond with JSON only (no markdown wrapper):\n"
     '{"event_type": "leader_response", "member_tags": [], "member_names": [], '
-    '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}'
+    '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}\n\n'
+    "Or, when sharing to the clan:\n"
+    '{"event_type": "leader_share", "member_tags": [], "member_names": [], '
+    '"summary": "one sentence TL;DR", "content": "reply to the leader confirming the share", '
+    '"share_content": "the clan-facing post for #elixir", "metadata": {}}'
 )
 
 

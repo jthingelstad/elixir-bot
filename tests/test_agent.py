@@ -224,6 +224,41 @@ def test_respond_to_leader_without_history(_mock_openai_client):
     assert result["event_type"] == "leader_response"
 
 
+def test_leader_share_event_type_in_prompt():
+    """LEADER_SYSTEM prompt describes the leader_share event type."""
+    assert "leader_share" in elixir_agent.LEADER_SYSTEM
+    assert "share_content" in elixir_agent.LEADER_SYSTEM
+
+
+def test_respond_to_leader_share(_mock_openai_client):
+    """Leader asking to share produces a leader_share response with share_content."""
+    final = json.dumps({
+        "event_type": "leader_share",
+        "member_tags": [],
+        "member_names": ["King Levy"],
+        "summary": "Shout out to King Levy",
+        "content": "Done! I posted a shout-out to King Levy in #elixir. 🧪",
+        "share_content": "👑 Big shout-out to **King Levy** for crushing it this week! Keep it up, kings! 🧪",
+        "metadata": {},
+    })
+    mock_resp = _make_mock_response(content=final)
+    _mock_openai_client.chat.completions.create.return_value = mock_resp
+
+    result = elixir_agent.respond_to_leader(
+        question="Share a shout-out to King Levy with the clan",
+        author_name="LeaderBob",
+        clan_data={"memberList": []},
+        war_data={},
+        recent_entries=[],
+    )
+
+    assert result["event_type"] == "leader_share"
+    assert "share_content" in result
+    assert "King Levy" in result["share_content"]
+    # The content field is the reply to the leader
+    assert "#elixir" in result["content"]
+
+
 def test_execute_tool_war_champ_standings():
     """War Champ standings tool returns serialized results."""
     with patch("elixir_agent.db") as mock_db:
