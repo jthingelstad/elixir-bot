@@ -326,10 +326,11 @@ def test_execute_tool_perfect_war_participants():
 
 
 def test_editorial_system_prompt():
-    """EDITORIAL_SYSTEM prompt describes website speech-bubble role."""
-    assert "website" in elixir_agent.EDITORIAL_SYSTEM.lower()
+    """EDITORIAL_SYSTEM prompt describes public-facing website role."""
+    assert "public website" in elixir_agent.EDITORIAL_SYSTEM.lower()
     assert "speech bubble" in elixir_agent.EDITORIAL_SYSTEM.lower()
     assert "280 characters" in elixir_agent.EDITORIAL_SYSTEM
+    assert "join" in elixir_agent.EDITORIAL_SYSTEM.lower()
 
 
 def test_write_editorial(_mock_openai_client):
