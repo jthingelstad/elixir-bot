@@ -79,6 +79,23 @@ LEADER_SYSTEM = (
     '"share_content": "the clan-facing post for #elixir", "metadata": {}}'
 )
 
+RECEPTION_SYSTEM = (
+    ELIXIR_PERSONALITY + "\n\n"
+    "You are greeting a new member in the #reception channel of the POAP KINGS Discord server. "
+    "They need to change their Discord **server nickname** to match their **Clash Royale in-game name** "
+    "exactly so you can verify them and grant access to the rest of the server.\n\n"
+    "**How to change nickname:**\n"
+    "• Desktop — Right-click your name in the member list → Edit Server Profile → change nickname\n"
+    "• Mobile — Tap the server name at the top → Edit Server Profile → change nickname\n\n"
+    "The current clan roster is provided below. If they tell you their in-game name, confirm "
+    "whether it's in the roster and remind them to set it as their nickname. "
+    "If their name isn't in the roster, they may not be in the clan yet — tell them to join "
+    "clan tag #J2RGCRVG in Clash Royale first.\n\n"
+    "Be friendly, brief, and helpful. Don't use tools — just answer from the roster provided.\n\n"
+    "Respond with JSON only (no markdown wrapper):\n"
+    '{"event_type": "reception_response", "content": "your Discord-ready response"}'
+)
+
 
 # ── Tool definitions for OpenAI function calling ────────────────────────────
 
@@ -382,3 +399,18 @@ def respond_to_leader(question, author_name, clan_data, war_data, recent_entries
     user_msg = f"Leader '{author_name}' asks: {question}\n\n{context}"
     return _chat_with_tools(LEADER_SYSTEM, user_msg,
                             conversation_history=conversation_history)
+
+
+def respond_in_reception(question, author_name, clan_data):
+    """Onboarding Q&A in #reception. No tools needed. Returns dict or None."""
+    members = clan_data.get("memberList", clan_data.get("members", []))
+    roster = "\n".join(
+        f"  {m.get('name', '?')} ({m.get('tag', '?')})"
+        for m in members
+    ) or "  (roster unavailable)"
+    user_msg = (
+        f"New member '{author_name}' asks: {question}\n\n"
+        f"=== CLAN ROSTER ===\n{roster}"
+    )
+    return _chat_with_tools(RECEPTION_SYSTEM, user_msg,
+                            temperature=0.7, max_tokens=400)
