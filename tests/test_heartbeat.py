@@ -196,6 +196,84 @@ def test_detect_role_changes(conn):
     assert signals[0]["new_role"] == "elder"
 
 
+def test_detect_war_deck_usage_battle_day():
+    """War deck usage signal produced on battle days."""
+    war_data = {
+        "state": "warDay",
+        "clan": {
+            "participants": [
+                {"name": "King Levy", "tag": "#ABC", "decksUsedToday": 4},
+                {"name": "Vijay", "tag": "#DEF", "decksUsedToday": 2},
+                {"name": "Newbie", "tag": "#GHI", "decksUsedToday": 0},
+            ]
+        }
+    }
+    # Thursday = battle day
+    with patch("heartbeat.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 3, 5, 18, 0)  # Thursday
+        mock_dt.utcnow = datetime.utcnow
+        mock_dt.strptime = datetime.strptime
+        signals = heartbeat.detect_war_deck_usage(war_data)
+
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig["type"] == "war_deck_usage"
+    assert len(sig["used_all_4"]) == 1
+    assert sig["used_all_4"][0]["name"] == "King Levy"
+    assert len(sig["used_some"]) == 1
+    assert sig["used_some"][0]["name"] == "Vijay"
+    assert len(sig["used_none"]) == 1
+    assert sig["used_none"][0]["name"] == "Newbie"
+
+
+def test_detect_war_deck_usage_training_day():
+    """No war deck signal on training days."""
+    war_data = {"state": "warDay", "clan": {"participants": []}}
+    # Wednesday = training day
+    with patch("heartbeat.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 3, 4, 18, 0)  # Wednesday
+        signals = heartbeat.detect_war_deck_usage(war_data)
+
+    assert len(signals) == 0
+
+
+def test_detect_war_deck_usage_no_war():
+    """No signal when not in war."""
+    signals = heartbeat.detect_war_deck_usage({"state": "notInWar"})
+    assert len(signals) == 0
+
+
+def test_detect_war_champ_update(conn):
+    """War Champ standings signal includes top contributors."""
+    conn.execute(
+        "INSERT INTO war_results (id, season_id, section_index, our_rank, our_fame, created_date) "
+        "VALUES (1, 50, 1, 1, 10000, '20260301T120000.000Z')"
+    )
+    conn.execute(
+        "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+        "VALUES (1, '#ABC', 'King Levy', 3500, 4)"
+    )
+    conn.execute(
+        "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+        "VALUES (1, '#DEF', 'Vijay', 4000, 4)"
+    )
+    conn.commit()
+
+    signals = heartbeat.detect_war_champ_update(conn=conn)
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig["type"] == "war_champ_standings"
+    assert sig["season_id"] == 50
+    assert sig["leader"]["name"] == "Vijay"  # Vijay has more fame
+    assert len(sig["standings"]) == 2
+
+
+def test_detect_war_champ_update_empty(conn):
+    """No signal when no war data."""
+    signals = heartbeat.detect_war_champ_update(conn=conn)
+    assert len(signals) == 0
+
+
 def test_multiple_signals(conn):
     """Multiple changes produce multiple signals."""
     # Snapshot A

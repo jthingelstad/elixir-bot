@@ -65,7 +65,21 @@ CREATE TABLE IF NOT EXISTS war_participation (
 );
 
 CREATE INDEX IF NOT EXISTS idx_war_part_tag ON war_participation(tag);
+
+CREATE TABLE IF NOT EXISTS leader_conversations (
+    id INTEGER PRIMARY KEY,
+    author_id TEXT NOT NULL,
+    author_name TEXT,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_leader_conv_author ON leader_conversations(author_id, recorded_at);
 """
+
+CONVERSATION_RETENTION_DAYS = 30
+CONVERSATION_MAX_PER_LEADER = 20
 
 
 def get_connection(db_path=None):
@@ -184,9 +198,21 @@ def purge_old_data(conn=None):
         )
         war_deleted = cur.rowcount
 
+        # Purge old conversations
+        conv_cutoff = (datetime.utcnow() - timedelta(days=CONVERSATION_RETENTION_DAYS)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
+        cur = conn.execute(
+            "DELETE FROM leader_conversations WHERE recorded_at < ?", (conv_cutoff,)
+        )
+        conv_deleted = cur.rowcount
+
         conn.commit()
-        if snap_deleted or war_deleted:
-            log.info("Purged %d old snapshots, %d old war results", snap_deleted, war_deleted)
+        if snap_deleted or war_deleted or conv_deleted:
+            log.info(
+                "Purged %d old snapshots, %d old war results, %d old conversations",
+                snap_deleted, war_deleted, conv_deleted,
+            )
     finally:
         if close:
             conn.close()
@@ -552,6 +578,125 @@ def get_promotion_candidates(conn=None):
             })
 
         return candidates
+    finally:
+        if close:
+            conn.close()
+
+
+# ── Conversation memory ──────────────────────────────────────────────────────
+
+def save_conversation_turn(author_id, author_name, role, content, conn=None):
+    """Save a single conversation turn (question or response).
+
+    role: 'user' for the leader's question, 'assistant' for Elixir's response.
+    """
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO leader_conversations (author_id, author_name, role, content) "
+            "VALUES (?, ?, ?, ?)",
+            (author_id, author_name, role, content),
+        )
+        # Trim to keep only the most recent turns per leader
+        conn.execute(
+            "DELETE FROM leader_conversations WHERE id NOT IN "
+            "(SELECT id FROM leader_conversations WHERE author_id = ? "
+            "ORDER BY recorded_at DESC LIMIT ?) AND author_id = ?",
+            (author_id, CONVERSATION_MAX_PER_LEADER, author_id),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def get_conversation_history(author_id, limit=10, conn=None):
+    """Get recent conversation turns for a leader.
+
+    Returns list of dicts: {role, content, recorded_at}, oldest first.
+    """
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT role, content, recorded_at FROM leader_conversations "
+            "WHERE author_id = ? ORDER BY recorded_at DESC LIMIT ?",
+            (author_id, limit),
+        ).fetchall()
+        # Return oldest first so they read chronologically
+        return [dict(r) for r in reversed(rows)]
+    finally:
+        if close:
+            conn.close()
+
+
+def purge_old_conversations(conn=None):
+    """Delete conversation turns older than retention period."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        cutoff = (datetime.utcnow() - timedelta(days=CONVERSATION_RETENTION_DAYS)).strftime(
+            "%Y-%m-%dT%H:%M:%S"
+        )
+        conn.execute("DELETE FROM leader_conversations WHERE recorded_at < ?", (cutoff,))
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+# ── War Champ tracking ───────────────────────────────────────────────────────
+
+def get_war_champ_standings(season_id=None, conn=None):
+    """Get War Champ rankings — total fame per member across a season.
+
+    If season_id is None, uses the most recent season.
+    Returns list of dicts: {tag, name, total_fame, races_participated, avg_fame},
+    sorted by total_fame descending.
+    """
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        if season_id is None:
+            row = conn.execute(
+                "SELECT MAX(season_id) as sid FROM war_results"
+            ).fetchone()
+            if not row or row["sid"] is None:
+                return []
+            season_id = row["sid"]
+
+        rows = conn.execute(
+            """
+            SELECT
+                wp.tag,
+                wp.name,
+                SUM(wp.fame) AS total_fame,
+                COUNT(*) AS races_participated,
+                ROUND(AVG(wp.fame), 0) AS avg_fame
+            FROM war_participation wp
+            JOIN war_results wr ON wp.war_result_id = wr.id
+            WHERE wr.season_id = ? AND wp.fame > 0
+            GROUP BY wp.tag
+            ORDER BY total_fame DESC
+            """,
+            (season_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        if close:
+            conn.close()
+
+
+def get_current_season_id(conn=None):
+    """Get the most recent season_id from war results."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT MAX(season_id) as sid FROM war_results"
+        ).fetchone()
+        return row["sid"] if row else None
     finally:
         if close:
             conn.close()

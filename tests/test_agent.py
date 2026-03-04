@@ -164,3 +164,74 @@ def test_observe_with_signals(_mock_openai_client):
     assert "trophy_milestone" in user_msg
     assert "King Levy" in user_msg
     assert result["event_type"] == "arena_milestone"
+
+
+def test_respond_to_leader_with_history(_mock_openai_client):
+    """Conversation history is injected into messages for leader Q&A."""
+    final = '{"event_type": "leader_response", "content": "Based on our earlier talk...", "summary": "follow-up"}'
+    mock_resp = _make_mock_response(content=final)
+    _mock_openai_client.chat.completions.create.return_value = mock_resp
+
+    history = [
+        {"role": "user", "content": "Who should we promote?"},
+        {"role": "assistant", "content": "Vijay looks ready."},
+    ]
+
+    result = elixir_agent.respond_to_leader(
+        question="What about King Levy?",
+        author_name="LeaderBob",
+        clan_data={"memberList": []},
+        war_data={},
+        recent_entries=[],
+        conversation_history=history,
+    )
+
+    # Verify history appeared in the messages
+    call_args = _mock_openai_client.chat.completions.create.call_args
+    messages = call_args.kwargs.get("messages") or call_args[1].get("messages")
+
+    # messages[0] = system, messages[1] = prior user, messages[2] = prior assistant,
+    # messages[3] = current user
+    assert len(messages) == 4
+    assert messages[1]["role"] == "user"
+    assert "promote" in messages[1]["content"]
+    assert messages[2]["role"] == "assistant"
+    assert "Vijay" in messages[2]["content"]
+    assert messages[3]["role"] == "user"
+    assert "King Levy" in messages[3]["content"]
+    assert result["event_type"] == "leader_response"
+
+
+def test_respond_to_leader_without_history(_mock_openai_client):
+    """Leader Q&A works without conversation history."""
+    final = '{"event_type": "leader_response", "content": "Answer here.", "summary": "response"}'
+    mock_resp = _make_mock_response(content=final)
+    _mock_openai_client.chat.completions.create.return_value = mock_resp
+
+    result = elixir_agent.respond_to_leader(
+        question="How's our war going?",
+        author_name="LeaderBob",
+        clan_data={"memberList": []},
+        war_data={},
+        recent_entries=[],
+    )
+
+    call_args = _mock_openai_client.chat.completions.create.call_args
+    messages = call_args.kwargs.get("messages") or call_args[1].get("messages")
+
+    # Just system + user, no history
+    assert len(messages) == 2
+    assert result["event_type"] == "leader_response"
+
+
+def test_execute_tool_war_champ_standings():
+    """War Champ standings tool returns serialized results."""
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.get_war_champ_standings.return_value = [
+            {"tag": "#ABC", "name": "King Levy", "total_fame": 6700, "races_participated": 2}
+        ]
+        result = elixir_agent._execute_tool("get_war_champ_standings", {})
+        parsed = json.loads(result)
+        assert len(parsed) == 1
+        assert parsed[0]["name"] == "King Levy"
+        assert parsed[0]["total_fame"] == 6700

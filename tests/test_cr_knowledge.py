@@ -59,3 +59,24 @@ def test_crossed_milestone():
     assert cr_knowledge.crossed_milestone(11900, 12100) == 12000
     assert cr_knowledge.crossed_milestone(900, 1100) == 1000
     assert cr_knowledge.crossed_milestone(2500, 3100) == 3000
+
+
+def test_deck_usage_knowledge():
+    """Knowledge block mentions 4 decks per day."""
+    block = cr_knowledge.get_knowledge_block()
+    assert "4 battle decks" in block or "4 decks" in block
+    assert "nudge" in block.lower() or "Nudge" in block
+
+
+def test_clan_composition_knowledge():
+    """Knowledge block mentions clan composition guidelines."""
+    block = cr_knowledge.get_knowledge_block()
+    assert "2-3 elders" in block
+    assert "composition" in block.lower()
+
+
+def test_donation_timing_knowledge():
+    """Knowledge block mentions donation timing."""
+    block = cr_knowledge.get_knowledge_block()
+    assert "once per day" in block.lower() or "once a day" in block.lower()
+    assert "consistent" in block.lower()

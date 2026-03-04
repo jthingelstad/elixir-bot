@@ -59,6 +59,9 @@ LEADER_SYSTEM = (
     "Base your answer on the clan data provided and use your tools to look up "
     "member history, war stats, or player details as needed. Be direct, give a "
     "concrete recommendation, and explain your reasoning briefly.\n\n"
+    "You may be provided with recent conversation history with this leader. "
+    "Use it for context — reference earlier questions and answers naturally. "
+    "Don't repeat yourself if you already covered a topic recently.\n\n"
     "Respond with JSON only (no markdown wrapper):\n"
     '{"event_type": "leader_response", "member_tags": [], "member_names": [], '
     '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}'
@@ -154,6 +157,23 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_war_champ_standings",
+            "description": "Get the current War Champ standings for this season — total fame per member across all war races. The top contributor at season end wins War Champ and a free Pass Royale.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -173,6 +193,10 @@ def _execute_tool(name, arguments):
             result = db.get_promotion_candidates()
         elif name == "get_player_details":
             result = cr_api.get_player(arguments["player_tag"])
+        elif name == "get_war_champ_standings":
+            result = db.get_war_champ_standings(
+                season_id=arguments.get("season_id"),
+            )
         else:
             result = {"error": f"Unknown tool: {name}"}
 
@@ -198,15 +222,22 @@ def _parse_response(text):
         return None
 
 
-def _chat_with_tools(system_prompt, user_message, temperature=0.7, max_tokens=800):
+def _chat_with_tools(system_prompt, user_message, conversation_history=None,
+                     temperature=0.7, max_tokens=800):
     """Run a chat completion with tool-calling loop.
 
+    conversation_history: optional list of {role, content} dicts to inject
+        between the system prompt and the current user message (for leader Q&A memory).
     Returns the final parsed response dict, or None.
     """
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message},
     ]
+    # Inject prior conversation turns if provided
+    if conversation_history:
+        for turn in conversation_history:
+            messages.append({"role": turn["role"], "content": turn["content"]})
+    messages.append({"role": "user", "content": user_message})
 
     for _round in range(MAX_TOOL_ROUNDS + 1):
         try:
@@ -311,8 +342,10 @@ def observe_and_post(clan_data, war_data, recent_entries, signals=None):
     return _chat_with_tools(OBSERVE_SYSTEM, user_msg)
 
 
-def respond_to_leader(question, author_name, clan_data, war_data, recent_entries):
-    """Leader Q&A with tool access. Returns dict or None."""
+def respond_to_leader(question, author_name, clan_data, war_data, recent_entries,
+                      conversation_history=None):
+    """Leader Q&A with tool access and conversation memory. Returns dict or None."""
     context = _clan_context(clan_data, war_data, recent_entries)
     user_msg = f"Leader '{author_name}' asks: {question}\n\n{context}"
-    return _chat_with_tools(LEADER_SYSTEM, user_msg)
+    return _chat_with_tools(LEADER_SYSTEM, user_msg,
+                            conversation_history=conversation_history)

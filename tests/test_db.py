@@ -381,3 +381,171 @@ def test_get_member_history(conn):
     # Ordered by time ascending
     assert history[0]["trophies"] == 9200
     assert history[2]["trophies"] == 9000
+
+
+# ── Conversation memory tests ───────────────────────────────────────────────
+
+def test_save_and_get_conversation(conn):
+    """Conversation turns are saved and retrieved in chronological order."""
+    db.save_conversation_turn("user123", "LeaderBob", "user", "Who should we promote?", conn=conn)
+    db.save_conversation_turn("user123", "LeaderBob", "assistant", "Vijay looks ready.", conn=conn)
+    db.save_conversation_turn("user123", "LeaderBob", "user", "What about King Levy?", conn=conn)
+
+    history = db.get_conversation_history("user123", conn=conn)
+    assert len(history) == 3
+    # Oldest first
+    assert history[0]["role"] == "user"
+    assert "promote" in history[0]["content"]
+    assert history[1]["role"] == "assistant"
+    assert history[2]["role"] == "user"
+    assert "King Levy" in history[2]["content"]
+
+
+def test_conversation_per_leader(conn):
+    """Different leaders have separate conversation histories."""
+    db.save_conversation_turn("leader1", "Alice", "user", "Question from Alice", conn=conn)
+    db.save_conversation_turn("leader2", "Bob", "user", "Question from Bob", conn=conn)
+
+    alice_history = db.get_conversation_history("leader1", conn=conn)
+    bob_history = db.get_conversation_history("leader2", conn=conn)
+
+    assert len(alice_history) == 1
+    assert len(bob_history) == 1
+    assert "Alice" in alice_history[0]["content"]
+    assert "Bob" in bob_history[0]["content"]
+
+
+def test_conversation_limit(conn):
+    """History is limited to the requested number of turns."""
+    for i in range(15):
+        db.save_conversation_turn("user123", "Bob", "user", f"Message {i}", conn=conn)
+
+    history = db.get_conversation_history("user123", limit=5, conn=conn)
+    assert len(history) == 5
+    # Should be the 5 most recent, oldest first
+    assert "Message 10" in history[0]["content"]
+    assert "Message 14" in history[4]["content"]
+
+
+def test_conversation_trimmed_on_save(conn):
+    """Excess turns are trimmed when saving beyond CONVERSATION_MAX_PER_LEADER."""
+    for i in range(25):
+        db.save_conversation_turn("user123", "Bob", "user", f"Message {i}", conn=conn)
+
+    rows = conn.execute(
+        "SELECT COUNT(*) as cnt FROM leader_conversations WHERE author_id = 'user123'"
+    ).fetchone()
+    assert rows["cnt"] <= db.CONVERSATION_MAX_PER_LEADER
+
+
+def test_purge_old_conversations(conn):
+    """Old conversations are purged."""
+    old_time = (datetime.utcnow() - timedelta(days=45)).strftime("%Y-%m-%dT%H:%M:%S")
+    recent_time = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+
+    conn.execute(
+        "INSERT INTO leader_conversations (author_id, author_name, role, content, recorded_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("user123", "Bob", "user", "Old question", old_time),
+    )
+    conn.execute(
+        "INSERT INTO leader_conversations (author_id, author_name, role, content, recorded_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("user123", "Bob", "user", "Recent question", recent_time),
+    )
+    conn.commit()
+
+    db.purge_old_conversations(conn=conn)
+
+    rows = conn.execute("SELECT * FROM leader_conversations").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["content"] == "Recent question"
+
+
+# ── War Champ tests ──────────────────────────────────────────────────────────
+
+def test_get_war_champ_standings(conn):
+    """Aggregates fame per member across a season."""
+    # Two war results in the same season
+    conn.execute(
+        "INSERT INTO war_results (id, season_id, section_index, our_rank, our_fame, created_date) "
+        "VALUES (1, 50, 1, 2, 8000, '20260201T120000.000Z')"
+    )
+    conn.execute(
+        "INSERT INTO war_results (id, season_id, section_index, our_rank, our_fame, created_date) "
+        "VALUES (2, 50, 2, 1, 10500, '20260301T120000.000Z')"
+    )
+    # Participation for both races
+    conn.execute(
+        "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+        "VALUES (1, '#ABC123', 'King Levy', 3200, 4)"
+    )
+    conn.execute(
+        "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+        "VALUES (1, '#DEF456', 'Vijay', 2800, 4)"
+    )
+    conn.execute(
+        "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+        "VALUES (2, '#ABC123', 'King Levy', 3500, 4)"
+    )
+    conn.execute(
+        "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+        "VALUES (2, '#DEF456', 'Vijay', 4000, 4)"
+    )
+    conn.commit()
+
+    standings = db.get_war_champ_standings(season_id=50, conn=conn)
+    assert len(standings) == 2
+    # Vijay has more total fame (2800 + 4000 = 6800) vs Levy (3200 + 3500 = 6700)
+    assert standings[0]["name"] == "Vijay"
+    assert standings[0]["total_fame"] == 6800
+    assert standings[0]["races_participated"] == 2
+    assert standings[1]["name"] == "King Levy"
+    assert standings[1]["total_fame"] == 6700
+
+
+def test_get_war_champ_standings_auto_season(conn):
+    """Uses the most recent season when season_id is not specified."""
+    conn.execute(
+        "INSERT INTO war_results (id, season_id, section_index, our_rank, our_fame, created_date) "
+        "VALUES (1, 49, 1, 2, 8000, '20260101T120000.000Z')"
+    )
+    conn.execute(
+        "INSERT INTO war_results (id, season_id, section_index, our_rank, our_fame, created_date) "
+        "VALUES (2, 50, 1, 1, 10000, '20260301T120000.000Z')"
+    )
+    conn.execute(
+        "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+        "VALUES (1, '#ABC123', 'King Levy', 3000, 4)"
+    )
+    conn.execute(
+        "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+        "VALUES (2, '#ABC123', 'King Levy', 3500, 4)"
+    )
+    conn.commit()
+
+    # Without specifying season_id, should use season 50
+    standings = db.get_war_champ_standings(conn=conn)
+    assert len(standings) == 1
+    assert standings[0]["total_fame"] == 3500  # Only season 50 data
+
+
+def test_get_war_champ_standings_empty(conn):
+    """Returns empty list when no war data exists."""
+    standings = db.get_war_champ_standings(conn=conn)
+    assert standings == []
+
+
+def test_get_current_season_id(conn):
+    """Returns the most recent season_id."""
+    conn.execute(
+        "INSERT INTO war_results (season_id, section_index, our_rank, our_fame, created_date) "
+        "VALUES (49, 1, 2, 8000, '20260101T120000.000Z')"
+    )
+    conn.execute(
+        "INSERT INTO war_results (season_id, section_index, our_rank, our_fame, created_date) "
+        "VALUES (50, 1, 1, 10000, '20260301T120000.000Z')"
+    )
+    conn.commit()
+
+    assert db.get_current_season_id(conn=conn) == 50

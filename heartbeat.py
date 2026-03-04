@@ -202,6 +202,66 @@ def detect_inactivity(current_members, now=None):
     return signals
 
 
+def detect_war_deck_usage(war_data):
+    """Check who has and hasn't used their 4 war decks today.
+
+    war_data: dict from cr_api.get_current_war().
+    Returns a signal with players who used decks and who haven't, only on battle days.
+    """
+    now = datetime.now()
+    if not cr_knowledge.is_war_battle_day(now.weekday()):
+        return []
+
+    if not war_data or war_data.get("state") in (None, "notInWar"):
+        return []
+
+    participants = war_data.get("clan", {}).get("participants", [])
+    if not participants:
+        return []
+
+    used_all = []
+    used_some = []
+    used_none = []
+
+    for p in participants:
+        decks_today = p.get("decksUsedToday", 0)
+        name = p.get("name", "?")
+        tag = p.get("tag", "")
+        if decks_today >= 4:
+            used_all.append({"name": name, "tag": tag, "decks": decks_today})
+        elif decks_today > 0:
+            used_some.append({"name": name, "tag": tag, "decks": decks_today})
+        else:
+            used_none.append({"name": name, "tag": tag, "decks": 0})
+
+    return [{
+        "type": "war_deck_usage",
+        "used_all_4": used_all,
+        "used_some": used_some,
+        "used_none": used_none,
+        "total_participants": len(participants),
+    }]
+
+
+def detect_war_champ_update(conn=None):
+    """Generate a War Champ standings signal when a new war result has been stored.
+
+    This is triggered after detect_war_completion stores a new result.
+    Returns the current season standings so the LLM can share weekly rankings.
+    """
+    standings = db.get_war_champ_standings(conn=conn)
+    if not standings:
+        return []
+
+    season_id = db.get_current_season_id(conn=conn)
+    return [{
+        "type": "war_champ_standings",
+        "season_id": season_id,
+        "standings": standings[:10],  # Top 10
+        "leader": standings[0] if standings else None,
+    }]
+
+
 def detect_war_completion(clan_tag, conn=None):
     """Fetch river race log and check for newly completed wars.
 
@@ -284,6 +344,11 @@ def tick(conn=None):
         log.warning("Heartbeat: empty member list from API")
         return []
 
+    try:
+        war = cr_api.get_current_war()
+    except Exception:
+        war = {}
+
     close = conn is None
     conn = conn or db.get_connection()
     try:
@@ -314,12 +379,22 @@ def tick(conn=None):
         # War day awareness
         signals.extend(detect_war_day_transition())
 
-        # War completion
-        clan_tag = os.getenv("CR_CLAN_TAG", "J2RGCRVG")
-        signals.extend(detect_war_completion(clan_tag, conn=conn))
+        # War deck usage — thank players who used 4 decks, nudge those who haven't
+        signals.extend(detect_war_deck_usage(war))
 
-        # Donation leaders
-        signals.extend(detect_donation_leaders(members))
+        # War completion + War Champ standings
+        clan_tag = os.getenv("CR_CLAN_TAG", "J2RGCRVG")
+        war_signals = detect_war_completion(clan_tag, conn=conn)
+        signals.extend(war_signals)
+
+        # If a war just completed, also share War Champ standings
+        if war_signals:
+            signals.extend(detect_war_champ_update(conn=conn))
+
+        # Donation leaders — only towards end of day (8pm-10pm Chicago)
+        now = datetime.now()
+        if now.hour >= 20:
+            signals.extend(detect_donation_leaders(members))
 
         # Inactivity
         signals.extend(detect_inactivity(members))
