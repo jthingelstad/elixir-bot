@@ -235,3 +235,17 @@ def test_execute_tool_war_champ_standings():
         assert len(parsed) == 1
         assert parsed[0]["name"] == "King Levy"
         assert parsed[0]["total_fame"] == 6700
+
+
+def test_execute_tool_perfect_war_participants():
+    """Perfect war participants tool returns serialized results."""
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.get_perfect_war_participants.return_value = [
+            {"tag": "#ABC", "name": "King Levy", "races_participated": 4,
+             "total_fame": 12000, "total_races_in_season": 4}
+        ]
+        result = elixir_agent._execute_tool("get_perfect_war_participants", {})
+        parsed = json.loads(result)
+        assert len(parsed) == 1
+        assert parsed[0]["name"] == "King Levy"
+        assert parsed[0]["total_races_in_season"] == 4

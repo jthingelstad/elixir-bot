@@ -174,6 +174,23 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_perfect_war_participants",
+            "description": "Find members who participated in every single war race of a season — perfect attendance. These players earn a free Pass Royale for their dedication.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -195,6 +212,10 @@ def _execute_tool(name, arguments):
             result = cr_api.get_player(arguments["player_tag"])
         elif name == "get_war_champ_standings":
             result = db.get_war_champ_standings(
+                season_id=arguments.get("season_id"),
+            )
+        elif name == "get_perfect_war_participants":
+            result = db.get_perfect_war_participants(
                 season_id=arguments.get("season_id"),
             )
         else:

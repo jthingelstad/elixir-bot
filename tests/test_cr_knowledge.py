@@ -80,3 +80,17 @@ def test_donation_timing_knowledge():
     block = cr_knowledge.get_knowledge_block()
     assert "once per day" in block.lower() or "once a day" in block.lower()
     assert "consistent" in block.lower()
+
+
+def test_perfect_participation_knowledge():
+    """Knowledge block mentions perfect war participation reward."""
+    block = cr_knowledge.get_knowledge_block()
+    assert "perfect" in block.lower()
+    assert "Pass Royale" in block
+
+
+def test_season_naming_knowledge():
+    """Knowledge block mentions SEASON-WEEK naming convention."""
+    block = cr_knowledge.get_knowledge_block()
+    assert "SEASON-WEEK" in block
+    assert "130-1" in block
