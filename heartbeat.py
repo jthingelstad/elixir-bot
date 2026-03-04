@@ -248,18 +248,23 @@ def detect_war_champ_update(conn=None):
 
     This is triggered after detect_war_completion stores a new result.
     Returns the current season standings so the LLM can share weekly rankings.
+    Also includes perfect participation info.
     """
     standings = db.get_war_champ_standings(conn=conn)
     if not standings:
         return []
 
     season_id = db.get_current_season_id(conn=conn)
-    return [{
+    perfect = db.get_perfect_war_participants(season_id=season_id, conn=conn)
+
+    signals = [{
         "type": "war_champ_standings",
         "season_id": season_id,
         "standings": standings[:10],  # Top 10
         "leader": standings[0] if standings else None,
+        "perfect_participants": perfect,
     }]
+    return signals
 
 
 def detect_war_completion(clan_tag, conn=None):

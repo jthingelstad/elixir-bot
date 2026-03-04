@@ -700,3 +700,57 @@ def get_current_season_id(conn=None):
     finally:
         if close:
             conn.close()
+
+
+def get_perfect_war_participants(season_id=None, conn=None):
+    """Find members who participated in every war race of a season.
+
+    A "perfect" participant used decks in every single race the clan played
+    that season. Returns list of dicts: {tag, name, races_participated,
+    total_fame, total_races_in_season}.
+    """
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        if season_id is None:
+            row = conn.execute(
+                "SELECT MAX(season_id) as sid FROM war_results"
+            ).fetchone()
+            if not row or row["sid"] is None:
+                return []
+            season_id = row["sid"]
+
+        # How many races happened this season?
+        total_row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM war_results WHERE season_id = ?",
+            (season_id,),
+        ).fetchone()
+        total_races = total_row["cnt"] if total_row else 0
+        if total_races == 0:
+            return []
+
+        # Members who participated in every race
+        rows = conn.execute(
+            """
+            SELECT
+                wp.tag,
+                wp.name,
+                COUNT(*) AS races_participated,
+                SUM(wp.fame) AS total_fame
+            FROM war_participation wp
+            JOIN war_results wr ON wp.war_result_id = wr.id
+            WHERE wr.season_id = ? AND wp.fame > 0
+            GROUP BY wp.tag
+            HAVING COUNT(*) = ?
+            ORDER BY total_fame DESC
+            """,
+            (season_id, total_races),
+        ).fetchall()
+
+        return [
+            {**dict(r), "total_races_in_season": total_races}
+            for r in rows
+        ]
+    finally:
+        if close:
+            conn.close()

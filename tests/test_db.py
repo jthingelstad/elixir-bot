@@ -549,3 +549,68 @@ def test_get_current_season_id(conn):
     conn.commit()
 
     assert db.get_current_season_id(conn=conn) == 50
+
+
+# ── Perfect war participation tests ─────────────────────────────────────────
+
+def test_get_perfect_war_participants(conn):
+    """Members who participated in every race are identified."""
+    # Season 50 with 3 races
+    for i in range(1, 4):
+        conn.execute(
+            "INSERT INTO war_results (id, season_id, section_index, our_rank, our_fame, created_date) "
+            "VALUES (?, 50, ?, 1, 10000, ?)",
+            (i, i, f"2026030{i}T120000.000Z"),
+        )
+    # King Levy played all 3 races
+    for i in range(1, 4):
+        conn.execute(
+            "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+            "VALUES (?, '#ABC123', 'King Levy', 3000, 4)",
+            (i,),
+        )
+    # Vijay only played 2 of 3
+    for i in range(1, 3):
+        conn.execute(
+            "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+            "VALUES (?, '#DEF456', 'Vijay', 2500, 4)",
+            (i,),
+        )
+    conn.commit()
+
+    perfect = db.get_perfect_war_participants(season_id=50, conn=conn)
+    assert len(perfect) == 1
+    assert perfect[0]["name"] == "King Levy"
+    assert perfect[0]["races_participated"] == 3
+    assert perfect[0]["total_races_in_season"] == 3
+    assert perfect[0]["total_fame"] == 9000
+
+
+def test_get_perfect_war_participants_multiple(conn):
+    """Multiple members can have perfect participation."""
+    for i in range(1, 3):
+        conn.execute(
+            "INSERT INTO war_results (id, season_id, section_index, our_rank, our_fame, created_date) "
+            "VALUES (?, 50, ?, 1, 10000, ?)",
+            (i, i, f"2026030{i}T120000.000Z"),
+        )
+    for i in range(1, 3):
+        conn.execute(
+            "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+            "VALUES (?, '#ABC', 'King Levy', 3000, 4)",
+            (i,),
+        )
+        conn.execute(
+            "INSERT INTO war_participation (war_result_id, tag, name, fame, decks_used) "
+            "VALUES (?, '#DEF', 'Vijay', 3500, 4)",
+            (i,),
+        )
+    conn.commit()
+
+    perfect = db.get_perfect_war_participants(season_id=50, conn=conn)
+    assert len(perfect) == 2
+
+
+def test_get_perfect_war_participants_empty(conn):
+    """Returns empty when no war data."""
+    assert db.get_perfect_war_participants(conn=conn) == []

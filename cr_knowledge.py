@@ -17,6 +17,8 @@ _KNOWLEDGE = """
 
 WAR SCHEDULE (River Race):
 - River Race runs weekly. Each week is one "race" within a longer war season (4-5 weeks).
+- Seasons are identified as SEASON-WEEK (e.g., "130-1" = season 130, week 1).
+- The season_id in the API corresponds to the season number. section_index is the week (0-indexed).
 - Battle days are THURSDAY through SUNDAY. Members should use their war decks on these days.
 - Monday through Wednesday are training/preparation days — no war battles.
 - Each member gets 4 battle decks per day during battle days — one deck per battle.
@@ -53,6 +55,11 @@ WAR CHAMP:
 - The top Clan Wars contributor each season is crowned War Champ.
 - War Champ receives a free Pass Royale.
 - War seasons last 4-5 weeks. Weekly standings are shared to keep competition alive.
+
+PERFECT WAR PARTICIPATION:
+- A player who uses all 4 decks every single battle day for an entire war season earns a free Pass Royale.
+- This is a major achievement — acknowledge and celebrate it at season end.
+- Track this across all war races in a season.
 
 DONATIONS:
 - Donation standings are highlighted once per day, towards end of day.
