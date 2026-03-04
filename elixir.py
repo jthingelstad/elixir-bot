@@ -1,9 +1,7 @@
 """Elixir - POAP KINGS Discord bot (LLM-powered with heartbeat)."""
 
 import os
-import json
 import logging
-import asyncio
 from datetime import datetime, timezone
 
 import discord
@@ -56,13 +54,6 @@ async def _post_to_elixir(channel, entry: dict):
         await channel.send(content)
 
 
-async def _write_and_push(entry: dict, commit_msg: str):
-    """Append to journal and push to poapkings.com."""
-    saved = journal.append_entry(POAPKINGS_REPO, entry)
-    journal.commit_and_push(POAPKINGS_REPO, commit_msg)
-    return saved
-
-
 def _match_clan_member(nickname):
     """Match a Discord nickname to a clan member. Returns (tag, name) or None.
 
@@ -113,59 +104,65 @@ async def _heartbeat_tick():
         except Exception:
             war = {}
 
-        entries = journal.load_entries(POAPKINGS_REPO)
-        recent = journal.recent_entries(entries, 20)
-
         # Handle join/leave signals directly (these get specific formatted posts)
         other_signals = []
         for sig in signals:
             if sig["type"] == "member_join":
-                entry = {
-                    "event_type": "member_join",
-                    "member_tags": [sig["tag"]],
-                    "member_names": [sig["name"]],
-                    "summary": f"{sig['name']} joined POAP KINGS.",
-                    "content": (
-                        f"👑 **Welcome to POAP KINGS, {sig['name']}!** 👑\n\n"
-                        f"Glad to have you with us. Donate cards, battle hard, and climb together. "
-                        f"Questions? Leadership is in #leader-lounge. Let's go! 🧪"
-                    ),
-                    "metadata": {"tag": sig["tag"]},
-                }
-                saved = await _write_and_push(entry, f"Elixir: {sig['name']} joined the clan")
-                await _post_to_elixir(channel, saved)
+                await channel.send(
+                    f"👑 **Welcome to POAP KINGS, {sig['name']}!** 👑\n\n"
+                    f"Glad to have you with us. Donate cards, battle hard, and climb together. "
+                    f"Questions? Leadership is in #leader-lounge. Let's go! 🧪"
+                )
             elif sig["type"] == "member_leave":
-                entry = {
-                    "event_type": "member_leave",
-                    "member_tags": [sig["tag"]],
-                    "member_names": [sig["name"]],
-                    "summary": f"{sig['name']} left POAP KINGS.",
-                    "content": (
-                        f"👋 **{sig['name']} has left POAP KINGS.**\n\n"
-                        f"We wish them well on their journey. Onwards, kings! 🧪"
-                    ),
-                    "metadata": {"tag": sig["tag"]},
-                }
-                saved = await _write_and_push(entry, f"Elixir: {sig['name']} left the clan")
-                await _post_to_elixir(channel, saved)
+                await channel.send(
+                    f"👋 **{sig['name']} has left POAP KINGS.**\n\n"
+                    f"We wish them well on their journey. Onwards, kings! 🧪"
+                )
             else:
                 other_signals.append(sig)
 
         # If there are non-join/leave signals, let the LLM craft a post
         if other_signals:
-            result = elixir_agent.observe_and_post(clan, war, recent, signals=other_signals)
+            result = elixir_agent.observe_and_post(clan, war, signals=other_signals)
             if result is None:
                 log.info("Heartbeat: LLM decided signals not worth posting")
                 return
-            entry = await _write_and_push(
-                result,
-                f"Elixir observation [{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}]",
-            )
-            await _post_to_elixir(channel, entry)
+            await _post_to_elixir(channel, result)
             log.info("Posted observation: %s", result.get("summary"))
 
     except Exception as e:
         log.error("Heartbeat error: %s", e, exc_info=True)
+
+
+# ── Daily editorial for poapkings.com ────────────────────────────────────────
+
+EDITORIAL_HOUR = int(os.getenv("EDITORIAL_HOUR", "20"))  # 8pm Chicago
+
+
+async def _daily_editorial():
+    """Evening job — write a short editorial for the poapkings.com website."""
+    try:
+        try:
+            clan = cr_api.get_clan()
+        except Exception:
+            clan = {}
+        try:
+            war = cr_api.get_current_war()
+        except Exception:
+            war = {}
+
+        previous = journal.load_messages(POAPKINGS_REPO)
+
+        text = elixir_agent.write_editorial(clan, war, previous)
+        if not text:
+            log.info("Editorial: LLM returned nothing, skipping")
+            return
+
+        journal.save_message(POAPKINGS_REPO, text)
+        journal.commit_and_push(POAPKINGS_REPO)
+        log.info("Editorial published: %s", text[:80])
+    except Exception as e:
+        log.error("Editorial error: %s", e, exc_info=True)
 
 
 # ── Bot events ────────────────────────────────────────────────────────────────
@@ -183,9 +180,20 @@ async def on_ready():
             hours=1,
             id="heartbeat",
         )
+        # Daily editorial for poapkings.com website
+        scheduler.add_job(
+            lambda: bot.loop.call_soon_threadsafe(
+                lambda: bot.loop.create_task(_daily_editorial())
+            ),
+            "cron",
+            hour=EDITORIAL_HOUR,
+            minute=0,
+            id="editorial",
+        )
         scheduler.start()
-        log.info("Scheduler started — hourly heartbeat (active %dam-%dpm Chicago)",
-                 HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR)
+        log.info("Scheduler started — hourly heartbeat (active %dam-%dpm Chicago), "
+                 "daily editorial at %dpm",
+                 HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR, EDITORIAL_HOUR)
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 
@@ -304,8 +312,6 @@ async def on_message(message):
                     war = cr_api.get_current_war()
                 except Exception:
                     war = {}
-                entries = journal.load_entries(POAPKINGS_REPO)
-                recent = journal.recent_entries(entries, 20)
                 # Strip the @Elixir mention from the question
                 question = message.content.replace(f"<@{bot.user.id}>", "").strip()
 
@@ -324,7 +330,6 @@ async def on_message(message):
                     author_name=message.author.display_name,
                     clan_data=clan,
                     war_data=war,
-                    recent_entries=recent,
                     conversation_history=conversation_history,
                 )
                 if result is None:
@@ -339,21 +344,9 @@ async def on_message(message):
                     if share_content:
                         elixir_channel = bot.get_channel(ANNOUNCEMENTS_CHANNEL_ID)
                         if elixir_channel:
-                            share_entry = {
-                                "event_type": "leader_share",
-                                "member_tags": result.get("member_tags", []),
-                                "member_names": result.get("member_names", []),
-                                "summary": result.get("summary", ""),
+                            await _post_to_elixir(elixir_channel, {
                                 "content": share_content,
-                                "metadata": {
-                                    "shared_by": message.author.display_name,
-                                },
-                            }
-                            saved = await _write_and_push(
-                                share_entry,
-                                f"Elixir: leader share from {message.author.display_name}",
-                            )
-                            await _post_to_elixir(elixir_channel, saved)
+                            })
 
                 # Save Elixir's response to conversation memory
                 db.save_conversation_turn(

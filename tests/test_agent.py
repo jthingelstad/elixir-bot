@@ -37,9 +37,18 @@ def test_parse_response_markdown_fence():
     assert result["event_type"] == "test"
 
 
-def test_parse_response_invalid():
-    """Returns None for unparseable content."""
-    assert elixir_agent._parse_response("not json at all") is None
+def test_parse_response_plain_text_fallback():
+    """Wraps plain text as content dict when JSON fails."""
+    result = elixir_agent._parse_response("not json at all")
+    assert result is not None
+    assert result["content"] == "not json at all"
+    assert "summary" in result
+
+
+def test_parse_response_empty():
+    """Returns None for empty string."""
+    assert elixir_agent._parse_response("") is None
+    assert elixir_agent._parse_response("   ") is None
 
 
 def test_knowledge_in_system_prompt():
@@ -141,7 +150,7 @@ def test_null_response_returns_none(_mock_openai_client):
     """When LLM returns null, observe_and_post returns None."""
     mock_resp = _make_mock_response(content="null")
     _mock_openai_client.chat.completions.create.return_value = mock_resp
-    result = elixir_agent.observe_and_post({}, {}, [])
+    result = elixir_agent.observe_and_post({}, {})
     assert result is None
 
 
@@ -154,7 +163,7 @@ def test_observe_with_signals(_mock_openai_client):
     signals = [{"type": "trophy_milestone", "name": "King Levy", "milestone": 10000}]
 
     result = elixir_agent.observe_and_post(
-        {"memberList": []}, {}, [], signals=signals
+        {"memberList": []}, {}, signals=signals
     )
 
     # Verify signals appeared in the user message
@@ -182,7 +191,6 @@ def test_respond_to_leader_with_history(_mock_openai_client):
         author_name="LeaderBob",
         clan_data={"memberList": []},
         war_data={},
-        recent_entries=[],
         conversation_history=history,
     )
 
@@ -213,7 +221,6 @@ def test_respond_to_leader_without_history(_mock_openai_client):
         author_name="LeaderBob",
         clan_data={"memberList": []},
         war_data={},
-        recent_entries=[],
     )
 
     call_args = _mock_openai_client.chat.completions.create.call_args
@@ -249,7 +256,6 @@ def test_respond_to_leader_share(_mock_openai_client):
         author_name="LeaderBob",
         clan_data={"memberList": []},
         war_data={},
-        recent_entries=[],
     )
 
     assert result["event_type"] == "leader_share"
@@ -317,3 +323,48 @@ def test_execute_tool_perfect_war_participants():
         assert len(parsed) == 1
         assert parsed[0]["name"] == "King Levy"
         assert parsed[0]["total_races_in_season"] == 4
+
+
+def test_editorial_system_prompt():
+    """EDITORIAL_SYSTEM prompt describes website speech-bubble role."""
+    assert "website" in elixir_agent.EDITORIAL_SYSTEM.lower()
+    assert "speech bubble" in elixir_agent.EDITORIAL_SYSTEM.lower()
+    assert "280 characters" in elixir_agent.EDITORIAL_SYSTEM
+
+
+def test_write_editorial(_mock_openai_client):
+    """write_editorial returns plain text from LLM."""
+    mock_resp = _make_mock_response(content="POAP KINGS crushed it in war today. Keep pushing, kings! 🧪")
+    _mock_openai_client.chat.completions.create.return_value = mock_resp
+
+    result = elixir_agent.write_editorial(
+        clan_data={"memberList": []},
+        war_data={},
+        previous_messages=[{"date": "2026-03-03", "text": "Old message 🧪"}],
+    )
+
+    assert result is not None
+    assert "🧪" in result
+
+    # Verify previous messages appear in user message
+    call_args = _mock_openai_client.chat.completions.create.call_args
+    messages = call_args.kwargs.get("messages") or call_args[1].get("messages")
+    user_msg = messages[1]["content"]
+    assert "Old message" in user_msg
+
+
+def test_write_editorial_null_response(_mock_openai_client):
+    """write_editorial returns None when LLM returns null."""
+    mock_resp = _make_mock_response(content="null")
+    _mock_openai_client.chat.completions.create.return_value = mock_resp
+
+    result = elixir_agent.write_editorial({}, {}, [])
+    assert result is None
+
+
+def test_clan_context_no_recent():
+    """_clan_context no longer includes recent entries section."""
+    ctx = elixir_agent._clan_context({"memberList": []}, {})
+    assert "RECENT ELIXIR POSTS" not in ctx
+    assert "CLAN ROSTER" in ctx
+    assert "WAR STATUS" in ctx
