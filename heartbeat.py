@@ -1,0 +1,331 @@
+"""heartbeat.py — Hourly signal detection for Elixir bot.
+
+Runs cheap deterministic checks against fresh clan data and the SQLite
+history store.  Only calls the LLM when real signals are found.
+"""
+
+import json
+import logging
+import os
+from datetime import datetime
+
+import cr_api
+import cr_knowledge
+import db
+
+log = logging.getLogger("elixir_heartbeat")
+
+SNAPSHOT_PATH = os.path.join(os.path.dirname(__file__), "member_snapshot.json")
+
+
+def _load_snapshot():
+    if os.path.exists(SNAPSHOT_PATH):
+        with open(SNAPSHOT_PATH) as f:
+            return json.load(f)
+    return {}
+
+
+def _save_snapshot(data):
+    with open(SNAPSHOT_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+# ── Signal detectors ─────────────────────────────────────────────────────────
+# Each returns a list of signal dicts (may be empty).
+
+
+def detect_joins_leaves(current_members, known_snapshot):
+    """Compare current roster to known snapshot for joins/departures.
+
+    current_members: list of member dicts from CR API memberList.
+    known_snapshot: dict of {tag: name} from member_snapshot.json.
+
+    Returns (signals, updated_snapshot).
+    """
+    current = {m["tag"]: m["name"] for m in current_members}
+    signals = []
+
+    for tag, name in current.items():
+        if tag not in known_snapshot:
+            signals.append({
+                "type": "member_join",
+                "tag": tag,
+                "name": name,
+            })
+
+    for tag, name in known_snapshot.items():
+        if tag not in current:
+            signals.append({
+                "type": "member_leave",
+                "tag": tag,
+                "name": name,
+            })
+
+    return signals, current
+
+
+def detect_trophy_milestones(conn=None):
+    """Check DB for trophy milestone crossings since last snapshot.
+
+    Wraps db.detect_milestones() and filters to trophy_milestone type.
+    """
+    milestones = db.detect_milestones(conn=conn)
+    return [
+        {
+            "type": "trophy_milestone",
+            "tag": m["tag"],
+            "name": m["name"],
+            "old": m["old_value"],
+            "new": m["new_value"],
+            "milestone": m["milestone"],
+        }
+        for m in milestones
+        if m["type"] == "trophy_milestone"
+    ]
+
+
+def detect_arena_changes(conn=None):
+    """Check DB for arena changes since last snapshot."""
+    milestones = db.detect_milestones(conn=conn)
+    return [
+        {
+            "type": "arena_change",
+            "tag": m["tag"],
+            "name": m["name"],
+            "old_arena": m["old_value"],
+            "new_arena": m["new_value"],
+        }
+        for m in milestones
+        if m["type"] == "arena_change"
+    ]
+
+
+def detect_role_changes(conn=None):
+    """Check DB for role promotions/demotions since last snapshot."""
+    changes = db.detect_role_changes(conn=conn)
+    return [
+        {
+            "type": "role_change",
+            "tag": c["tag"],
+            "name": c["name"],
+            "old_role": c["old_role"],
+            "new_role": c["new_role"],
+        }
+        for c in changes
+    ]
+
+
+def detect_war_day_transition(now=None):
+    """Check if today is a war battle day transition.
+
+    Returns a signal if today is the first battle day (Thursday)
+    or last battle day (Sunday), to prompt relevant commentary.
+    """
+    now = now or datetime.now()
+    weekday = now.weekday()
+    signals = []
+
+    if weekday == 3:  # Thursday
+        signals.append({
+            "type": "war_day_start",
+            "day": "Thursday",
+            "message": "Battle days begin! Time to use those war decks.",
+        })
+    elif weekday == 6:  # Sunday
+        signals.append({
+            "type": "war_day_end",
+            "day": "Sunday",
+            "message": "Last day of battles this week. Use remaining decks!",
+        })
+    elif cr_knowledge.is_war_battle_day(weekday):
+        signals.append({
+            "type": "war_battle_day",
+            "day": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][weekday],
+        })
+
+    return signals
+
+
+def detect_donation_leaders(current_members):
+    """Identify the top 3 donors from the current roster.
+
+    Always returns a signal with the donation leaderboard so the LLM
+    can decide if it's worth mentioning.
+    """
+    sorted_members = sorted(current_members, key=lambda m: m.get("donations", 0), reverse=True)
+    top = sorted_members[:3]
+    if not top or top[0].get("donations", 0) == 0:
+        return []
+    return [{
+        "type": "donation_leaders",
+        "leaders": [
+            {"name": m.get("name", "?"), "donations": m.get("donations", 0), "rank": i + 1}
+            for i, m in enumerate(top)
+        ],
+    }]
+
+
+def detect_inactivity(current_members, now=None):
+    """Flag members not seen in 3+ days.
+
+    Uses the lastSeen field from CR API (format: 20260304T120000.000Z).
+    """
+    now = now or datetime.utcnow()
+    signals = []
+    inactive = []
+
+    for m in current_members:
+        last_seen = m.get("lastSeen", m.get("last_seen", ""))
+        if not last_seen:
+            continue
+        try:
+            # Parse CR API date format: 20260304T120000.000Z
+            clean = last_seen.split(".")[0]  # Remove .000Z
+            seen_dt = datetime.strptime(clean, "%Y%m%dT%H%M%S")
+            days_away = (now - seen_dt).days
+            if days_away >= 3:
+                inactive.append({
+                    "name": m.get("name", "?"),
+                    "tag": m.get("tag", ""),
+                    "days_inactive": days_away,
+                    "role": m.get("role", "member"),
+                })
+        except (ValueError, TypeError):
+            continue
+
+    if inactive:
+        signals.append({
+            "type": "inactive_members",
+            "members": sorted(inactive, key=lambda x: x["days_inactive"], reverse=True),
+        })
+
+    return signals
+
+
+def detect_war_completion(clan_tag, conn=None):
+    """Fetch river race log and check for newly completed wars.
+
+    Stores any new results in the DB and returns signals for races
+    that weren't previously recorded.
+    """
+    try:
+        race_log = cr_api.get_river_race_log()
+    except Exception as e:
+        log.warning("Failed to fetch river race log: %s", e)
+        return []
+
+    if not race_log:
+        return []
+
+    close = conn is None
+    conn = conn or db.get_connection()
+    try:
+        # Check what we already have
+        existing = set()
+        for row in conn.execute("SELECT season_id, section_index FROM war_results").fetchall():
+            existing.add((row["season_id"], row["section_index"]))
+
+        # Store new results
+        db.store_war_log(race_log, clan_tag, conn=conn)
+
+        # Find newly added results
+        signals = []
+        for entry in race_log.get("items", []):
+            key = (entry.get("seasonId"), entry.get("sectionIndex"))
+            if key in existing:
+                continue
+
+            # This is a new war result — generate a signal
+            standings = entry.get("standings", [])
+            our = None
+            for s in standings:
+                clan = s.get("clan", {})
+                if clan.get("tag", "").replace("#", "") == clan_tag.replace("#", ""):
+                    our = s
+                    break
+
+            if our:
+                signals.append({
+                    "type": "war_completed",
+                    "season_id": entry.get("seasonId"),
+                    "section_index": entry.get("sectionIndex"),
+                    "our_rank": our.get("rank"),
+                    "our_fame": our.get("clan", {}).get("fame", 0),
+                    "total_clans": len(standings),
+                    "won": our.get("rank") == 1,
+                })
+
+        return signals
+    finally:
+        if close:
+            conn.close()
+
+
+# ── Main heartbeat tick ──────────────────────────────────────────────────────
+
+def tick(conn=None):
+    """Run one heartbeat cycle. Returns list of signals (may be empty).
+
+    Steps:
+    1. Fetch live clan + war data
+    2. Snapshot members to DB
+    3. Purge expired data
+    4. Run all signal detectors
+    5. Return collected signals
+    """
+    try:
+        clan = cr_api.get_clan()
+    except Exception as e:
+        log.error("Heartbeat: failed to fetch clan data: %s", e)
+        return []
+
+    members = clan.get("memberList", [])
+    if not members:
+        log.warning("Heartbeat: empty member list from API")
+        return []
+
+    close = conn is None
+    conn = conn or db.get_connection()
+    try:
+        # 1. Snapshot current state
+        db.snapshot_members(members, conn=conn)
+
+        # 2. Purge old data
+        db.purge_old_data(conn=conn)
+
+        # 3. Collect signals from all detectors
+        signals = []
+
+        # Join/leave detection
+        known = _load_snapshot()
+        join_leave_signals, updated_snapshot = detect_joins_leaves(members, known)
+        signals.extend(join_leave_signals)
+        _save_snapshot(updated_snapshot)
+
+        # Trophy milestones
+        signals.extend(detect_trophy_milestones(conn=conn))
+
+        # Arena changes
+        signals.extend(detect_arena_changes(conn=conn))
+
+        # Role changes
+        signals.extend(detect_role_changes(conn=conn))
+
+        # War day awareness
+        signals.extend(detect_war_day_transition())
+
+        # War completion
+        clan_tag = os.getenv("CR_CLAN_TAG", "J2RGCRVG")
+        signals.extend(detect_war_completion(clan_tag, conn=conn))
+
+        # Donation leaders
+        signals.extend(detect_donation_leaders(members))
+
+        # Inactivity
+        signals.extend(detect_inactivity(members))
+
+        log.info("Heartbeat: %d signals detected", len(signals))
+        return signals
+    finally:
+        if close:
+            conn.close()

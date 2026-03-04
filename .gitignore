@@ -3,3 +3,5 @@ venv/
 __pycache__/
 *.pyc
 *.log
+elixir.db
+.pytest_cache/

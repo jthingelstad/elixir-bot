@@ -44,3 +44,19 @@ def get_river_race_log():
         return r.json()
     except Exception:
         return None
+
+
+def get_player(tag):
+    """Fetch individual player profile from CR API.
+
+    tag: player tag with or without '#' prefix.
+    Returns player dict or None on error.
+    """
+    clean_tag = tag.lstrip("#")
+    url = f"{API_BASE}/players/%23{clean_tag}"
+    try:
+        r = requests.get(url, headers=_headers(), timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None

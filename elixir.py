@@ -1,9 +1,11 @@
-"""Elixir - POAP KINGS Discord bot (LLM-powered)."""
+"""Elixir - POAP KINGS Discord bot (LLM-powered with heartbeat)."""
+
 import os
 import json
 import logging
 import asyncio
 from datetime import datetime, timezone
+
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -13,6 +15,7 @@ import pytz
 import cr_api
 import journal
 import elixir_agent
+import heartbeat
 
 load_dotenv()
 
@@ -23,8 +26,11 @@ CHICAGO = pytz.timezone("America/Chicago")
 TOKEN = os.getenv("DISCORD_TOKEN")
 ANNOUNCEMENTS_CHANNEL_ID = int(os.getenv("DISCORD_ANNOUNCEMENTS_CHANNEL", "0"))
 LEADERSHIP_CHANNEL_ID = int(os.getenv("DISCORD_LEADERSHIP_CHANNEL", "0"))
-SNAPSHOT_PATH = os.path.join(os.path.dirname(__file__), "member_snapshot.json")
 POAPKINGS_REPO = os.path.expanduser(os.getenv("POAPKINGS_REPO_PATH", "../poapkings.com"))
+
+# Active hours for the heartbeat (Chicago time). Outside this window, heartbeat is skipped.
+HEARTBEAT_START_HOUR = int(os.getenv("HEARTBEAT_START_HOUR", "7"))
+HEARTBEAT_END_HOUR = int(os.getenv("HEARTBEAT_END_HOUR", "22"))
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -33,18 +39,6 @@ scheduler = AsyncIOScheduler(timezone=CHICAGO)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _load_snapshot():
-    if os.path.exists(SNAPSHOT_PATH):
-        with open(SNAPSHOT_PATH) as f:
-            return json.load(f)
-    return {}
-
-
-def _save_snapshot(data):
-    with open(SNAPSHOT_PATH, "w") as f:
-        json.dump(data, f, indent=2)
-
 
 async def _post_to_elixir(channel, entry: dict):
     """Post an entry's content to #elixir channel."""
@@ -65,83 +59,96 @@ async def _write_and_push(entry: dict, commit_msg: str):
     return saved
 
 
-# ── Scheduled observations ────────────────────────────────────────────────────
+# ── Heartbeat ────────────────────────────────────────────────────────────────
 
-async def _scheduled_observe():
-    """Called 4x/day — ask Elixir agent if anything is worth posting."""
+async def _heartbeat_tick():
+    """Hourly heartbeat — fetch data, detect signals, post if interesting."""
+    # Check active hours
+    now_chicago = datetime.now(CHICAGO)
+    if not (HEARTBEAT_START_HOUR <= now_chicago.hour < HEARTBEAT_END_HOUR):
+        log.info("Heartbeat: outside active hours (%d:%02d), skipping",
+                 now_chicago.hour, now_chicago.minute)
+        return
+
     channel = bot.get_channel(ANNOUNCEMENTS_CHANNEL_ID)
     if not channel:
         log.error("Announcements channel %s not found", ANNOUNCEMENTS_CHANNEL_ID)
         return
+
     try:
-        clan = cr_api.get_clan()
+        # Run the heartbeat tick — fetches data, snapshots, detects signals
+        signals = heartbeat.tick()
+
+        if not signals:
+            log.info("Heartbeat: no signals, nothing to post")
+            return
+
+        log.info("Heartbeat: %d signals detected, consulting LLM", len(signals))
+
+        # Get clan + war data for context (heartbeat.tick already fetched it,
+        # but we need it for the LLM context too)
+        try:
+            clan = cr_api.get_clan()
+        except Exception:
+            clan = {}
         try:
             war = cr_api.get_current_war()
         except Exception:
             war = {}
+
         entries = journal.load_entries(POAPKINGS_REPO)
         recent = journal.recent_entries(entries, 20)
-        result = elixir_agent.observe_and_post(clan, war, recent)
-        if result is None:
-            log.info("Elixir agent: nothing worth posting right now")
-            return
-        entry = await _write_and_push(result, f"Elixir observation [{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}]")
-        await _post_to_elixir(channel, entry)
-        log.info("Posted observation: %s", result.get("summary"))
-    except Exception as e:
-        log.error("_scheduled_observe error: %s", e)
 
-
-# ── Member change detection ───────────────────────────────────────────────────
-
-async def _check_member_changes():
-    """Hourly — detect joins and departures, log to journal, post to #elixir."""
-    try:
-        clan = cr_api.get_clan()
-        current = {m["tag"]: m["name"] for m in clan.get("memberList", [])}
-        known = _load_snapshot()
-        channel = bot.get_channel(ANNOUNCEMENTS_CHANNEL_ID)
-
-        for tag, name in current.items():
-            if tag not in known:
-                log.info("New member: %s (%s)", name, tag)
+        # Handle join/leave signals directly (these get specific formatted posts)
+        other_signals = []
+        for sig in signals:
+            if sig["type"] == "member_join":
                 entry = {
                     "event_type": "member_join",
-                    "member_tags": [tag],
-                    "member_names": [name],
-                    "summary": f"{name} joined POAP KINGS.",
+                    "member_tags": [sig["tag"]],
+                    "member_names": [sig["name"]],
+                    "summary": f"{sig['name']} joined POAP KINGS.",
                     "content": (
-                        f"👑 **Welcome to POAP KINGS, {name}!** 👑\n\n"
+                        f"👑 **Welcome to POAP KINGS, {sig['name']}!** 👑\n\n"
                         f"Glad to have you with us. Donate cards, battle hard, and climb together. "
                         f"Questions? Leadership is in #leader-lounge. Let's go! 🧪"
                     ),
-                    "metadata": {"tag": tag}
+                    "metadata": {"tag": sig["tag"]},
                 }
-                saved = await _write_and_push(entry, f"Elixir: {name} joined the clan")
-                if channel:
-                    await _post_to_elixir(channel, saved)
-
-        for tag, name in known.items():
-            if tag not in current:
-                log.info("Member left: %s (%s)", name, tag)
+                saved = await _write_and_push(entry, f"Elixir: {sig['name']} joined the clan")
+                await _post_to_elixir(channel, saved)
+            elif sig["type"] == "member_leave":
                 entry = {
                     "event_type": "member_leave",
-                    "member_tags": [tag],
-                    "member_names": [name],
-                    "summary": f"{name} left POAP KINGS.",
+                    "member_tags": [sig["tag"]],
+                    "member_names": [sig["name"]],
+                    "summary": f"{sig['name']} left POAP KINGS.",
                     "content": (
-                        f"👋 **{name} has left POAP KINGS.**\n\n"
+                        f"👋 **{sig['name']} has left POAP KINGS.**\n\n"
                         f"We wish them well on their journey. Onwards, kings! 🧪"
                     ),
-                    "metadata": {"tag": tag}
+                    "metadata": {"tag": sig["tag"]},
                 }
-                saved = await _write_and_push(entry, f"Elixir: {name} left the clan")
-                if channel:
-                    await _post_to_elixir(channel, saved)
+                saved = await _write_and_push(entry, f"Elixir: {sig['name']} left the clan")
+                await _post_to_elixir(channel, saved)
+            else:
+                other_signals.append(sig)
 
-        _save_snapshot(current)
+        # If there are non-join/leave signals, let the LLM craft a post
+        if other_signals:
+            result = elixir_agent.observe_and_post(clan, war, recent, signals=other_signals)
+            if result is None:
+                log.info("Heartbeat: LLM decided signals not worth posting")
+                return
+            entry = await _write_and_push(
+                result,
+                f"Elixir observation [{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}]",
+            )
+            await _post_to_elixir(channel, entry)
+            log.info("Posted observation: %s", result.get("summary"))
+
     except Exception as e:
-        log.error("_check_member_changes error: %s", e)
+        log.error("Heartbeat error: %s", e, exc_info=True)
 
 
 # ── Bot events ────────────────────────────────────────────────────────────────
@@ -150,13 +157,18 @@ async def _check_member_changes():
 async def on_ready():
     log.info("Elixir online as %s 🧪", bot.user)
     if not scheduler.running:
-        scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=7, minute=0)
-        scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=12, minute=0)
-        scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=17, minute=0)
-        scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=21, minute=0)
-        scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_check_member_changes())), "interval", hours=1)
+        # Single hourly heartbeat replaces both the 4x/day observations and hourly member check
+        scheduler.add_job(
+            lambda: bot.loop.call_soon_threadsafe(
+                lambda: bot.loop.create_task(_heartbeat_tick())
+            ),
+            "interval",
+            hours=1,
+            id="heartbeat",
+        )
         scheduler.start()
-        log.info("Scheduler started — observations at 7am, 12pm, 5pm, 9pm + hourly member check")
+        log.info("Scheduler started — hourly heartbeat (active %dam-%dpm Chicago)",
+                 HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR)
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 
@@ -190,7 +202,7 @@ async def on_message(message):
                     author_name=message.author.display_name,
                     clan_data=clan,
                     war_data=war,
-                    recent_entries=recent
+                    recent_entries=recent,
                 )
                 if result is None:
                     await message.reply("Something went wrong on my end — try again? 🧪")
