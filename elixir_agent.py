@@ -257,18 +257,25 @@ def _execute_tool(name, arguments):
 
 
 def _parse_response(text):
-    """Parse LLM JSON response, handling markdown fences."""
+    """Parse LLM JSON response, handling markdown fences.
+
+    Falls back to wrapping plain text as {"content": text} when JSON parsing
+    fails but the response looks like a real answer.
+    """
     text = text.strip()
     if text.lower() == "null":
         return None
     try:
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        return json.loads(text.strip())
-    except Exception as e:
-        log.error("Failed to parse agent response: %s\nRaw: %s", e, text)
+        cleaned = text
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("```")[1]
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:]
+        return json.loads(cleaned.strip())
+    except Exception:
+        if text:
+            log.warning("LLM returned plain text instead of JSON, wrapping: %s", text[:120])
+            return {"content": text, "summary": "agent response"}
         return None
 
 
@@ -341,7 +348,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         return None
 
 
-def _clan_context(clan_data, war_data, recent):
+def _clan_context(clan_data, war_data):
     """Format clan data into a concise context string for the LLM."""
     members = clan_data.get("memberList", clan_data.get("members", []))
     member_summary = []
@@ -365,20 +372,18 @@ def _clan_context(clan_data, war_data, recent):
             f"battled today: {', '.join(used) or 'nobody'} | "
             f"not yet: {', '.join(unused) or 'everyone done'}"
         )
-    recent_summary = json.dumps(recent, indent=2) if recent else "None yet."
     return (
         f"=== CLAN ROSTER ===\n" + "\n".join(member_summary)
         + f"\n\n=== WAR STATUS ===\n{war_summary}"
-        + f"\n\n=== RECENT ELIXIR POSTS (last {len(recent) if recent else 0}) ===\n{recent_summary}"
     )
 
 
-def observe_and_post(clan_data, war_data, recent_entries, signals=None):
+def observe_and_post(clan_data, war_data, signals=None):
     """Observation with signals from heartbeat. Returns dict or None.
 
     signals: list of signal dicts from heartbeat.tick(), or None for legacy mode.
     """
-    context = _clan_context(clan_data, war_data, recent_entries)
+    context = _clan_context(clan_data, war_data)
 
     if signals:
         signals_text = json.dumps(signals, indent=2, default=str)
@@ -392,10 +397,10 @@ def observe_and_post(clan_data, war_data, recent_entries, signals=None):
     return _chat_with_tools(OBSERVE_SYSTEM, user_msg)
 
 
-def respond_to_leader(question, author_name, clan_data, war_data, recent_entries,
+def respond_to_leader(question, author_name, clan_data, war_data,
                       conversation_history=None):
     """Leader Q&A with tool access and conversation memory. Returns dict or None."""
-    context = _clan_context(clan_data, war_data, recent_entries)
+    context = _clan_context(clan_data, war_data)
     user_msg = f"Leader '{author_name}' asks: {question}\n\n{context}"
     return _chat_with_tools(LEADER_SYSTEM, user_msg,
                             conversation_history=conversation_history)
@@ -414,3 +419,56 @@ def respond_in_reception(question, author_name, clan_data):
     )
     return _chat_with_tools(RECEPTION_SYSTEM, user_msg,
                             temperature=0.7, max_tokens=400)
+
+
+# ── Daily editorial for poapkings.com ────────────────────────────────────────
+
+EDITORIAL_SYSTEM = (
+    ELIXIR_PERSONALITY + "\n\n"
+    + cr_knowledge.get_knowledge_block() + "\n\n"
+    "Your job: write a short, punchy editorial message (1-3 sentences) for the "
+    "POAP KINGS public website. This appears as a speech bubble from you on the "
+    "home page — visible to anyone, including people who aren't in the clan yet.\n\n"
+    "Your audience is the public. Showcase what makes POAP KINGS great — active wars, "
+    "trophy milestones, generous donations, strong leadership. Make visitors want to "
+    "join. Use the clan data provided for real details, not generic hype.\n\n"
+    "Guidelines:\n"
+    "- Keep it under 280 characters — think tweet-length\n"
+    "- Write in first person as Elixir, the clan's AI chronicler\n"
+    "- Be fresh — don't repeat what you said in your previous messages\n"
+    "- You can use simple markdown (**bold**, *italic*) for emphasis\n"
+    "- No JSON — just the raw message text\n"
+    "- Sign off with 🧪"
+)
+
+
+def write_editorial(clan_data, war_data, previous_messages):
+    """Generate a short editorial for the poapkings.com website. Returns text or None."""
+    context = _clan_context(clan_data, war_data)
+    prev_text = "\n".join(
+        f"  [{m['date']}] {m['text']}" for m in previous_messages
+    ) if previous_messages else "  (none yet)"
+    user_msg = (
+        f"{context}\n\n"
+        f"=== YOUR PREVIOUS MESSAGES ON THE SITE ===\n{prev_text}\n\n"
+        f"Write your next message for the website."
+    )
+
+    messages = [
+        {"role": "system", "content": EDITORIAL_SYSTEM},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        resp = _get_client().chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            temperature=0.9,
+            max_tokens=200,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if not text or text.lower() == "null":
+            return None
+        return text
+    except Exception as e:
+        log.error("Editorial API error: %s", e)
+        return None
