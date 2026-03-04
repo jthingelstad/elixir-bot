@@ -149,13 +149,16 @@ async def _check_member_changes():
 @bot.event
 async def on_ready():
     log.info("Elixir online as %s 🧪", bot.user)
-    scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=7, minute=0)
-    scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=12, minute=0)
-    scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=17, minute=0)
-    scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=21, minute=0)
-    scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_check_member_changes())), "interval", hours=1)
-    scheduler.start()
-    log.info("Scheduler started — observations at 7am, 12pm, 5pm, 9pm + hourly member check")
+    if not scheduler.running:
+        scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=7, minute=0)
+        scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=12, minute=0)
+        scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=17, minute=0)
+        scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_scheduled_observe())), "cron", hour=21, minute=0)
+        scheduler.add_job(lambda: bot.loop.call_soon_threadsafe(lambda: bot.loop.create_task(_check_member_changes())), "interval", hours=1)
+        scheduler.start()
+        log.info("Scheduler started — observations at 7am, 12pm, 5pm, 9pm + hourly member check")
+    else:
+        log.info("Reconnected — scheduler already running, skipping re-init")
 
 
 @bot.event
