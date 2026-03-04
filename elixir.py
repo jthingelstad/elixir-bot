@@ -27,6 +27,8 @@ CHICAGO = pytz.timezone("America/Chicago")
 TOKEN = os.getenv("DISCORD_TOKEN")
 ANNOUNCEMENTS_CHANNEL_ID = int(os.getenv("DISCORD_ANNOUNCEMENTS_CHANNEL", "0"))
 LEADERSHIP_CHANNEL_ID = int(os.getenv("DISCORD_LEADERSHIP_CHANNEL", "0"))
+RECEPTION_CHANNEL_ID = int(os.getenv("DISCORD_RECEPTION_CHANNEL", "0"))
+MEMBER_ROLE_ID = int(os.getenv("DISCORD_MEMBER_ROLE", "0"))
 POAPKINGS_REPO = os.path.expanduser(os.getenv("POAPKINGS_REPO_PATH", "../poapkings.com"))
 
 # Active hours for the heartbeat (Chicago time). Outside this window, heartbeat is skipped.
@@ -35,6 +37,7 @@ HEARTBEAT_END_HOUR = int(os.getenv("HEARTBEAT_END_HOUR", "22"))
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 scheduler = AsyncIOScheduler(timezone=CHICAGO)
 
@@ -58,6 +61,19 @@ async def _write_and_push(entry: dict, commit_msg: str):
     saved = journal.append_entry(POAPKINGS_REPO, entry)
     journal.commit_and_push(POAPKINGS_REPO, commit_msg)
     return saved
+
+
+def _match_clan_member(nickname):
+    """Match a Discord nickname to a clan member. Returns (tag, name) or None.
+
+    Uses member_snapshot.json for the current roster. Case-insensitive.
+    """
+    snapshot = heartbeat._load_snapshot()
+    normalized = nickname.lower().strip()
+    for tag, name in snapshot.items():
+        if name.lower().strip() == normalized:
+            return (tag, name)
+    return None
 
 
 # ── Heartbeat ────────────────────────────────────────────────────────────────
@@ -175,6 +191,73 @@ async def on_ready():
 
 
 @bot.event
+async def on_member_join(member):
+    """Welcome new Discord members in #reception."""
+    channel = bot.get_channel(RECEPTION_CHANNEL_ID)
+    if not channel:
+        return
+    await channel.send(
+        f"👋 Welcome to the **POAP KINGS** Discord, {member.mention}!\n\n"
+        f"To get full access, please update your **server nickname** to match "
+        f"your **Clash Royale in-game name** exactly.\n\n"
+        f"**How to change your nickname:**\n"
+        f"• **Desktop** — Right-click your name in the member list → "
+        f"*Edit Server Profile* → change nickname\n"
+        f"• **Mobile** — Tap the server name at the top → "
+        f"*Edit Server Profile* → change nickname\n\n"
+        f"Once I see a match with our clan roster, I'll unlock the rest of the "
+        f"server for you. Need help? Just tag me! 🧪"
+    )
+
+
+@bot.event
+async def on_member_update(before, after):
+    """Detect nickname changes and grant member role when name matches a clan member."""
+    if before.nick == after.nick:
+        return
+    if not after.nick:
+        return
+
+    # Only act if they don't already have the member role
+    if not MEMBER_ROLE_ID:
+        return
+    member_role = after.guild.get_role(MEMBER_ROLE_ID)
+    if not member_role or member_role in after.roles:
+        return
+
+    match = _match_clan_member(after.nick)
+    channel = bot.get_channel(RECEPTION_CHANNEL_ID)
+
+    if not match:
+        if channel:
+            await channel.send(
+                f"Hmm {after.mention}, I don't see **{after.nick}** in our clan roster. "
+                f"Make sure your server nickname matches your Clash Royale name exactly. "
+                f"Tag me if you need help! 🧪"
+            )
+        return
+
+    tag, cr_name = match
+    try:
+        await after.add_roles(member_role, reason=f"Matched clan member: {cr_name} ({tag})")
+    except discord.Forbidden:
+        log.error("Cannot assign member role — check bot permissions and role hierarchy")
+        if channel:
+            await channel.send(
+                f"I matched **{cr_name}** but couldn't assign the role — "
+                f"a leader will need to help. 🧪"
+            )
+        return
+
+    if channel:
+        await channel.send(
+            f"✅ **Welcome aboard, {cr_name}!** {after.mention}\n\n"
+            f"Matched you to your Clash Royale account (`{tag}`). "
+            f"You now have full access — head to the other channels and say hi! 🧪"
+        )
+
+
+@bot.event
 async def on_message(message):
     if message.author.bot:
         return
@@ -183,6 +266,33 @@ async def on_message(message):
 
     # #elixir channel — broadcast only, Elixir does not respond here
     if message.channel.id == ANNOUNCEMENTS_CHANNEL_ID:
+        return
+
+    # #reception — onboarding help
+    if message.channel.id == RECEPTION_CHANNEL_ID:
+        async with message.channel.typing():
+            try:
+                clan = cr_api.get_clan()
+                question = message.content.replace(f"<@{bot.user.id}>", "").strip()
+                result = elixir_agent.respond_in_reception(
+                    question=question,
+                    author_name=message.author.display_name,
+                    clan_data=clan,
+                )
+                if result is None:
+                    await message.reply(
+                        "Having a hiccup — try again in a sec! 🧪"
+                    )
+                    return
+                content = result.get("content", result.get("summary", ""))
+                if len(content) > 2000:
+                    for chunk in [content[i:i+1990] for i in range(0, len(content), 1990)]:
+                        await message.reply(chunk)
+                else:
+                    await message.reply(content)
+            except Exception as e:
+                log.error("reception error: %s", e)
+                await message.reply("Hit an error — try again in a moment. 🧪")
         return
 
     # #leader-lounge — relay everything to the agent
