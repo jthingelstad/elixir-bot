@@ -13,6 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
 
 import cr_api
+import db
 import journal
 import elixir_agent
 import heartbeat
@@ -197,18 +198,37 @@ async def on_message(message):
                 recent = journal.recent_entries(entries, 20)
                 # Strip the @Elixir mention from the question
                 question = message.content.replace(f"<@{bot.user.id}>", "").strip()
+
+                # Load conversation history for this leader
+                author_id = str(message.author.id)
+                conversation_history = db.get_conversation_history(author_id)
+
+                # Save the leader's question
+                db.save_conversation_turn(
+                    author_id, message.author.display_name,
+                    "user", question,
+                )
+
                 result = elixir_agent.respond_to_leader(
                     question=question,
                     author_name=message.author.display_name,
                     clan_data=clan,
                     war_data=war,
                     recent_entries=recent,
+                    conversation_history=conversation_history,
                 )
                 if result is None:
                     await message.reply("Something went wrong on my end — try again? 🧪")
                     return
                 # NOTE: leader-lounge responses are NOT written to elixir.json (private)
                 content = result.get("content", result.get("summary", ""))
+
+                # Save Elixir's response to conversation memory
+                db.save_conversation_turn(
+                    author_id, message.author.display_name,
+                    "assistant", content,
+                )
+
                 if len(content) > 2000:
                     for chunk in [content[i:i+1990] for i in range(0, len(content), 1990)]:
                         await message.reply(chunk)

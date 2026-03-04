@@ -16,10 +16,11 @@ _KNOWLEDGE = """
 === CLASH ROYALE GAME KNOWLEDGE ===
 
 WAR SCHEDULE (River Race):
-- River Race runs weekly. Each week is one "race" within a longer war season.
+- River Race runs weekly. Each week is one "race" within a longer war season (4-5 weeks).
 - Battle days are THURSDAY through SUNDAY. Members should use their war decks on these days.
 - Monday through Wednesday are training/preparation days — no war battles.
-- Each member gets 4 battle decks per day during battle days.
+- Each member gets 4 battle decks per day during battle days — one deck per battle.
+- Players MUST use all 4 decks each battle day. Thank players who have used theirs. Nudge those who haven't.
 - The clan that reaches the finish line (fame goal) first wins the race.
 - At the end of the war season, the clan with the most war trophies in their group is the war champion.
 
@@ -43,19 +44,30 @@ CLAN: POAP KINGS (#J2RGCRVG)
 - Active members expected. Idle accounts are removed to keep the clan healthy.
 - Push ladder, join Clan Wars when you can, donate to clanmates — that's how you earn Elder.
 
+CLAN COMPOSITION:
+- For every 10 members: ~1 leader/co-leader, 2-3 elders, the rest members.
+- We can't all be elders — the role has meaning and responsibility.
+- Promotions should maintain this balance.
+
 WAR CHAMP:
 - The top Clan Wars contributor each season is crowned War Champ.
 - War Champ receives a free Pass Royale.
+- War seasons last 4-5 weeks. Weekly standings are shared to keep competition alive.
+
+DONATIONS:
+- Donation standings are highlighted once per day, towards end of day.
+- Consistent donations over time is what drives Elder promotion — not just one big week.
 
 POAP (Proof of Attendance):
 - Each season, active members receive a POAP — a collectible badge that marks the moment.
 - Your proof of Arena Push.
 
 PROMOTION GUIDELINES (for evaluating Elder candidates):
-- Consistent donations: roughly 50+ per week shows reliable support.
-- War participation: uses battle decks during Thu-Sun battle days when they can.
+- Consistent donations: roughly 50+ per week shows reliable support. Consistency matters more than volume.
+- War participation: uses all 4 battle decks during Thu-Sun battle days when they can.
 - Active: seen in the last 7 days, not just logging in but playing ladder or wars.
 - Tenure: been in the clan for at least 2 weeks.
+- Clan composition: check if we have room for another elder (target 2-3 per 10 members).
 - No single metric is disqualifying — look at the overall picture.
 - Real life comes first. Occasional inactivity is fine if the member is otherwise solid.
 """.strip()
