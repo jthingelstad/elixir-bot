@@ -1,4 +1,4 @@
-"""Tests for prompts.py — prompt file loading and threshold parsing."""
+"""Tests for prompts.py — prompt file loading and config parsing."""
 
 import prompts
 
@@ -24,9 +24,9 @@ def test_clan_loads():
     assert "J2RGCRVG" in text
 
 
-def test_channels_loads():
-    """CHANNELS.md loads and contains channel definitions."""
-    text = prompts.channels()
+def test_discord_loads():
+    """DISCORD.md loads and contains channel definitions."""
+    text = prompts.discord()
     assert "#elixir" in text
     assert "#leader-lounge" in text
     assert "#reception" in text
@@ -73,3 +73,20 @@ def test_thresholds():
     assert t["trophy_milestone_max"] == 15000
     assert t["inactivity_days"] == 3
     assert t["donation_highlight_hour"] == 20
+
+
+def test_discord_config():
+    """Discord config IDs are parsed from DISCORD.md."""
+    dc = prompts.discord_config()
+    assert dc["application_id"] == 1477043197443182832
+    assert dc["guild_id"] == 1474760692992180429
+    assert dc["announcements_channel"] == 1477043729503359198
+    assert dc["leadership_channel"] == 1475139718525227089
+    assert dc["reception_channel"] == 1476456514121109514
+    assert dc["member_role"] == 1474762690692911104
+
+
+def test_clan_tag():
+    """Clan tag is extracted from CLAN.md."""
+    tag = prompts.clan_tag()
+    assert tag == "J2RGCRVG"

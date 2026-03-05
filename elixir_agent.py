@@ -111,7 +111,7 @@ def _event_system():
     """System prompt for generating event-driven messages (welcome, join, leave, etc.)."""
     return _build_system_prompt(
         prompts.purpose(),
-        prompts.channels(),
+        prompts.discord(),
         "You are generating a single Discord message in response to an event. "
         "The event details are provided below. Write a message appropriate for the "
         "channel and situation described. Be natural and in character.\n\n"

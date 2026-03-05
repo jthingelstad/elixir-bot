@@ -29,3 +29,12 @@ Be friendly, brief, and helpful. Guide them through changing their nickname. If 
 How to change nickname:
 - Desktop: Right-click your name in the member list, then Edit Server Profile, then change nickname
 - Mobile: Tap the server name at the top, then Edit Server Profile, then change nickname
+
+## Config
+
+- application_id: 1477043197443182832
+- guild_id: 1474760692992180429
+- announcements_channel: 1477043729503359198
+- leadership_channel: 1475139718525227089
+- reception_channel: 1476456514121109514
+- member_role: 1474762690692911104

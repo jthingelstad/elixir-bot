@@ -389,7 +389,7 @@ def tick(conn=None):
         signals.extend(detect_war_deck_usage(war))
 
         # War completion + War Champ standings
-        clan_tag = os.getenv("CR_CLAN_TAG", "J2RGCRVG")
+        clan_tag = cr_api.CLAN_TAG
         war_signals = detect_war_completion(clan_tag, conn=conn)
         signals.extend(war_signals)
 

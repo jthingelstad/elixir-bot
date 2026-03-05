@@ -3,10 +3,12 @@ import os
 import requests
 from dotenv import load_dotenv
 
+import prompts
+
 load_dotenv()
 
 API_BASE = "https://api.clashroyale.com/v1"
-CLAN_TAG = os.getenv("CR_CLAN_TAG", "J2RGCRVG")
+CLAN_TAG = prompts.clan_tag()
 API_KEY = os.getenv("CR_API_KEY", "")
 
 
