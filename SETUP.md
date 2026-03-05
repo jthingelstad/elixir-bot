@@ -79,7 +79,7 @@ source venv/bin/activate
 pytest tests/ -v
 ```
 
-Tests use in-memory SQLite and mock all external services (no API keys, Discord, or network needed). Currently 69 tests.
+Tests use in-memory SQLite and mock all external services (no API keys, Discord, or network needed). Currently 108 tests.
 
 ## Project Architecture
 
@@ -94,7 +94,6 @@ Tests use in-memory SQLite and mock all external services (no API keys, Discord,
 | `cr_api.py` | Clash Royale API client. Clan roster, war status, river race log, player profiles. |
 | `cr_knowledge.py` | Static game knowledge constants (war schedule, thresholds). Loads configurable values from prompt files. |
 | `journal.py` | Append-only JSON log. Writes entries to `poapkings.com` repo and git pushes. |
-| `announcements.py` | Legacy, unused. |
 
 ### How It Works
 
@@ -154,7 +153,6 @@ Key rules encoded in `cr_knowledge.py`:
 
 - All times in **America/Chicago** timezone
 - Clan tag: `J2RGCRVG` (POAP KINGS)
-- Member snapshot file: `member_snapshot.json` (tag-to-name map for join/leave detection)
 - SQLite DB: `elixir.db` (gitignored, auto-created)
 - Journal entries: `../poapkings.com/src/_data/elixir.json`
 - `.env`, `venv/`, `__pycache__/`, `*.log`, `elixir.db` are all gitignored

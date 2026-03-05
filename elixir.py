@@ -59,9 +59,9 @@ async def _post_to_elixir(channel, entry: dict):
 def _match_clan_member(nickname):
     """Match a Discord nickname to a clan member. Returns (tag, name) or None.
 
-    Uses member_snapshot.json for the current roster. Case-insensitive.
+    Uses the latest SQLite roster snapshot. Case-insensitive.
     """
-    snapshot = heartbeat._load_snapshot()
+    snapshot = db.get_known_roster()
     normalized = nickname.lower().strip()
     for tag, name in snapshot.items():
         if name.lower().strip() == normalized:

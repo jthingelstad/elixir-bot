@@ -4,9 +4,7 @@ Runs cheap deterministic checks against fresh clan data and the SQLite
 history store.  Only calls the LLM when real signals are found.
 """
 
-import json
 import logging
-import os
 from datetime import datetime
 
 import cr_api
@@ -14,20 +12,6 @@ import cr_knowledge
 import db
 
 log = logging.getLogger("elixir_heartbeat")
-
-SNAPSHOT_PATH = os.path.join(os.path.dirname(__file__), "member_snapshot.json")
-
-
-def _load_snapshot():
-    if os.path.exists(SNAPSHOT_PATH):
-        with open(SNAPSHOT_PATH) as f:
-            return json.load(f)
-    return {}
-
-
-def _save_snapshot(data):
-    with open(SNAPSHOT_PATH, "w") as f:
-        json.dump(data, f, indent=2)
 
 
 # ── Signal detectors ─────────────────────────────────────────────────────────
@@ -38,7 +22,7 @@ def detect_joins_leaves(current_members, known_snapshot):
     """Compare current roster to known snapshot for joins/departures.
 
     current_members: list of member dicts from CR API memberList.
-    known_snapshot: dict of {tag: name} from member_snapshot.json.
+    known_snapshot: dict of {tag: name} from the previous roster.
 
     Returns (signals, updated_snapshot).
     """
@@ -358,20 +342,21 @@ def tick(conn=None):
     close = conn is None
     conn = conn or db.get_connection()
     try:
-        # 1. Snapshot current state
+        # 1. Get known roster BEFORE snapshotting (so we compare old vs new)
+        known = db.get_known_roster(conn=conn)
+
+        # 2. Snapshot current state
         db.snapshot_members(members, conn=conn)
 
-        # 2. Purge old data
+        # 3. Purge old data
         db.purge_old_data(conn=conn)
 
-        # 3. Collect signals from all detectors
+        # 4. Collect signals from all detectors
         signals = []
 
         # Join/leave detection
-        known = _load_snapshot()
-        join_leave_signals, updated_snapshot = detect_joins_leaves(members, known)
+        join_leave_signals, _ = detect_joins_leaves(members, known)
         signals.extend(join_leave_signals)
-        _save_snapshot(updated_snapshot)
 
         # Trophy milestones
         signals.extend(detect_trophy_milestones(conn=conn))

@@ -33,7 +33,7 @@ See [SETUP.md](SETUP.md) for full setup instructions, environment variables, arc
 pytest tests/ -v
 ```
 
-69 tests — all use in-memory SQLite and mocked external services. No API keys needed.
+108 tests — all use in-memory SQLite and mocked external services. No API keys needed.
 
 ## Project Structure
 
