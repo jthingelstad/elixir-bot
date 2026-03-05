@@ -1,4 +1,4 @@
-"""Tests for cr_knowledge.py — static game + clan knowledge."""
+"""Tests for cr_knowledge.py — game + clan knowledge loaded from prompt files."""
 
 import cr_knowledge
 
@@ -40,13 +40,13 @@ def test_is_war_battle_day():
     assert not cr_knowledge.is_war_battle_day(2)  # Wednesday
 
 
-def test_milestones_every_1k():
-    """Milestones are at every 1,000 trophies."""
+def test_milestones_from_thresholds():
+    """Milestones are generated from CLAN.md thresholds."""
     assert 1000 in cr_knowledge.TROPHY_MILESTONES
     assert 5000 in cr_knowledge.TROPHY_MILESTONES
     assert 10000 in cr_knowledge.TROPHY_MILESTONES
     assert 15000 in cr_knowledge.TROPHY_MILESTONES
-    # Every entry is a multiple of 1000
+    # Every entry is a multiple of the interval
     for m in cr_knowledge.TROPHY_MILESTONES:
         assert m % 1000 == 0
 
@@ -61,11 +61,20 @@ def test_crossed_milestone():
     assert cr_knowledge.crossed_milestone(2500, 3100) == 3000
 
 
+def test_inactivity_threshold():
+    """Inactivity threshold is loaded from CLAN.md."""
+    assert cr_knowledge.INACTIVITY_DAYS == 3
+
+
+def test_donation_highlight_hour():
+    """Donation highlight hour is loaded from CLAN.md."""
+    assert cr_knowledge.DONATION_HIGHLIGHT_HOUR == 20
+
+
 def test_deck_usage_knowledge():
     """Knowledge block mentions 4 decks per day."""
     block = cr_knowledge.get_knowledge_block()
     assert "4 battle decks" in block or "4 decks" in block
-    assert "nudge" in block.lower() or "Nudge" in block
 
 
 def test_clan_composition_knowledge():
@@ -75,10 +84,9 @@ def test_clan_composition_knowledge():
     assert "composition" in block.lower()
 
 
-def test_donation_timing_knowledge():
-    """Knowledge block mentions donation timing."""
+def test_donation_consistency_knowledge():
+    """Knowledge block mentions donation consistency."""
     block = cr_knowledge.get_knowledge_block()
-    assert "once per day" in block.lower() or "once a day" in block.lower()
     assert "consistent" in block.lower()
 
 

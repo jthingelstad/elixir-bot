@@ -104,20 +104,25 @@ async def _heartbeat_tick():
         except Exception:
             war = {}
 
-        # Handle join/leave signals directly (these get specific formatted posts)
+        # Handle join/leave signals via LLM
         other_signals = []
         for sig in signals:
             if sig["type"] == "member_join":
-                await channel.send(
-                    f"👑 **Welcome to POAP KINGS, {sig['name']}!** 👑\n\n"
-                    f"Glad to have you with us. Donate cards, battle hard, and climb together. "
-                    f"Questions? Leadership is in #leader-lounge. Let's go! 🧪"
+                msg = elixir_agent.generate_message(
+                    "member_join_broadcast",
+                    f"New member '{sig['name']}' (tag: {sig['tag']}) just joined the clan. "
+                    f"Write a welcome announcement for the broadcast channel.",
                 )
+                if msg:
+                    await channel.send(msg)
             elif sig["type"] == "member_leave":
-                await channel.send(
-                    f"👋 **{sig['name']} has left POAP KINGS.**\n\n"
-                    f"We wish them well on their journey. Onwards, kings! 🧪"
+                msg = elixir_agent.generate_message(
+                    "member_leave_broadcast",
+                    f"Member '{sig['name']}' (tag: {sig['tag']}) has left the clan. "
+                    f"Write a brief farewell for the broadcast channel.",
                 )
+                if msg:
+                    await channel.send(msg)
             else:
                 other_signals.append(sig)
 
@@ -204,18 +209,19 @@ async def on_member_join(member):
     channel = bot.get_channel(RECEPTION_CHANNEL_ID)
     if not channel:
         return
-    await channel.send(
-        f"👋 Welcome to the **POAP KINGS** Discord, {member.mention}!\n\n"
-        f"To get full access, please update your **server nickname** to match "
-        f"your **Clash Royale in-game name** exactly.\n\n"
-        f"**How to change your nickname:**\n"
-        f"• **Desktop** — Right-click your name in the member list → "
-        f"*Edit Server Profile* → change nickname\n"
-        f"• **Mobile** — Tap the server name at the top → "
-        f"*Edit Server Profile* → change nickname\n\n"
-        f"Once I see a match with our clan roster, I'll unlock the rest of the "
-        f"server for you. Need help? Just tag me! 🧪"
+    msg = elixir_agent.generate_message(
+        "discord_member_join",
+        f"A new user '{member.display_name}' ({member.mention}) just joined the Discord server. "
+        f"Welcome them in #reception and explain how to set their server nickname "
+        f"to match their Clash Royale in-game name to get verified.",
     )
+    if msg:
+        await channel.send(msg)
+    else:
+        await channel.send(
+            f"Welcome to the server, {member.mention}! Set your server nickname "
+            f"to your Clash Royale name and I'll get you verified."
+        )
 
 
 @bot.event
@@ -238,11 +244,13 @@ async def on_member_update(before, after):
 
     if not match:
         if channel:
-            await channel.send(
-                f"Hmm {after.mention}, I don't see **{after.nick}** in our clan roster. "
-                f"Make sure your server nickname matches your Clash Royale name exactly. "
-                f"Tag me if you need help! 🧪"
+            msg = elixir_agent.generate_message(
+                "nickname_no_match",
+                f"User {after.mention} set their nickname to '{after.nick}' but it doesn't "
+                f"match anyone in the clan roster. Let them know and suggest they check "
+                f"the spelling or join the clan first. Channel: #reception.",
             )
+            await channel.send(msg or f"Hmm {after.mention}, I don't see **{after.nick}** in our roster.")
         return
 
     tag, cr_name = match
@@ -251,18 +259,23 @@ async def on_member_update(before, after):
     except discord.Forbidden:
         log.error("Cannot assign member role — check bot permissions and role hierarchy")
         if channel:
-            await channel.send(
-                f"I matched **{cr_name}** but couldn't assign the role — "
-                f"a leader will need to help. 🧪"
+            msg = elixir_agent.generate_message(
+                "role_grant_failed",
+                f"Matched user {after.mention} to clan member '{cr_name}' ({tag}) but "
+                f"couldn't assign the member role due to permissions. Let them know "
+                f"a leader will help. Channel: #reception.",
             )
+            await channel.send(msg or f"I matched **{cr_name}** but couldn't assign the role.")
         return
 
     if channel:
-        await channel.send(
-            f"✅ **Welcome aboard, {cr_name}!** {after.mention}\n\n"
-            f"Matched you to your Clash Royale account (`{tag}`). "
-            f"You now have full access — head to the other channels and say hi! 🧪"
+        msg = elixir_agent.generate_message(
+            "nickname_matched",
+            f"User {after.mention} set their nickname to '{cr_name}' which matches "
+            f"clan member tag {tag}. They've been granted the member role. "
+            f"Welcome them and let them know they have full access. Channel: #reception.",
         )
+        await channel.send(msg or f"Welcome aboard, {cr_name}! You now have full access.")
 
 
 @bot.event

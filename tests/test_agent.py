@@ -52,11 +52,13 @@ def test_parse_response_empty():
 
 
 def test_knowledge_in_system_prompt():
-    """System prompts include game knowledge block."""
-    assert "POAP KINGS" in elixir_agent.OBSERVE_SYSTEM
-    assert "THURSDAY" in elixir_agent.OBSERVE_SYSTEM.upper()
-    assert "POAP KINGS" in elixir_agent.LEADER_SYSTEM
-    assert "Elder" in elixir_agent.LEADER_SYSTEM
+    """System prompts include game and clan knowledge."""
+    observe = elixir_agent._observe_system()
+    assert "POAP KINGS" in observe
+    assert "THURSDAY" in observe.upper()
+    leader = elixir_agent._leader_system()
+    assert "POAP KINGS" in leader
+    assert "Elder" in leader
 
 
 def test_execute_tool_get_war_results():
@@ -90,7 +92,7 @@ def _make_mock_response(content=None, tool_calls=None):
 
 def test_chat_no_tools(_mock_openai_client):
     """Direct response without tool calls."""
-    final = '{"event_type": "test", "content": "Hello 🧪", "summary": "test"}'
+    final = '{"event_type": "test", "content": "Hello", "summary": "test"}'
     mock_resp = _make_mock_response(content=final)
 
     _mock_openai_client.chat.completions.create.return_value = mock_resp
@@ -231,10 +233,11 @@ def test_respond_to_leader_without_history(_mock_openai_client):
     assert result["event_type"] == "leader_response"
 
 
-def test_leader_share_event_type_in_prompt():
-    """LEADER_SYSTEM prompt describes the leader_share event type."""
-    assert "leader_share" in elixir_agent.LEADER_SYSTEM
-    assert "share_content" in elixir_agent.LEADER_SYSTEM
+def test_leader_share_in_prompt():
+    """Leader system prompt describes the leader_share event type."""
+    leader = elixir_agent._leader_system()
+    assert "leader_share" in leader
+    assert "share_content" in leader
 
 
 def test_respond_to_leader_share(_mock_openai_client):
@@ -244,8 +247,8 @@ def test_respond_to_leader_share(_mock_openai_client):
         "member_tags": [],
         "member_names": ["King Levy"],
         "summary": "Shout out to King Levy",
-        "content": "Done! I posted a shout-out to King Levy in #elixir. 🧪",
-        "share_content": "👑 Big shout-out to **King Levy** for crushing it this week! Keep it up, kings! 🧪",
+        "content": "Done! I posted a shout-out to King Levy in the broadcast channel.",
+        "share_content": "Big shout-out to **King Levy** for crushing it this week! Keep it up, kings!",
         "metadata": {},
     })
     mock_resp = _make_mock_response(content=final)
@@ -261,22 +264,20 @@ def test_respond_to_leader_share(_mock_openai_client):
     assert result["event_type"] == "leader_share"
     assert "share_content" in result
     assert "King Levy" in result["share_content"]
-    # The content field is the reply to the leader
-    assert "#elixir" in result["content"]
 
 
 def test_reception_system_prompt():
-    """RECEPTION_SYSTEM prompt describes onboarding instructions."""
-    assert "server nickname" in elixir_agent.RECEPTION_SYSTEM.lower()
-    assert "Clash Royale" in elixir_agent.RECEPTION_SYSTEM
-    assert "reception_response" in elixir_agent.RECEPTION_SYSTEM
+    """Reception system prompt describes onboarding instructions."""
+    reception = elixir_agent._reception_system()
+    assert "nickname" in reception.lower()
+    assert "reception_response" in reception
 
 
 def test_respond_in_reception(_mock_openai_client):
     """Reception Q&A returns a helpful onboarding response."""
     final = json.dumps({
         "event_type": "reception_response",
-        "content": "Hey! I can see **King Levy** in our roster. Set that as your server nickname and I'll get you in! 🧪",
+        "content": "Hey! I can see **King Levy** in our roster. Set that as your server nickname and I'll get you in!",
     })
     mock_resp = _make_mock_response(content=final)
     _mock_openai_client.chat.completions.create.return_value = mock_resp
@@ -326,26 +327,25 @@ def test_execute_tool_perfect_war_participants():
 
 
 def test_editorial_system_prompt():
-    """EDITORIAL_SYSTEM prompt describes public-facing website role."""
-    assert "public website" in elixir_agent.EDITORIAL_SYSTEM.lower()
-    assert "speech bubble" in elixir_agent.EDITORIAL_SYSTEM.lower()
-    assert "280 characters" in elixir_agent.EDITORIAL_SYSTEM
-    assert "join" in elixir_agent.EDITORIAL_SYSTEM.lower()
+    """Editorial system prompt describes public-facing website role."""
+    editorial = elixir_agent._editorial_system()
+    assert "public" in editorial.lower()
+    assert "speech bubble" in editorial.lower()
+    assert "280 characters" in editorial
 
 
 def test_write_editorial(_mock_openai_client):
     """write_editorial returns plain text from LLM."""
-    mock_resp = _make_mock_response(content="POAP KINGS crushed it in war today. Keep pushing, kings! 🧪")
+    mock_resp = _make_mock_response(content="POAP KINGS crushed it in war today. Keep pushing, kings!")
     _mock_openai_client.chat.completions.create.return_value = mock_resp
 
     result = elixir_agent.write_editorial(
         clan_data={"memberList": []},
         war_data={},
-        previous_messages=[{"date": "2026-03-03", "text": "Old message 🧪"}],
+        previous_messages=[{"date": "2026-03-03", "text": "Old message"}],
     )
 
     assert result is not None
-    assert "🧪" in result
 
     # Verify previous messages appear in user message
     call_args = _mock_openai_client.chat.completions.create.call_args
@@ -369,3 +369,41 @@ def test_clan_context_no_recent():
     assert "RECENT ELIXIR POSTS" not in ctx
     assert "CLAN ROSTER" in ctx
     assert "WAR STATUS" in ctx
+
+
+def test_generate_message(_mock_openai_client):
+    """generate_message returns plain text for events."""
+    mock_resp = _make_mock_response(content="Welcome to the clan, NewPlayer!")
+    _mock_openai_client.chat.completions.create.return_value = mock_resp
+
+    result = elixir_agent.generate_message(
+        "member_join_broadcast",
+        "New member 'NewPlayer' joined the clan.",
+    )
+    assert result is not None
+    assert "NewPlayer" in result
+
+
+def test_generate_message_null(_mock_openai_client):
+    """generate_message returns None on null response."""
+    mock_resp = _make_mock_response(content="null")
+    _mock_openai_client.chat.completions.create.return_value = mock_resp
+
+    result = elixir_agent.generate_message("test_event", "test context")
+    assert result is None
+
+
+def test_generate_message_api_error(_mock_openai_client):
+    """generate_message returns None on API error."""
+    _mock_openai_client.chat.completions.create.side_effect = Exception("API error")
+
+    result = elixir_agent.generate_message("test_event", "test context")
+    assert result is None
+
+
+def test_event_system_includes_channels():
+    """Event system prompt includes channel definitions."""
+    event_sys = elixir_agent._event_system()
+    assert "#elixir" in event_sys
+    assert "#reception" in event_sys
+    assert "broadcast" in event_sys.lower()
