@@ -20,81 +20,107 @@ DB_PATH = os.getenv("ELIXIR_DB_PATH", os.path.join(os.path.dirname(__file__), "e
 SNAPSHOT_RETENTION_DAYS = 90
 WAR_RETENTION_DAYS = 180
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS member_snapshots (
-    id INTEGER PRIMARY KEY,
-    tag TEXT NOT NULL,
-    name TEXT,
-    trophies INTEGER,
-    best_trophies INTEGER,
-    donations INTEGER,
-    donations_received INTEGER,
-    role TEXT,
-    arena_id INTEGER,
-    arena_name TEXT,
-    exp_level INTEGER,
-    clan_rank INTEGER,
-    last_seen TEXT,
-    recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
-);
+def _add_column_if_not_exists(conn, table, column, col_type, default=None):
+    """Add a column to a table if it doesn't already exist."""
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in cols:
+        default_clause = f" DEFAULT {default}" if default is not None else ""
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}{default_clause}")
 
-CREATE INDEX IF NOT EXISTS idx_snapshots_tag_time ON member_snapshots(tag, recorded_at);
 
-CREATE TABLE IF NOT EXISTS war_results (
-    id INTEGER PRIMARY KEY,
-    season_id INTEGER,
-    section_index INTEGER,
-    our_rank INTEGER,
-    our_fame INTEGER,
-    finish_time TEXT,
-    created_date TEXT,
-    standings_json TEXT,
-    recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
-    UNIQUE(season_id, section_index)
-);
+def _migration_0(conn):
+    """Initial schema — all IF NOT EXISTS, safe on existing DBs."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS member_snapshots (
+            id INTEGER PRIMARY KEY,
+            tag TEXT NOT NULL,
+            name TEXT,
+            trophies INTEGER,
+            best_trophies INTEGER,
+            donations INTEGER,
+            donations_received INTEGER,
+            role TEXT,
+            arena_id INTEGER,
+            arena_name TEXT,
+            exp_level INTEGER,
+            clan_rank INTEGER,
+            last_seen TEXT,
+            recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        );
 
-CREATE TABLE IF NOT EXISTS war_participation (
-    id INTEGER PRIMARY KEY,
-    war_result_id INTEGER REFERENCES war_results(id),
-    tag TEXT NOT NULL,
-    name TEXT,
-    fame INTEGER,
-    repair_points INTEGER,
-    decks_used INTEGER,
-    recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
-);
+        CREATE INDEX IF NOT EXISTS idx_snapshots_tag_time ON member_snapshots(tag, recorded_at);
 
-CREATE INDEX IF NOT EXISTS idx_war_part_tag ON war_participation(tag);
+        CREATE TABLE IF NOT EXISTS war_results (
+            id INTEGER PRIMARY KEY,
+            season_id INTEGER,
+            section_index INTEGER,
+            our_rank INTEGER,
+            our_fame INTEGER,
+            finish_time TEXT,
+            created_date TEXT,
+            standings_json TEXT,
+            recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
+            UNIQUE(season_id, section_index)
+        );
 
-CREATE TABLE IF NOT EXISTS leader_conversations (
-    id INTEGER PRIMARY KEY,
-    author_id TEXT NOT NULL,
-    author_name TEXT,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
-);
+        CREATE TABLE IF NOT EXISTS war_participation (
+            id INTEGER PRIMARY KEY,
+            war_result_id INTEGER REFERENCES war_results(id),
+            tag TEXT NOT NULL,
+            name TEXT,
+            fame INTEGER,
+            repair_points INTEGER,
+            decks_used INTEGER,
+            recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        );
 
-CREATE INDEX IF NOT EXISTS idx_leader_conv_author ON leader_conversations(author_id, recorded_at);
+        CREATE INDEX IF NOT EXISTS idx_war_part_tag ON war_participation(tag);
 
-CREATE TABLE IF NOT EXISTS member_dates (
-    tag TEXT PRIMARY KEY,
-    name TEXT,
-    joined_date TEXT,
-    birth_month INTEGER,
-    birth_day INTEGER,
-    recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
-);
+        CREATE TABLE IF NOT EXISTS leader_conversations (
+            id INTEGER PRIMARY KEY,
+            author_id TEXT NOT NULL,
+            author_name TEXT,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        );
 
-CREATE TABLE IF NOT EXISTS cake_day_announcements (
-    id INTEGER PRIMARY KEY,
-    announcement_date TEXT NOT NULL,
-    announcement_type TEXT NOT NULL,
-    target_tag TEXT,
-    recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
-    UNIQUE(announcement_date, announcement_type, target_tag)
-);
-"""
+        CREATE INDEX IF NOT EXISTS idx_leader_conv_author ON leader_conversations(author_id, recorded_at);
+
+        CREATE TABLE IF NOT EXISTS member_dates (
+            tag TEXT PRIMARY KEY,
+            name TEXT,
+            joined_date TEXT,
+            birth_month INTEGER,
+            birth_day INTEGER,
+            recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS cake_day_announcements (
+            id INTEGER PRIMARY KEY,
+            announcement_date TEXT NOT NULL,
+            announcement_type TEXT NOT NULL,
+            target_tag TEXT,
+            recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
+            UNIQUE(announcement_date, announcement_type, target_tag)
+        );
+    """)
+
+
+_MIGRATIONS = [
+    _migration_0,
+]
+
+
+def _run_migrations(conn):
+    """Apply pending migrations and advance PRAGMA user_version."""
+    current = conn.execute("PRAGMA user_version").fetchone()[0]
+    for version, fn in enumerate(_MIGRATIONS):
+        if version < current:
+            continue
+        fn(conn)
+        conn.execute(f"PRAGMA user_version = {version + 1}")
+        conn.commit()
 
 CONVERSATION_RETENTION_DAYS = 30
 CONVERSATION_MAX_PER_LEADER = 20
@@ -105,7 +131,7 @@ def get_connection(db_path=None):
     path = db_path or DB_PATH
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    conn.executescript(_SCHEMA)
+    _run_migrations(conn)
     return conn
 
 
