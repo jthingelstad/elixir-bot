@@ -8,14 +8,10 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py + 
 - `elixir_agent.py` — LLM engine: observation + leader Q&A via GPT-4o
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log)
 - `heartbeat.py` — Hourly signal detection (milestones, joins/leaves, war transitions)
-- `db.py` — SQLite history store (member snapshots, war results)
+- `db.py` — SQLite history store; versioned migrations via `PRAGMA user_version`
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
+- `prompts.py` — Loads and caches external prompt/config files from `prompts/`
 - `journal.py` — Append-only JSON log committed to sibling poapkings.com repo
-
-## Channels
-
-- **#elixir** — Broadcast only. Elixir posts here but never responds to messages.
-- **#leader-lounge** — Interactive. Leaders @Elixir with questions.
 
 ## Environment
 
@@ -26,15 +22,28 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py + 
 
 ## Running Tests
 
-```
+```bash
 pytest tests/ -v
 ```
 
 Tests use in-memory SQLite and mocked external services (no API keys needed).
 
+## Database
+
+SQLite at `elixir.db` (auto-created, gitignored). Schema is defined in `_migration_0()` in `db.py`. Tables: `member_snapshots`, `war_results`, `war_participation`, `leader_conversations`, `member_dates`, `cake_day_announcements`. All `db.py` functions accept an optional `conn` parameter — pass one in tests, omit in production.
+
+### Migrations
+
+Schema is managed by `_MIGRATIONS` list in `db.py` using `PRAGMA user_version`. To add a schema change:
+
+1. Write a `_migration_N(conn)` function
+2. Append it to `_MIGRATIONS`
+3. Use `_add_column_if_not_exists()` for adding columns
+
+Migrations run automatically in `get_connection()`. Existing data is always preserved.
+
 ## Key Conventions
 
 - All times in America/Chicago timezone
 - Clan tag: J2RGCRVG (POAP KINGS)
-- SQLite DB: `elixir.db` (auto-created on first run)
 - Journal entries go to `../poapkings.com/src/_data/elixir.json`

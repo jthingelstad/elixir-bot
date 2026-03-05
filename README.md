@@ -9,23 +9,16 @@ LLM-powered clan management bot for **POAP KINGS**, a Clash Royale clan (#J2RGCR
 - **War tracking**: Monitors deck usage on battle days (Thu-Sun), tracks War Champ standings across seasons, and celebrates perfect participation
 - **Member history**: SQLite-backed snapshots track trophy progression, donations, arena changes, and role promotions over time
 
-## Channels
-
-| Channel | Behavior |
-|---------|----------|
-| **#elixir** | Broadcast only. Elixir posts observations here but never responds. |
-| **#leader-lounge** | Interactive. Leaders @Elixir with questions and get responses with conversation memory. |
-
 ## Quick Start
 
 ```bash
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # fill in your tokens
+# create .env with DISCORD_TOKEN, OPENAI_API_KEY, CR_API_KEY
 python elixir.py
 ```
 
-See [SETUP.md](SETUP.md) for full setup instructions, environment variables, architecture details, and database schema.
+See [SETUP.md](SETUP.md) for full setup, configuration, and operations guide.
 
 ## Running Tests
 
@@ -33,7 +26,7 @@ See [SETUP.md](SETUP.md) for full setup instructions, environment variables, arc
 pytest tests/ -v
 ```
 
-108 tests — all use in-memory SQLite and mocked external services. No API keys needed.
+130 tests — all use in-memory SQLite and mocked external services. No API keys needed.
 
 ## Project Structure
 
@@ -45,6 +38,7 @@ pytest tests/ -v
 | `db.py` | SQLite history store: member snapshots, war results, conversations, War Champ |
 | `cr_api.py` | Clash Royale API client: clan roster, war status, river race log, player profiles |
 | `cr_knowledge.py` | Static game + clan knowledge injected into LLM system prompt |
+| `prompts.py` | Loads and caches external prompt/config files from `prompts/` |
 | `journal.py` | Append-only JSON log committed to sibling poapkings.com repo |
 
 ## Key Features
@@ -55,9 +49,19 @@ pytest tests/ -v
 - **War Champ tracking** — Aggregates fame per member across a 4-5 week season; weekly rankings shared to the clan
 - **Perfect participation** — Tracks members who use all 4 decks every battle day all season
 - **Deck usage monitoring** — On battle days, thanks players who used their decks and nudges those who haven't
-- **Self-managing database** — Change-only snapshots, automatic data expiration (90/180/30 day retention)
+- **Cake days** — Tracks and announces clan birthday, member join anniversaries, and member birthdays
+- **Self-managing database** — Change-only snapshots, automatic data expiration (90/180/30 day retention), versioned migrations via `PRAGMA user_version`
 - **Clan composition awareness** — Understands the target ratio of leaders, elders, and members
 
-## Clan Knowledge
+## Prompts & Configuration
 
-Elixir knows POAP KINGS rules: war schedule (Thu-Sun battle days, 4 decks/day), season format (e.g., "130-1"), War Champ rewards, perfect participation rewards, elder promotion criteria, clan composition targets, and donation expectations. See `cr_knowledge.py`.
+Elixir's personality, knowledge, and channel behavior are defined in markdown files under `prompts/`, not hardcoded in Python. This makes it easy to tune the bot without touching code.
+
+| File | What it controls |
+|------|-----------------|
+| `prompts/PURPOSE.md` | Elixir's personality, voice, and tone |
+| `prompts/GAME.md` | Clash Royale game knowledge (war schedule, seasons, arenas) |
+| `prompts/CLAN.md` | POAP KINGS rules, clan tag, promotion criteria, composition targets |
+| `prompts/DISCORD.md` | Channel behaviors, Discord IDs, guild config |
+
+These files are loaded by `prompts.py` and injected into the LLM system prompt. Static constants (trophy milestones, thresholds) live in `cr_knowledge.py`.
