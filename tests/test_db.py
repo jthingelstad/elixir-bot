@@ -1,6 +1,8 @@
 """Tests for db.py — SQLite history store."""
 
+import os
 import sqlite3
+import tempfile
 from datetime import datetime, timedelta
 
 import pytest
@@ -742,6 +744,34 @@ def test_announcement_dedup_clan_birthday(conn):
     assert not db.was_announcement_sent("2026-02-04", "clan_birthday", None, conn=conn)
     db.mark_announcement_sent("2026-02-04", "clan_birthday", None, conn=conn)
     assert db.was_announcement_sent("2026-02-04", "clan_birthday", None, conn=conn)
+
+
+def test_migration_version_tracking():
+    """PRAGMA user_version equals len(_MIGRATIONS) after get_connection."""
+    conn = db.get_connection(":memory:")
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == len(db._MIGRATIONS)
+    finally:
+        conn.close()
+
+
+def test_migrations_idempotent():
+    """Running get_connection twice on the same DB causes no errors."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        conn1 = db.get_connection(path)
+        v1 = conn1.execute("PRAGMA user_version").fetchone()[0]
+        conn1.close()
+
+        conn2 = db.get_connection(path)
+        v2 = conn2.execute("PRAGMA user_version").fetchone()[0]
+        conn2.close()
+
+        assert v1 == v2 == len(db._MIGRATIONS)
+    finally:
+        os.unlink(path)
 
 
 def test_birthday_and_join_date_independent(conn):
