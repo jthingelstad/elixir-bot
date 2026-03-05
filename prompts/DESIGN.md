@@ -7,7 +7,7 @@ prompts/
   PURPOSE.md    — Elixir's identity, voice, personality
   CLAN.md       — Clan identity, rules, history, traditions, thresholds
   GAME.md       — Clash Royale mechanics (game-generic)
-  CHANNELS.md   — Discord server structure, channel behaviors, message templates
+  DISCORD.md    — Discord server structure, channel behaviors, config IDs
 ```
 
 ## What Lives in Prompt Files
@@ -20,7 +20,7 @@ prompts/
   - Promotion criteria and clan composition targets
   - Donation highlight thresholds
   - Clan history and lore (human-authored, updated occasionally)
-- **CHANNELS.md**: Discord server layout, per-channel behavior rules.
+- **DISCORD.md**: Discord server layout, per-channel behavior rules.
 
 ## What Stays in Code
 
@@ -47,7 +47,7 @@ Events that currently use f-string templates become LLM calls with context:
 - **nickname_match_failure** — pass the failed name to LLM, it writes the guidance
 - **role_grant_failure** — pass the error context to LLM, it writes the fallback
 
-The LLM gets its voice from PURPOSE.md and knows channel context from CHANNELS.md.
+The LLM gets its voice from PURPOSE.md and knows channel context from DISCORD.md.
 This means every message is consistent with Elixir's personality and adapts naturally
 to changes in the prompt files. A casual clan's Elixir would welcome people differently
 than a competitive clan's — without anyone touching code.
@@ -57,7 +57,7 @@ than a competitive clan's — without anyone touching code.
 ### Share-to-broadcast as a general tool
 Currently `leader_share` is a special event_type that posts from #leader-lounge to #elixir.
 This should become a general-purpose tool available in any interactive channel — "post this
-to the broadcast channel." The tool definition would reference CHANNELS.md to know which
+to the broadcast channel." The tool definition would reference DISCORD.md to know which
 channel has the `broadcast` role.
 
 ### Editorial publishing
@@ -77,6 +77,6 @@ can set their own thresholds without editing Python.
 
 A new clan forks elixir-bot and only rewrites:
 - **CLAN.md** — their clan name, tag, rules, history, thresholds
-- **CHANNELS.md** — their Discord server layout and templates
+- **DISCORD.md** — their Discord server layout, channel behaviors, and config IDs
 
 PURPOSE.md and GAME.md stay mostly the same.

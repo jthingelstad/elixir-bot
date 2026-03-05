@@ -15,6 +15,7 @@ import db
 import journal
 import elixir_agent
 import heartbeat
+import prompts
 
 load_dotenv()
 
@@ -23,10 +24,11 @@ log = logging.getLogger("elixir")
 
 CHICAGO = pytz.timezone("America/Chicago")
 TOKEN = os.getenv("DISCORD_TOKEN")
-ANNOUNCEMENTS_CHANNEL_ID = int(os.getenv("DISCORD_ANNOUNCEMENTS_CHANNEL", "0"))
-LEADERSHIP_CHANNEL_ID = int(os.getenv("DISCORD_LEADERSHIP_CHANNEL", "0"))
-RECEPTION_CHANNEL_ID = int(os.getenv("DISCORD_RECEPTION_CHANNEL", "0"))
-MEMBER_ROLE_ID = int(os.getenv("DISCORD_MEMBER_ROLE", "0"))
+_dc = prompts.discord_config()
+ANNOUNCEMENTS_CHANNEL_ID = _dc.get("announcements_channel", 0)
+LEADERSHIP_CHANNEL_ID = _dc.get("leadership_channel", 0)
+RECEPTION_CHANNEL_ID = _dc.get("reception_channel", 0)
+MEMBER_ROLE_ID = _dc.get("member_role", 0)
 POAPKINGS_REPO = os.path.expanduser(os.getenv("POAPKINGS_REPO_PATH", "../poapkings.com"))
 
 # Active hours for the heartbeat (Chicago time). Outside this window, heartbeat is skipped.

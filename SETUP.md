@@ -46,22 +46,22 @@ pip install pytest
 Create a `.env` file in the project root:
 
 ```env
-# Required
+# Required — secrets only
 DISCORD_TOKEN=your_discord_bot_token
 OPENAI_API_KEY=your_openai_api_key
 CR_API_KEY=your_clash_royale_api_key
 
-# Discord channel IDs (get from Discord developer mode)
-DISCORD_ANNOUNCEMENTS_CHANNEL=123456789012345678   # #elixir channel
-DISCORD_LEADERSHIP_CHANNEL=123456789012345678      # #leader-lounge channel
-
 # Optional (defaults shown)
-CR_CLAN_TAG=J2RGCRVG                               # POAP KINGS clan tag
 POAPKINGS_REPO_PATH=../poapkings.com               # Path to poapkings.com repo
 HEARTBEAT_START_HOUR=7                              # Start hour (Chicago time)
 HEARTBEAT_END_HOUR=22                               # End hour (Chicago time)
+EDITORIAL_HOUR=20                                   # Daily editorial hour (Chicago time)
 ELIXIR_DB_PATH=./elixir.db                          # SQLite database path
 ```
+
+Non-secret configuration (Discord channel IDs, guild ID, clan tag) lives in prompt files:
+- `prompts/DISCORD.md` — Channel behaviors and Discord IDs (`## Config` section)
+- `prompts/CLAN.md` — Clan tag, rules, thresholds
 
 ## Running
 
@@ -92,7 +92,7 @@ Tests use in-memory SQLite and mock all external services (no API keys, Discord,
 | `heartbeat.py` | Hourly signal detection. Cheap deterministic checks before calling the LLM. |
 | `db.py` | SQLite history store. Member snapshots, war results, conversation memory, War Champ tracking. |
 | `cr_api.py` | Clash Royale API client. Clan roster, war status, river race log, player profiles. |
-| `cr_knowledge.py` | Static game knowledge injected into LLM system prompt. War schedule, clan rules, promotion guidelines. |
+| `cr_knowledge.py` | Static game knowledge constants (war schedule, thresholds). Loads configurable values from prompt files. |
 | `journal.py` | Append-only JSON log. Writes entries to `poapkings.com` repo and git pushes. |
 | `announcements.py` | Legacy, unused. |
 
