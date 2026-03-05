@@ -54,6 +54,13 @@ Clan tag: #J2RGCRVG
 - trophy_milestone_max: 15000
 - inactivity_days: 3
 - donation_highlight_hour: 20
+- clan_founded: 2026-02-04
+
+## Cake Days
+
+- Celebrate the clan's birthday (cake day) every year on February 4.
+- Elixir tracks when each member joined and celebrates their join anniversary annually.
+- Leaders can set member birthdays and override join dates via #leader-lounge.
 
 ## History
 

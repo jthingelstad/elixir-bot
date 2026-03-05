@@ -363,6 +363,34 @@ def test_write_editorial_null_response(_mock_openai_client):
     assert result is None
 
 
+def test_execute_tool_set_member_birthday():
+    """set_member_birthday tool dispatches correctly."""
+    with patch("elixir_agent.db") as mock_db:
+        result = elixir_agent._execute_tool(
+            "set_member_birthday",
+            {"member_tag": "#ABC123", "month": 7, "day": 15},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        mock_db.set_member_birthday.assert_called_once_with(
+            "#ABC123", name=None, month=7, day=15,
+        )
+
+
+def test_execute_tool_set_member_join_date():
+    """set_member_join_date tool dispatches correctly."""
+    with patch("elixir_agent.db") as mock_db:
+        result = elixir_agent._execute_tool(
+            "set_member_join_date",
+            {"member_tag": "#ABC123", "date": "2025-06-01"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        mock_db.set_member_join_date.assert_called_once_with(
+            "#ABC123", name=None, joined_date="2025-06-01",
+        )
+
+
 def test_clan_context_no_recent():
     """_clan_context no longer includes recent entries section."""
     ctx = elixir_agent._clan_context({"memberList": []}, {})

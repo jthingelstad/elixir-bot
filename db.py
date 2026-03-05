@@ -76,6 +76,24 @@ CREATE TABLE IF NOT EXISTS leader_conversations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_leader_conv_author ON leader_conversations(author_id, recorded_at);
+
+CREATE TABLE IF NOT EXISTS member_dates (
+    tag TEXT PRIMARY KEY,
+    name TEXT,
+    joined_date TEXT,
+    birth_month INTEGER,
+    birth_day INTEGER,
+    recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS cake_day_announcements (
+    id INTEGER PRIMARY KEY,
+    announcement_date TEXT NOT NULL,
+    announcement_type TEXT NOT NULL,
+    target_tag TEXT,
+    recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
+    UNIQUE(announcement_date, announcement_type, target_tag)
+);
 """
 
 CONVERSATION_RETENTION_DAYS = 30
@@ -224,6 +242,13 @@ def purge_old_data(conn=None):
             "DELETE FROM leader_conversations WHERE recorded_at < ?", (conv_cutoff,)
         )
         conv_deleted = cur.rowcount
+
+        # Purge old cake day announcements (>7 days)
+        cake_cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
+        conn.execute(
+            "DELETE FROM cake_day_announcements WHERE announcement_date < ?",
+            (cake_cutoff,),
+        )
 
         conn.commit()
         if snap_deleted or war_deleted or conv_deleted:
@@ -769,6 +794,187 @@ def get_perfect_war_participants(season_id=None, conn=None):
             {**dict(r), "total_races_in_season": total_races}
             for r in rows
         ]
+    finally:
+        if close:
+            conn.close()
+
+
+# ── Cake day tracking ─────────────────────────────────────────────────────
+
+def backfill_join_dates(conn=None):
+    """Backfill joined_date from earliest member_snapshots for members missing it."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO member_dates (tag, name, joined_date)
+            SELECT ms.tag, ms.name, DATE(MIN(ms.recorded_at))
+            FROM member_snapshots ms
+            LEFT JOIN member_dates md ON ms.tag = md.tag
+            WHERE md.tag IS NULL OR md.joined_date IS NULL
+            GROUP BY ms.tag
+            ON CONFLICT(tag) DO UPDATE SET
+                joined_date = excluded.joined_date
+            WHERE member_dates.joined_date IS NULL
+            """
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def record_join_date(tag, name, joined_date, conn=None):
+    """Record a join date — only sets if not already present."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO member_dates (tag, name, joined_date) VALUES (?, ?, ?) "
+            "ON CONFLICT(tag) DO UPDATE SET "
+            "joined_date = excluded.joined_date, name = COALESCE(excluded.name, member_dates.name) "
+            "WHERE member_dates.joined_date IS NULL",
+            (tag, name, joined_date),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def set_member_join_date(tag, name, joined_date, conn=None):
+    """Set or override a member's join date (leader override)."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO member_dates (tag, name, joined_date) VALUES (?, ?, ?) "
+            "ON CONFLICT(tag) DO UPDATE SET "
+            "joined_date = excluded.joined_date, name = COALESCE(excluded.name, member_dates.name)",
+            (tag, name, joined_date),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def set_member_birthday(tag, name, month, day, conn=None):
+    """Set or override a member's birthday (month and day)."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO member_dates (tag, name, birth_month, birth_day) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(tag) DO UPDATE SET "
+            "birth_month = excluded.birth_month, birth_day = excluded.birth_day, "
+            "name = COALESCE(excluded.name, member_dates.name)",
+            (tag, name, month, day),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def get_member_dates(tag, conn=None):
+    """Get a member's dates record, or None."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM member_dates WHERE tag = ?", (tag,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        if close:
+            conn.close()
+
+
+def get_join_anniversaries_today(today_str, conn=None):
+    """Get members whose join anniversary is today (excluding current-year joins).
+
+    today_str: 'YYYY-MM-DD'
+    Returns list of dicts with tag, name, joined_date, years.
+    """
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        month_day = today_str[5:]  # 'MM-DD'
+        year = today_str[:4]
+        rows = conn.execute(
+            "SELECT tag, name, joined_date FROM member_dates "
+            "WHERE strftime('%m-%d', joined_date) = ? "
+            "AND strftime('%Y', joined_date) != ? "
+            "AND joined_date IS NOT NULL",
+            (month_day, year),
+        ).fetchall()
+        result = []
+        for r in rows:
+            joined_year = int(r["joined_date"][:4])
+            years = int(year) - joined_year
+            result.append({
+                "tag": r["tag"],
+                "name": r["name"],
+                "joined_date": r["joined_date"],
+                "years": years,
+            })
+        return result
+    finally:
+        if close:
+            conn.close()
+
+
+def get_birthdays_today(today_str, conn=None):
+    """Get members whose birthday is today.
+
+    today_str: 'YYYY-MM-DD'
+    Returns list of dicts with tag, name, birth_month, birth_day.
+    """
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        month = int(today_str[5:7])
+        day = int(today_str[8:10])
+        rows = conn.execute(
+            "SELECT tag, name, birth_month, birth_day FROM member_dates "
+            "WHERE birth_month = ? AND birth_day = ?",
+            (month, day),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        if close:
+            conn.close()
+
+
+def mark_announcement_sent(date_str, announcement_type, target_tag, conn=None):
+    """Record that a cake day announcement was sent (dedup)."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO cake_day_announcements "
+            "(announcement_date, announcement_type, target_tag) VALUES (?, ?, ?)",
+            (date_str, announcement_type, target_tag),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def was_announcement_sent(date_str, announcement_type, target_tag, conn=None):
+    """Check if a cake day announcement was already sent today."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM cake_day_announcements "
+            "WHERE announcement_date = ? AND announcement_type = ? AND target_tag IS ?",
+            (date_str, announcement_type, target_tag),
+        ).fetchone()
+        return row is not None
     finally:
         if close:
             conn.close()
