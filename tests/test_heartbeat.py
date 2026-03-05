@@ -274,6 +274,50 @@ def test_detect_war_champ_update_empty(conn):
     assert len(signals) == 0
 
 
+def test_detect_cake_days_clan_birthday(conn):
+    """Clan birthday detected on Feb 4."""
+    signals = heartbeat.detect_cake_days(today_str="2027-02-04", conn=conn)
+    clan_bday = [s for s in signals if s["type"] == "clan_birthday"]
+    assert len(clan_bday) == 1
+    assert clan_bday[0]["years"] == 1
+
+
+def test_detect_cake_days_join_anniversary(conn):
+    """Join anniversary detected for member."""
+    db.set_member_join_date("#ABC", "King Levy", "2025-03-05", conn=conn)
+    signals = heartbeat.detect_cake_days(today_str="2026-03-05", conn=conn)
+    anniv = [s for s in signals if s["type"] == "join_anniversary"]
+    assert len(anniv) == 1
+    assert anniv[0]["members"][0]["name"] == "King Levy"
+    assert anniv[0]["members"][0]["years"] == 1
+
+
+def test_detect_cake_days_member_birthday(conn):
+    """Member birthday detected."""
+    db.set_member_birthday("#ABC", "King Levy", 3, 5, conn=conn)
+    signals = heartbeat.detect_cake_days(today_str="2026-03-05", conn=conn)
+    bday = [s for s in signals if s["type"] == "member_birthday"]
+    assert len(bday) == 1
+    assert bday[0]["members"][0]["name"] == "King Levy"
+
+
+def test_detect_cake_days_dedup(conn):
+    """Second call on same day returns empty (dedup)."""
+    db.set_member_birthday("#ABC", "King Levy", 3, 5, conn=conn)
+    signals1 = heartbeat.detect_cake_days(today_str="2026-03-05", conn=conn)
+    assert len([s for s in signals1 if s["type"] == "member_birthday"]) == 1
+
+    signals2 = heartbeat.detect_cake_days(today_str="2026-03-05", conn=conn)
+    assert len([s for s in signals2 if s["type"] == "member_birthday"]) == 0
+
+
+def test_detect_cake_days_no_match(conn):
+    """No signals when nothing matches today."""
+    db.set_member_birthday("#ABC", "King Levy", 7, 15, conn=conn)
+    signals = heartbeat.detect_cake_days(today_str="2026-03-05", conn=conn)
+    assert len(signals) == 0
+
+
 def test_multiple_signals(conn):
     """Multiple changes produce multiple signals."""
     # Snapshot A

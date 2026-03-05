@@ -614,3 +614,141 @@ def test_get_perfect_war_participants_multiple(conn):
 def test_get_perfect_war_participants_empty(conn):
     """Returns empty when no war data."""
     assert db.get_perfect_war_participants(conn=conn) == []
+
+
+# ── Cake day tests ─────────────────────────────────────────────────────────
+
+def test_schema_includes_cake_day_tables(conn):
+    """DB initializes with member_dates and cake_day_announcements tables."""
+    tables = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    ).fetchall()
+    names = [t["name"] for t in tables]
+    assert "member_dates" in names
+    assert "cake_day_announcements" in names
+
+
+def test_set_and_get_member_birthday(conn):
+    """Birthday can be set and retrieved."""
+    db.set_member_birthday("#ABC123", "King Levy", 7, 15, conn=conn)
+    result = db.get_member_dates("#ABC123", conn=conn)
+    assert result is not None
+    assert result["birth_month"] == 7
+    assert result["birth_day"] == 15
+    assert result["name"] == "King Levy"
+    assert result["joined_date"] is None
+
+
+def test_set_member_birthday_overwrites(conn):
+    """Birthday can be overwritten."""
+    db.set_member_birthday("#ABC123", "King Levy", 7, 15, conn=conn)
+    db.set_member_birthday("#ABC123", "King Levy", 12, 25, conn=conn)
+    result = db.get_member_dates("#ABC123", conn=conn)
+    assert result["birth_month"] == 12
+    assert result["birth_day"] == 25
+
+
+def test_set_and_get_member_join_date(conn):
+    """Join date can be set (leader override) and retrieved."""
+    db.set_member_join_date("#ABC123", "King Levy", "2025-06-01", conn=conn)
+    result = db.get_member_dates("#ABC123", conn=conn)
+    assert result is not None
+    assert result["joined_date"] == "2025-06-01"
+
+
+def test_record_join_date_does_not_overwrite(conn):
+    """record_join_date only sets if not already present."""
+    db.set_member_join_date("#ABC123", "King Levy", "2025-01-01", conn=conn)
+    db.record_join_date("#ABC123", "King Levy", "2026-03-05", conn=conn)
+    result = db.get_member_dates("#ABC123", conn=conn)
+    assert result["joined_date"] == "2025-01-01"  # Not overwritten
+
+
+def test_record_join_date_sets_when_null(conn):
+    """record_join_date sets date when none exists."""
+    db.record_join_date("#ABC123", "King Levy", "2026-03-05", conn=conn)
+    result = db.get_member_dates("#ABC123", conn=conn)
+    assert result["joined_date"] == "2026-03-05"
+
+
+def test_backfill_join_dates(conn):
+    """Backfills join dates from earliest snapshot."""
+    conn.execute(
+        "INSERT INTO member_snapshots (tag, name, trophies, recorded_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("#ABC123", "King Levy", 9000, "2025-06-15T10:00:00"),
+    )
+    conn.execute(
+        "INSERT INTO member_snapshots (tag, name, trophies, recorded_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("#ABC123", "King Levy", 9500, "2025-07-01T10:00:00"),
+    )
+    conn.commit()
+
+    db.backfill_join_dates(conn=conn)
+    result = db.get_member_dates("#ABC123", conn=conn)
+    assert result is not None
+    assert result["joined_date"] == "2025-06-15"
+
+
+def test_backfill_does_not_overwrite_existing(conn):
+    """Backfill respects existing (leader-set) join dates."""
+    db.set_member_join_date("#ABC123", "King Levy", "2024-01-01", conn=conn)
+
+    conn.execute(
+        "INSERT INTO member_snapshots (tag, name, trophies, recorded_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("#ABC123", "King Levy", 9000, "2025-06-15T10:00:00"),
+    )
+    conn.commit()
+
+    db.backfill_join_dates(conn=conn)
+    result = db.get_member_dates("#ABC123", conn=conn)
+    assert result["joined_date"] == "2024-01-01"
+
+
+def test_get_join_anniversaries_today(conn):
+    """Returns members whose join anniversary matches today."""
+    db.set_member_join_date("#ABC123", "King Levy", "2025-03-05", conn=conn)
+    db.set_member_join_date("#DEF456", "Vijay", "2025-07-10", conn=conn)
+    # Same year join should be excluded
+    db.set_member_join_date("#GHI789", "Newbie", "2026-03-05", conn=conn)
+
+    results = db.get_join_anniversaries_today("2026-03-05", conn=conn)
+    assert len(results) == 1
+    assert results[0]["tag"] == "#ABC123"
+    assert results[0]["years"] == 1
+
+
+def test_get_birthdays_today(conn):
+    """Returns members whose birthday matches today."""
+    db.set_member_birthday("#ABC123", "King Levy", 3, 5, conn=conn)
+    db.set_member_birthday("#DEF456", "Vijay", 7, 10, conn=conn)
+
+    results = db.get_birthdays_today("2026-03-05", conn=conn)
+    assert len(results) == 1
+    assert results[0]["tag"] == "#ABC123"
+
+
+def test_announcement_dedup(conn):
+    """Announcement dedup prevents re-announcing."""
+    assert not db.was_announcement_sent("2026-03-05", "birthday", "#ABC123", conn=conn)
+    db.mark_announcement_sent("2026-03-05", "birthday", "#ABC123", conn=conn)
+    assert db.was_announcement_sent("2026-03-05", "birthday", "#ABC123", conn=conn)
+
+
+def test_announcement_dedup_clan_birthday(conn):
+    """Clan birthday dedup works with NULL target_tag."""
+    assert not db.was_announcement_sent("2026-02-04", "clan_birthday", None, conn=conn)
+    db.mark_announcement_sent("2026-02-04", "clan_birthday", None, conn=conn)
+    assert db.was_announcement_sent("2026-02-04", "clan_birthday", None, conn=conn)
+
+
+def test_birthday_and_join_date_independent(conn):
+    """Birthday and join date can be set independently on the same member."""
+    db.set_member_birthday("#ABC123", "King Levy", 7, 15, conn=conn)
+    db.set_member_join_date("#ABC123", "King Levy", "2025-01-01", conn=conn)
+    result = db.get_member_dates("#ABC123", conn=conn)
+    assert result["birth_month"] == 7
+    assert result["birth_day"] == 15
+    assert result["joined_date"] == "2025-01-01"

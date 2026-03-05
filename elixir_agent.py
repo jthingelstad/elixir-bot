@@ -228,6 +228,52 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "set_member_birthday",
+            "description": "Set a clan member's birthday (month and day).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "Player tag (e.g. '#ABC123')",
+                    },
+                    "month": {
+                        "type": "integer",
+                        "description": "Birth month (1-12)",
+                    },
+                    "day": {
+                        "type": "integer",
+                        "description": "Birth day (1-31)",
+                    },
+                },
+                "required": ["member_tag", "month", "day"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_member_join_date",
+            "description": "Set or override a clan member's join date. Use when a leader provides or corrects a member's join date.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "Player tag (e.g. '#ABC123')",
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Join date in YYYY-MM-DD format",
+                    },
+                },
+                "required": ["member_tag", "date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_perfect_war_participants",
             "description": "Find members who participated in every single war race of a season — perfect attendance. These players earn a free Pass Royale for their dedication.",
             "parameters": {
@@ -269,6 +315,18 @@ def _execute_tool(name, arguments):
             result = db.get_perfect_war_participants(
                 season_id=arguments.get("season_id"),
             )
+        elif name == "set_member_birthday":
+            db.set_member_birthday(
+                arguments["member_tag"], name=None,
+                month=arguments["month"], day=arguments["day"],
+            )
+            result = {"success": True}
+        elif name == "set_member_join_date":
+            db.set_member_join_date(
+                arguments["member_tag"], name=None,
+                joined_date=arguments["date"],
+            )
+            result = {"success": True}
         else:
             result = {"error": f"Unknown tool: {name}"}
 

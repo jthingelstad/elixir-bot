@@ -10,6 +10,7 @@ from datetime import datetime
 import cr_api
 import cr_knowledge
 import db
+import prompts
 
 log = logging.getLogger("elixir_heartbeat")
 
@@ -311,6 +312,66 @@ def detect_war_completion(clan_tag, conn=None):
             conn.close()
 
 
+def detect_cake_days(today_str=None, conn=None):
+    """Check for clan birthday, join anniversaries, and member birthdays.
+
+    Uses cake_day_announcements table for dedup — only returns signals
+    for events not yet announced today. Marks them as announced.
+
+    Returns list of signal dicts.
+    """
+    close = conn is None
+    conn = conn or db.get_connection()
+    try:
+        if today_str is None:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+
+        signals = []
+
+        # Clan birthday — founded date from config
+        thresholds = prompts.thresholds()
+        clan_founded = thresholds.get("clan_founded", "2026-02-04")
+        if today_str[5:] == clan_founded[5:]:  # month-day match
+            if not db.was_announcement_sent(today_str, "clan_birthday", None, conn=conn):
+                years = int(today_str[:4]) - int(clan_founded[:4])
+                signals.append({
+                    "type": "clan_birthday",
+                    "years": years,
+                })
+                db.mark_announcement_sent(today_str, "clan_birthday", None, conn=conn)
+
+        # Join anniversaries
+        anniversaries = db.get_join_anniversaries_today(today_str, conn=conn)
+        unannounced = []
+        for a in anniversaries:
+            if not db.was_announcement_sent(today_str, "join_anniversary", a["tag"], conn=conn):
+                unannounced.append(a)
+                db.mark_announcement_sent(today_str, "join_anniversary", a["tag"], conn=conn)
+        if unannounced:
+            signals.append({
+                "type": "join_anniversary",
+                "members": unannounced,
+            })
+
+        # Member birthdays
+        birthdays = db.get_birthdays_today(today_str, conn=conn)
+        unannounced_bdays = []
+        for b in birthdays:
+            if not db.was_announcement_sent(today_str, "birthday", b["tag"], conn=conn):
+                unannounced_bdays.append(b)
+                db.mark_announcement_sent(today_str, "birthday", b["tag"], conn=conn)
+        if unannounced_bdays:
+            signals.append({
+                "type": "member_birthday",
+                "members": unannounced_bdays,
+            })
+
+        return signals
+    finally:
+        if close:
+            conn.close()
+
+
 # ── Main heartbeat tick ──────────────────────────────────────────────────────
 
 def tick(conn=None):
@@ -358,6 +419,15 @@ def tick(conn=None):
         join_leave_signals, _ = detect_joins_leaves(members, known)
         signals.extend(join_leave_signals)
 
+        # Record join dates for newly detected members
+        for sig in join_leave_signals:
+            if sig["type"] == "member_join":
+                db.record_join_date(sig["tag"], sig["name"],
+                                    datetime.now().strftime("%Y-%m-%d"), conn=conn)
+
+        # Backfill join dates from historical snapshots (idempotent)
+        db.backfill_join_dates(conn=conn)
+
         # Trophy milestones
         signals.extend(detect_trophy_milestones(conn=conn))
 
@@ -389,6 +459,9 @@ def tick(conn=None):
 
         # Inactivity
         signals.extend(detect_inactivity(members))
+
+        # Cake days — birthdays, join anniversaries, clan birthday
+        signals.extend(detect_cake_days(conn=conn))
 
         log.info("Heartbeat: %d signals detected", len(signals))
         return signals
