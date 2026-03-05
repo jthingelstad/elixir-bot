@@ -11,7 +11,6 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py + 
 - `db.py` — SQLite history store (member snapshots, war results)
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `journal.py` — Append-only JSON log committed to sibling poapkings.com repo
-- `announcements.py` — Legacy, unused
 
 ## Channels
 
@@ -37,6 +36,5 @@ Tests use in-memory SQLite and mocked external services (no API keys needed).
 
 - All times in America/Chicago timezone
 - Clan tag: J2RGCRVG (POAP KINGS)
-- Member snapshot file: `member_snapshot.json` (tag → name map)
 - SQLite DB: `elixir.db` (auto-created on first run)
 - Journal entries go to `../poapkings.com/src/_data/elixir.json`

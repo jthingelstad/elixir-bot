@@ -170,6 +170,24 @@ def snapshot_members(member_list, conn=None):
             conn.close()
 
 
+def get_known_roster(conn=None):
+    """Return {tag: name} for the most recent snapshot of each member.
+
+    Used for join/leave detection — call BEFORE snapshot_members() in tick().
+    """
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT tag, name FROM member_snapshots WHERE id IN "
+            "(SELECT MAX(id) FROM member_snapshots GROUP BY tag)"
+        ).fetchall()
+        return {r["tag"]: r["name"] for r in rows}
+    finally:
+        if close:
+            conn.close()
+
+
 def purge_old_data(conn=None):
     """Delete data older than retention thresholds."""
     close = conn is None

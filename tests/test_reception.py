@@ -20,7 +20,7 @@ class TestMatchClanMember:
     """Tests for the _match_clan_member helper."""
 
     def _match(self, nickname):
-        with patch("elixir.heartbeat._load_snapshot", return_value=SAMPLE_SNAPSHOT):
+        with patch("elixir.db.get_known_roster", return_value=SAMPLE_SNAPSHOT):
             return elixir._match_clan_member(nickname)
 
     def test_exact_match(self):
@@ -48,6 +48,6 @@ class TestMatchClanMember:
         assert result is None
 
     def test_empty_snapshot(self):
-        with patch("elixir.heartbeat._load_snapshot", return_value={}):
+        with patch("elixir.db.get_known_roster", return_value={}):
             result = elixir._match_clan_member("King Levy")
         assert result is None
