@@ -2,6 +2,9 @@
 
 Uses OpenAI function calling to let the LLM query member history, war
 results, and player details on demand.
+
+Personality, clan knowledge, and channel behaviors are loaded from
+prompt files in the prompts/ directory.
 """
 
 import json
@@ -11,8 +14,8 @@ import os
 from openai import OpenAI
 
 import cr_api
-import cr_knowledge
 import db
+import prompts
 
 log = logging.getLogger("elixir_agent")
 
@@ -28,73 +31,92 @@ def _get_client():
 
 MAX_TOOL_ROUNDS = 3
 
-ELIXIR_PERSONALITY = (
-    "You are Elixir 🧪, the sharp-minded chronicler and advisor for POAP KINGS, "
-    "a Clash Royale clan. You know the game deeply — arenas, card donations, River Race, "
-    "trophy pushing, Elder/Co-Leader promotions. You're confident, direct, and occasionally "
-    "witty. You avoid repeating yourself. You always sign off with 🧪."
-)
 
-OBSERVE_SYSTEM = (
-    ELIXIR_PERSONALITY + "\n\n"
-    + cr_knowledge.get_knowledge_block() + "\n\n"
-    "Your job: you are given a set of signals detected from the latest heartbeat check. "
-    "Each signal represents something that actually changed — a trophy milestone, a new member, "
-    "a war result, etc. Weave 2-3 of the most interesting signals into a single, natural "
-    "Discord post. Don't just list them — tell a story. If a signal isn't interesting enough, "
-    "skip it.\n\n"
-    "You have tools available to look up member history, war results, and player details. "
-    "Use them if you want more context before writing your post.\n\n"
-    "Respond with JSON only (no markdown wrapper):\n"
-    '{"event_type": "clan_observation|arena_milestone|donation_milestone|war_update|member_join|member_leave", '
-    '"member_tags": [], "member_names": [], "summary": "one sentence", '
-    '"content": "full Discord-ready markdown post", "metadata": {}}\n\n'
-    "Or respond with exactly: null\n\nif the signals are genuinely not worth posting about."
-)
+def _build_system_prompt(*sections):
+    """Combine prompt sections into a single system prompt."""
+    return "\n\n".join(s for s in sections if s)
 
-LEADER_SYSTEM = (
-    ELIXIR_PERSONALITY + "\n\n"
-    + cr_knowledge.get_knowledge_block() + "\n\n"
-    "You are answering a question from a clan leader in #leader-lounge. "
-    "Base your answer on the clan data provided and use your tools to look up "
-    "member history, war stats, or player details as needed. Be direct, give a "
-    "concrete recommendation, and explain your reasoning briefly.\n\n"
-    "You may be provided with recent conversation history with this leader. "
-    "Use it for context — reference earlier questions and answers naturally. "
-    "Don't repeat yourself if you already covered a topic recently.\n\n"
-    "## Sharing to the clan\n"
-    "A leader may ask you to share a point, insight, or announcement with the whole clan "
-    "(e.g. \"share that with the clan\", \"post that to #elixir\", \"announce that\"). "
-    "When they do, use event_type \"leader_share\" and include a \"share_content\" field "
-    "with a message crafted for the whole clan in #elixir. The \"content\" field should be "
-    "your reply to the leader confirming what you shared. "
-    "The share_content should be written for a general clan audience — motivational, clear, "
-    "and without referencing the private leader-lounge discussion.\n\n"
-    "Respond with JSON only (no markdown wrapper):\n"
-    '{"event_type": "leader_response", "member_tags": [], "member_names": [], '
-    '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}\n\n'
-    "Or, when sharing to the clan:\n"
-    '{"event_type": "leader_share", "member_tags": [], "member_names": [], '
-    '"summary": "one sentence TL;DR", "content": "reply to the leader confirming the share", '
-    '"share_content": "the clan-facing post for #elixir", "metadata": {}}'
-)
 
-RECEPTION_SYSTEM = (
-    ELIXIR_PERSONALITY + "\n\n"
-    "You are greeting a new member in the #reception channel of the POAP KINGS Discord server. "
-    "They need to change their Discord **server nickname** to match their **Clash Royale in-game name** "
-    "exactly so you can verify them and grant access to the rest of the server.\n\n"
-    "**How to change nickname:**\n"
-    "• Desktop — Right-click your name in the member list → Edit Server Profile → change nickname\n"
-    "• Mobile — Tap the server name at the top → Edit Server Profile → change nickname\n\n"
-    "The current clan roster is provided below. If they tell you their in-game name, confirm "
-    "whether it's in the roster and remind them to set it as their nickname. "
-    "If their name isn't in the roster, they may not be in the clan yet — tell them to join "
-    "clan tag #J2RGCRVG in Clash Royale first.\n\n"
-    "Be friendly, brief, and helpful. Don't use tools — just answer from the roster provided.\n\n"
-    "Respond with JSON only (no markdown wrapper):\n"
-    '{"event_type": "reception_response", "content": "your Discord-ready response"}'
-)
+def _observe_system():
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.knowledge_block(),
+        prompts.channel_section("#elixir"),
+        "You have tools available to look up member history, war results, and player details. "
+        "Use them if you want more context before writing your post.\n\n"
+        "Respond with JSON only (no markdown wrapper):\n"
+        '{"event_type": "clan_observation|arena_milestone|donation_milestone|war_update|member_join|member_leave", '
+        '"member_tags": [], "member_names": [], "summary": "one sentence", '
+        '"content": "full Discord-ready markdown post", "metadata": {}}\n\n'
+        "Or respond with exactly: null\n\nif the signals are genuinely not worth posting about.",
+    )
+
+
+def _leader_system():
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.knowledge_block(),
+        prompts.channel_section("#leader-lounge"),
+        "You may be provided with recent conversation history with this leader. "
+        "Use it for context — reference earlier questions and answers naturally. "
+        "Don't repeat yourself if you already covered a topic recently.\n\n"
+        "## Sharing to the clan\n"
+        "A leader may ask you to share a point, insight, or announcement with the whole clan "
+        "(e.g. \"share that with the clan\", \"post that to #elixir\", \"announce that\"). "
+        "When they do, use event_type \"leader_share\" and include a \"share_content\" field "
+        "with a message crafted for the whole clan in the broadcast channel. The \"content\" field should be "
+        "your reply to the leader confirming what you shared. "
+        "The share_content should be written for a general clan audience — motivational, clear, "
+        "and without referencing the private leader discussion.\n\n"
+        "Respond with JSON only (no markdown wrapper):\n"
+        '{"event_type": "leader_response", "member_tags": [], "member_names": [], '
+        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}\n\n'
+        "Or, when sharing to the clan:\n"
+        '{"event_type": "leader_share", "member_tags": [], "member_names": [], '
+        '"summary": "one sentence TL;DR", "content": "reply to the leader confirming the share", '
+        '"share_content": "the clan-facing post for the broadcast channel", "metadata": {}}',
+    )
+
+
+def _reception_system():
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.channel_section("#reception"),
+        "Don't use tools — just answer from the roster provided.\n\n"
+        "Respond with JSON only (no markdown wrapper):\n"
+        '{"event_type": "reception_response", "content": "your Discord-ready response"}',
+    )
+
+
+def _editorial_system():
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.knowledge_block(),
+        "Your job: write a short, punchy editorial message (1-3 sentences) for the "
+        "clan's public website. This appears as a speech bubble from you on the "
+        "home page — visible to anyone, including people who aren't in the clan yet.\n\n"
+        "Your audience is the public. Showcase what makes the clan great — active wars, "
+        "trophy milestones, generous donations, strong leadership. Make visitors want to "
+        "join. Use the clan data provided for real details, not generic hype.\n\n"
+        "Guidelines:\n"
+        "- Keep it under 280 characters — think tweet-length\n"
+        "- Write in first person as the clan's AI chronicler\n"
+        "- Be fresh — don't repeat what you said in your previous messages\n"
+        "- You can use simple markdown (**bold**, *italic*) for emphasis\n"
+        "- No JSON — just the raw message text",
+    )
+
+
+def _event_system():
+    """System prompt for generating event-driven messages (welcome, join, leave, etc.)."""
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.channels(),
+        "You are generating a single Discord message in response to an event. "
+        "The event details are provided below. Write a message appropriate for the "
+        "channel and situation described. Be natural and in character.\n\n"
+        "Respond with the message text only — no JSON, no markdown wrapper.",
+    )
 
 
 # ── Tool definitions for OpenAI function calling ────────────────────────────
@@ -394,7 +416,7 @@ def observe_and_post(clan_data, war_data, signals=None):
     else:
         user_msg = context
 
-    return _chat_with_tools(OBSERVE_SYSTEM, user_msg)
+    return _chat_with_tools(_observe_system(), user_msg)
 
 
 def respond_to_leader(question, author_name, clan_data, war_data,
@@ -402,7 +424,7 @@ def respond_to_leader(question, author_name, clan_data, war_data,
     """Leader Q&A with tool access and conversation memory. Returns dict or None."""
     context = _clan_context(clan_data, war_data)
     user_msg = f"Leader '{author_name}' asks: {question}\n\n{context}"
-    return _chat_with_tools(LEADER_SYSTEM, user_msg,
+    return _chat_with_tools(_leader_system(), user_msg,
                             conversation_history=conversation_history)
 
 
@@ -417,30 +439,42 @@ def respond_in_reception(question, author_name, clan_data):
         f"New member '{author_name}' asks: {question}\n\n"
         f"=== CLAN ROSTER ===\n{roster}"
     )
-    return _chat_with_tools(RECEPTION_SYSTEM, user_msg,
+    return _chat_with_tools(_reception_system(), user_msg,
                             temperature=0.7, max_tokens=400)
 
 
+# ── Event-driven message generation ──────────────────────────────────────────
+
+def generate_message(event, context):
+    """Generate a single Discord message for an event using the LLM.
+
+    event: short description of what happened (e.g. "new_member_discord_join")
+    context: string with all relevant details for the LLM
+
+    Returns message text, or None on failure.
+    """
+    user_msg = f"Event: {event}\n\n{context}"
+    messages = [
+        {"role": "system", "content": _event_system()},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        resp = _get_client().chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=300,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if not text or text.lower() == "null":
+            return None
+        return text
+    except Exception as e:
+        log.error("generate_message error (%s): %s", event, e)
+        return None
+
+
 # ── Daily editorial for poapkings.com ────────────────────────────────────────
-
-EDITORIAL_SYSTEM = (
-    ELIXIR_PERSONALITY + "\n\n"
-    + cr_knowledge.get_knowledge_block() + "\n\n"
-    "Your job: write a short, punchy editorial message (1-3 sentences) for the "
-    "POAP KINGS public website. This appears as a speech bubble from you on the "
-    "home page — visible to anyone, including people who aren't in the clan yet.\n\n"
-    "Your audience is the public. Showcase what makes POAP KINGS great — active wars, "
-    "trophy milestones, generous donations, strong leadership. Make visitors want to "
-    "join. Use the clan data provided for real details, not generic hype.\n\n"
-    "Guidelines:\n"
-    "- Keep it under 280 characters — think tweet-length\n"
-    "- Write in first person as Elixir, the clan's AI chronicler\n"
-    "- Be fresh — don't repeat what you said in your previous messages\n"
-    "- You can use simple markdown (**bold**, *italic*) for emphasis\n"
-    "- No JSON — just the raw message text\n"
-    "- Sign off with 🧪"
-)
-
 
 def write_editorial(clan_data, war_data, previous_messages):
     """Generate a short editorial for the poapkings.com website. Returns text or None."""
@@ -455,7 +489,7 @@ def write_editorial(clan_data, war_data, previous_messages):
     )
 
     messages = [
-        {"role": "system", "content": EDITORIAL_SYSTEM},
+        {"role": "system", "content": _editorial_system()},
         {"role": "user", "content": user_msg},
     ]
     try:

@@ -173,6 +173,7 @@ def detect_inactivity(current_members, now=None):
     now = now or datetime.utcnow()
     signals = []
     inactive = []
+    threshold = cr_knowledge.INACTIVITY_DAYS
 
     for m in current_members:
         last_seen = m.get("lastSeen", m.get("last_seen", ""))
@@ -183,7 +184,7 @@ def detect_inactivity(current_members, now=None):
             clean = last_seen.split(".")[0]  # Remove .000Z
             seen_dt = datetime.strptime(clean, "%Y%m%dT%H%M%S")
             days_away = (now - seen_dt).days
-            if days_away >= 3:
+            if days_away >= threshold:
                 inactive.append({
                     "name": m.get("name", "?"),
                     "tag": m.get("tag", ""),
@@ -396,9 +397,9 @@ def tick(conn=None):
         if war_signals:
             signals.extend(detect_war_champ_update(conn=conn))
 
-        # Donation leaders — only towards end of day (8pm-10pm Chicago)
+        # Donation leaders — only towards end of day
         now = datetime.now()
-        if now.hour >= 20:
+        if now.hour >= cr_knowledge.DONATION_HIGHLIGHT_HOUR:
             signals.extend(detect_donation_leaders(members))
 
         # Inactivity
