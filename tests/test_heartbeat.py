@@ -435,3 +435,39 @@ def test_multiple_signals(conn):
     # Total across all detectors
     all_signals = trophy_signals + arena_signals + role_signals
     assert len(all_signals) == 3
+
+
+def test_tick_returns_bundle_with_clan_and_war(conn):
+    """tick returns HeartbeatTickResult including fetched clan/war payloads."""
+    clan = {
+        "memberList": [
+            {"tag": "#ABC", "name": "King Levy", "trophies": 9000, "donations": 10, "role": "member"}
+        ]
+    }
+    war = {"state": "warDay", "clan": {"participants": []}}
+
+    with (
+        patch("heartbeat.cr_api.get_clan", return_value=clan),
+        patch("heartbeat.cr_api.get_current_war", return_value=war),
+        patch("heartbeat.detect_joins_leaves", return_value=([], {})),
+        patch("heartbeat.detect_trophy_milestones", return_value=[]),
+        patch("heartbeat.detect_arena_changes", return_value=[]),
+        patch("heartbeat.detect_role_changes", return_value=[]),
+        patch("heartbeat.detect_war_day_transition", return_value=[]),
+        patch("heartbeat.detect_war_deck_usage", return_value=[]),
+        patch("heartbeat.detect_war_completion", return_value=[]),
+        patch("heartbeat.detect_war_champ_update", return_value=[]),
+        patch("heartbeat.detect_donation_leaders", return_value=[]),
+        patch("heartbeat.detect_inactivity", return_value=[]),
+        patch("heartbeat.detect_cake_days", return_value=[]),
+        patch("heartbeat.db.backfill_join_dates"),
+        patch("heartbeat.db.purge_old_data"),
+        patch("heartbeat.db.snapshot_members"),
+        patch("heartbeat.db.mark_signal_sent"),
+    ):
+        result = heartbeat.tick(conn=conn)
+
+    assert isinstance(result, heartbeat.HeartbeatTickResult)
+    assert result.clan == clan
+    assert result.war == war
+    assert result.signals == []

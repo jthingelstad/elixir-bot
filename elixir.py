@@ -91,7 +91,8 @@ async def _heartbeat_tick():
 
     try:
         # Run the heartbeat tick — fetches data, snapshots, detects signals
-        signals = heartbeat.tick()
+        tick_result = heartbeat.tick()
+        signals = tick_result.signals
 
         if not signals:
             log.info("Heartbeat: no signals, nothing to post")
@@ -99,16 +100,9 @@ async def _heartbeat_tick():
 
         log.info("Heartbeat: %d signals detected, consulting LLM", len(signals))
 
-        # Get clan + war data for context (heartbeat.tick already fetched it,
-        # but we need it for the LLM context too)
-        try:
-            clan = cr_api.get_clan()
-        except Exception:
-            clan = {}
-        try:
-            war = cr_api.get_current_war()
-        except Exception:
-            war = {}
+        # Use clan + war data fetched during heartbeat.tick()
+        clan = tick_result.clan
+        war = tick_result.war
 
         # Fetch recent #elixir post history to avoid repetition
         recent_posts = await asyncio.to_thread(

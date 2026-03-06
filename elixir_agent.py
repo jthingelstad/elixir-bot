@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 
 from openai import OpenAI
 
@@ -46,6 +47,11 @@ def _get_client():
     return _client
 
 MAX_TOOL_ROUNDS = 3
+LEADER_WRITE_TOOLS_ENABLED = True
+MAX_CONTEXT_MEMBERS_DEFAULT = 30
+MAX_CONTEXT_MEMBERS_FULL = 50
+TOOL_RESULT_MAX_ITEMS = 8
+TOOL_RESULT_MAX_CHARS = 3000
 
 
 def _build_system_prompt(*sections):
@@ -437,6 +443,38 @@ TOOLS = [
     },
 ]
 
+TOOL_DEFINITIONS = []
+for _tool in TOOLS:
+    _name = _tool["function"]["name"]
+    _side_effect = "write" if _name.startswith("set_member_") else "read"
+    TOOL_DEFINITIONS.append({
+        "tool": _tool,
+        "name": _name,
+        "side_effect": _side_effect,
+    })
+
+TOOL_DEFINITIONS_BY_NAME = {
+    d["name"]: d for d in TOOL_DEFINITIONS
+}
+
+READ_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "read"]
+WRITE_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "write"]
+ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
+
+TOOLSETS_BY_WORKFLOW = {
+    "observe": READ_TOOLS,
+    "leader": ALL_TOOLS,
+    "reception": [],
+    "roster_bios": READ_TOOLS,
+}
+
+RESPONSE_SCHEMAS_BY_WORKFLOW = {
+    "observation": {"required": ["event_type", "summary", "content"]},
+    "leader": {"required": ["event_type", "summary", "content"]},
+    "reception": {"required": ["event_type", "content"]},
+    "roster_bios": {"required": ["intro", "members"]},
+}
+
 
 def _execute_tool(name, arguments):
     """Execute a tool call and return the result as a string."""
@@ -524,8 +562,127 @@ def _parse_response(text):
         return None
 
 
+def _parse_json_response(text):
+    """Parse strict JSON-only model responses."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    if text.lower() == "null":
+        return None
+    cleaned = text
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```")[1]
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+    return json.loads(cleaned.strip())
+
+
+def _validate_response(workflow, parsed_obj, response_schema=None):
+    """Validate parsed model responses against workflow contracts."""
+    schema = response_schema or RESPONSE_SCHEMAS_BY_WORKFLOW.get(workflow)
+    if parsed_obj is None:
+        if workflow == "observation":
+            return True, None
+        if schema:
+            return False, "null response is not allowed for this workflow"
+        return True, None
+    if not isinstance(parsed_obj, dict):
+        return False, "response must be a JSON object"
+    if not schema:
+        return True, None
+
+    for key in schema.get("required", []):
+        if key not in parsed_obj:
+            return False, f"missing required field: {key}"
+
+    if workflow == "observation":
+        allowed = {
+            "clan_observation", "arena_milestone", "donation_milestone",
+            "war_update", "member_join", "member_leave",
+        }
+        et = parsed_obj.get("event_type")
+        if et not in allowed:
+            return False, f"invalid event_type for observation: {et}"
+    elif workflow == "leader":
+        et = parsed_obj.get("event_type")
+        if et == "leader_response":
+            pass
+        elif et == "leader_share":
+            if "share_content" not in parsed_obj:
+                return False, "missing required field for leader_share: share_content"
+        else:
+            return False, f"invalid event_type for leader: {et}"
+    elif workflow == "reception":
+        if parsed_obj.get("event_type") != "reception_response":
+            return False, f"invalid event_type for reception: {parsed_obj.get('event_type')}"
+    elif workflow == "roster_bios":
+        if not isinstance(parsed_obj.get("members"), dict):
+            return False, "members must be an object map"
+
+    return True, None
+
+
+def _tool_names(tool_defs):
+    return {t["function"]["name"] for t in (tool_defs or [])}
+
+
+def _estimate_message_chars(messages):
+    """Cheap prompt-size proxy for telemetry."""
+    total = 0
+    for m in messages:
+        content = m.get("content", "")
+        if isinstance(content, str):
+            total += len(content)
+        elif isinstance(content, list):
+            total += len(json.dumps(content, default=str))
+        elif content is not None:
+            total += len(str(content))
+    return total
+
+
+def _build_tool_result_envelope(name, raw_result):
+    """Normalize tool output into a compact envelope for model context."""
+    try:
+        parsed = json.loads(raw_result)
+    except Exception:
+        parsed = {"error": "tool_result_not_json", "raw": str(raw_result)[:500]}
+
+    envelope = {
+        "ok": True,
+        "error": None,
+        "truncated": False,
+        "meta": {"tool": name},
+        "data": parsed,
+    }
+
+    if isinstance(parsed, dict) and "error" in parsed:
+        envelope["ok"] = False
+        envelope["error"] = parsed.get("error")
+
+    if isinstance(parsed, list):
+        original_count = len(parsed)
+        if original_count > TOOL_RESULT_MAX_ITEMS:
+            envelope["data"] = parsed[:TOOL_RESULT_MAX_ITEMS]
+            envelope["truncated"] = True
+            envelope["meta"]["original_count"] = original_count
+            envelope["meta"]["returned_count"] = TOOL_RESULT_MAX_ITEMS
+
+    serialized = json.dumps(envelope, default=str)
+    if len(serialized) > TOOL_RESULT_MAX_CHARS:
+        envelope["truncated"] = True
+        envelope["meta"]["char_limit"] = TOOL_RESULT_MAX_CHARS
+        envelope["meta"]["char_size"] = len(serialized)
+        data_s = json.dumps(envelope.get("data"), default=str)
+        envelope["data"] = data_s[:TOOL_RESULT_MAX_CHARS // 2] + "...[truncated]"
+        if envelope["ok"] and envelope["error"] is None:
+            envelope["error"] = "tool_result_truncated_for_context"
+
+    return json.dumps(envelope, default=str)
+
+
 def _chat_with_tools(system_prompt, user_message, conversation_history=None,
-                     temperature=0.7, max_tokens=800):
+                     temperature=0.7, max_tokens=800, workflow="generic",
+                     allowed_tools=None, response_schema=None, strict_json=True):
     """Run a chat completion with tool-calling loop.
 
     conversation_history: optional list of {role, content} dicts to inject
@@ -541,17 +698,57 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             messages.append({"role": turn["role"], "content": turn["content"]})
     messages.append({"role": "user", "content": user_message})
 
+    if allowed_tools is None:
+        allowed_tools = TOOLSETS_BY_WORKFLOW.get(workflow, ALL_TOOLS)
+    allowed_tool_names = _tool_names(allowed_tools)
+
+    enable_write_tools = workflow == "leader" and LEADER_WRITE_TOOLS_ENABLED
+
+    tools_called = []
+    denied_tool_count = 0
+    validation_failure_count = 0
+    completion_latencies_ms = []
+    completion_chars = 0
+
+    def _create_completion(call_messages):
+        start = time.perf_counter()
+        kwargs = {
+            "model": "gpt-4o",
+            "messages": call_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "timeout": 60,
+        }
+        if allowed_tools:
+            kwargs["tools"] = allowed_tools
+            kwargs["tool_choice"] = "auto"
+        resp = _get_client().chat.completions.create(**kwargs)
+        completion_latencies_ms.append(round((time.perf_counter() - start) * 1000, 2))
+        return resp
+
+    def _parse_and_validate(content, repair_allowed):
+        nonlocal validation_failure_count
+        try:
+            parsed = _parse_json_response(content) if strict_json else _parse_response(content or "null")
+        except Exception as e:
+            validation_failure_count += 1
+            if not repair_allowed:
+                log.warning("validation_failure workflow=%s reason=parse_error detail=%s", workflow, e)
+                return None
+            return "__REPAIR__", f"Invalid JSON. Error: {e}"
+
+        ok, error = _validate_response(workflow, parsed, response_schema=response_schema)
+        if ok:
+            return parsed
+        validation_failure_count += 1
+        if not repair_allowed:
+            log.warning("validation_failure workflow=%s reason=schema_error detail=%s", workflow, error)
+            return None
+        return "__REPAIR__", f"Schema validation failed: {error}"
+
     for _round in range(MAX_TOOL_ROUNDS + 1):
         try:
-            resp = _get_client().chat.completions.create(
-                model="gpt-4o",
-                messages=messages,
-                tools=TOOLS,
-                tool_choice="auto",
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout=60,
-            )
+            resp = _create_completion(messages)
         except Exception as e:
             log.error("OpenAI API error: %s", e)
             return None
@@ -560,7 +757,35 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
 
         # If no tool calls, we have the final answer
         if not choice.message.tool_calls:
-            return _parse_response(choice.message.content or "null")
+            completion_chars += len(choice.message.content or "")
+            parsed = _parse_and_validate(choice.message.content or "null", repair_allowed=True)
+            if isinstance(parsed, tuple) and parsed[0] == "__REPAIR__":
+                messages.append({"role": "assistant", "content": choice.message.content or ""})
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "Your previous response was invalid for this workflow. "
+                        f"{parsed[1]} Return JSON only that satisfies the required schema."
+                    ),
+                })
+                try:
+                    repair_resp = _create_completion(messages)
+                except Exception as e:
+                    log.error("OpenAI API repair error: %s", e)
+                    return None
+
+                repaired = repair_resp.choices[0].message.content or "null"
+                completion_chars += len(repaired)
+                parsed = _parse_and_validate(repaired, repair_allowed=False)
+
+            prompt_chars = _estimate_message_chars(messages)
+            log.info(
+                "agent_loop workflow=%s tool_rounds=%d tools_called=%s denied_tools=%d "
+                "validation_failures=%d prompt_chars=%d completion_chars=%d completion_latencies_ms=%s",
+                workflow, _round, tools_called, denied_tool_count, validation_failure_count,
+                prompt_chars, completion_chars, completion_latencies_ms,
+            )
+            return parsed
 
         # Process tool calls
         messages.append(choice.message)
@@ -571,8 +796,38 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             except json.JSONDecodeError:
                 fn_args = {}
 
-            log.info("Tool call: %s(%s)", fn_name, fn_args)
-            result = _execute_tool(fn_name, fn_args)
+            allowed = fn_name in allowed_tool_names
+            if not allowed:
+                denied_tool_count += 1
+                log.warning(
+                    "tool_denied workflow=%s tool=%s reason=not_allowed_for_workflow",
+                    workflow, fn_name,
+                )
+                result = json.dumps({
+                    "error": "tool_not_allowed",
+                    "tool": fn_name,
+                    "workflow": workflow,
+                })
+            else:
+                side_effect = TOOL_DEFINITIONS_BY_NAME.get(fn_name, {}).get("side_effect", "read")
+                if side_effect == "write" and not enable_write_tools:
+                    denied_tool_count += 1
+                    log.warning(
+                        "tool_denied workflow=%s tool=%s reason=write_policy_disabled",
+                        workflow, fn_name,
+                    )
+                    result = json.dumps({
+                        "error": "tool_write_disabled",
+                        "tool": fn_name,
+                        "workflow": workflow,
+                    })
+                else:
+                    log.info("Tool call workflow=%s: %s(%s)", workflow, fn_name, fn_args)
+                    tools_called.append(fn_name)
+                    result = _build_tool_result_envelope(
+                        fn_name,
+                        _execute_tool(fn_name, fn_args),
+                    )
             messages.append({
                 "role": "tool",
                 "tool_call_id": tool_call.id,
@@ -582,20 +837,23 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     # If we hit max rounds, try to get a final answer without tools
     log.warning("Hit max tool rounds (%d), requesting final answer", MAX_TOOL_ROUNDS)
     try:
-        resp = _get_client().chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=60,
+        resp = _create_completion(messages)
+        completion_chars += len(resp.choices[0].message.content or "")
+        parsed = _parse_and_validate(resp.choices[0].message.content or "null", repair_allowed=False)
+        prompt_chars = _estimate_message_chars(messages)
+        log.info(
+            "agent_loop workflow=%s tool_rounds=%d tools_called=%s denied_tools=%d "
+            "validation_failures=%d prompt_chars=%d completion_chars=%d completion_latencies_ms=%s",
+            workflow, MAX_TOOL_ROUNDS, tools_called, denied_tool_count, validation_failure_count,
+            prompt_chars, completion_chars, completion_latencies_ms,
         )
-        return _parse_response(resp.choices[0].message.content or "null")
+        return parsed
     except Exception as e:
         log.error("Final answer error: %s", e)
         return None
 
 
-def _clan_context(clan_data, war_data, roster_data=None):
+def _clan_context(clan_data, war_data, roster_data=None, max_members=MAX_CONTEXT_MEMBERS_DEFAULT):
     """Format clan data into a concise context string for the LLM.
 
     roster_data: optional enriched roster dict (from build_roster_data with
@@ -610,7 +868,9 @@ def _clan_context(clan_data, war_data, roster_data=None):
 
     members = clan_data.get("memberList", clan_data.get("members", []))
     member_summary = []
-    for m in sorted(members, key=lambda x: x.get("clanRank", x.get("clan_rank", 99))):
+    sorted_members = sorted(members, key=lambda x: x.get("clanRank", x.get("clan_rank", 99)))
+    limited_members = sorted_members[:max_members]
+    for m in limited_members:
         arena = m.get("arena", {})
         arena_name = arena.get("name", str(arena)) if isinstance(arena, dict) else str(arena)
         line = (
@@ -627,6 +887,10 @@ def _clan_context(clan_data, war_data, roster_data=None):
             card_str = ", ".join(f"{c['name']} ({c['usage_pct']}%)" for c in fav_cards[:5])
             line += f" | top cards: {card_str}"
         member_summary.append(line)
+
+    omitted_count = max(0, len(sorted_members) - len(limited_members))
+    if omitted_count:
+        member_summary.append(f"  ... {omitted_count} more members omitted for context budget")
 
     war_summary = "No active war data."
     if war_data and war_data.get("state") not in (None, "notInWar"):
@@ -663,7 +927,7 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None):
     signals: list of signal dicts from heartbeat.tick(), or None for legacy mode.
     recent_posts: list of recent conversation dicts from db.get_conversation_history().
     """
-    context = _clan_context(clan_data, war_data)
+    context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
 
     if signals:
         signals_text = json.dumps(signals, indent=2, default=str)
@@ -676,16 +940,28 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None):
 
     user_msg += _format_recent_posts(recent_posts)
 
-    return _chat_with_tools(_observe_system(), user_msg)
+    return _chat_with_tools(
+        _observe_system(), user_msg,
+        workflow="observation",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["observe"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["observation"],
+        strict_json=True,
+    )
 
 
 def respond_to_leader(question, author_name, clan_data, war_data,
                       conversation_history=None):
     """Leader Q&A with tool access and conversation memory. Returns dict or None."""
-    context = _clan_context(clan_data, war_data)
+    context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
     user_msg = f"Leader '{author_name}' asks: {question}\n\n{context}"
-    return _chat_with_tools(_leader_system(), user_msg,
-                            conversation_history=conversation_history)
+    return _chat_with_tools(
+        _leader_system(), user_msg,
+        conversation_history=conversation_history,
+        workflow="leader",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["leader"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["leader"],
+        strict_json=True,
+    )
 
 
 def respond_in_reception(question, author_name, clan_data):
@@ -699,8 +975,14 @@ def respond_in_reception(question, author_name, clan_data):
         f"New member '{author_name}' asks: {question}\n\n"
         f"=== CLAN ROSTER ===\n{roster}"
     )
-    return _chat_with_tools(_reception_system(), user_msg,
-                            temperature=0.7, max_tokens=400)
+    return _chat_with_tools(
+        _reception_system(), user_msg,
+        temperature=0.7, max_tokens=400,
+        workflow="reception",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["reception"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["reception"],
+        strict_json=True,
+    )
 
 
 # ── Event-driven message generation ──────────────────────────────────────────
@@ -741,7 +1023,11 @@ def generate_message(event, context, recent_posts=None):
 
 def generate_home_message(clan_data, war_data, previous_message, roster_data=None):
     """Generate a message for the poapkings.com home page. Returns text or None."""
-    context = _clan_context(clan_data, war_data, roster_data=roster_data)
+    context = _clan_context(
+        clan_data, war_data,
+        roster_data=roster_data,
+        max_members=MAX_CONTEXT_MEMBERS_FULL,
+    )
     prev_text = f"Your previous message: {previous_message}" if previous_message else "(none yet)"
     user_msg = f"{context}\n\n{prev_text}\n\nWrite your next message for the home page."
 
@@ -768,7 +1054,11 @@ def generate_home_message(clan_data, war_data, previous_message, roster_data=Non
 
 def generate_members_message(clan_data, war_data, previous_message, roster_data=None):
     """Generate a message for the poapkings.com members page. Returns text or None."""
-    context = _clan_context(clan_data, war_data, roster_data=roster_data)
+    context = _clan_context(
+        clan_data, war_data,
+        roster_data=roster_data,
+        max_members=MAX_CONTEXT_MEMBERS_FULL,
+    )
     prev_text = f"Your previous message: {previous_message}" if previous_message else "(none yet)"
     user_msg = f"{context}\n\n{prev_text}\n\nWrite your next message for the members page."
 
@@ -795,7 +1085,11 @@ def generate_members_message(clan_data, war_data, previous_message, roster_data=
 
 def generate_roster_bios(clan_data, war_data, roster_data=None):
     """Generate roster intro and per-member bios. Returns dict or None."""
-    context = _clan_context(clan_data, war_data, roster_data=roster_data)
+    context = _clan_context(
+        clan_data, war_data,
+        roster_data=roster_data,
+        max_members=MAX_CONTEXT_MEMBERS_FULL,
+    )
     members = clan_data.get("memberList", clan_data.get("members", []))
     member_tags = [m.get("tag", "") for m in members]
     user_msg = (
@@ -803,13 +1097,23 @@ def generate_roster_bios(clan_data, war_data, roster_data=None):
         f"Generate an intro and bio for each member.\n"
         f"Member tags to cover: {', '.join(member_tags)}"
     )
-    return _chat_with_tools(_roster_bios_system(), user_msg,
-                            temperature=0.8, max_tokens=2000)
+    return _chat_with_tools(
+        _roster_bios_system(), user_msg,
+        temperature=0.8, max_tokens=2000,
+        workflow="roster_bios",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["roster_bios"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["roster_bios"],
+        strict_json=True,
+    )
 
 
 def generate_promote_content(clan_data, roster_data=None):
     """Generate promotional messages for 5 channels. Returns dict or None."""
-    context = _clan_context(clan_data, {}, roster_data=roster_data)
+    context = _clan_context(
+        clan_data, {},
+        roster_data=roster_data,
+        max_members=MAX_CONTEXT_MEMBERS_FULL,
+    )
     user_msg = f"{context}\n\nGenerate promotional messages for all 5 channels."
 
     messages = [
