@@ -10,6 +10,7 @@ prompt files in the prompts/ directory.
 import json
 import logging
 import os
+import subprocess
 
 from openai import OpenAI
 
@@ -18,6 +19,21 @@ import db
 import prompts
 
 log = logging.getLogger("elixir_agent")
+
+
+def _get_build_hash():
+    """Capture the git short hash at import time."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.path.dirname(__file__) or ".",
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        return "unknown"
+
+
+BUILD_HASH = _get_build_hash()
 
 # Lazy client — only initialized when actually needed (allows tests to import without API key)
 _client = None
@@ -34,7 +50,9 @@ MAX_TOOL_ROUNDS = 3
 
 def _build_system_prompt(*sections):
     """Combine prompt sections into a single system prompt."""
-    return "\n\n".join(s for s in sections if s)
+    parts = [s for s in sections if s]
+    parts.append(f"Your build version: {BUILD_HASH}")
+    return "\n\n".join(parts)
 
 
 def _observe_system():

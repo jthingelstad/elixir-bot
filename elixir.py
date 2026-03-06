@@ -1,7 +1,9 @@
 """Elixir - POAP KINGS Discord bot (LLM-powered with heartbeat)."""
 
 import asyncio
+import atexit
 import os
+import signal
 import logging
 from datetime import datetime, timezone
 
@@ -511,7 +513,34 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
+PID_FILE = os.path.join(os.path.dirname(__file__), "elixir.pid")
+
+
+def _acquire_pid_file():
+    """Write current PID to file, killing any stale process first."""
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE) as f:
+                old_pid = int(f.read().strip())
+            os.kill(old_pid, signal.SIGTERM)
+            log.info("Killed stale process %d", old_pid)
+        except (ValueError, ProcessLookupError, PermissionError):
+            pass  # PID invalid, process gone, or not ours
+    with open(PID_FILE, "w") as f:
+        f.write(str(os.getpid()))
+
+
+def _cleanup_pid_file():
+    """Remove PID file on clean shutdown."""
+    try:
+        os.remove(PID_FILE)
+    except FileNotFoundError:
+        pass
+
+
 if __name__ == "__main__":
     if not TOKEN:
         raise ValueError("DISCORD_TOKEN not set in .env")
+    _acquire_pid_file()
+    atexit.register(_cleanup_pid_file)
     bot.run(TOKEN)
