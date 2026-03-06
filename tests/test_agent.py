@@ -297,6 +297,8 @@ def test_respond_in_reception(_mock_openai_client):
     user_msg = messages[1]["content"]
     assert "King Levy" in user_msg
     assert "#ABC" in user_msg
+    kwargs = call_args.kwargs or call_args[1]
+    assert "tools" not in kwargs
 
 
 def test_execute_tool_war_champ_standings():
@@ -503,3 +505,152 @@ def test_event_system_includes_channels():
     assert "#elixir" in event_sys
     assert "#reception" in event_sys
     assert "broadcast" in event_sys.lower()
+
+
+def test_tool_call_denied_for_workflow_and_loop_continues(_mock_openai_client):
+    """Denied tool calls return structured errors and loop can still finish."""
+    tool_call = MagicMock()
+    tool_call.id = "call_denied"
+    tool_call.function.name = "get_war_results"
+    tool_call.function.arguments = "{}"
+    first_resp = _make_mock_response(tool_calls=[tool_call])
+    first_resp.choices[0].message.content = None
+
+    final = json.dumps({
+        "event_type": "reception_response",
+        "content": "No tools needed here.",
+    })
+    second_resp = _make_mock_response(content=final)
+    _mock_openai_client.chat.completions.create.side_effect = [first_resp, second_resp]
+
+    with patch("elixir_agent._execute_tool") as mock_exec:
+        result = elixir_agent._chat_with_tools(
+            "system", "user",
+            workflow="reception",
+            allowed_tools=[],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["reception"],
+            strict_json=True,
+        )
+
+    assert result is not None
+    assert result["event_type"] == "reception_response"
+    mock_exec.assert_not_called()
+
+
+def test_write_tool_blocked_when_not_leader_workflow(_mock_openai_client):
+    """Write tools are blocked outside leader workflow even if allowlisted."""
+    tool_call = MagicMock()
+    tool_call.id = "call_write"
+    tool_call.function.name = "set_member_note"
+    tool_call.function.arguments = '{"member_tag":"#ABC123","note":"Founder"}'
+    first_resp = _make_mock_response(tool_calls=[tool_call])
+    first_resp.choices[0].message.content = None
+
+    final = json.dumps({
+        "event_type": "reception_response",
+        "content": "done",
+    })
+    second_resp = _make_mock_response(content=final)
+    _mock_openai_client.chat.completions.create.side_effect = [first_resp, second_resp]
+
+    write_tool = [
+        t for t in elixir_agent.WRITE_TOOLS
+        if t["function"]["name"] == "set_member_note"
+    ]
+
+    with patch("elixir_agent._execute_tool") as mock_exec:
+        result = elixir_agent._chat_with_tools(
+            "system", "user",
+            workflow="reception",
+            allowed_tools=write_tool,
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["reception"],
+            strict_json=True,
+        )
+
+    assert result is not None
+    assert result["event_type"] == "reception_response"
+    mock_exec.assert_not_called()
+
+
+def test_invalid_json_triggers_single_repair_retry(_mock_openai_client):
+    """Strict workflows retry once when JSON parsing fails."""
+    bad = _make_mock_response(content="not-json")
+    repaired = _make_mock_response(content='{"event_type":"reception_response","content":"ok"}')
+    _mock_openai_client.chat.completions.create.side_effect = [bad, repaired]
+
+    result = elixir_agent._chat_with_tools(
+        "system", "user",
+        workflow="reception",
+        allowed_tools=[],
+        response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["reception"],
+        strict_json=True,
+    )
+
+    assert result is not None
+    assert result["event_type"] == "reception_response"
+    assert _mock_openai_client.chat.completions.create.call_count == 2
+
+
+def test_schema_invalid_after_repair_returns_none(_mock_openai_client):
+    """If retry is still schema-invalid, strict workflows return None."""
+    first = _make_mock_response(content='{"event_type":"leader_share","content":"x","summary":"y"}')
+    second = _make_mock_response(content='{"event_type":"leader_share","content":"x","summary":"y"}')
+    _mock_openai_client.chat.completions.create.side_effect = [first, second]
+
+    result = elixir_agent._chat_with_tools(
+        "system", "user",
+        workflow="leader",
+        allowed_tools=[],
+        response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["leader"],
+        strict_json=True,
+    )
+
+    assert result is None
+    assert _mock_openai_client.chat.completions.create.call_count == 2
+
+
+def test_clan_context_budget_omits_extra_members():
+    """Context builder clips roster lines and reports omitted count."""
+    members = [
+        {"name": f"M{i}", "tag": f"#{i}", "clanRank": i, "trophies": 1000 + i, "donations": i, "role": "member"}
+        for i in range(1, 8)
+    ]
+    ctx = elixir_agent._clan_context({"memberList": members}, {}, max_members=3)
+    assert "M1" in ctx
+    assert "M3" in ctx
+    assert "M4" not in ctx
+    assert "4 more members omitted" in ctx
+
+
+def test_tool_results_are_enveloped_and_truncated(_mock_openai_client):
+    """Tool result payloads are shaped into compact envelopes."""
+    tool_call = MagicMock()
+    tool_call.id = "call_many"
+    tool_call.function.name = "get_war_results"
+    tool_call.function.arguments = "{}"
+    first_resp = _make_mock_response(tool_calls=[tool_call])
+    first_resp.choices[0].message.content = None
+
+    final = json.dumps({"event_type": "leader_response", "summary": "ok", "content": "done"})
+    second_resp = _make_mock_response(content=final)
+    _mock_openai_client.chat.completions.create.side_effect = [first_resp, second_resp]
+
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.get_war_history.return_value = [{"idx": i} for i in range(20)]
+        result = elixir_agent._chat_with_tools(
+            "system", "user",
+            workflow="leader",
+            allowed_tools=elixir_agent.READ_TOOLS,
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["leader"],
+            strict_json=True,
+        )
+
+    assert result is not None
+    second_call = _mock_openai_client.chat.completions.create.call_args_list[1]
+    messages = second_call.kwargs.get("messages") or second_call[1].get("messages")
+    tool_msg = next(m for m in messages if m.get("role") == "tool")
+    envelope = json.loads(tool_msg["content"])
+    assert envelope["ok"] is True
+    assert envelope["truncated"] is True
+    assert envelope["meta"]["original_count"] == 20
+    assert len(envelope["data"]) == elixir_agent.TOOL_RESULT_MAX_ITEMS

@@ -5,6 +5,7 @@ history store.  Only calls the LLM when real signals are found.
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 
 import cr_api
@@ -389,26 +390,34 @@ def detect_cake_days(today_str=None, conn=None):
 
 # ── Main heartbeat tick ──────────────────────────────────────────────────────
 
+
+@dataclass
+class HeartbeatTickResult:
+    """Full heartbeat output bundle for downstream consumers."""
+    signals: list
+    clan: dict
+    war: dict
+
 def tick(conn=None):
-    """Run one heartbeat cycle. Returns list of signals (may be empty).
+    """Run one heartbeat cycle and return signals + fetched clan/war data.
 
     Steps:
     1. Fetch live clan + war data
     2. Snapshot members to DB
     3. Purge expired data
     4. Run all signal detectors
-    5. Return collected signals
+    5. Return collected signals with the fetched data bundle
     """
     try:
         clan = cr_api.get_clan()
     except Exception as e:
         log.error("Heartbeat: failed to fetch clan data: %s", e)
-        return []
+        return HeartbeatTickResult(signals=[], clan={}, war={})
 
     members = clan.get("memberList", [])
     if not members:
         log.warning("Heartbeat: empty member list from API")
-        return []
+        return HeartbeatTickResult(signals=[], clan=clan, war={})
 
     try:
         war = cr_api.get_current_war()
@@ -486,7 +495,7 @@ def tick(conn=None):
             db.mark_signal_sent(sig["type"], today, conn=conn)
 
         log.info("Heartbeat: %d signals detected", len(signals))
-        return signals
+        return HeartbeatTickResult(signals=signals, clan=clan, war=war)
     finally:
         if close:
             conn.close()
