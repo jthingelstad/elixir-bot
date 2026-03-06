@@ -5,3 +5,4 @@ __pycache__/
 *.log
 elixir.db
 .pytest_cache/
+elixir.pid
