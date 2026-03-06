@@ -100,7 +100,9 @@ def _home_message_system():
         prompts.knowledge_block(),
         "Your job: write a short message (2-4 sentences) for the clan's public website home page. "
         "Visible to anyone, including people who aren't in the clan yet.\n\n"
-        "Your audience is the public. Give a peek into clan activity — wars, trophies, "
+        "Your audience is brand-new visitors who know nothing about the clan or you. "
+        "Briefly introduce yourself (Elixir, the clan's AI chronicler) and the clan. "
+        "Then give a peek into clan activity — wars, trophies, "
         "donations, milestones, and the cards our members love to play. "
         "Make visitors want to join. Use real details from the data.\n\n"
         "Guidelines:\n"
