@@ -32,6 +32,7 @@ ANNOUNCEMENTS_CHANNEL_ID = _dc.get("announcements_channel", 0)
 LEADERSHIP_CHANNEL_ID = _dc.get("leadership_channel", 0)
 RECEPTION_CHANNEL_ID = _dc.get("reception_channel", 0)
 MEMBER_ROLE_ID = _dc.get("member_role", 0)
+BOT_ROLE_ID = _dc.get("bot_role", 0)
 POAPKINGS_REPO = os.path.expanduser(os.getenv("POAPKINGS_REPO_PATH", "../poapkings.com"))
 
 # Active hours for the heartbeat (Chicago time). Outside this window, heartbeat is skipped.
@@ -405,7 +406,9 @@ async def on_member_update(before, after):
 async def on_message(message):
     if message.author.bot:
         return
-    if bot.user not in message.mentions:
+    mentioned = (bot.user in message.mentions or
+                 any(r.id == BOT_ROLE_ID for r in message.role_mentions))
+    if not mentioned:
         return
 
     # #elixir channel — broadcast only, Elixir does not respond here
@@ -417,7 +420,7 @@ async def on_message(message):
         async with message.channel.typing():
             try:
                 clan = await asyncio.to_thread(cr_api.get_clan)
-                question = message.content.replace(f"<@{bot.user.id}>", "").strip()
+                question = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@&{BOT_ROLE_ID}>", "").strip()
                 result = await asyncio.to_thread(
                     elixir_agent.respond_in_reception,
                     question=question,
@@ -450,7 +453,7 @@ async def on_message(message):
                 except Exception:
                     war = {}
                 # Strip the @Elixir mention from the question
-                question = message.content.replace(f"<@{bot.user.id}>", "").strip()
+                question = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@&{BOT_ROLE_ID}>", "").strip()
 
                 # Load conversation history for this leader
                 leader_scope = f"leader:{message.author.id}"
