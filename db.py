@@ -114,9 +114,44 @@ def _migration_1(conn):
     _add_column_if_not_exists(conn, "member_dates", "note", "TEXT", "''")
 
 
+def _migration_2(conn):
+    """Add signal_log for heartbeat dedup; unified conversations table replacing leader_conversations."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS signal_log (
+            signal_date TEXT NOT NULL,
+            signal_type TEXT NOT NULL,
+            UNIQUE(signal_date, signal_type)
+        );
+
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope TEXT NOT NULL,
+            role TEXT NOT NULL,
+            author_name TEXT,
+            content TEXT NOT NULL,
+            recorded_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_conv_scope ON conversations(scope, recorded_at);
+    """)
+    # Migrate existing leader_conversations data into conversations
+    try:
+        rows = conn.execute("SELECT * FROM leader_conversations").fetchall()
+        for r in rows:
+            conn.execute(
+                "INSERT INTO conversations (scope, role, author_name, content, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (f"leader:{r['author_id']}", r["role"], r["author_name"], r["content"], r["recorded_at"]),
+            )
+        conn.execute("DROP TABLE IF EXISTS leader_conversations")
+    except Exception:
+        # Table may not exist in fresh DBs
+        pass
+
+
 _MIGRATIONS = [
     _migration_0,
     _migration_1,
+    _migration_2,
 ]
 
 
@@ -273,7 +308,7 @@ def purge_old_data(conn=None):
             "%Y-%m-%dT%H:%M:%S"
         )
         cur = conn.execute(
-            "DELETE FROM leader_conversations WHERE recorded_at < ?", (conv_cutoff,)
+            "DELETE FROM conversations WHERE recorded_at < ?", (conv_cutoff,)
         )
         conv_deleted = cur.rowcount
 
@@ -281,6 +316,12 @@ def purge_old_data(conn=None):
         cake_cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
         conn.execute(
             "DELETE FROM cake_day_announcements WHERE announcement_date < ?",
+            (cake_cutoff,),
+        )
+
+        # Purge old signal_log entries (>7 days)
+        conn.execute(
+            "DELETE FROM signal_log WHERE signal_date < ?",
             (cake_cutoff,),
         )
 
@@ -660,27 +701,31 @@ def get_promotion_candidates(conn=None):
             conn.close()
 
 
-# ── Conversation memory ──────────────────────────────────────────────────────
+# ── Signal log (heartbeat dedup) ─────────────────────────────────────────────
 
-def save_conversation_turn(author_id, author_name, role, content, conn=None):
-    """Save a single conversation turn (question or response).
+def was_signal_sent(signal_type, date_str, conn=None):
+    """Check if a signal type has already been emitted today."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM signal_log WHERE signal_type = ? AND signal_date = ?",
+            (signal_type, date_str),
+        ).fetchone()
+        return row is not None
+    finally:
+        if close:
+            conn.close()
 
-    role: 'user' for the leader's question, 'assistant' for Elixir's response.
-    """
+
+def mark_signal_sent(signal_type, date_str, conn=None):
+    """Record that a signal type was emitted today."""
     close = conn is None
     conn = conn or get_connection()
     try:
         conn.execute(
-            "INSERT INTO leader_conversations (author_id, author_name, role, content) "
-            "VALUES (?, ?, ?, ?)",
-            (author_id, author_name, role, content),
-        )
-        # Trim to keep only the most recent turns per leader
-        conn.execute(
-            "DELETE FROM leader_conversations WHERE id NOT IN "
-            "(SELECT id FROM leader_conversations WHERE author_id = ? "
-            "ORDER BY recorded_at DESC LIMIT ?) AND author_id = ?",
-            (author_id, CONVERSATION_MAX_PER_LEADER, author_id),
+            "INSERT OR IGNORE INTO signal_log (signal_type, signal_date) VALUES (?, ?)",
+            (signal_type, date_str),
         )
         conn.commit()
     finally:
@@ -688,18 +733,47 @@ def save_conversation_turn(author_id, author_name, role, content, conn=None):
             conn.close()
 
 
-def get_conversation_history(author_id, limit=10, conn=None):
-    """Get recent conversation turns for a leader.
+# ── Conversation memory ──────────────────────────────────────────────────────
 
-    Returns list of dicts: {role, content, recorded_at}, oldest first.
+def save_conversation_turn(scope, role, content, author_name=None, conn=None):
+    """Save a single conversation turn.
+
+    scope: e.g. 'leader:12345', 'channel:elixir'
+    role: 'user' or 'assistant'
+    """
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO conversations (scope, role, author_name, content) "
+            "VALUES (?, ?, ?, ?)",
+            (scope, role, author_name, content),
+        )
+        # Trim to keep only the most recent turns per scope
+        conn.execute(
+            "DELETE FROM conversations WHERE id NOT IN "
+            "(SELECT id FROM conversations WHERE scope = ? "
+            "ORDER BY recorded_at DESC LIMIT ?) AND scope = ?",
+            (scope, CONVERSATION_MAX_PER_LEADER, scope),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def get_conversation_history(scope, limit=10, conn=None):
+    """Get recent conversation turns for a scope.
+
+    Returns list of dicts: {role, content, author_name, recorded_at}, oldest first.
     """
     close = conn is None
     conn = conn or get_connection()
     try:
         rows = conn.execute(
-            "SELECT role, content, recorded_at FROM leader_conversations "
-            "WHERE author_id = ? ORDER BY recorded_at DESC LIMIT ?",
-            (author_id, limit),
+            "SELECT role, content, author_name, recorded_at FROM conversations "
+            "WHERE scope = ? ORDER BY recorded_at DESC LIMIT ?",
+            (scope, limit),
         ).fetchall()
         # Return oldest first so they read chronologically
         return [dict(r) for r in reversed(rows)]
@@ -716,7 +790,7 @@ def purge_old_conversations(conn=None):
         cutoff = (datetime.utcnow() - timedelta(days=CONVERSATION_RETENTION_DAYS)).strftime(
             "%Y-%m-%dT%H:%M:%S"
         )
-        conn.execute("DELETE FROM leader_conversations WHERE recorded_at < ?", (cutoff,))
+        conn.execute("DELETE FROM conversations WHERE recorded_at < ?", (cutoff,))
         conn.commit()
     finally:
         if close:

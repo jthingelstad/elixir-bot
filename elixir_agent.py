@@ -623,10 +623,23 @@ def _clan_context(clan_data, war_data, roster_data=None):
     )
 
 
-def observe_and_post(clan_data, war_data, signals=None):
+def _format_recent_posts(recent_posts):
+    """Format recent post history for inclusion in LLM context."""
+    if not recent_posts:
+        return ""
+    lines = []
+    for p in recent_posts:
+        ts = p.get("recorded_at", "")
+        content = p.get("content", "")
+        lines.append(f"  [{ts}] {content[:200]}")
+    return "\n=== YOUR RECENT POSTS IN #elixir ===\n" + "\n".join(lines) + "\n"
+
+
+def observe_and_post(clan_data, war_data, signals=None, recent_posts=None):
     """Observation with signals from heartbeat. Returns dict or None.
 
     signals: list of signal dicts from heartbeat.tick(), or None for legacy mode.
+    recent_posts: list of recent conversation dicts from db.get_conversation_history().
     """
     context = _clan_context(clan_data, war_data)
 
@@ -638,6 +651,8 @@ def observe_and_post(clan_data, war_data, signals=None):
         )
     else:
         user_msg = context
+
+    user_msg += _format_recent_posts(recent_posts)
 
     return _chat_with_tools(_observe_system(), user_msg)
 
@@ -668,15 +683,17 @@ def respond_in_reception(question, author_name, clan_data):
 
 # ── Event-driven message generation ──────────────────────────────────────────
 
-def generate_message(event, context):
+def generate_message(event, context, recent_posts=None):
     """Generate a single Discord message for an event using the LLM.
 
     event: short description of what happened (e.g. "new_member_discord_join")
     context: string with all relevant details for the LLM
+    recent_posts: optional list of recent post dicts to avoid repetition.
 
     Returns message text, or None on failure.
     """
     user_msg = f"Event: {event}\n\n{context}"
+    user_msg += _format_recent_posts(recent_posts)
     messages = [
         {"role": "system", "content": _event_system()},
         {"role": "user", "content": user_msg},

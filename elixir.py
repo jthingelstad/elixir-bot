@@ -107,35 +107,61 @@ async def _heartbeat_tick():
         except Exception:
             war = {}
 
+        # Fetch recent #elixir post history to avoid repetition
+        recent_posts = await asyncio.to_thread(
+            db.get_conversation_history, "channel:elixir", 20,
+        )
+
         # Handle join/leave signals via LLM
         other_signals = []
         for sig in signals:
             if sig["type"] == "member_join":
-                msg = elixir_agent.generate_message(
+                msg = await asyncio.to_thread(
+                    elixir_agent.generate_message,
                     "member_join_broadcast",
                     f"New member '{sig['name']}' (tag: {sig['tag']}) just joined the clan. "
                     f"Write a welcome announcement for the broadcast channel.",
+                    recent_posts,
                 )
                 if msg:
                     await channel.send(msg)
+                    await asyncio.to_thread(
+                        db.save_conversation_turn,
+                        "channel:elixir", "assistant", msg,
+                    )
             elif sig["type"] == "member_leave":
-                msg = elixir_agent.generate_message(
+                msg = await asyncio.to_thread(
+                    elixir_agent.generate_message,
                     "member_leave_broadcast",
                     f"Member '{sig['name']}' (tag: {sig['tag']}) has left the clan. "
                     f"Write a brief farewell for the broadcast channel.",
+                    recent_posts,
                 )
                 if msg:
                     await channel.send(msg)
+                    await asyncio.to_thread(
+                        db.save_conversation_turn,
+                        "channel:elixir", "assistant", msg,
+                    )
             else:
                 other_signals.append(sig)
 
         # If there are non-join/leave signals, let the LLM craft a post
         if other_signals:
-            result = elixir_agent.observe_and_post(clan, war, signals=other_signals)
+            result = await asyncio.to_thread(
+                elixir_agent.observe_and_post, clan, war,
+                other_signals, recent_posts,
+            )
             if result is None:
                 log.info("Heartbeat: LLM decided signals not worth posting")
                 return
             await _post_to_elixir(channel, result)
+            content = result.get("content", result.get("summary", ""))
+            if content:
+                await asyncio.to_thread(
+                    db.save_conversation_turn,
+                    "channel:elixir", "assistant", content,
+                )
             log.info("Posted observation: %s", result.get("summary"))
 
     except Exception as e:
@@ -425,16 +451,16 @@ async def on_message(message):
                 question = message.content.replace(f"<@{bot.user.id}>", "").strip()
 
                 # Load conversation history for this leader
-                author_id = str(message.author.id)
+                leader_scope = f"leader:{message.author.id}"
                 conversation_history = await asyncio.to_thread(
-                    db.get_conversation_history, author_id,
+                    db.get_conversation_history, leader_scope,
                 )
 
                 # Save the leader's question
                 await asyncio.to_thread(
                     db.save_conversation_turn,
-                    author_id, message.author.display_name,
-                    "user", question,
+                    leader_scope, "user", question,
+                    message.author.display_name,
                 )
 
                 result = await asyncio.to_thread(
@@ -460,12 +486,16 @@ async def on_message(message):
                             await _post_to_elixir(elixir_channel, {
                                 "content": share_content,
                             })
+                            await asyncio.to_thread(
+                                db.save_conversation_turn,
+                                "channel:elixir", "assistant", share_content,
+                            )
 
                 # Save Elixir's response to conversation memory
                 await asyncio.to_thread(
                     db.save_conversation_turn,
-                    author_id, message.author.display_name,
-                    "assistant", content,
+                    leader_scope, "assistant", content,
+                    message.author.display_name,
                 )
 
                 if len(content) > 2000:
