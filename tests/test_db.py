@@ -49,7 +49,7 @@ SAMPLE_MEMBERS = [
 
 
 def test_schema_creation(conn):
-    """DB initializes with all 3 tables."""
+    """DB initializes with expected tables."""
     tables = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
     ).fetchall()
@@ -57,6 +57,9 @@ def test_schema_creation(conn):
     assert "member_snapshots" in names
     assert "war_results" in names
     assert "war_participation" in names
+    assert "conversations" in names
+    assert "signal_log" in names
+    assert "leader_conversations" not in names
 
 
 def test_snapshot_members(conn):
@@ -385,15 +388,44 @@ def test_get_member_history(conn):
     assert history[2]["trophies"] == 9000
 
 
+# ── Signal log tests ──────────────────────────────────────────────────────
+
+def test_signal_log_mark_and_check(conn):
+    """Signal can be marked and checked."""
+    assert not db.was_signal_sent("war_day_start", "2026-03-05", conn=conn)
+    db.mark_signal_sent("war_day_start", "2026-03-05", conn=conn)
+    assert db.was_signal_sent("war_day_start", "2026-03-05", conn=conn)
+
+
+def test_signal_log_different_days(conn):
+    """Same signal type on different days are independent."""
+    db.mark_signal_sent("donation_leaders", "2026-03-05", conn=conn)
+    assert db.was_signal_sent("donation_leaders", "2026-03-05", conn=conn)
+    assert not db.was_signal_sent("donation_leaders", "2026-03-06", conn=conn)
+
+
+def test_signal_log_different_types(conn):
+    """Different signal types on the same day are independent."""
+    db.mark_signal_sent("war_day_start", "2026-03-05", conn=conn)
+    assert not db.was_signal_sent("donation_leaders", "2026-03-05", conn=conn)
+
+
+def test_signal_log_idempotent(conn):
+    """Marking the same signal twice doesn't raise."""
+    db.mark_signal_sent("war_day_start", "2026-03-05", conn=conn)
+    db.mark_signal_sent("war_day_start", "2026-03-05", conn=conn)
+    assert db.was_signal_sent("war_day_start", "2026-03-05", conn=conn)
+
+
 # ── Conversation memory tests ───────────────────────────────────────────────
 
 def test_save_and_get_conversation(conn):
     """Conversation turns are saved and retrieved in chronological order."""
-    db.save_conversation_turn("user123", "LeaderBob", "user", "Who should we promote?", conn=conn)
-    db.save_conversation_turn("user123", "LeaderBob", "assistant", "Vijay looks ready.", conn=conn)
-    db.save_conversation_turn("user123", "LeaderBob", "user", "What about King Levy?", conn=conn)
+    db.save_conversation_turn("leader:user123", "user", "Who should we promote?", author_name="LeaderBob", conn=conn)
+    db.save_conversation_turn("leader:user123", "assistant", "Vijay looks ready.", conn=conn)
+    db.save_conversation_turn("leader:user123", "user", "What about King Levy?", author_name="LeaderBob", conn=conn)
 
-    history = db.get_conversation_history("user123", conn=conn)
+    history = db.get_conversation_history("leader:user123", conn=conn)
     assert len(history) == 3
     # Oldest first
     assert history[0]["role"] == "user"
@@ -403,13 +435,13 @@ def test_save_and_get_conversation(conn):
     assert "King Levy" in history[2]["content"]
 
 
-def test_conversation_per_leader(conn):
-    """Different leaders have separate conversation histories."""
-    db.save_conversation_turn("leader1", "Alice", "user", "Question from Alice", conn=conn)
-    db.save_conversation_turn("leader2", "Bob", "user", "Question from Bob", conn=conn)
+def test_conversation_per_scope(conn):
+    """Different scopes have separate conversation histories."""
+    db.save_conversation_turn("leader:1", "user", "Question from Alice", author_name="Alice", conn=conn)
+    db.save_conversation_turn("leader:2", "user", "Question from Bob", author_name="Bob", conn=conn)
 
-    alice_history = db.get_conversation_history("leader1", conn=conn)
-    bob_history = db.get_conversation_history("leader2", conn=conn)
+    alice_history = db.get_conversation_history("leader:1", conn=conn)
+    bob_history = db.get_conversation_history("leader:2", conn=conn)
 
     assert len(alice_history) == 1
     assert len(bob_history) == 1
@@ -417,12 +449,23 @@ def test_conversation_per_leader(conn):
     assert "Bob" in bob_history[0]["content"]
 
 
+def test_conversation_channel_scope(conn):
+    """Channel scope tracks broadcast posts."""
+    db.save_conversation_turn("channel:elixir", "assistant", "War update!", conn=conn)
+    db.save_conversation_turn("channel:elixir", "assistant", "Trophy milestone!", conn=conn)
+
+    history = db.get_conversation_history("channel:elixir", conn=conn)
+    assert len(history) == 2
+    assert history[0]["content"] == "War update!"
+    assert history[1]["content"] == "Trophy milestone!"
+
+
 def test_conversation_limit(conn):
     """History is limited to the requested number of turns."""
     for i in range(15):
-        db.save_conversation_turn("user123", "Bob", "user", f"Message {i}", conn=conn)
+        db.save_conversation_turn("leader:user123", "user", f"Message {i}", author_name="Bob", conn=conn)
 
-    history = db.get_conversation_history("user123", limit=5, conn=conn)
+    history = db.get_conversation_history("leader:user123", limit=5, conn=conn)
     assert len(history) == 5
     # Should be the 5 most recent, oldest first
     assert "Message 10" in history[0]["content"]
@@ -432,10 +475,10 @@ def test_conversation_limit(conn):
 def test_conversation_trimmed_on_save(conn):
     """Excess turns are trimmed when saving beyond CONVERSATION_MAX_PER_LEADER."""
     for i in range(25):
-        db.save_conversation_turn("user123", "Bob", "user", f"Message {i}", conn=conn)
+        db.save_conversation_turn("leader:user123", "user", f"Message {i}", conn=conn)
 
     rows = conn.execute(
-        "SELECT COUNT(*) as cnt FROM leader_conversations WHERE author_id = 'user123'"
+        "SELECT COUNT(*) as cnt FROM conversations WHERE scope = 'leader:user123'"
     ).fetchone()
     assert rows["cnt"] <= db.CONVERSATION_MAX_PER_LEADER
 
@@ -446,20 +489,20 @@ def test_purge_old_conversations(conn):
     recent_time = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
 
     conn.execute(
-        "INSERT INTO leader_conversations (author_id, author_name, role, content, recorded_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        ("user123", "Bob", "user", "Old question", old_time),
+        "INSERT INTO conversations (scope, role, content, recorded_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("leader:user123", "user", "Old question", old_time),
     )
     conn.execute(
-        "INSERT INTO leader_conversations (author_id, author_name, role, content, recorded_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        ("user123", "Bob", "user", "Recent question", recent_time),
+        "INSERT INTO conversations (scope, role, content, recorded_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("leader:user123", "user", "Recent question", recent_time),
     )
     conn.commit()
 
     db.purge_old_conversations(conn=conn)
 
-    rows = conn.execute("SELECT * FROM leader_conversations").fetchall()
+    rows = conn.execute("SELECT * FROM conversations").fetchall()
     assert len(rows) == 1
     assert rows[0]["content"] == "Recent question"
 

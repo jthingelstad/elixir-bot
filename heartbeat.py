@@ -100,43 +100,50 @@ def detect_role_changes(conn=None):
     ]
 
 
-def detect_war_day_transition(now=None):
+def detect_war_day_transition(now=None, conn=None):
     """Check if today is a war battle day transition.
 
     Returns a signal if today is the first battle day (Thursday)
     or last battle day (Sunday), to prompt relevant observations.
+    Only fires once per day per signal type.
     """
     now = now or datetime.now()
+    today = now.strftime("%Y-%m-%d")
     weekday = now.weekday()
     signals = []
 
     if weekday == 3:  # Thursday
-        signals.append({
-            "type": "war_day_start",
-            "day": "Thursday",
-            "message": "Battle days begin! Time to use those war decks.",
-        })
+        if not db.was_signal_sent("war_day_start", today, conn=conn):
+            signals.append({
+                "type": "war_day_start",
+                "day": "Thursday",
+                "message": "Battle days begin! Time to use those war decks.",
+            })
     elif weekday == 6:  # Sunday
-        signals.append({
-            "type": "war_day_end",
-            "day": "Sunday",
-            "message": "Last day of battles this week. Use remaining decks!",
-        })
+        if not db.was_signal_sent("war_day_end", today, conn=conn):
+            signals.append({
+                "type": "war_day_end",
+                "day": "Sunday",
+                "message": "Last day of battles this week. Use remaining decks!",
+            })
     elif cr_knowledge.is_war_battle_day(weekday):
-        signals.append({
-            "type": "war_battle_day",
-            "day": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][weekday],
-        })
+        if not db.was_signal_sent("war_battle_day", today, conn=conn):
+            signals.append({
+                "type": "war_battle_day",
+                "day": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][weekday],
+            })
 
     return signals
 
 
-def detect_donation_leaders(current_members):
+def detect_donation_leaders(current_members, conn=None):
     """Identify the top 3 donors from the current roster.
 
-    Always returns a signal with the donation leaderboard so the LLM
-    can decide if it's worth mentioning.
+    Only fires once per day.
     """
+    today = datetime.now().strftime("%Y-%m-%d")
+    if db.was_signal_sent("donation_leaders", today, conn=conn):
+        return []
     sorted_members = sorted(current_members, key=lambda m: m.get("donations", 0), reverse=True)
     top = sorted_members[:3]
     if not top or top[0].get("donations", 0) == 0:
@@ -150,11 +157,15 @@ def detect_donation_leaders(current_members):
     }]
 
 
-def detect_inactivity(current_members, now=None):
+def detect_inactivity(current_members, now=None, conn=None):
     """Flag members not seen in 3+ days.
 
     Uses the lastSeen field from CR API (format: 20260304T120000.000Z).
+    Only fires once per day.
     """
+    today = (now or datetime.now()).strftime("%Y-%m-%d")
+    if db.was_signal_sent("inactive_members", today, conn=conn):
+        return []
     now = now or datetime.utcnow()
     signals = []
     inactive = []
@@ -188,13 +199,17 @@ def detect_inactivity(current_members, now=None):
     return signals
 
 
-def detect_war_deck_usage(war_data):
+def detect_war_deck_usage(war_data, conn=None):
     """Check who has and hasn't used their 4 war decks today.
 
     war_data: dict from cr_api.get_current_war().
     Returns a signal with players who used decks and who haven't, only on battle days.
+    Only fires once per day.
     """
     now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    if db.was_signal_sent("war_deck_usage", today, conn=conn):
+        return []
     if not cr_knowledge.is_war_battle_day(now.weekday()):
         return []
 
@@ -440,10 +455,10 @@ def tick(conn=None):
         signals.extend(detect_role_changes(conn=conn))
 
         # War day awareness
-        signals.extend(detect_war_day_transition())
+        signals.extend(detect_war_day_transition(conn=conn))
 
         # War deck usage — thank players who used 4 decks, nudge those who haven't
-        signals.extend(detect_war_deck_usage(war))
+        signals.extend(detect_war_deck_usage(war, conn=conn))
 
         # War completion + War Champ standings
         clan_tag = cr_api.CLAN_TAG
@@ -457,13 +472,18 @@ def tick(conn=None):
         # Donation leaders — only towards end of day
         now = datetime.now()
         if now.hour >= cr_knowledge.DONATION_HIGHLIGHT_HOUR:
-            signals.extend(detect_donation_leaders(members))
+            signals.extend(detect_donation_leaders(members, conn=conn))
 
         # Inactivity
-        signals.extend(detect_inactivity(members))
+        signals.extend(detect_inactivity(members, conn=conn))
 
         # Cake days — birthdays, join anniversaries, clan birthday
         signals.extend(detect_cake_days(conn=conn))
+
+        # Mark emitted signals so they don't re-fire today
+        today = datetime.now().strftime("%Y-%m-%d")
+        for sig in signals:
+            db.mark_signal_sent(sig["type"], today, conn=conn)
 
         log.info("Heartbeat: %d signals detected", len(signals))
         return signals

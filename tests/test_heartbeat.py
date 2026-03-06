@@ -101,38 +101,48 @@ def test_detect_arena_changes(conn):
     assert signals[0]["new_arena"] == "Lumberlove"
 
 
-def test_war_day_detection_thursday():
+def test_war_day_detection_thursday(conn):
     """Thursday triggers war_day_start signal."""
     thursday = datetime(2026, 3, 5, 10, 0)  # March 5, 2026 is Thursday
-    signals = heartbeat.detect_war_day_transition(now=thursday)
+    signals = heartbeat.detect_war_day_transition(now=thursday, conn=conn)
     assert len(signals) == 1
     assert signals[0]["type"] == "war_day_start"
 
 
-def test_war_day_detection_sunday():
+def test_war_day_detection_sunday(conn):
     """Sunday triggers war_day_end signal."""
     sunday = datetime(2026, 3, 8, 10, 0)  # March 8, 2026 is Sunday
-    signals = heartbeat.detect_war_day_transition(now=sunday)
+    signals = heartbeat.detect_war_day_transition(now=sunday, conn=conn)
     assert len(signals) == 1
     assert signals[0]["type"] == "war_day_end"
 
 
-def test_war_day_detection_wednesday():
+def test_war_day_detection_wednesday(conn):
     """Wednesday (training day) produces no signal."""
     wednesday = datetime(2026, 3, 4, 10, 0)  # March 4, 2026 is Wednesday
-    signals = heartbeat.detect_war_day_transition(now=wednesday)
+    signals = heartbeat.detect_war_day_transition(now=wednesday, conn=conn)
     assert len(signals) == 0
 
 
-def test_war_day_detection_friday():
+def test_war_day_detection_friday(conn):
     """Friday is a regular battle day."""
     friday = datetime(2026, 3, 6, 10, 0)
-    signals = heartbeat.detect_war_day_transition(now=friday)
+    signals = heartbeat.detect_war_day_transition(now=friday, conn=conn)
     assert len(signals) == 1
     assert signals[0]["type"] == "war_battle_day"
 
 
-def test_detect_donation_leaders():
+def test_war_day_transition_dedup(conn):
+    """War day signal only fires once per day."""
+    thursday = datetime(2026, 3, 5, 10, 0)
+    signals1 = heartbeat.detect_war_day_transition(now=thursday, conn=conn)
+    assert len(signals1) == 1
+    db.mark_signal_sent("war_day_start", "2026-03-05", conn=conn)
+    signals2 = heartbeat.detect_war_day_transition(now=thursday, conn=conn)
+    assert len(signals2) == 0
+
+
+def test_detect_donation_leaders(conn):
     """Top 3 donors are identified."""
     members = [
         {"name": "A", "donations": 150},
@@ -140,7 +150,7 @@ def test_detect_donation_leaders():
         {"name": "C", "donations": 50},
         {"name": "D", "donations": 10},
     ]
-    signals = heartbeat.detect_donation_leaders(members)
+    signals = heartbeat.detect_donation_leaders(members, conn=conn)
     assert len(signals) == 1
     assert signals[0]["type"] == "donation_leaders"
     leaders = signals[0]["leaders"]
@@ -149,14 +159,24 @@ def test_detect_donation_leaders():
     assert leaders[0]["donations"] == 150
 
 
-def test_detect_donation_leaders_no_donations():
+def test_detect_donation_leaders_no_donations(conn):
     """No signal when nobody has donated."""
     members = [{"name": "A", "donations": 0}]
-    signals = heartbeat.detect_donation_leaders(members)
+    signals = heartbeat.detect_donation_leaders(members, conn=conn)
     assert len(signals) == 0
 
 
-def test_detect_inactivity():
+def test_detect_donation_leaders_dedup(conn):
+    """Donation leaders signal only fires once per day."""
+    members = [{"name": "A", "donations": 150}]
+    signals1 = heartbeat.detect_donation_leaders(members, conn=conn)
+    assert len(signals1) == 1
+    db.mark_signal_sent("donation_leaders", datetime.now().strftime("%Y-%m-%d"), conn=conn)
+    signals2 = heartbeat.detect_donation_leaders(members, conn=conn)
+    assert len(signals2) == 0
+
+
+def test_detect_inactivity(conn):
     """Flags members not seen in 3+ days."""
     now = datetime(2026, 3, 10, 12, 0)
     members = [
@@ -164,7 +184,7 @@ def test_detect_inactivity():
         {"name": "Inactive", "tag": "#B", "lastSeen": "20260305T100000.000Z", "role": "member"},
         {"name": "VeryInactive", "tag": "#C", "lastSeen": "20260301T100000.000Z", "role": "member"},
     ]
-    signals = heartbeat.detect_inactivity(members, now=now)
+    signals = heartbeat.detect_inactivity(members, now=now, conn=conn)
     assert len(signals) == 1
     assert signals[0]["type"] == "inactive_members"
     names = [m["name"] for m in signals[0]["members"]]
@@ -173,6 +193,19 @@ def test_detect_inactivity():
     assert "Active" not in names
     # Sorted by most inactive first
     assert signals[0]["members"][0]["name"] == "VeryInactive"
+
+
+def test_detect_inactivity_dedup(conn):
+    """Inactivity signal only fires once per day."""
+    now = datetime(2026, 3, 10, 12, 0)
+    members = [
+        {"name": "Inactive", "tag": "#B", "lastSeen": "20260305T100000.000Z", "role": "member"},
+    ]
+    signals1 = heartbeat.detect_inactivity(members, now=now, conn=conn)
+    assert len(signals1) == 1
+    db.mark_signal_sent("inactive_members", "2026-03-10", conn=conn)
+    signals2 = heartbeat.detect_inactivity(members, now=now, conn=conn)
+    assert len(signals2) == 0
 
 
 def test_detect_role_changes(conn):
@@ -196,7 +229,7 @@ def test_detect_role_changes(conn):
     assert signals[0]["new_role"] == "elder"
 
 
-def test_detect_war_deck_usage_battle_day():
+def test_detect_war_deck_usage_battle_day(conn):
     """War deck usage signal produced on battle days."""
     war_data = {
         "state": "warDay",
@@ -213,7 +246,7 @@ def test_detect_war_deck_usage_battle_day():
         mock_dt.now.return_value = datetime(2026, 3, 5, 18, 0)  # Thursday
         mock_dt.utcnow = datetime.utcnow
         mock_dt.strptime = datetime.strptime
-        signals = heartbeat.detect_war_deck_usage(war_data)
+        signals = heartbeat.detect_war_deck_usage(war_data, conn=conn)
 
     assert len(signals) == 1
     sig = signals[0]
@@ -226,21 +259,42 @@ def test_detect_war_deck_usage_battle_day():
     assert sig["used_none"][0]["name"] == "Newbie"
 
 
-def test_detect_war_deck_usage_training_day():
+def test_detect_war_deck_usage_training_day(conn):
     """No war deck signal on training days."""
     war_data = {"state": "warDay", "clan": {"participants": []}}
     # Wednesday = training day
     with patch("heartbeat.datetime") as mock_dt:
         mock_dt.now.return_value = datetime(2026, 3, 4, 18, 0)  # Wednesday
-        signals = heartbeat.detect_war_deck_usage(war_data)
+        signals = heartbeat.detect_war_deck_usage(war_data, conn=conn)
 
     assert len(signals) == 0
 
 
-def test_detect_war_deck_usage_no_war():
+def test_detect_war_deck_usage_no_war(conn):
     """No signal when not in war."""
-    signals = heartbeat.detect_war_deck_usage({"state": "notInWar"})
+    signals = heartbeat.detect_war_deck_usage({"state": "notInWar"}, conn=conn)
     assert len(signals) == 0
+
+
+def test_detect_war_deck_usage_dedup(conn):
+    """War deck usage signal only fires once per day."""
+    war_data = {
+        "state": "warDay",
+        "clan": {
+            "participants": [
+                {"name": "King Levy", "tag": "#ABC", "decksUsedToday": 4},
+            ]
+        }
+    }
+    with patch("heartbeat.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 3, 5, 18, 0)  # Thursday
+        mock_dt.utcnow = datetime.utcnow
+        mock_dt.strptime = datetime.strptime
+        signals1 = heartbeat.detect_war_deck_usage(war_data, conn=conn)
+        assert len(signals1) == 1
+        db.mark_signal_sent("war_deck_usage", "2026-03-05", conn=conn)
+        signals2 = heartbeat.detect_war_deck_usage(war_data, conn=conn)
+        assert len(signals2) == 0
 
 
 def test_detect_war_champ_update(conn):
