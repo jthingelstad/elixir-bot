@@ -1,5 +1,6 @@
 """Elixir - POAP KINGS Discord bot (LLM-powered with heartbeat)."""
 
+import asyncio
 import os
 import logging
 from datetime import datetime, timezone
@@ -299,7 +300,8 @@ async def on_member_join(member):
     channel = bot.get_channel(RECEPTION_CHANNEL_ID)
     if not channel:
         return
-    msg = elixir_agent.generate_message(
+    msg = await asyncio.to_thread(
+        elixir_agent.generate_message,
         "discord_member_join",
         f"A new user '{member.display_name}' ({member.mention}) just joined the Discord server. "
         f"Welcome them in #reception and explain how to set their server nickname "
@@ -329,12 +331,13 @@ async def on_member_update(before, after):
     if not member_role or member_role in after.roles:
         return
 
-    match = _match_clan_member(after.nick)
+    match = await asyncio.to_thread(_match_clan_member, after.nick)
     channel = bot.get_channel(RECEPTION_CHANNEL_ID)
 
     if not match:
         if channel:
-            msg = elixir_agent.generate_message(
+            msg = await asyncio.to_thread(
+                elixir_agent.generate_message,
                 "nickname_no_match",
                 f"User {after.mention} set their nickname to '{after.nick}' but it doesn't "
                 f"match anyone in the clan roster. Let them know and suggest they check "
@@ -349,7 +352,8 @@ async def on_member_update(before, after):
     except discord.Forbidden:
         log.error("Cannot assign member role — check bot permissions and role hierarchy")
         if channel:
-            msg = elixir_agent.generate_message(
+            msg = await asyncio.to_thread(
+                elixir_agent.generate_message,
                 "role_grant_failed",
                 f"Matched user {after.mention} to clan member '{cr_name}' ({tag}) but "
                 f"couldn't assign the member role due to permissions. Let them know "
@@ -359,7 +363,8 @@ async def on_member_update(before, after):
         return
 
     if channel:
-        msg = elixir_agent.generate_message(
+        msg = await asyncio.to_thread(
+            elixir_agent.generate_message,
             "nickname_matched",
             f"User {after.mention} set their nickname to '{cr_name}' which matches "
             f"clan member tag {tag}. They've been granted the member role. "
@@ -383,9 +388,10 @@ async def on_message(message):
     if message.channel.id == RECEPTION_CHANNEL_ID:
         async with message.channel.typing():
             try:
-                clan = cr_api.get_clan()
+                clan = await asyncio.to_thread(cr_api.get_clan)
                 question = message.content.replace(f"<@{bot.user.id}>", "").strip()
-                result = elixir_agent.respond_in_reception(
+                result = await asyncio.to_thread(
+                    elixir_agent.respond_in_reception,
                     question=question,
                     author_name=message.author.display_name,
                     clan_data=clan,
@@ -410,9 +416,9 @@ async def on_message(message):
     if message.channel.id == LEADERSHIP_CHANNEL_ID:
         async with message.channel.typing():
             try:
-                clan = cr_api.get_clan()
+                clan = await asyncio.to_thread(cr_api.get_clan)
                 try:
-                    war = cr_api.get_current_war()
+                    war = await asyncio.to_thread(cr_api.get_current_war)
                 except Exception:
                     war = {}
                 # Strip the @Elixir mention from the question
@@ -420,15 +426,19 @@ async def on_message(message):
 
                 # Load conversation history for this leader
                 author_id = str(message.author.id)
-                conversation_history = db.get_conversation_history(author_id)
+                conversation_history = await asyncio.to_thread(
+                    db.get_conversation_history, author_id,
+                )
 
                 # Save the leader's question
-                db.save_conversation_turn(
+                await asyncio.to_thread(
+                    db.save_conversation_turn,
                     author_id, message.author.display_name,
                     "user", question,
                 )
 
-                result = elixir_agent.respond_to_leader(
+                result = await asyncio.to_thread(
+                    elixir_agent.respond_to_leader,
                     question=question,
                     author_name=message.author.display_name,
                     clan_data=clan,
@@ -452,7 +462,8 @@ async def on_message(message):
                             })
 
                 # Save Elixir's response to conversation memory
-                db.save_conversation_turn(
+                await asyncio.to_thread(
+                    db.save_conversation_turn,
                     author_id, message.author.display_name,
                     "assistant", content,
                 )
