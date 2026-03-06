@@ -311,6 +311,28 @@ def test_detect_cake_days_dedup(conn):
     assert len([s for s in signals2 if s["type"] == "member_birthday"]) == 0
 
 
+def test_detect_cake_days_leave_resets_anniversary(conn):
+    """Leaving the clan clears join date so rejoin gets a fresh tenure."""
+    # Member joins and gets a join date
+    db.set_member_join_date("#ABC", "King Levy", "2025-03-05", conn=conn)
+
+    # Verify anniversary would fire
+    signals = heartbeat.detect_cake_days(today_str="2026-03-05", conn=conn)
+    assert len([s for s in signals if s["type"] == "join_anniversary"]) == 1
+
+    # Member leaves — tenure is cleared
+    db.clear_member_tenure("#ABC", conn=conn)
+
+    # Anniversary no longer fires
+    signals = heartbeat.detect_cake_days(today_str="2027-03-05", conn=conn)
+    assert len([s for s in signals if s["type"] == "join_anniversary"]) == 0
+
+    # Member rejoins with fresh date
+    db.record_join_date("#ABC", "King Levy", "2027-01-15", conn=conn)
+    dates = db.get_member_dates("#ABC", conn=conn)
+    assert dates["joined_date"] == "2027-01-15"
+
+
 def test_detect_cake_days_no_match(conn):
     """No signals when nothing matches today."""
     db.set_member_birthday("#ABC", "King Levy", 7, 15, conn=conn)

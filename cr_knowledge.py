@@ -23,11 +23,6 @@ WAR_BATTLE_DAYS = {3, 4, 5, 6}  # Thursday, Friday, Saturday, Sunday
 WAR_TRAINING_DAYS = {0, 1, 2}  # Monday, Tuesday, Wednesday
 
 
-def get_knowledge_block():
-    """Return combined game + clan knowledge for LLM system prompts."""
-    return prompts.knowledge_block()
-
-
 def is_war_battle_day(weekday):
     """Check if a given weekday (0=Monday) is a war battle day."""
     return weekday in WAR_BATTLE_DAYS

@@ -1,0 +1,450 @@
+"""Tests for site_content.py — JSON content management for poapkings.com."""
+
+import json
+import os
+import tempfile
+from unittest.mock import patch
+
+import pytest
+
+import db
+import site_content
+
+
+@pytest.fixture
+def conn():
+    """In-memory SQLite DB with schema."""
+    c = db.get_connection(":memory:")
+    yield c
+    c.close()
+
+
+@pytest.fixture
+def tmp_repo(tmp_path):
+    """Temporary repo structure with schemas."""
+    data_dir = tmp_path / "src" / "_data"
+    schema_dir = data_dir / "schemas"
+    schema_dir.mkdir(parents=True)
+
+    # Copy schemas from the real poapkings.com
+    real_schema_dir = os.path.join(
+        os.path.dirname(__file__), "..", "..", "poapkings.com", "src", "_data", "schemas"
+    )
+    if os.path.exists(real_schema_dir):
+        for f in os.listdir(real_schema_dir):
+            if f.endswith(".schema.json"):
+                with open(os.path.join(real_schema_dir, f)) as src:
+                    (schema_dir / f).write_text(src.read())
+
+    return tmp_path
+
+
+# ── write_content / load_current ──────────────────────────────────────────
+
+def test_write_and_load_content(tmp_repo, monkeypatch):
+    """Write content and load it back."""
+    monkeypatch.setattr(site_content, "DATA_DIR", str(tmp_repo / "src" / "_data"))
+    monkeypatch.setattr(site_content, "SCHEMA_DIR", str(tmp_repo / "src" / "_data" / "schemas"))
+
+    data = {
+        "memberCount": 18,
+        "clanScore": 57519,
+        "clanWarTrophies": 140,
+        "donationsPerWeek": 212,
+        "totalTrophies": 132730,
+        "avgLevel": 42.5,
+        "minTrophies": 2000,
+        "clanLeague": "Bronze",
+        "clanStatus": "Open",
+    }
+    assert site_content.write_content("clan", data) is True
+    loaded = site_content.load_current("clan")
+    assert loaded["memberCount"] == 18
+    assert loaded["clanScore"] == 57519
+
+
+def test_write_content_invalid_schema(tmp_repo, monkeypatch):
+    """Invalid data fails schema validation and is not written."""
+    monkeypatch.setattr(site_content, "DATA_DIR", str(tmp_repo / "src" / "_data"))
+    monkeypatch.setattr(site_content, "SCHEMA_DIR", str(tmp_repo / "src" / "_data" / "schemas"))
+
+    data = {"memberCount": "not_an_int"}  # Missing required fields, wrong type
+    assert site_content.write_content("clan", data) is False
+
+
+def test_write_content_unknown_type():
+    """Unknown content type raises ValueError."""
+    with pytest.raises(ValueError, match="Unknown content type"):
+        site_content.write_content("unknown", {})
+
+
+def test_load_current_missing(tmp_repo, monkeypatch):
+    """Returns None for non-existent file."""
+    monkeypatch.setattr(site_content, "DATA_DIR", str(tmp_repo / "src" / "_data"))
+    assert site_content.load_current("home") is None
+
+
+def test_load_current_unknown_type():
+    """Unknown content type returns None."""
+    assert site_content.load_current("unknown") is None
+
+
+# ── build_clan_data ──────────────────────────────────────────────────────────
+
+def test_build_clan_data():
+    """Extracts clan stats correctly."""
+    clan_data = {
+        "members": 18,
+        "clanScore": 57519,
+        "clanWarTrophies": 140,
+        "donationsPerWeek": 212,
+        "requiredTrophies": 2000,
+        "type": "open",
+        "warLeague": {"name": "Bronze"},
+        "memberList": [
+            {"trophies": 10000, "expLevel": 50},
+            {"trophies": 8000, "expLevel": 40},
+        ],
+    }
+    result = site_content.build_clan_data(clan_data)
+    assert result["memberCount"] == 18
+    assert result["totalTrophies"] == 18000
+    assert result["avgLevel"] == 45.0
+    assert result["clanLeague"] == "Bronze"
+    assert result["clanStatus"] == "Open"
+
+
+def test_build_clan_data_empty():
+    """Handles empty member list."""
+    result = site_content.build_clan_data({"memberList": []})
+    assert result["memberCount"] == 0
+    assert result["avgLevel"] == 0
+
+
+# ── build_roster_data ────────────────────────────────────────────────────────
+
+def test_build_roster_data(conn):
+    """Builds roster from API data and DB extras."""
+    # Seed some extras — tags stored without # prefix (matching how build_roster_data looks them up)
+    db.set_member_join_date("ABC123", "King Levy", "2026-02-04T04:00:00Z", conn=conn)
+    db.set_member_note("ABC123", "King Levy", "Founder", conn=conn)
+    db.set_member_profile_url("ABC123", "King Levy", "https://example.com", conn=conn)
+
+    clan_data = {
+        "memberList": [
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "role": "coLeader",
+                "expLevel": 66,
+                "trophies": 11313,
+                "arena": {"name": "Musketeer Street"},
+                "clanRank": 3,
+                "donations": 30,
+                "donationsReceived": 32,
+                "lastSeen": "20260303T034007.000Z",
+            },
+            {
+                "tag": "#DEF456",
+                "name": "Newbie",
+                "role": "member",
+                "expLevel": 10,
+                "trophies": 3000,
+                "arena": {"name": "Arena 5"},
+                "clanRank": 10,
+                "donations": 0,
+                "donationsReceived": 0,
+                "lastSeen": "20260303T120000.000Z",
+            },
+        ],
+    }
+    result = site_content.build_roster_data(clan_data, conn=conn)
+    assert "updated" in result
+    assert len(result["members"]) == 2
+
+    # King Levy has extras from DB
+    levy = result["members"][0]
+    assert levy["name"] == "King Levy"
+    assert levy["note"] == "Founder"
+    assert levy["profile_url"] == "https://example.com"
+    assert levy["date_joined"] == "2026-02-04T04:00:00Z"
+
+    # Newbie got auto-recorded join date
+    newbie = result["members"][1]
+    assert newbie["date_joined"]  # Should be set
+
+
+def test_build_roster_data_sorted_by_join_date(conn):
+    """Roster is sorted by join date ascending."""
+    db.set_member_join_date("TAG1", "Older", "2026-01-01T00:00:00Z", conn=conn)
+    db.set_member_join_date("TAG2", "Newer", "2026-02-01T00:00:00Z", conn=conn)
+
+    clan_data = {
+        "memberList": [
+            {"tag": "#TAG2", "name": "Newer", "role": "member", "arena": {}},
+            {"tag": "#TAG1", "name": "Older", "role": "member", "arena": {}},
+        ],
+    }
+    result = site_content.build_roster_data(clan_data, conn=conn)
+    assert result["members"][0]["name"] == "Older"
+    assert result["members"][1]["name"] == "Newer"
+
+
+# ── validate_against_schema ──────────────────────────────────────────────────
+
+def test_validate_home_schema(tmp_repo, monkeypatch):
+    """Home message validates correctly."""
+    monkeypatch.setattr(site_content, "SCHEMA_DIR", str(tmp_repo / "src" / "_data" / "schemas"))
+    data = {"message": "Hello world", "generated": "2026-03-06T20:00:00Z"}
+    assert site_content.validate_against_schema("home", data) is True
+
+
+def test_validate_roster_schema(tmp_repo, monkeypatch):
+    """Roster data validates correctly."""
+    monkeypatch.setattr(site_content, "SCHEMA_DIR", str(tmp_repo / "src" / "_data" / "schemas"))
+    data = {
+        "updated": "2026-03-06T20:00:00Z",
+        "members": [
+            {"name": "King Levy", "tag": "ABC123", "role": "Co-Leader"},
+        ],
+    }
+    assert site_content.validate_against_schema("roster", data) is True
+
+
+def test_validate_promote_schema(tmp_repo, monkeypatch):
+    """Promote data validates correctly."""
+    monkeypatch.setattr(site_content, "SCHEMA_DIR", str(tmp_repo / "src" / "_data" / "schemas"))
+    data = {
+        "message": {"body": "Join us!"},
+        "social": {"body": "Follow us!"},
+        "email": {"subject": "Hi", "body": "Join!"},
+        "discord": {"body": "Come play!"},
+        "reddit": {"title": "POAP KINGS", "body": "Join!"},
+    }
+    assert site_content.validate_against_schema("promote", data) is True
+
+
+# ── seed_member_extras_from_csv ──────────────────────────────────────────────
+
+def test_seed_member_extras_from_csv(conn, tmp_path):
+    """CSV seed imports data correctly."""
+    csv_file = tmp_path / "roster-extra.csv"
+    csv_file.write_text(
+        "tag,name,note,profile_url,address,date_joined\n"
+        "ABC123,King Thing,Founder,https://example.com,poap.eth,2026-02-04T04:00:00Z\n"
+        "DEF456,Player,,,,2026-02-05T00:00:00Z\n"
+    )
+    db.seed_member_extras_from_csv(str(csv_file), conn=conn)
+
+    extras = db.get_all_member_extras(conn=conn)
+    assert "ABC123" in extras
+    assert extras["ABC123"]["note"] == "Founder"
+    assert extras["ABC123"]["profile_url"] == "https://example.com"
+    assert extras["ABC123"]["poap_address"] == "poap.eth"
+    assert extras["ABC123"]["joined_date"] == "2026-02-04T04:00:00Z"
+
+    assert "DEF456" in extras
+    assert extras["DEF456"]["joined_date"] == "2026-02-05T00:00:00Z"
+    assert extras["DEF456"]["note"] == ""
+
+
+# ── aggregate_card_usage ──────────────────────────────────────────────────
+
+_filler_counter = [0]
+
+def _make_deck(*named_cards):
+    """Build an 8-card deck list, padding with unique filler cards."""
+    cards = list(named_cards)
+    for i in range(8 - len(cards)):
+        cards.append({"name": f"_filler_{_filler_counter[0]}", "iconUrls": {"medium": ""}})
+        _filler_counter[0] += 1
+    return cards
+
+
+def test_aggregate_card_usage():
+    """Aggregates card usage from battle log correctly."""
+    battle_log = [
+        {
+            "type": "PvP",
+            "team": [{"tag": "#ABC123", "cards": _make_deck(
+                {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog.png"}},
+                {"name": "Fireball", "iconUrls": {"medium": "https://cdn/fireball.png"}},
+                {"name": "Musketeer", "iconUrls": {"medium": "https://cdn/musk.png"}},
+            )}],
+        },
+        {
+            "type": "PvP",
+            "team": [{"tag": "#ABC123", "cards": _make_deck(
+                {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog.png"}},
+                {"name": "Fireball", "iconUrls": {"medium": "https://cdn/fireball.png"}},
+                {"name": "Valkyrie", "iconUrls": {"medium": "https://cdn/valk.png"}},
+            )}],
+        },
+        {
+            "type": "PvP",
+            "team": [{"tag": "#ABC123", "cards": _make_deck(
+                {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog.png"}},
+                {"name": "Valkyrie", "iconUrls": {"medium": "https://cdn/valk.png"}},
+                {"name": "Zap", "iconUrls": {"medium": "https://cdn/zap.png"}},
+            )}],
+        },
+    ]
+    result = site_content.aggregate_card_usage(battle_log, "ABC123")
+    assert len(result) > 0
+    # Hog Rider used in all 3 battles
+    assert result[0]["name"] == "Hog Rider"
+    assert result[0]["usage_pct"] == 100
+    assert result[0]["icon_url"] == "https://cdn/hog.png"
+    # Fireball and Valkyrie each used in 2 battles
+    second_third_names = {result[1]["name"], result[2]["name"]}
+    assert second_third_names == {"Fireball", "Valkyrie"}
+    assert result[1]["usage_pct"] == 67
+
+
+def test_aggregate_card_usage_empty():
+    """None or empty input returns empty list."""
+    assert site_content.aggregate_card_usage(None, "ABC") == []
+    assert site_content.aggregate_card_usage([], "ABC") == []
+
+
+def test_aggregate_card_usage_no_matching_player():
+    """Returns empty when player tag not found in any battle."""
+    battle_log = [
+        {"type": "PvP", "team": [{"tag": "#OTHER", "cards": _make_deck(
+            {"name": "Zap", "iconUrls": {"medium": ""}},
+        )}]},
+    ]
+    assert site_content.aggregate_card_usage(battle_log, "ABC123") == []
+
+
+def test_aggregate_card_usage_skips_friendlies_and_duels():
+    """Friendlies, boat battles, and duels are excluded."""
+    battle_log = [
+        {"type": "friendly", "team": [{"tag": "#ABC123", "cards": _make_deck(
+            {"name": "Golem", "iconUrls": {"medium": ""}},
+        )}]},
+        {"type": "boatBattle", "team": [{"tag": "#ABC123", "cards": _make_deck(
+            {"name": "Golem", "iconUrls": {"medium": ""}},
+        )}]},
+        {"type": "riverRaceDuel", "team": [{"tag": "#ABC123", "cards": _make_deck(
+            {"name": "Golem", "iconUrls": {"medium": ""}},
+        )}]},
+        {"type": "PvP", "team": [{"tag": "#ABC123", "cards": _make_deck(
+            {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog.png"}},
+        )}]},
+    ]
+    result = site_content.aggregate_card_usage(battle_log, "ABC123")
+    card_names = [c["name"] for c in result]
+    assert "Hog Rider" in card_names
+    assert "Golem" not in card_names
+
+
+def test_extract_current_deck():
+    """Extracts card names from player profile."""
+    player = {
+        "currentDeck": [
+            {"name": "Hog Rider", "id": 1},
+            {"name": "Fireball", "id": 2},
+        ]
+    }
+    result = site_content.extract_current_deck(player)
+    assert result == ["Hog Rider", "Fireball"]
+
+
+def test_extract_current_deck_empty():
+    """Returns empty list for None or missing deck."""
+    assert site_content.extract_current_deck(None) == []
+    assert site_content.extract_current_deck({}) == []
+
+
+# ── build_roster_data with cards ──────────────────────────────────────────
+
+def test_build_roster_data_with_cards(conn):
+    """With include_cards=True, members get favorite_cards and current_deck."""
+    mock_battle_log = [
+        {"type": "PvP", "team": [{"tag": "#ABC123", "cards": _make_deck(
+            {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog.png"}},
+        )}]},
+    ]
+    mock_player = {"currentDeck": [{"name": "Hog Rider"}, {"name": "Zap"}]}
+
+    clan_data = {
+        "memberList": [
+            {"tag": "#ABC123", "name": "TestPlayer", "role": "member", "arena": {}},
+        ],
+    }
+
+    with patch("site_content.cr_api.get_player_battle_log", return_value=mock_battle_log), \
+         patch("site_content.cr_api.get_player", return_value=mock_player), \
+         patch("site_content.time.sleep"):
+        result = site_content.build_roster_data(clan_data, include_cards=True, conn=conn)
+
+    m = result["members"][0]
+    assert len(m["favorite_cards"]) == 8
+    assert m["favorite_cards"][0]["name"] == "Hog Rider"
+    assert "Hog Rider" in m["current_deck"]
+    assert "Zap" in m["current_deck"]
+
+
+def test_build_card_stats():
+    """Aggregates clan-wide card stats from roster members."""
+    members = [
+        {"favorite_cards": [
+            {"name": "Hog Rider", "icon_url": "https://cdn/hog.png", "usage_pct": 80},
+            {"name": "Fireball", "icon_url": "https://cdn/fb.png", "usage_pct": 60},
+        ]},
+        {"favorite_cards": [
+            {"name": "Hog Rider", "icon_url": "https://cdn/hog.png", "usage_pct": 70},
+            {"name": "Zap", "icon_url": "https://cdn/zap.png", "usage_pct": 90},
+        ]},
+        {"favorite_cards": []},
+    ]
+    result = site_content.build_card_stats(members)
+    assert len(result) == 3
+    # Hog Rider used by 2 members, should be first
+    assert result[0]["name"] == "Hog Rider"
+    assert result[0]["member_count"] == 2
+    assert result[0]["avg_pct"] == 75  # (80+70)//2
+    assert result[0]["icon_url"] == "https://cdn/hog.png"
+
+
+def test_build_card_stats_empty():
+    """Empty members returns empty stats."""
+    assert site_content.build_card_stats([]) == []
+    assert site_content.build_card_stats([{"favorite_cards": []}]) == []
+
+
+def test_build_roster_data_includes_card_stats(conn):
+    """With include_cards=True, roster includes card_stats."""
+    mock_battle_log = [
+        {"type": "PvP", "team": [{"tag": "#ABC123", "cards": _make_deck(
+            {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog.png"}},
+        )}]},
+    ]
+    mock_player = {"currentDeck": [{"name": "Hog Rider"}]}
+    clan_data = {
+        "memberList": [
+            {"tag": "#ABC123", "name": "TestPlayer", "role": "member", "arena": {}},
+        ],
+    }
+    with patch("site_content.cr_api.get_player_battle_log", return_value=mock_battle_log), \
+         patch("site_content.cr_api.get_player", return_value=mock_player), \
+         patch("site_content.time.sleep"):
+        result = site_content.build_roster_data(clan_data, include_cards=True, conn=conn)
+    assert "card_stats" in result
+    assert len(result["card_stats"]) >= 1
+    card_names = [c["name"] for c in result["card_stats"]]
+    assert "Hog Rider" in card_names
+
+
+def test_build_roster_data_without_cards(conn):
+    """Default (include_cards=False) does not include card fields."""
+    clan_data = {
+        "memberList": [
+            {"tag": "#ABC123", "name": "TestPlayer", "role": "member", "arena": {}},
+        ],
+    }
+    result = site_content.build_roster_data(clan_data, conn=conn)
+    m = result["members"][0]
+    assert "favorite_cards" not in m
+    assert "current_deck" not in m

@@ -12,7 +12,7 @@ import pytz
 
 import cr_api
 import db
-import journal
+import site_content
 import elixir_agent
 import heartbeat
 import prompts
@@ -141,13 +141,39 @@ async def _heartbeat_tick():
         log.error("Heartbeat error: %s", e, exc_info=True)
 
 
-# ── Daily editorial for poapkings.com ────────────────────────────────────────
+# ── Site content for poapkings.com ────────────────────────────────────────────
 
-EDITORIAL_HOUR = int(os.getenv("EDITORIAL_HOUR", "20"))  # 8pm Chicago
+SITE_DATA_HOUR = int(os.getenv("SITE_DATA_HOUR", "8"))       # 8am Chicago
+SITE_CONTENT_HOUR = int(os.getenv("SITE_CONTENT_HOUR", "20"))  # 8pm Chicago
 
 
-async def _daily_editorial():
-    """Evening job — write a short editorial for the poapkings.com website."""
+async def _site_data_refresh():
+    """Morning job — refresh clan data and roster on poapkings.com."""
+    try:
+        try:
+            clan = cr_api.get_clan()
+        except Exception:
+            log.error("Site data refresh: CR API failed")
+            clan = {}
+
+        if not clan.get("memberList"):
+            log.info("Site data refresh: no member data, skipping")
+            return
+
+        roster_data = site_content.build_roster_data(clan)
+        site_content.write_content("roster", roster_data)
+
+        clan_stats = site_content.build_clan_data(clan)
+        site_content.write_content("clan", clan_stats)
+
+        site_content.commit_and_push("Elixir data refresh")
+        log.info("Site data refresh complete: %d members", len(roster_data.get("members", [])))
+    except Exception as e:
+        log.error("Site data refresh error: %s", e, exc_info=True)
+
+
+async def _site_content_cycle():
+    """Evening job — generate all site content and refresh data."""
     try:
         try:
             clan = cr_api.get_clan()
@@ -158,18 +184,69 @@ async def _daily_editorial():
         except Exception:
             war = {}
 
-        previous = journal.load_messages(POAPKINGS_REPO)
+        # Build and write data (second daily refresh)
+        roster_data = None
+        if clan.get("memberList"):
+            roster_data = site_content.build_roster_data(clan, include_cards=True)
+            clan_stats = site_content.build_clan_data(clan)
 
-        text = elixir_agent.write_editorial(clan, war, previous)
-        if not text:
-            log.info("Editorial: LLM returned nothing, skipping")
-            return
+            # Generate roster bios and merge
+            try:
+                bios = elixir_agent.generate_roster_bios(clan, war, roster_data=roster_data)
+                if bios:
+                    roster_data["intro"] = bios.get("intro", "")
+                    member_bios = bios.get("members", {})
+                    for m in roster_data["members"]:
+                        mc = member_bios.get(m["tag"], {}) or member_bios.get("#" + m["tag"], {})
+                        if mc:
+                            m["bio"] = mc.get("bio", "")
+                            m["highlight"] = mc.get("highlight", "general")
+            except Exception as e:
+                log.error("Roster bio generation error: %s", e)
 
-        journal.save_message(POAPKINGS_REPO, text)
-        journal.commit_and_push(POAPKINGS_REPO)
-        log.info("Editorial published: %s", text[:80])
+            site_content.write_content("roster", roster_data)
+            site_content.write_content("clan", clan_stats)
+
+        # Generate home message
+        try:
+            prev_home = site_content.load_current("home")
+            prev_msg = prev_home.get("message", "") if prev_home else ""
+            home_text = elixir_agent.generate_home_message(clan, war, prev_msg, roster_data=roster_data)
+            if home_text:
+                site_content.write_content("home", {
+                    "message": home_text,
+                    "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                })
+        except Exception as e:
+            log.error("Home message error: %s", e)
+
+        # Generate members message
+        try:
+            prev_members = site_content.load_current("members")
+            prev_msg = prev_members.get("message", "") if prev_members else ""
+            members_text = elixir_agent.generate_members_message(clan, war, prev_msg, roster_data=roster_data)
+            if members_text:
+                site_content.write_content("members", {
+                    "message": members_text,
+                    "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                })
+        except Exception as e:
+            log.error("Members message error: %s", e)
+
+        # Generate promote content on Sundays
+        now_chicago = datetime.now(CHICAGO)
+        if now_chicago.weekday() == 6:  # Sunday
+            try:
+                promote = elixir_agent.generate_promote_content(clan, roster_data=roster_data)
+                if promote:
+                    site_content.write_content("promote", promote)
+            except Exception as e:
+                log.error("Promote content error: %s", e)
+
+        site_content.commit_and_push("Elixir content update")
+        log.info("Site content cycle complete")
     except Exception as e:
-        log.error("Editorial error: %s", e, exc_info=True)
+        log.error("Site content cycle error: %s", e, exc_info=True)
 
 
 # ── Bot events ────────────────────────────────────────────────────────────────
@@ -187,20 +264,31 @@ async def on_ready():
             hours=1,
             id="heartbeat",
         )
-        # Daily editorial for poapkings.com website
+        # Morning data refresh for poapkings.com
         scheduler.add_job(
             lambda: bot.loop.call_soon_threadsafe(
-                lambda: bot.loop.create_task(_daily_editorial())
+                lambda: bot.loop.create_task(_site_data_refresh())
             ),
             "cron",
-            hour=EDITORIAL_HOUR,
+            hour=SITE_DATA_HOUR,
             minute=0,
-            id="editorial",
+            id="site_data_refresh",
+        )
+        # Evening content cycle for poapkings.com
+        scheduler.add_job(
+            lambda: bot.loop.call_soon_threadsafe(
+                lambda: bot.loop.create_task(_site_content_cycle())
+            ),
+            "cron",
+            hour=SITE_CONTENT_HOUR,
+            minute=0,
+            id="site_content_cycle",
         )
         scheduler.start()
         log.info("Scheduler started — hourly heartbeat (active %dam-%dpm Chicago), "
-                 "daily editorial at %dpm",
-                 HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR, EDITORIAL_HOUR)
+                 "site data refresh at %dam, content cycle at %dpm",
+                 HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
+                 SITE_DATA_HOUR, SITE_CONTENT_HOUR)
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 

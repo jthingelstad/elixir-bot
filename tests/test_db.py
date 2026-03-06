@@ -774,6 +774,34 @@ def test_migrations_idempotent():
         os.unlink(path)
 
 
+def test_clear_member_tenure(conn):
+    """Clearing tenure NULLs join date and removes anniversary announcements."""
+    db.set_member_join_date("#ABC123", "King Levy", "2025-01-01", conn=conn)
+    db.mark_announcement_sent("2026-01-01", "join_anniversary", "#ABC123", conn=conn)
+    db.mark_announcement_sent("2026-01-01", "birthday", "#ABC123", conn=conn)
+
+    db.clear_member_tenure("#ABC123", conn=conn)
+
+    dates = db.get_member_dates("#ABC123", conn=conn)
+    assert dates["joined_date"] is None
+    # Anniversary announcement removed, birthday announcement kept
+    assert not db.was_announcement_sent("2026-01-01", "join_anniversary", "#ABC123", conn=conn)
+    assert db.was_announcement_sent("2026-01-01", "birthday", "#ABC123", conn=conn)
+
+
+def test_clear_member_tenure_preserves_birthday(conn):
+    """Clearing tenure keeps birthday data intact."""
+    db.set_member_join_date("#ABC123", "King Levy", "2025-01-01", conn=conn)
+    db.set_member_birthday("#ABC123", "King Levy", 7, 15, conn=conn)
+
+    db.clear_member_tenure("#ABC123", conn=conn)
+
+    dates = db.get_member_dates("#ABC123", conn=conn)
+    assert dates["joined_date"] is None
+    assert dates["birth_month"] == 7
+    assert dates["birth_day"] == 15
+
+
 def test_birthday_and_join_date_independent(conn):
     """Birthday and join date can be set independently on the same member."""
     db.set_member_birthday("#ABC123", "King Levy", 7, 15, conn=conn)

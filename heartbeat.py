@@ -104,7 +104,7 @@ def detect_war_day_transition(now=None):
     """Check if today is a war battle day transition.
 
     Returns a signal if today is the first battle day (Thursday)
-    or last battle day (Sunday), to prompt relevant commentary.
+    or last battle day (Sunday), to prompt relevant observations.
     """
     now = now or datetime.now()
     weekday = now.weekday()
@@ -419,11 +419,13 @@ def tick(conn=None):
         join_leave_signals, _ = detect_joins_leaves(members, known)
         signals.extend(join_leave_signals)
 
-        # Record join dates for newly detected members
+        # Record join dates for newly detected members; reset tenure for leavers
         for sig in join_leave_signals:
             if sig["type"] == "member_join":
                 db.record_join_date(sig["tag"], sig["name"],
                                     datetime.now().strftime("%Y-%m-%d"), conn=conn)
+            elif sig["type"] == "member_leave":
+                db.clear_member_tenure(sig["tag"], conn=conn)
 
         # Backfill join dates from historical snapshots (idempotent)
         db.backfill_join_dates(conn=conn)

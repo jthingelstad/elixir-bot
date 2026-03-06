@@ -2,6 +2,14 @@
 
 Clan tag: #J2RGCRVG
 
+## History
+
+Raquaza and King Levy have been playing Clash Royale for over three years, cycling through a variety of clans along the way. King Thing picked up the game a few months ago. We're all family, and after enough time in clans that didn't quite fit, we decided to build our own — one that matched our idea of what a clan should be. That was the genesis of POAP KINGS: structure, recognition, and something lasting to show for the grind.
+
+Why the name POAP KINGS?
+
+King Thing loves making POAPs and sharing them with friends — it's a wonderful way to mark events and moments that matter. We decided to bring that passion into the Clash Royale clan world. POAP (Proof of Attendance Protocol) gives members a permanent, collectible record of each season. Kings because we aim high. "Proof of Arena Push" is just our Clash-flavored spin on it.
+
 ## Rules
 
 - Join requirement: 2,000+ trophies.

@@ -107,8 +107,16 @@ def _migration_0(conn):
     """)
 
 
+def _migration_1(conn):
+    """Add profile_url, poap_address, and note columns to member_dates."""
+    _add_column_if_not_exists(conn, "member_dates", "profile_url", "TEXT", "''")
+    _add_column_if_not_exists(conn, "member_dates", "poap_address", "TEXT", "''")
+    _add_column_if_not_exists(conn, "member_dates", "note", "TEXT", "''")
+
+
 _MIGRATIONS = [
     _migration_0,
+    _migration_1,
 ]
 
 
@@ -869,6 +877,26 @@ def record_join_date(tag, name, joined_date, conn=None):
             conn.close()
 
 
+def clear_member_tenure(tag, conn=None):
+    """Reset join date and anniversary announcements when a member leaves."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "UPDATE member_dates SET joined_date = NULL WHERE tag = ?",
+            (tag,),
+        )
+        conn.execute(
+            "DELETE FROM cake_day_announcements "
+            "WHERE target_tag = ? AND announcement_type = 'join_anniversary'",
+            (tag,),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
 def set_member_join_date(tag, name, joined_date, conn=None):
     """Set or override a member's join date (leader override)."""
     close = conn is None
@@ -1001,6 +1029,120 @@ def was_announcement_sent(date_str, announcement_type, target_tag, conn=None):
             (date_str, announcement_type, target_tag),
         ).fetchone()
         return row is not None
+    finally:
+        if close:
+            conn.close()
+
+
+# ── Member extras (profile_url, poap_address, note) ─────────────────────────
+
+def set_member_profile_url(tag, name, url, conn=None):
+    """Set or update a member's profile URL."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO member_dates (tag, name, profile_url) VALUES (?, ?, ?) "
+            "ON CONFLICT(tag) DO UPDATE SET "
+            "profile_url = excluded.profile_url, "
+            "name = COALESCE(excluded.name, member_dates.name)",
+            (tag, name, url),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def set_member_poap_address(tag, name, poap_address, conn=None):
+    """Set or update a member's POAP wallet address."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO member_dates (tag, name, poap_address) VALUES (?, ?, ?) "
+            "ON CONFLICT(tag) DO UPDATE SET "
+            "poap_address = excluded.poap_address, "
+            "name = COALESCE(excluded.name, member_dates.name)",
+            (tag, name, poap_address),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def set_member_note(tag, name, note, conn=None):
+    """Set or update a member's note (e.g. 'Founder')."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO member_dates (tag, name, note) VALUES (?, ?, ?) "
+            "ON CONFLICT(tag) DO UPDATE SET "
+            "note = excluded.note, "
+            "name = COALESCE(excluded.name, member_dates.name)",
+            (tag, name, note),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def get_all_member_extras(conn=None):
+    """Get all member extras for roster building.
+
+    Returns {tag: {joined_date, birth_month, birth_day, profile_url, poap_address, note}}.
+    """
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute("SELECT * FROM member_dates").fetchall()
+        return {
+            r["tag"]: {
+                "joined_date": r["joined_date"],
+                "birth_month": r["birth_month"],
+                "birth_day": r["birth_day"],
+                "profile_url": r["profile_url"],
+                "poap_address": r["poap_address"],
+                "note": r["note"],
+            }
+            for r in rows
+        }
+    finally:
+        if close:
+            conn.close()
+
+
+def seed_member_extras_from_csv(csv_path, conn=None):
+    """One-time import of roster-extra.csv data into member_dates.
+
+    Only sets values that are non-empty in the CSV and not already set in the DB.
+    """
+    import csv as csv_mod
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        with open(csv_path, "r", newline="") as f:
+            for row in csv_mod.DictReader(f):
+                tag = row.get("tag", "").strip()
+                if not tag:
+                    continue
+                name = row.get("name", "").strip() or None
+                date_joined = row.get("date_joined", "").strip()
+                note = row.get("note", "").strip()
+                profile_url = row.get("profile_url", "").strip()
+                poap_address = row.get("address", "").strip()
+
+                if date_joined:
+                    record_join_date(tag, name, date_joined, conn=conn)
+                if note:
+                    set_member_note(tag, name, note, conn=conn)
+                if profile_url:
+                    set_member_profile_url(tag, name, profile_url, conn=conn)
+                if poap_address:
+                    set_member_poap_address(tag, name, poap_address, conn=conn)
     finally:
         if close:
             conn.close()
