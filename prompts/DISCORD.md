@@ -43,3 +43,4 @@ How to change nickname:
 - leadership_channel: 1475139718525227089
 - reception_channel: 1476456514121109514
 - member_role: 1474762690692911104
+- bot_role: 1477050812789293117
