@@ -42,7 +42,7 @@ _client = None
 def _get_client():
     global _client
     if _client is None:
-        _client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        _client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=60)
     return _client
 
 MAX_TOOL_ROUNDS = 3
@@ -550,6 +550,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                 tool_choice="auto",
                 temperature=temperature,
                 max_tokens=max_tokens,
+                timeout=60,
             )
         except Exception as e:
             log.error("OpenAI API error: %s", e)
@@ -586,6 +587,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            timeout=60,
         )
         return _parse_response(resp.choices[0].message.content or "null")
     except Exception as e:
@@ -724,6 +726,7 @@ def generate_message(event, context, recent_posts=None):
             messages=messages,
             temperature=0.7,
             max_tokens=300,
+            timeout=60,
         )
         text = (resp.choices[0].message.content or "").strip()
         if not text or text.lower() == "null":
@@ -752,6 +755,7 @@ def generate_home_message(clan_data, war_data, previous_message, roster_data=Non
             messages=messages,
             temperature=0.9,
             max_tokens=300,
+            timeout=60,
         )
         text = (resp.choices[0].message.content or "").strip()
         if not text or text.lower() == "null":
@@ -778,6 +782,7 @@ def generate_members_message(clan_data, war_data, previous_message, roster_data=
             messages=messages,
             temperature=0.9,
             max_tokens=400,
+            timeout=60,
         )
         text = (resp.choices[0].message.content or "").strip()
         if not text or text.lower() == "null":
@@ -817,6 +822,7 @@ def generate_promote_content(clan_data, roster_data=None):
             messages=messages,
             temperature=0.8,
             max_tokens=1500,
+            timeout=60,
         )
         return _parse_response(resp.choices[0].message.content or "null")
     except Exception as e:
