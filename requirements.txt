@@ -4,3 +4,4 @@ python-dotenv
 apscheduler
 pytz
 openai
+jsonschema

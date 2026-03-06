@@ -326,41 +326,67 @@ def test_execute_tool_perfect_war_participants():
         assert parsed[0]["total_races_in_season"] == 4
 
 
-def test_editorial_system_prompt():
-    """Editorial system prompt describes public-facing website role."""
-    editorial = elixir_agent._editorial_system()
-    assert "public" in editorial.lower()
-    assert "speech bubble" in editorial.lower()
-    assert "280 characters" in editorial
+def test_home_message_system_prompt():
+    """Home message system prompt describes public-facing role."""
+    prompt = elixir_agent._home_message_system()
+    assert "public" in prompt.lower()
+    assert "home page" in prompt.lower()
 
 
-def test_write_editorial(_mock_openai_client):
-    """write_editorial returns plain text from LLM."""
-    mock_resp = _make_mock_response(content="POAP KINGS crushed it in war today. Keep pushing, kings!")
+def test_generate_home_message(_mock_openai_client):
+    """generate_home_message returns plain text from LLM."""
+    mock_resp = _make_mock_response(content="POAP KINGS crushed it in war today!")
     _mock_openai_client.chat.completions.create.return_value = mock_resp
 
-    result = elixir_agent.write_editorial(
+    result = elixir_agent.generate_home_message(
         clan_data={"memberList": []},
         war_data={},
-        previous_messages=[{"date": "2026-03-03", "text": "Old message"}],
+        previous_message="Old message",
     )
-
     assert result is not None
 
-    # Verify previous messages appear in user message
     call_args = _mock_openai_client.chat.completions.create.call_args
     messages = call_args.kwargs.get("messages") or call_args[1].get("messages")
     user_msg = messages[1]["content"]
     assert "Old message" in user_msg
 
 
-def test_write_editorial_null_response(_mock_openai_client):
-    """write_editorial returns None when LLM returns null."""
+def test_generate_home_message_null_response(_mock_openai_client):
+    """generate_home_message returns None when LLM returns null."""
     mock_resp = _make_mock_response(content="null")
     _mock_openai_client.chat.completions.create.return_value = mock_resp
 
-    result = elixir_agent.write_editorial({}, {}, [])
+    result = elixir_agent.generate_home_message({}, {}, "")
     assert result is None
+
+
+def test_generate_members_message(_mock_openai_client):
+    """generate_members_message returns plain text."""
+    mock_resp = _make_mock_response(content="King Levy is on a roll this week!")
+    _mock_openai_client.chat.completions.create.return_value = mock_resp
+
+    result = elixir_agent.generate_members_message(
+        clan_data={"memberList": []}, war_data={}, previous_message="",
+    )
+    assert result is not None
+
+
+def test_generate_promote_content(_mock_openai_client):
+    """generate_promote_content returns parsed JSON dict."""
+    promote_json = json.dumps({
+        "message": {"body": "Join us!"},
+        "social": {"body": "Follow!"},
+        "email": {"subject": "Hi", "body": "Join!"},
+        "discord": {"body": "Come play!"},
+        "reddit": {"title": "POAP KINGS", "body": "Join!"},
+    })
+    mock_resp = _make_mock_response(content=promote_json)
+    _mock_openai_client.chat.completions.create.return_value = mock_resp
+
+    result = elixir_agent.generate_promote_content(clan_data={"memberList": []})
+    assert result is not None
+    assert "message" in result
+    assert "reddit" in result
 
 
 def test_execute_tool_set_member_birthday():
@@ -388,6 +414,48 @@ def test_execute_tool_set_member_join_date():
         assert parsed["success"] is True
         mock_db.set_member_join_date.assert_called_once_with(
             "#ABC123", name=None, joined_date="2025-06-01",
+        )
+
+
+def test_execute_tool_set_member_profile_url():
+    """set_member_profile_url tool dispatches correctly."""
+    with patch("elixir_agent.db") as mock_db:
+        result = elixir_agent._execute_tool(
+            "set_member_profile_url",
+            {"member_tag": "#ABC123", "url": "https://example.com"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        mock_db.set_member_profile_url.assert_called_once_with(
+            "#ABC123", name=None, url="https://example.com",
+        )
+
+
+def test_execute_tool_set_member_poap_address():
+    """set_member_poap_address tool dispatches correctly."""
+    with patch("elixir_agent.db") as mock_db:
+        result = elixir_agent._execute_tool(
+            "set_member_poap_address",
+            {"member_tag": "#ABC123", "poap_address": "poap.eth"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        mock_db.set_member_poap_address.assert_called_once_with(
+            "#ABC123", name=None, poap_address="poap.eth",
+        )
+
+
+def test_execute_tool_set_member_note():
+    """set_member_note tool dispatches correctly."""
+    with patch("elixir_agent.db") as mock_db:
+        result = elixir_agent._execute_tool(
+            "set_member_note",
+            {"member_tag": "#ABC123", "note": "Founder"},
+        )
+        parsed = json.loads(result)
+        assert parsed["success"] is True
+        mock_db.set_member_note.assert_called_once_with(
+            "#ABC123", name=None, note="Founder",
         )
 
 

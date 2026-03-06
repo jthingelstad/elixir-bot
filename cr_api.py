@@ -62,3 +62,19 @@ def get_player(tag):
         return r.json()
     except Exception:
         return None
+
+
+def get_player_battle_log(tag):
+    """Fetch a player's recent battle log (~25 battles).
+
+    tag: player tag with or without '#' prefix.
+    Returns list of battle objects or None on error.
+    """
+    clean_tag = tag.lstrip("#")
+    url = f"{API_BASE}/players/%23{clean_tag}/battlelog"
+    try:
+        r = requests.get(url, headers=_headers(), timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None

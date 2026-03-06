@@ -26,7 +26,7 @@ See [SETUP.md](SETUP.md) for full setup, configuration, and operations guide.
 pytest tests/ -v
 ```
 
-130 tests — all use in-memory SQLite and mocked external services. No API keys needed.
+157+ tests — all use in-memory SQLite and mocked external services. No API keys needed.
 
 ## Project Structure
 
@@ -39,7 +39,7 @@ pytest tests/ -v
 | `cr_api.py` | Clash Royale API client: clan roster, war status, river race log, player profiles |
 | `cr_knowledge.py` | Static game + clan knowledge injected into LLM system prompt |
 | `prompts.py` | Loads and caches external prompt/config files from `prompts/` |
-| `journal.py` | Append-only JSON log committed to sibling poapkings.com repo |
+| `site_content.py` | JSON content management for poapkings.com (write, validate, commit/push) |
 
 ## Key Features
 

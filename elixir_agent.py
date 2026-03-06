@@ -44,6 +44,9 @@ def _observe_system():
         prompts.channel_section("#elixir"),
         "You have tools available to look up member history, war results, and player details. "
         "Use them if you want more context before writing your post.\n\n"
+        "The roster data includes each member's most-used cards from recent battles. "
+        "Use this to add personality and specificity — mention signature cards, playstyles, "
+        "or deck choices when they're relevant to the signal (e.g. a trophy milestone, war update).\n\n"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "clan_observation|arena_milestone|donation_milestone|war_update|member_join|member_leave", '
         '"member_tags": [], "member_names": [], "summary": "one sentence", '
@@ -60,6 +63,9 @@ def _leader_system():
         "You may be provided with recent conversation history with this leader. "
         "Use it for context — reference earlier questions and answers naturally. "
         "Don't repeat yourself if you already covered a topic recently.\n\n"
+        "The roster includes each member's favorite cards and battle activity. "
+        "Use this when answering questions about members — you can reference their playstyle, "
+        "deck preferences, and card usage patterns to give richer, more specific answers.\n\n"
         "## Sharing to the clan\n"
         "A leader may ask you to share a point, insight, or announcement with the whole clan "
         "(e.g. \"share that with the clan\", \"post that to #elixir\", \"announce that\"). "
@@ -88,22 +94,80 @@ def _reception_system():
     )
 
 
-def _editorial_system():
+def _home_message_system():
     return _build_system_prompt(
         prompts.purpose(),
         prompts.knowledge_block(),
-        "Your job: write a short, punchy editorial message (1-3 sentences) for the "
-        "clan's public website. This appears as a speech bubble from you on the "
-        "home page — visible to anyone, including people who aren't in the clan yet.\n\n"
-        "Your audience is the public. Showcase what makes the clan great — active wars, "
-        "trophy milestones, generous donations, strong leadership. Make visitors want to "
-        "join. Use the clan data provided for real details, not generic hype.\n\n"
+        "Your job: write a short message (2-4 sentences) for the clan's public website home page. "
+        "Visible to anyone, including people who aren't in the clan yet.\n\n"
+        "Your audience is the public. Give a peek into clan activity — wars, trophies, "
+        "donations, milestones, and the cards our members love to play. "
+        "Make visitors want to join. Use real details from the data.\n\n"
         "Guidelines:\n"
-        "- Keep it under 280 characters — think tweet-length\n"
         "- Write in first person as the clan's AI chronicler\n"
-        "- Be fresh — don't repeat what you said in your previous messages\n"
+        "- Be fresh — don't repeat what you said in your previous message\n"
         "- You can use simple markdown (**bold**, *italic*) for emphasis\n"
         "- No JSON — just the raw message text",
+    )
+
+
+def _members_message_system():
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.knowledge_block(),
+        "Your job: write a short message (2-5 sentences) for the clan's Members page. "
+        "Only current clan members see this page.\n\n"
+        "Your audience is insiders. Be conversational, reference specific members by name, "
+        "call out donation leaders, trophy movers, war heroes. Hype internal achievements. "
+        "You can see each member's most-played cards — use this to add flavor "
+        "(e.g. 'our resident Hog Rider main is on a tear').\n\n"
+        "Guidelines:\n"
+        "- Write in first person as the clan's AI chronicler\n"
+        "- Be fresh — don't repeat what you said in your previous message\n"
+        "- You can use simple markdown (**bold**, *italic*) for emphasis\n"
+        "- No JSON — just the raw message text",
+    )
+
+
+def _roster_bios_system():
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.knowledge_block(),
+        "Your job: write a short intro paragraph and per-member bios for the clan roster page.\n\n"
+        "Output JSON only (no markdown wrapper):\n"
+        '{"intro": "1-2 sentence intro for the roster page", '
+        '"members": {"TAG": {"bio": "3-5 sentence member biography", '
+        '"highlight": "donations|war|trophies|tenure|general"}}}\n\n'
+        "Guidelines:\n"
+        "- The intro should welcome visitors and set the tone\n"
+        "- Each member gets a bio (3-5 sentences) — a short profile paragraph written in third person. "
+        "Cover their role, how long they've been in the clan, notable stats (trophies, donations, war contributions), "
+        "and something that makes them stand out. Be specific with real numbers from the data. "
+        "Treat Co-Leaders the same as Leaders — refer to both simply as 'leader' (do not say 'co-leader'). "
+        "Tone: warm, celebratory, like introducing a teammate to the world.\n"
+        "- highlight categories: donations (generous donator), war (strong war contributor), "
+        "trophies (high trophy count or recent push), tenure (long-time member), general (default)\n"
+        "- Member data may include favorite_cards (top cards from recent battles) and current_deck. "
+        "Reference card preferences in bios when available (e.g. 'Known for devastating Hog Rider pushes')\n"
+        "- Use the member data, war stats, and donation info to personalize\n"
+        "- You have tools available to look up member history and war stats if needed",
+    )
+
+
+def _promote_system():
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.knowledge_block(),
+        "Your job: generate promotional messages for 5 channels to recruit new players.\n\n"
+        "Output JSON only (no markdown wrapper):\n"
+        '{"message": {"body": "SMS-friendly, short, include poapkings.com link"}, '
+        '"social": {"body": "Twitter/Instagram post with stats and link"}, '
+        '"email": {"subject": "...", "body": "detailed recruitment pitch"}, '
+        '"discord": {"body": "formatted for Discord servers with emojis"}, '
+        '"reddit": {"title": "r/RoyaleRecruit format", "body": "detailed post, NO clan invite link"}}\n\n'
+        "Use real clan stats from the data provided. The roster includes members' favorite cards — "
+        "mention popular cards and deck diversity to show the clan has active, strategic players. "
+        "Keep the tone inviting and authentic.",
     )
 
 
@@ -288,6 +352,69 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_member_profile_url",
+            "description": "Set a clan member's profile URL (personal website, social media, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "Player tag (e.g. '#ABC123')",
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "Profile URL (must be https://)",
+                    },
+                },
+                "required": ["member_tag", "url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_member_poap_address",
+            "description": "Set a clan member's POAP wallet address (Ethereum address or ENS name).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "Player tag (e.g. '#ABC123')",
+                    },
+                    "poap_address": {
+                        "type": "string",
+                        "description": "Ethereum address or ENS name for POAP collection",
+                    },
+                },
+                "required": ["member_tag", "poap_address"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_member_note",
+            "description": "Set a clan member's note (e.g. 'Founder', 'War Machine'). Shows on the roster page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "Player tag (e.g. '#ABC123')",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Short note or title for the member",
+                    },
+                },
+                "required": ["member_tag", "note"],
+            },
+        },
+    },
 ]
 
 
@@ -325,6 +452,24 @@ def _execute_tool(name, arguments):
             db.set_member_join_date(
                 arguments["member_tag"], name=None,
                 joined_date=arguments["date"],
+            )
+            result = {"success": True}
+        elif name == "set_member_profile_url":
+            db.set_member_profile_url(
+                arguments["member_tag"], name=None,
+                url=arguments["url"],
+            )
+            result = {"success": True}
+        elif name == "set_member_poap_address":
+            db.set_member_poap_address(
+                arguments["member_tag"], name=None,
+                poap_address=arguments["poap_address"],
+            )
+            result = {"success": True}
+        elif name == "set_member_note":
+            db.set_member_note(
+                arguments["member_tag"], name=None,
+                note=arguments["note"],
             )
             result = {"success": True}
         else:
@@ -428,19 +573,39 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         return None
 
 
-def _clan_context(clan_data, war_data):
-    """Format clan data into a concise context string for the LLM."""
+def _clan_context(clan_data, war_data, roster_data=None):
+    """Format clan data into a concise context string for the LLM.
+
+    roster_data: optional enriched roster dict (from build_roster_data with
+        include_cards=True). When provided, favorite cards are included per member.
+    """
+    # Build a lookup of enriched roster data (cards, etc.) by tag
+    roster_by_tag = {}
+    if roster_data:
+        for rm in roster_data.get("members", []):
+            roster_by_tag[rm.get("tag", "")] = rm
+            roster_by_tag["#" + rm.get("tag", "")] = rm
+
     members = clan_data.get("memberList", clan_data.get("members", []))
     member_summary = []
     for m in sorted(members, key=lambda x: x.get("clanRank", x.get("clan_rank", 99))):
         arena = m.get("arena", {})
         arena_name = arena.get("name", str(arena)) if isinstance(arena, dict) else str(arena)
-        member_summary.append(
+        line = (
             f"  {m.get('name','?')} ({m.get('tag','?')}) | rank #{m.get('clanRank', m.get('clan_rank','?'))} | "
             f"{m.get('trophies',0):,} trophies | {m.get('donations',0)} donations | "
             f"role: {m.get('role','member')} | arena: {arena_name} | "
             f"last_seen: {m.get('lastSeen', m.get('last_seen','?'))}"
         )
+        # Append card data from enriched roster if available
+        tag = m.get("tag", "")
+        enriched = roster_by_tag.get(tag, {})
+        fav_cards = enriched.get("favorite_cards", [])
+        if fav_cards:
+            card_str = ", ".join(f"{c['name']} ({c['usage_pct']}%)" for c in fav_cards[:5])
+            line += f" | top cards: {card_str}"
+        member_summary.append(line)
+
     war_summary = "No active war data."
     if war_data and war_data.get("state") not in (None, "notInWar"):
         parts = war_data.get("clan", {}).get("participants", [])
@@ -532,22 +697,16 @@ def generate_message(event, context):
         return None
 
 
-# ── Daily editorial for poapkings.com ────────────────────────────────────────
+# ── Site content generation for poapkings.com ────────────────────────────────
 
-def write_editorial(clan_data, war_data, previous_messages):
-    """Generate a short editorial for the poapkings.com website. Returns text or None."""
-    context = _clan_context(clan_data, war_data)
-    prev_text = "\n".join(
-        f"  [{m['date']}] {m['text']}" for m in previous_messages
-    ) if previous_messages else "  (none yet)"
-    user_msg = (
-        f"{context}\n\n"
-        f"=== YOUR PREVIOUS MESSAGES ON THE SITE ===\n{prev_text}\n\n"
-        f"Write your next message for the website."
-    )
+def generate_home_message(clan_data, war_data, previous_message, roster_data=None):
+    """Generate a message for the poapkings.com home page. Returns text or None."""
+    context = _clan_context(clan_data, war_data, roster_data=roster_data)
+    prev_text = f"Your previous message: {previous_message}" if previous_message else "(none yet)"
+    user_msg = f"{context}\n\n{prev_text}\n\nWrite your next message for the home page."
 
     messages = [
-        {"role": "system", "content": _editorial_system()},
+        {"role": "system", "content": _home_message_system()},
         {"role": "user", "content": user_msg},
     ]
     try:
@@ -555,12 +714,74 @@ def write_editorial(clan_data, war_data, previous_messages):
             model="gpt-4o",
             messages=messages,
             temperature=0.9,
-            max_tokens=200,
+            max_tokens=300,
         )
         text = (resp.choices[0].message.content or "").strip()
         if not text or text.lower() == "null":
             return None
         return text
     except Exception as e:
-        log.error("Editorial API error: %s", e)
+        log.error("Home message API error: %s", e)
+        return None
+
+
+def generate_members_message(clan_data, war_data, previous_message, roster_data=None):
+    """Generate a message for the poapkings.com members page. Returns text or None."""
+    context = _clan_context(clan_data, war_data, roster_data=roster_data)
+    prev_text = f"Your previous message: {previous_message}" if previous_message else "(none yet)"
+    user_msg = f"{context}\n\n{prev_text}\n\nWrite your next message for the members page."
+
+    messages = [
+        {"role": "system", "content": _members_message_system()},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        resp = _get_client().chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            temperature=0.9,
+            max_tokens=400,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if not text or text.lower() == "null":
+            return None
+        return text
+    except Exception as e:
+        log.error("Members message API error: %s", e)
+        return None
+
+
+def generate_roster_bios(clan_data, war_data, roster_data=None):
+    """Generate roster intro and per-member bios. Returns dict or None."""
+    context = _clan_context(clan_data, war_data, roster_data=roster_data)
+    members = clan_data.get("memberList", clan_data.get("members", []))
+    member_tags = [m.get("tag", "") for m in members]
+    user_msg = (
+        f"{context}\n\n"
+        f"Generate an intro and bio for each member.\n"
+        f"Member tags to cover: {', '.join(member_tags)}"
+    )
+    return _chat_with_tools(_roster_bios_system(), user_msg,
+                            temperature=0.8, max_tokens=2000)
+
+
+def generate_promote_content(clan_data, roster_data=None):
+    """Generate promotional messages for 5 channels. Returns dict or None."""
+    context = _clan_context(clan_data, {}, roster_data=roster_data)
+    user_msg = f"{context}\n\nGenerate promotional messages for all 5 channels."
+
+    messages = [
+        {"role": "system", "content": _promote_system()},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        resp = _get_client().chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            temperature=0.8,
+            max_tokens=1500,
+        )
+        return _parse_response(resp.choices[0].message.content or "null")
+    except Exception as e:
+        log.error("Promote API error: %s", e)
         return None

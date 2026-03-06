@@ -34,10 +34,10 @@ CR_API_KEY=your_clash_royale_api_key
 **Optional** (defaults shown):
 
 ```env
-POAPKINGS_REPO_PATH=../poapkings.com               # Sibling repo for journal entries
+POAPKINGS_REPO_PATH=../poapkings.com               # Sibling repo for site content
 HEARTBEAT_START_HOUR=7                              # Start hour (Chicago time)
 HEARTBEAT_END_HOUR=22                               # End hour (Chicago time)
-EDITORIAL_HOUR=20                                   # Daily editorial hour (Chicago time)
+SITE_CONTENT_HOUR=20                                # Evening content cycle hour (Chicago time)
 ELIXIR_DB_PATH=./elixir.db                          # SQLite database path
 ```
 
@@ -163,6 +163,6 @@ Lives at `ELIXIR_DB_PATH` (default: `./elixir.db` in the project root). Contains
 
 Only exists if launchd is configured to write stdout to a file. The bot doesn't rotate it. If it grows large, it's safe to truncate (`> elixir.log`) or delete while the bot is stopped.
 
-### `../poapkings.com/src/_data/elixir.json`
+### `../poapkings.com/src/_data/elixir*.json`
 
-Append-only journal. The bot writes entries here and git pushes. This is in a separate repo.
+Dynamic site content files (elixirClan.json, elixirRoster.json, etc.). The bot writes and pushes these. This is in a separate repo.

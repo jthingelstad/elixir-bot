@@ -1,11 +1,12 @@
 """Tests for cr_knowledge.py — game + clan knowledge loaded from prompt files."""
 
 import cr_knowledge
+import prompts
 
 
 def test_war_schedule_present():
     """Knowledge block mentions Thu-Sun battle days."""
-    block = cr_knowledge.get_knowledge_block()
+    block = prompts.knowledge_block()
     assert "THURSDAY" in block.upper()
     assert "SUNDAY" in block.upper()
     assert "battle days" in block.lower()
@@ -13,7 +14,7 @@ def test_war_schedule_present():
 
 def test_clan_rules_present():
     """Knowledge block includes POAP KINGS rules."""
-    block = cr_knowledge.get_knowledge_block()
+    block = prompts.knowledge_block()
     assert "POAP KINGS" in block
     assert "Elder" in block
     assert "War Champ" in block
@@ -23,7 +24,7 @@ def test_clan_rules_present():
 
 def test_promotion_guidelines_present():
     """Knowledge block includes promotion criteria."""
-    block = cr_knowledge.get_knowledge_block()
+    block = prompts.knowledge_block()
     assert "donation" in block.lower()
     assert "war participation" in block.lower()
     assert "active" in block.lower()
@@ -73,32 +74,32 @@ def test_donation_highlight_hour():
 
 def test_deck_usage_knowledge():
     """Knowledge block mentions 4 decks per day."""
-    block = cr_knowledge.get_knowledge_block()
+    block = prompts.knowledge_block()
     assert "4 battle decks" in block or "4 decks" in block
 
 
 def test_clan_composition_knowledge():
     """Knowledge block mentions clan composition guidelines."""
-    block = cr_knowledge.get_knowledge_block()
+    block = prompts.knowledge_block()
     assert "2-3 elders" in block
     assert "composition" in block.lower()
 
 
 def test_donation_consistency_knowledge():
     """Knowledge block mentions donation consistency."""
-    block = cr_knowledge.get_knowledge_block()
+    block = prompts.knowledge_block()
     assert "consistent" in block.lower()
 
 
 def test_perfect_participation_knowledge():
     """Knowledge block mentions perfect war participation reward."""
-    block = cr_knowledge.get_knowledge_block()
+    block = prompts.knowledge_block()
     assert "perfect" in block.lower()
     assert "Pass Royale" in block
 
 
 def test_season_naming_knowledge():
     """Knowledge block mentions SEASON-WEEK naming convention."""
-    block = cr_knowledge.get_knowledge_block()
+    block = prompts.knowledge_block()
     assert "SEASON-WEEK" in block
     assert "130-1" in block
