@@ -1,0 +1,228 @@
+def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memory_context=None):
+    """Observation with signals from heartbeat. Returns dict or None.
+
+    signals: list of signal dicts from heartbeat.tick(), or None when no detector output is being passed.
+    recent_posts: list of recent message dicts from db.list_channel_messages().
+    """
+    context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
+
+    if signals:
+        signals_text = json.dumps(signals, indent=2, default=str)
+        user_msg = (
+            f"=== HEARTBEAT SIGNALS ===\n{signals_text}\n\n"
+            f"{context}"
+        )
+    else:
+        user_msg = context
+
+    user_msg += _format_recent_posts(recent_posts)
+    user_msg += _format_memory_context(memory_context)
+
+    return _chat_with_tools(
+        _observe_system(), user_msg,
+        workflow="observation",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["observe"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["observation"],
+        strict_json=True,
+    )
+
+
+def respond_in_reception(question, author_name, clan_data, memory_context=None):
+    """Onboarding Q&A in #reception. No tools needed. Returns dict or None."""
+    members = clan_data.get("memberList", clan_data.get("members", []))
+    roster = "\n".join(
+        f"  {m.get('name', '?')} ({m.get('tag', '?')})"
+        for m in members
+    ) or "  (roster unavailable)"
+    user_msg = (
+        f"New member '{author_name}' asks: {question}\n\n"
+        f"=== CLAN ROSTER ===\n{roster}"
+    )
+    user_msg += _format_memory_context(memory_context)
+    return _chat_with_tools(
+        _reception_system(), user_msg,
+        temperature=0.7, max_tokens=400,
+        workflow="reception",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["reception"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["reception"],
+        strict_json=True,
+    )
+
+
+def respond_in_channel(question, author_name, channel_name, workflow, clan_data, war_data,
+                       conversation_history=None, memory_context=None, proactive=False):
+    """Channel Q&A for interactive/clanops workflows."""
+    if workflow not in {"interactive", "clanops"}:
+        raise ValueError(f"unsupported channel workflow: {workflow}")
+    context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
+    speaker = "Observed message from" if proactive else "Message from"
+    user_msg = f"{speaker} '{author_name}' in {channel_name}: {question}\n\n{context}"
+    user_msg += _format_memory_context(memory_context)
+    workflow_key = f"{workflow}_proactive" if proactive else workflow
+    system_prompt = (
+        _interactive_system(channel_name, proactive=proactive)
+        if workflow == "interactive"
+        else _clanops_system(channel_name, proactive=proactive)
+    )
+    return _chat_with_tools(
+        system_prompt,
+        user_msg,
+        conversation_history=conversation_history,
+        workflow=workflow_key,
+        allowed_tools=TOOLSETS_BY_WORKFLOW[workflow_key],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW[workflow_key],
+        strict_json=True,
+    )
+
+
+# ── Event-driven message generation ──────────────────────────────────────────
+
+def generate_message(event, context, recent_posts=None):
+    """Generate a single Discord message for an event using the LLM.
+
+    event: short description of what happened (e.g. "new_member_discord_join")
+    context: string with all relevant details for the LLM
+    recent_posts: optional list of recent post dicts to avoid repetition.
+
+    Returns message text, or None on failure.
+    """
+    user_msg = f"Event: {event}\n\n{context}"
+    user_msg += _format_recent_posts(recent_posts)
+    messages = [
+        {"role": "system", "content": _event_system()},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        resp = _create_chat_completion(
+            workflow=f"event:{event}",
+            messages=messages,
+            model="gpt-4o",
+            temperature=0.7,
+            max_tokens=300,
+            timeout=60,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if not text or text.lower() == "null":
+            return None
+        return text
+    except Exception as e:
+        log.error("generate_message error (%s): %s", event, e)
+        return None
+
+
+# ── Site content generation for poapkings.com ────────────────────────────────
+
+def generate_home_message(clan_data, war_data, previous_message, roster_data=None):
+    """Generate a message for the poapkings.com home page. Returns text or None."""
+    context = _clan_context(
+        clan_data, war_data,
+        roster_data=roster_data,
+        max_members=MAX_CONTEXT_MEMBERS_FULL,
+    )
+    prev_text = f"Your previous message: {previous_message}" if previous_message else "(none yet)"
+    user_msg = f"{context}\n\n{prev_text}\n\nWrite your next message for the home page."
+
+    messages = [
+        {"role": "system", "content": _home_message_system()},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        resp = _create_chat_completion(
+            workflow="site_home_message",
+            messages=messages,
+            model="gpt-4o",
+            temperature=0.9,
+            max_tokens=300,
+            timeout=60,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if not text or text.lower() == "null":
+            return None
+        return text
+    except Exception as e:
+        log.error("Home message API error: %s", e)
+        return None
+
+
+def generate_members_message(clan_data, war_data, previous_message, roster_data=None):
+    """Generate a message for the poapkings.com members page. Returns text or None."""
+    context = _clan_context(
+        clan_data, war_data,
+        roster_data=roster_data,
+        max_members=MAX_CONTEXT_MEMBERS_FULL,
+    )
+    prev_text = f"Your previous message: {previous_message}" if previous_message else "(none yet)"
+    user_msg = f"{context}\n\n{prev_text}\n\nWrite your next message for the members page."
+
+    messages = [
+        {"role": "system", "content": _members_message_system()},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        resp = _create_chat_completion(
+            workflow="site_members_message",
+            messages=messages,
+            model="gpt-4o",
+            temperature=0.9,
+            max_tokens=400,
+            timeout=60,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if not text or text.lower() == "null":
+            return None
+        return text
+    except Exception as e:
+        log.error("Members message API error: %s", e)
+        return None
+
+
+def generate_roster_bios(clan_data, war_data, roster_data=None):
+    """Generate roster intro and per-member bios. Returns dict or None."""
+    context = _clan_context(
+        clan_data, war_data,
+        roster_data=roster_data,
+        max_members=MAX_CONTEXT_MEMBERS_FULL,
+    )
+    members = clan_data.get("memberList", clan_data.get("members", []))
+    member_tags = [m.get("tag", "") for m in members]
+    user_msg = (
+        f"{context}\n\n"
+        f"Generate an intro and bio for each member.\n"
+        f"Member tags to cover: {', '.join(member_tags)}"
+    )
+    return _chat_with_tools(
+        _roster_bios_system(), user_msg,
+        temperature=0.8, max_tokens=2000,
+        workflow="roster_bios",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["roster_bios"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["roster_bios"],
+        strict_json=True,
+    )
+
+
+def generate_promote_content(clan_data, roster_data=None):
+    """Generate promotional messages for 5 channels. Returns dict or None."""
+    context = _clan_context(
+        clan_data, {},
+        roster_data=roster_data,
+        max_members=MAX_CONTEXT_MEMBERS_FULL,
+    )
+    user_msg = f"{context}\n\nGenerate promotional messages for all 5 channels."
+
+    messages = [
+        {"role": "system", "content": _promote_system()},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        resp = _create_chat_completion(
+            workflow="site_promote_content",
+            messages=messages,
+            model="gpt-4o",
+            temperature=0.8,
+            max_tokens=1500,
+            timeout=60,
+        )
+        return _parse_response(resp.choices[0].message.content or "null")
+    except Exception as e:
+        log.error("Promote API error: %s", e)
+        return None
