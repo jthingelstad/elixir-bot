@@ -124,8 +124,7 @@ def test_build_clan_data_empty():
 # ── build_roster_data ────────────────────────────────────────────────────────
 
 def test_build_roster_data(conn):
-    """Builds roster from API data and DB extras."""
-    # Seed some extras — tags stored without # prefix (matching how build_roster_data looks them up)
+    """Builds roster from API data and stored member metadata."""
     db.set_member_join_date("ABC123", "King Levy", "2026-02-04T04:00:00Z", conn=conn)
     db.set_member_note("ABC123", "King Levy", "Founder", conn=conn)
     db.set_member_profile_url("ABC123", "King Levy", "https://example.com", conn=conn)
@@ -169,9 +168,9 @@ def test_build_roster_data(conn):
     assert levy["profile_url"] == "https://example.com"
     assert levy["date_joined"] == "2026-02-04T04:00:00Z"
 
-    # Newbie got auto-recorded join date
+    # Unknown join dates stay unknown until observed elsewhere or overridden.
     newbie = result["members"][1]
-    assert newbie["date_joined"]  # Should be set
+    assert newbie["date_joined"] is None
 
 
 def test_build_roster_data_sorted_by_join_date(conn):
@@ -222,30 +221,6 @@ def test_validate_promote_schema(tmp_repo, monkeypatch):
         "reddit": {"title": "POAP KINGS", "body": "Join!"},
     }
     assert site_content.validate_against_schema("promote", data) is True
-
-
-# ── seed_member_extras_from_csv ──────────────────────────────────────────────
-
-def test_seed_member_extras_from_csv(conn, tmp_path):
-    """CSV seed imports data correctly."""
-    csv_file = tmp_path / "roster-extra.csv"
-    csv_file.write_text(
-        "tag,name,note,profile_url,address,date_joined\n"
-        "ABC123,King Thing,Founder,https://example.com,poap.eth,2026-02-04T04:00:00Z\n"
-        "DEF456,Player,,,,2026-02-05T00:00:00Z\n"
-    )
-    db.seed_member_extras_from_csv(str(csv_file), conn=conn)
-
-    extras = db.get_all_member_extras(conn=conn)
-    assert "ABC123" in extras
-    assert extras["ABC123"]["note"] == "Founder"
-    assert extras["ABC123"]["profile_url"] == "https://example.com"
-    assert extras["ABC123"]["poap_address"] == "poap.eth"
-    assert extras["ABC123"]["joined_date"] == "2026-02-04T04:00:00Z"
-
-    assert "DEF456" in extras
-    assert extras["DEF456"]["joined_date"] == "2026-02-05T00:00:00Z"
-    assert extras["DEF456"]["note"] == ""
 
 
 # ── aggregate_card_usage ──────────────────────────────────────────────────

@@ -8,7 +8,7 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py + 
 - `elixir_agent.py` — LLM engine: observation + leader Q&A + site content generation via GPT-4o
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log)
 - `heartbeat.py` — Hourly signal detection (milestones, joins/leaves, war transitions)
-- `db.py` — SQLite history store; versioned migrations via `PRAGMA user_version`
+- `db.py` — SQLite V2 data store: identity, memory, current state, analytics, war, and raw payload capture
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
 - `site_content.py` — JSON content management for poapkings.com (write, validate, commit/push)
@@ -30,7 +30,16 @@ Tests use in-memory SQLite and mocked external services (no API keys needed).
 
 ## Database
 
-SQLite at `elixir.db` (auto-created, gitignored). Schema is defined in `_migration_0()` in `db.py`. Tables: `member_snapshots`, `war_results`, `war_participation`, `leader_conversations`, `member_dates`, `cake_day_announcements`. All `db.py` functions accept an optional `conn` parameter — pass one in tests, omit in production.
+SQLite at `elixir.db` (auto-created, gitignored). The project now uses the V2 schema defined in `_migration_0()` in `db.py`. The key tables are:
+
+- Identity + metadata: `members`, `member_metadata`, `member_aliases`, `discord_users`, `discord_links`
+- Conversation memory: `conversation_threads`, `messages`, `memory_facts`, `memory_episodes`, `channel_state`
+- Clan/member state: `clan_memberships`, `member_current_state`, `member_state_snapshots`, `member_daily_metrics`
+- Player analytics: `player_profile_snapshots`, `member_card_collection_snapshots`, `member_deck_snapshots`, `member_card_usage_snapshots`, `member_battle_facts`, `member_recent_form`
+- War: `war_current_state`, `war_day_status`, `war_races`, `war_participation`
+- Raw ingest + signals: `raw_api_payloads`, `signal_log`, `cake_day_announcements`
+
+All `db.py` functions accept an optional `conn` parameter — pass one in tests, omit in production.
 
 ### Migrations
 
@@ -38,13 +47,12 @@ Schema is managed by `_MIGRATIONS` list in `db.py` using `PRAGMA user_version`. 
 
 1. Write a `_migration_N(conn)` function
 2. Append it to `_MIGRATIONS`
-3. Use `_add_column_if_not_exists()` for adding columns
+3. Keep migrations additive unless you are intentionally resetting the database as a breaking change
 
-Migrations run automatically in `get_connection()`. Existing data is always preserved.
+Migrations run automatically in `get_connection()`. This repo currently treats V2 as the clean baseline; additive migrations are fine, but breaking resets are acceptable when the model changes materially.
 
 Current migrations:
-- `_migration_0` — Initial schema (all tables)
-- `_migration_1` — Add `profile_url`, `poap_address`, `note` columns to `member_dates`
+- `_migration_0` — V2 baseline schema
 
 ## Site Content System
 
@@ -62,6 +70,7 @@ Filenames are camelCase (not hyphenated) because 11ty uses the filename stem as 
 
 - **8:00 AM Chicago** — `_site_data_refresh()`: Fetch CR API, build roster + clan data, commit/push
 - **8:00 PM Chicago** — `_site_content_cycle()`: Refresh data, generate LLM bios/messages, commit/push
+- **Every 6 hours by default** — `_player_intel_refresh()`: Refresh a stale subset of active members' player profiles and battle logs into the V2 analytics tables, and emit progression signals like level-ups and card milestones
 
 ## Architecture: Prompts vs Code
 
@@ -76,7 +85,7 @@ Principle: **Prompts define what Elixir says and why. Code defines when, where, 
 
 ### What stays in code
 
-Channel routing, JSON response format contracts, tool definitions + execution, signal detection logic (reads thresholds from CLAN.md), conversation memory, scheduling, nickname matching, LLM parameters.
+Channel routing, JSON response format contracts, tool definitions + execution, signal detection logic (reads thresholds from CLAN.md), conversation memory, scheduling, nickname matching, LLM parameters, and V2 data normalization.
 
 ### No templates — all LLM
 
@@ -89,6 +98,16 @@ A new clan forks elixir-bot and only rewrites CLAN.md (their clan name, tag, rul
 ### Future work
 
 - `leader_share` is currently specific to #leader-lounge → #elixir. Should become a general-purpose "post to broadcast" tool available in any interactive channel.
+
+## V2 Query Layer (Current)
+
+Elixir’s factual member/leader answers should come from V2 query helpers and tools, not prompt reconstruction. Important read paths include:
+
+- member resolution: `resolve_member`
+- roster summaries: `get_clan_roster_summary`, `list_clan_members`, `list_longest_tenure_members`, `list_recent_joins`
+- member intelligence: `get_member_profile`, `get_member_recent_form`, `get_member_current_deck`, `get_member_signature_cards`
+- war intelligence: `get_current_war_status`, `get_war_deck_status_today`, `get_member_war_status`, `get_war_season_summary`, `get_members_without_war_participation`, `compare_member_war_to_clan_average`
+- trend/support signals: `get_trophy_drops`, `get_members_on_losing_streak`, `get_trending_war_contributors`, `get_members_at_risk`
 
 ## Key Conventions
 

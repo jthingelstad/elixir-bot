@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import pytest
 
-# We test _match_clan_member by patching the snapshot it reads
 import elixir
 
 
@@ -20,7 +19,17 @@ class TestMatchClanMember:
     """Tests for the _match_clan_member helper."""
 
     def _match(self, nickname):
-        with patch("elixir.db.get_known_roster", return_value=SAMPLE_SNAPSHOT):
+        matches = [
+            {
+                "player_tag": tag,
+                "current_name": name,
+                "match_source": "current_name_exact",
+                "match_score": 100,
+            }
+            for tag, name in SAMPLE_SNAPSHOT.items()
+            if name.lower().strip() == nickname.lower().strip()
+        ]
+        with patch("elixir.db.resolve_member", return_value=matches):
             return elixir._match_clan_member(nickname)
 
     def test_exact_match(self):
@@ -48,6 +57,7 @@ class TestMatchClanMember:
         assert result is None
 
     def test_empty_snapshot(self):
-        with patch("elixir.db.get_known_roster", return_value={}):
+        with patch("elixir.db.resolve_member", return_value=[]), \
+             patch("elixir.db.get_active_roster_map", return_value={}):
             result = elixir._match_clan_member("King Levy")
         assert result is None

@@ -50,8 +50,8 @@ MAX_TOOL_ROUNDS = 3
 LEADER_WRITE_TOOLS_ENABLED = True
 MAX_CONTEXT_MEMBERS_DEFAULT = 30
 MAX_CONTEXT_MEMBERS_FULL = 50
-TOOL_RESULT_MAX_ITEMS = 8
-TOOL_RESULT_MAX_CHARS = 3000
+TOOL_RESULT_MAX_ITEMS = 50
+TOOL_RESULT_MAX_CHARS = 12000
 
 
 def _build_system_prompt(*sections):
@@ -66,7 +66,7 @@ def _observe_system():
         prompts.purpose(),
         prompts.knowledge_block(),
         prompts.channel_section("#elixir"),
-        "You have tools available to look up member history, war results, and player details. "
+        "You have tools available to look up the full roster, member profiles, recent form, deck data, and war status. "
         "Use them if you want more context before writing your post.\n\n"
         "The roster data includes each member's most-used cards from recent battles. "
         "Use this to add personality and specificity — mention signature cards, playstyles, "
@@ -87,9 +87,9 @@ def _leader_system():
         "You may be provided with recent conversation history with this leader. "
         "Use it for context — reference earlier questions and answers naturally. "
         "Don't repeat yourself if you already covered a topic recently.\n\n"
-        "The roster includes each member's favorite cards and battle activity. "
-        "Use this when answering questions about members — you can reference their playstyle, "
-        "deck preferences, and card usage patterns to give richer, more specific answers.\n\n"
+        "You have tools for member resolution, the full roster, member profiles, current decks, signature cards, recent form, war status, and promotion review. "
+        "If a leader mentions a player by name or Discord handle instead of tag, resolve them first instead of guessing.\n\n"
+        "Use them to answer factual questions directly instead of guessing from clipped roster context.\n\n"
         "## Sharing to the clan\n"
         "A leader may ask you to share a point, insight, or announcement with the whole clan "
         "(e.g. \"share that with the clan\", \"post that to #elixir\", \"announce that\"). "
@@ -215,14 +215,208 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_member_history",
-            "description": "Get a clan member's trophy and donation history over time. Returns snapshots from the database.",
+            "name": "resolve_member",
+            "description": "Resolve a clan member from a player name, alias, Discord handle, or player tag and return the best matching candidates.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Player name, alias, Discord handle, or player tag.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of candidates to return. Default 5.",
+                        "default": 5,
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_clan_roster_summary",
+            "description": "Get a high-level roster summary including member count, open slots, average level, and average trophies.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_clan_members",
+            "description": "List the current clan members with their role, level, trophies, rank, join date, and Discord linkage when available.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_longest_tenure_members",
+            "description": "List the longest-tenured active clan members using the tracked join dates.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of members to return. Default 10.",
+                        "default": 10,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_recent_joins",
+            "description": "List members who joined recently along with their recent form and current-season war contribution.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "How many days back to consider recent joins. Default 30.",
+                        "default": 30,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_profile",
+            "description": "Get a normalized current profile for a clan member including join date, role, level, trophies, notes, recent form, and Discord linkage.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "member_tag": {
                         "type": "string",
-                        "description": "The player tag (e.g. '#ABC123'). Look this up from the roster context.",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_overview",
+            "description": "Get a combined member overview with current profile, recent form, deck info, and current war status in one response.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_recent_form",
+            "description": "Get a member's recent form summary such as wins/losses, streak, and whether they are hot, mixed, or slumping.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Recent form scope. Default competitive_10.",
+                        "default": "competitive_10",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_current_deck",
+            "description": "Get the member's latest known current deck from stored player profile data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_next_chests",
+            "description": "Fetch a member's upcoming chest cycle directly from the Clash Royale API.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_signature_cards",
+            "description": "Get the member's most-used cards from recent battle logs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                    "mode_scope": {
+                        "type": "string",
+                        "description": "Mode scope for card usage. Default overall.",
+                        "default": "overall",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_history",
+            "description": "Get a clan member's trophy and donation history over time from the stored state snapshots.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
                     },
                     "days": {
                         "type": "integer",
@@ -237,14 +431,110 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_war_results",
-            "description": "Get recent clan war (River Race) results. Shows our rank, fame, and whether we won.",
+            "name": "get_member_war_stats",
+            "description": "Get a specific member's war participation history — fame earned, decks used, and race context.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "count": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_war_status",
+            "description": "Get a member's current-day war deck status and current-season participation summary.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                    "season_id": {
                         "type": "integer",
-                        "description": "Number of recent war results to retrieve. Default 5.",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_war_attendance",
+            "description": "Get a member's war attendance summary for the current season and the last 4 weeks, including participation rate and races missed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_war_battle_record",
+            "description": "Get a member's war-battle win/loss/draw record for the selected season using stored battle-log facts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_war_status",
+            "description": "Get the current clan war state, latest known season/week, and current race rank.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_war_season_summary",
+            "description": "Get a season-level war summary including races, fame-per-member, top contributors, and members with no war participation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "How many top contributors to include. Default 5.",
                         "default": 5,
                     },
                 },
@@ -255,17 +545,213 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_member_war_stats",
-            "description": "Get a specific member's war participation history — fame earned, decks used, which wars they participated in.",
+            "name": "get_war_deck_status_today",
+            "description": "List who has used all, some, or none of their war decks today.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_members_without_war_participation",
+            "description": "List active members who have not used any war decks in the selected season.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_war_battle_win_rates",
+            "description": "List the active members with the highest war-battle win rates this season.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of members to return. Default 10.",
+                        "default": 10,
+                    },
+                    "min_battles": {
+                        "type": "integer",
+                        "description": "Minimum war battles required to be included. Default 1.",
+                        "default": 1,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_clan_boat_battle_record",
+            "description": "Get the clan's aggregate boat-battle win/loss/draw record over the most recent N war races.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "wars": {
+                        "type": "integer",
+                        "description": "How many recent war races to include. Default 3.",
+                        "default": 3,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_war_score_trend",
+            "description": "Summarize whether the clan's war score/rating trend has moved up or down over the selected recent window.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "How many days back to compare. Default 30.",
+                        "default": 30,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_fame_per_member_to_previous_season",
+            "description": "Compare this season's fame-per-member to the previous season.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional current season ID. If omitted, uses the current/most recent season.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_war_champ_standings",
+            "description": "Get the current War Champ standings for this season — total fame per member across all war races.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_recent_role_changes",
+            "description": "List recent member promotions or demotions by comparing tracked role snapshots.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "How many days back to inspect for role changes. Default 30.",
+                        "default": 30,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_missed_war_days",
+            "description": "List the war days a member missed in the selected season based on tracked daily war status.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "member_tag": {
                         "type": "string",
-                        "description": "The player tag (e.g. '#ABC123').",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
                     },
                 },
                 "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_member_war_to_clan_average",
+            "description": "Compare one member's war contribution to the clan average for the selected season.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_trending_war_contributors",
+            "description": "List the members whose recent war contribution is trending upward relative to their earlier season performance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                    },
+                    "recent_races": {
+                        "type": "integer",
+                        "description": "How many most recent races to treat as the trend window. Default 2.",
+                        "default": 2,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of members to return. Default 5.",
+                        "default": 5,
+                    },
+                },
+                "required": [],
             },
         },
     },
@@ -284,34 +770,105 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_player_details",
-            "description": "Fetch detailed player stats from the Clash Royale API: best trophies, win/loss record, total donations, cards, etc.",
+            "name": "get_members_at_risk",
+            "description": "List members currently flagged by configurable participation/activity thresholds, including the reasons they were flagged.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "player_tag": {
-                        "type": "string",
-                        "description": "The player tag (e.g. '#ABC123').",
+                    "inactivity_days": {
+                        "type": "integer",
+                        "description": "Flag members inactive for at least this many days. Default 7.",
+                        "default": 7,
+                    },
+                    "min_donations_week": {
+                        "type": "integer",
+                        "description": "Flag members below this weekly donation count. Default 20.",
+                        "default": 20,
+                    },
+                    "require_war_participation": {
+                        "type": "boolean",
+                        "description": "Whether to include war participation as a risk criterion. Default false.",
+                        "default": False,
+                    },
+                    "min_war_races": {
+                        "type": "integer",
+                        "description": "Minimum race participation if war participation is required. Default 1.",
+                        "default": 1,
+                    },
+                    "tenure_grace_days": {
+                        "type": "integer",
+                        "description": "Ignore very new members younger than this many days. Default 14.",
+                        "default": 14,
+                    },
+                    "season_id": {
+                        "type": "integer",
+                        "description": "Optional season ID for war participation checks.",
                     },
                 },
-                "required": ["player_tag"],
+                "required": [],
             },
         },
     },
     {
         "type": "function",
         "function": {
-            "name": "get_war_champ_standings",
-            "description": "Get the current War Champ standings for this season — total fame per member across all war races. The top contributor at season end wins War Champ and a free Pass Royale.",
+            "name": "get_members_on_losing_streak",
+            "description": "List active members on a current losing streak so leaders can spot who may need support.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "season_id": {
+                    "min_streak": {
                         "type": "integer",
-                        "description": "Optional season ID. If omitted, uses the current/most recent season.",
+                        "description": "Minimum current losing streak to include. Default 3.",
+                        "default": 3,
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Recent form scope. Default competitive_10.",
+                        "default": "competitive_10",
                     },
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_trophy_drops",
+            "description": "Get members with notable trophy drops over the last N days.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "Window in days. Default 7.",
+                        "default": 7,
+                    },
+                    "min_drop": {
+                        "type": "integer",
+                        "description": "Minimum trophy drop to include. Default 100.",
+                        "default": 100,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_player_details",
+            "description": "Fetch fresh player stats directly from the Clash Royale API when raw live details are needed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "player_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                },
+                "required": ["player_tag"],
             },
         },
     },
@@ -325,7 +882,7 @@ TOOLS = [
                 "properties": {
                     "member_tag": {
                         "type": "string",
-                        "description": "Player tag (e.g. '#ABC123')",
+                        "description": "Player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie')",
                     },
                     "month": {
                         "type": "integer",
@@ -350,7 +907,7 @@ TOOLS = [
                 "properties": {
                     "member_tag": {
                         "type": "string",
-                        "description": "Player tag (e.g. '#ABC123')",
+                        "description": "Player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie')",
                     },
                     "date": {
                         "type": "string",
@@ -388,7 +945,7 @@ TOOLS = [
                 "properties": {
                     "member_tag": {
                         "type": "string",
-                        "description": "Player tag (e.g. '#ABC123')",
+                        "description": "Player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie')",
                     },
                     "url": {
                         "type": "string",
@@ -402,27 +959,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "set_member_poap_address",
-            "description": "Set a clan member's POAP wallet address (Ethereum address or ENS name).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "member_tag": {
-                        "type": "string",
-                        "description": "Player tag (e.g. '#ABC123')",
-                    },
-                    "poap_address": {
-                        "type": "string",
-                        "description": "Ethereum address or ENS name for POAP collection",
-                    },
-                },
-                "required": ["member_tag", "poap_address"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "set_member_note",
             "description": "Set a clan member's note (e.g. 'Founder', 'War Machine'). Shows on the roster page.",
             "parameters": {
@@ -430,7 +966,7 @@ TOOLS = [
                 "properties": {
                     "member_tag": {
                         "type": "string",
-                        "description": "Player tag (e.g. '#ABC123')",
+                        "description": "Player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie')",
                     },
                     "note": {
                         "type": "string",
@@ -476,24 +1012,197 @@ RESPONSE_SCHEMAS_BY_WORKFLOW = {
 }
 
 
+def _refresh_member_cache(member_tag, include_battles=False):
+    """Refresh stored player profile and optionally battle log for a member."""
+    player = cr_api.get_player(member_tag)
+    if player:
+        db.snapshot_player_profile(player)
+    if include_battles:
+        battles = cr_api.get_player_battle_log(member_tag)
+        if battles:
+            db.snapshot_player_battlelog(member_tag, battles)
+
+
+def _resolve_member_tag(value):
+    """Accept a tag, name, alias, or Discord handle and return a canonical player tag."""
+    query = (value or "").strip()
+    if not query:
+        raise ValueError("member reference is required")
+    if query.startswith("#"):
+        return query
+
+    matches = db.resolve_member(query, limit=5)
+    if not matches:
+        raise ValueError(f"Could not resolve member reference: {query}")
+    exactish = [m for m in matches if m.get("match_score", 0) >= 850]
+    if len(exactish) == 1:
+        return exactish[0]["player_tag"]
+    if len(matches) == 1:
+        return matches[0]["player_tag"]
+    top = matches[0]
+    second = matches[1]
+    if (top.get("match_score", 0) - second.get("match_score", 0)) >= 100:
+        return top["player_tag"]
+    choices = ", ".join(m.get("member_ref_with_handle") or m.get("current_name") or m["player_tag"] for m in matches[:3])
+    raise ValueError(f"Ambiguous member reference '{query}'. Top matches: {choices}")
+
+
 def _execute_tool(name, arguments):
     """Execute a tool call and return the result as a string."""
     try:
-        if name == "get_member_history":
-            result = db.get_member_history(
-                arguments["member_tag"],
+        if name == "resolve_member":
+            result = db.resolve_member(
+                arguments["query"],
+                limit=arguments.get("limit", 5),
+            )
+        elif name == "get_clan_roster_summary":
+            result = db.get_clan_roster_summary()
+        elif name == "list_clan_members":
+            result = db.list_members()
+        elif name == "list_longest_tenure_members":
+            result = db.list_longest_tenure_members(
+                limit=arguments.get("limit", 10),
+            )
+        elif name == "list_recent_joins":
+            result = db.list_recent_joins(
                 days=arguments.get("days", 30),
             )
-        elif name == "get_war_results":
-            result = db.get_war_history(n=arguments.get("count", 5))
+        elif name == "get_member_profile":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            _refresh_member_cache(member_tag, include_battles=True)
+            result = db.get_member_profile(member_tag)
+        elif name == "get_member_overview":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            _refresh_member_cache(member_tag, include_battles=True)
+            result = db.get_member_overview(member_tag)
+        elif name == "get_member_recent_form":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            _refresh_member_cache(member_tag, include_battles=True)
+            result = db.get_member_recent_form(
+                member_tag,
+                scope=arguments.get("scope", "competitive_10"),
+            )
+        elif name == "get_member_current_deck":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            _refresh_member_cache(member_tag, include_battles=False)
+            result = db.get_member_current_deck(member_tag)
+        elif name == "get_member_next_chests":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            result = cr_api.get_player_chests(member_tag)
+        elif name == "get_member_signature_cards":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            _refresh_member_cache(member_tag, include_battles=True)
+            result = db.get_member_signature_cards(
+                member_tag,
+                mode_scope=arguments.get("mode_scope", "overall"),
+            )
+        elif name == "get_member_history":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            result = db.get_member_history(
+                member_tag,
+                days=arguments.get("days", 30),
+            )
         elif name == "get_member_war_stats":
-            result = db.get_member_war_stats(arguments["member_tag"])
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            result = db.get_member_war_stats(member_tag)
+        elif name == "get_member_war_status":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            result = db.get_member_war_status(
+                member_tag,
+                season_id=arguments.get("season_id"),
+            )
+        elif name == "get_member_war_attendance":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            result = db.get_member_war_attendance(
+                member_tag,
+                season_id=arguments.get("season_id"),
+            )
+        elif name == "get_member_war_battle_record":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            _refresh_member_cache(member_tag, include_battles=True)
+            result = db.get_member_war_battle_record(
+                member_tag,
+                season_id=arguments.get("season_id"),
+            )
+        elif name == "get_current_war_status":
+            result = db.get_current_war_status()
+        elif name == "get_war_season_summary":
+            result = db.get_war_season_summary(
+                season_id=arguments.get("season_id"),
+                top_n=arguments.get("top_n", 5),
+            )
+        elif name == "get_war_deck_status_today":
+            result = db.get_war_deck_status_today()
+        elif name == "get_members_without_war_participation":
+            result = db.get_members_without_war_participation(
+                season_id=arguments.get("season_id"),
+            )
+        elif name == "get_trending_war_contributors":
+            result = db.get_trending_war_contributors(
+                season_id=arguments.get("season_id"),
+                recent_races=arguments.get("recent_races", 2),
+                limit=arguments.get("limit", 5),
+            )
         elif name == "get_promotion_candidates":
             result = db.get_promotion_candidates()
+        elif name == "compare_member_war_to_clan_average":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            result = db.compare_member_war_to_clan_average(
+                member_tag,
+                season_id=arguments.get("season_id"),
+            )
+        elif name == "get_members_at_risk":
+            result = db.get_members_at_risk(
+                inactivity_days=arguments.get("inactivity_days", 7),
+                min_donations_week=arguments.get("min_donations_week", 20),
+                require_war_participation=arguments.get("require_war_participation", False),
+                min_war_races=arguments.get("min_war_races", 1),
+                tenure_grace_days=arguments.get("tenure_grace_days", 14),
+                season_id=arguments.get("season_id"),
+            )
+        elif name == "get_members_on_losing_streak":
+            result = db.get_members_on_losing_streak(
+                min_streak=arguments.get("min_streak", 3),
+                scope=arguments.get("scope", "competitive_10"),
+            )
+        elif name == "get_trophy_drops":
+            result = db.get_trophy_drops(
+                days=arguments.get("days", 7),
+                min_drop=arguments.get("min_drop", 100),
+            )
         elif name == "get_player_details":
-            result = cr_api.get_player(arguments["player_tag"])
+            player_tag = _resolve_member_tag(arguments["player_tag"])
+            result = cr_api.get_player(player_tag)
         elif name == "get_war_champ_standings":
             result = db.get_war_champ_standings(
+                season_id=arguments.get("season_id"),
+            )
+        elif name == "get_war_battle_win_rates":
+            result = db.get_war_battle_win_rates(
+                season_id=arguments.get("season_id"),
+                limit=arguments.get("limit", 10),
+                min_battles=arguments.get("min_battles", 1),
+            )
+        elif name == "get_clan_boat_battle_record":
+            result = db.get_clan_boat_battle_record(
+                wars=arguments.get("wars", 3),
+            )
+        elif name == "get_war_score_trend":
+            result = db.get_war_score_trend(
+                days=arguments.get("days", 30),
+            )
+        elif name == "compare_fame_per_member_to_previous_season":
+            result = db.compare_fame_per_member_to_previous_season(
+                season_id=arguments.get("season_id"),
+            )
+        elif name == "get_recent_role_changes":
+            result = db.get_recent_role_changes(
+                days=arguments.get("days", 30),
+            )
+        elif name == "get_member_missed_war_days":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            result = db.get_member_missed_war_days(
+                member_tag,
                 season_id=arguments.get("season_id"),
             )
         elif name == "get_perfect_war_participants":
@@ -501,32 +1210,30 @@ def _execute_tool(name, arguments):
                 season_id=arguments.get("season_id"),
             )
         elif name == "set_member_birthday":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
             db.set_member_birthday(
-                arguments["member_tag"], name=None,
+                member_tag, name=None,
                 month=arguments["month"], day=arguments["day"],
             )
             result = {"success": True}
         elif name == "set_member_join_date":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
             db.set_member_join_date(
-                arguments["member_tag"], name=None,
+                member_tag, name=None,
                 joined_date=arguments["date"],
             )
             result = {"success": True}
         elif name == "set_member_profile_url":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
             db.set_member_profile_url(
-                arguments["member_tag"], name=None,
+                member_tag, name=None,
                 url=arguments["url"],
             )
             result = {"success": True}
-        elif name == "set_member_poap_address":
-            db.set_member_poap_address(
-                arguments["member_tag"], name=None,
-                poap_address=arguments["poap_address"],
-            )
-            result = {"success": True}
         elif name == "set_member_note":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
             db.set_member_note(
-                arguments["member_tag"], name=None,
+                member_tag, name=None,
                 note=arguments["note"],
             )
             result = {"success": True}
@@ -921,11 +1628,51 @@ def _format_recent_posts(recent_posts):
     return "\n=== YOUR RECENT POSTS IN #elixir ===\n" + "\n".join(lines) + "\n"
 
 
-def observe_and_post(clan_data, war_data, signals=None, recent_posts=None):
+def _format_memory_context(memory_context):
+    if not memory_context:
+        return ""
+    sections = []
+    user_ctx = memory_context.get("discord_user") or {}
+    user_facts = user_ctx.get("facts") or []
+    user_episodes = user_ctx.get("episodes") or []
+    if user_facts or user_episodes:
+        lines = []
+        for fact in user_facts[:5]:
+            lines.append(f"  fact: {fact.get('fact_type')} = {fact.get('fact_value')}")
+        for episode in user_episodes[:5]:
+            lines.append(f"  episode: {episode.get('summary')}")
+        sections.append("=== USER MEMORY ===\n" + "\n".join(lines))
+
+    member_ctx = memory_context.get("member") or {}
+    member_facts = member_ctx.get("facts") or []
+    member_episodes = member_ctx.get("episodes") or []
+    if member_facts or member_episodes:
+        lines = []
+        for fact in member_facts[:5]:
+            lines.append(f"  fact: {fact.get('fact_type')} = {fact.get('fact_value')}")
+        for episode in member_episodes[:5]:
+            lines.append(f"  episode: {episode.get('summary')}")
+        sections.append("=== MEMBER MEMORY ===\n" + "\n".join(lines))
+
+    channel_ctx = memory_context.get("channel") or {}
+    channel_state = channel_ctx.get("state") or {}
+    channel_episodes = channel_ctx.get("episodes") or []
+    if channel_state or channel_episodes:
+        lines = []
+        if channel_state.get("last_summary"):
+            lines.append(f"  last_elixir_summary: {channel_state.get('last_summary')}")
+        for episode in channel_episodes[:5]:
+            lines.append(f"  episode: {episode.get('summary')}")
+        sections.append("=== CHANNEL MEMORY ===\n" + "\n".join(lines))
+
+    return ("\n\n" + "\n\n".join(sections)) if sections else ""
+
+
+def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memory_context=None):
     """Observation with signals from heartbeat. Returns dict or None.
 
-    signals: list of signal dicts from heartbeat.tick(), or None for legacy mode.
-    recent_posts: list of recent conversation dicts from db.get_conversation_history().
+    signals: list of signal dicts from heartbeat.tick(), or None when no detector output is being passed.
+    recent_posts: list of recent conversation dicts from db.list_thread_messages().
     """
     context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
 
@@ -939,6 +1686,7 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None):
         user_msg = context
 
     user_msg += _format_recent_posts(recent_posts)
+    user_msg += _format_memory_context(memory_context)
 
     return _chat_with_tools(
         _observe_system(), user_msg,
@@ -950,10 +1698,11 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None):
 
 
 def respond_to_leader(question, author_name, clan_data, war_data,
-                      conversation_history=None):
+                      conversation_history=None, memory_context=None):
     """Leader Q&A with tool access and conversation memory. Returns dict or None."""
     context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
     user_msg = f"Leader '{author_name}' asks: {question}\n\n{context}"
+    user_msg += _format_memory_context(memory_context)
     return _chat_with_tools(
         _leader_system(), user_msg,
         conversation_history=conversation_history,
@@ -964,7 +1713,7 @@ def respond_to_leader(question, author_name, clan_data, war_data,
     )
 
 
-def respond_in_reception(question, author_name, clan_data):
+def respond_in_reception(question, author_name, clan_data, memory_context=None):
     """Onboarding Q&A in #reception. No tools needed. Returns dict or None."""
     members = clan_data.get("memberList", clan_data.get("members", []))
     roster = "\n".join(
@@ -975,6 +1724,7 @@ def respond_in_reception(question, author_name, clan_data):
         f"New member '{author_name}' asks: {question}\n\n"
         f"=== CLAN ROSTER ===\n{roster}"
     )
+    user_msg += _format_memory_context(memory_context)
     return _chat_with_tools(
         _reception_system(), user_msg,
         temperature=0.7, max_tokens=400,

@@ -268,7 +268,7 @@ def build_card_stats(members):
 
 
 def build_roster_data(clan_data, include_cards=False, conn=None):
-    """Build roster data from CR API + member extras from DB.
+    """Build roster data from CR API + V2 member metadata.
 
     include_cards: if True, fetch battle logs and player profiles to add
         favorite_cards and current_deck per member (~15s extra for API calls).
@@ -280,7 +280,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
     conn = conn or db.get_connection()
     try:
         member_list = clan_data.get("memberList", [])
-        extras = db.get_all_member_extras(conn=conn)
+        metadata = db.get_member_metadata_map(conn=conn)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         members = []
@@ -291,14 +291,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
             arena = m.get("arena", {})
             arena_name = arena.get("name", "") if isinstance(arena, dict) else ""
 
-            extra = extras.get(tag, {})
-
-            # Auto-record join date for new members
-            if not extra.get("joined_date"):
-                db.record_join_date(tag, m.get("name", ""), now, conn=conn)
-                date_joined = now
-            else:
-                date_joined = extra["joined_date"]
+            extra = metadata.get(tag, {})
 
             member = {
                 "name": m.get("name", "Unknown"),
@@ -314,7 +307,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                 "note": extra.get("note", ""),
                 "profile_url": extra.get("profile_url", ""),
                 "poap_address": extra.get("poap_address", ""),
-                "date_joined": date_joined,
+                "date_joined": extra.get("joined_date"),
             }
             members.append(member)
 
@@ -324,15 +317,26 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                 tag = member["tag"]
                 try:
                     battle_log = cr_api.get_player_battle_log(tag)
+                    if battle_log:
+                        db.snapshot_player_battlelog(tag, battle_log, conn=conn)
                     member["favorite_cards"] = aggregate_card_usage(battle_log, tag)
                 except Exception:
-                    member["favorite_cards"] = []
+                    cached = db.get_member_signature_cards("#" + tag, conn=conn)
+                    member["favorite_cards"] = (cached or {}).get("cards", [])
 
                 try:
                     player_data = cr_api.get_player(tag)
                     member["current_deck"] = extract_current_deck(player_data)
+                    if player_data:
+                        snapshot_payload = dict(player_data)
+                        snapshot_payload.setdefault("tag", "#" + tag)
+                        snapshot_payload.setdefault("name", member["name"])
+                        db.snapshot_player_profile(snapshot_payload, conn=conn)
                 except Exception:
-                    member["current_deck"] = []
+                    cached = db.get_member_current_deck("#" + tag, conn=conn)
+                    member["current_deck"] = [
+                        c.get("name", "") for c in ((cached or {}).get("cards") or []) if c.get("name")
+                    ]
 
                 time.sleep(0.3)
 
@@ -346,8 +350,8 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                     if prev.get(field) and not member.get(field):
                         member[field] = prev[field]
 
-        # Sort by date_joined ascending, then name
-        members.sort(key=lambda m: (m["date_joined"], m["name"].lower()))
+        # Sort known join dates first, oldest to newest; unknown tenure sorts last.
+        members.sort(key=lambda m: (m["date_joined"] is None, m["date_joined"] or "", m["name"].lower()))
 
         result = {"updated": now, "members": members}
         if existing and existing.get("intro"):

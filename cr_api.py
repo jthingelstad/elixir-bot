@@ -24,18 +24,13 @@ def get_clan():
 
 
 def get_current_war():
-    # Try River Race first (current format), fall back to legacy war endpoint
-    for endpoint in ["currentriverrace", "currentwar"]:
-        url = f"{API_BASE}/clans/%23{CLAN_TAG}/{endpoint}"
-        try:
-            r = requests.get(url, headers=_headers(), timeout=10)
-            r.raise_for_status()
-            data = r.json()
-            if data:
-                return data
-        except Exception:
-            continue
-    return None
+    url = f"{API_BASE}/clans/%23{CLAN_TAG}/currentriverrace"
+    try:
+        r = requests.get(url, headers=_headers(), timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
 
 
 def get_river_race_log():
@@ -76,5 +71,21 @@ def get_player_battle_log(tag):
         r = requests.get(url, headers=_headers(), timeout=10)
         r.raise_for_status()
         return r.json()
+    except Exception:
+        return None
+
+
+def get_player_chests(tag):
+    """Fetch a player's upcoming chest cycle.
+
+    tag: player tag with or without '#' prefix.
+    Returns list of chest objects or None on error.
+    """
+    clean_tag = tag.lstrip("#")
+    url = f"{API_BASE}/players/%23{clean_tag}/upcomingchests"
+    try:
+        r = requests.get(url, headers=_headers(), timeout=10)
+        r.raise_for_status()
+        return r.json().get("items", [])
     except Exception:
         return None
