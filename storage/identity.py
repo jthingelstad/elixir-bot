@@ -92,6 +92,24 @@ def get_member_identity(member_tag, conn=None):
             conn.close()
 
 
+def get_linked_member_for_discord_user(discord_user_id, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT m.member_id, m.player_tag, m.current_name AS member_name, du.discord_user_id, dl.discord_username, dl.discord_display_name "
+            "FROM discord_links dl "
+            "JOIN members m ON m.member_id = dl.member_id "
+            "LEFT JOIN discord_users du ON du.discord_user_id = dl.discord_user_id "
+            "WHERE dl.discord_user_id = ? AND dl.is_primary = 1",
+            (str(discord_user_id),),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        if close:
+            conn.close()
+
+
 def format_member_reference(member_or_tag, style="plain_name", conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -104,9 +122,12 @@ def format_member_reference(member_or_tag, style="plain_name", conn=None):
         username = member.get("discord_username") or member.get("discord_display_name")
         if style == "name_with_mention" and user_id:
             return f"{name} (<@{user_id}>)"
-        if style == "name_with_handle" and username:
-            handle = username if str(username).startswith("@") else f"@{username}"
-            return f"{name} ({handle})"
+        if style == "name_with_handle":
+            if user_id:
+                return f"{name} (<@{user_id}>)"
+            if username:
+                handle = username if str(username).startswith("@") else f"@{username}"
+                return f"{name} ({handle})"
         return name
     finally:
         if close:
@@ -213,6 +234,7 @@ def get_system_status(conn=None):
         from storage.roster import get_clan_roster_summary
         db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
         schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
+        schema_display = f"V2 baseline (migration v{schema_version})"
         counts = conn.execute(
             "SELECT "
             "(SELECT COUNT(*) FROM members) AS members_total, "
@@ -260,6 +282,7 @@ def get_system_status(conn=None):
             "db_path": db_path,
             "db_size_bytes": size_bytes,
             "schema_version": schema_version,
+            "schema_display": schema_display,
             "counts": dict(counts),
             "roster_summary": roster_summary,
             "freshness": freshness,

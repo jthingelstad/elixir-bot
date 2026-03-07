@@ -1,4 +1,5 @@
 import asyncio
+import re
 import os
 from datetime import datetime, timezone
 
@@ -96,6 +97,139 @@ def _clan_status_mode(text: str) -> str | None:
     return None
 
 
+def _is_roster_join_dates_request(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    return normalized in {
+        "who are the members of the clan and when did they join?",
+        "who are the members of the clan and when did they join",
+        "who is in the clan and when did they join?",
+        "who is in the clan and when did they join",
+        "list the clan members and when they joined",
+        "list clan members and join dates",
+        "show clan members and join dates",
+        "roster with join dates",
+    }
+
+
+def _is_kick_risk_request(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    return normalized in {
+        "who is at risk of being kicked based on participation thresholds?",
+        "who is at risk of being kicked based on participation thresholds",
+        "who is at risk of being kicked?",
+        "who is at risk of being kicked",
+        "who is at kick risk?",
+        "who is at kick risk",
+        "who should be kicked for inactivity?",
+        "who should be kicked for inactivity",
+        "which members are inactive for more than 1 week?",
+        "which members are inactive for more than 1 week",
+        "which members are inactive for more than a week?",
+        "which members are inactive for more than a week",
+    }
+
+
+def _is_top_war_contributors_request(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    return normalized in {
+        "who are the top 5 contributors to clan wars this season?",
+        "who are the top 5 contributors to clan wars this season",
+        "who are the top war contributors this season?",
+        "who are the top war contributors this season",
+        "top war contributors this season",
+        "show top war contributors this season",
+        "who are the top contributors to clan wars this season?",
+        "who are the top contributors to clan wars this season",
+    }
+
+
+def _is_member_deck_request(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    if "deck" not in normalized:
+        return False
+    return any(
+        phrase in normalized
+        for phrase in (
+            "what cards are in",
+            "what cards were in",
+            "current deck",
+            "show",
+            "what is in",
+            "what's in",
+            "deck for",
+            "deck of",
+        )
+    )
+
+
+def _resolve_member_candidate(query: str):
+    matches = db.resolve_member(query, limit=3)
+    if not matches:
+        return None, f"I couldn't find a clan member matching {query}."
+    exactish = [item for item in matches if item.get("match_score", 0) >= 850]
+    if len(exactish) == 1:
+        return exactish[0], None
+    if len(matches) == 1:
+        return matches[0], None
+    top = matches[0]
+    second = matches[1]
+    if (top.get("match_score", 0) - second.get("match_score", 0)) >= 100:
+        return top, None
+    choices = ", ".join(
+        item.get("member_ref_with_handle") or item.get("current_name") or item["player_tag"]
+        for item in matches[:3]
+    )
+    return None, f"I couldn't tell which member you meant. Top matches: {choices}"
+
+
+def _extract_member_deck_target(text: str, message):
+    normalized = " ".join((text or "").strip().lower().split())
+    if "my deck" in normalized:
+        linked = db.get_linked_member_for_discord_user(message.author.id)
+        if linked:
+            return linked["player_tag"]
+    mentioned_users = [
+        user for user in getattr(message, "mentions", [])
+        if getattr(user, "id", None) != getattr(getattr(bot, "user", None), "id", None)
+    ]
+    if len(mentioned_users) == 1:
+        linked = db.get_linked_member_for_discord_user(mentioned_users[0].id)
+        if linked:
+            return linked["player_tag"]
+        for candidate in (
+            getattr(mentioned_users[0], "display_name", None),
+            getattr(mentioned_users[0], "global_name", None),
+            getattr(mentioned_users[0], "name", None),
+        ):
+            if candidate:
+                return candidate
+    handles = re.findall(r"(?<!\S)@([A-Za-z0-9_.-]{2,32})", text or "")
+    if handles:
+        return f"@{handles[0]}"
+    return None
+
+
+def _build_member_deck_report(member_query: str):
+    member, error = _resolve_member_candidate(member_query)
+    if error:
+        return error
+    deck = db.get_member_current_deck(member["player_tag"])
+    label = member.get("member_ref_with_handle") or member.get("member_ref") or member.get("current_name") or member["player_tag"]
+    if not deck or not deck.get("cards"):
+        return f"I don't have a stored current deck yet for {label}."
+    lines = [f"**Current Deck for {label}**"]
+    for card in deck.get("cards") or []:
+        card_name = card.get("name") or "Unknown Card"
+        card_level = card.get("level")
+        if card_level is None:
+            lines.append(f"- {card_name}")
+        else:
+            lines.append(f"- {card_name} — Level {card_level}")
+    if deck.get("fetched_at"):
+        lines.append(f"_Snapshot: {_fmt_iso_short(deck['fetched_at'])}_")
+    return "\n".join(lines)
+
+
 def _is_help_request(text: str) -> bool:
     normalized = " ".join((text or "").strip().lower().split())
     return normalized in {
@@ -107,6 +241,17 @@ def _is_help_request(text: str) -> bool:
         "what can you do",
         "what do you do",
     }
+
+
+def _fallback_channel_response(question: str, workflow: str) -> str:
+    normalized = " ".join((question or "").strip().lower().split())
+    if "war participation rate" in normalized:
+        return "I don't have enough recent war participation data to answer that reliably yet."
+    if "what cards are in my deck" in normalized or "current deck" in normalized:
+        return "I couldn't build a clean deck answer just now. Try again in a moment."
+    if workflow == "clanops":
+        return "I couldn't produce a clean answer from the data I have. Try asking a narrower clan ops question."
+    return "I couldn't produce a clean answer just now. Try again in a moment."
 
 
 def _fmt_iso_short(value):
@@ -163,6 +308,12 @@ def _fmt_num(value, digits=0):
     return f"{value:,}"
 
 
+def _status_badge(ok):
+    if ok is None:
+        return "⚪"
+    return "🟢" if ok else "🔴"
+
+
 def _member_label(member):
     return (
         member.get("member_ref")
@@ -200,11 +351,78 @@ def _job_next_runs():
 
 
 async def _reply_text(message, content):
+    def _discord_safe_content(text: str) -> str:
+        text = text or ""
+
+        def _replace_image(match):
+            alt = (match.group(1) or "").strip()
+            url = (match.group(2) or "").strip()
+            return f"{alt}: {url}" if alt else url
+
+        return re.sub(r"!\[([^\]]*)\]\((https?://[^)]+)\)", _replace_image, text)
+
+    content = _discord_safe_content(content)
     if len(content) > 2000:
         for chunk in [content[i:i + 1990] for i in range(0, len(content), 1990)]:
             await message.reply(chunk)
     else:
         await message.reply(content)
+
+
+def _build_roster_join_dates_report():
+    members = db.list_members()
+    lines = ["**Clan Roster + Join Dates**"]
+    for index, member in enumerate(members, start=1):
+        name = member.get("current_name") or member.get("member_name") or member.get("player_tag") or "Unknown"
+        role = member.get("role") or "member"
+        joined = member.get("joined_date")
+        suffix = f"joined {joined}" if joined else "join date not tracked yet"
+        lines.append(f"{index}. {name} ({role}) — {suffix}")
+    return "\n".join(lines)
+
+
+def _build_kick_risk_report():
+    risk = db.get_members_at_risk(
+        inactivity_days=7,
+        min_donations_week=0,
+        require_war_participation=False,
+        tenure_grace_days=0,
+    )
+    members = (risk or {}).get("members") or []
+    lines = ["**Kick Risk (Inactive 7+ Days)**"]
+    if not members:
+        lines.append("No active members are currently over the 7-day inactivity threshold.")
+        return "\n".join(lines)
+
+    for member in members:
+        name = _member_label(member)
+        inactive_reason = next(
+            (reason for reason in (member.get("reasons") or []) if reason.get("type") == "inactive"),
+            None,
+        )
+        detail = inactive_reason.get("detail") if inactive_reason else "inactive 7+ days"
+        lines.append(f"- {name} — {detail}")
+    return "\n".join(lines)
+
+
+def _build_top_war_contributors_report(limit=5):
+    summary = db.get_war_season_summary(top_n=limit)
+    if not summary:
+        return "**Top War Contributors**\nNo current war season data is available yet."
+
+    season_id = summary.get("season_id")
+    contributors = summary.get("top_contributors") or []
+    lines = [f"**Top War Contributors (Season {season_id})**"]
+    if not contributors:
+        lines.append("No war contributor data is available yet for this season.")
+        return "\n".join(lines)
+
+    for index, member in enumerate(contributors, start=1):
+        name = _member_label(member)
+        fame = member.get("total_fame", 0)
+        races = member.get("races_played", 0)
+        lines.append(f"{index}. {name} — {fame:,} fame across {races} race(s)")
+    return "\n".join(lines)
 
 
 def _build_status_report():
@@ -219,35 +437,40 @@ def _build_status_report():
     for item in (data.get("raw_payloads_by_endpoint") or [])[:4]:
         endpoint_bits.append(f"{item['endpoint']}={item['count']}")
     endpoint_summary = ", ".join(endpoint_bits) or "none"
+    scheduler_badge = "🟢" if scheduler.running else "🔴"
+    discord_badge = "🟢" if runtime["env"]["has_discord_token"] else "🔴"
+    openai_env_badge = "🟢" if runtime["env"]["has_openai_api_key"] else "🔴"
+    cr_env_badge = "🟢" if runtime["env"]["has_cr_api_key"] else "🔴"
+    schema_display = data.get("schema_display") or f"v{data.get('schema_version')}"
     lines = [
         "**Elixir Status**",
-        f"- Build: `{elixir_agent.BUILD_HASH}`",
-        f"- Uptime: {_fmt_relative(runtime.get('started_at'))} (since {_fmt_iso_short(runtime.get('started_at'))})",
-        f"- Scheduler: {'running' if scheduler.running else 'stopped'}",
-        f"- DB: `{os.path.basename(data.get('db_path') or 'n/a')}` | schema v{data.get('schema_version')} | {_fmt_bytes(data.get('db_size_bytes'))} | active members {roster.get('active_members', 0)}/50",
-        f"- Data freshness: roster {_fmt_relative(freshness.get('member_state_at'))}, profiles {_fmt_relative(freshness.get('player_profile_at'))}, battles {_fmt_relative(freshness.get('battle_fact_at'))}, war {_fmt_relative(freshness.get('war_state_at'))}",
-        f"- Data counts: raw payloads {data.get('counts', {}).get('raw_payload_count', 0)}, battle facts {data.get('counts', {}).get('battle_fact_count', 0)}, messages {data.get('counts', {}).get('message_count', 0)}, discord links {data.get('counts', {}).get('discord_links', 0)}",
-        f"- Raw ingest: latest {((data.get('latest_raw_payload') or {}).get('endpoint') or 'n/a')} @ {_fmt_relative((data.get('latest_raw_payload') or {}).get('fetched_at'))}; endpoints {endpoint_summary}",
-        f"- Player intel backlog: {data.get('stale_player_intel_targets', 0)} stale target(s)",
-        f"- CR API: last {(api.get('last_endpoint') or 'n/a')} ({api.get('last_entity_key') or '-'}) {_fmt_relative(api.get('last_call_at'))}; status {api.get('last_status_code') or 'n/a'}; {'ok' if api.get('last_ok') else 'error' if api.get('last_ok') is not None else 'n/a'}; {api.get('last_duration_ms') or 'n/a'}ms; total {api.get('call_count', 0)} calls / {api.get('error_count', 0)} errors",
-        f"- OpenAI: last {(openai.get('last_workflow') or 'n/a')} via {(openai.get('last_model') or 'n/a')} {_fmt_relative(openai.get('last_call_at'))}; {'ok' if openai.get('last_ok') else 'error' if openai.get('last_ok') is not None else 'n/a'}; {openai.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {openai.get('last_prompt_tokens') or 'n/a'}/{openai.get('last_completion_tokens') or 'n/a'}/{openai.get('last_total_tokens') or 'n/a'}; total {openai.get('call_count', 0)} calls / {openai.get('error_count', 0)} errors",
-        f"- Env: Discord {'ok' if runtime['env']['has_discord_token'] else 'missing'}, OpenAI {'ok' if runtime['env']['has_openai_api_key'] else 'missing'}, CR {'ok' if runtime['env']['has_cr_api_key'] else 'missing'}",
+        f"🤖 Build: `{elixir_agent.BUILD_HASH}`",
+        f"⏱️ Uptime: {_fmt_relative(runtime.get('started_at'))} (since {_fmt_iso_short(runtime.get('started_at'))})",
+        f"{scheduler_badge} Scheduler: {'running' if scheduler.running else 'stopped'}",
+        f"🗄️ DB: `{os.path.basename(data.get('db_path') or 'n/a')}` | schema {schema_display} | {_fmt_bytes(data.get('db_size_bytes'))} | active members {roster.get('active_members', 0)}/50",
+        f"🧾 Data freshness: roster {_fmt_relative(freshness.get('member_state_at'))}, profiles {_fmt_relative(freshness.get('player_profile_at'))}, battles {_fmt_relative(freshness.get('battle_fact_at'))}, war {_fmt_relative(freshness.get('war_state_at'))}",
+        f"📊 Data counts: raw payloads {data.get('counts', {}).get('raw_payload_count', 0)}, battle facts {data.get('counts', {}).get('battle_fact_count', 0)}, messages {data.get('counts', {}).get('message_count', 0)}, discord links {data.get('counts', {}).get('discord_links', 0)}",
+        f"📥 Raw ingest: latest {((data.get('latest_raw_payload') or {}).get('endpoint') or 'n/a')} @ {_fmt_relative((data.get('latest_raw_payload') or {}).get('fetched_at'))}; endpoints {endpoint_summary}",
+        f"🎯 Player intel backlog: {data.get('stale_player_intel_targets', 0)} stale target(s)",
+        f"{_status_badge(api.get('last_ok'))} CR API: last {(api.get('last_endpoint') or 'n/a')} ({api.get('last_entity_key') or '-'}) {_fmt_relative(api.get('last_call_at'))}; status {api.get('last_status_code') or 'n/a'}; {'ok' if api.get('last_ok') else 'error' if api.get('last_ok') is not None else 'n/a'}; {api.get('last_duration_ms') or 'n/a'}ms; total {api.get('call_count', 0)} calls / {api.get('error_count', 0)} errors",
+        f"{_status_badge(openai.get('last_ok'))} OpenAI: last {(openai.get('last_workflow') or 'n/a')} via {(openai.get('last_model') or 'n/a')} {_fmt_relative(openai.get('last_call_at'))}; {'ok' if openai.get('last_ok') else 'error' if openai.get('last_ok') is not None else 'n/a'}; {openai.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {openai.get('last_prompt_tokens') or 'n/a'}/{openai.get('last_completion_tokens') or 'n/a'}/{openai.get('last_total_tokens') or 'n/a'}; total {openai.get('call_count', 0)} calls / {openai.get('error_count', 0)} errors",
+        f"🔐 Env: Discord {discord_badge}, OpenAI {openai_env_badge}, CR {cr_env_badge}",
     ]
     if data.get("latest_signal"):
         lines.append(
-            f"- Latest signal log: {data['latest_signal']['signal_type']} on {data['latest_signal']['signal_date']}"
+            f"📣 Latest signal log: {data['latest_signal']['signal_type']} on {data['latest_signal']['signal_date']}"
         )
     if data.get("current_season_id") is not None:
-        lines.append(f"- Current war season id: {data['current_season_id']}")
+        lines.append(f"🏁 Current war season id: {data['current_season_id']}")
     if jobs:
-        lines.append("- Jobs:")
+        lines.append("🛠️ Jobs:")
         for name in ("heartbeat", "player_intel_refresh", "site_data_refresh", "site_content_cycle", "clanops_weekly_review"):
             state = jobs.get(name) or {}
             next_run = next((item["next_run"] for item in _job_next_runs() if item["id"] == name), "n/a")
             last = state.get("last_success_at") or state.get("last_failure_at") or state.get("last_started_at")
             summary = state.get("last_summary") or state.get("last_error") or "n/a"
             lines.append(
-                f"  - `{name}` next {next_run} | last {_fmt_relative(last)} | {summary}"
+                f"  {_status_badge(state.get('last_error') is None if last else None)} `{name}` next {next_run} | last {_fmt_relative(last)} | {summary}"
             )
     return "\n".join(lines)
 

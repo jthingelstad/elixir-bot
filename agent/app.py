@@ -16,15 +16,17 @@ from agent.core import (
     TOOL_RESULT_MAX_ITEMS,
     _build_system_prompt,
     _get_client,
+    _model_for_workflow,
     log,
     runtime_status,
 )
 
 
-def _create_chat_completion(*, workflow, messages, model="gpt-4o", temperature=0.7, max_tokens=800, timeout=60, tools=None, tool_choice=None):
+def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, max_tokens=800, timeout=60, tools=None, tool_choice=None):
     started = time.perf_counter()
+    selected_model = _model_for_workflow(workflow, model=model)
     kwargs = {
-        "model": model,
+        "model": selected_model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
@@ -40,7 +42,7 @@ def _create_chat_completion(*, workflow, messages, model="gpt-4o", temperature=0
         runtime_status.record_openai_call(
             workflow,
             ok=True,
-            model=model,
+            model=selected_model,
             duration_ms=round((time.perf_counter() - started) * 1000, 2),
             prompt_tokens=getattr(usage, "prompt_tokens", None),
             completion_tokens=getattr(usage, "completion_tokens", None),
@@ -51,7 +53,7 @@ def _create_chat_completion(*, workflow, messages, model="gpt-4o", temperature=0
         runtime_status.record_openai_call(
             workflow,
             ok=False,
-            model=model,
+            model=selected_model,
             error=exc,
             duration_ms=round((time.perf_counter() - started) * 1000, 2),
         )

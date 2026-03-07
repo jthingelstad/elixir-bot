@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from db import (
     _canon_tag,
+    _card_level,
     _current_joined_at,
     _ensure_member,
     _get_current_membership,
@@ -202,7 +203,7 @@ def resolve_member(query, status="active", limit=5, conn=None):
                 score, source = 900, "alias_exact"
             elif discord_username == query_handle:
                 score, source = 875, "discord_username_exact"
-            elif discord_display == query_lower:
+            elif discord_display == query_lower or discord_display == query_handle:
                 score, source = 850, "discord_display_exact"
             elif name.startswith(query_lower):
                 score, source = 775, "current_name_prefix"
@@ -453,9 +454,17 @@ def get_member_current_deck(tag, conn=None):
         ).fetchone()
         if not row or not row["current_deck_json"]:
             return None
+        cards = []
+        for raw_card in json.loads(row["current_deck_json"]):
+            card = dict(raw_card)
+            display_level = _card_level(card)
+            if display_level is not None:
+                card["api_level"] = card.get("level")
+                card["level"] = display_level
+            cards.append(card)
         return {
             "fetched_at": row["fetched_at"],
-            "cards": json.loads(row["current_deck_json"]),
+            "cards": cards,
         }
     finally:
         if close:

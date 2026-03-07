@@ -107,11 +107,46 @@ def _tool_names(tool_defs):
     return {t["function"]["name"] for t in (tool_defs or [])}
 
 
+def _normalize_message(message):
+    if isinstance(message, dict):
+        return message
+    if hasattr(message, "model_dump"):
+        dumped = message.model_dump(exclude_none=True)
+        if isinstance(dumped, dict):
+            return dumped
+
+    normalized = {
+        "role": getattr(message, "role", None),
+        "content": getattr(message, "content", None),
+    }
+    tool_calls = getattr(message, "tool_calls", None)
+    if tool_calls:
+        normalized_calls = []
+        for tool_call in tool_calls:
+            if hasattr(tool_call, "model_dump"):
+                normalized_calls.append(tool_call.model_dump(exclude_none=True))
+                continue
+            fn = getattr(tool_call, "function", None)
+            normalized_calls.append(
+                {
+                    "id": getattr(tool_call, "id", None),
+                    "type": getattr(tool_call, "type", "function"),
+                    "function": {
+                        "name": getattr(fn, "name", None),
+                        "arguments": getattr(fn, "arguments", None),
+                    },
+                }
+            )
+        normalized["tool_calls"] = normalized_calls
+    return {key: value for key, value in normalized.items() if value is not None}
+
+
 def _estimate_message_chars(messages):
     """Cheap prompt-size proxy for telemetry."""
     total = 0
     for m in messages:
-        content = m.get("content", "")
+        normalized = _normalize_message(m)
+        content = normalized.get("content", "")
         if isinstance(content, str):
             total += len(content)
         elif isinstance(content, list):
@@ -196,7 +231,6 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         resp = _create_chat_completion(
             workflow=workflow,
             messages=call_messages,
-            model="gpt-4o",
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=60,
@@ -268,7 +302,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             return parsed
 
         # Process tool calls
-        messages.append(choice.message)
+        messages.append(_normalize_message(choice.message))
         for tool_call in choice.message.tool_calls:
             fn_name = tool_call.function.name
             try:

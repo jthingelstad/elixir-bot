@@ -9,6 +9,7 @@ from db import (
     _ensure_thread,
     _json_or_none,
     _normalize_scope,
+    _rowdicts,
     _utcnow,
     get_connection,
 )
@@ -240,6 +241,64 @@ def list_channel_messages(channel_id, limit=10, author_type=None, conn=None):
                 "recorded_at": msg["created_at"],
             })
         return out
+    finally:
+        if close:
+            conn.close()
+
+
+def record_prompt_failure(question, failure_type, failure_stage, *, workflow=None, channel_id=None,
+                          channel_name=None, discord_user_id=None, discord_message_id=None,
+                          detail=None, result_preview=None, openai_last_error=None,
+                          openai_last_model=None, openai_last_call_at=None, raw_json=None,
+                          conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO prompt_failures (recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, openai_last_error, openai_last_model, openai_last_call_at, raw_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                _utcnow(),
+                workflow,
+                failure_type,
+                failure_stage,
+                str(channel_id) if channel_id is not None else None,
+                channel_name,
+                str(discord_user_id) if discord_user_id is not None else None,
+                str(discord_message_id) if discord_message_id is not None else None,
+                question or "",
+                detail,
+                result_preview,
+                openai_last_error,
+                openai_last_model,
+                openai_last_call_at,
+                _json_or_none(raw_json),
+            ),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        if close:
+            conn.close()
+
+
+def list_prompt_failures(limit=20, workflow=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        if workflow:
+            rows = conn.execute(
+                "SELECT failure_id, recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, openai_last_error, openai_last_model, openai_last_call_at, raw_json "
+                "FROM prompt_failures WHERE workflow = ? ORDER BY recorded_at DESC, failure_id DESC LIMIT ?",
+                (workflow, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT failure_id, recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, openai_last_error, openai_last_model, openai_last_call_at, raw_json "
+                "FROM prompt_failures ORDER BY recorded_at DESC, failure_id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return _rowdicts(rows)
     finally:
         if close:
             conn.close()

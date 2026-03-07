@@ -80,6 +80,65 @@ def test_on_message_routes_interactive_channel_when_mentioned():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
+    message = _make_message(200, "clan-ops", "<@999> What is my current war participation rate over the last 4 weeks?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={}),
+        patch("elixir.db.save_message"),
+        patch("elixir.db.record_prompt_failure", return_value=17) as mock_failure,
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch("elixir.elixir_agent.respond_in_channel", return_value=None),
+        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
+        patch("elixir.runtime_status.snapshot", return_value={
+            "openai": {
+                "last_error": "Error code: 429 rate_limit_exceeded",
+                "last_model": "gpt-4.1-mini",
+                "last_call_at": "2026-03-07T19:12:00",
+            }
+        }),
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    message.reply.assert_awaited_once_with(
+        "I don't have enough recent war participation data to answer that reliably yet."
+    )
+    mock_failure.assert_called_once_with(
+        "What is my current war participation rate over the last 4 weeks?",
+        "agent_none",
+        "respond_in_channel",
+        workflow="clanops",
+        channel_id=200,
+        channel_name="clan-ops",
+        discord_user_id=123,
+        discord_message_id=555,
+        detail=None,
+        result_preview=None,
+        openai_last_error="Error code: 429 rate_limit_exceeded",
+        openai_last_model="gpt-4.1-mini",
+        openai_last_call_at="2026-03-07T19:12:00",
+        raw_json=None,
+    )
+    mock_share.assert_not_awaited()
+    mock_process.assert_not_awaited()
+
+
 def test_on_message_routes_clanops_proactively_without_mention():
     message = _make_message(200, "clan-ops", "I think we need to review promotions this week.")
 
@@ -115,6 +174,58 @@ def test_on_message_routes_clanops_proactively_without_mention():
     assert mock_save.call_args_list[0].args[0] == "channel_user:200:123"
     message.reply.assert_awaited_once_with("I can pull the current promotion candidates if you want.")
     mock_share.assert_awaited_once()
+    mock_process.assert_not_awaited()
+
+
+def test_on_message_handles_explicit_member_deck_request_without_llm():
+    message = _make_message(200, "clan-ops", "<@999> what cards are in @Vijay deck?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.db.resolve_member", return_value=[{
+            "player_tag": "#DEF456",
+            "current_name": "Vijay",
+            "member_ref": "Vijay",
+            "member_ref_with_handle": "Vijay (<@456>)",
+            "match_score": 850,
+            "match_source": "discord_display_exact",
+        }]) as mock_resolve,
+        patch("elixir.db.get_member_current_deck", return_value={
+            "fetched_at": "2026-03-07T12:00:00",
+            "cards": [
+                {"name": "Knight", "level": 16},
+                {"name": "Fireball", "level": 16},
+            ],
+        }),
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_resolve.assert_called_once_with("@Vijay", limit=3)
+    message.reply.assert_awaited_once_with(
+        "**Current Deck for Vijay (<@456>)**\n"
+        "- Knight — Level 16\n"
+        "- Fireball — Level 16\n"
+        "_Snapshot: 2026-03-07 06:00 AM CT_"
+    )
+    assert mock_save.call_count == 2
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "member_deck_report"
+    mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
 
@@ -280,6 +391,117 @@ def test_on_message_handles_interactive_help_directly():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_handles_roster_join_dates_directly():
+    message = _make_message(200, "clan-ops", "Who are the members of the clan and when did they join?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch(
+            "elixir._build_roster_join_dates_report",
+            return_value="**Clan Roster + Join Dates**\n1. King Levy (coLeader) — joined 2024-01-15",
+        ) as mock_build,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_build.assert_called_once_with()
+    message.reply.assert_awaited_once_with(
+        "**Clan Roster + Join Dates**\n1. King Levy (coLeader) — joined 2024-01-15"
+    )
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "roster_join_dates_report"
+    mock_respond.assert_not_called()
+    mock_process.assert_not_awaited()
+
+
+def test_on_message_handles_kick_risk_directly():
+    message = _make_message(200, "clan-ops", "Who is at risk of being kicked based on participation thresholds?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch(
+            "elixir._build_kick_risk_report",
+            return_value="**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago",
+        ) as mock_build,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_build.assert_called_once_with()
+    message.reply.assert_awaited_once_with(
+        "**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago"
+    )
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "kick_risk_report"
+    mock_respond.assert_not_called()
+    mock_process.assert_not_awaited()
+
+
+def test_on_message_handles_top_war_contributors_directly():
+    message = _make_message(200, "clan-ops", "Who are the top 5 contributors to clan wars this season?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch(
+            "elixir._build_top_war_contributors_report",
+            return_value="**Top War Contributors (Season 130)**\n1. King Levy — 3,200 fame across 4 race(s)",
+        ) as mock_build,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_build.assert_called_once_with()
+    message.reply.assert_awaited_once_with(
+        "**Top War Contributors (Season 130)**\n1. King Levy — 3,200 fame across 4 race(s)"
+    )
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "top_war_contributors_report"
+    mock_respond.assert_not_called()
+    mock_process.assert_not_awaited()
+
+
 def test_build_clan_status_report_summarizes_operational_clan_state():
     with (
         patch("elixir.db.get_clan_roster_summary", return_value={
@@ -289,7 +511,7 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
             "donations_week_total": 1340,
         }),
         patch("elixir.db.list_members", return_value=[
-            {"name": "King Levy", "member_ref": "King Levy (@jamie)", "donations_week": 220, "trophies": 9000, "clan_rank": 1},
+            {"name": "King Levy", "member_ref": "King Levy (<@1474760692992180429>)", "donations_week": 220, "trophies": 9000, "clan_rank": 1},
             {"name": "Finn", "member_ref": "Finn", "donations_week": 180, "trophies": 8500, "clan_rank": 2},
             {"name": "Vijay", "member_ref": "Vijay", "donations_week": 140, "trophies": 8100, "clan_rank": 3},
         ]),
@@ -308,7 +530,7 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
             "total_clan_fame": 23456,
             "fame_per_active_member": 1116.95,
             "top_contributors": [
-                {"member_ref": "King Levy (@jamie)", "total_fame": 3200},
+                {"member_ref": "King Levy (<@1474760692992180429>)", "total_fame": 3200},
                 {"member_ref": "Finn", "total_fame": 3100},
             ],
             "nonparticipants": [{"member_ref": "Vijay"}],
@@ -331,10 +553,77 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
     assert report.startswith("**POAP KINGS Status**")
     assert "Roster: 21/50 members | 29 open" in report
     assert "weekly donations 1,400" in report
-    assert "top donors King Levy (@jamie) 220, Finn 180, Vijay 140" in report
+    assert "top donors King Levy (<@1474760692992180429>) 220, Finn 180, Vijay 140" in report
     assert "War now: season 77 | week 2 | state riverRace | rank 1" in report
     assert "Watch list: 1 with no war decks this season | 1 at risk | 1 on losing streaks | 1 joined in last 30d" in report
     assert "War today: 2 used all 4 decks | 3 used some | 2 unused" in report
+
+
+def test_build_roster_join_dates_report_uses_human_fallback_for_missing_dates():
+    with patch("elixir.db.list_members", return_value=[
+        {"current_name": "raquaza", "role": "coLeader", "joined_date": None},
+        {"current_name": "King Levy", "role": "leader", "joined_date": "2024-01-15"},
+    ]):
+        report = elixir._build_roster_join_dates_report()
+
+    assert "raquaza (coLeader) — join date not tracked yet" in report
+    assert "King Levy (leader) — joined 2024-01-15" in report
+
+
+def test_build_kick_risk_report_uses_inactivity_only():
+    with patch("elixir.db.get_members_at_risk", return_value={
+        "members": [
+            {
+                "member_ref": "Vijay",
+                "reasons": [
+                    {"type": "inactive", "detail": "last seen 8 days ago"},
+                    {"type": "low_donations", "detail": "0 donations this week"},
+                ],
+            }
+        ]
+    }) as mock_risk:
+        report = elixir._build_kick_risk_report()
+
+    mock_risk.assert_called_once_with(
+        inactivity_days=7,
+        min_donations_week=0,
+        require_war_participation=False,
+        tenure_grace_days=0,
+    )
+    assert report == "**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago"
+
+
+def test_build_top_war_contributors_report_formats_season_leaders():
+    with patch("elixir.db.get_war_season_summary", return_value={
+        "season_id": 130,
+        "top_contributors": [
+            {"member_ref": "King Levy", "total_fame": 3200, "races_played": 4},
+            {"member_ref": "Vijay", "total_fame": 2800, "races_played": 4},
+        ],
+    }) as mock_summary:
+        report = elixir._build_top_war_contributors_report()
+
+    mock_summary.assert_called_once_with(top_n=5)
+    assert report == (
+        "**Top War Contributors (Season 130)**\n"
+        "1. King Levy — 3,200 fame across 4 race(s)\n"
+        "2. Vijay — 2,800 fame across 4 race(s)"
+    )
+
+
+def test_reply_text_converts_markdown_images_to_discord_friendly_text():
+    message = _make_message(200, "clan-ops", "deck")
+
+    asyncio.run(
+        elixir._reply_text(
+            message,
+            "![Royal Ghost](https://example.com/ghost.png)\n![Witch](https://example.com/witch.png)",
+        )
+    )
+
+    message.reply.assert_awaited_once_with(
+        "Royal Ghost: https://example.com/ghost.png\nWitch: https://example.com/witch.png"
+    )
 
 
 def test_build_clan_status_short_report_is_compact():
@@ -354,7 +643,7 @@ def test_build_clan_status_short_report_is_compact():
         patch("elixir.db.get_war_season_summary", return_value={
             "fame_per_active_member": 1116.95,
             "top_contributors": [
-                {"member_ref": "King Levy (@jamie)", "total_fame": 3200},
+                {"member_ref": "King Levy (<@1474760692992180429>)", "total_fame": 3200},
                 {"member_ref": "Finn", "total_fame": 3100},
             ],
         }),
@@ -366,7 +655,7 @@ def test_build_clan_status_short_report_is_compact():
     assert report.startswith("**POAP KINGS Status (Short)**")
     assert "Roster: 21/50 | open 29" in report
     assert "War: season 77 | week 2 | rank 1 | fame 12,345" in report
-    assert "Season: fame/member 1,117.0 | top King Levy (@jamie) 3,200, Finn 3,100" in report
+    assert "Season: fame/member 1,117.0 | top King Levy (<@1474760692992180429>) 3,200, Finn 3,100" in report
     assert "Watch: 1 at risk | 1 slumping" in report
 
 
@@ -376,7 +665,7 @@ def test_build_weekly_clanops_review_tags_leaders_and_summarizes_actions():
         patch("elixir.db.get_promotion_candidates", return_value={
             "composition": {"elders": 5, "target_elder_min": 4, "target_elder_max": 6, "elder_capacity_remaining": 1},
             "recommended": [
-                {"member_ref": "King Levy (@jamie)", "donations": 220, "war_races_played": 4, "tenure_days": 90, "days_inactive": 0},
+                {"member_ref": "King Levy (<@1474760692992180429>)", "donations": 220, "war_races_played": 4, "tenure_days": 90, "days_inactive": 0},
             ],
             "borderline": [
                 {"member_ref": "Finn", "donations": 120, "war_races_played": 2, "tenure_days": 20, "days_inactive": 1},
@@ -396,7 +685,7 @@ def test_build_weekly_clanops_review_tags_leaders_and_summarizes_actions():
 
     assert report.startswith(f"<@&{elixir.LEADER_ROLE_ID}>")
     assert "**Weekly ClanOps Review**" in report
-    assert "Promote now (1): King Levy (@jamie) — 220 donations, 4 war races, 90d tenure, seen 0d ago" in report
+    assert "Promote now (1): King Levy (<@1474760692992180429>) — 220 donations, 4 war races, 90d tenure, seen 0d ago" in report
     assert "Borderline (1): Finn — 120 donations, 2 war races, 20d tenure, seen 1d ago" in report
     assert "Demotion/kick watch (1): Vijay — last seen 8 days ago; 0 donations this week" in report
     assert "No war decks this season (1): Chanco" in report

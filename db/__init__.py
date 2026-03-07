@@ -31,6 +31,67 @@ WAR_RETENTION_DAYS = 180
 RAW_PAYLOAD_RETENTION_DAYS = 90
 CONVERSATION_RETENTION_DAYS = 30
 CONVERSATION_MAX_PER_SCOPE = 20
+
+_V2_SCHEMA_CORE = {
+    "members": {
+        "member_id",
+        "player_tag",
+        "current_name",
+        "status",
+        "first_seen_at",
+        "last_seen_at",
+    },
+    "discord_users": {
+        "discord_user_id",
+        "username",
+        "global_name",
+        "display_name",
+        "first_seen_at",
+        "last_seen_at",
+    },
+    "discord_links": {
+        "discord_link_id",
+        "discord_user_id",
+        "member_id",
+        "linked_at",
+        "source",
+        "confidence",
+        "is_primary",
+    },
+    "discord_channels": {
+        "channel_id",
+        "channel_name",
+        "channel_kind",
+        "first_seen_at",
+        "last_seen_at",
+    },
+    "conversation_threads": {
+        "thread_id",
+        "scope_type",
+        "scope_key",
+        "channel_id",
+        "discord_user_id",
+        "member_id",
+        "created_at",
+        "last_active_at",
+    },
+    "messages": {
+        "message_id",
+        "thread_id",
+        "channel_id",
+        "discord_user_id",
+        "member_id",
+        "author_type",
+        "workflow",
+        "event_type",
+        "content",
+        "summary",
+        "created_at",
+        "raw_json",
+    },
+}
+
+
 def _utcnow() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -130,7 +191,12 @@ def _build_form_summary(wins: int, losses: int, draws: int, sample_size: int, la
 
 def _card_level(card: dict) -> Optional[int]:
     level = card.get("level")
-    return level if isinstance(level, int) else None
+    if not isinstance(level, int):
+        return None
+    max_level = card.get("maxLevel")
+    if not isinstance(max_level, int) or max_level <= 0 or max_level > 16:
+        return level
+    return level + max(0, 16 - max_level)
 
 
 def _aggregate_card_usage_from_battle_facts(rows: Iterable[sqlite3.Row]) -> tuple[int, list[dict]]:
@@ -313,6 +379,40 @@ def _store_raw_payload(conn: sqlite3.Connection, endpoint: str, entity_key: str,
         "INSERT INTO raw_api_payloads (endpoint, entity_key, fetched_at, payload_hash, payload_json) VALUES (?, ?, ?, ?, ?)",
         (endpoint, entity_key, _utcnow(), payload_hash, payload_json),
     )
+
+
+def _existing_tables(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    return {row["name"] for row in rows}
+
+
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row["name"] for row in rows}
+
+
+def _schema_is_compatible(conn: sqlite3.Connection) -> bool:
+    tables = _existing_tables(conn)
+    if not tables:
+        return True
+
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version > len(_MIGRATIONS):
+        return False
+
+    for table_name, expected_columns in _V2_SCHEMA_CORE.items():
+        if table_name not in tables:
+            return False
+        if not expected_columns.issubset(_table_columns(conn, table_name)):
+            return False
+    return True
+
+
+def _legacy_backup_path(path: str) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    return f"{path}.legacy-v2-backup-{stamp}"
 
 
 def _migration_0(conn: sqlite3.Connection) -> None:
@@ -706,7 +806,35 @@ def _migration_0(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0]
+def _migration_1(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS prompt_failures (
+            failure_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recorded_at TEXT NOT NULL,
+            workflow TEXT,
+            failure_type TEXT NOT NULL,
+            failure_stage TEXT NOT NULL,
+            channel_id TEXT,
+            channel_name TEXT,
+            discord_user_id TEXT,
+            discord_message_id TEXT,
+            question TEXT NOT NULL,
+            detail TEXT,
+            result_preview TEXT,
+            openai_last_error TEXT,
+            openai_last_model TEXT,
+            openai_last_call_at TEXT,
+            raw_json TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_prompt_failures_recorded_at ON prompt_failures(recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_prompt_failures_workflow ON prompt_failures(workflow, recorded_at DESC);
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
@@ -720,10 +848,26 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
 
 def get_connection(db_path=None):
-    path = db_path or DB_PATH
+    path = os.fspath(db_path or DB_PATH)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    if path != ":memory:" and not _schema_is_compatible(conn):
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        tables = sorted(_existing_tables(conn))
+        backup_path = _legacy_backup_path(path)
+        conn.close()
+        os.replace(path, backup_path)
+        log.warning(
+            "Detected incompatible database schema at %s (user_version=%s, tables=%s); moved it to %s and rebuilding V2 schema",
+            path,
+            version,
+            ", ".join(tables) or "<none>",
+            backup_path,
+        )
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
     _run_migrations(conn)
     return conn
 
