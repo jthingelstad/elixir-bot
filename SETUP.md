@@ -48,35 +48,37 @@ Non-secret config (Discord channel IDs, guild ID, clan tag) lives in prompt file
 
 ## Process Management (launchd)
 
-The bot runs as a **launchd** service, not manually via `python elixir.py`. The plist points at `run.sh`, which activates the venv and execs `python elixir.py`.
+The bot runs as a **launchd** service. The plist at `~/Library/LaunchAgents/com.poapkings.elixir.plist` runs the venv Python binary directly — no shell wrapper scripts involved. launchd is the single owner of the process lifecycle: it starts, stops, and auto-restarts the bot.
+
+**Do not** use `pkill`, `nohup`, or manual `python elixir.py` to manage the bot. Always go through `launchctl`.
 
 ### Starting and stopping
 
 ```bash
-# Stop the bot
+# Stop the bot (also prevents launchd from restarting it)
 launchctl unload ~/Library/LaunchAgents/com.poapkings.elixir.plist
 
-# Start the bot
+# Start the bot (launchd will auto-restart on crash)
 launchctl load ~/Library/LaunchAgents/com.poapkings.elixir.plist
 ```
 
-### Verify it's running (single process)
+### Verify it's running
 
 ```bash
-pgrep -f "python elixir.py"
+launchctl list | grep com.poapkings.elixir
 ```
 
-This should return **exactly one** PID. Zero means it's not running. More than one means duplicates — unload, kill all, then load again:
-
-```bash
-launchctl unload ~/Library/LaunchAgents/com.poapkings.elixir.plist
-pkill -f "python elixir.py"
-launchctl load ~/Library/LaunchAgents/com.poapkings.elixir.plist
-```
+The second column is the exit status — `0` or `-` means healthy, a negative number (e.g. `-15`) means the last run was killed/crashed.
 
 ## Deployment (Updating)
 
-Canonical update procedure:
+Use the upgrade script, which stops the service, pulls, updates deps, and restarts:
+
+```bash
+bash scripts/upgrade.sh
+```
+
+Or do it manually:
 
 ```bash
 # 1. Stop
@@ -94,7 +96,7 @@ pip install -r requirements.txt
 launchctl load ~/Library/LaunchAgents/com.poapkings.elixir.plist
 
 # 5. Verify
-pgrep -f "python elixir.py"
+launchctl list | grep com.poapkings.elixir
 ```
 
 Database migrations run automatically on startup — no manual schema changes needed.
