@@ -67,7 +67,7 @@ Rules:
 | `cr_knowledge.py` | Static game + clan knowledge injected into LLM system prompt |
 | `prompts.py` | Loads and caches external prompt/config files from `prompts/` |
 | `site_content.py` | JSON content management for poapkings.com (write, validate, commit/push) |
-| `_*` modules | Internal extracted implementation modules used to keep `db.py`, `elixir.py`, and `elixir_agent.py` navigable while preserving their public APIs |
+| `storage/`, `agent/`, `runtime/` | Domain-first implementation packages for persistence, LLM behavior, and Discord runtime; public APIs stay at the root modules |
 
 ## Key Features
 

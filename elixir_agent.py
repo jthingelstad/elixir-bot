@@ -107,7 +107,7 @@ def _load_extracted(relative_path):
 
 # -- Extracted prompt, tool, and workflow modules --------------------------
 
-_load_extracted("_agent_prompts.py")
-_load_extracted("_agent_tools.py")
-_load_extracted("_agent_chat.py")
-_load_extracted("_agent_workflows.py")
+_load_extracted("agent/prompts.py")
+_load_extracted("agent/tools.py")
+_load_extracted("agent/chat.py")
+_load_extracted("agent/workflows.py")
