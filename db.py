@@ -733,9 +733,9 @@ def _load_extracted(relative_path):
 
 # -- Extracted domains ------------------------------------------------------
 
-_load_extracted("_db_roster.py")
-_load_extracted("_db_war.py")
-_load_extracted("_db_player.py")
-_load_extracted("_db_identity.py")
-_load_extracted("_db_messages.py")
-_load_extracted("_db_metadata.py")
+_load_extracted("storage/roster.py")
+_load_extracted("storage/war.py")
+_load_extracted("storage/player.py")
+_load_extracted("storage/identity.py")
+_load_extracted("storage/messages.py")
+_load_extracted("storage/metadata.py")

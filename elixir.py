@@ -69,8 +69,8 @@ def _load_extracted(relative_path):
 
 # -- Extracted helpers and jobs --------------------------------------------
 
-_load_extracted("_elixir_helpers.py")
-_load_extracted("_elixir_jobs.py")
+_load_extracted("runtime/helpers.py")
+_load_extracted("runtime/jobs.py")
 
 @bot.event
 async def on_ready():
