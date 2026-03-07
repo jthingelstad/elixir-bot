@@ -9,6 +9,51 @@ import re
 
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 
+CHANNEL_ROLE_CONFIG = {
+    "announcements": {
+        "workflow": None,
+        "mention_required": False,
+        "allow_proactive": False,
+        "singleton": True,
+        "respond_allowed": False,
+    },
+    "promotion": {
+        "workflow": None,
+        "mention_required": False,
+        "allow_proactive": False,
+        "singleton": True,
+        "respond_allowed": False,
+    },
+    "arena_relay": {
+        "workflow": None,
+        "mention_required": False,
+        "allow_proactive": False,
+        "singleton": True,
+        "respond_allowed": False,
+    },
+    "onboarding": {
+        "workflow": "reception",
+        "mention_required": True,
+        "allow_proactive": False,
+        "singleton": True,
+        "respond_allowed": True,
+    },
+    "interactive": {
+        "workflow": "interactive",
+        "mention_required": True,
+        "allow_proactive": False,
+        "singleton": False,
+        "respond_allowed": True,
+    },
+    "clanops": {
+        "workflow": "clanops",
+        "mention_required": False,
+        "allow_proactive": True,
+        "singleton": False,
+        "respond_allowed": True,
+    },
+}
+
 
 def _load(filename):
     """Load a prompt file and return its contents as a string."""
@@ -48,10 +93,88 @@ def channel_section(channel_name):
     channel_name: e.g. "#elixir", "#leader-lounge", "#reception"
     Returns the text from that channel's heading to the next ## heading (or EOF).
     """
+    for channel in discord_channel_configs():
+        if channel["name"] == channel_name:
+            return channel["section"]
+    return ""
+
+
+def discord_channel_configs():
+    """Parse DISCORD.md channel sections into structured channel config."""
     text = discord()
-    pattern = rf"(## {re.escape(channel_name)}\s*\n.*?)(?=\n## |\Z)"
-    match = re.search(pattern, text, re.DOTALL)
-    return match.group(1).strip() if match else ""
+    heading_matches = list(re.finditer(r"^## (.+?)\s*$", text, re.MULTILINE))
+    channels = []
+
+    for i, match in enumerate(heading_matches):
+        heading = match.group(1).strip()
+        if heading == "Config":
+            continue
+        start = match.start()
+        end = heading_matches[i + 1].start() if i + 1 < len(heading_matches) else len(text)
+        section = text[start:end].strip()
+
+        id_match = re.search(r"^ID:\s*(\d+)\s*$", section, re.MULTILINE)
+        role_match = re.search(r"^Role:\s*([A-Za-z0-9_-]+)\s*$", section, re.MULTILINE)
+        if not id_match or not role_match:
+            continue
+
+        role = role_match.group(1).strip().lower()
+        channel_id = int(id_match.group(1))
+        role_config = CHANNEL_ROLE_CONFIG.get(role, {})
+
+        channels.append(
+            {
+                "name": heading,
+                "id": channel_id,
+                "role": role,
+                "workflow": role_config.get("workflow"),
+                "mention_required": role_config.get("mention_required", True),
+                "allow_proactive": role_config.get("allow_proactive", False),
+                "singleton": role_config.get("singleton", False),
+                "respond_allowed": role_config.get("respond_allowed", True),
+                "section": section,
+            }
+        )
+    return channels
+
+
+def discord_channels_by_id():
+    """Return parsed Discord channel config keyed by numeric channel ID."""
+    return {channel["id"]: channel for channel in discord_channel_configs()}
+
+
+def discord_channels_by_role(role):
+    """Return parsed Discord channel configs for a role."""
+    role = (role or "").strip().lower()
+    return [channel for channel in discord_channel_configs() if channel["role"] == role]
+
+
+def discord_singleton_channel(role):
+    """Return the unique configured channel for a singleton role."""
+    role = (role or "").strip().lower()
+    role_config = CHANNEL_ROLE_CONFIG.get(role, {})
+    if not role_config.get("singleton"):
+        raise ValueError(f"role is not singleton: {role}")
+    channels = discord_channels_by_role(role)
+    if len(channels) != 1:
+        raise ValueError(f"expected exactly one {role} channel, found {len(channels)}")
+    return channels[0]
+
+
+def resolve_channel_reference(value):
+    """Resolve a channel by exact heading name or singleton role."""
+    query = (value or "").strip().lower()
+    if not query:
+        return None
+    for channel in discord_channel_configs():
+        if channel["name"].lower() == query:
+            return channel
+    role_config = CHANNEL_ROLE_CONFIG.get(query)
+    if role_config and role_config.get("singleton"):
+        channels = discord_channels_by_role(query)
+        if len(channels) == 1:
+            return channels[0]
+    return None
 
 
 def knowledge_block():

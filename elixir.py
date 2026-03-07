@@ -28,12 +28,11 @@ log = logging.getLogger("elixir")
 CHICAGO = pytz.timezone("America/Chicago")
 TOKEN = os.getenv("DISCORD_TOKEN")
 _dc = prompts.discord_config()
-ANNOUNCEMENTS_CHANNEL_ID = _dc.get("announcements_channel", 0)
-LEADERSHIP_CHANNEL_ID = _dc.get("leadership_channel", 0)
-RECEPTION_CHANNEL_ID = _dc.get("reception_channel", 0)
 MEMBER_ROLE_ID = _dc.get("member_role", 0)
 BOT_ROLE_ID = _dc.get("bot_role", 0)
 POAPKINGS_REPO = os.path.expanduser(os.getenv("POAPKINGS_REPO_PATH", "../poapkings.com"))
+CLANOPS_PROACTIVE_COOLDOWN_SECONDS = int(os.getenv("CLANOPS_PROACTIVE_COOLDOWN_SECONDS", "900"))
+CHANNEL_CONVERSATION_LIMIT = 20
 
 # Active hours for the heartbeat (Chicago time). Outside this window, heartbeat is skipped.
 HEARTBEAT_START_HOUR = int(os.getenv("HEARTBEAT_START_HOUR", "7"))
@@ -91,9 +90,94 @@ def _match_clan_member(nickname):
 
 
 def _channel_scope(channel) -> str:
-    if channel.id == ANNOUNCEMENTS_CHANNEL_ID:
+    behavior = _get_channel_behavior(channel.id)
+    if behavior and behavior.get("role") == "announcements":
         return "channel:elixir"
     return f"channel:{channel.id}"
+
+
+def _strip_bot_mentions(text: str) -> str:
+    if bot.user is None:
+        return (text or "").strip()
+    return (
+        (text or "")
+        .replace(f"<@{bot.user.id}>", "")
+        .replace(f"<@!{bot.user.id}>", "")
+        .replace(f"<@&{BOT_ROLE_ID}>", "")
+        .strip()
+    )
+
+
+def _is_bot_mentioned(message) -> bool:
+    return bot.user in message.mentions or any(r.id == BOT_ROLE_ID for r in message.role_mentions)
+
+
+def _get_channel_behavior(channel_id):
+    return prompts.discord_channels_by_id().get(channel_id)
+
+
+def _get_singleton_channel(role):
+    return prompts.discord_singleton_channel(role)
+
+
+def _get_singleton_channel_id(role):
+    return _get_singleton_channel(role)["id"]
+
+
+def _channel_reply_target_name(channel_config):
+    return channel_config.get("name") or f"channel:{channel_config['id']}"
+
+
+def _clanops_cooldown_elapsed(channel_id):
+    state = db.get_channel_state(channel_id)
+    if not state or not state.get("last_elixir_post_at"):
+        return True
+    try:
+        last_post = datetime.strptime(state["last_elixir_post_at"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    return (datetime.now(timezone.utc) - last_post).total_seconds() >= CLANOPS_PROACTIVE_COOLDOWN_SECONDS
+
+
+async def _load_live_clan_context():
+    clan = await asyncio.to_thread(cr_api.get_clan)
+    if clan.get("memberList"):
+        await asyncio.to_thread(db.snapshot_members, clan.get("memberList", []))
+    try:
+        war = await asyncio.to_thread(cr_api.get_current_war)
+    except Exception:
+        war = {}
+    if war:
+        await asyncio.to_thread(db.upsert_war_current_state, war)
+    return clan, war
+
+
+async def _share_channel_result(result, workflow):
+    if result.get("event_type") not in {"channel_share", "leader_share"}:
+        return
+    share_content = result.get("share_content", "")
+    if not share_content:
+        return
+    target_ref = result.get("share_channel") or "#elixir"
+    target = prompts.resolve_channel_reference(target_ref)
+    if not target:
+        log.warning("Unknown share target channel: %s", target_ref)
+        return
+    target_channel = bot.get_channel(target["id"])
+    if not target_channel:
+        return
+    await _post_to_elixir(target_channel, {"content": share_content})
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(target_channel),
+        "assistant",
+        share_content,
+        channel_id=target_channel.id,
+        channel_name=getattr(target_channel, "name", None),
+        channel_kind=str(target_channel.type),
+        workflow=workflow,
+        event_type=result.get("event_type"),
+    )
 
 
 # ── Heartbeat ────────────────────────────────────────────────────────────────
@@ -107,9 +191,10 @@ async def _heartbeat_tick():
                  now_chicago.hour, now_chicago.minute)
         return
 
-    channel = bot.get_channel(ANNOUNCEMENTS_CHANNEL_ID)
+    announcements_channel_id = _get_singleton_channel_id("announcements")
+    channel = bot.get_channel(announcements_channel_id)
     if not channel:
-        log.error("Announcements channel %s not found", ANNOUNCEMENTS_CHANNEL_ID)
+        log.error("Announcements channel %s not found", announcements_channel_id)
         return
 
     try:
@@ -133,7 +218,7 @@ async def _heartbeat_tick():
         )
         channel_memory = await asyncio.to_thread(
             db.build_memory_context,
-            channel_id=ANNOUNCEMENTS_CHANNEL_ID,
+            channel_id=announcements_channel_id,
         )
 
         # Handle join/leave signals via LLM
@@ -367,7 +452,8 @@ async def _player_intel_refresh():
             log.warning("Player intel refresh failed for %s: %s", tag, e)
 
     if progression_signals:
-        channel = bot.get_channel(ANNOUNCEMENTS_CHANNEL_ID)
+        announcements_channel_id = _get_singleton_channel_id("announcements")
+        channel = bot.get_channel(announcements_channel_id)
         if channel:
             recent_posts = await asyncio.to_thread(
                 db.list_thread_messages, "channel:elixir", 20,
@@ -380,7 +466,7 @@ async def _player_intel_refresh():
                 recent_posts,
                 await asyncio.to_thread(
                     db.build_memory_context,
-                    channel_id=ANNOUNCEMENTS_CHANNEL_ID,
+                    channel_id=announcements_channel_id,
                 ),
             )
             if result:
@@ -464,7 +550,7 @@ async def on_member_join(member):
         global_name=getattr(member, "global_name", None),
         display_name=member.display_name,
     )
-    channel = bot.get_channel(RECEPTION_CHANNEL_ID)
+    channel = bot.get_channel(_get_singleton_channel_id("onboarding"))
     if not channel:
         return
     msg = await asyncio.to_thread(
@@ -506,7 +592,7 @@ async def on_member_update(before, after):
         return
 
     match = await asyncio.to_thread(_match_clan_member, after.nick)
-    channel = bot.get_channel(RECEPTION_CHANNEL_ID)
+    channel = bot.get_channel(_get_singleton_channel_id("onboarding"))
 
     if not match:
         if channel:
@@ -566,21 +652,50 @@ async def on_message(message):
         global_name=getattr(message.author, "global_name", None),
         display_name=message.author.display_name,
     )
-    mentioned = (bot.user in message.mentions or
-                 any(r.id == BOT_ROLE_ID for r in message.role_mentions))
-    if not mentioned:
+    channel_config = _get_channel_behavior(message.channel.id)
+    mentioned = _is_bot_mentioned(message)
+    if not channel_config:
+        await bot.process_commands(message)
         return
 
-    # #elixir channel — broadcast only, Elixir does not respond here
-    if message.channel.id == ANNOUNCEMENTS_CHANNEL_ID:
+    role = channel_config.get("role")
+    workflow = channel_config.get("workflow")
+    scope = _channel_scope(message.channel)
+
+    # Non-responsive singleton channels are outbound only.
+    if not channel_config.get("respond_allowed", True):
         return
 
-    # #reception — onboarding help
-    if message.channel.id == RECEPTION_CHANNEL_ID:
+    if role == "onboarding" and not mentioned:
+        return
+
+    proactive = role == "clanops" and not mentioned
+    if proactive and not _clanops_cooldown_elapsed(message.channel.id):
+        await asyncio.to_thread(
+            db.save_message,
+            scope,
+            "user",
+            message.content.strip(),
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow="clanops",
+            discord_message_id=message.id,
+        )
+        return
+
+    if not mentioned and not proactive:
+        await bot.process_commands(message)
+        return
+
+    if role == "onboarding":
         async with message.channel.typing():
             try:
                 clan = await asyncio.to_thread(cr_api.get_clan)
-                question = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@&{BOT_ROLE_ID}>", "").strip()
+                question = _strip_bot_mentions(message.content)
                 memory_context = await asyncio.to_thread(
                     db.build_memory_context,
                     discord_user_id=message.author.id,
@@ -588,7 +703,7 @@ async def on_message(message):
                 )
                 await asyncio.to_thread(
                     db.save_message,
-                    _channel_scope(message.channel),
+                    scope,
                     "user",
                     question,
                     channel_id=message.channel.id,
@@ -620,7 +735,7 @@ async def on_message(message):
                     await message.reply(content)
                 await asyncio.to_thread(
                     db.save_message,
-                    _channel_scope(message.channel),
+                    scope,
                     "assistant",
                     content,
                     channel_id=message.channel.id,
@@ -634,26 +749,15 @@ async def on_message(message):
                 await message.reply("Hit an error — try again in a moment. 🧪")
         return
 
-    # #leader-lounge — relay everything to the agent
-    if message.channel.id == LEADERSHIP_CHANNEL_ID:
+    if workflow in {"interactive", "clanops"}:
         async with message.channel.typing():
             try:
-                clan = await asyncio.to_thread(cr_api.get_clan)
-                if clan.get("memberList"):
-                    await asyncio.to_thread(db.snapshot_members, clan.get("memberList", []))
-                try:
-                    war = await asyncio.to_thread(cr_api.get_current_war)
-                except Exception:
-                    war = {}
-                if war:
-                    await asyncio.to_thread(db.upsert_war_current_state, war)
-                # Strip the @Elixir mention from the question
-                question = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@&{BOT_ROLE_ID}>", "").strip()
-
-                # Load conversation history for this leader
-                leader_scope = f"leader:{message.author.id}"
+                clan, war = await _load_live_clan_context()
+                question = _strip_bot_mentions(message.content) if mentioned else message.content.strip()
                 conversation_history = await asyncio.to_thread(
-                    db.list_thread_messages, leader_scope,
+                    db.list_thread_messages,
+                    scope,
+                    CHANNEL_CONVERSATION_LIMIT,
                 )
                 memory_context = await asyncio.to_thread(
                     db.build_memory_context,
@@ -661,65 +765,51 @@ async def on_message(message):
                     channel_id=message.channel.id,
                 )
 
-                # Save the leader's question
                 await asyncio.to_thread(
                     db.save_message,
-                    leader_scope, "user", question,
+                    scope,
+                    "user",
+                    question,
                     channel_id=message.channel.id,
                     channel_name=getattr(message.channel, "name", None),
                     channel_kind=str(message.channel.type),
                     discord_user_id=message.author.id,
                     username=message.author.name,
                     display_name=message.author.display_name,
-                    workflow="leader",
+                    workflow=workflow,
                     discord_message_id=message.id,
                 )
 
                 result = await asyncio.to_thread(
-                    elixir_agent.respond_to_leader,
+                    elixir_agent.respond_in_channel,
                     question=question,
                     author_name=message.author.display_name,
+                    channel_name=_channel_reply_target_name(channel_config),
+                    workflow=workflow,
                     clan_data=clan,
                     war_data=war,
                     conversation_history=conversation_history,
                     memory_context=memory_context,
+                    proactive=proactive,
                 )
                 if result is None:
-                    await message.reply("Something went wrong on my end — try again? 🧪")
                     return
 
                 content = result.get("content", result.get("summary", ""))
+                await _share_channel_result(result, workflow)
 
-                # If the leader asked to share something with the clan, post to #elixir
-                if result.get("event_type") == "leader_share":
-                    share_content = result.get("share_content", "")
-                    if share_content:
-                        elixir_channel = bot.get_channel(ANNOUNCEMENTS_CHANNEL_ID)
-                        if elixir_channel:
-                            await _post_to_elixir(elixir_channel, {
-                                "content": share_content,
-                            })
-                            await asyncio.to_thread(
-                                db.save_message,
-                                "channel:elixir", "assistant", share_content,
-                                channel_id=elixir_channel.id,
-                                channel_name=getattr(elixir_channel, "name", None),
-                                channel_kind=str(elixir_channel.type),
-                                workflow="leader",
-                                event_type="leader_share",
-                            )
-
-                # Save Elixir's response to conversation memory
                 await asyncio.to_thread(
                     db.save_message,
-                    leader_scope, "assistant", content,
+                    scope,
+                    "assistant",
+                    content,
                     channel_id=message.channel.id,
                     channel_name=getattr(message.channel, "name", None),
                     channel_kind=str(message.channel.type),
                     discord_user_id=message.author.id,
                     username=message.author.name,
                     display_name=message.author.display_name,
-                    workflow="leader",
+                    workflow=workflow,
                     event_type=result.get("event_type"),
                 )
 
@@ -729,8 +819,9 @@ async def on_message(message):
                 else:
                     await message.reply(content)
             except Exception as e:
-                log.error("leader-lounge error: %s", e)
-                await message.reply("Hit an error — try again in a moment. 🧪")
+                log.error("%s channel error: %s", workflow, e)
+                if mentioned:
+                    await message.reply("Hit an error — try again in a moment. 🧪")
         return
 
     await bot.process_commands(message)

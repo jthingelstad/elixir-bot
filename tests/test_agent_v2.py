@@ -203,3 +203,39 @@ def test_execute_tool_get_member_missed_war_days_resolves_member():
         result = json.loads(elixir_agent._execute_tool("get_member_missed_war_days", {"member_tag": "@jamie", "season_id": 129}))
         assert result == {"days_missed": 1}
         mock_db.get_member_missed_war_days.assert_called_once_with("#ABC123", season_id=129)
+
+
+def test_respond_in_channel_uses_interactive_read_only_workflow():
+    with patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "hi"}) as mock_chat:
+        result = elixir_agent.respond_in_channel(
+            question="How am I doing?",
+            author_name="Jamie",
+            channel_name="#member-chat",
+            workflow="interactive",
+            clan_data={"memberList": []},
+            war_data={},
+            conversation_history=[],
+            memory_context={},
+            proactive=False,
+        )
+        assert result["event_type"] == "channel_response"
+        assert mock_chat.call_args.kwargs["workflow"] == "interactive"
+        assert mock_chat.call_args.kwargs["allowed_tools"] == elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]
+
+
+def test_respond_in_channel_uses_clanops_proactive_workflow():
+    with patch("elixir_agent._chat_with_tools", return_value=None) as mock_chat:
+        result = elixir_agent.respond_in_channel(
+            question="We should review promotions this week.",
+            author_name="Jamie",
+            channel_name="#clan-ops",
+            workflow="clanops",
+            clan_data={"memberList": []},
+            war_data={},
+            conversation_history=[],
+            memory_context={},
+            proactive=True,
+        )
+        assert result is None
+        assert mock_chat.call_args.kwargs["workflow"] == "clanops_proactive"
+        assert mock_chat.call_args.kwargs["allowed_tools"] == elixir_agent.TOOLSETS_BY_WORKFLOW["clanops_proactive"]

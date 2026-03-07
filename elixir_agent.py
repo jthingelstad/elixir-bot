@@ -92,9 +92,11 @@ def _leader_system():
         "Use them to answer factual questions directly instead of guessing from clipped roster context.\n\n"
         "## Sharing to the clan\n"
         "A leader may ask you to share a point, insight, or announcement with the whole clan "
-        "(e.g. \"share that with the clan\", \"post that to #elixir\", \"announce that\"). "
+        "(e.g. \"share that with the clan\", \"post that to #elixir\", \"announce that\", \"share that with #arena-relay\"). "
         "When they do, use event_type \"leader_share\" and include a \"share_content\" field "
-        "with a message crafted for the whole clan in the broadcast channel. The \"content\" field should be "
+        "with a message crafted for the whole clan in the target channel. "
+        "If a specific target channel is requested, include \"share_channel\" with the exact channel name like \"#arena-relay\". "
+        "If no target is specified, default to \"#elixir\". The \"content\" field should be "
         "your reply to the leader confirming what you shared. "
         "The share_content should be written for a general clan audience — motivational, clear, "
         "and without referencing the private leader discussion.\n\n"
@@ -104,7 +106,65 @@ def _leader_system():
         "Or, when sharing to the clan:\n"
         '{"event_type": "leader_share", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "reply to the leader confirming the share", '
-        '"share_content": "the clan-facing post for the broadcast channel", "metadata": {}}',
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#elixir", "metadata": {}}',
+    )
+
+
+def _interactive_system(channel_name, proactive=False):
+    proactive_block = (
+        "You are observing an ongoing channel conversation. Only reply if you can add clear value. "
+        "If you do not have something genuinely useful to add, respond with exactly null.\n\n"
+        if proactive
+        else ""
+    )
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.knowledge_block(),
+        prompts.channel_section(channel_name),
+        "This is an interactive read-only channel. "
+        "You may answer questions, explain, analyze, summarize, and help members or leaders interpret clan data. "
+        "Do not use write tools. Do not recommend or direct promotions, demotions, or kicks here.\n\n"
+        "You have read-only tools for member resolution, the full roster, member profiles, current decks, signature cards, recent form, war status, and battle analytics. "
+        "Resolve members by name or Discord handle instead of guessing.\n\n"
+        "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
+        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to #elixir.\n\n"
+        f"{proactive_block}"
+        "Respond with JSON only (no markdown wrapper):\n"
+        '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
+        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}\n\n'
+        "Or, when sharing to the clan:\n"
+        '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
+        '"summary": "one sentence TL;DR", "content": "reply in the current channel", '
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#elixir", "metadata": {}}',
+    )
+
+
+def _clanops_system(channel_name, proactive=False):
+    proactive_block = (
+        "You are observing a private clan operations discussion. Only interject when you have concrete value to add. "
+        "If you do not have a strong, relevant contribution, respond with exactly null.\n\n"
+        if proactive
+        else ""
+    )
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.knowledge_block(),
+        prompts.channel_section(channel_name),
+        "This is a private clan operations channel. "
+        "This is the right place to discuss promotions, demotions, kicks, roster corrections, and leadership decisions. "
+        "You may use both read and write tools here when necessary.\n\n"
+        "Use tools to ground factual claims. Be direct, concrete, and operational. "
+        "If a member is referenced by name or Discord handle, resolve them first instead of guessing.\n\n"
+        "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
+        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to #elixir.\n\n"
+        f"{proactive_block}"
+        "Respond with JSON only (no markdown wrapper):\n"
+        '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
+        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}\n\n'
+        "Or, when sharing to the clan:\n"
+        '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
+        '"summary": "one sentence TL;DR", "content": "reply in the current channel", '
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#elixir", "metadata": {}}',
     )
 
 
@@ -1000,6 +1060,10 @@ ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
 TOOLSETS_BY_WORKFLOW = {
     "observe": READ_TOOLS,
     "leader": ALL_TOOLS,
+    "interactive": READ_TOOLS,
+    "interactive_proactive": READ_TOOLS,
+    "clanops": ALL_TOOLS,
+    "clanops_proactive": ALL_TOOLS,
     "reception": [],
     "roster_bios": READ_TOOLS,
 }
@@ -1007,6 +1071,10 @@ TOOLSETS_BY_WORKFLOW = {
 RESPONSE_SCHEMAS_BY_WORKFLOW = {
     "observation": {"required": ["event_type", "summary", "content"]},
     "leader": {"required": ["event_type", "summary", "content"]},
+    "interactive": {"required": ["event_type", "summary", "content"]},
+    "interactive_proactive": {"required": ["event_type", "summary", "content"]},
+    "clanops": {"required": ["event_type", "summary", "content"]},
+    "clanops_proactive": {"required": ["event_type", "summary", "content"]},
     "reception": {"required": ["event_type", "content"]},
     "roster_bios": {"required": ["intro", "members"]},
 }
@@ -1290,6 +1358,8 @@ def _validate_response(workflow, parsed_obj, response_schema=None):
     if parsed_obj is None:
         if workflow == "observation":
             return True, None
+        if workflow in {"interactive_proactive", "clanops_proactive"}:
+            return True, None
         if schema:
             return False, "null response is not allowed for this workflow"
         return True, None
@@ -1322,6 +1392,15 @@ def _validate_response(workflow, parsed_obj, response_schema=None):
     elif workflow == "reception":
         if parsed_obj.get("event_type") != "reception_response":
             return False, f"invalid event_type for reception: {parsed_obj.get('event_type')}"
+    elif workflow in {"interactive", "interactive_proactive", "clanops", "clanops_proactive"}:
+        et = parsed_obj.get("event_type")
+        if et == "channel_response":
+            pass
+        elif et == "channel_share":
+            if "share_content" not in parsed_obj:
+                return False, "missing required field for channel_share: share_content"
+        else:
+            return False, f"invalid event_type for {workflow}: {et}"
     elif workflow == "roster_bios":
         if not isinstance(parsed_obj.get("members"), dict):
             return False, "members must be an object map"
@@ -1731,6 +1810,32 @@ def respond_in_reception(question, author_name, clan_data, memory_context=None):
         workflow="reception",
         allowed_tools=TOOLSETS_BY_WORKFLOW["reception"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["reception"],
+        strict_json=True,
+    )
+
+
+def respond_in_channel(question, author_name, channel_name, workflow, clan_data, war_data,
+                       conversation_history=None, memory_context=None, proactive=False):
+    """Channel Q&A for interactive/clanops workflows."""
+    if workflow not in {"interactive", "clanops"}:
+        raise ValueError(f"unsupported channel workflow: {workflow}")
+    context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
+    speaker = "Observed message from" if proactive else "Message from"
+    user_msg = f"{speaker} '{author_name}' in {channel_name}: {question}\n\n{context}"
+    user_msg += _format_memory_context(memory_context)
+    workflow_key = f"{workflow}_proactive" if proactive else workflow
+    system_prompt = (
+        _interactive_system(channel_name, proactive=proactive)
+        if workflow == "interactive"
+        else _clanops_system(channel_name, proactive=proactive)
+    )
+    return _chat_with_tools(
+        system_prompt,
+        user_msg,
+        conversation_history=conversation_history,
+        workflow=workflow_key,
+        allowed_tools=TOOLSETS_BY_WORKFLOW[workflow_key],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW[workflow_key],
         strict_json=True,
     )
 
