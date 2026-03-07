@@ -286,6 +286,66 @@ def test_channel_messages_and_state_are_tracked_for_channel_user_threads():
         conn.close()
 
 
+def test_get_system_status_summarizes_v2_data_layer():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "leader", "expLevel": 66, "trophies": 11429, "clanRank": 1}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "expLevel": 66,
+                "trophies": 11429,
+                "bestTrophies": 11500,
+                "currentDeck": [{"name": "Knight"}] * 8,
+                "cards": [{"name": "Knight", "level": 16}],
+            },
+            conn=conn,
+        )
+        db.snapshot_player_battlelog(
+            "#ABC123",
+            [{
+                "battleTime": "20260307T120000.000Z",
+                "type": "PvP",
+                "gameMode": {"name": "Ladder", "id": 72000006},
+                "team": [{"crowns": 3, "trophyChange": 30, "startingTrophies": 11400, "cards": [{"name": "Knight"}] * 8}],
+                "opponent": [{"crowns": 1, "tag": "#XYZ999", "name": "Opponent", "clan": {"tag": "#CLAN"}}],
+            }],
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {"state": "warDay", "clan": {"tag": "#J2RGCRVG", "name": "POAP KINGS", "participants": []}},
+            conn=conn,
+        )
+        db.save_message(
+            "channel_user:100:123",
+            "assistant",
+            "Status is healthy.",
+            channel_id=100,
+            channel_name="clan-ops",
+            channel_kind="text",
+            workflow="clanops",
+            conn=conn,
+        )
+
+        status = db.get_system_status(conn=conn)
+
+        assert status["schema_version"] == 1
+        assert status["counts"]["members_active"] == 1
+        assert status["counts"]["battle_fact_count"] == 1
+        assert status["counts"]["message_count"] == 1
+        assert status["freshness"]["member_state_at"] is not None
+        assert status["freshness"]["player_profile_at"] is not None
+        assert status["freshness"]["battle_fact_at"] is not None
+        assert status["freshness"]["war_state_at"] is not None
+        assert isinstance(status["raw_payloads_by_endpoint"], list)
+    finally:
+        conn.close()
+
+
 def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
     conn = db.get_connection(":memory:")
     try:
