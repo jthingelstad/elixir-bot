@@ -14,6 +14,7 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py + 
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
 - `site_content.py` — JSON content management for poapkings.com (write, validate, commit/push)
+- `_*` extracted modules — Internal implementation splits for large files (`_db_*.py`, `_agent_*.py`, `_elixir_*.py`); root modules remain the stable public API surface
 
 ## Environment
 
