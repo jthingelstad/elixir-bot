@@ -6,7 +6,7 @@ LLM-powered clan management bot for **POAP KINGS**, a Clash Royale clan (#J2RGCR
 
 - **Hourly heartbeat**: Fetches clan data, detects changes (milestones, joins/leaves, war status, deck usage), and posts about what matters — skips when nothing interesting happened
 - **Scheduled player-intel refresh**: Keeps a stale subset of active members' profiles and battle logs warm between the daily site-content runs, and surfaces progression moments like level-ups and card milestone upgrades
-- **Leader Q&A**: Leaders @mention Elixir in #leader-lounge for promotion advice, war analysis, player lookups, and more — with conversation memory
+- **Channel-aware operations**: Elixir answers member questions in `interactive` channels, participates proactively in `clanops`, and routes announcements/onboarding by prompt-defined channel roles
 - **War tracking**: Monitors deck usage on battle days (Thu-Sun), tracks War Champ standings across seasons, and celebrates perfect participation
 - **V2 clan intelligence**: SQLite-backed identity, roster, war, battle-log, and conversation-memory tables support deterministic member and leader answers
 
@@ -60,7 +60,7 @@ Rules:
 | File | Purpose |
 |------|---------|
 | `elixir.py` | Main bot: Discord events, APScheduler heartbeat, channel routing |
-| `elixir_agent.py` | LLM engine: GPT-4o with function calling for observations + leader Q&A |
+| `elixir_agent.py` | LLM engine: GPT-4o with function calling for observations, channel replies, and site content |
 | `heartbeat.py` | Hourly signal detection: milestones, war decks, joins/leaves, donations |
 | `db.py` | SQLite V2 store: identity, memory, current state, player analytics, war, raw payloads |
 | `cr_api.py` | Clash Royale API client: clan roster, war status, river race log, player profiles |
@@ -72,7 +72,7 @@ Rules:
 
 - **Signal-based posting** — Only calls the LLM when there are real things to talk about (trophy milestones, war completions, new members, etc.)
 - **Agentic tool use** — LLM can resolve members, query roster summaries, current decks, recent form, war participation, and player profiles on demand
-- **Leader analytics** — Can now answer at-risk member questions, recent-join performance, trending war contributors, and member-vs-clan war comparisons from the V2 query layer
+- **Clanops analytics** — Can answer at-risk member questions, recent-join performance, trending war contributors, and member-vs-clan war comparisons from the V2 query layer
 - **War-battle analytics** — Can answer war-battle win/loss records, attendance rates, and highest war-battle win rates from stored battle facts
 - **Role-change tracking** — Can report recent promotions and demotions from role snapshots instead of inferring from prompt context
 - **Conversation memory** — Stores Discord/user/channel conversation history and subject-level memory in V2 tables

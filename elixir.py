@@ -48,7 +48,7 @@ scheduler = AsyncIOScheduler(timezone=CHICAGO)
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _post_to_elixir(channel, entry: dict):
-    """Post an entry's content to #elixir channel."""
+    """Post an entry's content to a configured Discord channel."""
     content = entry.get("content", entry.get("summary", ""))
     if not content:
         return
@@ -90,10 +90,11 @@ def _match_clan_member(nickname):
 
 
 def _channel_scope(channel) -> str:
-    behavior = _get_channel_behavior(channel.id)
-    if behavior and behavior.get("role") == "announcements":
-        return "channel:elixir"
     return f"channel:{channel.id}"
+
+
+def _channel_conversation_scope(channel, discord_user_id) -> str:
+    return f"channel_user:{channel.id}:{discord_user_id}"
 
 
 def _strip_bot_mentions(text: str) -> str:
@@ -153,12 +154,12 @@ async def _load_live_clan_context():
 
 
 async def _share_channel_result(result, workflow):
-    if result.get("event_type") not in {"channel_share", "leader_share"}:
+    if result.get("event_type") != "channel_share":
         return
     share_content = result.get("share_content", "")
     if not share_content:
         return
-    target_ref = result.get("share_channel") or "#elixir"
+    target_ref = result.get("share_channel") or "announcements"
     target = prompts.resolve_channel_reference(target_ref)
     if not target:
         log.warning("Unknown share target channel: %s", target_ref)
@@ -212,9 +213,9 @@ async def _heartbeat_tick():
         clan = tick_result.clan
         war = tick_result.war
 
-        # Fetch recent #elixir post history to avoid repetition
+        # Fetch recent announcements-channel post history to avoid repetition
         recent_posts = await asyncio.to_thread(
-            db.list_thread_messages, "channel:elixir", 20,
+            db.list_channel_messages, announcements_channel_id, 20, "assistant",
         )
         channel_memory = await asyncio.to_thread(
             db.build_memory_context,
@@ -236,7 +237,7 @@ async def _heartbeat_tick():
                     await channel.send(msg)
                     await asyncio.to_thread(
                         db.save_message,
-                        "channel:elixir", "assistant", msg,
+                        _channel_scope(channel), "assistant", msg,
                         channel_id=channel.id,
                         channel_name=getattr(channel, "name", None),
                         channel_kind=str(channel.type),
@@ -255,7 +256,7 @@ async def _heartbeat_tick():
                     await channel.send(msg)
                     await asyncio.to_thread(
                         db.save_message,
-                        "channel:elixir", "assistant", msg,
+                        _channel_scope(channel), "assistant", msg,
                         channel_id=channel.id,
                         channel_name=getattr(channel, "name", None),
                         channel_kind=str(channel.type),
@@ -279,7 +280,7 @@ async def _heartbeat_tick():
             if content:
                 await asyncio.to_thread(
                     db.save_message,
-                    "channel:elixir", "assistant", content,
+                    _channel_scope(channel), "assistant", content,
                     channel_id=channel.id,
                     channel_name=getattr(channel, "name", None),
                     channel_kind=str(channel.type),
@@ -456,7 +457,7 @@ async def _player_intel_refresh():
         channel = bot.get_channel(announcements_channel_id)
         if channel:
             recent_posts = await asyncio.to_thread(
-                db.list_thread_messages, "channel:elixir", 20,
+                db.list_channel_messages, announcements_channel_id, 20, "assistant",
             )
             result = await asyncio.to_thread(
                 elixir_agent.observe_and_post,
@@ -475,7 +476,7 @@ async def _player_intel_refresh():
                 if content:
                     await asyncio.to_thread(
                         db.save_message,
-                        "channel:elixir", "assistant", content,
+                        _channel_scope(channel), "assistant", content,
                         channel_id=channel.id,
                         channel_name=getattr(channel, "name", None),
                         channel_kind=str(channel.type),
@@ -491,6 +492,7 @@ async def _player_intel_refresh():
 @bot.event
 async def on_ready():
     log.info("Elixir online as %s 🧪", bot.user)
+    prompts.ensure_valid_discord_channel_config()
     if not scheduler.running:
         # Single hourly heartbeat replaces both the 4x/day observations and hourly member check
         scheduler.add_job(
@@ -661,6 +663,7 @@ async def on_message(message):
     role = channel_config.get("role")
     workflow = channel_config.get("workflow")
     scope = _channel_scope(message.channel)
+    conversation_scope = _channel_conversation_scope(message.channel, message.author.id)
 
     # Non-responsive singleton channels are outbound only.
     if not channel_config.get("respond_allowed", True):
@@ -673,7 +676,7 @@ async def on_message(message):
     if proactive and not _clanops_cooldown_elapsed(message.channel.id):
         await asyncio.to_thread(
             db.save_message,
-            scope,
+            conversation_scope,
             "user",
             message.content.strip(),
             channel_id=message.channel.id,
@@ -756,7 +759,7 @@ async def on_message(message):
                 question = _strip_bot_mentions(message.content) if mentioned else message.content.strip()
                 conversation_history = await asyncio.to_thread(
                     db.list_thread_messages,
-                    scope,
+                    conversation_scope,
                     CHANNEL_CONVERSATION_LIMIT,
                 )
                 memory_context = await asyncio.to_thread(
@@ -767,7 +770,7 @@ async def on_message(message):
 
                 await asyncio.to_thread(
                     db.save_message,
-                    scope,
+                    conversation_scope,
                     "user",
                     question,
                     channel_id=message.channel.id,
@@ -776,9 +779,9 @@ async def on_message(message):
                     discord_user_id=message.author.id,
                     username=message.author.name,
                     display_name=message.author.display_name,
-                    workflow=workflow,
-                    discord_message_id=message.id,
-                )
+                        workflow=workflow,
+                        discord_message_id=message.id,
+                    )
 
                 result = await asyncio.to_thread(
                     elixir_agent.respond_in_channel,
@@ -799,10 +802,10 @@ async def on_message(message):
                 await _share_channel_result(result, workflow)
 
                 await asyncio.to_thread(
-                    db.save_message,
-                    scope,
-                    "assistant",
-                    content,
+                        db.save_message,
+                        conversation_scope,
+                        "assistant",
+                        content,
                     channel_id=message.channel.id,
                     channel_name=getattr(message.channel, "name", None),
                     channel_kind=str(message.channel.type),

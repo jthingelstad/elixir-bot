@@ -47,7 +47,7 @@ def _get_client():
     return _client
 
 MAX_TOOL_ROUNDS = 3
-LEADER_WRITE_TOOLS_ENABLED = True
+CLANOPS_WRITE_TOOLS_ENABLED = os.getenv("CLANOPS_WRITE_TOOLS_ENABLED", "1") != "0"
 MAX_CONTEXT_MEMBERS_DEFAULT = 30
 MAX_CONTEXT_MEMBERS_FULL = 50
 TOOL_RESULT_MAX_ITEMS = 50
@@ -62,10 +62,11 @@ def _build_system_prompt(*sections):
 
 
 def _observe_system():
+    announcements = prompts.discord_singleton_channel("announcements")
     return _build_system_prompt(
         prompts.purpose(),
         prompts.knowledge_block(),
-        prompts.channel_section("#elixir"),
+        prompts.channel_section(announcements["name"]),
         "You have tools available to look up the full roster, member profiles, recent form, deck data, and war status. "
         "Use them if you want more context before writing your post.\n\n"
         "The roster data includes each member's most-used cards from recent battles. "
@@ -76,37 +77,6 @@ def _observe_system():
         '"member_tags": [], "member_names": [], "summary": "one sentence", '
         '"content": "full Discord-ready markdown post", "metadata": {}}\n\n'
         "Or respond with exactly: null\n\nif the signals are genuinely not worth posting about.",
-    )
-
-
-def _leader_system():
-    return _build_system_prompt(
-        prompts.purpose(),
-        prompts.knowledge_block(),
-        prompts.channel_section("#leader-lounge"),
-        "You may be provided with recent conversation history with this leader. "
-        "Use it for context — reference earlier questions and answers naturally. "
-        "Don't repeat yourself if you already covered a topic recently.\n\n"
-        "You have tools for member resolution, the full roster, member profiles, current decks, signature cards, recent form, war status, and promotion review. "
-        "If a leader mentions a player by name or Discord handle instead of tag, resolve them first instead of guessing.\n\n"
-        "Use them to answer factual questions directly instead of guessing from clipped roster context.\n\n"
-        "## Sharing to the clan\n"
-        "A leader may ask you to share a point, insight, or announcement with the whole clan "
-        "(e.g. \"share that with the clan\", \"post that to #elixir\", \"announce that\", \"share that with #arena-relay\"). "
-        "When they do, use event_type \"leader_share\" and include a \"share_content\" field "
-        "with a message crafted for the whole clan in the target channel. "
-        "If a specific target channel is requested, include \"share_channel\" with the exact channel name like \"#arena-relay\". "
-        "If no target is specified, default to \"#elixir\". The \"content\" field should be "
-        "your reply to the leader confirming what you shared. "
-        "The share_content should be written for a general clan audience — motivational, clear, "
-        "and without referencing the private leader discussion.\n\n"
-        "Respond with JSON only (no markdown wrapper):\n"
-        '{"event_type": "leader_response", "member_tags": [], "member_names": [], '
-        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}\n\n'
-        "Or, when sharing to the clan:\n"
-        '{"event_type": "leader_share", "member_tags": [], "member_names": [], '
-        '"summary": "one sentence TL;DR", "content": "reply to the leader confirming the share", '
-        '"share_content": "the clan-facing post for the target channel", "share_channel": "#elixir", "metadata": {}}',
     )
 
 
@@ -127,7 +97,7 @@ def _interactive_system(channel_name, proactive=False):
         "You have read-only tools for member resolution, the full roster, member profiles, current decks, signature cards, recent form, war status, and battle analytics. "
         "Resolve members by name or Discord handle instead of guessing.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
-        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to #elixir.\n\n"
+        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to the primary announcements channel.\n\n"
         f"{proactive_block}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
@@ -135,7 +105,7 @@ def _interactive_system(channel_name, proactive=False):
         "Or, when sharing to the clan:\n"
         '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "reply in the current channel", '
-        '"share_content": "the clan-facing post for the target channel", "share_channel": "#elixir", "metadata": {}}',
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#arena-relay", "metadata": {}}',
     )
 
 
@@ -156,7 +126,7 @@ def _clanops_system(channel_name, proactive=False):
         "Use tools to ground factual claims. Be direct, concrete, and operational. "
         "If a member is referenced by name or Discord handle, resolve them first instead of guessing.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
-        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to #elixir.\n\n"
+        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to the primary announcements channel.\n\n"
         f"{proactive_block}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
@@ -164,14 +134,15 @@ def _clanops_system(channel_name, proactive=False):
         "Or, when sharing to the clan:\n"
         '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "reply in the current channel", '
-        '"share_content": "the clan-facing post for the target channel", "share_channel": "#elixir", "metadata": {}}',
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#arena-relay", "metadata": {}}',
     )
 
 
 def _reception_system():
+    onboarding = prompts.discord_singleton_channel("onboarding")
     return _build_system_prompt(
         prompts.purpose(),
-        prompts.channel_section("#reception"),
+        prompts.channel_section(onboarding["name"]),
         "Don't use tools — just answer from the roster provided.\n\n"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "reception_response", "content": "your Discord-ready response"}',
@@ -1059,7 +1030,6 @@ ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
 
 TOOLSETS_BY_WORKFLOW = {
     "observe": READ_TOOLS,
-    "leader": ALL_TOOLS,
     "interactive": READ_TOOLS,
     "interactive_proactive": READ_TOOLS,
     "clanops": ALL_TOOLS,
@@ -1070,7 +1040,6 @@ TOOLSETS_BY_WORKFLOW = {
 
 RESPONSE_SCHEMAS_BY_WORKFLOW = {
     "observation": {"required": ["event_type", "summary", "content"]},
-    "leader": {"required": ["event_type", "summary", "content"]},
     "interactive": {"required": ["event_type", "summary", "content"]},
     "interactive_proactive": {"required": ["event_type", "summary", "content"]},
     "clanops": {"required": ["event_type", "summary", "content"]},
@@ -1380,15 +1349,6 @@ def _validate_response(workflow, parsed_obj, response_schema=None):
         et = parsed_obj.get("event_type")
         if et not in allowed:
             return False, f"invalid event_type for observation: {et}"
-    elif workflow == "leader":
-        et = parsed_obj.get("event_type")
-        if et == "leader_response":
-            pass
-        elif et == "leader_share":
-            if "share_content" not in parsed_obj:
-                return False, "missing required field for leader_share: share_content"
-        else:
-            return False, f"invalid event_type for leader: {et}"
     elif workflow == "reception":
         if parsed_obj.get("event_type") != "reception_response":
             return False, f"invalid event_type for reception: {parsed_obj.get('event_type')}"
@@ -1472,7 +1432,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     """Run a chat completion with tool-calling loop.
 
     conversation_history: optional list of {role, content} dicts to inject
-        between the system prompt and the current user message (for leader Q&A memory).
+        between the system prompt and the current user message.
     Returns the final parsed response dict, or None.
     """
     messages = [
@@ -1488,7 +1448,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         allowed_tools = TOOLSETS_BY_WORKFLOW.get(workflow, ALL_TOOLS)
     allowed_tool_names = _tool_names(allowed_tools)
 
-    enable_write_tools = workflow == "leader" and LEADER_WRITE_TOOLS_ENABLED
+    enable_write_tools = workflow in {"clanops", "clanops_proactive"} and CLANOPS_WRITE_TOOLS_ENABLED
 
     tools_called = []
     denied_tool_count = 0
@@ -1695,8 +1655,8 @@ def _clan_context(clan_data, war_data, roster_data=None, max_members=MAX_CONTEXT
     )
 
 
-def _format_recent_posts(recent_posts):
-    """Format recent post history for inclusion in LLM context."""
+def _format_recent_posts(recent_posts, channel_label="this channel"):
+    """Format recent assistant post history for inclusion in LLM context."""
     if not recent_posts:
         return ""
     lines = []
@@ -1704,7 +1664,7 @@ def _format_recent_posts(recent_posts):
         ts = p.get("recorded_at", "")
         content = p.get("content", "")
         lines.append(f"  [{ts}] {content[:200]}")
-    return "\n=== YOUR RECENT POSTS IN #elixir ===\n" + "\n".join(lines) + "\n"
+    return f"\n=== YOUR RECENT POSTS IN {channel_label} ===\n" + "\n".join(lines) + "\n"
 
 
 def _format_memory_context(memory_context):
@@ -1751,7 +1711,7 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memor
     """Observation with signals from heartbeat. Returns dict or None.
 
     signals: list of signal dicts from heartbeat.tick(), or None when no detector output is being passed.
-    recent_posts: list of recent conversation dicts from db.list_thread_messages().
+    recent_posts: list of recent message dicts from db.list_channel_messages().
     """
     context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
 
@@ -1772,22 +1732,6 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memor
         workflow="observation",
         allowed_tools=TOOLSETS_BY_WORKFLOW["observe"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["observation"],
-        strict_json=True,
-    )
-
-
-def respond_to_leader(question, author_name, clan_data, war_data,
-                      conversation_history=None, memory_context=None):
-    """Leader Q&A with tool access and conversation memory. Returns dict or None."""
-    context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
-    user_msg = f"Leader '{author_name}' asks: {question}\n\n{context}"
-    user_msg += _format_memory_context(memory_context)
-    return _chat_with_tools(
-        _leader_system(), user_msg,
-        conversation_history=conversation_history,
-        workflow="leader",
-        allowed_tools=TOOLSETS_BY_WORKFLOW["leader"],
-        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["leader"],
         strict_json=True,
     )
 

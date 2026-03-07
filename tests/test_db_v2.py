@@ -255,6 +255,37 @@ def test_save_message_auto_links_discord_user_to_member_identity():
         conn.close()
 
 
+def test_channel_messages_and_state_are_tracked_for_channel_user_threads():
+    conn = db.get_connection(":memory:")
+    try:
+        db.save_message(
+            "channel_user:100:123",
+            "assistant",
+            "Keep an eye on war usage today.",
+            channel_id=100,
+            channel_name="clan-ops",
+            channel_kind="text",
+            workflow="clanops",
+            conn=conn,
+        )
+
+        history = db.list_channel_messages(100, conn=conn)
+        state = db.get_channel_state(100, conn=conn)
+
+        assert history == [
+            {
+                "role": "assistant",
+                "content": "Keep an eye on war usage today.",
+                "author_name": None,
+                "recorded_at": history[0]["recorded_at"],
+            }
+        ]
+        assert state["last_summary"] == "Keep an eye on war usage today."
+        assert state["last_elixir_post_at"]
+    finally:
+        conn.close()
+
+
 def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
     conn = db.get_connection(":memory:")
     try:

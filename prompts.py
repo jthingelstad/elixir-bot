@@ -55,6 +55,45 @@ CHANNEL_ROLE_CONFIG = {
 }
 
 
+def validate_discord_channel_config():
+    """Return a list of config errors found in DISCORD.md channel definitions."""
+    channels = discord_channel_configs()
+    errors = []
+
+    seen_ids = {}
+    seen_names = {}
+    for channel in channels:
+        role = channel["role"]
+        if role not in CHANNEL_ROLE_CONFIG:
+            errors.append(f"unknown channel role '{role}' for {channel['name']}")
+        if channel["id"] in seen_ids:
+            errors.append(
+                f"duplicate channel id {channel['id']} for {seen_ids[channel['id']]} and {channel['name']}"
+            )
+        else:
+            seen_ids[channel["id"]] = channel["name"]
+        if channel["name"].lower() in seen_names:
+            errors.append(f"duplicate channel heading {channel['name']}")
+        else:
+            seen_names[channel["name"].lower()] = channel["id"]
+
+    for role, config in CHANNEL_ROLE_CONFIG.items():
+        if not config.get("singleton"):
+            continue
+        matching = [channel for channel in channels if channel["role"] == role]
+        if len(matching) != 1:
+            errors.append(f"expected exactly one {role} channel, found {len(matching)}")
+
+    return errors
+
+
+def ensure_valid_discord_channel_config():
+    """Raise ValueError if DISCORD.md channel definitions are invalid."""
+    errors = validate_discord_channel_config()
+    if errors:
+        raise ValueError("; ".join(errors))
+
+
 def _load(filename):
     """Load a prompt file and return its contents as a string."""
     path = os.path.join(_PROMPTS_DIR, filename)
