@@ -1,3 +1,14 @@
+import os
+
+from db import (
+    _canon_tag,
+    _ensure_member,
+    _json_or_none,
+    _rowdicts,
+    _utcnow,
+    get_connection,
+)
+
 # -- Discord identity and memory helpers -----------------------------------
 
 def upsert_discord_user(discord_user_id, username=None, global_name=None, display_name=None, conn=None):
@@ -197,6 +208,9 @@ def get_system_status(conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
+        from storage.war import get_current_season_id
+        from storage.player import get_player_intel_refresh_targets
+        from storage.roster import get_clan_roster_summary
         db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
         schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
         counts = conn.execute(
@@ -299,4 +313,3 @@ def build_memory_context(discord_user_id=None, member_tag=None, channel_id=None,
 
 
 # -- Core member state ------------------------------------------------------
-

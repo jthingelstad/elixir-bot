@@ -1,0 +1,294 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+import sqlite3
+
+from cr_knowledge import TROPHY_MILESTONES
+from db import (
+    _canon_tag,
+    _current_joined_at,
+    _member_reference_fields,
+    _parse_cr_time,
+    _rowdicts,
+    _utcnow,
+    get_connection,
+)
+
+def _format_member_reference(*args, **kwargs):
+    from storage.identity import format_member_reference
+
+    return format_member_reference(*args, **kwargs)
+
+def get_current_war_status(conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        war = conn.execute(
+            "SELECT observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score "
+            "FROM war_current_state ORDER BY observed_at DESC, war_id DESC LIMIT 1"
+        ).fetchone()
+        if not war:
+            return None
+        season_id = get_current_season_id(conn=conn)
+        current_race = None
+        if season_id is not None:
+            current_race = conn.execute(
+                "SELECT season_id, section_index, created_date, our_rank, trophy_change, our_fame, total_clans, finish_time "
+                "FROM war_races WHERE season_id = ? ORDER BY section_index DESC LIMIT 1",
+                (season_id,),
+            ).fetchone()
+        result = dict(war)
+        if current_race:
+            result["season_id"] = current_race["season_id"]
+            result["section_index"] = current_race["section_index"]
+            result["week"] = current_race["section_index"] + 1 if current_race["section_index"] is not None else None
+            result["race_rank"] = current_race["our_rank"]
+            result["trophy_change"] = current_race["trophy_change"]
+        return result
+    finally:
+        if close:
+            conn.close()
+
+def get_war_deck_status_today(conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        today = _utcnow()[:10]
+        rows = conn.execute(
+            "SELECT m.player_tag AS tag, m.current_name AS name, w.decks_used_today, w.decks_used_total, w.fame "
+            "FROM war_day_status w JOIN members m ON m.member_id = w.member_id "
+            "WHERE w.battle_date = ? AND m.status = 'active' "
+            "ORDER BY COALESCE(w.decks_used_today, 0) DESC, m.current_name COLLATE NOCASE",
+            (today,),
+        ).fetchall()
+        used_all = []
+        used_some = []
+        used_none = []
+        for row in rows:
+            item = dict(row)
+            decks_today = item.get("decks_used_today") or 0
+            member_id = conn.execute(
+                "SELECT member_id FROM members WHERE player_tag = ?",
+                (_canon_tag(item["tag"]),),
+            ).fetchone()["member_id"]
+            item = _member_reference_fields(conn, member_id, item)
+            if decks_today >= 4:
+                used_all.append(item)
+            elif decks_today > 0:
+                used_some.append(item)
+            else:
+                used_none.append(item)
+        return {
+            "battle_date": today,
+            "used_all_4": used_all,
+            "used_some": used_some,
+            "used_none": used_none,
+            "total_participants": len(rows),
+        }
+    finally:
+        if close:
+            conn.close()
+
+def get_war_season_summary(season_id=None, top_n=5, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        from storage.war_analytics import (
+            get_members_without_war_participation,
+            get_war_champ_standings,
+        )
+
+        if season_id is None:
+            season_id = get_current_season_id(conn=conn)
+        if season_id is None:
+            return None
+        total_races = conn.execute(
+            "SELECT COUNT(*) AS cnt, SUM(COALESCE(our_fame, 0)) AS total_clan_fame "
+            "FROM war_races WHERE season_id = ?",
+            (season_id,),
+        ).fetchone()
+        top = get_war_champ_standings(season_id=season_id, conn=conn)[:top_n]
+        nonparticipants = get_members_without_war_participation(season_id=season_id, conn=conn)["members"]
+        active_members = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM members WHERE status = 'active'"
+        ).fetchone()["cnt"]
+        return {
+            "season_id": season_id,
+            "races": total_races["cnt"],
+            "total_clan_fame": total_races["total_clan_fame"] or 0,
+            "fame_per_active_member": round((total_races["total_clan_fame"] or 0) / active_members, 2) if active_members else 0,
+            "top_contributors": top,
+            "nonparticipants": nonparticipants,
+        }
+    finally:
+        if close:
+            conn.close()
+
+def get_trophy_drops(days=7, min_drop=100, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%d")
+        rows = conn.execute(
+            "SELECT m.player_tag AS tag, m.current_name AS name, "
+            "MIN(dm.trophies) AS min_trophies, MAX(dm.trophies) AS max_trophies, "
+            "MAX(dm.metric_date) AS latest_metric_date, "
+            "(MAX(dm.trophies) - MIN(dm.trophies)) AS spread "
+            "FROM member_daily_metrics dm "
+            "JOIN members m ON m.member_id = dm.member_id "
+            "WHERE dm.metric_date >= ? AND m.status = 'active' "
+            "GROUP BY dm.member_id "
+            "HAVING spread >= ? "
+            "ORDER BY spread DESC",
+            (cutoff, min_drop),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["drop"] = item.pop("spread")
+            result.append(item)
+        return result
+    finally:
+        if close:
+            conn.close()
+
+def get_trophy_changes(since_hours=24, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=since_hours)).strftime("%Y-%m-%dT%H:%M:%S")
+        rows = conn.execute(
+            """
+            WITH ranked AS (
+                SELECT m.player_tag AS tag, s.name, s.trophies, s.observed_at,
+                    ROW_NUMBER() OVER (PARTITION BY s.member_id ORDER BY s.observed_at ASC) AS rn_asc,
+                    ROW_NUMBER() OVER (PARTITION BY s.member_id ORDER BY s.observed_at DESC) AS rn_desc,
+                    s.member_id
+                FROM member_state_snapshots s
+                JOIN members m ON m.member_id = s.member_id
+                WHERE s.observed_at >= ?
+            )
+            SELECT a.tag, a.name,
+                   a.trophies AS old_trophies,
+                   b.trophies AS new_trophies,
+                   (b.trophies - a.trophies) AS change
+            FROM ranked a
+            JOIN ranked b ON a.member_id = b.member_id
+            WHERE a.rn_asc = 1 AND b.rn_desc = 1 AND a.trophies != b.trophies
+            ORDER BY ABS(change) DESC
+            """,
+            (cutoff,),
+        ).fetchall()
+        return _rowdicts(rows)
+    finally:
+        if close:
+            conn.close()
+
+def detect_milestones(conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            """
+            WITH ranked AS (
+                SELECT s.*, m.player_tag AS tag,
+                    ROW_NUMBER() OVER (PARTITION BY s.member_id ORDER BY s.observed_at DESC) AS rn
+                FROM member_state_snapshots s
+                JOIN members m ON m.member_id = s.member_id
+            )
+            SELECT a.tag, a.name,
+                   b.trophies AS old_trophies, a.trophies AS new_trophies,
+                   b.arena_name AS old_arena, a.arena_name AS new_arena
+            FROM ranked a
+            JOIN ranked b ON a.member_id = b.member_id
+            WHERE a.rn = 1 AND b.rn = 2
+            """
+        ).fetchall()
+        milestones = []
+        for row in rows:
+            old_t = row["old_trophies"] or 0
+            new_t = row["new_trophies"] or 0
+            for threshold in TROPHY_MILESTONES:
+                if old_t < threshold <= new_t:
+                    milestones.append({
+                        "tag": row["tag"],
+                        "name": row["name"],
+                        "type": "trophy_milestone",
+                        "old_value": old_t,
+                        "new_value": new_t,
+                        "milestone": threshold,
+                    })
+            if row["old_arena"] and row["new_arena"] and row["old_arena"] != row["new_arena"]:
+                milestones.append({
+                    "tag": row["tag"],
+                    "name": row["name"],
+                    "type": "arena_change",
+                    "old_value": row["old_arena"],
+                    "new_value": row["new_arena"],
+                })
+        return milestones
+    finally:
+        if close:
+            conn.close()
+
+def detect_role_changes(conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            """
+            WITH ranked AS (
+                SELECT s.*, m.player_tag AS tag,
+                    ROW_NUMBER() OVER (PARTITION BY s.member_id ORDER BY s.observed_at DESC) AS rn
+                FROM member_state_snapshots s
+                JOIN members m ON m.member_id = s.member_id
+            )
+            SELECT a.tag, a.name, b.role AS old_role, a.role AS new_role
+            FROM ranked a
+            JOIN ranked b ON a.member_id = b.member_id
+            WHERE a.rn = 1 AND b.rn = 2 AND COALESCE(a.role, '') != COALESCE(b.role, '')
+            """
+        ).fetchall()
+        return _rowdicts(rows)
+    finally:
+        if close:
+            conn.close()
+
+def get_war_history(n=10, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT war_race_id AS id, season_id, section_index, our_rank, our_fame, finish_time, created_date, raw_json AS standings_json FROM war_races ORDER BY created_date DESC LIMIT ?",
+            (n,),
+        ).fetchall()
+        return _rowdicts(rows)
+    finally:
+        if close:
+            conn.close()
+
+def get_current_season_id(conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute("SELECT MAX(season_id) AS sid FROM war_races").fetchone()
+        return row["sid"] if row else None
+    finally:
+        if close:
+            conn.close()
+
+def _season_bounds(conn: sqlite3.Connection, season_id: int) -> tuple[Optional[str], Optional[str]]:
+    row = conn.execute(
+        "SELECT MIN(created_date) AS start_date, MAX(created_date) AS end_date "
+        "FROM war_races WHERE season_id = ?",
+        (season_id,),
+    ).fetchone()
+    if not row or not row["start_date"] or not row["end_date"]:
+        return None, None
+    start_dt = _parse_cr_time(row["start_date"])
+    end_dt = _parse_cr_time(row["end_date"])
+    if not start_dt or not end_dt:
+        return None, None
+    end_dt = end_dt + timedelta(days=7)
+    return start_dt.strftime("%Y%m%dT%H%M%S.000Z"), end_dt.strftime("%Y%m%dT%H%M%S.000Z")

@@ -1,3 +1,27 @@
+import asyncio
+import os
+from datetime import datetime, timezone
+
+import cr_api
+import db
+import elixir_agent
+import prompts
+from runtime import app as _app
+from runtime.app import (
+    BOT_ROLE_ID,
+    CHICAGO,
+    CLANOPS_PROACTIVE_COOLDOWN_SECONDS,
+    LEADER_ROLE_ID,
+    bot,
+    log,
+    scheduler,
+)
+from runtime import status as runtime_status
+
+
+async def _post_to_elixir(*args, **kwargs):
+    return await _app._post_to_elixir(*args, **kwargs)
+
 def _match_clan_member(nickname):
     """Match a Discord nickname to a clan member. Returns (tag, name) or None.
 
@@ -567,3 +591,8 @@ async def _share_channel_result(result, workflow):
 
 # ── Heartbeat ────────────────────────────────────────────────────────────────
 
+
+__all__ = [
+    name for name in globals()
+    if not name.startswith("__") and name not in {"_post_to_elixir"}
+]

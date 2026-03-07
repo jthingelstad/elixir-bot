@@ -1,3 +1,36 @@
+import asyncio
+import os
+from datetime import datetime, timezone
+
+import cr_api
+import db
+import elixir_agent
+import heartbeat
+import prompts
+import site_content
+from runtime import app as _app
+from runtime.app import (
+    CHICAGO,
+    HEARTBEAT_END_HOUR,
+    HEARTBEAT_START_HOUR,
+    bot,
+    log,
+)
+from runtime.helpers import _channel_scope, _get_singleton_channel_id
+from runtime import status as runtime_status
+
+
+async def _post_to_elixir(*args, **kwargs):
+    return await _app._post_to_elixir(*args, **kwargs)
+
+
+async def _load_live_clan_context(*args, **kwargs):
+    return await _app._load_live_clan_context(*args, **kwargs)
+
+
+def _build_weekly_clanops_review(*args, **kwargs):
+    return _app._build_weekly_clanops_review(*args, **kwargs)
+
 async def _heartbeat_tick():
     """Hourly heartbeat — fetch data, detect signals, post if interesting."""
     runtime_status.mark_job_start("heartbeat")
@@ -365,3 +398,8 @@ async def _clanops_weekly_review():
 
 
 # ── Bot events ────────────────────────────────────────────────────────────────
+
+__all__ = [
+    name for name in globals()
+    if not name.startswith("__") and name not in {"_post_to_elixir", "_load_live_clan_context", "_build_weekly_clanops_review"}
+]

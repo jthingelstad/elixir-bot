@@ -29,6 +29,16 @@ pytest tests/ -v
 
 Focused tests use in-memory SQLite and mocked external services. No API keys needed.
 
+## Cleanup
+
+```bash
+venv/bin/python scripts/clean.py
+venv/bin/python scripts/clean.py --db
+```
+
+- default: remove cache directories like `__pycache__` and `.pytest_cache`
+- `--db`: also remove local runtime files like `elixir.db` and `elixir.pid`
+
 ## V2 Validation Scripts
 
 ```bash
@@ -62,7 +72,7 @@ Rules:
 | `elixir.py` | Main bot: Discord events, APScheduler heartbeat, channel routing |
 | `elixir_agent.py` | LLM engine: GPT-4o with function calling for observations, channel replies, and site content |
 | `heartbeat.py` | Hourly signal detection: milestones, war decks, joins/leaves, donations |
-| `db.py` | SQLite V2 store: identity, memory, current state, player analytics, war, raw payloads |
+| `db/` | SQLite V2 store package: identity, memory, current state, player analytics, war, raw payloads |
 | `cr_api.py` | Clash Royale API client: clan roster, war status, river race log, player profiles |
 | `cr_knowledge.py` | Static game + clan knowledge injected into LLM system prompt |
 | `prompts.py` | Loads and caches external prompt/config files from `prompts/` |

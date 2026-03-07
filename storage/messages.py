@@ -1,3 +1,19 @@
+from datetime import datetime, timedelta, timezone
+
+from db import (
+    CONVERSATION_MAX_PER_SCOPE,
+    CONVERSATION_RETENTION_DAYS,
+    _canon_tag,
+    _ensure_channel,
+    _ensure_member,
+    _ensure_thread,
+    _json_or_none,
+    _normalize_scope,
+    _utcnow,
+    get_connection,
+)
+from storage.identity import save_memory_episode, save_memory_fact, upsert_discord_user
+
 # -- Signal and announcement logs ------------------------------------------
 
 def was_signal_sent(signal_type, date_str, conn=None):
@@ -239,4 +255,3 @@ def purge_old_conversations(conn=None):
     finally:
         if close:
             conn.close()
-

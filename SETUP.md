@@ -17,7 +17,7 @@ Verify the install:
 pytest tests/ -v
 ```
 
-All 130 tests use in-memory SQLite and mocked services — no API keys or network needed. If tests pass, the install is good.
+All 121 tests use in-memory SQLite and mocked services — no API keys or network needed. If tests pass, the install is good.
 
 ## Configure
 
@@ -43,7 +43,7 @@ ELIXIR_DB_PATH=./elixir.db                          # SQLite database path
 
 Non-secret config (Discord channel IDs, guild ID, clan tag) lives in prompt files checked into the repo:
 
-- `prompts/DISCORD.md` — Channel behaviors and Discord IDs (`## Config` section)
+- `prompts/DISCORD.md` — Channel behaviors, per-channel routing, singleton channel roles, and Discord IDs
 - `prompts/CLAN.md` — Clan tag, rules, thresholds
 
 ## Process Management (launchd)
@@ -140,22 +140,36 @@ This runs one heartbeat cycle against the live API (requires `.env` with valid k
 ```bash
 cd ~/Projects/elixir-bot
 source venv/bin/activate
-python -c "import heartbeat; signals = heartbeat.tick(); print(f'{len(signals)} signals')"
+python -c "import heartbeat; result = heartbeat.tick(); print(f'{len(result.signals)} signals')"
 ```
 
 This is safe — it reads from the API and writes to the local DB, but does **not** post to Discord.
+
+## Cleanup
+
+Remove transient local cruft:
+
+```bash
+venv/bin/python scripts/clean.py
+```
+
+Remove caches plus local runtime files like `elixir.db` and `elixir.pid`:
+
+```bash
+venv/bin/python scripts/clean.py --db
+```
 
 ## What's Stateful
 
 ### `elixir.db` (SQLite)
 
-Lives at `ELIXIR_DB_PATH` (default: `./elixir.db` in the project root). Contains real clan data:
+Lives at `ELIXIR_DB_PATH` (default: `./elixir.db` in the project root). Contains real clan data in the V2 schema:
 
-- Member snapshots (90-day retention)
-- War results and participation (180-day retention)
-- Leader conversation memory (30-day retention)
-- Join dates and birthdays (permanent)
-- Cake day announcement dedup (7-day retention)
+- Member identity, metadata, and clan membership history
+- Current member state, daily metrics, and player analytics
+- War state, war participation, and battle facts
+- Conversation memory and channel state
+- Raw API payload capture and operational signal tables
 
 **Safe to delete** if you want a clean slate — the bot will recreate it on startup. But you lose all history. The file is gitignored.
 

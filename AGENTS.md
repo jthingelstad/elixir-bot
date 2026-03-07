@@ -10,7 +10,7 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py + 
 - `elixir_agent.py` — LLM engine: observation + channel replies + site content generation via GPT-4o
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log)
 - `heartbeat.py` — Hourly signal detection (milestones, joins/leaves, war transitions)
-- `db.py` — SQLite V2 data store: identity, memory, current state, analytics, war, and raw payload capture
+- `db/` — SQLite V2 data store package: identity, memory, current state, analytics, war, and raw payload capture
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
 - `site_content.py` — JSON content management for poapkings.com (write, validate, commit/push)
@@ -31,9 +31,19 @@ venv/bin/python -m pytest tests/ -v
 
 Tests use in-memory SQLite and mocked external services (no API keys needed).
 
+## Cleanup
+
+```bash
+venv/bin/python scripts/clean.py
+venv/bin/python scripts/clean.py --db
+```
+
+- default: remove cache directories like `__pycache__` and `.pytest_cache`
+- `--db`: also remove local runtime files like `elixir.db` and `elixir.pid`
+
 ## Database
 
-SQLite at `elixir.db` (auto-created, gitignored). The project now uses the V2 schema defined in `_migration_0()` in `db.py`. The key tables are:
+SQLite at `elixir.db` (auto-created, gitignored). The project now uses the V2 schema defined in `_migration_0()` in `db/__init__.py`. The key tables are:
 
 - Identity + metadata: `members`, `member_metadata`, `member_aliases`, `discord_users`, `discord_links`
 - Conversation memory: `conversation_threads`, `messages`, `memory_facts`, `memory_episodes`, `channel_state`
@@ -42,11 +52,11 @@ SQLite at `elixir.db` (auto-created, gitignored). The project now uses the V2 sc
 - War: `war_current_state`, `war_day_status`, `war_races`, `war_participation`
 - Raw ingest + signals: `raw_api_payloads`, `signal_log`, `cake_day_announcements`
 
-All `db.py` functions accept an optional `conn` parameter — pass one in tests, omit in production.
+All `db` module functions accept an optional `conn` parameter — pass one in tests, omit in production.
 
 ### Migrations
 
-Schema is managed by `_MIGRATIONS` list in `db.py` using `PRAGMA user_version`. To add a schema change:
+Schema is managed by `_MIGRATIONS` list in `db/__init__.py` using `PRAGMA user_version`. To add a schema change:
 
 1. Write a `_migration_N(conn)` function
 2. Append it to `_MIGRATIONS`

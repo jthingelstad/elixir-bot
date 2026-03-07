@@ -1,3 +1,30 @@
+import json
+
+from agent import app as _app
+from agent.core import (
+    MAX_CONTEXT_MEMBERS_DEFAULT,
+    MAX_CONTEXT_MEMBERS_FULL,
+    _create_chat_completion,
+    log,
+)
+from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_response
+from agent.prompts import (
+    _clanops_system,
+    _event_system,
+    _home_message_system,
+    _interactive_system,
+    _members_message_system,
+    _observe_system,
+    _promote_system,
+    _reception_system,
+    _roster_bios_system,
+)
+from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
+
+
+def _chat_with_tools(*args, **kwargs):
+    return _app._chat_with_tools(*args, **kwargs)
+
 def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memory_context=None):
     """Observation with signals from heartbeat. Returns dict or None.
 
@@ -226,3 +253,14 @@ def generate_promote_content(clan_data, roster_data=None):
     except Exception as e:
         log.error("Promote API error: %s", e)
         return None
+
+__all__ = [
+    "observe_and_post",
+    "respond_in_reception",
+    "respond_in_channel",
+    "generate_message",
+    "generate_home_message",
+    "generate_members_message",
+    "generate_roster_bios",
+    "generate_promote_content",
+]

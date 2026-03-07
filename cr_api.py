@@ -5,7 +5,7 @@ import requests
 from dotenv import load_dotenv
 
 import prompts
-import runtime_status
+from runtime import status as runtime_status
 
 load_dotenv()
 

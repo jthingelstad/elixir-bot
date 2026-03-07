@@ -121,11 +121,6 @@ def discord():
     return _load("DISCORD.md")
 
 
-def channels():
-    """Alias for discord() — kept for backward compatibility."""
-    return discord()
-
-
 def channel_section(channel_name):
     """Extract a single channel's section from DISCORD.md.
 

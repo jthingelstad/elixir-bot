@@ -1,4 +1,4 @@
-"""db.py — SQLite storage layer for Elixir bot.
+"""db — SQLite storage layer for Elixir bot.
 
 V2 resets the schema around stable member identity, Discord identity, raw API
 payloads, war history, battle facts, and conversational memory.
@@ -21,7 +21,10 @@ from cr_knowledge import TROPHY_MILESTONES
 
 log = logging.getLogger("elixir_db")
 
-DB_PATH = os.getenv("ELIXIR_DB_PATH", os.path.join(os.path.dirname(__file__), "elixir.db"))
+PACKAGE_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.dirname(PACKAGE_DIR)
+
+DB_PATH = os.getenv("ELIXIR_DB_PATH", os.path.join(PROJECT_ROOT, "elixir.db"))
 
 SNAPSHOT_RETENTION_DAYS = 90
 WAR_RETENTION_DAYS = 180
@@ -725,17 +728,32 @@ def get_connection(db_path=None):
     return conn
 
 
-def _load_extracted(relative_path):
-    path = os.path.join(os.path.dirname(__file__), relative_path)
-    with open(path, "r") as f:
-        exec(compile(f.read(), path, "exec"), globals())
+# Allow storage submodules to import db's internal helpers during package init.
+def __export_public(module):
+    names = getattr(module, "__all__", None) or [
+        name for name in vars(module) if not name.startswith("__")
+    ]
+    for name in names:
+        globals()[name] = getattr(module, name)
+    return names
 
 
-# -- Extracted domains ------------------------------------------------------
+from storage import identity as _identity_module
+from storage import war as _war_module
+from storage import roster as _roster_module
+from storage import player as _player_module
+from storage import messages as _messages_module
+from storage import metadata as _metadata_module
 
-_load_extracted("storage/roster.py")
-_load_extracted("storage/war.py")
-_load_extracted("storage/player.py")
-_load_extracted("storage/identity.py")
-_load_extracted("storage/messages.py")
-_load_extracted("storage/metadata.py")
+__all__ = [name for name in globals() if not name.startswith("__")]
+for _module in (
+    _identity_module,
+    _war_module,
+    _roster_module,
+    _player_module,
+    _messages_module,
+    _metadata_module,
+):
+    __export_public(_module)
+
+__all__ = [name for name in globals() if not name.startswith("__")]
