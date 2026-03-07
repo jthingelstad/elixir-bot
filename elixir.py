@@ -111,6 +111,42 @@ def _is_status_request(text: str) -> bool:
     }
 
 
+def _clan_status_mode(text: str) -> str | None:
+    normalized = " ".join((text or "").strip().lower().split())
+    if normalized in {
+        "clan status",
+        "!clan-status",
+        "/clan-status",
+        "clan health",
+        "clan health check",
+        "poap kings status",
+    }:
+        return "full"
+    if normalized in {
+        "clan status short",
+        "clan status brief",
+        "!clan-status-short",
+        "/clan-status-short",
+        "clan health short",
+        "poap kings status short",
+    }:
+        return "short"
+    return None
+
+
+def _is_help_request(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    return normalized in {
+        "help",
+        "!help",
+        "/help",
+        "elixir help",
+        "@elixir help",
+        "what can you do",
+        "what do you do",
+    }
+
+
 def _fmt_iso_short(value):
     if not value:
         return "n/a"
@@ -151,6 +187,35 @@ def _fmt_bytes(size):
             return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} {unit}"
         value /= 1024
     return f"{int(size)} B"
+
+
+def _fmt_num(value, digits=0):
+    if value is None:
+        return "n/a"
+    if isinstance(value, float):
+        if digits:
+            return f"{value:,.{digits}f}"
+        if value.is_integer():
+            return f"{int(value):,}"
+        return f"{value:,.2f}"
+    return f"{value:,}"
+
+
+def _member_label(member):
+    return (
+        member.get("member_ref")
+        or member.get("member_reference")
+        or member.get("name")
+        or member.get("member_name")
+        or member.get("tag")
+        or "unknown"
+    )
+
+
+def _join_member_bits(members, formatter, limit=3):
+    if not members:
+        return "none"
+    return ", ".join(formatter(member) for member in members[:limit])
 
 
 def _job_next_runs():
@@ -212,6 +277,182 @@ def _build_status_report():
                 f"  - `{name}` next {next_run} | last {_fmt_relative(last)} | {summary}"
             )
     return "\n".join(lines)
+
+
+def _build_clan_status_report(clan=None, war=None):
+    clan = clan or {}
+    war = war or {}
+    roster = db.get_clan_roster_summary()
+    members = db.list_members()
+    war_status = db.get_current_war_status()
+    season_summary = db.get_war_season_summary(top_n=3)
+    at_risk = db.get_members_at_risk(require_war_participation=True)
+    slumping = db.get_members_on_losing_streak(min_streak=3)
+    recent_joins = db.list_recent_joins(days=30)
+    deck_status = db.get_war_deck_status_today()
+
+    clan_name = clan.get("name") or (war_status.get("clan_name") if war_status else None)
+    clan_name = clan_name or "Clan"
+    member_count = clan.get("members") or clan.get("memberCount") or roster.get("active_members") or 0
+    open_slots = max(0, 50 - member_count)
+    clan_score = clan.get("clanScore")
+    war_trophies = clan.get("clanWarTrophies")
+    required_trophies = clan.get("requiredTrophies")
+    donations_total = clan.get("donationsPerWeek")
+    if donations_total in (None, 0):
+        donations_total = roster.get("donations_week_total")
+
+    top_donors = sorted(
+        members,
+        key=lambda member: (member.get("donations_week") or 0, -(member.get("clan_rank") or 999)),
+        reverse=True,
+    )
+    top_donors = [member for member in top_donors if (member.get("donations_week") or 0) > 0][:3]
+    top_trophy_member = max(members, key=lambda member: member.get("trophies") or 0, default=None)
+
+    lines = [
+        f"**{clan_name} Status**",
+        (
+            f"- Roster: {member_count}/50 members | {open_slots} open | avg King Level {_fmt_num(roster.get('avg_exp_level'), 2)} "
+            f"| avg trophies {_fmt_num(roster.get('avg_trophies'), 2)}"
+        ),
+        (
+            f"- Ladder/Economy: clan score {_fmt_num(clan_score)} | war trophies {_fmt_num(war_trophies)} "
+            f"| required trophies {_fmt_num(required_trophies)} | weekly donations {_fmt_num(donations_total)}"
+        ),
+    ]
+
+    if top_trophy_member or top_donors:
+        top_trophy_text = (
+            f"{_member_label(top_trophy_member)} {_fmt_num(top_trophy_member.get('trophies'))}"
+            if top_trophy_member else "n/a"
+        )
+        donor_text = _join_member_bits(
+            top_donors,
+            lambda member: f"{_member_label(member)} {_fmt_num(member.get('donations_week') or 0)}",
+        )
+        lines.append(f"- Standouts: top trophies {top_trophy_text} | top donors {donor_text}")
+
+    if war_status:
+        war_bits = [
+            f"season {war_status.get('season_id')}" if war_status.get("season_id") is not None else None,
+            f"week {war_status.get('week')}" if war_status.get("week") is not None else None,
+            f"state {war_status.get('war_state') or 'n/a'}",
+            f"rank {war_status.get('race_rank')}" if war_status.get("race_rank") is not None else None,
+            f"fame {_fmt_num(war_status.get('fame'))}",
+            f"repair {_fmt_num(war_status.get('repair_points'))}",
+            f"score {_fmt_num(war_status.get('clan_score'))}",
+        ]
+        lines.append(f"- War now: {' | '.join(bit for bit in war_bits if bit)}")
+
+    if season_summary:
+        top_contributors = _join_member_bits(
+            season_summary.get("top_contributors") or [],
+            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_fame') or 0)}",
+        )
+        lines.append(
+            f"- War season: {season_summary.get('races', 0)} races | total fame {_fmt_num(season_summary.get('total_clan_fame'))} "
+            f"| fame/member {_fmt_num(season_summary.get('fame_per_active_member'), 2)} | top contributors {top_contributors}"
+        )
+        lines.append(
+            f"- Watch list: {len(season_summary.get('nonparticipants') or [])} with no war decks this season | "
+            f"{len((at_risk or {}).get('members') or [])} at risk | {len(slumping or [])} on losing streaks | "
+            f"{len(recent_joins or [])} joined in last 30d"
+        )
+
+    if deck_status and deck_status.get("total_participants"):
+        lines.append(
+            f"- War today: {len(deck_status.get('used_all_4') or [])} used all 4 decks | "
+            f"{len(deck_status.get('used_some') or [])} used some | "
+            f"{len(deck_status.get('used_none') or [])} unused"
+        )
+
+    if recent_joins:
+        lines.append(
+            f"- Recent joins: {_join_member_bits(recent_joins, lambda member: _member_label(member))}"
+        )
+
+    if slumping:
+        slumping_text = _join_member_bits(
+            slumping,
+            lambda member: f"{_member_label(member)} L{member.get('current_streak')}",
+        )
+        lines.append(
+            f"- Slumping: {slumping_text}"
+        )
+
+    if at_risk and at_risk.get("members"):
+        lines.append(
+            f"- At risk: {_join_member_bits(at_risk['members'], lambda member: _member_label(member))}"
+        )
+
+    if war and war.get("clans"):
+        lines.append(f"- Live war feed: {len(war.get('clans') or [])} clans in current river race")
+
+    return "\n".join(lines)
+
+
+def _build_clan_status_short_report(clan=None, war=None):
+    clan = clan or {}
+    roster = db.get_clan_roster_summary()
+    war_status = db.get_current_war_status()
+    season_summary = db.get_war_season_summary(top_n=2)
+    at_risk = db.get_members_at_risk(require_war_participation=True)
+    slumping = db.get_members_on_losing_streak(min_streak=3)
+
+    clan_name = clan.get("name") or (war_status.get("clan_name") if war_status else None) or "Clan"
+    member_count = clan.get("members") or clan.get("memberCount") or roster.get("active_members") or 0
+    open_slots = max(0, 50 - member_count)
+    lines = [
+        f"**{clan_name} Status (Short)**",
+        (
+            f"- Roster: {member_count}/50 | open {open_slots} | avg level {_fmt_num(roster.get('avg_exp_level'), 1)} "
+            f"| avg trophies {_fmt_num(roster.get('avg_trophies'), 0)}"
+        ),
+    ]
+    if war_status:
+        lines.append(
+            f"- War: season {war_status.get('season_id') if war_status.get('season_id') is not None else 'n/a'} "
+            f"| week {war_status.get('week') if war_status.get('week') is not None else 'n/a'} "
+            f"| rank {war_status.get('race_rank') if war_status.get('race_rank') is not None else 'n/a'} "
+            f"| fame {_fmt_num(war_status.get('fame'))}"
+        )
+    if season_summary:
+        top_contributors = _join_member_bits(
+            season_summary.get("top_contributors") or [],
+            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_fame') or 0)}",
+            limit=2,
+        )
+        lines.append(
+            f"- Season: fame/member {_fmt_num(season_summary.get('fame_per_active_member'), 1)} | top {top_contributors}"
+        )
+    lines.append(
+        f"- Watch: {len((at_risk or {}).get('members') or [])} at risk | {len(slumping or [])} slumping"
+    )
+    return "\n".join(lines)
+
+
+def _build_help_report(role: str) -> str:
+    if role == "clanops":
+        return "\n".join(
+            [
+                "**Elixir Help — ClanOps**",
+                "- Ask without mentioning me in this channel when you want operational input.",
+                "- Direct commands: `status`, `clan status`, `clan status short`, `help`.",
+                "- I can help with roster reviews, war participation, promotions, demotions, kicks, recent form, decks, donations, and member lookups.",
+                "- I can resolve members by in-game name, tag, alias, or Discord handle.",
+                "- If I have something useful to add to an ops discussion here, I may inject proactively.",
+            ]
+        )
+    return "\n".join(
+        [
+            "**Elixir Help — Interactive**",
+            "- Mention me in this channel when you want help: `@Elixir help`.",
+            "- I can answer member questions about current trophies, league/arena, deck, signature cards, recent form, war decks left, war participation, and clan rank.",
+            "- I can answer clan questions like who is in the clan, recent joins, donation leaders, and current war status.",
+            "- I am read-only in interactive channels. I do not make admin decisions here.",
+        ]
+    )
 
 
 def _strip_bot_mentions(text: str) -> str:
@@ -810,8 +1051,64 @@ async def on_message(message):
     if role == "onboarding" and not mentioned:
         return
 
-    if role == "clanops" and _is_status_request(raw_question):
-        status_content = await asyncio.to_thread(_build_status_report)
+    clan_status_mode = _clan_status_mode(raw_question)
+
+    if role in {"clanops", "interactive"} and _is_help_request(raw_question):
+        help_content = await asyncio.to_thread(_build_help_report, role)
+        workflow_name = "clanops" if role == "clanops" else workflow
+        event_type = f"{role}_help"
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "user",
+            raw_question,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow=workflow_name,
+            discord_message_id=message.id,
+        )
+        await _reply_text(message, help_content)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "assistant",
+            help_content,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow=workflow_name,
+            event_type=event_type,
+        )
+        return
+
+    if role == "clanops" and (_is_status_request(raw_question) or clan_status_mode):
+        clan = {}
+        war = {}
+        if clan_status_mode:
+            try:
+                clan, war = await _load_live_clan_context()
+            except Exception as exc:
+                log.warning("Clan status refresh failed: %s", exc)
+        if clan_status_mode == "full":
+            report_builder = _build_clan_status_report
+            report_args = (clan, war)
+            event_type = "clan_status_report"
+        elif clan_status_mode == "short":
+            report_builder = _build_clan_status_short_report
+            report_args = (clan, war)
+            event_type = "clan_status_short_report"
+        else:
+            report_builder = _build_status_report
+            report_args = ()
+            event_type = "status_report"
+        status_content = await asyncio.to_thread(report_builder, *report_args)
         await asyncio.to_thread(
             db.save_message,
             conversation_scope,
@@ -839,7 +1136,7 @@ async def on_message(message):
             username=message.author.name,
             display_name=message.author.display_name,
             workflow="clanops",
-            event_type="status_report",
+            event_type=event_type,
         )
         return
 
