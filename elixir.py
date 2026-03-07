@@ -19,6 +19,7 @@ import site_content
 import elixir_agent
 import heartbeat
 import prompts
+import runtime_status
 
 load_dotenv()
 
@@ -95,6 +96,122 @@ def _channel_scope(channel) -> str:
 
 def _channel_conversation_scope(channel, discord_user_id) -> str:
     return f"channel_user:{channel.id}:{discord_user_id}"
+
+
+def _is_status_request(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    return normalized in {
+        "status",
+        "!status",
+        "/status",
+        "elixir status",
+        "@elixir status",
+        "health",
+        "health check",
+    }
+
+
+def _fmt_iso_short(value):
+    if not value:
+        return "n/a"
+    try:
+        dt = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        return dt.astimezone(CHICAGO).strftime("%Y-%m-%d %I:%M %p CT")
+    except ValueError:
+        return str(value)
+
+
+def _fmt_relative(value):
+    if not value:
+        return "n/a"
+    try:
+        dt = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return str(value)
+    delta = datetime.now(timezone.utc) - dt
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return f"{seconds}s ago"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours}h ago"
+    days = hours // 24
+    return f"{days}d ago"
+
+
+def _fmt_bytes(size):
+    if size is None:
+        return "n/a"
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} {unit}"
+        value /= 1024
+    return f"{int(size)} B"
+
+
+def _job_next_runs():
+    items = []
+    for job in scheduler.get_jobs():
+        next_run = job.next_run_time.astimezone(CHICAGO).strftime("%Y-%m-%d %I:%M %p CT") if job.next_run_time else "n/a"
+        items.append({"id": job.id, "next_run": next_run})
+    return sorted(items, key=lambda item: item["id"])
+
+
+async def _reply_text(message, content):
+    if len(content) > 2000:
+        for chunk in [content[i:i + 1990] for i in range(0, len(content), 1990)]:
+            await message.reply(chunk)
+    else:
+        await message.reply(content)
+
+
+def _build_status_report():
+    runtime = runtime_status.snapshot()
+    data = db.get_system_status()
+    api = runtime["api"]
+    openai = runtime["openai"]
+    roster = data.get("roster_summary") or {}
+    freshness = data.get("freshness") or {}
+    jobs = runtime.get("jobs") or {}
+    endpoint_bits = []
+    for item in (data.get("raw_payloads_by_endpoint") or [])[:4]:
+        endpoint_bits.append(f"{item['endpoint']}={item['count']}")
+    endpoint_summary = ", ".join(endpoint_bits) or "none"
+    lines = [
+        "**Elixir Status**",
+        f"- Build: `{elixir_agent.BUILD_HASH}`",
+        f"- Uptime: {_fmt_relative(runtime.get('started_at'))} (since {_fmt_iso_short(runtime.get('started_at'))})",
+        f"- Scheduler: {'running' if scheduler.running else 'stopped'}",
+        f"- DB: `{os.path.basename(data.get('db_path') or 'n/a')}` | schema v{data.get('schema_version')} | {_fmt_bytes(data.get('db_size_bytes'))} | active members {roster.get('active_members', 0)}/50",
+        f"- Data freshness: roster {_fmt_relative(freshness.get('member_state_at'))}, profiles {_fmt_relative(freshness.get('player_profile_at'))}, battles {_fmt_relative(freshness.get('battle_fact_at'))}, war {_fmt_relative(freshness.get('war_state_at'))}",
+        f"- Data counts: raw payloads {data.get('counts', {}).get('raw_payload_count', 0)}, battle facts {data.get('counts', {}).get('battle_fact_count', 0)}, messages {data.get('counts', {}).get('message_count', 0)}, discord links {data.get('counts', {}).get('discord_links', 0)}",
+        f"- Raw ingest: latest {((data.get('latest_raw_payload') or {}).get('endpoint') or 'n/a')} @ {_fmt_relative((data.get('latest_raw_payload') or {}).get('fetched_at'))}; endpoints {endpoint_summary}",
+        f"- Player intel backlog: {data.get('stale_player_intel_targets', 0)} stale target(s)",
+        f"- CR API: last {(api.get('last_endpoint') or 'n/a')} ({api.get('last_entity_key') or '-'}) {_fmt_relative(api.get('last_call_at'))}; status {api.get('last_status_code') or 'n/a'}; {'ok' if api.get('last_ok') else 'error' if api.get('last_ok') is not None else 'n/a'}; {api.get('last_duration_ms') or 'n/a'}ms; total {api.get('call_count', 0)} calls / {api.get('error_count', 0)} errors",
+        f"- OpenAI: last {(openai.get('last_workflow') or 'n/a')} via {(openai.get('last_model') or 'n/a')} {_fmt_relative(openai.get('last_call_at'))}; {'ok' if openai.get('last_ok') else 'error' if openai.get('last_ok') is not None else 'n/a'}; {openai.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {openai.get('last_prompt_tokens') or 'n/a'}/{openai.get('last_completion_tokens') or 'n/a'}/{openai.get('last_total_tokens') or 'n/a'}; total {openai.get('call_count', 0)} calls / {openai.get('error_count', 0)} errors",
+        f"- Env: Discord {'ok' if runtime['env']['has_discord_token'] else 'missing'}, OpenAI {'ok' if runtime['env']['has_openai_api_key'] else 'missing'}, CR {'ok' if runtime['env']['has_cr_api_key'] else 'missing'}",
+    ]
+    if data.get("latest_signal"):
+        lines.append(
+            f"- Latest signal log: {data['latest_signal']['signal_type']} on {data['latest_signal']['signal_date']}"
+        )
+    if data.get("current_season_id") is not None:
+        lines.append(f"- Current war season id: {data['current_season_id']}")
+    if jobs:
+        lines.append("- Jobs:")
+        for name in ("heartbeat", "player_intel_refresh", "site_data_refresh", "site_content_cycle"):
+            state = jobs.get(name) or {}
+            next_run = next((item["next_run"] for item in _job_next_runs() if item["id"] == name), "n/a")
+            last = state.get("last_success_at") or state.get("last_failure_at") or state.get("last_started_at")
+            summary = state.get("last_summary") or state.get("last_error") or "n/a"
+            lines.append(
+                f"  - `{name}` next {next_run} | last {_fmt_relative(last)} | {summary}"
+            )
+    return "\n".join(lines)
 
 
 def _strip_bot_mentions(text: str) -> str:
@@ -185,17 +302,20 @@ async def _share_channel_result(result, workflow):
 
 async def _heartbeat_tick():
     """Hourly heartbeat — fetch data, detect signals, post if interesting."""
+    runtime_status.mark_job_start("heartbeat")
     # Check active hours
     now_chicago = datetime.now(CHICAGO)
     if not (HEARTBEAT_START_HOUR <= now_chicago.hour < HEARTBEAT_END_HOUR):
         log.info("Heartbeat: outside active hours (%d:%02d), skipping",
                  now_chicago.hour, now_chicago.minute)
+        runtime_status.mark_job_success("heartbeat", "skipped outside active hours")
         return
 
     announcements_channel_id = _get_singleton_channel_id("announcements")
     channel = bot.get_channel(announcements_channel_id)
     if not channel:
         log.error("Announcements channel %s not found", announcements_channel_id)
+        runtime_status.mark_job_failure("heartbeat", "announcements channel not found")
         return
 
     try:
@@ -205,6 +325,7 @@ async def _heartbeat_tick():
 
         if not signals:
             log.info("Heartbeat: no signals, nothing to post")
+            runtime_status.mark_job_success("heartbeat", "no signals")
             return
 
         log.info("Heartbeat: %d signals detected, consulting LLM", len(signals))
@@ -274,6 +395,7 @@ async def _heartbeat_tick():
             )
             if result is None:
                 log.info("Heartbeat: LLM decided signals not worth posting")
+                runtime_status.mark_job_success("heartbeat", f"{len(other_signals)} signal(s), no post")
                 return
             await _post_to_elixir(channel, result)
             content = result.get("content", result.get("summary", ""))
@@ -289,8 +411,11 @@ async def _heartbeat_tick():
                 )
             log.info("Posted observation: %s", result.get("summary"))
 
+        runtime_status.mark_job_success("heartbeat", f"{len(signals)} signal(s) processed")
+
     except Exception as e:
         log.error("Heartbeat error: %s", e, exc_info=True)
+        runtime_status.mark_job_failure("heartbeat", str(e))
 
 
 # ── Site content for poapkings.com ────────────────────────────────────────────
@@ -304,6 +429,7 @@ PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "6"))
 
 async def _site_data_refresh():
     """Morning job — refresh clan data and roster on poapkings.com."""
+    runtime_status.mark_job_start("site_data_refresh")
     try:
         try:
             clan = cr_api.get_clan()
@@ -313,6 +439,7 @@ async def _site_data_refresh():
 
         if not clan.get("memberList"):
             log.info("Site data refresh: no member data, skipping")
+            runtime_status.mark_job_success("site_data_refresh", "no member data")
             return
 
         roster_data = site_content.build_roster_data(clan)
@@ -323,12 +450,15 @@ async def _site_data_refresh():
 
         site_content.commit_and_push("Elixir data refresh")
         log.info("Site data refresh complete: %d members", len(roster_data.get("members", [])))
+        runtime_status.mark_job_success("site_data_refresh", f"{len(roster_data.get('members', []))} members")
     except Exception as e:
         log.error("Site data refresh error: %s", e, exc_info=True)
+        runtime_status.mark_job_failure("site_data_refresh", str(e))
 
 
 async def _site_content_cycle():
     """Evening job — generate all site content and refresh data."""
+    runtime_status.mark_job_start("site_content_cycle")
     try:
         try:
             clan = cr_api.get_clan()
@@ -400,21 +530,26 @@ async def _site_content_cycle():
 
         site_content.commit_and_push("Elixir content update")
         log.info("Site content cycle complete")
+        runtime_status.mark_job_success("site_content_cycle", "content updated")
     except Exception as e:
         log.error("Site content cycle error: %s", e, exc_info=True)
+        runtime_status.mark_job_failure("site_content_cycle", str(e))
 
 
 async def _player_intel_refresh():
     """Refresh stored player profile and battle intelligence for a subset of active members."""
+    runtime_status.mark_job_start("player_intel_refresh")
     try:
         clan = await asyncio.to_thread(cr_api.get_clan)
     except Exception as e:
         log.error("Player intel refresh: clan fetch failed: %s", e)
+        runtime_status.mark_job_failure("player_intel_refresh", f"clan fetch failed: {e}")
         return
 
     members = clan.get("memberList", [])
     if not members:
         log.info("Player intel refresh: no member data, skipping")
+        runtime_status.mark_job_success("player_intel_refresh", "no member data")
         return
 
     await asyncio.to_thread(db.snapshot_members, members)
@@ -432,6 +567,7 @@ async def _player_intel_refresh():
     )
     if not targets:
         log.info("Player intel refresh: no stale targets")
+        runtime_status.mark_job_success("player_intel_refresh", "no stale targets")
         return
 
     refreshed = 0
@@ -485,6 +621,7 @@ async def _player_intel_refresh():
                     )
 
     log.info("Player intel refresh complete: refreshed %d members", refreshed)
+    runtime_status.mark_job_success("player_intel_refresh", f"refreshed {refreshed} member(s)")
 
 
 # ── Bot events ────────────────────────────────────────────────────────────────
@@ -664,12 +801,46 @@ async def on_message(message):
     workflow = channel_config.get("workflow")
     scope = _channel_scope(message.channel)
     conversation_scope = _channel_conversation_scope(message.channel, message.author.id)
+    raw_question = _strip_bot_mentions(message.content) if mentioned else message.content.strip()
 
     # Non-responsive singleton channels are outbound only.
     if not channel_config.get("respond_allowed", True):
         return
 
     if role == "onboarding" and not mentioned:
+        return
+
+    if role == "clanops" and _is_status_request(raw_question):
+        status_content = await asyncio.to_thread(_build_status_report)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "user",
+            raw_question,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow="clanops",
+            discord_message_id=message.id,
+        )
+        await _reply_text(message, status_content)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "assistant",
+            status_content,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow="clanops",
+            event_type="status_report",
+        )
         return
 
     proactive = role == "clanops" and not mentioned
@@ -698,7 +869,7 @@ async def on_message(message):
         async with message.channel.typing():
             try:
                 clan = await asyncio.to_thread(cr_api.get_clan)
-                question = _strip_bot_mentions(message.content)
+                question = raw_question
                 memory_context = await asyncio.to_thread(
                     db.build_memory_context,
                     discord_user_id=message.author.id,
@@ -726,16 +897,10 @@ async def on_message(message):
                     memory_context=memory_context,
                 )
                 if result is None:
-                    await message.reply(
-                        "Having a hiccup — try again in a sec! 🧪"
-                    )
+                    await message.reply("Having a hiccup — try again in a sec! 🧪")
                     return
                 content = result.get("content", result.get("summary", ""))
-                if len(content) > 2000:
-                    for chunk in [content[i:i+1990] for i in range(0, len(content), 1990)]:
-                        await message.reply(chunk)
-                else:
-                    await message.reply(content)
+                await _reply_text(message, content)
                 await asyncio.to_thread(
                     db.save_message,
                     scope,
@@ -756,7 +921,7 @@ async def on_message(message):
         async with message.channel.typing():
             try:
                 clan, war = await _load_live_clan_context()
-                question = _strip_bot_mentions(message.content) if mentioned else message.content.strip()
+                question = raw_question
                 conversation_history = await asyncio.to_thread(
                     db.list_thread_messages,
                     conversation_scope,
@@ -816,11 +981,7 @@ async def on_message(message):
                     event_type=result.get("event_type"),
                 )
 
-                if len(content) > 2000:
-                    for chunk in [content[i:i+1990] for i in range(0, len(content), 1990)]:
-                        await message.reply(chunk)
-                else:
-                    await message.reply(content)
+                await _reply_text(message, content)
             except Exception as e:
                 log.error("%s channel error: %s", workflow, e)
                 if mentioned:

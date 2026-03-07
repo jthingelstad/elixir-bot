@@ -1,6 +1,7 @@
 """Focused tests for V2 agent tools."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import elixir_agent
@@ -239,3 +240,28 @@ def test_respond_in_channel_uses_clanops_proactive_workflow():
         assert result is None
         assert mock_chat.call_args.kwargs["workflow"] == "clanops_proactive"
         assert mock_chat.call_args.kwargs["allowed_tools"] == elixir_agent.TOOLSETS_BY_WORKFLOW["clanops_proactive"]
+
+
+def test_create_chat_completion_records_openai_telemetry():
+    response = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+    )
+    mock_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=lambda **kwargs: response)
+        )
+    )
+    with (
+        patch("elixir_agent._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_openai_call") as mock_record,
+    ):
+        result = elixir_agent._create_chat_completion(
+            workflow="interactive",
+            messages=[{"role": "user", "content": "status"}],
+        )
+
+    assert result is response
+    mock_record.assert_called_once()
+    assert mock_record.call_args.args[0] == "interactive"
+    assert mock_record.call_args.kwargs["ok"] is True
+    assert mock_record.call_args.kwargs["total_tokens"] == 30

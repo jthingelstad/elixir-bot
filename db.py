@@ -920,6 +920,73 @@ def get_channel_state(channel_id, conn=None):
             conn.close()
 
 
+def get_system_status(conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
+        schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
+        counts = conn.execute(
+            "SELECT "
+            "(SELECT COUNT(*) FROM members) AS members_total, "
+            "(SELECT COUNT(*) FROM members WHERE status = 'active') AS members_active, "
+            "(SELECT COUNT(*) FROM members WHERE status != 'active') AS members_inactive, "
+            "(SELECT COUNT(*) FROM discord_users) AS discord_users, "
+            "(SELECT COUNT(*) FROM discord_links WHERE is_primary = 1) AS discord_links, "
+            "(SELECT COUNT(*) FROM messages) AS message_count, "
+            "(SELECT COUNT(*) FROM raw_api_payloads) AS raw_payload_count, "
+            "(SELECT COUNT(*) FROM member_battle_facts) AS battle_fact_count"
+        ).fetchone()
+        freshness = {
+            "member_state_at": conn.execute(
+                "SELECT MAX(observed_at) AS ts FROM member_current_state"
+            ).fetchone()["ts"],
+            "player_profile_at": conn.execute(
+                "SELECT MAX(fetched_at) AS ts FROM player_profile_snapshots"
+            ).fetchone()["ts"],
+            "battle_fact_at": conn.execute(
+                "SELECT MAX(battle_time) AS ts FROM member_battle_facts"
+            ).fetchone()["ts"],
+            "war_state_at": conn.execute(
+                "SELECT MAX(observed_at) AS ts FROM war_current_state"
+            ).fetchone()["ts"],
+        }
+        latest_raw = conn.execute(
+            "SELECT endpoint, entity_key, fetched_at FROM raw_api_payloads ORDER BY fetched_at DESC, payload_id DESC LIMIT 1"
+        ).fetchone()
+        endpoint_counts = _rowdicts(
+            conn.execute(
+                "SELECT endpoint, COUNT(*) AS count, MAX(fetched_at) AS last_fetched_at "
+                "FROM raw_api_payloads GROUP BY endpoint ORDER BY count DESC, endpoint ASC"
+            ).fetchall()
+        )
+        current_season_id = get_current_season_id(conn=conn)
+        stale_targets = len(get_player_intel_refresh_targets(limit=500, stale_after_hours=6, conn=conn))
+        latest_signal = conn.execute(
+            "SELECT signal_type, signal_date FROM signal_log ORDER BY signal_date DESC, signal_type ASC LIMIT 1"
+        ).fetchone()
+        roster_summary = get_clan_roster_summary(conn=conn)
+        size_bytes = None
+        if db_path and os.path.exists(db_path):
+            size_bytes = os.path.getsize(db_path)
+        return {
+            "db_path": db_path,
+            "db_size_bytes": size_bytes,
+            "schema_version": schema_version,
+            "counts": dict(counts),
+            "roster_summary": roster_summary,
+            "freshness": freshness,
+            "latest_raw_payload": dict(latest_raw) if latest_raw else None,
+            "raw_payloads_by_endpoint": endpoint_counts,
+            "current_season_id": current_season_id,
+            "stale_player_intel_targets": stale_targets,
+            "latest_signal": dict(latest_signal) if latest_signal else None,
+        }
+    finally:
+        if close:
+            conn.close()
+
+
 def build_memory_context(discord_user_id=None, member_tag=None, channel_id=None, conn=None):
     close = conn is None
     conn = conn or get_connection()

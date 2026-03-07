@@ -18,6 +18,7 @@ from openai import OpenAI
 import cr_api
 import db
 import prompts
+import runtime_status
 
 log = logging.getLogger("elixir_agent")
 
@@ -59,6 +60,43 @@ def _build_system_prompt(*sections):
     parts = [s for s in sections if s]
     parts.append(f"Your build version: {BUILD_HASH}")
     return "\n\n".join(parts)
+
+
+def _create_chat_completion(*, workflow, messages, model="gpt-4o", temperature=0.7, max_tokens=800, timeout=60, tools=None, tool_choice=None):
+    started = time.perf_counter()
+    kwargs = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "timeout": timeout,
+    }
+    if tools:
+        kwargs["tools"] = tools
+    if tool_choice:
+        kwargs["tool_choice"] = tool_choice
+    try:
+        resp = _get_client().chat.completions.create(**kwargs)
+        usage = getattr(resp, "usage", None)
+        runtime_status.record_openai_call(
+            workflow,
+            ok=True,
+            model=model,
+            duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            prompt_tokens=getattr(usage, "prompt_tokens", None),
+            completion_tokens=getattr(usage, "completion_tokens", None),
+            total_tokens=getattr(usage, "total_tokens", None),
+        )
+        return resp
+    except Exception as exc:
+        runtime_status.record_openai_call(
+            workflow,
+            ok=False,
+            model=model,
+            error=exc,
+            duration_ms=round((time.perf_counter() - started) * 1000, 2),
+        )
+        raise
 
 
 def _observe_system():
@@ -1458,17 +1496,16 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
 
     def _create_completion(call_messages):
         start = time.perf_counter()
-        kwargs = {
-            "model": "gpt-4o",
-            "messages": call_messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "timeout": 60,
-        }
-        if allowed_tools:
-            kwargs["tools"] = allowed_tools
-            kwargs["tool_choice"] = "auto"
-        resp = _get_client().chat.completions.create(**kwargs)
+        resp = _create_chat_completion(
+            workflow=workflow,
+            messages=call_messages,
+            model="gpt-4o",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=60,
+            tools=allowed_tools if allowed_tools else None,
+            tool_choice="auto" if allowed_tools else None,
+        )
         completion_latencies_ms.append(round((time.perf_counter() - start) * 1000, 2))
         return resp
 
@@ -1802,9 +1839,10 @@ def generate_message(event, context, recent_posts=None):
         {"role": "user", "content": user_msg},
     ]
     try:
-        resp = _get_client().chat.completions.create(
-            model="gpt-4o",
+        resp = _create_chat_completion(
+            workflow=f"event:{event}",
             messages=messages,
+            model="gpt-4o",
             temperature=0.7,
             max_tokens=300,
             timeout=60,
@@ -1835,9 +1873,10 @@ def generate_home_message(clan_data, war_data, previous_message, roster_data=Non
         {"role": "user", "content": user_msg},
     ]
     try:
-        resp = _get_client().chat.completions.create(
-            model="gpt-4o",
+        resp = _create_chat_completion(
+            workflow="site_home_message",
             messages=messages,
+            model="gpt-4o",
             temperature=0.9,
             max_tokens=300,
             timeout=60,
@@ -1866,9 +1905,10 @@ def generate_members_message(clan_data, war_data, previous_message, roster_data=
         {"role": "user", "content": user_msg},
     ]
     try:
-        resp = _get_client().chat.completions.create(
-            model="gpt-4o",
+        resp = _create_chat_completion(
+            workflow="site_members_message",
             messages=messages,
+            model="gpt-4o",
             temperature=0.9,
             max_tokens=400,
             timeout=60,
@@ -1920,9 +1960,10 @@ def generate_promote_content(clan_data, roster_data=None):
         {"role": "user", "content": user_msg},
     ]
     try:
-        resp = _get_client().chat.completions.create(
-            model="gpt-4o",
+        resp = _create_chat_completion(
+            workflow="site_promote_content",
             messages=messages,
+            model="gpt-4o",
             temperature=0.8,
             max_tokens=1500,
             timeout=60,
