@@ -2,10 +2,12 @@
 
 Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py + OpenAI GPT-4o.
 
+`AGENTS.md` is the single source of truth for repository-specific instructions and architecture notes.
+
 ## Project Structure
 
 - `elixir.py` — Main bot: Discord events, APScheduler, channel routing
-- `elixir_agent.py` — LLM engine: observation + leader Q&A + site content generation via GPT-4o
+- `elixir_agent.py` — LLM engine: observation + channel replies + site content generation via GPT-4o
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log)
 - `heartbeat.py` — Hourly signal detection (milestones, joins/leaves, war transitions)
 - `db.py` — SQLite V2 data store: identity, memory, current state, analytics, war, and raw payload capture
@@ -91,15 +93,16 @@ Channel routing, JSON response format contracts, tool definitions + execution, s
 
 - Tool policy is enforced in code per workflow (not prompt-only):
   - `observation` -> read tools only
-  - `leader` -> read + write tools
+  - `interactive` -> read tools only
+  - `clanops` -> read + write tools
   - `reception` -> no tools
   - `roster_bios` -> read tools only
-- Write tools are gated by workflow policy and `LEADER_WRITE_TOOLS_ENABLED` (default enabled for leader workflow only).
+- Write tools are gated by workflow policy and `CLANOPS_WRITE_TOOLS_ENABLED` (default enabled for `clanops` only).
 - Tool outputs are wrapped in a compact envelope (`ok`, `error`, `truncated`, `meta`, `data`) and truncated for context budget safety.
 - Leader/member factual answers should prefer V2 tools over clipped roster context. Resolve members by name/Discord handle before using tag-based tools when needed.
 - Strict JSON workflow contracts are validated in code with one repair retry:
   - `observation`: requires `event_type`, `summary`, `content` (or `null`)
-  - `leader`: requires `event_type`, `summary`, `content`; `leader_share` also requires `share_content`
+  - `interactive` / `clanops`: require `event_type`, `summary`, `content`; `channel_share` also requires `share_content`
   - `reception`: requires `event_type=reception_response` and `content`
   - `roster_bios`: requires `intro` and `members` map
 - Loop telemetry is logged per request: workflow, tool rounds, tools called, denied tools, validation failures, prompt/completion size estimates, and completion latencies.
@@ -140,7 +143,7 @@ A new clan forks elixir-bot and only rewrites CLAN.md (their clan name, tag, rul
 
 ### Future work
 
-- `leader_share` is currently specific to #leader-lounge → #elixir. Should become a general-purpose "post to broadcast" tool available in any interactive channel.
+- channel-role config should eventually support hot reload or startup lint tooling outside the bot runtime
 
 ## Key Conventions
 

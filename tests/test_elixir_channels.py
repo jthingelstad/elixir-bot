@@ -63,7 +63,7 @@ def test_on_message_routes_interactive_channel_when_mentioned():
             "allow_proactive": False,
         }),
         patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.list_thread_messages", return_value=[]) as mock_history,
         patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message"),
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
@@ -74,6 +74,7 @@ def test_on_message_routes_interactive_channel_when_mentioned():
 
     assert mock_respond.call_args.kwargs["workflow"] == "interactive"
     assert mock_respond.call_args.kwargs["proactive"] is False
+    mock_history.assert_called_once_with("channel_user:100:123", elixir.CHANNEL_CONVERSATION_LIMIT)
     message.reply.assert_awaited_once_with("You look solid.")
     mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()
@@ -99,9 +100,9 @@ def test_on_message_routes_clanops_proactively_without_mention():
         }),
         patch("elixir._clanops_cooldown_elapsed", return_value=True),
         patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.list_thread_messages", return_value=[]) as mock_history,
         patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message"),
+        patch("elixir.db.save_message") as mock_save,
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
         patch("elixir.elixir_agent.respond_in_channel", return_value={"event_type": "channel_response", "content": "I can pull the current promotion candidates if you want.", "summary": "ops"}) as mock_respond,
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
@@ -110,6 +111,8 @@ def test_on_message_routes_clanops_proactively_without_mention():
 
     assert mock_respond.call_args.kwargs["workflow"] == "clanops"
     assert mock_respond.call_args.kwargs["proactive"] is True
+    mock_history.assert_called_once_with("channel_user:200:123", elixir.CHANNEL_CONVERSATION_LIMIT)
+    assert mock_save.call_args_list[0].args[0] == "channel_user:200:123"
     message.reply.assert_awaited_once_with("I can pull the current promotion candidates if you want.")
     mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()

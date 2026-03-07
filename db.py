@@ -3132,12 +3132,11 @@ def save_message(scope, author_type, content, summary=None, channel_id=None, cha
             "UPDATE conversation_threads SET last_active_at = ? WHERE thread_id = ?",
             (now, thread_id),
         )
-        if scope.startswith("channel:") and author_type == "assistant":
-            scope_type, scope_key = _normalize_scope(scope)
+        if channel_id is not None and author_type == "assistant":
             conn.execute(
                 "INSERT INTO channel_state (channel_id, last_elixir_post_at, last_summary) VALUES (?, ?, ?) "
                 "ON CONFLICT(channel_id) DO UPDATE SET last_elixir_post_at = excluded.last_elixir_post_at, last_summary = excluded.last_summary",
-                (scope_key, now, summary),
+                (str(channel_id), now, summary),
             )
         if discord_user_id is not None:
             importance = 2 if workflow in {"leader", "reception"} else 1
@@ -3212,6 +3211,37 @@ def list_thread_messages(scope, limit=10, conn=None):
         rows = conn.execute(
             "SELECT author_type, content, summary, created_at FROM messages WHERE thread_id = ? ORDER BY created_at DESC, message_id DESC LIMIT ?",
             (row["thread_id"], limit),
+        ).fetchall()
+        out = []
+        for msg in reversed(rows):
+            role = "assistant" if msg["author_type"] == "assistant" else "user"
+            out.append({
+                "role": role,
+                "content": msg["content"],
+                "author_name": None,
+                "recorded_at": msg["created_at"],
+            })
+        return out
+    finally:
+        if close:
+            conn.close()
+
+
+def list_channel_messages(channel_id, limit=10, author_type=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        where = ["channel_id = ?"]
+        params = [str(channel_id)]
+        if author_type:
+            where.append("author_type = ?")
+            params.append(author_type)
+        params.append(limit)
+        rows = conn.execute(
+            "SELECT author_type, content, summary, created_at "
+            f"FROM messages WHERE {' AND '.join(where)} "
+            "ORDER BY created_at DESC, message_id DESC LIMIT ?",
+            tuple(params),
         ).fetchall()
         out = []
         for msg in reversed(rows):

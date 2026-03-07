@@ -98,6 +98,28 @@ def test_discord_channel_configs_parse_roles_and_policies(monkeypatch):
     assert prompts.discord_singleton_channel("announcements")["id"] == 150
 
 
+def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
+    monkeypatch.setattr(
+        prompts,
+        "discord",
+        lambda: (
+            "## Config\n\n"
+            "- application_id: 1\n\n"
+            "## #one\n\n"
+            "ID: 100\n"
+            "Role: announcements\n\n"
+            "Primary announcements.\n\n"
+            "## #two\n\n"
+            "ID: 101\n"
+            "Role: announcements\n\n"
+            "Duplicate singleton.\n"
+        ),
+    )
+    errors = prompts.validate_discord_channel_config()
+
+    assert any("expected exactly one announcements channel" in error for error in errors)
+
+
 def test_knowledge_block():
     """Combined knowledge includes both game and clan content."""
     block = prompts.knowledge_block()
