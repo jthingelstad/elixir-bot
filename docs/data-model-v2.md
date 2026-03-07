@@ -92,6 +92,8 @@ These should never be hand-authored:
 
 ## ERD
 
+For a schema-reference-only version of the implemented diagram, see [data-model-v2-erd.md](/Users/jamie/Projects/elixir-bot/docs/data-model-v2-erd.md).
+
 ```mermaid
 erDiagram
     members {

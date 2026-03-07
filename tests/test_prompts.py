@@ -35,14 +35,14 @@ def test_discord_loads():
 def test_channel_section_elixir():
     """Extracts #elixir section."""
     section = prompts.channel_section("#elixir")
-    assert "broadcast" in section.lower()
+    assert "announcements" in section.lower()
     assert "#elixir" in section
 
 
 def test_channel_section_leader():
     """Extracts #leader-lounge section."""
     section = prompts.channel_section("#leader-lounge")
-    assert "interactive" in section.lower()
+    assert "clanops" in section.lower()
     assert "leader" in section.lower()
 
 
@@ -57,6 +57,45 @@ def test_channel_section_nonexistent():
     """Returns empty string for unknown channel."""
     section = prompts.channel_section("#nonexistent")
     assert section == ""
+
+
+def test_discord_channel_configs_parse_roles_and_policies(monkeypatch):
+    monkeypatch.setattr(
+        prompts,
+        "discord",
+        lambda: (
+            "# Discord Channels\n\n"
+            "## Config\n\n"
+            "- application_id: 1\n\n"
+            "## #member-chat\n\n"
+            "ID: 100\n"
+            "Role: interactive\n\n"
+            "Read-only member Q&A.\n\n"
+            "## #elixir\n\n"
+            "ID: 150\n"
+            "Role: announcements\n\n"
+            "Main stage.\n\n"
+            "## #clan-ops\n\n"
+            "ID: 200\n"
+            "Role: clanops\n\n"
+            "Private operations.\n"
+        ),
+    )
+    channels = prompts.discord_channels_by_id()
+
+    assert channels[100]["workflow"] == "interactive"
+    assert channels[100]["mention_required"] is True
+    assert channels[100]["allow_proactive"] is False
+
+    assert channels[150]["workflow"] is None
+    assert channels[150]["singleton"] is True
+    assert channels[150]["respond_allowed"] is False
+
+    assert channels[200]["workflow"] == "clanops"
+    assert channels[200]["mention_required"] is False
+    assert channels[200]["allow_proactive"] is True
+
+    assert prompts.discord_singleton_channel("announcements")["id"] == 150
 
 
 def test_knowledge_block():
@@ -80,10 +119,8 @@ def test_discord_config():
     dc = prompts.discord_config()
     assert dc["application_id"] == 1477043197443182832
     assert dc["guild_id"] == 1474760692992180429
-    assert dc["announcements_channel"] == 1477043729503359198
-    assert dc["leadership_channel"] == 1475139718525227089
-    assert dc["reception_channel"] == 1476456514121109514
     assert dc["member_role"] == 1474762690692911104
+    assert dc["bot_role"] == 1477050812789293117
 
 
 def test_clan_tag():
