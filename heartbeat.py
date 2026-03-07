@@ -167,7 +167,7 @@ def detect_inactivity(current_members, now=None, conn=None):
     today = (now or datetime.now()).strftime("%Y-%m-%d")
     if db.was_signal_sent("inactive_members", today, conn=conn):
         return []
-    now = now or datetime.utcnow()
+    now = now or datetime.now()
     signals = []
     inactive = []
     threshold = cr_knowledge.INACTIVITY_DAYS
@@ -289,7 +289,7 @@ def detect_war_completion(clan_tag, conn=None):
     try:
         # Check what we already have
         existing = set()
-        for row in conn.execute("SELECT season_id, section_index FROM war_results").fetchall():
+        for row in conn.execute("SELECT season_id, section_index FROM war_races").fetchall():
             existing.add((row["season_id"], row["section_index"]))
 
         # Store new results
@@ -428,10 +428,12 @@ def tick(conn=None):
     conn = conn or db.get_connection()
     try:
         # 1. Get known roster BEFORE snapshotting (so we compare old vs new)
-        known = db.get_known_roster(conn=conn)
+        known = db.get_active_roster_map(conn=conn)
 
         # 2. Snapshot current state
         db.snapshot_members(members, conn=conn)
+        if war:
+            db.upsert_war_current_state(war, conn=conn)
 
         # 3. Purge old data
         db.purge_old_data(conn=conn)

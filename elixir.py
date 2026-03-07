@@ -63,14 +63,37 @@ async def _post_to_elixir(channel, entry: dict):
 def _match_clan_member(nickname):
     """Match a Discord nickname to a clan member. Returns (tag, name) or None.
 
-    Uses the latest SQLite roster snapshot. Case-insensitive.
+    Uses the V2 member resolver but only accepts high-confidence exact matches.
     """
-    snapshot = db.get_known_roster()
-    normalized = nickname.lower().strip()
-    for tag, name in snapshot.items():
-        if name.lower().strip() == normalized:
-            return (tag, name)
+    normalized = (nickname or "").lower().strip()
+    if not normalized:
+        return None
+
+    try:
+        matches = db.resolve_member(nickname, limit=2)
+        if matches:
+            best = matches[0]
+            if best.get("match_source") in {"player_tag_exact", "current_name_exact", "alias_exact"}:
+                if len(matches) == 1 or matches[0].get("match_score") != matches[1].get("match_score"):
+                    return (best["player_tag"], best.get("current_name") or best.get("member_name"))
+            return None
+    except Exception:
+        pass
+
+    try:
+        snapshot = db.get_active_roster_map()
+        for tag, name in snapshot.items():
+            if name.lower().strip() == normalized:
+                return (tag, name)
+    except Exception:
+        return None
     return None
+
+
+def _channel_scope(channel) -> str:
+    if channel.id == ANNOUNCEMENTS_CHANNEL_ID:
+        return "channel:elixir"
+    return f"channel:{channel.id}"
 
 
 # ── Heartbeat ────────────────────────────────────────────────────────────────
@@ -106,7 +129,11 @@ async def _heartbeat_tick():
 
         # Fetch recent #elixir post history to avoid repetition
         recent_posts = await asyncio.to_thread(
-            db.get_conversation_history, "channel:elixir", 20,
+            db.list_thread_messages, "channel:elixir", 20,
+        )
+        channel_memory = await asyncio.to_thread(
+            db.build_memory_context,
+            channel_id=ANNOUNCEMENTS_CHANNEL_ID,
         )
 
         # Handle join/leave signals via LLM
@@ -123,8 +150,13 @@ async def _heartbeat_tick():
                 if msg:
                     await channel.send(msg)
                     await asyncio.to_thread(
-                        db.save_conversation_turn,
+                        db.save_message,
                         "channel:elixir", "assistant", msg,
+                        channel_id=channel.id,
+                        channel_name=getattr(channel, "name", None),
+                        channel_kind=str(channel.type),
+                        workflow="observation",
+                        event_type="member_join_broadcast",
                     )
             elif sig["type"] == "member_leave":
                 msg = await asyncio.to_thread(
@@ -137,8 +169,13 @@ async def _heartbeat_tick():
                 if msg:
                     await channel.send(msg)
                     await asyncio.to_thread(
-                        db.save_conversation_turn,
+                        db.save_message,
                         "channel:elixir", "assistant", msg,
+                        channel_id=channel.id,
+                        channel_name=getattr(channel, "name", None),
+                        channel_kind=str(channel.type),
+                        workflow="observation",
+                        event_type="member_leave_broadcast",
                     )
             else:
                 other_signals.append(sig)
@@ -147,7 +184,7 @@ async def _heartbeat_tick():
         if other_signals:
             result = await asyncio.to_thread(
                 elixir_agent.observe_and_post, clan, war,
-                other_signals, recent_posts,
+                other_signals, recent_posts, channel_memory,
             )
             if result is None:
                 log.info("Heartbeat: LLM decided signals not worth posting")
@@ -156,8 +193,13 @@ async def _heartbeat_tick():
             content = result.get("content", result.get("summary", ""))
             if content:
                 await asyncio.to_thread(
-                    db.save_conversation_turn,
+                    db.save_message,
                     "channel:elixir", "assistant", content,
+                    channel_id=channel.id,
+                    channel_name=getattr(channel, "name", None),
+                    channel_kind=str(channel.type),
+                    workflow="observation",
+                    event_type=result.get("event_type"),
                 )
             log.info("Posted observation: %s", result.get("summary"))
 
@@ -169,6 +211,9 @@ async def _heartbeat_tick():
 
 SITE_DATA_HOUR = int(os.getenv("SITE_DATA_HOUR", "8"))       # 8am Chicago
 SITE_CONTENT_HOUR = int(os.getenv("SITE_CONTENT_HOUR", "20"))  # 8pm Chicago
+PLAYER_INTEL_REFRESH_HOURS = int(os.getenv("PLAYER_INTEL_REFRESH_HOURS", "6"))
+PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "12"))
+PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "6"))
 
 
 async def _site_data_refresh():
@@ -273,6 +318,88 @@ async def _site_content_cycle():
         log.error("Site content cycle error: %s", e, exc_info=True)
 
 
+async def _player_intel_refresh():
+    """Refresh stored player profile and battle intelligence for a subset of active members."""
+    try:
+        clan = await asyncio.to_thread(cr_api.get_clan)
+    except Exception as e:
+        log.error("Player intel refresh: clan fetch failed: %s", e)
+        return
+
+    members = clan.get("memberList", [])
+    if not members:
+        log.info("Player intel refresh: no member data, skipping")
+        return
+
+    await asyncio.to_thread(db.snapshot_members, members)
+    try:
+        war = await asyncio.to_thread(cr_api.get_current_war)
+        if war:
+            await asyncio.to_thread(db.upsert_war_current_state, war)
+    except Exception:
+        war = {}
+
+    targets = await asyncio.to_thread(
+        db.get_player_intel_refresh_targets,
+        PLAYER_INTEL_BATCH_SIZE,
+        PLAYER_INTEL_STALE_HOURS,
+    )
+    if not targets:
+        log.info("Player intel refresh: no stale targets")
+        return
+
+    refreshed = 0
+    progression_signals = []
+    for target in targets:
+        tag = target["tag"]
+        try:
+            profile = await asyncio.to_thread(cr_api.get_player, tag)
+            if profile:
+                profile_signals = await asyncio.to_thread(db.snapshot_player_profile, profile)
+                if profile_signals:
+                    progression_signals.extend(profile_signals)
+            battle_log = await asyncio.to_thread(cr_api.get_player_battle_log, tag)
+            if battle_log:
+                await asyncio.to_thread(db.snapshot_player_battlelog, tag, battle_log)
+            refreshed += 1
+            await asyncio.sleep(0.3)
+        except Exception as e:
+            log.warning("Player intel refresh failed for %s: %s", tag, e)
+
+    if progression_signals:
+        channel = bot.get_channel(ANNOUNCEMENTS_CHANNEL_ID)
+        if channel:
+            recent_posts = await asyncio.to_thread(
+                db.list_thread_messages, "channel:elixir", 20,
+            )
+            result = await asyncio.to_thread(
+                elixir_agent.observe_and_post,
+                clan,
+                war,
+                progression_signals,
+                recent_posts,
+                await asyncio.to_thread(
+                    db.build_memory_context,
+                    channel_id=ANNOUNCEMENTS_CHANNEL_ID,
+                ),
+            )
+            if result:
+                await _post_to_elixir(channel, result)
+                content = result.get("content", result.get("summary", ""))
+                if content:
+                    await asyncio.to_thread(
+                        db.save_message,
+                        "channel:elixir", "assistant", content,
+                        channel_id=channel.id,
+                        channel_name=getattr(channel, "name", None),
+                        channel_kind=str(channel.type),
+                        workflow="observation",
+                        event_type=result.get("event_type"),
+                    )
+
+    log.info("Player intel refresh complete: refreshed %d members", refreshed)
+
+
 # ── Bot events ────────────────────────────────────────────────────────────────
 
 @bot.event
@@ -308,11 +435,21 @@ async def on_ready():
             minute=0,
             id="site_content_cycle",
         )
+        scheduler.add_job(
+            lambda: bot.loop.call_soon_threadsafe(
+                lambda: bot.loop.create_task(_player_intel_refresh())
+            ),
+            "interval",
+            hours=PLAYER_INTEL_REFRESH_HOURS,
+            id="player_intel_refresh",
+            max_instances=1,
+            coalesce=True,
+        )
         scheduler.start()
         log.info("Scheduler started — hourly heartbeat (active %dam-%dpm Chicago), "
-                 "site data refresh at %dam, content cycle at %dpm",
+                 "site data refresh at %dam, content cycle at %dpm, player intel refresh every %dh",
                  HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
-                 SITE_DATA_HOUR, SITE_CONTENT_HOUR)
+                 SITE_DATA_HOUR, SITE_CONTENT_HOUR, PLAYER_INTEL_REFRESH_HOURS)
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 
@@ -320,6 +457,13 @@ async def on_ready():
 @bot.event
 async def on_member_join(member):
     """Welcome new Discord members in #reception."""
+    await asyncio.to_thread(
+        db.upsert_discord_user,
+        member.id,
+        username=member.name,
+        global_name=getattr(member, "global_name", None),
+        display_name=member.display_name,
+    )
     channel = bot.get_channel(RECEPTION_CHANNEL_ID)
     if not channel:
         return
@@ -346,6 +490,13 @@ async def on_member_update(before, after):
         return
     if not after.nick:
         return
+    await asyncio.to_thread(
+        db.upsert_discord_user,
+        after.id,
+        username=after.name,
+        global_name=getattr(after, "global_name", None),
+        display_name=after.display_name,
+    )
 
     # Only act if they don't already have the member role
     if not MEMBER_ROLE_ID:
@@ -370,6 +521,14 @@ async def on_member_update(before, after):
         return
 
     tag, cr_name = match
+    await asyncio.to_thread(
+        db.link_discord_user_to_member,
+        after.id,
+        tag,
+        username=after.name,
+        display_name=after.display_name,
+        source="verified_nickname_match",
+    )
     try:
         await after.add_roles(member_role, reason=f"Matched clan member: {cr_name} ({tag})")
     except discord.Forbidden:
@@ -400,6 +559,13 @@ async def on_member_update(before, after):
 async def on_message(message):
     if message.author.bot:
         return
+    await asyncio.to_thread(
+        db.upsert_discord_user,
+        message.author.id,
+        username=message.author.name,
+        global_name=getattr(message.author, "global_name", None),
+        display_name=message.author.display_name,
+    )
     mentioned = (bot.user in message.mentions or
                  any(r.id == BOT_ROLE_ID for r in message.role_mentions))
     if not mentioned:
@@ -415,11 +581,31 @@ async def on_message(message):
             try:
                 clan = await asyncio.to_thread(cr_api.get_clan)
                 question = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@&{BOT_ROLE_ID}>", "").strip()
+                memory_context = await asyncio.to_thread(
+                    db.build_memory_context,
+                    discord_user_id=message.author.id,
+                    channel_id=message.channel.id,
+                )
+                await asyncio.to_thread(
+                    db.save_message,
+                    _channel_scope(message.channel),
+                    "user",
+                    question,
+                    channel_id=message.channel.id,
+                    channel_name=getattr(message.channel, "name", None),
+                    channel_kind=str(message.channel.type),
+                    discord_user_id=message.author.id,
+                    username=message.author.name,
+                    display_name=message.author.display_name,
+                    workflow="reception",
+                    discord_message_id=message.id,
+                )
                 result = await asyncio.to_thread(
                     elixir_agent.respond_in_reception,
                     question=question,
                     author_name=message.author.display_name,
                     clan_data=clan,
+                    memory_context=memory_context,
                 )
                 if result is None:
                     await message.reply(
@@ -432,6 +618,17 @@ async def on_message(message):
                         await message.reply(chunk)
                 else:
                     await message.reply(content)
+                await asyncio.to_thread(
+                    db.save_message,
+                    _channel_scope(message.channel),
+                    "assistant",
+                    content,
+                    channel_id=message.channel.id,
+                    channel_name=getattr(message.channel, "name", None),
+                    channel_kind=str(message.channel.type),
+                    workflow="reception",
+                    event_type=result.get("event_type"),
+                )
             except Exception as e:
                 log.error("reception error: %s", e)
                 await message.reply("Hit an error — try again in a moment. 🧪")
@@ -442,24 +639,40 @@ async def on_message(message):
         async with message.channel.typing():
             try:
                 clan = await asyncio.to_thread(cr_api.get_clan)
+                if clan.get("memberList"):
+                    await asyncio.to_thread(db.snapshot_members, clan.get("memberList", []))
                 try:
                     war = await asyncio.to_thread(cr_api.get_current_war)
                 except Exception:
                     war = {}
+                if war:
+                    await asyncio.to_thread(db.upsert_war_current_state, war)
                 # Strip the @Elixir mention from the question
                 question = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@&{BOT_ROLE_ID}>", "").strip()
 
                 # Load conversation history for this leader
                 leader_scope = f"leader:{message.author.id}"
                 conversation_history = await asyncio.to_thread(
-                    db.get_conversation_history, leader_scope,
+                    db.list_thread_messages, leader_scope,
+                )
+                memory_context = await asyncio.to_thread(
+                    db.build_memory_context,
+                    discord_user_id=message.author.id,
+                    channel_id=message.channel.id,
                 )
 
                 # Save the leader's question
                 await asyncio.to_thread(
-                    db.save_conversation_turn,
+                    db.save_message,
                     leader_scope, "user", question,
-                    message.author.display_name,
+                    channel_id=message.channel.id,
+                    channel_name=getattr(message.channel, "name", None),
+                    channel_kind=str(message.channel.type),
+                    discord_user_id=message.author.id,
+                    username=message.author.name,
+                    display_name=message.author.display_name,
+                    workflow="leader",
+                    discord_message_id=message.id,
                 )
 
                 result = await asyncio.to_thread(
@@ -469,6 +682,7 @@ async def on_message(message):
                     clan_data=clan,
                     war_data=war,
                     conversation_history=conversation_history,
+                    memory_context=memory_context,
                 )
                 if result is None:
                     await message.reply("Something went wrong on my end — try again? 🧪")
@@ -486,15 +700,27 @@ async def on_message(message):
                                 "content": share_content,
                             })
                             await asyncio.to_thread(
-                                db.save_conversation_turn,
+                                db.save_message,
                                 "channel:elixir", "assistant", share_content,
+                                channel_id=elixir_channel.id,
+                                channel_name=getattr(elixir_channel, "name", None),
+                                channel_kind=str(elixir_channel.type),
+                                workflow="leader",
+                                event_type="leader_share",
                             )
 
                 # Save Elixir's response to conversation memory
                 await asyncio.to_thread(
-                    db.save_conversation_turn,
+                    db.save_message,
                     leader_scope, "assistant", content,
-                    message.author.display_name,
+                    channel_id=message.channel.id,
+                    channel_name=getattr(message.channel, "name", None),
+                    channel_kind=str(message.channel.type),
+                    discord_user_id=message.author.id,
+                    username=message.author.name,
+                    display_name=message.author.display_name,
+                    workflow="leader",
+                    event_type=result.get("event_type"),
                 )
 
                 if len(content) > 2000:

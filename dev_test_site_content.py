@@ -7,7 +7,6 @@ Usage:
 
 Steps:
     data      — fetch CR API, build roster + clan data, write JSON (no commit)
-    seed      — seed member_dates from roster-extra.csv
     home      — generate home message via LLM
     members   — generate members message via LLM
     roster    — generate roster bios via LLM
@@ -35,21 +34,6 @@ import elixir_agent
 
 
 DRY_RUN = os.getenv("DRY_RUN", "1") == "1"
-
-
-def step_seed():
-    """Seed member_dates from roster-extra.csv."""
-    csv_path = os.path.join(site_content.POAPKINGS_REPO, "roster-extra.csv")
-    if not os.path.exists(csv_path):
-        log.warning("No roster-extra.csv found at %s", csv_path)
-        return
-    log.info("Seeding from %s", csv_path)
-    db.seed_member_extras_from_csv(csv_path)
-    extras = db.get_all_member_extras()
-    log.info("Seeded %d members into member_dates", len(extras))
-    for tag, data in list(extras.items())[:5]:
-        log.info("  %s: note=%r, profile_url=%r, poap_address=%r",
-                 tag, data["note"], data["profile_url"], data["poap_address"])
 
 
 def step_data():
@@ -207,7 +191,6 @@ def main():
         log.info("DRY_RUN=1 — will write files but skip git commit/push")
 
     steps = {
-        "seed": lambda: step_seed(),
         "data": lambda: step_data(),
         "home": lambda: step_home(),
         "members": lambda: step_members(),
@@ -216,7 +199,6 @@ def main():
     }
 
     if step == "all":
-        step_seed()
         clan = step_data()
         if clan:
             step_home(clan)
