@@ -30,6 +30,7 @@ CHICAGO = pytz.timezone("America/Chicago")
 TOKEN = os.getenv("DISCORD_TOKEN")
 _dc = prompts.discord_config()
 MEMBER_ROLE_ID = _dc.get("member_role", 0)
+LEADER_ROLE_ID = _dc.get("leader_role", 0)
 BOT_ROLE_ID = _dc.get("bot_role", 0)
 POAPKINGS_REPO = os.path.expanduser(os.getenv("POAPKINGS_REPO_PATH", "../poapkings.com"))
 CLANOPS_PROACTIVE_COOLDOWN_SECONDS = int(os.getenv("CLANOPS_PROACTIVE_COOLDOWN_SECONDS", "900"))
@@ -218,6 +219,17 @@ def _join_member_bits(members, formatter, limit=3):
     return ", ".join(formatter(member) for member in members[:limit])
 
 
+def _leader_role_mention():
+    return f"<@&{LEADER_ROLE_ID}>" if LEADER_ROLE_ID else ""
+
+
+def _with_leader_ping(content):
+    mention = _leader_role_mention()
+    if not mention or not content or mention in content:
+        return content
+    return f"{mention}\n{content}"
+
+
 def _job_next_runs():
     items = []
     for job in scheduler.get_jobs():
@@ -268,7 +280,7 @@ def _build_status_report():
         lines.append(f"- Current war season id: {data['current_season_id']}")
     if jobs:
         lines.append("- Jobs:")
-        for name in ("heartbeat", "player_intel_refresh", "site_data_refresh", "site_content_cycle"):
+        for name in ("heartbeat", "player_intel_refresh", "site_data_refresh", "site_content_cycle", "clanops_weekly_review"):
             state = jobs.get(name) or {}
             next_run = next((item["next_run"] for item in _job_next_runs() if item["id"] == name), "n/a")
             last = state.get("last_success_at") or state.get("last_failure_at") or state.get("last_started_at")
@@ -455,6 +467,81 @@ def _build_help_report(role: str) -> str:
     )
 
 
+def _build_weekly_clanops_review(clan=None, war=None):
+    clan = clan or {}
+    war = war or {}
+    roster = db.get_clan_roster_summary()
+    promotions = db.get_promotion_candidates()
+    at_risk = db.get_members_at_risk(require_war_participation=True)
+    season_summary = db.get_war_season_summary(top_n=3)
+
+    clan_name = clan.get("name") or "Clan"
+    composition = promotions.get("composition") or {}
+    recommended = promotions.get("recommended") or []
+    borderline = promotions.get("borderline") or []
+    flagged = (at_risk or {}).get("members") or []
+    nonparticipants = (season_summary or {}).get("nonparticipants") or []
+
+    def _promotion_reason(member):
+        bits = [
+            f"{_fmt_num(member.get('donations') or 0)} donations",
+            f"{_fmt_num(member.get('war_races_played') or 0)} war races",
+        ]
+        if member.get("tenure_days") is not None:
+            bits.append(f"{member['tenure_days']}d tenure")
+        if member.get("days_inactive") is not None:
+            bits.append(f"seen {member['days_inactive']}d ago")
+        return ", ".join(bits)
+
+    def _risk_reason(member):
+        reasons = member.get("reasons") or []
+        if not reasons:
+            return "needs review"
+        return "; ".join(reason.get("detail") or reason.get("type") for reason in reasons[:3])
+
+    lines = [
+        "**Weekly ClanOps Review**",
+        f"- {clan_name}: {roster.get('active_members', 0)}/50 active | elders {composition.get('elders', 0)} | target elder band {composition.get('target_elder_min', 0)}-{composition.get('target_elder_max', 0)} | remaining elder capacity {composition.get('elder_capacity_remaining', 0)}",
+    ]
+
+    if recommended:
+        lines.append(
+            f"- Promote now ({len(recommended)}): "
+            + _join_member_bits(recommended, lambda member: f"{_member_label(member)} — {_promotion_reason(member)}", limit=5)
+        )
+    else:
+        lines.append("- Promote now: none this week")
+
+    if borderline:
+        lines.append(
+            f"- Borderline ({len(borderline)}): "
+            + _join_member_bits(borderline, lambda member: f"{_member_label(member)} — {_promotion_reason(member)}", limit=3)
+        )
+
+    if flagged:
+        lines.append(
+            f"- Demotion/kick watch ({len(flagged)}): "
+            + _join_member_bits(flagged, lambda member: f"{_member_label(member)} — {_risk_reason(member)}", limit=5)
+        )
+    else:
+        lines.append("- Demotion/kick watch: none right now")
+
+    if nonparticipants:
+        lines.append(
+            f"- No war decks this season ({len(nonparticipants)}): "
+            + _join_member_bits(nonparticipants, lambda member: _member_label(member), limit=5)
+        )
+
+    if war:
+        clan_war = (war or {}).get("clan") or {}
+        if clan_war:
+            lines.append(
+                f"- Current river race: fame {_fmt_num(clan_war.get('fame'))} | repair {_fmt_num(clan_war.get('repairPoints'))} | score {_fmt_num(clan_war.get('clanScore'))}"
+            )
+
+    return _with_leader_ping("\n".join(lines))
+
+
 def _strip_bot_mentions(text: str) -> str:
     if bot.user is None:
         return (text or "").strip()
@@ -525,6 +612,8 @@ async def _share_channel_result(result, workflow):
     target_channel = bot.get_channel(target["id"])
     if not target_channel:
         return
+    if target.get("role") == "arena_relay":
+        share_content = _with_leader_ping(share_content)
     await _post_to_elixir(target_channel, {"content": share_content})
     await asyncio.to_thread(
         db.save_message,
@@ -666,6 +755,8 @@ SITE_CONTENT_HOUR = int(os.getenv("SITE_CONTENT_HOUR", "20"))  # 8pm Chicago
 PLAYER_INTEL_REFRESH_HOURS = int(os.getenv("PLAYER_INTEL_REFRESH_HOURS", "6"))
 PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "12"))
 PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "6"))
+CLANOPS_WEEKLY_REVIEW_DAY = os.getenv("CLANOPS_WEEKLY_REVIEW_DAY", "fri")
+CLANOPS_WEEKLY_REVIEW_HOUR = int(os.getenv("CLANOPS_WEEKLY_REVIEW_HOUR", "19"))
 
 
 async def _site_data_refresh():
@@ -865,6 +956,46 @@ async def _player_intel_refresh():
     runtime_status.mark_job_success("player_intel_refresh", f"refreshed {refreshed} member(s)")
 
 
+async def _clanops_weekly_review():
+    runtime_status.mark_job_start("clanops_weekly_review")
+    clanops_channels = prompts.discord_channels_by_role("clanops")
+    if not clanops_channels:
+        runtime_status.mark_job_failure("clanops_weekly_review", "no clanops channel configured")
+        return
+
+    target_config = clanops_channels[0]
+    channel = bot.get_channel(target_config["id"])
+    if not channel:
+        runtime_status.mark_job_failure("clanops_weekly_review", "clanops channel not found")
+        return
+
+    clan = {}
+    war = {}
+    try:
+        clan, war = await _load_live_clan_context()
+    except Exception as exc:
+        log.warning("ClanOps weekly review refresh failed: %s", exc)
+
+    review_content = await asyncio.to_thread(_build_weekly_clanops_review, clan, war)
+    if not review_content:
+        runtime_status.mark_job_success("clanops_weekly_review", "no review content")
+        return
+
+    await _post_to_elixir(channel, {"content": review_content})
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(channel),
+        "assistant",
+        review_content,
+        channel_id=channel.id,
+        channel_name=getattr(channel, "name", None),
+        channel_kind=str(channel.type),
+        workflow="clanops",
+        event_type="weekly_clanops_review",
+    )
+    runtime_status.mark_job_success("clanops_weekly_review", "weekly review posted")
+
+
 # ── Bot events ────────────────────────────────────────────────────────────────
 
 @bot.event
@@ -911,11 +1042,22 @@ async def on_ready():
             max_instances=1,
             coalesce=True,
         )
+        scheduler.add_job(
+            lambda: bot.loop.call_soon_threadsafe(
+                lambda: bot.loop.create_task(_clanops_weekly_review())
+            ),
+            "cron",
+            day_of_week=CLANOPS_WEEKLY_REVIEW_DAY,
+            hour=CLANOPS_WEEKLY_REVIEW_HOUR,
+            minute=0,
+            id="clanops_weekly_review",
+        )
         scheduler.start()
         log.info("Scheduler started — hourly heartbeat (active %dam-%dpm Chicago), "
-                 "site data refresh at %dam, content cycle at %dpm, player intel refresh every %dh",
+                 "site data refresh at %dam, content cycle at %dpm, player intel refresh every %dh, clanops review %s at %02d:00",
                  HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
-                 SITE_DATA_HOUR, SITE_CONTENT_HOUR, PLAYER_INTEL_REFRESH_HOURS)
+                 SITE_DATA_HOUR, SITE_CONTENT_HOUR, PLAYER_INTEL_REFRESH_HOURS,
+                 CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR)
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 

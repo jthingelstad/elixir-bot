@@ -105,3 +105,28 @@ def test_player_intel_refresh_posts_progression_signals():
     assert args[0] == clan
     assert args[2][0]["type"] == "player_level_up"
     mock_post.assert_awaited_once()
+
+
+def test_clanops_weekly_review_posts_to_clanops_channel():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 200
+    channel.name = "leader-lounge"
+    channel.type = "text"
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.prompts.discord_channels_by_role", return_value=[{"id": 200, "name": "#leader-lounge", "role": "clanops"}]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS"}, {"state": "warDay"}))),
+        patch("elixir._build_weekly_clanops_review", return_value="<@&1474762111287824584>\n**Weekly ClanOps Review**") as mock_build,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.save_message") as mock_save,
+    ):
+        asyncio.run(elixir._clanops_weekly_review())
+
+    mock_build.assert_called_once_with({"name": "POAP KINGS"}, {"state": "warDay"})
+    mock_post.assert_awaited_once_with(channel, {"content": "<@&1474762111287824584>\n**Weekly ClanOps Review**"})
+    assert mock_save.call_args.kwargs["event_type"] == "weekly_clanops_review"

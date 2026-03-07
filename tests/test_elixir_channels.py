@@ -368,3 +368,57 @@ def test_build_clan_status_short_report_is_compact():
     assert "War: season 77 | week 2 | rank 1 | fame 12,345" in report
     assert "Season: fame/member 1,117.0 | top King Levy (@jamie) 3,200, Finn 3,100" in report
     assert "Watch: 1 at risk | 1 slumping" in report
+
+
+def test_build_weekly_clanops_review_tags_leaders_and_summarizes_actions():
+    with (
+        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21}),
+        patch("elixir.db.get_promotion_candidates", return_value={
+            "composition": {"elders": 5, "target_elder_min": 4, "target_elder_max": 6, "elder_capacity_remaining": 1},
+            "recommended": [
+                {"member_ref": "King Levy (@jamie)", "donations": 220, "war_races_played": 4, "tenure_days": 90, "days_inactive": 0},
+            ],
+            "borderline": [
+                {"member_ref": "Finn", "donations": 120, "war_races_played": 2, "tenure_days": 20, "days_inactive": 1},
+            ],
+        }),
+        patch("elixir.db.get_members_at_risk", return_value={
+            "members": [
+                {"member_ref": "Vijay", "reasons": [{"detail": "last seen 8 days ago"}, {"detail": "0 donations this week"}]},
+            ]
+        }),
+        patch("elixir.db.get_war_season_summary", return_value={"nonparticipants": [{"member_ref": "Chanco"}]}),
+    ):
+        report = elixir._build_weekly_clanops_review(
+            {"name": "POAP KINGS"},
+            {"clan": {"fame": 12345, "repairPoints": 120, "clanScore": 4560}},
+        )
+
+    assert report.startswith(f"<@&{elixir.LEADER_ROLE_ID}>")
+    assert "**Weekly ClanOps Review**" in report
+    assert "Promote now (1): King Levy (@jamie) — 220 donations, 4 war races, 90d tenure, seen 0d ago" in report
+    assert "Borderline (1): Finn — 120 donations, 2 war races, 20d tenure, seen 1d ago" in report
+    assert "Demotion/kick watch (1): Vijay — last seen 8 days ago; 0 donations this week" in report
+    assert "No war decks this season (1): Chanco" in report
+
+
+def test_share_channel_result_tags_leader_role_for_arena_relay():
+    channel = AsyncMock()
+    channel.id = 300
+    channel.name = "arena-relay"
+    channel.type = "text"
+
+    with (
+        patch("elixir.prompts.resolve_channel_reference", return_value={"id": 300, "role": "arena_relay", "name": "#arena-relay"}),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.save_message"),
+    ):
+        asyncio.run(
+            elixir._share_channel_result(
+                {"event_type": "channel_share", "share_content": "Relay this to clan chat.", "share_channel": "#arena-relay"},
+                "clanops",
+            )
+        )
+
+    mock_post.assert_awaited_once_with(channel, {"content": f"<@&{elixir.LEADER_ROLE_ID}>\nRelay this to clan chat."})
