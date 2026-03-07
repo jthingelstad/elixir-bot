@@ -40,6 +40,7 @@ ROLE_MAP = {
     "elder": "Elder",
     "member": "Member",
 }
+CARD_STATS_MEMBER_LIST_LIMIT = 5
 
 
 def validate_against_schema(content_type, data):
@@ -180,6 +181,7 @@ def aggregate_card_usage(battle_log, player_tag):
     clean_tag = "#" + player_tag.lstrip("#")
     card_counts = {}
     card_icons = {}
+    card_members = {}
     total_battles = 0
 
     for battle in battle_log:
@@ -226,42 +228,90 @@ def extract_current_deck(player_data):
     return [card.get("name", "") for card in player_data.get("currentDeck", []) if card.get("name")]
 
 
-def build_card_stats(members):
-    """Aggregate clan-wide card usage stats from enriched roster members.
+def extract_current_deck_icons(player_data):
+    """Extract current deck icon URLs keyed by card name."""
+    if not player_data:
+        return {}
+    icons = {}
+    for card in player_data.get("currentDeck", []):
+        name = card.get("name", "")
+        if not name:
+            continue
+        icon = card.get("iconUrls", {}).get("medium", "")
+        if icon:
+            icons[name] = icon
+    return icons
 
-    Returns list of top cards sorted by number of members using them:
-    [{"name": "Witch", "icon_url": "...", "member_count": 10, "avg_pct": 76}, ...]
+
+def build_card_stats(members):
+    """Aggregate clan-wide current-deck stats from enriched roster members.
+
+    Returns cards sorted by how many current decks contain them.
+    `avg_pct` is retained for schema/template compatibility and now represents
+    the percent of member current decks containing the card.
     """
-    card_total_pct = Counter()
     card_member_count = Counter()
     card_icons = {}
+    card_members = {}
+    deck_count = 0
 
     for m in members:
-        for c in m.get("favorite_cards", []):
-            name = c.get("name", "")
+        current_deck = m.get("current_deck", []) or []
+        if not current_deck:
+            continue
+        deck_count += 1
+        deck_icons = m.get("_current_deck_icons", {}) or {}
+        seen = set()
+        favorite_card_icons = {
+            c.get("name", ""): c.get("icon_url", "")
+            for c in m.get("favorite_cards", [])
+            if c.get("name")
+        }
+        for card in current_deck:
+            name = card.get("name", "") if isinstance(card, dict) else str(card)
             if not name:
                 continue
-            card_total_pct[name] += c.get("usage_pct", 0)
+            if name in seen:
+                continue
+            seen.add(name)
             card_member_count[name] += 1
-            icon = c.get("icon_url", "")
+            card_members.setdefault(name, []).append(
+                {
+                    "name": m.get("name", "Unknown"),
+                    "clan_rank": m.get("clan_rank"),
+                }
+            )
+            icon = deck_icons.get(name) or favorite_card_icons.get(name, "")
             if icon:
                 card_icons[name] = icon
 
-    if not card_member_count:
+    if not card_member_count or deck_count == 0:
         return []
 
-    # Sort by member_count desc, then avg_pct desc
+    # Sort by member_count desc, then card name asc for stable output.
     cards = sorted(
         card_member_count.keys(),
-        key=lambda n: (card_member_count[n], card_total_pct[n] // card_member_count[n]),
-        reverse=True,
+        key=lambda n: (-card_member_count[n], n.lower()),
     )
+    def _sort_card_members(items):
+        return sorted(
+            items,
+            key=lambda item: (
+                item.get("clan_rank") if item.get("clan_rank") is not None else 999,
+                (item.get("name") or "").lower(),
+            ),
+        )
+
     return [
         {
             "name": name,
             "icon_url": card_icons.get(name, ""),
             "member_count": card_member_count[name],
-            "avg_pct": card_total_pct[name] // card_member_count[name],
+            "avg_pct": round(card_member_count[name] / deck_count * 100),
+            "members": [
+                item["name"]
+                for item in _sort_card_members(card_members.get(name, []))[:CARD_STATS_MEMBER_LIST_LIMIT]
+            ],
         }
         for name in cards
     ]
@@ -327,6 +377,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                 try:
                     player_data = cr_api.get_player(tag)
                     member["current_deck"] = extract_current_deck(player_data)
+                    member["_current_deck_icons"] = extract_current_deck_icons(player_data)
                     if player_data:
                         snapshot_payload = dict(player_data)
                         snapshot_payload.setdefault("tag", "#" + tag)
@@ -334,9 +385,13 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                         db.snapshot_player_profile(snapshot_payload, conn=conn)
                 except Exception:
                     cached = db.get_member_current_deck("#" + tag, conn=conn)
-                    member["current_deck"] = [
-                        c.get("name", "") for c in ((cached or {}).get("cards") or []) if c.get("name")
-                    ]
+                    cached_cards = (cached or {}).get("cards") or []
+                    member["current_deck"] = [c.get("name", "") for c in cached_cards if c.get("name")]
+                    member["_current_deck_icons"] = {
+                        c.get("name", ""): c.get("iconUrls", {}).get("medium", "")
+                        for c in cached_cards
+                        if c.get("name")
+                    }
 
                 time.sleep(0.3)
 
@@ -358,6 +413,8 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
             result["intro"] = existing["intro"]
         if include_cards:
             result["card_stats"] = build_card_stats(members)
+        for member in members:
+            member.pop("_current_deck_icons", None)
         return result
     finally:
         if close:

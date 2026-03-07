@@ -362,31 +362,61 @@ def test_build_roster_data_with_cards(conn):
 
 
 def test_build_card_stats():
-    """Aggregates clan-wide card stats from roster members."""
+    """Aggregates clan-wide card stats from current decks."""
     members = [
-        {"favorite_cards": [
-            {"name": "Hog Rider", "icon_url": "https://cdn/hog.png", "usage_pct": 80},
-            {"name": "Fireball", "icon_url": "https://cdn/fb.png", "usage_pct": 60},
-        ]},
-        {"favorite_cards": [
-            {"name": "Hog Rider", "icon_url": "https://cdn/hog.png", "usage_pct": 70},
-            {"name": "Zap", "icon_url": "https://cdn/zap.png", "usage_pct": 90},
-        ]},
-        {"favorite_cards": []},
+        {
+            "name": "King Levy",
+            "clan_rank": 2,
+            "current_deck": ["Hog Rider", "Fireball", "Zap"],
+            "_current_deck_icons": {"Hog Rider": "https://cdn/hog.png", "Fireball": "https://cdn/fb.png"},
+        },
+        {
+            "name": "Finn",
+            "clan_rank": 1,
+            "current_deck": ["Hog Rider", "Zap"],
+            "_current_deck_icons": {"Zap": "https://cdn/zap.png"},
+        },
+        {
+            "name": "Vijay",
+            "clan_rank": 7,
+            "current_deck": ["Zap"],
+        },
+        {"name": "NoDeck", "clan_rank": 99, "current_deck": []},
     ]
     result = site_content.build_card_stats(members)
     assert len(result) == 3
-    # Hog Rider used by 2 members, should be first
-    assert result[0]["name"] == "Hog Rider"
-    assert result[0]["member_count"] == 2
-    assert result[0]["avg_pct"] == 75  # (80+70)//2
-    assert result[0]["icon_url"] == "https://cdn/hog.png"
+    assert result[0]["name"] == "Zap"
+    assert result[0]["member_count"] == 3
+    assert result[0]["avg_pct"] == 100
+    assert result[0]["members"] == ["Finn", "King Levy", "Vijay"]
+    assert result[1]["name"] == "Hog Rider"
+    assert result[1]["member_count"] == 2
+    assert result[1]["avg_pct"] == 67
+    assert result[1]["icon_url"] == "https://cdn/hog.png"
 
 
 def test_build_card_stats_empty():
     """Empty members returns empty stats."""
     assert site_content.build_card_stats([]) == []
-    assert site_content.build_card_stats([{"favorite_cards": []}]) == []
+    assert site_content.build_card_stats([{"current_deck": []}]) == []
+
+
+def test_build_card_stats_limits_member_list_by_clan_rank():
+    members = []
+    for idx, name in enumerate(["G", "E", "C", "A", "F", "D", "B"], start=1):
+        members.append(
+            {
+                "name": name,
+                "clan_rank": idx,
+                "current_deck": ["Hog Rider"],
+            }
+        )
+
+    result = site_content.build_card_stats(members)
+
+    assert result[0]["name"] == "Hog Rider"
+    assert result[0]["member_count"] == 7
+    assert result[0]["members"] == ["G", "E", "C", "A", "F"]
 
 
 def test_build_roster_data_includes_card_stats(conn):
