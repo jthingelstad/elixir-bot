@@ -142,6 +142,7 @@ def test_discord_config():
     assert dc["application_id"] == 1477043197443182832
     assert dc["guild_id"] == 1474760692992180429
     assert dc["member_role"] == 1474762690692911104
+    assert dc["leader_role"] == 1474762111287824584
     assert dc["bot_role"] == 1477050812789293117
 
 
