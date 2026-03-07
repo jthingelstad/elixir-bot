@@ -557,8 +557,13 @@ async def on_message(message):
         )
         return
 
-    if role == "clanops" and (_is_status_request(raw_question) or clan_status_mode):
-        route = "clan_status_report" if clan_status_mode == "full" else "clan_status_short_report" if clan_status_mode == "short" else "status_report"
+    if role == "clanops" and (_is_status_request(raw_question) or _is_schedule_request(raw_question) or clan_status_mode):
+        route = (
+            "clan_status_report" if clan_status_mode == "full"
+            else "clan_status_short_report" if clan_status_mode == "short"
+            else "schedule_report" if _is_schedule_request(raw_question)
+            else "status_report"
+        )
         log.info(
             "message_route route=%s channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
             route,
@@ -585,6 +590,10 @@ async def on_message(message):
             report_builder = _build_clan_status_short_report
             report_args = (clan, war)
             event_type = "clan_status_short_report"
+        elif _is_schedule_request(raw_question):
+            report_builder = _build_schedule_report
+            report_args = ()
+            event_type = "schedule_report"
         else:
             report_builder = _build_status_report
             report_args = ()

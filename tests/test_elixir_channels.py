@@ -260,6 +260,39 @@ def test_on_message_handles_clanops_status_directly():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_handles_clanops_schedule_directly():
+    message = _make_message(200, "clan-ops", "schedule")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir._build_schedule_report", return_value="**Elixir Schedule**\n- `heartbeat`: Every hour.") as mock_build,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_build.assert_called_once_with()
+    message.reply.assert_awaited_once_with("**Elixir Schedule**\n- `heartbeat`: Every hour.")
+    assert mock_save.call_count == 2
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "schedule_report"
+    mock_respond.assert_not_called()
+    mock_process.assert_not_awaited()
+
+
 def test_on_message_handles_clanops_clan_status_directly():
     message = _make_message(200, "clan-ops", "clan status")
 

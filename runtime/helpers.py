@@ -12,6 +12,8 @@ from runtime.app import (
     BOT_ROLE_ID,
     CHICAGO,
     CLANOPS_PROACTIVE_COOLDOWN_SECONDS,
+    HEARTBEAT_END_HOUR,
+    HEARTBEAT_START_HOUR,
     LEADER_ROLE_ID,
     bot,
     log,
@@ -71,6 +73,20 @@ def _is_status_request(text: str) -> bool:
         "@elixir status",
         "health",
         "health check",
+    }
+
+
+def _is_schedule_request(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    return normalized in {
+        "schedule",
+        "schedules",
+        "!schedule",
+        "/schedule",
+        "job schedule",
+        "job schedules",
+        "elixir schedule",
+        "@elixir schedule",
     }
 
 
@@ -350,6 +366,44 @@ def _job_next_runs():
     return sorted(items, key=lambda item: item["id"])
 
 
+def _schedule_specs():
+    site_data_hour = getattr(_app, "SITE_DATA_HOUR", 8)
+    site_content_hour = getattr(_app, "SITE_CONTENT_HOUR", 20)
+    player_intel_refresh_hours = getattr(_app, "PLAYER_INTEL_REFRESH_HOURS", 6)
+    clanops_weekly_review_day = getattr(_app, "CLANOPS_WEEKLY_REVIEW_DAY", "fri")
+    clanops_weekly_review_hour = getattr(_app, "CLANOPS_WEEKLY_REVIEW_HOUR", 19)
+    return [
+        {
+            "id": "heartbeat",
+            "label": "heartbeat",
+            "schedule": (
+                f"Every hour. Posts only during active hours "
+                f"{HEARTBEAT_START_HOUR}:00-{HEARTBEAT_END_HOUR}:00 Chicago."
+            ),
+        },
+        {
+            "id": "site_data_refresh",
+            "label": "site data refresh",
+            "schedule": f"Daily at {site_data_hour:02d}:00 CT.",
+        },
+        {
+            "id": "site_content_cycle",
+            "label": "site content cycle",
+            "schedule": f"Daily at {site_content_hour:02d}:00 CT.",
+        },
+        {
+            "id": "player_intel_refresh",
+            "label": "player intel refresh",
+            "schedule": f"Every {player_intel_refresh_hours} hour(s).",
+        },
+        {
+            "id": "clanops_weekly_review",
+            "label": "clanops weekly review",
+            "schedule": f"Every {clanops_weekly_review_day.title()} at {clanops_weekly_review_hour:02d}:00 CT.",
+        },
+    ]
+
+
 async def _reply_text(message, content):
     def _discord_safe_content(text: str) -> str:
         text = text or ""
@@ -472,6 +526,20 @@ def _build_status_report():
             lines.append(
                 f"  {_status_badge(state.get('last_error') is None if last else None)} `{name}` next {next_run} | last {_fmt_relative(last)} | {summary}"
             )
+    return "\n".join(lines)
+
+
+def _build_schedule_report():
+    next_runs = {item["id"]: item["next_run"] for item in _job_next_runs()}
+    scheduler_badge = "🟢" if scheduler.running else "🔴"
+    lines = [
+        "**Elixir Schedule**",
+        f"{scheduler_badge} Scheduler: {'running' if scheduler.running else 'stopped'} | timezone America/Chicago",
+    ]
+    for spec in _schedule_specs():
+        lines.append(
+            f"- `{spec['label']}`: {spec['schedule']} Next run: {next_runs.get(spec['id'], 'n/a')}"
+        )
     return "\n".join(lines)
 
 
@@ -634,7 +702,7 @@ def _build_help_report(role: str) -> str:
             [
                 "**Elixir Help — ClanOps**",
                 "- Ask without mentioning me in this channel when you want operational input.",
-                "- Direct commands: `status`, `clan status`, `clan status short`, `help`.",
+                "- Direct commands: `status`, `schedule`, `clan status`, `clan status short`, `help`.",
                 "- I can help with roster reviews, war participation, promotions, demotions, kicks, recent form, decks, donations, and member lookups.",
                 "- I can resolve members by in-game name, tag, alias, or Discord handle.",
                 "- If I have something useful to add to an ops discussion here, I may inject proactively.",
