@@ -35,6 +35,23 @@ def _get_client():
     return _client
 
 
+def _chat_model_name():
+    return os.getenv("ELIXIR_CHAT_MODEL", "gpt-4.1-mini")
+
+
+def _content_model_name():
+    return os.getenv("ELIXIR_CONTENT_MODEL", "gpt-4o")
+
+
+def _model_for_workflow(workflow, model=None):
+    if model:
+        return model
+    workflow = workflow or ""
+    if workflow.startswith("site_") or workflow == "roster_bios":
+        return _content_model_name()
+    return _chat_model_name()
+
+
 MAX_TOOL_ROUNDS = 3
 CLANOPS_WRITE_TOOLS_ENABLED = os.getenv("CLANOPS_WRITE_TOOLS_ENABLED", "1") != "0"
 MAX_CONTEXT_MEMBERS_DEFAULT = 30
@@ -49,10 +66,11 @@ def _build_system_prompt(*sections):
     return "\n\n".join(parts)
 
 
-def _create_chat_completion(*, workflow, messages, model="gpt-4o", temperature=0.7, max_tokens=800, timeout=60, tools=None, tool_choice=None):
+def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, max_tokens=800, timeout=60, tools=None, tool_choice=None):
     started = time.perf_counter()
+    selected_model = _model_for_workflow(workflow, model=model)
     kwargs = {
-        "model": model,
+        "model": selected_model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
@@ -68,7 +86,7 @@ def _create_chat_completion(*, workflow, messages, model="gpt-4o", temperature=0
         runtime_status.record_openai_call(
             workflow,
             ok=True,
-            model=model,
+            model=selected_model,
             duration_ms=round((time.perf_counter() - started) * 1000, 2),
             prompt_tokens=getattr(usage, "prompt_tokens", None),
             completion_tokens=getattr(usage, "completion_tokens", None),
@@ -79,7 +97,7 @@ def _create_chat_completion(*, workflow, messages, model="gpt-4o", temperature=0
         runtime_status.record_openai_call(
             workflow,
             ok=False,
-            model=model,
+            model=selected_model,
             error=exc,
             duration_ms=round((time.perf_counter() - started) * 1000, 2),
         )

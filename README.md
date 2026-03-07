@@ -1,4 +1,4 @@
-# Elixir 🧪 — POAP KINGS Discord Bot
+# Elixir - POAP KINGS Discord Bot
 
 LLM-powered clan management bot for **POAP KINGS**, a Clash Royale clan (#J2RGCRVG). Uses discord.py + OpenAI GPT-4o with function calling for intelligent, context-aware responses.
 
@@ -38,6 +38,25 @@ venv/bin/python scripts/clean.py --db
 
 - default: remove cache directories like `__pycache__` and `.pytest_cache`
 - `--db`: also remove local runtime files like `elixir.db` and `elixir.pid`
+
+## Reviewing Prompt Failures
+
+When a Discord prompt fails, falls back, or returns unusable output, Elixir stores a row in the local `prompt_failures` table with:
+
+- cleaned prompt text
+- workflow, failure type, and failure stage
+- Discord channel/user/message IDs
+- result preview or raw JSON
+- last OpenAI model, error, and call timestamp
+
+Review the latest failures with:
+
+```bash
+venv/bin/python scripts/review_prompt_failures.py --limit 20
+venv/bin/python scripts/review_prompt_failures.py --workflow clanops --json
+```
+
+Use `--json` when you want to hand the failure set to another model for diagnosis and routing/prompt recommendations.
 
 ## V2 Validation Scripts
 
@@ -114,6 +133,7 @@ Elixir now uses a V2 SQLite schema centered on:
 
 - `members`, `member_metadata`, `member_aliases`, `discord_users`, `discord_links`
 - `conversation_threads`, `messages`, `memory_facts`, `memory_episodes`, `channel_state`
+- `prompt_failures`
 - `member_current_state`, `member_state_snapshots`, `member_daily_metrics`
 - `player_profile_snapshots`, `member_deck_snapshots`, `member_card_usage_snapshots`, `member_battle_facts`, `member_recent_form`
 - `war_current_state`, `war_day_status`, `war_races`, `war_participation`

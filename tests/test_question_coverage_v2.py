@@ -171,7 +171,7 @@ def test_member_question_views_are_covered():
         assert slumping[0]["tag"] == "#DEF456"
 
         resolved = db.resolve_member("@jamie", conn=conn)
-        assert resolved[0]["member_ref_with_handle"] == "King Levy (@jamie)"
+        assert resolved[0]["member_ref_with_handle"] == "King Levy (<@123>)"
 
         attendance = db.get_member_war_attendance("#ABC123", conn=conn)
         assert attendance["season"]["races_played"] == 1

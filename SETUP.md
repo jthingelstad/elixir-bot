@@ -106,7 +106,7 @@ The bot logs to **stdout/stderr** only. launchd captures this — check the plis
 ### What normal looks like
 
 ```
-Elixir online as Elixir#1234 🧪
+Elixir online as Elixir#1234
 Scheduler started — hourly heartbeat ...
 Heartbeat: 3 signals detected, consulting LLM
 Posted observation: ...
@@ -118,7 +118,10 @@ Posted observation: ...
 Heartbeat error: ...
 Heartbeat: failed to fetch clan data: ...
 leader-lounge error: ...
+prompt_failure id=42 workflow=clanops type=agent_none stage=respond_in_channel ...
 ```
+
+Prompt failures are intentionally loud in the log now. Each `prompt_failure` line corresponds to a persisted row in SQLite with the prompt text, failure metadata, result preview, and last OpenAI error/model snapshot.
 
 ### Checking heartbeat health
 
@@ -145,6 +148,23 @@ python -c "import heartbeat; result = heartbeat.tick(); print(f'{len(result.sign
 
 This is safe — it reads from the API and writes to the local DB, but does **not** post to Discord.
 
+## Reviewing Prompt Failures
+
+Use this when Elixir says it hit an error, falls back with a weak response, or silently fails to produce a clean answer.
+
+```bash
+cd ~/Projects/elixir-bot
+source venv/bin/activate
+venv/bin/python scripts/review_prompt_failures.py --limit 20
+venv/bin/python scripts/review_prompt_failures.py --workflow clanops --json
+```
+
+- default output is human-readable triage
+- `--workflow` narrows to `clanops`, `interactive`, or `reception`
+- `--json` is the format to paste into Codex or Claude for review
+
+The backing data lives in the `prompt_failures` table inside `elixir.db`.
+
 ## Cleanup
 
 Remove transient local cruft:
@@ -169,6 +189,7 @@ Lives at `ELIXIR_DB_PATH` (default: `./elixir.db` in the project root). Contains
 - Current member state, daily metrics, and player analytics
 - War state, war participation, and battle facts
 - Conversation memory and channel state
+- Prompt failure review records for failed/fallback LLM requests
 - Raw API payload capture and operational signal tables
 
 **Safe to delete** if you want a clean slate — the bot will recreate it on startup. But you lose all history. The file is gitignored.

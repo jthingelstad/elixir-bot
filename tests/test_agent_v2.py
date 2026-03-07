@@ -1,8 +1,9 @@
 """Focused tests for V2 agent tools."""
 
 import json
+import os
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import elixir_agent
 
@@ -246,9 +247,10 @@ def test_create_chat_completion_records_openai_telemetry():
     response = SimpleNamespace(
         usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30),
     )
+    create = Mock(return_value=response)
     mock_client = SimpleNamespace(
         chat=SimpleNamespace(
-            completions=SimpleNamespace(create=lambda **kwargs: response)
+            completions=SimpleNamespace(create=create)
         )
     )
     with (
@@ -265,3 +267,97 @@ def test_create_chat_completion_records_openai_telemetry():
     assert mock_record.call_args.args[0] == "interactive"
     assert mock_record.call_args.kwargs["ok"] is True
     assert mock_record.call_args.kwargs["total_tokens"] == 30
+    assert create.call_args.kwargs["model"] == "gpt-4.1-mini"
+
+
+def test_create_chat_completion_uses_content_model_for_site_workflows():
+    response = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+    )
+    create = Mock(return_value=response)
+    mock_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create)
+        )
+    )
+    with (
+        patch("elixir_agent._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_openai_call"),
+    ):
+        elixir_agent._create_chat_completion(
+            workflow="site_home_message",
+            messages=[{"role": "user", "content": "status"}],
+        )
+
+    assert create.call_args.kwargs["model"] == "gpt-4o"
+
+
+def test_create_chat_completion_respects_model_env_overrides():
+    response = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+    )
+    create = Mock(return_value=response)
+    mock_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create)
+        )
+    )
+    with (
+        patch("elixir_agent._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_openai_call"),
+        patch.dict(os.environ, {"ELIXIR_CHAT_MODEL": "gpt-4.1-mini-test", "ELIXIR_CONTENT_MODEL": "gpt-4o-test"}),
+    ):
+        elixir_agent._create_chat_completion(
+            workflow="clanops",
+            messages=[{"role": "user", "content": "status"}],
+        )
+        assert create.call_args.kwargs["model"] == "gpt-4.1-mini-test"
+
+        elixir_agent._create_chat_completion(
+            workflow="site_members_message",
+            messages=[{"role": "user", "content": "status"}],
+        )
+        assert create.call_args.kwargs["model"] == "gpt-4o-test"
+
+
+def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
+    tool_call = SimpleNamespace(
+        id="call_1",
+        type="function",
+        function=SimpleNamespace(name="get_current_war_status", arguments="{}"),
+    )
+    first_message = SimpleNamespace(role="assistant", content=None, tool_calls=[tool_call])
+    second_message = SimpleNamespace(
+        role="assistant",
+        content=json.dumps(
+            {
+                "event_type": "channel_response",
+                "summary": "war answer",
+                "content": "We are in war day.",
+            }
+        ),
+        tool_calls=[],
+    )
+    responses = [
+        SimpleNamespace(choices=[SimpleNamespace(message=first_message)]),
+        SimpleNamespace(choices=[SimpleNamespace(message=second_message)]),
+    ]
+
+    def fake_create_chat_completion(**kwargs):
+        return responses.pop(0)
+
+    with (
+        patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion),
+        patch("agent.chat._execute_tool", return_value=json.dumps({"war_state": "warDay"})),
+    ):
+        result = elixir_agent._chat_with_tools(
+            "system",
+            "user",
+            workflow="clanops",
+            allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["clanops"],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["clanops"],
+            strict_json=True,
+        )
+
+    assert result["event_type"] == "channel_response"
+    assert result["content"] == "We are in war day."

@@ -2,7 +2,9 @@
 
 import asyncio
 import atexit
+import json
 import os
+import re
 import signal
 import logging
 from datetime import datetime, timezone
@@ -61,6 +63,64 @@ async def _post_to_elixir(channel, entry: dict):
         await channel.send(content)
 
 
+def _preview_text(value, limit=500):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, default=str, ensure_ascii=False)
+        except Exception:
+            text = repr(value)
+    return text[:limit]
+
+
+def _normalize_prompt_failure_question(question):
+    text = (question or "").strip()
+    text = re.sub(r"<@!?\d+>", " ", text)
+    text = re.sub(r"<@&\d+>", " ", text)
+    return " ".join(text.split())
+
+
+def _log_prompt_failure(*, question, workflow, failure_type, failure_stage, channel, author,
+                        discord_message_id=None, detail=None, result_preview=None, raw_json=None):
+    openai = runtime_status.snapshot().get("openai") or {}
+    clean_question = _normalize_prompt_failure_question(question)
+    try:
+        failure_id = db.record_prompt_failure(
+            clean_question,
+            failure_type,
+            failure_stage,
+            workflow=workflow,
+            channel_id=getattr(channel, "id", None),
+            channel_name=getattr(channel, "name", None),
+            discord_user_id=getattr(author, "id", None),
+            discord_message_id=discord_message_id,
+            detail=detail,
+            result_preview=result_preview,
+            openai_last_error=openai.get("last_error"),
+            openai_last_model=openai.get("last_model"),
+            openai_last_call_at=openai.get("last_call_at"),
+            raw_json=raw_json,
+        )
+        log.warning(
+            "prompt_failure id=%s workflow=%s type=%s stage=%s channel_id=%s author_id=%s question=%r detail=%r openai_model=%s openai_error=%r",
+            failure_id,
+            workflow,
+            failure_type,
+            failure_stage,
+            getattr(channel, "id", None),
+            getattr(author, "id", None),
+            _preview_text(clean_question, limit=180),
+            _preview_text(detail, limit=240),
+            openai.get("last_model"),
+            _preview_text(openai.get("last_error"), limit=240),
+        )
+    except Exception as exc:
+        log.error("prompt failure logging error: %s", exc)
+
+
 def __export_public(module):
     names = getattr(module, "__all__", None) or [
         name for name in vars(module) if not name.startswith("__")
@@ -81,7 +141,7 @@ __all__ = [name for name in globals() if not name.startswith("__")]
 
 @bot.event
 async def on_ready():
-    log.info("Elixir online as %s 🧪", bot.user)
+    log.info("Elixir online as %s", bot.user)
     prompts.ensure_valid_discord_channel_config()
     if not scheduler.running:
         # Single hourly heartbeat replaces both the 4x/day observations and hourly member check
@@ -277,6 +337,16 @@ async def on_message(message):
     clan_status_mode = _clan_status_mode(raw_question)
 
     if role in {"clanops", "interactive"} and _is_help_request(raw_question):
+        log.info(
+            "message_route route=help channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            message.channel.id,
+            message.author.id,
+            mentioned,
+            role,
+            workflow,
+            raw_question,
+            message.content,
+        )
         help_content = await asyncio.to_thread(_build_help_report, role)
         workflow_name = "clanops" if role == "clanops" else workflow
         event_type = f"{role}_help"
@@ -311,7 +381,195 @@ async def on_message(message):
         )
         return
 
+    if role in {"clanops", "interactive"} and _is_roster_join_dates_request(raw_question):
+        log.info(
+            "message_route route=roster_join_dates_report channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            message.channel.id,
+            message.author.id,
+            mentioned,
+            role,
+            workflow,
+            raw_question,
+            message.content,
+        )
+        roster_content = await asyncio.to_thread(_build_roster_join_dates_report)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "user",
+            raw_question,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow=workflow,
+            discord_message_id=message.id,
+        )
+        await _reply_text(message, roster_content)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "assistant",
+            roster_content,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow=workflow,
+            event_type="roster_join_dates_report",
+        )
+        return
+
+    deck_target = None
+    if role in {"clanops", "interactive"} and _is_member_deck_request(raw_question):
+        deck_target = await asyncio.to_thread(_extract_member_deck_target, raw_question, message)
+    if role in {"clanops", "interactive"} and deck_target:
+        log.info(
+            "message_route route=member_deck_report channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s deck_target=%r raw_question=%r original=%r",
+            message.channel.id,
+            message.author.id,
+            mentioned,
+            role,
+            workflow,
+            deck_target,
+            raw_question,
+            message.content,
+        )
+        deck_content = await asyncio.to_thread(_build_member_deck_report, deck_target)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "user",
+            raw_question,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow=workflow,
+            discord_message_id=message.id,
+        )
+        await _reply_text(message, deck_content)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "assistant",
+            deck_content,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow=workflow,
+            event_type="member_deck_report",
+        )
+        return
+
+    if role == "clanops" and _is_kick_risk_request(raw_question):
+        log.info(
+            "message_route route=kick_risk_report channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            message.channel.id,
+            message.author.id,
+            mentioned,
+            role,
+            workflow,
+            raw_question,
+            message.content,
+        )
+        kick_risk_content = await asyncio.to_thread(_build_kick_risk_report)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "user",
+            raw_question,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow=workflow,
+            discord_message_id=message.id,
+        )
+        await _reply_text(message, kick_risk_content)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "assistant",
+            kick_risk_content,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow=workflow,
+            event_type="kick_risk_report",
+        )
+        return
+
+    if role == "clanops" and _is_top_war_contributors_request(raw_question):
+        log.info(
+            "message_route route=top_war_contributors_report channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            message.channel.id,
+            message.author.id,
+            mentioned,
+            role,
+            workflow,
+            raw_question,
+            message.content,
+        )
+        top_war_content = await asyncio.to_thread(_build_top_war_contributors_report)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "user",
+            raw_question,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow=workflow,
+            discord_message_id=message.id,
+        )
+        await _reply_text(message, top_war_content)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "assistant",
+            top_war_content,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow=workflow,
+            event_type="top_war_contributors_report",
+        )
+        return
+
     if role == "clanops" and (_is_status_request(raw_question) or clan_status_mode):
+        route = "clan_status_report" if clan_status_mode == "full" else "clan_status_short_report" if clan_status_mode == "short" else "status_report"
+        log.info(
+            "message_route route=%s channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            route,
+            message.channel.id,
+            message.author.id,
+            mentioned,
+            role,
+            workflow,
+            raw_question,
+            message.content,
+        )
         clan = {}
         war = {}
         if clan_status_mode:
@@ -417,9 +675,46 @@ async def on_message(message):
                     memory_context=memory_context,
                 )
                 if result is None:
-                    await message.reply("Having a hiccup — try again in a sec! 🧪")
+                    _log_prompt_failure(
+                        question=question,
+                        workflow="reception",
+                        failure_type="agent_none",
+                        failure_stage="respond_in_reception",
+                        channel=message.channel,
+                        author=message.author,
+                        discord_message_id=message.id,
+                    )
+                    await message.reply("Having a hiccup. Try again in a sec.")
+                    return
+                if not isinstance(result, dict):
+                    _log_prompt_failure(
+                        question=question,
+                        workflow="reception",
+                        failure_type="invalid_result_type",
+                        failure_stage="respond_in_reception",
+                        channel=message.channel,
+                        author=message.author,
+                        discord_message_id=message.id,
+                        detail=type(result).__name__,
+                        result_preview=_preview_text(result),
+                    )
+                    await message.reply("Having a hiccup. Try again in a sec.")
                     return
                 content = result.get("content", result.get("summary", ""))
+                if not content:
+                    _log_prompt_failure(
+                        question=question,
+                        workflow="reception",
+                        failure_type="empty_result",
+                        failure_stage="respond_in_reception",
+                        channel=message.channel,
+                        author=message.author,
+                        discord_message_id=message.id,
+                        result_preview=_preview_text(result),
+                        raw_json=result,
+                    )
+                    await message.reply("Having a hiccup. Try again in a sec.")
+                    return
                 await _reply_text(message, content)
                 await asyncio.to_thread(
                     db.save_message,
@@ -434,10 +729,31 @@ async def on_message(message):
                 )
             except Exception as e:
                 log.error("reception error: %s", e)
-                await message.reply("Hit an error — try again in a moment. 🧪")
+                _log_prompt_failure(
+                    question=raw_question,
+                    workflow="reception",
+                    failure_type="exception",
+                    failure_stage="on_message_reception",
+                    channel=message.channel,
+                    author=message.author,
+                    discord_message_id=message.id,
+                    detail=str(e),
+                )
+                await message.reply("Hit an error. Try again in a moment.")
         return
 
     if workflow in {"interactive", "clanops"}:
+        log.info(
+            "message_route route=channel_llm channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s proactive=%s raw_question=%r original=%r",
+            message.channel.id,
+            message.author.id,
+            mentioned,
+            role,
+            workflow,
+            proactive,
+            raw_question,
+            message.content,
+        )
         async with message.channel.typing():
             try:
                 clan, war = await _load_live_clan_context()
@@ -481,9 +797,52 @@ async def on_message(message):
                     proactive=proactive,
                 )
                 if result is None:
+                    _log_prompt_failure(
+                        question=raw_question,
+                        workflow=workflow,
+                        failure_type="agent_none",
+                        failure_stage="respond_in_channel",
+                        channel=message.channel,
+                        author=message.author,
+                        discord_message_id=message.id,
+                    )
+                    if mentioned:
+                        await message.reply(_fallback_channel_response(raw_question, workflow))
+                    return
+                if not isinstance(result, dict):
+                    log.error("%s channel error: invalid result type %s", workflow, type(result).__name__)
+                    _log_prompt_failure(
+                        question=raw_question,
+                        workflow=workflow,
+                        failure_type="invalid_result_type",
+                        failure_stage="respond_in_channel",
+                        channel=message.channel,
+                        author=message.author,
+                        discord_message_id=message.id,
+                        detail=type(result).__name__,
+                        result_preview=_preview_text(result),
+                    )
+                    if mentioned:
+                        await message.reply(_fallback_channel_response(raw_question, workflow))
                     return
 
                 content = result.get("content", result.get("summary", ""))
+                if not content:
+                    log.error("%s channel error: empty result payload %s", workflow, result)
+                    _log_prompt_failure(
+                        question=raw_question,
+                        workflow=workflow,
+                        failure_type="empty_result",
+                        failure_stage="respond_in_channel",
+                        channel=message.channel,
+                        author=message.author,
+                        discord_message_id=message.id,
+                        result_preview=_preview_text(result),
+                        raw_json=result,
+                    )
+                    if mentioned:
+                        await message.reply(_fallback_channel_response(raw_question, workflow))
+                    return
                 await _share_channel_result(result, workflow)
 
                 await asyncio.to_thread(
@@ -504,8 +863,18 @@ async def on_message(message):
                 await _reply_text(message, content)
             except Exception as e:
                 log.error("%s channel error: %s", workflow, e)
+                _log_prompt_failure(
+                    question=raw_question,
+                    workflow=workflow,
+                    failure_type="exception",
+                    failure_stage="on_message_channel",
+                    channel=message.channel,
+                    author=message.author,
+                    discord_message_id=message.id,
+                    detail=str(e),
+                )
                 if mentioned:
-                    await message.reply("Hit an error — try again in a moment. 🧪")
+                    await message.reply("Hit an error. Try again in a moment.")
         return
 
     await bot.process_commands(message)

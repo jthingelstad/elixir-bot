@@ -14,6 +14,7 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py + 
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
 - `site_content.py` — JSON content management for poapkings.com (write, validate, commit/push)
+- `scripts/review_prompt_failures.py` — Review recent LLM/channel failures from SQLite for debugging and prompt/tool routing analysis
 - `storage/`, `agent/`, `runtime/` — Domain-first implementation packages for persistence, LLM behavior, and Discord runtime; root modules remain the stable public API surface
 
 ## Environment
@@ -47,6 +48,7 @@ SQLite at `elixir.db` (auto-created, gitignored). The project now uses the V2 sc
 
 - Identity + metadata: `members`, `member_metadata`, `member_aliases`, `discord_users`, `discord_links`
 - Conversation memory: `conversation_threads`, `messages`, `memory_facts`, `memory_episodes`, `channel_state`
+- Prompt failure review: `prompt_failures`
 - Clan/member state: `clan_memberships`, `member_current_state`, `member_state_snapshots`, `member_daily_metrics`
 - Player analytics: `player_profile_snapshots`, `member_card_collection_snapshots`, `member_deck_snapshots`, `member_card_usage_snapshots`, `member_battle_facts`, `member_recent_form`
 - War: `war_current_state`, `war_day_status`, `war_races`, `war_participation`
@@ -66,6 +68,7 @@ Migrations run automatically in `get_connection()`. This repo currently treats V
 
 Current migrations:
 - `_migration_0` — V2 baseline schema
+- `_migration_1` — prompt failure logging table for channel/reception LLM failures
 
 ## Site Content System
 
@@ -117,6 +120,19 @@ Channel routing, JSON response format contracts, tool definitions + execution, s
   - `reception`: requires `event_type=reception_response` and `content`
   - `roster_bios`: requires `intro` and `members` map
 - Loop telemetry is logged per request: workflow, tool rounds, tools called, denied tools, validation failures, prompt/completion size estimates, and completion latencies.
+- Channel/reception failures are also persisted in `prompt_failures` with the cleaned question text, workflow, failure type/stage, Discord metadata, result preview/raw JSON, and the last OpenAI error/model snapshot.
+
+### Prompt Failure Review
+
+Use the stored prompt-failure log when a Discord request fails, falls back, or returns unusable output:
+
+```bash
+venv/bin/python scripts/review_prompt_failures.py --limit 20
+venv/bin/python scripts/review_prompt_failures.py --workflow clanops --json
+```
+
+- text mode is for quick local triage
+- `--json` is the format to hand to Codex or Claude for “what failed and what should we change?” review
 
 ## Context Budgeting (Current)
 

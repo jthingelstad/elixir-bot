@@ -1,6 +1,8 @@
 """Focused tests for the V2 database baseline."""
 
+import json
 from datetime import datetime, timedelta, timezone
+import sqlite3
 
 import db
 
@@ -35,6 +37,35 @@ def test_v2_schema_initializes_core_tables():
         assert expected.issubset(tables)
     finally:
         conn.close()
+
+
+def test_get_connection_rebuilds_legacy_database_with_stale_version(tmp_path):
+    db_path = tmp_path / "legacy.db"
+    legacy = sqlite3.connect(db_path)
+    try:
+        legacy.execute("CREATE TABLE leader_conversations (id INTEGER PRIMARY KEY)")
+        legacy.execute("PRAGMA user_version = 2")
+        legacy.commit()
+    finally:
+        legacy.close()
+
+    conn = db.get_connection(str(db_path))
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == len(db._MIGRATIONS)
+        tables = {
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        assert "discord_users" in tables
+        assert "leader_conversations" not in tables
+    finally:
+        conn.close()
+
+    backups = list(tmp_path.glob("legacy.db.legacy-v2-backup-*"))
+    assert len(backups) == 1
 
 
 def test_snapshot_members_populates_current_state_membership_and_history():
@@ -97,7 +128,7 @@ def test_discord_link_and_member_reference_formatting():
         assert db.format_member_reference("#ABC123", conn=conn) == "King Levy"
         assert (
             db.format_member_reference("#ABC123", style="name_with_handle", conn=conn)
-            == "King Levy (@jamie)"
+            == "King Levy (<@1474760692992180429>)"
         )
         assert (
             db.format_member_reference("#ABC123", style="name_with_mention", conn=conn)
@@ -286,6 +317,66 @@ def test_channel_messages_and_state_are_tracked_for_channel_user_threads():
         conn.close()
 
 
+def test_resolve_member_matches_at_prefixed_discord_display_name():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#ABC123", "name": "King Levy", "role": "leader"},
+                {"tag": "#DEF456", "name": "Vijay", "role": "member"},
+            ],
+            conn=conn,
+        )
+        db.link_discord_user_to_member(
+            "456",
+            "#DEF456",
+            username="vijay_alt",
+            display_name="Vijay",
+            conn=conn,
+        )
+
+        matches = db.resolve_member("@Vijay", conn=conn)
+
+        assert matches[0]["player_tag"] == "#DEF456"
+        assert matches[0]["match_source"] == "discord_display_exact"
+    finally:
+        conn.close()
+
+
+def test_prompt_failures_are_recorded_and_listed_for_review():
+    conn = db.get_connection(":memory:")
+    try:
+        failure_id = db.record_prompt_failure(
+            "Are there any members who have dropped in trophies significantly this week?",
+            "agent_none",
+            "respond_in_channel",
+            workflow="clanops",
+            channel_id=200,
+            channel_name="clan-ops",
+            discord_user_id=123,
+            discord_message_id=555,
+            detail="model returned null after tool call",
+            result_preview='{"event_type":"channel_response","content":null}',
+            openai_last_error="Error code: 429 rate_limit_exceeded",
+            openai_last_model="gpt-4.1-mini",
+            openai_last_call_at="2026-03-07T19:12:00",
+            raw_json={"event_type": "channel_response", "content": None},
+            conn=conn,
+        )
+
+        failures = db.list_prompt_failures(conn=conn)
+
+        assert len(failures) == 1
+        assert failures[0]["failure_id"] == failure_id
+        assert failures[0]["workflow"] == "clanops"
+        assert failures[0]["failure_type"] == "agent_none"
+        assert failures[0]["channel_name"] == "clan-ops"
+        assert failures[0]["openai_last_model"] == "gpt-4.1-mini"
+        assert json.loads(failures[0]["raw_json"]) == {"event_type": "channel_response", "content": None}
+    finally:
+        conn.close()
+
+
 def test_get_system_status_summarizes_v2_data_layer():
     conn = db.get_connection(":memory:")
     try:
@@ -333,7 +424,8 @@ def test_get_system_status_summarizes_v2_data_layer():
 
         status = db.get_system_status(conn=conn)
 
-        assert status["schema_version"] == 1
+        assert status["schema_version"] == len(db._MIGRATIONS)
+        assert status["schema_display"] == f"V2 baseline (migration v{len(db._MIGRATIONS)})"
         assert status["counts"]["members_active"] == 1
         assert status["counts"]["battle_fact_count"] == 1
         assert status["counts"]["message_count"] == 1
@@ -373,14 +465,14 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
             "threeCrownWins": 20,
             "currentFavouriteCard": {"id": 26000011, "name": "Valkyrie"},
             "currentDeck": [
-                {"name": "Valkyrie", "iconUrls": {"medium": "icon://valk"}},
-                {"name": "Goblin Barrel", "iconUrls": {"medium": "icon://gb"}},
-                {"name": "Princess", "iconUrls": {"medium": "icon://princess"}},
-                {"name": "Knight", "iconUrls": {"medium": "icon://knight"}},
-                {"name": "Rocket", "iconUrls": {"medium": "icon://rocket"}},
-                {"name": "Ice Spirit", "iconUrls": {"medium": "icon://ice"}},
-                {"name": "Inferno Tower", "iconUrls": {"medium": "icon://inferno"}},
-                {"name": "Log", "iconUrls": {"medium": "icon://log"}},
+                {"name": "Valkyrie", "level": 14, "maxLevel": 14, "rarity": "rare", "iconUrls": {"medium": "icon://valk"}},
+                {"name": "Goblin Barrel", "level": 10, "maxLevel": 11, "rarity": "epic", "iconUrls": {"medium": "icon://gb"}},
+                {"name": "Princess", "level": 6, "maxLevel": 8, "rarity": "legendary", "iconUrls": {"medium": "icon://princess"}},
+                {"name": "Knight", "level": 16, "maxLevel": 16, "rarity": "common", "iconUrls": {"medium": "icon://knight"}},
+                {"name": "Rocket", "level": 14, "maxLevel": 14, "rarity": "rare", "iconUrls": {"medium": "icon://rocket"}},
+                {"name": "Ice Spirit", "level": 16, "maxLevel": 16, "rarity": "common", "iconUrls": {"medium": "icon://ice"}},
+                {"name": "Inferno Tower", "level": 10, "maxLevel": 11, "rarity": "epic", "iconUrls": {"medium": "icon://inferno"}},
+                {"name": "Log", "level": 8, "maxLevel": 8, "rarity": "legendary", "iconUrls": {"medium": "icon://log"}},
             ],
             "cards": [],
             "badges": [],
@@ -439,6 +531,10 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
 
         deck = db.get_member_current_deck("#ABC123", conn=conn)
         assert deck["cards"][0]["name"] == "Valkyrie"
+        assert deck["cards"][0]["level"] == 16
+        assert deck["cards"][0]["api_level"] == 14
+        assert deck["cards"][1]["level"] == 15
+        assert deck["cards"][1]["api_level"] == 10
 
         cards = db.get_member_signature_cards("#ABC123", conn=conn)
         assert cards["sample_battles"] == 2
@@ -466,8 +562,8 @@ def test_snapshot_player_profile_detects_level_and_card_milestones():
                 "expLevel": 65,
                 "currentDeck": [],
                 "cards": [
-                    {"name": "Fireball", "level": 15},
-                    {"name": "Knight", "level": 13},
+                    {"name": "Fireball", "level": 10, "maxLevel": 11, "rarity": "epic"},
+                    {"name": "Knight", "level": 13, "maxLevel": 16, "rarity": "common"},
                 ],
             },
             conn=conn,
@@ -479,8 +575,8 @@ def test_snapshot_player_profile_detects_level_and_card_milestones():
                 "expLevel": 66,
                 "currentDeck": [],
                 "cards": [
-                    {"name": "Fireball", "level": 16},
-                    {"name": "Knight", "level": 14},
+                    {"name": "Fireball", "level": 11, "maxLevel": 11, "rarity": "epic"},
+                    {"name": "Knight", "level": 14, "maxLevel": 16, "rarity": "common"},
                 ],
             },
             conn=conn,
