@@ -1229,17 +1229,17 @@ The tool layer should query this schema directly.
 - `save_memory_fact(...)`
 - `save_memory_episode(...)`
 
-## Breaking Change Plan
+## V2 Outcome
 
-1. Delete current `elixir.db`.
-2. Replace the existing migrations with one clean V2 initializer.
-3. Rebuild `db.py` around the new tables and ingestion helpers.
-4. Add Discord identity and memory tables from the start.
-5. Replace generic history tools with narrower query tools.
-6. Update heartbeat and site generation to read from normalized tables.
-7. Add tests around:
-   - tag normalization
-   - Discord member linkage
+The V2 reset is implemented.
+
+1. `elixir.db` is treated as disposable runtime state.
+2. The baseline schema lives in `db/__init__.py` as `_migration_0()`.
+3. Storage is now exposed through the `db` package, with domain code in `storage/`.
+4. Discord identity and memory are part of the baseline schema.
+5. Generic history lookups were replaced with narrower roster, member, war, and analytics queries.
+6. Heartbeat, site generation, and channel workflows now read from normalized V2 tables.
+7. Test coverage exists around tag normalization, Discord linkage, roster queries, war analytics, and channel routing.
    - join / leave membership tracking
    - battle dedup
    - form calculation

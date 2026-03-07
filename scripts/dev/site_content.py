@@ -3,7 +3,7 @@
 
 Usage:
     source venv/bin/activate
-    python dev_test_site_content.py [step]
+    python scripts/dev/site_content.py [step]
 
 Steps:
     data      — fetch CR API, build roster + clan data, write JSON (no commit)

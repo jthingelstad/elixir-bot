@@ -1,3 +1,17 @@
+import json
+from datetime import datetime, timedelta, timezone
+
+from db import (
+    _canon_tag,
+    _current_joined_at,
+    _ensure_member,
+    _get_current_membership,
+    _json_or_none,
+    _member_reference_fields,
+    _rowdicts,
+    _utcnow,
+    get_connection,
+)
 def snapshot_members(member_list, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -256,6 +270,7 @@ def get_clan_roster_summary(conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
+        from storage.war import get_current_war_status
         row = conn.execute(
             "SELECT COUNT(*) AS active_members, "
             "ROUND(AVG(COALESCE(cs.exp_level, 0)), 2) AS avg_exp_level, "
@@ -319,6 +334,8 @@ def get_member_overview(tag, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
+        from storage.war import get_member_war_status
+
         profile = get_member_profile(tag, conn=conn)
         if not profile:
             return None
@@ -371,6 +388,7 @@ def list_recent_joins(days=30, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
+        from storage.war import get_current_season_id
         cutoff = (datetime.now(timezone.utc).date() - timedelta(days=days))
         season_id = get_current_season_id(conn=conn)
         rows = conn.execute(
@@ -513,5 +531,3 @@ def get_members_on_losing_streak(min_streak=3, scope="competitive_10", conn=None
     finally:
         if close:
             conn.close()
-
-

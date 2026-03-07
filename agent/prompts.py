@@ -1,3 +1,7 @@
+import prompts
+
+from agent.core import _build_system_prompt
+
 def _observe_system():
     announcements = prompts.discord_singleton_channel("announcements")
     return _build_system_prompt(
@@ -177,3 +181,15 @@ def _event_system():
     )
 
 
+
+__all__ = [
+    "_observe_system",
+    "_interactive_system",
+    "_clanops_system",
+    "_reception_system",
+    "_home_message_system",
+    "_members_message_system",
+    "_roster_bios_system",
+    "_promote_system",
+    "_event_system",
+]
