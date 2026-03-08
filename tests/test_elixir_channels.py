@@ -80,6 +80,15 @@ def test_on_message_routes_interactive_channel_when_mentioned():
     mock_process.assert_not_awaited()
 
 
+def test_post_to_elixir_sends_content_list_as_multiple_messages():
+    channel = SimpleNamespace(send=AsyncMock())
+
+    asyncio.run(elixir._post_to_elixir(channel, {"content": ["First post", "Second post"]}))
+
+    assert channel.send.await_args_list[0].args == ("First post",)
+    assert channel.send.await_args_list[1].args == ("Second post",)
+
+
 def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
     message = _make_message(200, "clan-ops", "<@999> What is my current war participation rate over the last 4 weeks?")
 

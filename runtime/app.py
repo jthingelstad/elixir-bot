@@ -55,14 +55,24 @@ scheduler = AsyncIOScheduler(timezone=CHICAGO)
 
 async def _post_to_elixir(channel, entry: dict):
     """Post an entry's content to a configured Discord channel."""
-    content = entry.get("content", entry.get("summary", ""))
+    for post in _entry_posts(entry):
+        if len(post) > 2000:
+            for chunk in [post[i:i+1990] for i in range(0, len(post), 1990)]:
+                await channel.send(chunk)
+        else:
+            await channel.send(post)
+
+
+def _entry_posts(entry: dict, field="content"):
+    content = entry.get(field, entry.get("summary", ""))
     if not content:
-        return
-    if len(content) > 2000:
-        for chunk in [content[i:i+1990] for i in range(0, len(content), 1990)]:
-            await channel.send(chunk)
-    else:
-        await channel.send(content)
+        return []
+    if isinstance(content, list):
+        return [item.strip() for item in content if isinstance(item, str) and item.strip()]
+    if isinstance(content, str):
+        text = content.strip()
+        return [text] if text else []
+    return [str(content)]
 
 
 def _preview_text(value, limit=500):
