@@ -402,27 +402,14 @@ def list_recent_joins(days=30, conn=None):
         cutoff = (datetime.now(timezone.utc).date() - timedelta(days=days))
         season_id = get_current_season_id(conn=conn)
         rows = conn.execute(
-            "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.role, cs.exp_level, cs.trophies, cs.clan_rank, "
-            "cm.joined_at AS membership_joined_at, cm.join_source, md.joined_at_override "
+            "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.role, cs.exp_level, cs.trophies, cs.clan_rank "
             "FROM members m "
             "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-            "LEFT JOIN clan_memberships cm ON cm.member_id = m.member_id AND cm.left_at IS NULL "
-            "LEFT JOIN member_metadata md ON md.member_id = m.member_id "
             "WHERE m.status = 'active'"
         ).fetchall()
         result = []
         for row in rows:
-            override_joined = row["joined_at_override"]
-            membership_joined = row["membership_joined_at"]
-            membership_source = row["join_source"]
-            if override_joined:
-                joined_date = override_joined
-            elif membership_source in {"manual_record", "observed_join"}:
-                joined_date = membership_joined
-            elif membership_source == "clan_api_snapshot":
-                joined_date = membership_joined
-            else:
-                joined_date = None
+            joined_date = _current_joined_at(conn, row["member_id"])
             if not joined_date:
                 continue
             joined_day = joined_date[:10]

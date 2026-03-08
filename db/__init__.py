@@ -298,6 +298,20 @@ def _get_current_membership(conn: sqlite3.Connection, member_id: int):
     ).fetchone()
 
 
+def _trusted_current_joined_at(conn: sqlite3.Connection, member_id: int) -> Optional[str]:
+    membership = conn.execute(
+        "SELECT joined_at FROM clan_memberships "
+        "WHERE member_id = ? AND left_at IS NULL AND join_source IN ('manual_record', 'observed_join', 'clan_api_snapshot') "
+        "ORDER BY CASE join_source "
+        "WHEN 'manual_record' THEN 1 "
+        "WHEN 'observed_join' THEN 2 "
+        "WHEN 'clan_api_snapshot' THEN 3 "
+        "ELSE 99 END, joined_at DESC, membership_id DESC LIMIT 1",
+        (member_id,),
+    ).fetchone()
+    return membership["joined_at"] if membership else None
+
+
 def _current_joined_at(conn: sqlite3.Connection, member_id: int) -> Optional[str]:
     meta = conn.execute(
         "SELECT joined_at_override FROM member_metadata WHERE member_id = ?",
@@ -305,16 +319,6 @@ def _current_joined_at(conn: sqlite3.Connection, member_id: int) -> Optional[str
     ).fetchone()
     if meta and meta["joined_at_override"]:
         return meta["joined_at_override"]
-    memberships = conn.execute(
-        "SELECT joined_at, join_source FROM clan_memberships "
-        "WHERE member_id = ? AND left_at IS NULL "
-        "ORDER BY joined_at DESC, membership_id DESC",
-        (member_id,),
-    ).fetchall()
-    trusted_sources = {"manual_record", "observed_join", "clan_api_snapshot"}
-    for membership in memberships:
-        if membership["join_source"] in trusted_sources:
-            return membership["joined_at"]
     return None
 
 
@@ -862,7 +866,30 @@ def _migration_2(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE member_metadata ADD COLUMN generated_profile_updated_at TEXT")
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2]
+def _migration_3(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "INSERT INTO member_metadata (member_id) "
+        "SELECT m.member_id FROM members m "
+        "WHERE NOT EXISTS (SELECT 1 FROM member_metadata md WHERE md.member_id = m.member_id)"
+    )
+    rows = conn.execute("SELECT member_id FROM members").fetchall()
+    for row in rows:
+        trusted_joined_at = _trusted_current_joined_at(conn, row["member_id"])
+        if not trusted_joined_at:
+            continue
+        current = conn.execute(
+            "SELECT joined_at_override FROM member_metadata WHERE member_id = ?",
+            (row["member_id"],),
+        ).fetchone()
+        if current and current["joined_at_override"]:
+            continue
+        conn.execute(
+            "UPDATE member_metadata SET joined_at_override = ? WHERE member_id = ?",
+            (trusted_joined_at, row["member_id"]),
+        )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

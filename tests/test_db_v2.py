@@ -1186,6 +1186,7 @@ def test_current_joined_at_prefers_trusted_clan_api_snapshot_over_backfill():
             (member_id,),
         )
         conn.commit()
+        db.backfill_join_dates(conn=conn)
 
         assert db._current_joined_at(conn, member_id) == "2026-03-07"
     finally:
@@ -1222,6 +1223,7 @@ def test_recent_joins_excludes_initial_snapshot_cluster_but_keeps_later_real_add
             (newcomer_id,),
         )
         conn.commit()
+        db.backfill_join_dates(conn=conn)
 
         recent = db.list_recent_joins(days=30, conn=conn)
 
@@ -1256,11 +1258,44 @@ def test_recent_joins_excludes_bootstrap_and_backfill_rows_but_keeps_clan_api_sn
             (new_id,),
         )
         conn.commit()
+        db.backfill_join_dates(conn=conn)
 
         recent = db.list_recent_joins(days=30, conn=conn)
 
         assert [item["tag"] for item in recent] == ["#NEW1"]
         assert recent[0]["joined_date"] == "2026-03-07"
+    finally:
+        conn.close()
+
+
+def test_backfill_join_dates_promotes_trusted_current_membership_to_override_only():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#NEW1", "name": "Ditika", "role": "member", "clanRank": 1}],
+            conn=conn,
+        )
+        member_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#NEW1'"
+        ).fetchone()["member_id"]
+        conn.execute(
+            "UPDATE clan_memberships SET join_source = 'clan_api_snapshot', joined_at = '2026-03-08' WHERE member_id = ? AND left_at IS NULL",
+            (member_id,),
+        )
+        conn.commit()
+
+        db.backfill_join_dates(conn=conn)
+
+        meta = conn.execute(
+            "SELECT joined_at_override FROM member_metadata WHERE member_id = ?",
+            (member_id,),
+        ).fetchone()
+        membership_count = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM clan_memberships WHERE member_id = ? AND left_at IS NULL",
+            (member_id,),
+        ).fetchone()["cnt"]
+        assert meta["joined_at_override"] == "2026-03-08"
+        assert membership_count == 1
     finally:
         conn.close()
 

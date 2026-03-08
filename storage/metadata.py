@@ -6,6 +6,7 @@ from db import (
     SNAPSHOT_RETENTION_DAYS,
     WAR_RETENTION_DAYS,
     _canon_tag,
+    _trusted_current_joined_at,
     _current_joined_at,
     _ensure_member,
     _get_current_membership,
@@ -23,18 +24,20 @@ def record_join_date(tag, name, joined_date, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
+        normalized_joined_date = _normalize_date_string(joined_date)
         member_id = _ensure_member(conn, tag, name=name, status="active")
         current = _get_current_membership(conn, member_id)
         if not current:
             conn.execute(
                 "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, 'observed_join', NULL)",
-                (member_id, joined_date),
+                (member_id, normalized_joined_date),
             )
-        elif current["join_source"] in {"bootstrap_seed", "clan_api_snapshot", "backfill"}:
+        else:
             conn.execute(
                 "UPDATE clan_memberships SET joined_at = ?, join_source = 'observed_join' WHERE membership_id = ?",
-                (joined_date, current["membership_id"]),
+                (normalized_joined_date, current["membership_id"]),
             )
+        _upsert_member_metadata(conn, member_id, joined_at_override=normalized_joined_date)
         conn.commit()
     finally:
         if close:
@@ -68,7 +71,8 @@ def set_member_join_date(tag, name, joined_date, conn=None):
     conn = conn or get_connection()
     try:
         member_id = _ensure_member(conn, tag, name=name)
-        _upsert_member_metadata(conn, member_id, joined_at_override=_normalize_date_string(joined_date))
+        normalized_joined_date = _normalize_date_string(joined_date)
+        _upsert_member_metadata(conn, member_id, joined_at_override=normalized_joined_date)
         conn.commit()
     finally:
         if close:
@@ -376,17 +380,15 @@ def backfill_join_dates(conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        rows = conn.execute(
-            "SELECT member_id, MIN(observed_at) AS first_seen FROM member_state_snapshots GROUP BY member_id"
-        ).fetchall()
+        rows = conn.execute("SELECT member_id FROM members").fetchall()
         for row in rows:
             member_id = row["member_id"]
-            if _get_current_membership(conn, member_id):
+            if _current_joined_at(conn, member_id):
                 continue
-            conn.execute(
-                "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, 'backfill', NULL)",
-                (member_id, (row["first_seen"] or "")[:10]),
-            )
+            trusted_joined_at = _trusted_current_joined_at(conn, member_id)
+            if not trusted_joined_at:
+                continue
+            _upsert_member_metadata(conn, member_id, joined_at_override=trusted_joined_at)
         conn.commit()
     finally:
         if close:
