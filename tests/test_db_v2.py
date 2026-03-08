@@ -1121,6 +1121,69 @@ def test_tenure_recent_join_and_losing_streak_queries():
         conn.close()
 
 
+def test_record_join_date_upgrades_existing_membership_to_observed_join():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#DEF456", "name": "Vijay", "role": "member", "clanRank": 1}],
+            conn=conn,
+        )
+
+        db.record_join_date("#DEF456", "Vijay", "2026-03-08", conn=conn)
+
+        row = conn.execute(
+            "SELECT joined_at, join_source FROM clan_memberships cm "
+            "JOIN members m ON m.member_id = cm.member_id "
+            "WHERE m.player_tag = '#DEF456' AND cm.left_at IS NULL"
+        ).fetchone()
+        assert row["joined_at"] == "2026-03-08"
+        assert row["join_source"] == "observed_join"
+    finally:
+        conn.close()
+
+
+def test_recent_joins_excludes_initial_snapshot_cluster_but_keeps_later_real_additions():
+    conn = db.get_connection(":memory:")
+    try:
+        baseline_members = [
+            {"tag": f"#TAG{i}", "name": f"Member {i}", "role": "member", "clanRank": i}
+            for i in range(1, 6)
+        ]
+        db.snapshot_members(baseline_members, conn=conn)
+        conn.execute(
+            "UPDATE clan_memberships SET joined_at = '2026-03-07' WHERE left_at IS NULL"
+        )
+
+        # Simulate a later real addition observed after the baseline snapshot date.
+        newcomer_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#NEW1'"
+        ).fetchone()
+        assert newcomer_id is None
+        conn.execute(
+            "INSERT INTO members (player_tag, current_name, status, first_seen_at, last_seen_at) VALUES ('#NEW1', 'Ditika', 'active', '2026-03-08T12:00:00', '2026-03-08T12:00:00')"
+        )
+        newcomer_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#NEW1'"
+        ).fetchone()["member_id"]
+        conn.execute(
+            "INSERT INTO member_current_state (member_id, observed_at, role, exp_level, trophies, best_trophies, clan_rank, previous_clan_rank, donations_week, donations_received_week, arena_id, arena_name, arena_raw_name, last_seen_api, source, raw_json) "
+            "VALUES (?, '2026-03-08T12:00:00', 'member', 50, 6000, 6000, 6, NULL, 0, 0, NULL, NULL, NULL, NULL, 'clan_api', NULL)",
+            (newcomer_id,),
+        )
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-03-08', NULL, 'clan_api_snapshot', NULL)",
+            (newcomer_id,),
+        )
+        conn.commit()
+
+        recent = db.list_recent_joins(days=30, conn=conn)
+
+        assert [item["tag"] for item in recent] == ["#NEW1"]
+        assert recent[0]["joined_date"] == "2026-03-08"
+    finally:
+        conn.close()
+
+
 def test_war_rollup_queries_cover_nonparticipants_and_member_vs_average():
     conn = db.get_connection(":memory:")
     try:

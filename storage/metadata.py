@@ -27,8 +27,13 @@ def record_join_date(tag, name, joined_date, conn=None):
         current = _get_current_membership(conn, member_id)
         if not current:
             conn.execute(
-                "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, 'manual_record', NULL)",
+                "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, 'observed_join', NULL)",
                 (member_id, joined_date),
+            )
+        elif current["join_source"] in {"bootstrap_seed", "clan_api_snapshot", "backfill"}:
+            conn.execute(
+                "UPDATE clan_memberships SET joined_at = ?, join_source = 'observed_join' WHERE membership_id = ?",
+                (joined_date, current["membership_id"]),
             )
         conn.commit()
     finally:
