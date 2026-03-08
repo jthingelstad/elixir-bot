@@ -424,6 +424,8 @@ def test_detect_war_day_transition_marks_final_battle_day_from_api_period_index(
         assert signals[0]["type"] == "war_final_battle_day"
         assert signals[0]["week"] == 1
         assert signals[0]["period_index"] == 6
+        assert db.get_current_war_status(conn=conn)["battle_day_number"] == 4
+        assert db.get_current_war_status(conn=conn)["phase_display"] == "Battle Day 4"
         assert signals[0]["message"] == "Last day of battles this week. Use remaining decks!"
     finally:
         conn.close()
