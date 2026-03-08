@@ -87,7 +87,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_member_profile",
-            "description": "Get a normalized current profile for a clan member including join date, role, level, trophies, notes, recent form, and Discord linkage.",
+            "description": "Get a normalized current profile for a clan member including join date, role, level, trophies, generated member bio/highlight, recent form, longer-term player stats, signature cards, and Discord linkage.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -104,7 +104,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_member_overview",
-            "description": "Get a combined member overview with current profile, recent form, deck info, and current war status in one response.",
+            "description": "Get a combined member overview with current profile, generated member bio, recent form, deck info, signature cards, and current war status in one response.",
             "parameters": {
                 "type": "object",
                 "properties": {

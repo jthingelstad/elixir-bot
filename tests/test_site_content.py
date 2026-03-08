@@ -128,6 +128,13 @@ def test_build_roster_data(conn):
     db.set_member_join_date("ABC123", "King Levy", "2026-02-04T04:00:00Z", conn=conn)
     db.set_member_note("ABC123", "King Levy", "Founder", conn=conn)
     db.set_member_profile_url("ABC123", "King Levy", "https://example.com", conn=conn)
+    db.set_member_generated_profile(
+        "ABC123",
+        "King Levy",
+        "King Levy is one of the clan's war leaders and a steady ladder force.",
+        "war",
+        conn=conn,
+    )
 
     clan_data = {
         "memberList": [
@@ -167,6 +174,8 @@ def test_build_roster_data(conn):
     assert levy["note"] == "Founder"
     assert levy["profile_url"] == "https://example.com"
     assert levy["date_joined"] == "2026-02-04T04:00:00Z"
+    assert levy["bio"] == "King Levy is one of the clan's war leaders and a steady ladder force."
+    assert levy["highlight"] == "war"
 
     # Unknown join dates stay unknown until observed elsewhere or overridden.
     newbie = result["members"][1]

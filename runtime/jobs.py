@@ -381,6 +381,7 @@ async def _site_content_cycle():
                 if bios:
                     roster_data["intro"] = bios.get("intro", "")
                     member_bios = bios.get("members", {})
+                    db.upsert_member_generated_profiles(member_bios)
                     for m in roster_data["members"]:
                         mc = member_bios.get(m["tag"], {}) or member_bios.get("#" + m["tag"], {})
                         if mc:
