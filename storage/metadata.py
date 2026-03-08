@@ -347,21 +347,34 @@ def get_join_anniversaries_today(today_str, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        month_day = today_str[5:]
-        year = today_str[:4]
+        today = datetime.strptime(today_str[:10], "%Y-%m-%d").date()
         rows = conn.execute(
             "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name FROM members m WHERE m.status = 'active'"
         ).fetchall()
         result = []
         for row in rows:
             joined_at = _current_joined_at(conn, row["member_id"])
-            if not joined_at or joined_at[5:] != month_day or joined_at[:4] == year:
+            if not joined_at:
+                continue
+            try:
+                joined_day = datetime.strptime(joined_at[:10], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if joined_day >= today:
+                continue
+            if joined_day.day != today.day:
+                continue
+            months = (today.year - joined_day.year) * 12 + (today.month - joined_day.month)
+            if months < 3 or months % 3 != 0:
                 continue
             result.append({
                 "tag": row["tag"],
                 "name": row["name"],
                 "joined_date": joined_at,
-                "years": int(year) - int(joined_at[:4]),
+                "months": months,
+                "quarters": months // 3,
+                "years": months // 12,
+                "is_yearly": months % 12 == 0,
             })
         return result
     finally:

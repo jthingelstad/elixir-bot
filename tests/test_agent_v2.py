@@ -289,7 +289,7 @@ def test_create_chat_completion_uses_content_model_for_site_workflows():
             messages=[{"role": "user", "content": "status"}],
         )
 
-    assert create.call_args.kwargs["model"] == "gpt-4o"
+    assert create.call_args.kwargs["model"] == "gpt-5.2"
 
 
 def test_create_chat_completion_respects_model_env_overrides():
@@ -305,7 +305,7 @@ def test_create_chat_completion_respects_model_env_overrides():
     with (
         patch("elixir_agent._get_client", return_value=mock_client),
         patch("elixir_agent.runtime_status.record_openai_call"),
-        patch.dict(os.environ, {"ELIXIR_CHAT_MODEL": "gpt-4.1-mini-test", "ELIXIR_CONTENT_MODEL": "gpt-4o-test"}),
+        patch.dict(os.environ, {"ELIXIR_CHAT_MODEL": "gpt-4.1-mini-test", "ELIXIR_CONTENT_MODEL": "gpt-5.2-test"}),
     ):
         elixir_agent._create_chat_completion(
             workflow="clanops",
@@ -317,7 +317,7 @@ def test_create_chat_completion_respects_model_env_overrides():
             workflow="site_members_message",
             messages=[{"role": "user", "content": "status"}],
         )
-        assert create.call_args.kwargs["model"] == "gpt-4o-test"
+        assert create.call_args.kwargs["model"] == "gpt-5.2-test"
 
 
 def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():

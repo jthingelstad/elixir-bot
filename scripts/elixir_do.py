@@ -29,7 +29,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-import discord
 from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -38,13 +37,7 @@ if str(REPO_ROOT) not in sys.path:
 
 load_dotenv()
 
-import prompts
-import elixir
-import site_content
 from runtime import admin as admin_commands
-from runtime import jobs as runtime_jobs
-from runtime.app import TOKEN
-
 
 COMMAND_HELP = admin_commands.COMMAND_HELP
 
@@ -52,7 +45,7 @@ COMMAND_HELP = admin_commands.COMMAND_HELP
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="elixir_do.py",
-        description="Run Elixir admin jobs and reports on demand.",
+        description="Run Elixir admin jobs and reports on demand. Discord slash commands are grouped under /elixir; this CLI stays flat.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -174,6 +167,11 @@ def _utcnow() -> str:
 
 @asynccontextmanager
 async def _job_runtime(preview: bool):
+    import discord
+    import prompts
+    from runtime import jobs as runtime_jobs
+    from runtime.app import TOKEN
+
     channel_ids = [channel["id"] for channel in prompts.discord_channel_configs()]
     stack = ExitStack()
     client = None
@@ -218,6 +216,9 @@ async def _run_job(job_name: str, preview: bool):
 
 
 async def _load_site_context():
+    import elixir
+    import site_content
+
     clan, war = await elixir._load_live_clan_context()
     roster = await asyncio.to_thread(site_content.load_current, "roster")
     if roster is None and clan.get("memberList"):
@@ -227,6 +228,8 @@ async def _load_site_context():
 
 
 async def _run_site_publish(preview: bool):
+    import site_content
+
     if preview:
         print("Preview mode: site publish skipped.")
         return
@@ -237,6 +240,9 @@ async def _run_site_publish(preview: bool):
 
 
 async def _run_home_message(preview: bool):
+    import elixir
+    import site_content
+
     clan, war, roster = await _load_site_context()
     previous = await asyncio.to_thread(site_content.load_current, "home")
     previous_message = previous.get("message", "") if previous else ""
@@ -257,6 +263,9 @@ async def _run_home_message(preview: bool):
 
 
 async def _run_members_message(preview: bool):
+    import elixir
+    import site_content
+
     clan, war, roster = await _load_site_context()
     previous = await asyncio.to_thread(site_content.load_current, "members")
     previous_message = previous.get("message", "") if previous else ""
@@ -277,6 +286,9 @@ async def _run_members_message(preview: bool):
 
 
 async def _run_roster_bios(preview: bool):
+    import elixir
+    import site_content
+
     clan, war, roster = await _load_site_context()
     result = await asyncio.to_thread(
         elixir.elixir_agent.generate_roster_bios,
@@ -303,6 +315,9 @@ async def _run_roster_bios(preview: bool):
 
 
 async def _run_promote_content(preview: bool):
+    import elixir
+    import site_content
+
     clan, war, roster = await _load_site_context()
     promote = await asyncio.to_thread(
         elixir.elixir_agent.generate_promote_content,
@@ -319,6 +334,8 @@ async def _run_promote_content(preview: bool):
 
 
 async def _print_clan_status(short: bool):
+    import elixir
+
     clan, war = await elixir._load_live_clan_context()
     if short:
         print(elixir._build_clan_status_short_report(clan, war))

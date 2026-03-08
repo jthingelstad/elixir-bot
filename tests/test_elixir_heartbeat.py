@@ -221,6 +221,84 @@ def test_promotion_content_cycle_publishes_website_and_promotion_channel():
     assert mock_save.call_args_list[1].kwargs["event_type"] == "promotion_content_cycle_part"
 
 
+def test_detect_cake_days_uses_effective_join_date_and_birthdays():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.set_member_join_date("#ABC123", "King Levy", "2024-03-08", conn=conn)
+        db.set_member_birthday("#ABC123", "King Levy", 3, 8, conn=conn)
+
+        signals = heartbeat.detect_cake_days("2026-03-08", conn=conn)
+
+        join_signal = next(signal for signal in signals if signal["type"] == "join_anniversary")
+        birthday_signal = next(signal for signal in signals if signal["type"] == "member_birthday")
+
+        assert join_signal["members"] == [{
+            "tag": "#ABC123",
+            "name": "King Levy",
+            "joined_date": "2024-03-08",
+            "months": 24,
+            "quarters": 8,
+            "years": 2,
+            "is_yearly": True,
+        }]
+        assert birthday_signal["members"] == [{
+            "tag": "#ABC123",
+            "name": "King Levy",
+            "birth_month": 3,
+            "birth_day": 8,
+        }]
+    finally:
+        conn.close()
+
+
+def test_detect_cake_days_emits_quarterly_join_milestone():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.set_member_join_date("#ABC123", "King Levy", "2025-12-08", conn=conn)
+
+        signals = heartbeat.detect_cake_days("2026-03-08", conn=conn)
+        join_signal = next(signal for signal in signals if signal["type"] == "join_anniversary")
+
+        assert join_signal["members"] == [{
+            "tag": "#ABC123",
+            "name": "King Levy",
+            "joined_date": "2025-12-08",
+            "months": 3,
+            "quarters": 1,
+            "years": 0,
+            "is_yearly": False,
+        }]
+    finally:
+        conn.close()
+
+
+def test_detect_cake_days_dedupes_announcements_for_the_day():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.set_member_join_date("#ABC123", "King Levy", "2024-03-08", conn=conn)
+        db.set_member_birthday("#ABC123", "King Levy", 3, 8, conn=conn)
+
+        first = heartbeat.detect_cake_days("2026-03-08", conn=conn)
+        second = heartbeat.detect_cake_days("2026-03-08", conn=conn)
+
+        assert {signal["type"] for signal in first} >= {"join_anniversary", "member_birthday"}
+        assert second == []
+    finally:
+        conn.close()
+
+
 def test_maybe_post_arena_relay_posts_for_relayworthy_war_signal():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)

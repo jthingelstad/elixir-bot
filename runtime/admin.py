@@ -15,6 +15,7 @@ COMMAND_HELP = {
     "clan-status": "Fetch live clan/war data and print the operational clan status report.",
     "clan-list": "List active clan members with exact names, tags, roles, and clan ranks.",
     "profile": "Show the stored member profile and metadata for one member.",
+    "verify-discord": "Verify a member's Discord link and ensure the Member role is assigned.",
     "set-join-date": "Set a member join date in YYYY-MM-DD format.",
     "clear-join-date": "Clear a member join date.",
     "set-birthday": "Set a member birthday as month and day.",
@@ -45,6 +46,7 @@ COMMAND_ORDER = [
     "clan-status",
     "clan-list",
     "profile",
+    "verify-discord",
     "set-join-date",
     "clear-join-date",
     "set-birthday",
@@ -81,7 +83,7 @@ def render_admin_help(
 ) -> str:
     lines = [
         "**Elixir Admin Commands**",
-        f"Use `{slash_prefix} ...` for private replies, `{mention_prefix} <command>` in `#clanops` for public room replies, or `{cli_prefix} <command>` in the terminal.",
+        f"Use grouped slash commands under `{slash_prefix} ...` for private replies, `{mention_prefix} <command>` in `#clanops` for public room replies, or flat `{cli_prefix} <command>` commands in the terminal.",
         "",
         "Commands:",
     ]
@@ -96,10 +98,12 @@ def render_admin_help(
             "",
             "Examples:",
             f"- `{slash_prefix} clan-list`",
-            f"- `{slash_prefix} profile member:Ditika`",
-            f"- `{slash_prefix} member set-join-date member:Ditika date:2026-03-07`",
-            f"- `{slash_prefix} jobs heartbeat preview:true`",
+            f"- `{slash_prefix} profile show member:Ditika`",
+            f"- `{slash_prefix} profile verify-discord member:King Thing`",
+            f"- `{slash_prefix} profile set-join-date member:Ditika date:2026-03-07`",
+            f"- `{slash_prefix} jobs run job:heartbeat preview:true`",
             f"- `{mention_prefix} promotion --preview`",
+            f"- `{mention_prefix} verify-discord \"King Thing\"`",
             f"- `{mention_prefix} set-join-date \"Ditika\" 2026-03-07`",
             f"- `{mention_prefix} set-poap-address \"King Levy\" 0xabc123...`",
             f"- `{mention_prefix} set-note \"King Thing\" \"Founder and systems builder\"`",
@@ -162,6 +166,8 @@ def parse_admin_command(text: str, *, require_prefix: bool = False):
     if command == "clan-list" and not extra:
         return {"command": command, "preview": preview, "short": False, "args": {}}
     if command == "profile" and len(extra) >= 1:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": " ".join(extra)}}
+    if command == "verify-discord" and len(extra) >= 1:
         return {"command": command, "preview": preview, "short": False, "args": {"member": " ".join(extra)}}
     if command == "set-join-date" and len(extra) == 2:
         return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "date": extra[1]}}
@@ -274,7 +280,8 @@ def _build_member_profile_report(member_query: str) -> str:
     )
     lines.append(
         f"- Discord + notes: linked {'yes' if profile.get('in_discord') else 'no'} | "
-        f"handle {_fmt_optional(profile.get('discord_display_name') or profile.get('discord_username'))} | note {_fmt_optional(profile.get('note'))}"
+        f"handle {_fmt_optional(profile.get('discord_display_name') or profile.get('discord_username'))} | "
+        f"last seen {_fmt_optional(profile.get('discord_last_seen_at'))} | note {_fmt_optional(profile.get('note'))}"
     )
     lines.append(
         f"- Player history: wins {_fmt_optional(profile.get('career_wins'))} | losses {_fmt_optional(profile.get('career_losses'))} | "
@@ -539,6 +546,15 @@ async def _run_member_metadata_command(command: str, *, preview: bool, args: dic
     raise ValueError(f"Unknown metadata command: {command}")
 
 
+async def _run_verify_discord(*, preview: bool, args: dict) -> str:
+    import runtime.onboarding as onboarding
+
+    member_tag, label = await asyncio.to_thread(_resolve_member_tag, args["member"])
+    if preview:
+        return f"Preview: would verify the Discord link and Member role for {label}."
+    return await onboarding.verify_discord_membership(member_tag)
+
+
 async def dispatch_admin_command(command: str, *, preview: bool = False, short: bool = False, args: dict | None = None) -> str:
     import elixir
     args = args or {}
@@ -558,6 +574,8 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
         return await asyncio.to_thread(_build_clan_list_report)
     if command == "profile":
         return await asyncio.to_thread(_build_member_profile_report, args["member"])
+    if command == "verify-discord":
+        return await _run_verify_discord(preview=preview, args=args)
     if command in {
         "set-join-date",
         "clear-join-date",

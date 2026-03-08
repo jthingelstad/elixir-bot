@@ -255,7 +255,35 @@ def test_join_anniversary_uses_effective_join_date_override():
                 "tag": "#ABC123",
                 "name": "King Levy",
                 "joined_date": "2024-03-07",
+                "months": 24,
+                "quarters": 8,
                 "years": 2,
+                "is_yearly": True,
+            }
+        ]
+    finally:
+        conn.close()
+
+
+def test_join_anniversary_emits_quarterly_membership_milestones():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.set_member_join_date("#ABC123", "King Levy", "2025-12-08", conn=conn)
+
+        anniversaries = db.get_join_anniversaries_today("2026-03-08", conn=conn)
+        assert anniversaries == [
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "joined_date": "2025-12-08",
+                "months": 3,
+                "quarters": 1,
+                "years": 0,
+                "is_yearly": False,
             }
         ]
     finally:

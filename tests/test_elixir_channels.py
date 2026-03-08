@@ -448,6 +448,95 @@ def test_on_message_handles_clanops_profile_via_public_do_command():
     mock_process.assert_not_awaited()
 
 
+def test_dispatch_admin_command_handles_verify_discord():
+    with (
+        patch("runtime.admin._resolve_member_tag", return_value=("#ABC123", "King Levy")),
+        patch("runtime.onboarding.verify_discord_membership", new=AsyncMock(return_value="Verified Discord identity for King Levy.")) as mock_verify,
+    ):
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "verify-discord",
+                preview=False,
+                short=False,
+                args={"member": "King Levy"},
+            )
+        )
+
+    assert result == "Verified Discord identity for King Levy."
+    mock_verify.assert_awaited_once_with("#ABC123")
+
+
+def test_cr_api_auth_failure_alert_posts_once_per_signature():
+    channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
+
+    with (
+        patch("elixir.prompts.discord_channels_by_role", return_value=[{"id": 200, "name": "#leader-lounge", "role": "clanops"}]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.runtime_status.snapshot", return_value={
+            "api": {
+                "last_ok": False,
+                "last_status_code": 403,
+                "last_error": "403 Client Error: Forbidden",
+                "last_endpoint": "clan",
+                "last_entity_key": "J2RGCRVG",
+            }
+        }),
+    ):
+        elixir._CR_API_ALERT_SIGNATURE = None
+        first = asyncio.run(elixir._maybe_alert_cr_api_failure("live clan refresh"))
+        second = asyncio.run(elixir._maybe_alert_cr_api_failure("live clan refresh"))
+
+    try:
+        assert first is True
+        assert second is False
+        mock_post.assert_awaited_once()
+        posted = mock_post.await_args.args[1]["content"]
+        assert "King Thing" in posted
+        assert "live clan refresh" in posted
+        assert "IP allowlist" in posted or "key or its IP allowlist" in posted
+        assert mock_save.call_count == 1
+        assert mock_save.call_args.kwargs["event_type"] == "cr_api_auth_failure"
+    finally:
+        elixir._CR_API_ALERT_SIGNATURE = None
+
+
+def test_cr_api_outage_alert_posts_after_consecutive_failures():
+    channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
+
+    with (
+        patch("elixir.prompts.discord_channels_by_role", return_value=[{"id": 200, "name": "#leader-lounge", "role": "clanops"}]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.runtime_status.snapshot", return_value={
+            "api": {
+                "last_ok": False,
+                "last_status_code": 500,
+                "last_error": "500 Server Error: Internal Server Error",
+                "last_endpoint": "clan",
+                "last_entity_key": "J2RGCRVG",
+                "consecutive_error_count": 3,
+            }
+        }),
+    ):
+        elixir._CR_API_OUTAGE_ALERT_SIGNATURE = None
+        sent = asyncio.run(elixir._maybe_alert_cr_api_failure("player intel refresh"))
+
+    try:
+        assert sent is True
+        mock_post.assert_awaited_once()
+        posted = mock_post.await_args.args[1]["content"]
+        assert "failed 3 times in a row" in posted
+        assert "player intel refresh" in posted
+        assert mock_save.call_args.kwargs["event_type"] == "cr_api_outage"
+    finally:
+        elixir._CR_API_OUTAGE_ALERT_SIGNATURE = None
+
+
 def test_build_schedule_report_shows_47_minute_heartbeat():
     scheduler = SimpleNamespace(
         running=True,
