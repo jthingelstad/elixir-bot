@@ -852,6 +852,9 @@ def test_war_status_queries_use_v2_tables():
         war = db.get_current_war_status(conn=conn)
         assert war["war_state"] == "full"
         assert war["season_id"] == 129
+        assert war["phase"] is None
+        assert war["battle_phase_active"] is False
+        assert war["practice_phase_active"] is False
 
         today = db.get_war_deck_status_today(conn=conn)
         assert today["total_participants"] == 1
@@ -860,6 +863,99 @@ def test_war_status_queries_use_v2_tables():
         member_war = db.get_member_war_status("#ABC123", conn=conn)
         assert member_war["season"]["races_played"] == 1
         assert member_war["current_day"]["decks_left_today"] == 3
+    finally:
+        conn.close()
+
+
+def test_current_war_status_infers_new_season_after_section_index_rollover():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.store_war_log(
+            {
+                "items": [
+                    {
+                        "seasonId": 129,
+                        "sectionIndex": 3,
+                        "createdDate": "20260301T120000.000Z",
+                        "standings": [
+                            {
+                                "rank": 1,
+                                "trophyChange": 100,
+                                "clan": {
+                                    "tag": "#J2RGCRVG",
+                                    "name": "POAP KINGS",
+                                    "fame": 12850,
+                                    "finishTime": "20260301T180000.000Z",
+                                    "participants": [
+                                        {
+                                            "tag": "#ABC123",
+                                            "name": "King Levy",
+                                            "fame": 2400,
+                                            "repairPoints": 0,
+                                            "boatAttacks": 0,
+                                            "decksUsed": 12,
+                                            "decksUsedToday": 0,
+                                        }
+                                    ],
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+            "J2RGCRVG",
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 0,
+                "periodIndex": 5,
+                "periodType": "warDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 6622,
+                    "repairPoints": 0,
+                    "periodPoints": 2400,
+                    "clanScore": 140,
+                    "participants": [
+                        {
+                            "tag": "#ABC123",
+                            "name": "King Levy",
+                            "fame": 400,
+                            "repairPoints": 0,
+                            "boatAttacks": 0,
+                            "decksUsed": 2,
+                            "decksUsedToday": 1,
+                        }
+                    ],
+                },
+                "clans": [
+                    {"tag": "#AAA111", "fame": 0, "repairPoints": 0, "periodPoints": 0},
+                    {"tag": "#J2RGCRVG", "fame": 6622, "repairPoints": 0, "periodPoints": 2400},
+                ],
+            },
+            conn=conn,
+        )
+
+        war = db.get_current_war_status(conn=conn)
+
+        assert war["season_id"] == 130
+        assert war["section_index"] == 0
+        assert war["week"] == 1
+        assert war["period_type"] == "warDay"
+        assert war["period_index"] == 5
+        assert war["phase"] == "battle"
+        assert war["battle_phase_active"] is True
+        assert war["practice_phase_active"] is False
+        assert war["final_battle_day_active"] is False
+        assert war["race_rank"] == 1
+        assert db.get_current_season_id(conn=conn) == 130
     finally:
         conn.close()
 

@@ -3,6 +3,7 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+import db
 import heartbeat
 import elixir
 
@@ -130,3 +131,320 @@ def test_clanops_weekly_review_posts_to_clanops_channel():
     mock_build.assert_called_once_with({"name": "POAP KINGS"}, {"state": "warDay"})
     mock_post.assert_awaited_once_with(channel, {"content": "<@&1474762111287824584>\n**Weekly ClanOps Review**"})
     assert mock_save.call_args.kwargs["event_type"] == "weekly_clanops_review"
+
+
+def test_detect_war_rollovers_emits_week_rollover_for_new_live_week():
+    conn = db.get_connection(":memory:")
+    try:
+        db.store_war_log(
+            {
+                "items": [
+                    {
+                        "seasonId": 129,
+                        "sectionIndex": 2,
+                        "createdDate": "20260222T120000.000Z",
+                        "standings": [
+                            {"rank": 1, "clan": {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 10000}}
+                        ],
+                    }
+                ]
+            },
+            "J2RGCRVG",
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 2,
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 10000,
+                    "repairPoints": 0,
+                    "periodPoints": 1200,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 3,
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 250,
+                    "repairPoints": 0,
+                    "periodPoints": 250,
+                    "clanScore": 141,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_war_rollovers(conn=conn)
+
+        assert [sig["type"] for sig in signals] == ["war_week_rollover"]
+        assert signals[0]["previous_week"] == 3
+        assert signals[0]["week"] == 4
+        assert signals[0]["season_id"] == 129
+        assert signals[0]["season_changed"] is False
+    finally:
+        conn.close()
+
+
+def test_detect_war_rollovers_emits_week_and_season_rollover_for_section_wrap():
+    conn = db.get_connection(":memory:")
+    try:
+        db.store_war_log(
+            {
+                "items": [
+                    {
+                        "seasonId": 129,
+                        "sectionIndex": 3,
+                        "createdDate": "20260301T120000.000Z",
+                        "standings": [
+                            {"rank": 1, "clan": {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 12850}}
+                        ],
+                    }
+                ]
+            },
+            "J2RGCRVG",
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 3,
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 12850,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 0,
+                "periodIndex": 5,
+                "periodType": "warDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 400,
+                    "repairPoints": 0,
+                    "periodPoints": 400,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_war_rollovers(conn=conn)
+
+        assert [sig["type"] for sig in signals] == ["war_week_rollover", "war_season_rollover"]
+        assert signals[0]["previous_week"] == 4
+        assert signals[0]["week"] == 1
+        assert signals[0]["previous_season_id"] == 129
+        assert signals[0]["season_id"] == 130
+        assert signals[0]["season_changed"] is True
+        assert signals[1]["previous_season_id"] == 129
+        assert signals[1]["season_id"] == 130
+    finally:
+        conn.close()
+
+
+def test_detect_war_day_transition_emits_battle_phase_active_from_api_state():
+    conn = db.get_connection(":memory:")
+    try:
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 0,
+                "periodIndex": 3,
+                "periodType": "warDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 0,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_war_day_transition(conn=conn)
+
+        assert signals == [{
+            "type": "war_battle_phase_active",
+            "season_id": None,
+            "week": 1,
+            "section_index": 0,
+            "period_index": 3,
+            "period_type": "warDay",
+            "message": "Battle phase is live. Time to use those war decks.",
+        }]
+    finally:
+        conn.close()
+
+
+def test_detect_war_day_transition_emits_practice_phase_active_from_api_state():
+    conn = db.get_connection(":memory:")
+    try:
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 1,
+                "periodIndex": 1,
+                "periodType": "trainingDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 0,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_war_day_transition(conn=conn)
+
+        assert signals == [{
+            "type": "war_practice_phase_active",
+            "season_id": None,
+            "week": 2,
+            "section_index": 1,
+            "period_index": 1,
+            "period_type": "trainingDay",
+            "message": "Practice phase is live. Set boat defenses and get ready for battle days.",
+        }]
+    finally:
+        conn.close()
+
+
+def test_detect_war_day_transition_marks_final_battle_day_from_api_period_index():
+    conn = db.get_connection(":memory:")
+    try:
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 0,
+                "periodIndex": 5,
+                "periodType": "warDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 3200,
+                    "repairPoints": 0,
+                    "periodPoints": 3200,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 0,
+                "periodIndex": 6,
+                "periodType": "warDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 6400,
+                    "repairPoints": 0,
+                    "periodPoints": 3200,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_war_day_transition(conn=conn)
+
+        assert signals[0]["type"] == "war_final_battle_day"
+        assert signals[0]["week"] == 1
+        assert signals[0]["period_index"] == 6
+        assert signals[0]["message"] == "Last day of battles this week. Use remaining decks!"
+    finally:
+        conn.close()
+
+
+def test_detect_war_day_transition_marks_battle_phase_complete_from_api_transition():
+    conn = db.get_connection(":memory:")
+    try:
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 0,
+                "periodIndex": 6,
+                "periodType": "warDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 6400,
+                    "repairPoints": 0,
+                    "periodPoints": 3200,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 1,
+                "periodIndex": 0,
+                "periodType": "trainingDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 0,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 141,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_war_day_transition(conn=conn)
+
+        assert [sig["type"] for sig in signals] == [
+            "war_practice_phase_active",
+            "war_battle_days_complete",
+        ]
+        assert signals[0]["week"] == 2
+        assert signals[0]["period_type"] == "trainingDay"
+        assert signals[1] == {
+            "type": "war_battle_days_complete",
+            "previous_season_id": None,
+            "season_id": None,
+            "previous_week": 1,
+            "week": 2,
+            "previous_period_type": "warDay",
+            "period_type": "trainingDay",
+            "message": "Battle phase has ended. River Race has moved out of battle days.",
+        }
+    finally:
+        conn.close()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import sqlite3
@@ -15,40 +16,146 @@ from db import (
     get_connection,
 )
 
+BATTLE_PERIOD_TYPE = "warDay"
+FIRST_BATTLE_PERIOD_INDEX = 3
+FINAL_BATTLE_PERIOD_INDEX = 6
+
 def _format_member_reference(*args, **kwargs):
     from storage.identity import format_member_reference
 
     return format_member_reference(*args, **kwargs)
 
-def get_current_war_status(conn=None):
+
+def _load_war_payload(raw_json) -> dict:
+    if not raw_json:
+        return {}
+    if isinstance(raw_json, dict):
+        return raw_json
+    try:
+        return json.loads(raw_json)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+
+
+def _get_latest_logged_race(conn: sqlite3.Connection):
+    return conn.execute(
+        "SELECT season_id, section_index, created_date, our_rank, trophy_change, our_fame, total_clans, finish_time "
+        "FROM war_races ORDER BY season_id DESC, section_index DESC, war_race_id DESC LIMIT 1"
+    ).fetchone()
+
+
+def _infer_current_season_id_from_live_state(payload: dict, latest_logged_race) -> Optional[int]:
+    live_season_id = payload.get("seasonId")
+    if live_season_id is not None:
+        return live_season_id
+    if not latest_logged_race:
+        return None
+    live_section_index = payload.get("sectionIndex")
+    logged_section_index = latest_logged_race["section_index"]
+    if (
+        live_section_index is not None
+        and logged_section_index is not None
+        and live_section_index < logged_section_index
+    ):
+        return latest_logged_race["season_id"] + 1
+    return latest_logged_race["season_id"]
+
+
+def _resolve_phase(period_type: Optional[str], period_index: Optional[int]) -> Optional[str]:
+    if period_type == BATTLE_PERIOD_TYPE:
+        return "battle"
+    if period_type:
+        return "practice"
+    if period_index is None:
+        return None
+    if FIRST_BATTLE_PERIOD_INDEX <= period_index <= FINAL_BATTLE_PERIOD_INDEX:
+        return "battle"
+    return "practice"
+
+
+def _resolve_live_race_rank(payload: dict, clan_tag: Optional[str]) -> Optional[int]:
+    clans = payload.get("clans") or []
+    canon_clan_tag = _canon_tag(clan_tag) if clan_tag else None
+    if not clans or not canon_clan_tag:
+        return None
+    ranked = sorted(
+        clans,
+        key=lambda clan: (
+            clan.get("fame") or 0,
+            clan.get("repairPoints") or 0,
+            clan.get("periodPoints") or 0,
+            clan.get("clanScore") or 0,
+        ),
+        reverse=True,
+    )
+    for index, clan in enumerate(ranked, start=1):
+        if _canon_tag(clan.get("tag")) == canon_clan_tag:
+            return index
+    return None
+
+
+def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
+    if not row:
+        return None
+    payload = _load_war_payload(row["raw_json"])
+    result = dict(row)
+    result.pop("raw_json", None)
+
+    season_id = _infer_current_season_id_from_live_state(payload, latest_logged_race)
+    section_index = payload.get("sectionIndex")
+    period_index = payload.get("periodIndex")
+    period_type = payload.get("periodType")
+    phase = _resolve_phase(period_type, period_index)
+
+    if season_id is not None:
+        result["season_id"] = season_id
+    if section_index is not None:
+        result["section_index"] = section_index
+        result["week"] = section_index + 1
+    elif latest_logged_race and season_id == latest_logged_race["season_id"]:
+        result["section_index"] = latest_logged_race["section_index"]
+        result["week"] = (
+            latest_logged_race["section_index"] + 1
+            if latest_logged_race["section_index"] is not None
+            else None
+        )
+        result["trophy_change"] = latest_logged_race["trophy_change"]
+
+    result["period_index"] = period_index
+    result["period_type"] = period_type
+    result["phase"] = phase
+    result["battle_phase_active"] = phase == "battle"
+    result["practice_phase_active"] = phase == "practice"
+    result["final_battle_day_active"] = phase == "battle" and period_index == FINAL_BATTLE_PERIOD_INDEX
+    result["race_rank"] = _resolve_live_race_rank(payload, result.get("clan_tag")) or result.get("race_rank")
+    result["period_logs_count"] = len(payload.get("periodLogs") or [])
+    return result
+
+
+def get_recent_live_war_states(limit=2, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        war = conn.execute(
-            "SELECT observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score "
-            "FROM war_current_state ORDER BY observed_at DESC, war_id DESC LIMIT 1"
-        ).fetchone()
-        if not war:
-            return None
-        season_id = get_current_season_id(conn=conn)
-        current_race = None
-        if season_id is not None:
-            current_race = conn.execute(
-                "SELECT season_id, section_index, created_date, our_rank, trophy_change, our_fame, total_clans, finish_time "
-                "FROM war_races WHERE season_id = ? ORDER BY section_index DESC LIMIT 1",
-                (season_id,),
-            ).fetchone()
-        result = dict(war)
-        if current_race:
-            result["season_id"] = current_race["season_id"]
-            result["section_index"] = current_race["section_index"]
-            result["week"] = current_race["section_index"] + 1 if current_race["section_index"] is not None else None
-            result["race_rank"] = current_race["our_rank"]
-            result["trophy_change"] = current_race["trophy_change"]
-        return result
+        latest_logged_race = _get_latest_logged_race(conn)
+        rows = conn.execute(
+            "SELECT war_id, observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json "
+            "FROM war_current_state ORDER BY war_id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            state for state in (
+                _build_live_war_state(row, latest_logged_race)
+                for row in rows
+            )
+            if state
+        ]
     finally:
         if close:
             conn.close()
+
+def get_current_war_status(conn=None):
+    states = get_recent_live_war_states(limit=1, conn=conn)
+    return states[0] if states else None
 
 def get_war_deck_status_today(conn=None):
     close = conn is None
@@ -269,14 +376,8 @@ def get_war_history(n=10, conn=None):
             conn.close()
 
 def get_current_season_id(conn=None):
-    close = conn is None
-    conn = conn or get_connection()
-    try:
-        row = conn.execute("SELECT MAX(season_id) AS sid FROM war_races").fetchone()
-        return row["sid"] if row else None
-    finally:
-        if close:
-            conn.close()
+    current = get_current_war_status(conn=conn)
+    return current.get("season_id") if current else None
 
 def _season_bounds(conn: sqlite3.Connection, season_id: int) -> tuple[Optional[str], Optional[str]]:
     row = conn.execute(
