@@ -1,5 +1,7 @@
 import json
 
+import db
+
 from agent import app as _app
 from agent.core import (
     MAX_CONTEXT_MEMBERS_DEFAULT,
@@ -24,6 +26,131 @@ from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
 
 def _chat_with_tools(*args, **kwargs):
     return _app._chat_with_tools(*args, **kwargs)
+
+
+def _promotion_context(clan_data, war_data, roster_data=None):
+    members = clan_data.get("memberList", clan_data.get("members", [])) or []
+    lines = []
+
+    clan_name = clan_data.get("name", "POAP KINGS")
+    clan_tag = clan_data.get("tag", "#J2RGCRVG")
+    member_count = clan_data.get("members", len(members))
+    required_trophies = clan_data.get("requiredTrophies", 0)
+    donations_per_week = clan_data.get("donationsPerWeek", 0)
+    clan_score = clan_data.get("clanScore", 0)
+    clan_war_trophies = clan_data.get("clanWarTrophies", 0)
+    war_league = ((clan_data.get("warLeague") or {}).get("name")) or "Unknown"
+    total_trophies = sum((member.get("trophies") or 0) for member in members)
+    avg_level = round(
+        sum((member.get("expLevel") or 0) for member in members) / len(members),
+        1,
+    ) if members else 0
+
+    lines.append("=== CLAN SNAPSHOT ===")
+    lines.append(f"name: {clan_name}")
+    lines.append(f"tag: {clan_tag}")
+    lines.append(f"members: {member_count}")
+    lines.append(f"required_trophies: {required_trophies}")
+    lines.append(f"combined_trophies: {total_trophies}")
+    lines.append(f"avg_member_level: {avg_level}")
+    lines.append(f"weekly_donations: {donations_per_week}")
+    lines.append(f"clan_score: {clan_score}")
+    lines.append(f"clan_war_trophies: {clan_war_trophies}")
+    lines.append(f"war_league: {war_league}")
+
+    trophy_leaders = sorted(
+        members,
+        key=lambda member: (member.get("trophies") or 0, -(member.get("clanRank") or 999)),
+        reverse=True,
+    )[:5]
+    if trophy_leaders:
+        lines.append("\n=== TROPHY LEADERS ===")
+        for member in trophy_leaders:
+            lines.append(
+                f"- {member.get('name')} | {member.get('trophies', 0):,} trophies | "
+                f"role: {member.get('role', 'member')}"
+            )
+
+    donation_leaders = [
+        member for member in sorted(
+            members,
+            key=lambda member: (member.get("donations") or 0, member.get("trophies") or 0),
+            reverse=True,
+        )
+        if (member.get("donations") or 0) > 0
+    ][:5]
+    if donation_leaders:
+        lines.append("\n=== DONATION LEADERS ===")
+        for member in donation_leaders:
+            lines.append(
+                f"- {member.get('name')} | {member.get('donations', 0)} donations | "
+                f"{member.get('trophies', 0):,} trophies"
+            )
+
+    if roster_data:
+        spotlight_candidates = sorted(
+            roster_data.get("members", []),
+            key=lambda member: (
+                {"Leader": 3, "Co-Leader": 3, "Elder": 2, "Member": 1}.get(member.get("role"), 0),
+                member.get("trophies") or 0,
+                member.get("donations") or 0,
+            ),
+            reverse=True,
+        )
+        if spotlight_candidates:
+            lines.append("\n=== MEMBER SPOTLIGHTS ===")
+            for member in spotlight_candidates[:5]:
+                favorite_cards = ", ".join(card.get("name", "") for card in (member.get("favorite_cards") or [])[:2] if card.get("name"))
+                bio = (member.get("bio") or "").strip()
+                bio_preview = bio.split(". ")[0].strip() if bio else ""
+                line = (
+                    f"- {member.get('name')} | role: {member.get('role')} | "
+                    f"{member.get('trophies', 0):,} trophies | donations: {member.get('donations', 0)}"
+                )
+                if member.get("highlight"):
+                    line += f" | highlight: {member.get('highlight')}"
+                if favorite_cards:
+                    line += f" | cards: {favorite_cards}"
+                if bio_preview:
+                    line += f" | bio: {bio_preview}"
+                lines.append(line)
+
+        card_stats = roster_data.get("card_stats") or []
+        if card_stats:
+            lines.append("\n=== CLAN CARD IDENTITY ===")
+            for card in card_stats[:8]:
+                member_examples = ", ".join((card.get("members") or [])[:3])
+                line = f"- {card.get('name')} | in {card.get('member_count', 0)} current decks"
+                if member_examples:
+                    line += f" | played by: {member_examples}"
+                lines.append(line)
+
+    try:
+        current_war = db.get_current_war_status()
+    except Exception:
+        current_war = None
+    if current_war:
+        lines.append("\n=== CURRENT WAR ===")
+        lines.append(
+            f"- {current_war.get('season_week_label') or 'season/week unknown'} | "
+            f"{current_war.get('phase_display') or current_war.get('phase') or 'phase unknown'} | "
+            f"race rank: #{current_war.get('race_rank') or '?'} | "
+            f"fame: {(current_war.get('fame') or 0):,}"
+        )
+
+    try:
+        season_summary = db.get_war_season_summary(top_n=5)
+    except Exception:
+        season_summary = None
+    if season_summary:
+        lines.append("\n=== WAR SEASON LEADERS ===")
+        for member in (season_summary.get("top_contributors") or [])[:5]:
+            lines.append(
+                f"- {member.get('member_name') or member.get('name')} | "
+                f"{member.get('total_fame', 0):,} fame | races: {member.get('races_participated', 0)}"
+            )
+
+    return "\n".join(lines)
 
 def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memory_context=None):
     """Observation with signals from heartbeat. Returns dict or None.
@@ -224,14 +351,19 @@ def generate_roster_bios(clan_data, war_data, roster_data=None):
     )
 
 
-def generate_promote_content(clan_data, roster_data=None):
+def generate_promote_content(clan_data, war_data=None, roster_data=None):
     """Generate promotional messages for 5 channels. Returns dict or None."""
     context = _clan_context(
-        clan_data, {},
+        clan_data, war_data or {},
         roster_data=roster_data,
         max_members=MAX_CONTEXT_MEMBERS_FULL,
     )
-    user_msg = f"{context}\n\nGenerate promotional messages for all 5 channels."
+    promotion_context = _promotion_context(clan_data, war_data or {}, roster_data=roster_data)
+    user_msg = (
+        f"{context}\n\n"
+        f"{promotion_context}\n\n"
+        "Generate promotional messages for all 5 channels. Use the promotion snapshot heavily."
+    )
 
     messages = [
         {"role": "system", "content": _promote_system()},

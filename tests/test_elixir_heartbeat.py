@@ -174,6 +174,87 @@ def test_clanops_weekly_review_posts_to_clanops_channel():
     assert mock_save.call_args.kwargs["event_type"] == "weekly_clanops_review"
 
 
+def test_promotion_content_cycle_publishes_website_and_promotion_channel():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 400
+    channel.name = "promote-the-clan"
+    channel.type = "text"
+    clan = {
+        "name": "POAP KINGS",
+        "tag": "#J2RGCRVG",
+        "memberList": [{"name": "King Levy", "tag": "#ABC"}],
+    }
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._get_singleton_channel_id", return_value=400),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=(clan, {"state": "warDay"}))),
+        patch("elixir.site_content.build_roster_data", return_value={"members": [{"name": "King Levy"}]}) as mock_roster,
+        patch(
+            "elixir.elixir_agent.generate_promote_content",
+            return_value={
+                "discord": {"body": "Join POAP KINGS this weekend."},
+                "reddit": {"title": "POAP KINGS #J2RGCRVG [2000]", "body": "Recruiting body"},
+            },
+        ) as mock_generate,
+        patch("elixir.site_content.write_content", return_value=True) as mock_write,
+        patch("elixir.site_content.commit_and_push") as mock_push,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.save_message") as mock_save,
+    ):
+        asyncio.run(elixir._promotion_content_cycle())
+
+    mock_roster.assert_called_once_with(clan, True)
+    mock_generate.assert_called_once()
+    mock_write.assert_called_once()
+    mock_push.assert_called_once_with("Elixir promotion content update")
+    channel_posts = mock_post.await_args.args[1]["content"]
+    assert len(channel_posts) == 2
+    assert "Discord recruiting copy" in channel_posts[0]
+    assert "Reddit recruiting copy" in channel_posts[1]
+    assert mock_save.call_count == 2
+    assert mock_save.call_args_list[0].kwargs["event_type"] == "promotion_content_cycle"
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "promotion_content_cycle_part"
+
+
+def test_maybe_post_arena_relay_posts_for_relayworthy_war_signal():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 300
+    channel.name = "arena-relay"
+    channel.type = "text"
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._get_singleton_channel_id", return_value=300),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.elixir_agent.generate_message", return_value="Elixir: final battle day, use every remaining deck.") as mock_generate,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.save_message") as mock_save,
+    ):
+        asyncio.run(
+            elixir._maybe_post_arena_relay(
+                [{"type": "war_final_battle_day", "week": 1, "period_index": 6}],
+                {"name": "POAP KINGS", "tag": "#J2RGCRVG"},
+                {"state": "warDay", "race_rank": 1},
+            )
+        )
+
+    assert mock_generate.call_args.args[0] == "arena_relay_auto"
+    assert "war_final_battle_day" in mock_generate.call_args.args[1]
+    relay_post = mock_post.await_args.args[1]["content"]
+    assert "Elixir: final battle day, use every remaining deck." in relay_post
+    assert relay_post.startswith(f"<@&{elixir.LEADER_ROLE_ID}>")
+    assert mock_save.call_args.kwargs["event_type"] == "arena_relay_auto"
+
+
 def test_detect_war_rollovers_emits_week_rollover_for_new_live_week():
     conn = db.get_connection(":memory:")
     try:

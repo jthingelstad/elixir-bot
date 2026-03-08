@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from datetime import datetime, timezone
 
@@ -16,7 +17,7 @@ from runtime.app import (
     bot,
     log,
 )
-from runtime.helpers import _channel_scope, _get_singleton_channel_id
+from runtime.helpers import _channel_scope, _get_singleton_channel_id, _with_leader_ping
 from runtime import status as runtime_status
 
 
@@ -30,6 +31,165 @@ async def _load_live_clan_context(*args, **kwargs):
 
 def _build_weekly_clanops_review(*args, **kwargs):
     return _app._build_weekly_clanops_review(*args, **kwargs)
+
+
+def _relayworthy_war_signals(signals):
+    relay_signal_types = {
+        "war_final_practice_day",
+        "war_final_battle_day",
+        "war_week_rollover",
+        "war_season_rollover",
+    }
+    relayworthy = []
+    for signal in signals or []:
+        signal_type = signal.get("type")
+        if signal_type in relay_signal_types:
+            relayworthy.append(signal)
+            continue
+        if signal_type == "war_completed" and (signal.get("won") or signal.get("our_rank") == 1):
+            relayworthy.append(signal)
+    return relayworthy
+
+
+async def _maybe_post_arena_relay(signals, clan, war):
+    relayworthy = _relayworthy_war_signals(signals)
+    if not relayworthy:
+        return
+
+    try:
+        arena_relay_channel_id = _get_singleton_channel_id("arena_relay")
+    except Exception as exc:
+        log.warning("Arena relay post skipped: %s", exc)
+        return
+
+    channel = bot.get_channel(arena_relay_channel_id)
+    if not channel:
+        log.warning("Arena relay channel %s not found", arena_relay_channel_id)
+        return
+
+    recent_posts = await asyncio.to_thread(
+        db.list_channel_messages, arena_relay_channel_id, 10, "assistant",
+    )
+    relay_context = (
+        "Write a short relay-ready message for #arena-relay.\n"
+        "A clan leader may copy this into in-game Clan Chat.\n"
+        "Keep it short and punchy: 1-3 short sentences.\n"
+        "Focus on exactly what the clan should know or do right now.\n"
+        "Do not mention Discord, channels, reactions, or private leadership context.\n"
+        "Identify yourself naturally as Elixir.\n\n"
+        f"Relevant signals:\n{json.dumps(relayworthy, indent=2, default=str)}\n\n"
+        f"Current war data:\n{json.dumps(war or {}, indent=2, default=str)}\n\n"
+        f"Current clan data:\n{json.dumps({'name': clan.get('name'), 'tag': clan.get('tag')}, indent=2, default=str)}"
+    )
+
+    message = await asyncio.to_thread(
+        elixir_agent.generate_message,
+        "arena_relay_auto",
+        relay_context,
+        recent_posts,
+    )
+    if not message:
+        return
+
+    relay_post = _with_leader_ping(message)
+    await _post_to_elixir(channel, {"content": relay_post})
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(channel),
+        "assistant",
+        relay_post,
+        channel_id=channel.id,
+        channel_name=getattr(channel, "name", None),
+        channel_kind=str(channel.type),
+        workflow="observation",
+        event_type="arena_relay_auto",
+    )
+
+
+def _promotion_channel_posts(promote):
+    posts = []
+    discord_body = (((promote or {}).get("discord") or {}).get("body") or "").strip()
+    reddit = (promote or {}).get("reddit") or {}
+    reddit_title = (reddit.get("title") or "").strip()
+    reddit_body = (reddit.get("body") or "").strip()
+
+    if discord_body:
+        posts.append(
+            "**Discord recruiting copy**\n"
+            f"```text\n{discord_body}\n```"
+        )
+    if reddit_title or reddit_body:
+        reddit_lines = ["**Reddit recruiting copy**"]
+        if reddit_title:
+            reddit_lines.append(f"Title: `{reddit_title}`")
+        if reddit_body:
+            reddit_lines.append(f"```text\n{reddit_body}\n```")
+        posts.append("\n".join(reddit_lines))
+    return posts
+
+
+async def _promotion_content_cycle():
+    runtime_status.mark_job_start("promotion_content_cycle")
+    try:
+        promotion_channel_id = _get_singleton_channel_id("promotion")
+    except Exception as exc:
+        runtime_status.mark_job_failure("promotion_content_cycle", f"promotion channel config error: {exc}")
+        return
+
+    channel = bot.get_channel(promotion_channel_id)
+    if not channel:
+        runtime_status.mark_job_failure("promotion_content_cycle", "promotion channel not found")
+        return
+
+    try:
+        clan, war = await _load_live_clan_context()
+    except Exception as exc:
+        log.error("Promotion content refresh failed: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("promotion_content_cycle", f"refresh failed: {exc}")
+        return
+
+    if not clan.get("memberList"):
+        runtime_status.mark_job_success("promotion_content_cycle", "no member data")
+        return
+
+    roster_data = await asyncio.to_thread(site_content.build_roster_data, clan, True)
+    promote = await asyncio.to_thread(
+        elixir_agent.generate_promote_content,
+        clan,
+        war_data=war,
+        roster_data=roster_data,
+    )
+    if not promote:
+        runtime_status.mark_job_success("promotion_content_cycle", "no promotion content")
+        return
+
+    try:
+        await asyncio.to_thread(site_content.write_content, "promote", promote)
+        await asyncio.to_thread(site_content.commit_and_push, "Elixir promotion content update")
+    except Exception as exc:
+        log.error("Promotion content publish error: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("promotion_content_cycle", f"site publish failed: {exc}")
+        return
+
+    channel_posts = _promotion_channel_posts(promote)
+    if not channel_posts:
+        runtime_status.mark_job_success("promotion_content_cycle", "website updated, no promotion channel copy")
+        return
+
+    await _post_to_elixir(channel, {"content": channel_posts})
+    for index, post in enumerate(channel_posts):
+        await asyncio.to_thread(
+            db.save_message,
+            _channel_scope(channel),
+            "assistant",
+            post,
+            channel_id=channel.id,
+            channel_name=getattr(channel, "name", None),
+            channel_kind=str(channel.type),
+            workflow="promotion",
+            event_type="promotion_content_cycle" if index == 0 else "promotion_content_cycle_part",
+        )
+    runtime_status.mark_job_success("promotion_content_cycle", "website and Discord promotion content published")
 
 async def _heartbeat_tick():
     """Scheduled heartbeat — fetch data, detect signals, post if interesting."""
@@ -126,27 +286,28 @@ async def _heartbeat_tick():
             )
             if result is None:
                 log.info("Heartbeat: LLM decided signals not worth posting")
-                runtime_status.mark_job_success("heartbeat", f"{len(other_signals)} signal(s), no post")
-                return
-            await _post_to_elixir(channel, result)
-            posts = _app._entry_posts(result)
-            if posts:
-                summary = result.get("summary")
-                event_type = result.get("event_type")
-                for index, post in enumerate(posts):
-                    post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
-                    post_event_type = event_type if index == 0 else f"{event_type}_part" if event_type else None
-                    await asyncio.to_thread(
-                        db.save_message,
-                        _channel_scope(channel), "assistant", post,
-                        summary=post_summary,
-                        channel_id=channel.id,
-                        channel_name=getattr(channel, "name", None),
-                        channel_kind=str(channel.type),
-                        workflow="observation",
-                        event_type=post_event_type,
-                    )
-            log.info("Posted observation: %s", result.get("summary"))
+            else:
+                await _post_to_elixir(channel, result)
+                posts = _app._entry_posts(result)
+                if posts:
+                    summary = result.get("summary")
+                    event_type = result.get("event_type")
+                    for index, post in enumerate(posts):
+                        post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
+                        post_event_type = event_type if index == 0 else f"{event_type}_part" if event_type else None
+                        await asyncio.to_thread(
+                            db.save_message,
+                            _channel_scope(channel), "assistant", post,
+                            summary=post_summary,
+                            channel_id=channel.id,
+                            channel_name=getattr(channel, "name", None),
+                            channel_kind=str(channel.type),
+                            workflow="observation",
+                            event_type=post_event_type,
+                        )
+                log.info("Posted observation: %s", result.get("summary"))
+
+            await _maybe_post_arena_relay(other_signals, clan, war)
 
         runtime_status.mark_job_success("heartbeat", f"{len(signals)} signal(s) processed")
 
@@ -256,16 +417,6 @@ async def _site_content_cycle():
                 })
         except Exception as e:
             log.error("Members message error: %s", e)
-
-        # Generate promote content on Sundays
-        now_chicago = datetime.now(CHICAGO)
-        if now_chicago.weekday() == 6:  # Sunday
-            try:
-                promote = elixir_agent.generate_promote_content(clan, roster_data=roster_data)
-                if promote:
-                    site_content.write_content("promote", promote)
-            except Exception as e:
-                log.error("Promote content error: %s", e)
 
         site_content.commit_and_push("Elixir content update")
         log.info("Site content cycle complete")
