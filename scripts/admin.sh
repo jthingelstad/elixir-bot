@@ -17,14 +17,14 @@ status() {
 
 stop_bot() {
     echo "==> Stopping elixir-bot..."
-    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    launchctl unload "$PLIST" 2>/dev/null || true
     sleep 1
     status
 }
 
 start_bot() {
     echo "==> Starting elixir-bot..."
-    launchctl bootstrap "gui/$(id -u)" "$PLIST"
+    launchctl load -w "$PLIST"
     sleep 3
     status
 }
