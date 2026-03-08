@@ -53,6 +53,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 scheduler = AsyncIOScheduler(timezone=CHICAGO)
 
 
+def _format_hour_label(hour: int) -> str:
+    suffix = "am" if hour < 12 else "pm"
+    display_hour = hour % 12 or 12
+    return f"{display_hour}{suffix}"
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _post_to_elixir(channel, entry: dict):
@@ -168,17 +174,7 @@ async def on_ready():
             jitter=HEARTBEAT_JITTER_SECONDS,
             id="heartbeat",
         )
-        # Morning data refresh for poapkings.com
-        scheduler.add_job(
-            lambda: bot.loop.call_soon_threadsafe(
-                lambda: bot.loop.create_task(_site_data_refresh())
-            ),
-            "cron",
-            hour=SITE_DATA_HOUR,
-            minute=0,
-            id="site_data_refresh",
-        )
-        # Evening content cycle for poapkings.com
+        # Daily site publish for poapkings.com: refresh data, generate content, commit/push.
         scheduler.add_job(
             lambda: bot.loop.call_soon_threadsafe(
                 lambda: bot.loop.create_task(_site_content_cycle())
@@ -220,10 +216,10 @@ async def on_ready():
         )
         scheduler.start()
         log.info("Scheduler started — heartbeat every %d minutes with up to %ds jitter (active %dam-%dpm Chicago), "
-                 "site data refresh at %dam, content cycle at %dpm, player intel refresh every %dh, clanops review %s at %02d:00, "
+                 "site publish at %s, player intel refresh every %dh, clanops review %s at %02d:00, "
                  "promotion sync %s at %02d:00",
                  HEARTBEAT_INTERVAL_MINUTES, HEARTBEAT_JITTER_SECONDS, HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
-                 SITE_DATA_HOUR, SITE_CONTENT_HOUR, PLAYER_INTEL_REFRESH_HOURS,
+                 _format_hour_label(SITE_CONTENT_HOUR), PLAYER_INTEL_REFRESH_HOURS,
                  CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR,
                  PROMOTION_CONTENT_DAY, PROMOTION_CONTENT_HOUR)
     else:

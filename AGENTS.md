@@ -84,8 +84,7 @@ Filenames are camelCase (not hyphenated) because 11ty uses the filename stem as 
 
 ### Scheduled Jobs
 
-- **8:00 AM Chicago** — `_site_data_refresh()`: Fetch CR API, build roster + clan data, commit/push
-- **8:00 PM Chicago** — `_site_content_cycle()`: Refresh data, generate LLM bios/messages, commit/push
+- **6:00 PM Chicago** — `_site_content_cycle()`: Refresh CR data, build roster + clan data, generate LLM bios/messages, commit/push
 - **Every 6 hours by default** — `_player_intel_refresh()`: Refresh a stale subset of active members' player profiles and battle logs into the V2 analytics tables, and emit progression signals like level-ups and card milestones
 
 ## Architecture: Prompts vs Code

@@ -367,7 +367,6 @@ def _job_next_runs():
 
 
 def _schedule_specs():
-    site_data_hour = getattr(_app, "SITE_DATA_HOUR", 8)
     site_content_hour = getattr(_app, "SITE_CONTENT_HOUR", 20)
     player_intel_refresh_hours = getattr(_app, "PLAYER_INTEL_REFRESH_HOURS", 6)
     clanops_weekly_review_day = getattr(_app, "CLANOPS_WEEKLY_REVIEW_DAY", "fri")
@@ -387,13 +386,8 @@ def _schedule_specs():
             ),
         },
         {
-            "id": "site_data_refresh",
-            "label": "site data refresh",
-            "schedule": f"Daily at {site_data_hour:02d}:00 CT.",
-        },
-        {
             "id": "site_content_cycle",
-            "label": "site content cycle",
+            "label": "site publish",
             "schedule": f"Daily at {site_content_hour:02d}:00 CT.",
         },
         {
