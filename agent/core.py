@@ -40,13 +40,19 @@ def _chat_model_name():
 
 
 def _content_model_name():
-    return os.getenv("ELIXIR_CONTENT_MODEL", "gpt-4o")
+    return os.getenv("ELIXIR_CONTENT_MODEL", "gpt-5.2")
+
+
+def _promotion_model_name():
+    return os.getenv("ELIXIR_PROMOTION_MODEL", "gpt-5.2")
 
 
 def _model_for_workflow(workflow, model=None):
     if model:
         return model
     workflow = workflow or ""
+    if workflow == "site_promote_content":
+        return _promotion_model_name()
     if workflow.startswith("site_") or workflow == "roster_bios":
         return _content_model_name()
     return _chat_model_name()
@@ -73,9 +79,12 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
         "model": selected_model,
         "messages": messages,
         "temperature": temperature,
-        "max_tokens": max_tokens,
         "timeout": timeout,
     }
+    if selected_model.startswith("gpt-5"):
+        kwargs["max_completion_tokens"] = max_tokens
+    else:
+        kwargs["max_tokens"] = max_tokens
     if tools:
         kwargs["tools"] = tools
     if tool_choice:
@@ -102,6 +111,8 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
             duration_ms=round((time.perf_counter() - started) * 1000, 2),
         )
         raise
+
+
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

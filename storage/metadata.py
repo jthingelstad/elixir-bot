@@ -118,12 +118,56 @@ def set_member_note(tag, name, note, conn=None):
             conn.close()
 
 
+def set_member_generated_profile(tag, name, bio, highlight="general", generated_at=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        member_id = _ensure_member(conn, tag, name=name)
+        _upsert_member_metadata(
+            conn,
+            member_id,
+            generated_bio=(bio or "").strip(),
+            generated_highlight=(highlight or "general").strip() or "general",
+            generated_profile_updated_at=generated_at or _utcnow(),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def upsert_member_generated_profiles(profiles_by_tag, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        now = _utcnow()
+        for raw_tag, payload in (profiles_by_tag or {}).items():
+            if not payload:
+                continue
+            tag = _canon_tag(raw_tag)
+            name = payload.get("name") or payload.get("member_name") or tag
+            member_id = _ensure_member(conn, tag, name=name)
+            _upsert_member_metadata(
+                conn,
+                member_id,
+                generated_bio=(payload.get("bio") or "").strip(),
+                generated_highlight=(payload.get("highlight") or "general").strip() or "general",
+                generated_profile_updated_at=payload.get("generated_at") or now,
+            )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
 def get_member_metadata(tag, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
         row = conn.execute(
-            "SELECT m.member_id, md.birth_month, md.birth_day, md.profile_url, md.poap_address, md.note FROM members m LEFT JOIN member_metadata md ON md.member_id = m.member_id WHERE m.player_tag = ?",
+            "SELECT m.member_id, md.birth_month, md.birth_day, md.profile_url, md.poap_address, md.note, "
+            "md.generated_bio, md.generated_highlight, md.generated_profile_updated_at "
+            "FROM members m LEFT JOIN member_metadata md ON md.member_id = m.member_id WHERE m.player_tag = ?",
             (_canon_tag(tag),),
         ).fetchone()
         if not row:
@@ -137,6 +181,9 @@ def get_member_metadata(tag, conn=None):
             "profile_url": row["profile_url"] or "",
             "poap_address": row["poap_address"] or "",
             "note": row["note"] or "",
+            "bio": row["generated_bio"] or "",
+            "highlight": row["generated_highlight"] or "",
+            "generated_profile_updated_at": row["generated_profile_updated_at"],
         }
     finally:
         if close:
@@ -148,7 +195,9 @@ def get_member_metadata_map(conn=None):
     conn = conn or get_connection()
     try:
         rows = conn.execute(
-            "SELECT m.member_id, m.player_tag, md.birth_month, md.birth_day, md.profile_url, md.poap_address, md.note FROM members m LEFT JOIN member_metadata md ON md.member_id = m.member_id"
+            "SELECT m.member_id, m.player_tag, md.birth_month, md.birth_day, md.profile_url, md.poap_address, md.note, "
+            "md.generated_bio, md.generated_highlight, md.generated_profile_updated_at "
+            "FROM members m LEFT JOIN member_metadata md ON md.member_id = m.member_id"
         ).fetchall()
         result = {}
         for row in rows:
@@ -159,6 +208,9 @@ def get_member_metadata_map(conn=None):
                 "profile_url": row["profile_url"] or "",
                 "poap_address": row["poap_address"] or "",
                 "note": row["note"] or "",
+                "bio": row["generated_bio"] or "",
+                "highlight": row["generated_highlight"] or "",
+                "generated_profile_updated_at": row["generated_profile_updated_at"],
             }
         return result
     finally:

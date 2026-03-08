@@ -28,6 +28,82 @@ def _chat_with_tools(*args, **kwargs):
     return _app._chat_with_tools(*args, **kwargs)
 
 
+def _roster_bio_context(clan_data, roster_data=None):
+    members = roster_data.get("members", []) if roster_data else clan_data.get("memberList", clan_data.get("members", []))
+    if not members:
+        return ""
+
+    lines = ["=== MEMBER PROFILE SNAPSHOT ==="]
+    for member in members:
+        tag = member.get("tag", "")
+        canon_tag = tag if str(tag).startswith("#") else f"#{tag}"
+        try:
+            overview = db.get_member_overview(canon_tag)
+        except Exception:
+            overview = None
+        if not overview:
+            continue
+
+        line = [
+            f"- {overview.get('member_name') or member.get('name') or canon_tag}",
+            f"tag: {overview.get('player_tag') or canon_tag}",
+            f"role: {overview.get('role') or member.get('role') or 'member'}",
+            f"trophies: {overview.get('trophies') or 0:,}",
+        ]
+        if overview.get("best_trophies"):
+            line.append(f"best_trophies: {overview.get('best_trophies'):,}")
+        if overview.get("joined_date"):
+            line.append(f"joined_date: {overview.get('joined_date')}")
+        if overview.get("donations_week") is not None:
+            line.append(f"weekly_donations: {overview.get('donations_week')}")
+        if overview.get("career_wins") is not None:
+            line.append(
+                f"career_record: {overview.get('career_wins') or 0} wins / {overview.get('career_losses') or 0} losses"
+            )
+        if overview.get("three_crown_wins") is not None:
+            line.append(f"three_crown_wins: {overview.get('three_crown_wins') or 0}")
+        if overview.get("war_day_wins") is not None:
+            line.append(f"war_day_wins: {overview.get('war_day_wins') or 0}")
+        if overview.get("current_favourite_card_name"):
+            line.append(f"favorite_card: {overview.get('current_favourite_card_name')}")
+
+        recent_form = overview.get("recent_form") or {}
+        if recent_form:
+            line.append(f"recent_form: {recent_form.get('summary')}")
+
+        signature_cards = ((overview.get("signature_cards") or {}).get("cards") or [])
+        if signature_cards:
+            top_cards = ", ".join(card.get("name", "") for card in signature_cards[:3] if card.get("name"))
+            if top_cards:
+                line.append(f"signature_cards: {top_cards}")
+
+        current_deck = ((overview.get("current_deck") or {}).get("cards") or [])
+        if current_deck:
+            deck_cards = ", ".join(card.get("name", "") for card in current_deck[:4] if card.get("name"))
+            if deck_cards:
+                line.append(f"current_deck_sample: {deck_cards}")
+
+        war_status = overview.get("war_status") or {}
+        war_season = war_status.get("season") or {}
+        if war_season:
+            line.append(
+                "current_season_war: "
+                f"{war_season.get('races_played') or 0} races, "
+                f"{war_season.get('total_fame') or 0:,} fame, "
+                f"{war_season.get('total_decks_used') or 0} decks"
+            )
+
+        if overview.get("bio"):
+            line.append(f"existing_bio: {overview.get('bio')}")
+        if overview.get("profile_highlight"):
+            line.append(f"existing_highlight: {overview.get('profile_highlight')}")
+        if member.get("note"):
+            line.append(f"manual_note: {member.get('note')}")
+        lines.append(" | ".join(line))
+
+    return "\n".join(lines)
+
+
 def _promotion_context(clan_data, war_data, roster_data=None):
     members = clan_data.get("memberList", clan_data.get("members", [])) or []
     lines = []
@@ -92,51 +168,30 @@ def _promotion_context(clan_data, war_data, roster_data=None):
             roster_data.get("members", []),
             key=lambda member: (
                 {"Leader": 3, "Co-Leader": 3, "Elder": 2, "Member": 1}.get(member.get("role"), 0),
+                len(member.get("favorite_cards") or []),
                 member.get("trophies") or 0,
                 member.get("donations") or 0,
             ),
             reverse=True,
         )
         if spotlight_candidates:
-            lines.append("\n=== MEMBER SPOTLIGHTS ===")
+            lines.append("\n=== MEMBER SPOTLIGHTS WITH SIGNATURE CARDS ===")
             for member in spotlight_candidates[:5]:
                 favorite_cards = ", ".join(card.get("name", "") for card in (member.get("favorite_cards") or [])[:2] if card.get("name"))
                 bio = (member.get("bio") or "").strip()
                 bio_preview = bio.split(". ")[0].strip() if bio else ""
-                line = (
-                    f"- {member.get('name')} | role: {member.get('role')} | "
+                line = f"- {member.get('name')}"
+                if favorite_cards:
+                    line += f" | signature cards: {favorite_cards}"
+                line += (
+                    f" | role: {member.get('role')} | "
                     f"{member.get('trophies', 0):,} trophies | donations: {member.get('donations', 0)}"
                 )
                 if member.get("highlight"):
                     line += f" | highlight: {member.get('highlight')}"
-                if favorite_cards:
-                    line += f" | cards: {favorite_cards}"
                 if bio_preview:
                     line += f" | bio: {bio_preview}"
                 lines.append(line)
-
-        card_stats = roster_data.get("card_stats") or []
-        if card_stats:
-            lines.append("\n=== CLAN CARD IDENTITY ===")
-            for card in card_stats[:8]:
-                member_examples = ", ".join((card.get("members") or [])[:3])
-                line = f"- {card.get('name')} | in {card.get('member_count', 0)} current decks"
-                if member_examples:
-                    line += f" | played by: {member_examples}"
-                lines.append(line)
-
-    try:
-        current_war = db.get_current_war_status()
-    except Exception:
-        current_war = None
-    if current_war:
-        lines.append("\n=== CURRENT WAR ===")
-        lines.append(
-            f"- {current_war.get('season_week_label') or 'season/week unknown'} | "
-            f"{current_war.get('phase_display') or current_war.get('phase') or 'phase unknown'} | "
-            f"race rank: #{current_war.get('race_rank') or '?'} | "
-            f"fame: {(current_war.get('fame') or 0):,}"
-        )
 
     try:
         season_summary = db.get_war_season_summary(top_n=5)
@@ -334,10 +389,12 @@ def generate_roster_bios(clan_data, war_data, roster_data=None):
         roster_data=roster_data,
         max_members=MAX_CONTEXT_MEMBERS_FULL,
     )
+    member_profile_context = _roster_bio_context(clan_data, roster_data=roster_data)
     members = clan_data.get("memberList", clan_data.get("members", []))
     member_tags = [m.get("tag", "") for m in members]
     user_msg = (
         f"{context}\n\n"
+        f"{member_profile_context}\n\n"
         f"Generate an intro and bio for each member.\n"
         f"Member tags to cover: {', '.join(member_tags)}"
     )

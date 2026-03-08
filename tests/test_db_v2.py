@@ -200,6 +200,53 @@ def test_member_metadata_csv_import_updates_and_dry_run(tmp_path):
         conn.close()
 
 
+def test_member_generated_profile_and_player_snapshot_flow_into_member_profile():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "coLeader", "trophies": 11313, "bestTrophies": 11400}],
+            conn=conn,
+        )
+        db.set_member_generated_profile(
+            "#ABC123",
+            "King Levy",
+            "King Levy is one of the war leaders and keeps the pressure high with sharp Goblin Barrel lines.",
+            "war",
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "wins": 1234,
+                "losses": 777,
+                "battleCount": 2105,
+                "totalDonations": 9876,
+                "warDayWins": 88,
+                "threeCrownWins": 222,
+                "currentFavouriteCard": {"name": "Goblin Barrel"},
+                "currentDeck": [],
+                "cards": [],
+            },
+            conn=conn,
+        )
+
+        profile = db.get_member_profile("#ABC123", conn=conn)
+
+        assert profile["bio"].startswith("King Levy is one of the war leaders")
+        assert profile["profile_highlight"] == "war"
+        assert profile["career_wins"] == 1234
+        assert profile["career_losses"] == 777
+        assert profile["career_battle_count"] == 2105
+        assert profile["career_total_donations"] == 9876
+        assert profile["war_day_wins"] == 88
+        assert profile["three_crown_wins"] == 222
+        assert profile["current_favourite_card_name"] == "Goblin Barrel"
+        assert profile["generated_profile_updated_at"] is not None
+    finally:
+        conn.close()
+
+
 def test_join_anniversary_uses_effective_join_date_override():
     conn = db.get_connection(":memory:")
     try:
@@ -1466,7 +1513,8 @@ def test_promotion_candidates_use_v2_review_logic():
 
         review = db.get_promotion_candidates(conn=conn)
         assert review["recommended"][0]["tag"] == "#DEF456"
-        assert review["borderline"] == []
+        assert review["borderline"][0]["tag"] == "#GHI789"
+        assert review["borderline"][0]["missing"] == ["donations", "tenure"]
         assert review["composition"]["elder_capacity_remaining"] >= 0
     finally:
         conn.close()

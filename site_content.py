@@ -323,8 +323,8 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
     include_cards: if True, fetch battle logs and player profiles to add
         favorite_cards and current_deck per member (~15s extra for API calls).
 
-    Returns dict for elixir-roster.json (without bios — those get added
-    during the evening content cycle).
+    Returns dict for elixir-roster.json, including any stored generated
+    member bios/highlights from shared DB state.
     """
     close = conn is None
     conn = conn or db.get_connection()
@@ -358,6 +358,8 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                 "profile_url": extra.get("profile_url", ""),
                 "poap_address": extra.get("poap_address", ""),
                 "date_joined": extra.get("joined_date"),
+                "bio": extra.get("bio", ""),
+                "highlight": extra.get("highlight", ""),
             }
             members.append(member)
 
@@ -395,7 +397,8 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
 
                 time.sleep(0.3)
 
-        # Preserve existing bio/highlight fields from the current file
+        # Backfill from existing file when DB-shared generated profiles are not
+        # present yet (mainly for older local snapshots).
         existing = load_current("roster")
         if existing:
             existing_by_tag = {m["tag"]: m for m in existing.get("members", [])}

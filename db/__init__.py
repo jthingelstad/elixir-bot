@@ -436,7 +436,10 @@ def _migration_0(conn: sqlite3.Connection) -> None:
             birth_day INTEGER,
             profile_url TEXT DEFAULT '',
             poap_address TEXT DEFAULT '',
-            note TEXT DEFAULT ''
+            note TEXT DEFAULT '',
+            generated_bio TEXT DEFAULT '',
+            generated_highlight TEXT DEFAULT '',
+            generated_profile_updated_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS member_aliases (
@@ -834,7 +837,17 @@ def _migration_1(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1]
+def _migration_2(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "member_metadata")
+    if "generated_bio" not in columns:
+        conn.execute("ALTER TABLE member_metadata ADD COLUMN generated_bio TEXT DEFAULT ''")
+    if "generated_highlight" not in columns:
+        conn.execute("ALTER TABLE member_metadata ADD COLUMN generated_highlight TEXT DEFAULT ''")
+    if "generated_profile_updated_at" not in columns:
+        conn.execute("ALTER TABLE member_metadata ADD COLUMN generated_profile_updated_at TEXT")
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
