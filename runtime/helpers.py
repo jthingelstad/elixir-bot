@@ -696,6 +696,7 @@ def _build_help_report(role: str) -> str:
                 "**Elixir Help — ClanOps**",
                 "- Ask without mentioning me in this channel when you want operational input.",
                 "- Direct commands: `status`, `schedule`, `clan status`, `clan status short`, `help`.",
+                "- Admin runner: `do help`, `do heartbeat`, `do site-content`, `do promotion --preview`, `do site-publish`.",
                 "- I can help with roster reviews, war participation, promotions, demotions, kicks, recent form, decks, donations, and member lookups.",
                 "- I can resolve members by in-game name, tag, alias, or Discord handle.",
                 "- If I have something useful to add to an ops discussion here, I may inject proactively.",
