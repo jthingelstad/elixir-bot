@@ -32,7 +32,7 @@ def _build_weekly_clanops_review(*args, **kwargs):
     return _app._build_weekly_clanops_review(*args, **kwargs)
 
 async def _heartbeat_tick():
-    """Hourly heartbeat — fetch data, detect signals, post if interesting."""
+    """Scheduled heartbeat — fetch data, detect signals, post if interesting."""
     runtime_status.mark_job_start("heartbeat")
     # Check active hours
     now_chicago = datetime.now(CHICAGO)

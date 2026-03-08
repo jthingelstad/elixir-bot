@@ -41,6 +41,8 @@ CHANNEL_CONVERSATION_LIMIT = 20
 # Active hours for the heartbeat (Chicago time). Outside this window, heartbeat is skipped.
 HEARTBEAT_START_HOUR = int(os.getenv("HEARTBEAT_START_HOUR", "7"))
 HEARTBEAT_END_HOUR = int(os.getenv("HEARTBEAT_END_HOUR", "22"))
+HEARTBEAT_INTERVAL_MINUTES = int(os.getenv("HEARTBEAT_INTERVAL_MINUTES", "47"))
+HEARTBEAT_JITTER_SECONDS = int(os.getenv("HEARTBEAT_JITTER_SECONDS", "300"))
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -144,13 +146,14 @@ async def on_ready():
     log.info("Elixir online as %s", bot.user)
     prompts.ensure_valid_discord_channel_config()
     if not scheduler.running:
-        # Single hourly heartbeat replaces both the 4x/day observations and hourly member check
+        # Single heartbeat job replaces both the 4x/day observations and hourly member check
         scheduler.add_job(
             lambda: bot.loop.call_soon_threadsafe(
                 lambda: bot.loop.create_task(_heartbeat_tick())
             ),
             "interval",
-            hours=1,
+            minutes=HEARTBEAT_INTERVAL_MINUTES,
+            jitter=HEARTBEAT_JITTER_SECONDS,
             id="heartbeat",
         )
         # Morning data refresh for poapkings.com
@@ -194,9 +197,9 @@ async def on_ready():
             id="clanops_weekly_review",
         )
         scheduler.start()
-        log.info("Scheduler started — hourly heartbeat (active %dam-%dpm Chicago), "
+        log.info("Scheduler started — heartbeat every %d minutes with up to %ds jitter (active %dam-%dpm Chicago), "
                  "site data refresh at %dam, content cycle at %dpm, player intel refresh every %dh, clanops review %s at %02d:00",
-                 HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
+                 HEARTBEAT_INTERVAL_MINUTES, HEARTBEAT_JITTER_SECONDS, HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
                  SITE_DATA_HOUR, SITE_CONTENT_HOUR, PLAYER_INTEL_REFRESH_HOURS,
                  CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR)
     else:
