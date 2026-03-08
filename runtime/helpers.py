@@ -347,6 +347,35 @@ def _join_member_bits(members, formatter, limit=3):
     return ", ".join(formatter(member) for member in members[:limit])
 
 
+def _canon_tag(tag):
+    return (str(tag or "").strip().upper().lstrip("#"))
+
+
+def _format_relative_join_age(joined_date):
+    if not joined_date:
+        return "join timing unknown"
+    try:
+        joined_day = datetime.strptime(joined_date[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return "join timing unknown"
+    today = datetime.now(CHICAGO).date()
+    age_days = max(0, (today - joined_day).days)
+    if age_days == 0:
+        return "today"
+    if age_days == 1:
+        return "1 day ago"
+    return f"{age_days} days ago"
+
+
+def _recent_join_display_rows(clan):
+    clan = clan or {}
+    live_recent_joins = clan.get("_elixir_recent_joins") or []
+    stored_recent_joins = db.list_recent_joins(days=30)
+    if live_recent_joins:
+        return live_recent_joins, max(len(live_recent_joins), len(stored_recent_joins))
+    return stored_recent_joins, len(stored_recent_joins)
+
+
 def _leader_role_mention():
     return f"<@&{LEADER_ROLE_ID}>" if LEADER_ROLE_ID else ""
 
@@ -543,9 +572,9 @@ def _build_clan_status_report(clan=None, war=None):
     members = db.list_members()
     war_status = db.get_current_war_status()
     season_summary = db.get_war_season_summary(top_n=3)
-    at_risk = db.get_members_at_risk(require_war_participation=True)
+    at_risk = db.get_members_at_risk(require_war_participation=False)
     slumping = db.get_members_on_losing_streak(min_streak=3)
-    recent_joins = db.list_recent_joins(days=30)
+    recent_joins, recent_join_count = _recent_join_display_rows(clan)
     deck_status = db.get_war_deck_status_today()
 
     clan_name = clan.get("name") or (war_status.get("clan_name") if war_status else None)
@@ -614,7 +643,7 @@ def _build_clan_status_report(clan=None, war=None):
         lines.append(
             f"- Watch list: {len(season_summary.get('nonparticipants') or [])} with no war decks this season | "
             f"{len((at_risk or {}).get('members') or [])} at risk | {len(slumping or [])} on cold streaks | "
-            f"{len(recent_joins or [])} joined in last 30d"
+            f"{recent_join_count} joined in last 30d"
         )
 
     if deck_status and deck_status.get("total_participants"):
@@ -627,7 +656,7 @@ def _build_clan_status_report(clan=None, war=None):
     if recent_joins:
         recent_joins_text = _join_member_bits(
             recent_joins,
-            lambda member: f"{_member_label(member)} ({member.get('joined_date') or 'join date unknown'})",
+            lambda member: f"{_member_label(member)} ({_format_relative_join_age(member.get('joined_date'))})",
             limit=5,
         )
         lines.append(
@@ -659,7 +688,7 @@ def _build_clan_status_short_report(clan=None, war=None):
     roster = db.get_clan_roster_summary()
     war_status = db.get_current_war_status()
     season_summary = db.get_war_season_summary(top_n=2)
-    at_risk = db.get_members_at_risk(require_war_participation=True)
+    at_risk = db.get_members_at_risk(require_war_participation=False)
     slumping = db.get_members_on_losing_streak(min_streak=3)
 
     clan_name = clan.get("name") or (war_status.get("clan_name") if war_status else None) or "Clan"
@@ -838,8 +867,31 @@ def _clanops_cooldown_elapsed(channel_id):
 
 async def _load_live_clan_context():
     clan = await asyncio.to_thread(cr_api.get_clan)
-    if clan.get("memberList"):
-        await asyncio.to_thread(db.snapshot_members, clan.get("memberList", []))
+    member_list = clan.get("memberList") or []
+    if member_list:
+        previous_roster = await asyncio.to_thread(db.get_active_roster_map)
+        previous_tags = set(previous_roster) if previous_roster else set()
+        if previous_tags:
+            today = datetime.now(CHICAGO).date().isoformat()
+            live_recent_joins = []
+            for member in member_list:
+                tag = _canon_tag(member.get("tag"))
+                if not tag or tag in previous_tags:
+                    continue
+                live_recent_joins.append({
+                    "player_tag": tag,
+                    "tag": tag,
+                    "current_name": member.get("name") or tag,
+                    "name": member.get("name") or tag,
+                    "member_ref": member.get("name") or tag,
+                    "joined_date": today,
+                })
+            if live_recent_joins:
+                clan["_elixir_recent_joins"] = sorted(
+                    live_recent_joins,
+                    key=lambda item: (item.get("current_name") or "").lower(),
+                )
+        await asyncio.to_thread(db.snapshot_members, member_list)
     try:
         war = await asyncio.to_thread(cr_api.get_current_war)
     except Exception:

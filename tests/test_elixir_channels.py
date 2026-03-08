@@ -1,6 +1,7 @@
 """Tests for channel-role routing in elixir.py."""
 
 import asyncio
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -745,8 +746,105 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
     assert "War now: season 77 | week 2 | state riverRace | rank 1" in report
     assert "Watch list: 1 with no war decks this season | 1 at risk | 1 on cold streaks | 1 joined in last 30d" in report
     assert "War today: 2 used all 4 decks | 3 used some | 2 unused" in report
-    assert "Recent joins: New Guy (join date unknown)" in report
+    assert "Recent joins: New Guy (join timing unknown)" in report
     assert "Cold streaks: Finn lost 3 straight" in report
+
+
+def test_build_clan_status_report_uses_non_war_risk_watchlist():
+    with (
+        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_exp_level": 60.5, "avg_trophies": 7523.4}),
+        patch("elixir.db.list_members", return_value=[]),
+        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
+        patch("elixir.db.get_war_season_summary", return_value=None),
+        patch("elixir.db.get_members_at_risk", return_value={"members": []}) as mock_risk,
+        patch("elixir.db.get_members_on_losing_streak", return_value=[]),
+        patch("elixir.db.list_recent_joins", return_value=[]),
+        patch("elixir.db.get_war_deck_status_today", return_value={}),
+    ):
+        elixir._build_clan_status_report({"name": "POAP KINGS", "members": 21}, {})
+
+    mock_risk.assert_called_once_with(require_war_participation=False)
+
+
+def test_build_clan_status_report_formats_recent_joins_as_relative_days():
+    joined_date = (datetime.now(elixir.CHICAGO).date() - timedelta(days=3)).isoformat()
+    with (
+        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_exp_level": 60.5, "avg_trophies": 7523.4}),
+        patch("elixir.db.list_members", return_value=[]),
+        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
+        patch("elixir.db.get_war_season_summary", return_value=None),
+        patch("elixir.db.get_members_at_risk", return_value={"members": []}),
+        patch("elixir.db.get_members_on_losing_streak", return_value=[]),
+        patch("elixir.db.list_recent_joins", return_value=[{"member_ref": "Ditika", "joined_date": joined_date}]),
+        patch("elixir.db.get_war_deck_status_today", return_value={}),
+    ):
+        report = elixir._build_clan_status_report({"name": "POAP KINGS", "members": 21}, {})
+
+    assert "Recent joins: Ditika (3 days ago)" in report
+
+
+def test_build_clan_status_report_prefers_live_recent_join_delta():
+    today = datetime.now(elixir.CHICAGO).date().isoformat()
+    with (
+        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_exp_level": 60.5, "avg_trophies": 7523.4}),
+        patch("elixir.db.list_members", return_value=[]),
+        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
+        patch("elixir.db.get_war_season_summary", return_value={
+            "races": 1,
+            "total_clan_fame": 1000,
+            "fame_per_active_member": 50.0,
+            "top_contributors": [],
+            "nonparticipants": [],
+        }),
+        patch("elixir.db.get_members_at_risk", return_value={"members": []}),
+        patch("elixir.db.get_members_on_losing_streak", return_value=[]),
+        patch("elixir.db.list_recent_joins", return_value=[{"member_ref": "Vijay", "joined_date": "2026-03-07"}]),
+        patch("elixir.db.get_war_deck_status_today", return_value={}),
+    ):
+        report = elixir._build_clan_status_report(
+            {
+                "name": "POAP KINGS",
+                "members": 21,
+                "_elixir_recent_joins": [{"member_ref": "Ditika", "joined_date": today}],
+            },
+            {},
+        )
+
+    assert "Watch list: 0 with no war decks this season | 0 at risk | 0 on cold streaks | 1 joined in last 30d" in report
+    assert "Recent joins: Ditika (today)" in report
+    assert "Vijay" not in report.split("Recent joins: ", 1)[1]
+
+
+def test_load_live_clan_context_attaches_same_cycle_recent_joins():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.cr_api.get_clan", return_value={
+            "name": "POAP KINGS",
+            "memberList": [
+                {"tag": "#AAA", "name": "Existing"},
+                {"tag": "#BBB", "name": "Ditika"},
+            ],
+        }),
+        patch("elixir.db.get_active_roster_map", return_value={"AAA": "Existing"}),
+        patch("elixir.db.snapshot_members"),
+        patch("elixir.cr_api.get_current_war", return_value={}),
+    ):
+        clan, war = asyncio.run(elixir._load_live_clan_context())
+
+    assert war == {}
+    assert clan["_elixir_recent_joins"] == [
+        {
+            "player_tag": "BBB",
+            "tag": "BBB",
+            "current_name": "Ditika",
+            "name": "Ditika",
+            "member_ref": "Ditika",
+            "joined_date": datetime.now(elixir.CHICAGO).date().isoformat(),
+        }
+    ]
 
 
 def test_build_roster_join_dates_report_uses_human_fallback_for_missing_dates():
@@ -847,6 +945,19 @@ def test_build_clan_status_short_report_is_compact():
     assert "War: season 77 | week 2 | rank 1 | fame 12,345" in report
     assert "Season: fame/member 1,117.0 | top King Levy (<@1474760692992180429>) 3,200, Finn 3,100" in report
     assert "Watch: 1 at risk | 1 on cold streaks" in report
+
+
+def test_build_clan_status_short_report_uses_non_war_risk_watchlist():
+    with (
+        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_exp_level": 60.5, "avg_trophies": 7523.4}),
+        patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
+        patch("elixir.db.get_war_season_summary", return_value=None),
+        patch("elixir.db.get_members_at_risk", return_value={"members": []}) as mock_risk,
+        patch("elixir.db.get_members_on_losing_streak", return_value=[]),
+    ):
+        elixir._build_clan_status_short_report({"name": "POAP KINGS", "members": 21}, {})
+
+    mock_risk.assert_called_once_with(require_war_participation=False)
 
 
 def test_build_weekly_clanops_review_tags_leaders_and_summarizes_actions():
