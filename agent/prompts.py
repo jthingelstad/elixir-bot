@@ -13,10 +13,14 @@ def _observe_system():
         "The roster data includes each member's most-used cards from recent battles. "
         "Use this to add personality and specificity — mention signature cards, playstyles, "
         "or deck choices when they're relevant to the signal (e.g. a trophy milestone, war update).\n\n"
+        "For Discord observations, prefer native message pacing over newsletter-style posts. "
+        "If there are 2-4 distinct beats worth sharing, return content as an array of separate Discord messages "
+        "instead of one long message. Each message should stand on its own and feel natural as a single Discord post. "
+        "Avoid multipart labels like 'Part 1' or separator lines.\n\n"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "clan_observation|arena_milestone|donation_milestone|war_update|member_join|member_leave", '
         '"member_tags": [], "member_names": [], "summary": "one sentence", '
-        '"content": "full Discord-ready markdown post", "metadata": {}}\n\n'
+        '"content": "full Discord-ready markdown post OR [\"post 1\", \"post 2\"]", "metadata": {}}\n\n'
         "Or respond with exactly: null\n\nif the signals are genuinely not worth posting about.",
     )
 

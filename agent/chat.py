@@ -76,6 +76,16 @@ def _validate_response(workflow, parsed_obj, response_schema=None):
         if key not in parsed_obj:
             return False, f"missing required field: {key}"
 
+    if "content" in parsed_obj:
+        content = parsed_obj.get("content")
+        if isinstance(content, list):
+            if not content:
+                return False, "content list must not be empty"
+            if not all(isinstance(item, str) and item.strip() for item in content):
+                return False, "content list items must be non-empty strings"
+        elif content is not None and not isinstance(content, str):
+            return False, "content must be a string or list of strings"
+
     if workflow == "observation":
         allowed = {
             "clan_observation", "arena_milestone", "donation_milestone",

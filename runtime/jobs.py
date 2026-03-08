@@ -129,17 +129,23 @@ async def _heartbeat_tick():
                 runtime_status.mark_job_success("heartbeat", f"{len(other_signals)} signal(s), no post")
                 return
             await _post_to_elixir(channel, result)
-            content = result.get("content", result.get("summary", ""))
-            if content:
-                await asyncio.to_thread(
-                    db.save_message,
-                    _channel_scope(channel), "assistant", content,
-                    channel_id=channel.id,
-                    channel_name=getattr(channel, "name", None),
-                    channel_kind=str(channel.type),
-                    workflow="observation",
-                    event_type=result.get("event_type"),
-                )
+            posts = _app._entry_posts(result)
+            if posts:
+                summary = result.get("summary")
+                event_type = result.get("event_type")
+                for index, post in enumerate(posts):
+                    post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
+                    post_event_type = event_type if index == 0 else f"{event_type}_part" if event_type else None
+                    await asyncio.to_thread(
+                        db.save_message,
+                        _channel_scope(channel), "assistant", post,
+                        summary=post_summary,
+                        channel_id=channel.id,
+                        channel_name=getattr(channel, "name", None),
+                        channel_kind=str(channel.type),
+                        workflow="observation",
+                        event_type=post_event_type,
+                    )
             log.info("Posted observation: %s", result.get("summary"))
 
         runtime_status.mark_job_success("heartbeat", f"{len(signals)} signal(s) processed")
@@ -341,17 +347,23 @@ async def _player_intel_refresh():
             )
             if result:
                 await _post_to_elixir(channel, result)
-                content = result.get("content", result.get("summary", ""))
-                if content:
-                    await asyncio.to_thread(
-                        db.save_message,
-                        _channel_scope(channel), "assistant", content,
-                        channel_id=channel.id,
-                        channel_name=getattr(channel, "name", None),
-                        channel_kind=str(channel.type),
-                        workflow="observation",
-                        event_type=result.get("event_type"),
-                    )
+                posts = _app._entry_posts(result)
+                if posts:
+                    summary = result.get("summary")
+                    event_type = result.get("event_type")
+                    for index, post in enumerate(posts):
+                        post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
+                        post_event_type = event_type if index == 0 else f"{event_type}_part" if event_type else None
+                        await asyncio.to_thread(
+                            db.save_message,
+                            _channel_scope(channel), "assistant", post,
+                            summary=post_summary,
+                            channel_id=channel.id,
+                            channel_name=getattr(channel, "name", None),
+                            channel_kind=str(channel.type),
+                            workflow="observation",
+                            event_type=post_event_type,
+                        )
 
     log.info("Player intel refresh complete: refreshed %d members", refreshed)
     runtime_status.mark_job_success("player_intel_refresh", f"refreshed {refreshed} member(s)")

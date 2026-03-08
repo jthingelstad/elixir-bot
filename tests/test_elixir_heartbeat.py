@@ -42,6 +42,47 @@ def test_heartbeat_tick_uses_bundle_without_refetch():
     mock_get_war.assert_not_called()
 
 
+def test_heartbeat_tick_saves_multipart_observation_as_separate_messages():
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[{"type": "war_week_rollover", "season_id": 130, "week": 1}],
+        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
+        war={"state": "warDay"},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 123
+    channel.name = "elixir"
+    channel.type = "text"
+
+    with (
+        patch.object(elixir, "HEARTBEAT_START_HOUR", 0),
+        patch.object(elixir, "HEARTBEAT_END_HOUR", 24),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.heartbeat.tick", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={"channel": {"state": None, "episodes": []}}),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.elixir_agent.observe_and_post", return_value={
+            "event_type": "war_update",
+            "summary": "War update",
+            "content": ["First post", "Second post"],
+        }),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+    ):
+        asyncio.run(elixir._heartbeat_tick())
+
+    mock_post.assert_awaited_once()
+    assert mock_save.call_count == 2
+    assert mock_save.call_args_list[0].args[2] == "First post"
+    assert mock_save.call_args_list[1].args[2] == "Second post"
+    assert mock_save.call_args_list[0].kwargs["event_type"] == "war_update"
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "war_update_part"
+
+
 def test_player_intel_refresh_uses_refresh_targets_without_llm():
     """_player_intel_refresh should refresh stale members without touching the LLM."""
     clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
