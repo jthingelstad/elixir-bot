@@ -1427,6 +1427,7 @@ def test_risk_and_trending_war_queries_use_v2_rollups():
         )
         assert risk["members"][0]["tag"] == "#DEF456"
         assert len(risk["members"][0]["reasons"]) >= 2
+        assert all(member["tag"] != "#ABC123" for member in risk["members"])
 
         trending = db.get_trending_war_contributors(
             season_id=129,
