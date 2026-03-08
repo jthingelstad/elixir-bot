@@ -953,6 +953,10 @@ def test_current_war_status_infers_new_season_after_section_index_rollover():
         assert war["phase"] == "battle"
         assert war["battle_phase_active"] is True
         assert war["practice_phase_active"] is False
+        assert war["battle_day_number"] == 3
+        assert war["battle_day_total"] == 4
+        assert war["phase_display"] == "Battle Day 3"
+        assert war["season_week_label"] == "Season 130 Week 1"
         assert war["final_battle_day_active"] is False
         assert war["race_rank"] == 1
         assert db.get_current_season_id(conn=conn) == 130

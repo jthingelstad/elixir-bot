@@ -73,6 +73,14 @@ def _resolve_phase(period_type: Optional[str], period_index: Optional[int]) -> O
     return "practice"
 
 
+def _phase_day_number(phase: Optional[str], period_index: Optional[int]) -> Optional[int]:
+    if period_index is None or phase not in {"battle", "practice"}:
+        return None
+    if phase == "battle":
+        return period_index - FIRST_BATTLE_PERIOD_INDEX + 1
+    return period_index + 1
+
+
 def _resolve_live_race_rank(payload: dict, clan_tag: Optional[str]) -> Optional[int]:
     clans = payload.get("clans") or []
     canon_clan_tag = _canon_tag(clan_tag) if clan_tag else None
@@ -127,6 +135,22 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
     result["battle_phase_active"] = phase == "battle"
     result["practice_phase_active"] = phase == "practice"
     result["final_battle_day_active"] = phase == "battle" and period_index == FINAL_BATTLE_PERIOD_INDEX
+    result["battle_day_number"] = _phase_day_number(phase, period_index) if phase == "battle" else None
+    result["battle_day_total"] = 4 if phase == "battle" else None
+    result["practice_day_number"] = _phase_day_number(phase, period_index) if phase == "practice" else None
+    result["practice_day_total"] = FIRST_BATTLE_PERIOD_INDEX if phase == "practice" else None
+    result["phase_display"] = (
+        f"Battle Day {result['battle_day_number']}"
+        if result["battle_day_number"] is not None
+        else f"Practice Day {result['practice_day_number']}"
+        if result["practice_day_number"] is not None
+        else phase.title() if phase else None
+    )
+    result["season_week_label"] = (
+        f"Season {season_id} Week {result['week']}"
+        if season_id is not None and result.get("week") is not None
+        else None
+    )
     result["race_rank"] = _resolve_live_race_rank(payload, result.get("clan_tag")) or result.get("race_rank")
     result["period_logs_count"] = len(payload.get("periodLogs") or [])
     return result
