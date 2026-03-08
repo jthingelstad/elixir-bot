@@ -318,6 +318,23 @@ def test_build_schedule_report_shows_47_minute_heartbeat():
     assert "Every 47 minutes with up to 300s jitter." in report
 
 
+def test_build_schedule_report_includes_promotion_content_sync():
+    scheduler = SimpleNamespace(
+        running=True,
+        get_jobs=lambda: [],
+    )
+
+    with (
+        patch("elixir.scheduler", scheduler),
+        patch.object(elixir, "PROMOTION_CONTENT_DAY", "fri"),
+        patch.object(elixir, "PROMOTION_CONTENT_HOUR", 9),
+    ):
+        report = elixir._build_schedule_report()
+
+    assert "promotion content sync" in report
+    assert "Every Fri at 09:00 CT." in report
+
+
 def test_build_status_report_omits_job_schedule_section():
     scheduler = SimpleNamespace(
         running=True,

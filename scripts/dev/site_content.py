@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Dev test — exercise the site content pipeline without Discord.
 
+For the full admin control surface, prefer:
+    venv/bin/python scripts/elixir_do.py help
+
 Usage:
     source venv/bin/activate
     python scripts/dev/site_content.py [step]
@@ -155,11 +158,12 @@ def step_promote(clan=None):
     """Generate promote content."""
     if not clan:
         clan = _get_clan()
+    war = _get_war()
 
     roster = site_content.load_current("roster")
 
     log.info("Generating promote content...")
-    promote = elixir_agent.generate_promote_content(clan, roster_data=roster)
+    promote = elixir_agent.generate_promote_content(clan, war_data=war, roster_data=roster)
     if promote:
         for channel in ["message", "social", "email", "discord", "reddit"]:
             body = promote.get(channel, {}).get("body", promote.get(channel, {}).get("title", ""))

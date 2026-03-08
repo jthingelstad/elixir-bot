@@ -43,6 +43,8 @@ HEARTBEAT_START_HOUR = int(os.getenv("HEARTBEAT_START_HOUR", "7"))
 HEARTBEAT_END_HOUR = int(os.getenv("HEARTBEAT_END_HOUR", "22"))
 HEARTBEAT_INTERVAL_MINUTES = int(os.getenv("HEARTBEAT_INTERVAL_MINUTES", "47"))
 HEARTBEAT_JITTER_SECONDS = int(os.getenv("HEARTBEAT_JITTER_SECONDS", "300"))
+PROMOTION_CONTENT_DAY = os.getenv("PROMOTION_CONTENT_DAY", "fri")
+PROMOTION_CONTENT_HOUR = int(os.getenv("PROMOTION_CONTENT_HOUR", "9"))
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -206,12 +208,24 @@ async def on_ready():
             minute=0,
             id="clanops_weekly_review",
         )
+        scheduler.add_job(
+            lambda: bot.loop.call_soon_threadsafe(
+                lambda: bot.loop.create_task(_promotion_content_cycle())
+            ),
+            "cron",
+            day_of_week=PROMOTION_CONTENT_DAY,
+            hour=PROMOTION_CONTENT_HOUR,
+            minute=0,
+            id="promotion_content_cycle",
+        )
         scheduler.start()
         log.info("Scheduler started — heartbeat every %d minutes with up to %ds jitter (active %dam-%dpm Chicago), "
-                 "site data refresh at %dam, content cycle at %dpm, player intel refresh every %dh, clanops review %s at %02d:00",
+                 "site data refresh at %dam, content cycle at %dpm, player intel refresh every %dh, clanops review %s at %02d:00, "
+                 "promotion sync %s at %02d:00",
                  HEARTBEAT_INTERVAL_MINUTES, HEARTBEAT_JITTER_SECONDS, HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
                  SITE_DATA_HOUR, SITE_CONTENT_HOUR, PLAYER_INTEL_REFRESH_HOURS,
-                 CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR)
+                 CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR,
+                 PROMOTION_CONTENT_DAY, PROMOTION_CONTENT_HOUR)
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 

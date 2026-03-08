@@ -169,11 +169,23 @@ def _promote_system():
         '{"message": {"body": "SMS-friendly, short, include poapkings.com link"}, '
         '"social": {"body": "Twitter/Instagram post with stats and link"}, '
         '"email": {"subject": "...", "body": "detailed recruitment pitch"}, '
-        '"discord": {"body": "formatted for Discord servers with emojis"}, '
+        '"discord": {"body": "copy-ready recruiting post for Discord servers"}, '
         '"reddit": {"title": "r/RoyaleRecruit format", "body": "detailed post, NO clan invite link"}}\n\n'
-        "Use real clan stats from the data provided. The roster includes members' favorite cards — "
-        "mention popular cards and deck diversity to show the clan has active, strategic players. "
-        "Keep the tone inviting and authentic.",
+        "Use real clan stats from the data provided. Be specific.\n\n"
+        "Hard requirements:\n"
+        "- `reddit.title` MUST include the exact token `[2000]` for automod.\n"
+        "- `reddit.title` should also include the clan name and clan tag.\n"
+        "- `reddit.body` must be suitable for r/RoyaleRecruit and must NOT include a clan invite link.\n"
+        "- `discord.body` should be copy-ready for an external Discord server and should not rely on embeds or markdown links. Use the raw URL `https://poapkings.com`.\n\n"
+        "Quality bar:\n"
+        "- Do not write generic recruiting fluff.\n"
+        "- Use concrete stats, current clan identity, war positioning, and notable member or card highlights when available.\n"
+        "- Mention what makes POAP KINGS unusual: POAPs, builder culture, Free Pass Royale rewards, war focus, and real clan personality.\n"
+        "- If you mention members, choose 1-3 real standouts and say why they matter.\n"
+        "- If card data is available, use it to show what the clan actually plays.\n"
+        "- Avoid excessive emojis. Zero to two is enough.\n"
+        "- Write copy that sounds like a strong clan member or recruiter, not a generic ad bot.\n"
+        "- Keep the tone confident, grounded, and distinctive.",
     )
 
 

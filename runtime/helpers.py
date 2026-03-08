@@ -372,6 +372,8 @@ def _schedule_specs():
     player_intel_refresh_hours = getattr(_app, "PLAYER_INTEL_REFRESH_HOURS", 6)
     clanops_weekly_review_day = getattr(_app, "CLANOPS_WEEKLY_REVIEW_DAY", "fri")
     clanops_weekly_review_hour = getattr(_app, "CLANOPS_WEEKLY_REVIEW_HOUR", 19)
+    promotion_content_day = getattr(_app, "PROMOTION_CONTENT_DAY", "fri")
+    promotion_content_hour = getattr(_app, "PROMOTION_CONTENT_HOUR", 9)
     heartbeat_interval_minutes = getattr(_app, "HEARTBEAT_INTERVAL_MINUTES", 47)
     heartbeat_jitter_seconds = getattr(_app, "HEARTBEAT_JITTER_SECONDS", 300)
     return [
@@ -403,6 +405,11 @@ def _schedule_specs():
             "id": "clanops_weekly_review",
             "label": "clanops weekly review",
             "schedule": f"Every {clanops_weekly_review_day.title()} at {clanops_weekly_review_hour:02d}:00 CT.",
+        },
+        {
+            "id": "promotion_content_cycle",
+            "label": "promotion content sync",
+            "schedule": f"Every {promotion_content_day.title()} at {promotion_content_hour:02d}:00 CT.",
         },
     ]
 
