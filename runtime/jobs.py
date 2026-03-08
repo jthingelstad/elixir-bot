@@ -318,8 +318,8 @@ async def _heartbeat_tick():
 
 # ── Site content for poapkings.com ────────────────────────────────────────────
 
-SITE_DATA_HOUR = int(os.getenv("SITE_DATA_HOUR", "8"))       # 8am Chicago
-SITE_CONTENT_HOUR = int(os.getenv("SITE_CONTENT_HOUR", "20"))  # 8pm Chicago
+SITE_DATA_HOUR = int(os.getenv("SITE_DATA_HOUR", "18"))       # 6pm Chicago
+SITE_CONTENT_HOUR = int(os.getenv("SITE_CONTENT_HOUR", "18"))  # 6pm Chicago
 PLAYER_INTEL_REFRESH_HOURS = int(os.getenv("PLAYER_INTEL_REFRESH_HOURS", "6"))
 PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "12"))
 PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "6"))
@@ -328,7 +328,7 @@ CLANOPS_WEEKLY_REVIEW_HOUR = int(os.getenv("CLANOPS_WEEKLY_REVIEW_HOUR", "19"))
 
 
 async def _site_data_refresh():
-    """Morning job — refresh clan data and roster on poapkings.com."""
+    """On-demand site data refresh — refresh clan data and roster on poapkings.com."""
     runtime_status.mark_job_start("site_data_refresh")
     try:
         try:
@@ -357,7 +357,7 @@ async def _site_data_refresh():
 
 
 async def _site_content_cycle():
-    """Evening job — generate all site content and refresh data."""
+    """Daily site publish — refresh data, generate content, and push updates."""
     runtime_status.mark_job_start("site_content_cycle")
     try:
         try:
