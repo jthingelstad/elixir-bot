@@ -431,6 +431,58 @@ def test_detect_war_day_transition_marks_final_battle_day_from_api_period_index(
         conn.close()
 
 
+def test_detect_war_day_transition_marks_final_practice_day_from_api_period_index():
+    conn = db.get_connection(":memory:")
+    try:
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 0,
+                "periodIndex": 1,
+                "periodType": "trainingDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 0,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 0,
+                "periodIndex": 2,
+                "periodType": "trainingDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 0,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_war_day_transition(conn=conn)
+
+        assert [signal["type"] for signal in signals] == ["war_final_practice_day"]
+        assert signals[0]["week"] == 1
+        assert signals[0]["period_index"] == 2
+        assert signals[0]["message"] == "Last day of practice this week. Finish boat defenses and get ready for battle days."
+        assert db.get_current_war_status(conn=conn)["practice_day_number"] == 3
+        assert db.get_current_war_status(conn=conn)["phase_display"] == "Practice Day 3"
+    finally:
+        conn.close()
+
+
 def test_detect_war_day_transition_marks_battle_phase_complete_from_api_transition():
     conn = db.get_connection(":memory:")
     try:

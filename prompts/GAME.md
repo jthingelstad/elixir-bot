@@ -1,60 +1,94 @@
 # Clash Royale Game Knowledge
 
-## War Schedule (River Race)
+This file is for practical game knowledge Elixir can use when talking to the clan.
+Prioritize clear guidance, not wiki-style completeness.
 
-- River Race runs weekly. Each week is one "race" within a longer war season (4-5 weeks).
-- Seasons are identified as SEASON-WEEK (e.g., "130-1" = season 130, week 1).
-- The season_id in the API corresponds to the season number. section_index is the week (0-indexed).
-- **Training Days are Monday–Wednesday**: battles reward Gold only; clan boat does not progress.
-- **Battle Days are Thursday–Sunday**: battles reward Medals + Gold; boat progresses toward finish line.
-- Each member gets 4 battle decks per day during battle days — one deck per battle.
-- Players MUST use all 4 decks each battle day. Thank players who have used theirs. Nudge those who haven't.
-- The clan that reaches the finish line first wins the race (10,000 movement points; 5,000 in the final week).
-- At the end of the war season, the clan with the most war trophies in their group is the war champion.
+## River Race / Clan Wars
+
+- Treat the Clash Royale API as the source of truth for the current war state.
+- A war season contains multiple weekly races.
+- Humans sometimes refer to war status as `SEASON-WEEK` shorthand, for example `130-1`.
+- `season_id` is the season number.
+- `section_index` is the current race week within that season, starting at 0.
+- When speaking to humans, refer to the week as `section_index + 1`.
+
+### War Phases
+
+- There are two main live war phases: `practice` and `battle`.
+- If the API says practice is active, talk about preparation.
+- If the API says battle is active, talk about using war decks and winning the race.
+- Avoid relying on local calendar or timezone assumptions when describing the current phase.
+- In normal Clash Royale war rhythm, practice is typically Monday-Wednesday and battle is typically Thursday-Sunday, but live API state takes priority over that convention.
+
+### Practice Phase Priorities
+
+- Practice days are the setup window before battle days.
+- The main clan priority during practice is setting boat defenses.
+- Strong practice-day messaging should remind members to build or update boat defenses early.
+- Intact boat defenses at the end of a day award bonus movement points, so early setup matters.
+- On the final practice day, emphasize last-chance setup: finish boat defenses and get ready for battle days.
+
+### Battle Phase Priorities
+
+- Battle days are when the clan actively races and boat progress matters.
+- Each player gets 4 war decks per battle day.
+- The main clan priority during battle is using all 4 war decks.
+- Thank members who already used all 4.
+- Nudge members who have not started or who still have decks left.
+- On the final battle day, emphasize that it is the last chance to use remaining decks before battle days end.
+
+### Race Outcome
+
+- The clan that reaches the finish line first wins the weekly race.
+- Weekly placement matters for rewards and clan trophies.
+- First place is a meaningful achievement and should be celebrated.
+- In the final week of a season, the race can work differently from a normal week, so be careful and ground claims in current data.
 
 ## War Decks
 
-- Each player builds 4 war decks using 32 **unique** cards — no card can appear in more than one deck.
-- Once a deck is used in battle, it cannot be used again until the following day.
-- The "Magic" wand button in the deck builder can auto-fill decks from unused cards — useful tip for members struggling to build 4 decks.
-- Deck slot categories (Tower Destroyer, Tower Defender, Mini Tank, Distraction, Anti-Air, Small Spell, Big Spell, Personal Choice) provide guided suggestions when building decks.
+- A player builds 4 war decks using 32 unique cards total.
+- A card cannot appear in more than one of that player's war decks.
+- Once a deck is used, it cannot be reused until the next war day reset.
+- If helpful, mention that the in-game Magic wand can help auto-build decks from unused cards.
+
+## Boat Defenses
+
+- Boat defenses are separate from active war deck usage.
+- Cards used on defense towers can overlap with war deck cards.
+- A clan boat can hold multiple defenses, depending on league level.
+- Damaged boat defenses stay damaged between attacks, so teamwork and cleanup attacks matter.
+- Elixir Collector, Mirror, and Clone cannot be placed on defense towers.
 
 ## Battle Modes
 
-- **1v1 Battle**: Standard match, same as Trophy Road.
-- **Duel**: Best-of-3 using 3 war decks. Rewards more Gold than 3 separate 1v1s. If completed in 2 matches, the 3rd deck stays available for other modes. Stalemates are resolved by coin flip.
-- **Rotating Game Mode**: Weekly special mode (Double Elixir, Triple Elixir, Infinite Elixir, Sudden Death, Rage Battles).
-- **Boat Battles**: Attack another clan's boat defenses to slow their progress.
-- **Colosseum**: Final-week-only Duel mode for clans that finished the half-length River Race. Awards more Gold than a regular Duel.
+- `1v1 Battle`: one war deck, standard match.
+- `Duel`: best-of-3 using up to 3 war decks; often a strong value play.
+- `Rotating Game Mode`: special limited-time battle mode for war.
+- `Boat Battle`: attack enemy boat defenses to slow another clan.
+- `Colosseum`: special final-week mode; be careful and rely on live context before describing it in detail.
 
-## Clan Boat & Boat Defenses
+## Rewards and Recognition
 
-- Each clan boat has up to 15 Boat Defenses (count depends on Clan War League level), each with 3 Defense Towers.
-- Players assigned a Boat Defense set each tower with 4 cards from their own collection. Cards **can** overlap with war deck cards.
-- Key mechanics:
-  - Attacker starts at 1.5x Elixir generation.
-  - Destroying any tower eliminates all attacking troops, restores Elixir, boosts generation to 2.7x, and sets timer to 60 seconds.
-  - Damage to towers **persists** between attacks — coordinate with clanmates to finish off weakened defenses.
-  - Intact defenses at end of each day award bonus movement points. Set them up early for maximum benefit.
-  - Elixir Collector, Mirror, and Clone **cannot** be placed on Defense Towers.
+- Weekly war participation is worth celebrating, especially strong fame totals and full-deck usage.
+- First place in a race is a major clan achievement.
+- At season end, recognize top contributors and perfect participation.
+- Members must still be in the clan at race conclusion to claim their River Chest.
 
-## Rewards & Placement
+## Promotions and Clan Culture
 
-- All participating clans receive a River Chest; higher placement = better rewards.
-- **1st place** guarantees a Legendary card in the River Chest.
-- **1st and 2nd place** earn Clan Trophies; at higher leagues, **3rd place and below loses Trophies**.
-- In the final week, River Chest placement = order of finishing the race; Clan Trophies = total Medals earned (5x multiplier).
-- Players must be present in the clan at race conclusion to claim their River Chest.
-- Clans that don't meet minimum battle participation receive a small reward boot instead of a chest.
+- Consistent war participation matters, but real life comes first.
+- Using all 4 decks on battle days is a strong sign of reliability.
+- Setting boat defenses during practice also shows good clan support.
+- When discussing member effort, be fair, specific, and grounded in actual tracked behavior.
 
-## Trophy Milestones
+## Ladder and General Progress
 
-- Arena names come from the API — celebrate when a member reaches a new arena.
-- Reaching 10,000+ trophies puts a player in the upper echelon and is a major milestone.
+- Trophy milestones are meaningful and worth celebrating.
+- Reaching 10,000+ trophies is elite within this clan context.
+- Arena names should come from the API or stored data, not from guesswork.
 
 ## Roles
 
-- Member → Elder → Co-Leader → Leader
-- **Elder**: can kick members (once per 20 min) and invite/accept players.
-- **Co-Leader**: can manage the clan and start wars.
-- **Leader**: full control.
+- Member -> Elder -> Co-Leader -> Leader
+- Elder is a meaningful trust role, not an automatic reward.
+- Co-Leader and Leader are leadership roles and should be discussed carefully.

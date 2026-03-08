@@ -139,6 +139,17 @@ def detect_war_day_transition(now=None, conn=None):
                 "period_type": current.get("period_type"),
                 "message": "Practice phase is live. Set boat defenses and get ready for battle days.",
             })
+    if current.get("final_practice_day_active"):
+        if not db.was_signal_sent("war_final_practice_day", today, conn=conn):
+            signals.append({
+                "type": "war_final_practice_day",
+                "season_id": current.get("season_id"),
+                "week": current.get("week"),
+                "section_index": current.get("section_index"),
+                "period_index": current.get("period_index"),
+                "period_type": current.get("period_type"),
+                "message": "Last day of practice this week. Finish boat defenses and get ready for battle days.",
+            })
     if current.get("final_battle_day_active"):
         if not db.was_signal_sent("war_final_battle_day", today, conn=conn):
             signals.append({
