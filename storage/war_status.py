@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import sqlite3
 
-from cr_knowledge import TROPHY_MILESTONES
 from db import (
     _canon_tag,
     _current_joined_at,
@@ -342,18 +341,6 @@ def detect_milestones(conn=None):
         ).fetchall()
         milestones = []
         for row in rows:
-            old_t = row["old_trophies"] or 0
-            new_t = row["new_trophies"] or 0
-            for threshold in TROPHY_MILESTONES:
-                if old_t < threshold <= new_t:
-                    milestones.append({
-                        "tag": row["tag"],
-                        "name": row["name"],
-                        "type": "trophy_milestone",
-                        "old_value": old_t,
-                        "new_value": new_t,
-                        "milestone": threshold,
-                    })
             if row["old_arena"] and row["new_arena"] and row["old_arena"] != row["new_arena"]:
                 milestones.append({
                     "tag": row["tag"],

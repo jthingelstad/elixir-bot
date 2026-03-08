@@ -13,6 +13,18 @@ COMMAND_HELP = {
     "status": "Show Elixir runtime health, last jobs, and current telemetry.",
     "schedule": "Show the configured job cadence and next scheduler runs.",
     "clan-status": "Fetch live clan/war data and print the operational clan status report.",
+    "clan-list": "List active clan members with exact names, tags, roles, and clan ranks.",
+    "profile": "Show the stored member profile and metadata for one member.",
+    "set-join-date": "Set a member join date in YYYY-MM-DD format.",
+    "clear-join-date": "Clear a member join date.",
+    "set-birthday": "Set a member birthday as month and day.",
+    "clear-birthday": "Clear a member birthday.",
+    "set-profile-url": "Set a member profile URL.",
+    "clear-profile-url": "Clear a member profile URL.",
+    "set-poap-address": "Set a member POAP address.",
+    "clear-poap-address": "Clear a member POAP address.",
+    "set-note": "Set a member note.",
+    "clear-note": "Clear a member note.",
     "heartbeat": "Force one heartbeat cycle now.",
     "site-data": "Force the site data refresh job now.",
     "site-content": "Force the full site content cycle now.",
@@ -31,6 +43,18 @@ COMMAND_ORDER = [
     "status",
     "schedule",
     "clan-status",
+    "clan-list",
+    "profile",
+    "set-join-date",
+    "clear-join-date",
+    "set-birthday",
+    "clear-birthday",
+    "set-profile-url",
+    "clear-profile-url",
+    "set-poap-address",
+    "clear-poap-address",
+    "set-note",
+    "clear-note",
     "heartbeat",
     "site-data",
     "site-content",
@@ -49,10 +73,15 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def render_admin_help(*, channel_prefix: str = "do", cli_prefix: str = "venv/bin/python scripts/elixir_do.py") -> str:
+def render_admin_help(
+    *,
+    mention_prefix: str = "@Elixir do",
+    slash_prefix: str = "/elixir",
+    cli_prefix: str = "venv/bin/python scripts/elixir_do.py",
+) -> str:
     lines = [
         "**Elixir Admin Commands**",
-        f"Use `{channel_prefix} <command>` in `#clanops` or `{cli_prefix} <command>` in the terminal.",
+        f"Use `{slash_prefix} ...` for private replies, `{mention_prefix} <command>` in `#clanops` for public room replies, or `{cli_prefix} <command>` in the terminal.",
         "",
         "Commands:",
     ]
@@ -62,13 +91,18 @@ def render_admin_help(*, channel_prefix: str = "do", cli_prefix: str = "venv/bin
         [
             "",
             "Preview mode:",
-            f"- Add `--preview`, or use `{channel_prefix} <command> preview`, to suppress Discord sends and site pushes.",
+            f"- Add `--preview`, or use `{mention_prefix} <command> preview`, to suppress Discord sends and site pushes.",
             "- Preview mode still runs the job logic and shows would-be Discord posts.",
             "",
             "Examples:",
-            f"- `{channel_prefix} heartbeat --preview`",
-            f"- `{channel_prefix} site-content`",
-            f"- `{channel_prefix} promotion --preview`",
+            f"- `{slash_prefix} clan-list`",
+            f"- `{slash_prefix} profile member:Ditika`",
+            f"- `{slash_prefix} member set-join-date member:Ditika date:2026-03-07`",
+            f"- `{slash_prefix} jobs heartbeat preview:true`",
+            f"- `{mention_prefix} promotion --preview`",
+            f"- `{mention_prefix} set-join-date \"Ditika\" 2026-03-07`",
+            f"- `{mention_prefix} set-poap-address \"King Levy\" 0xabc123...`",
+            f"- `{mention_prefix} set-note \"King Thing\" \"Founder and systems builder\"`",
         ]
     )
     return "\n".join(lines)
@@ -111,22 +145,46 @@ def parse_admin_command(text: str, *, require_prefix: bool = False):
         if lower in {"--short", "short"}:
             short = True
             continue
-        filtered.append(lower)
+        filtered.append(original)
 
     if not filtered:
         return None
 
-    command = filtered[0]
+    command = filtered[0].lower()
     extra = filtered[1:]
 
     if command == "help" and not extra:
-        return {"command": "help", "preview": preview, "short": False}
+        return {"command": "help", "preview": preview, "short": False, "args": {}}
     if command in {"status", "schedule"} and not extra:
-        return {"command": command, "preview": preview, "short": False}
+        return {"command": command, "preview": preview, "short": False, "args": {}}
     if command == "clan-status" and not extra:
-        return {"command": command, "preview": preview, "short": short}
+        return {"command": command, "preview": preview, "short": short, "args": {}}
+    if command == "clan-list" and not extra:
+        return {"command": command, "preview": preview, "short": False, "args": {}}
+    if command == "profile" and len(extra) >= 1:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": " ".join(extra)}}
+    if command == "set-join-date" and len(extra) == 2:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "date": extra[1]}}
+    if command == "clear-join-date" and len(extra) == 1:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0]}}
+    if command == "set-birthday" and len(extra) == 3:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "month": extra[1], "day": extra[2]}}
+    if command == "clear-birthday" and len(extra) == 1:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0]}}
+    if command == "set-profile-url" and len(extra) == 2:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "url": extra[1]}}
+    if command == "clear-profile-url" and len(extra) == 1:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0]}}
+    if command == "set-poap-address" and len(extra) == 2:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "poap_address": extra[1]}}
+    if command == "clear-poap-address" and len(extra) == 1:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0]}}
+    if command == "set-note" and len(extra) >= 2:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "note": " ".join(extra[1:])}}
+    if command == "clear-note" and len(extra) == 1:
+        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0]}}
     if command in COMMAND_HELP and command not in {"help", "status", "schedule", "clan-status"} and not extra:
-        return {"command": command, "preview": preview, "short": False}
+        return {"command": command, "preview": preview, "short": False, "args": {}}
     return None
 
 
@@ -158,6 +216,86 @@ def _format_preview_posts(posts: list[tuple[str, str]]) -> str:
         lines.append(content)
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def _build_clan_list_report() -> str:
+    import db
+
+    members = db.list_members()
+    lines = [f"**Clan List ({len(members)} active)**"]
+    if not members:
+        lines.append("_No active members found._")
+        return "\n".join(lines)
+    for member in members:
+        name = member.get("current_name") or member.get("member_name") or member.get("player_tag")
+        role = member.get("role") or "member"
+        rank = member.get("clan_rank")
+        tag = member.get("player_tag") or member.get("tag") or "n/a"
+        trophies = member.get("trophies")
+        rank_text = f"rank {rank}" if rank is not None else "rank n/a"
+        trophy_text = f"{trophies:,} trophies" if isinstance(trophies, int) else "trophies n/a"
+        lines.append(f"- {name} — `{tag}` | {role} | {rank_text} | {trophy_text}")
+    return "\n".join(lines)
+
+
+def _fmt_optional(value, empty="n/a"):
+    if value in (None, "", []):
+        return empty
+    return str(value)
+
+
+def _build_member_profile_report(member_query: str) -> str:
+    import db
+
+    member_tag, label = _resolve_member_tag(member_query)
+    profile = db.get_member_profile(member_tag)
+    if not profile:
+        raise ValueError(f"No stored profile found for {label}.")
+    birthday = None
+    if profile.get("birth_month") and profile.get("birth_day"):
+        birthday = f"{int(profile['birth_month']):02d}-{int(profile['birth_day']):02d}"
+    trophies = f"{profile['trophies']:,}" if isinstance(profile.get("trophies"), int) else None
+    best_trophies = f"{profile['best_trophies']:,}" if isinstance(profile.get("best_trophies"), int) else None
+    streak = None
+    if profile.get("recent_form"):
+        streak = f"{profile['recent_form'].get('current_streak')}{profile['recent_form'].get('current_streak_type') or ''}"
+    lines = [f"**Member Profile: {label}**"]
+    lines.append(
+        f"- Identity: {_fmt_optional(profile.get('member_name'))} | tag `{profile.get('player_tag')}` | role {_fmt_optional(profile.get('role'))} | rank {_fmt_optional(profile.get('clan_rank'))} | status {_fmt_optional(profile.get('status'))}"
+    )
+    lines.append(
+        f"- Join + metadata: joined {_fmt_optional(profile.get('joined_date'))} | birthday "
+        f"{_fmt_optional(birthday)} | "
+        f"profile {_fmt_optional(profile.get('profile_url'))} | POAP {_fmt_optional(profile.get('poap_address'))}"
+    )
+    lines.append(
+        f"- Clan state: level {_fmt_optional(profile.get('exp_level'))} | trophies {_fmt_optional(trophies)} | "
+        f"best {_fmt_optional(best_trophies)} | donations {_fmt_optional(profile.get('donations_week'))} | received {_fmt_optional(profile.get('donations_received_week'))}"
+    )
+    lines.append(
+        f"- Discord + notes: linked {'yes' if profile.get('in_discord') else 'no'} | "
+        f"handle {_fmt_optional(profile.get('discord_display_name') or profile.get('discord_username'))} | note {_fmt_optional(profile.get('note'))}"
+    )
+    lines.append(
+        f"- Player history: wins {_fmt_optional(profile.get('career_wins'))} | losses {_fmt_optional(profile.get('career_losses'))} | "
+        f"battles {_fmt_optional(profile.get('career_battle_count'))} | total donations {_fmt_optional(profile.get('career_total_donations'))} | "
+        f"war day wins {_fmt_optional(profile.get('war_day_wins'))} | 3-crowns {_fmt_optional(profile.get('three_crown_wins'))}"
+    )
+    if profile.get("recent_form"):
+        form = profile["recent_form"]
+        lines.append(
+            f"- Recent form: {form.get('wins', 0)}-{form.get('losses', 0)} over {form.get('sample_size', 'n/a')} | "
+            f"label {_fmt_optional(form.get('form_label'))} | streak {_fmt_optional(streak)}"
+        )
+    signature_cards = profile.get("signature_cards")
+    if isinstance(signature_cards, dict):
+        signature_cards = signature_cards.get("cards") or []
+    if signature_cards:
+        cards = ", ".join(card.get("name") or "Unknown" for card in signature_cards[:5])
+        lines.append(f"- Signature cards: {cards}")
+    if profile.get("bio"):
+        lines.append(f"- Bio: {profile['bio']}")
+    return "\n".join(lines)
 
 
 @asynccontextmanager
@@ -320,8 +458,90 @@ async def _run_promote_content(preview: bool) -> str:
     return json.dumps(promote, indent=2)
 
 
-async def dispatch_admin_command(command: str, *, preview: bool = False, short: bool = False) -> str:
+def _resolve_member_tag(member_query: str) -> tuple[str, str]:
+    import db
+
+    matches = db.resolve_member(member_query, limit=3)
+    if not matches:
+        raise ValueError(f"No clan member matched {member_query!r}.")
+    exactish = [item for item in matches if item.get("match_score", 0) >= 850]
+    if len(exactish) == 1:
+        best = exactish[0]
+    elif len(matches) == 1:
+        best = matches[0]
+    elif (matches[0].get("match_score", 0) - matches[1].get("match_score", 0)) >= 100:
+        best = matches[0]
+    else:
+        choices = ", ".join(
+            item.get("member_ref_with_handle") or item.get("current_name") or item.get("player_tag")
+            for item in matches[:3]
+        )
+        raise ValueError(f"Ambiguous member {member_query!r}. Top matches: {choices}")
+    return best["player_tag"], best.get("member_ref_with_handle") or best.get("current_name") or best["player_tag"]
+
+
+async def _run_member_metadata_command(command: str, *, preview: bool, args: dict) -> str:
+    import db
+
+    member_tag, label = await asyncio.to_thread(_resolve_member_tag, args["member"])
+    if command == "set-join-date":
+        if preview:
+            return f"Preview: would set join date for {label} to {args['date']}."
+        await asyncio.to_thread(db.set_member_join_date, member_tag, None, args["date"])
+        return f"Set join date for {label} to {args['date']}."
+    if command == "clear-join-date":
+        if preview:
+            return f"Preview: would clear join date for {label}."
+        await asyncio.to_thread(db.clear_member_join_date, member_tag, None)
+        return f"Cleared join date for {label}."
+    if command == "set-birthday":
+        month = int(args["month"])
+        day = int(args["day"])
+        if preview:
+            return f"Preview: would set birthday for {label} to {month:02d}-{day:02d}."
+        await asyncio.to_thread(db.set_member_birthday, member_tag, None, month, day)
+        return f"Set birthday for {label} to {month:02d}-{day:02d}."
+    if command == "clear-birthday":
+        if preview:
+            return f"Preview: would clear birthday for {label}."
+        await asyncio.to_thread(db.clear_member_birthday, member_tag, None)
+        return f"Cleared birthday for {label}."
+    if command == "set-profile-url":
+        if preview:
+            return f"Preview: would set profile URL for {label} to {args['url']}."
+        await asyncio.to_thread(db.set_member_profile_url, member_tag, None, args["url"])
+        return f"Set profile URL for {label}."
+    if command == "clear-profile-url":
+        if preview:
+            return f"Preview: would clear profile URL for {label}."
+        await asyncio.to_thread(db.clear_member_profile_url, member_tag, None)
+        return f"Cleared profile URL for {label}."
+    if command == "set-poap-address":
+        if preview:
+            return f"Preview: would set POAP address for {label} to {args['poap_address']}."
+        await asyncio.to_thread(db.set_member_poap_address, member_tag, None, args["poap_address"])
+        return f"Set POAP address for {label}."
+    if command == "clear-poap-address":
+        if preview:
+            return f"Preview: would clear POAP address for {label}."
+        await asyncio.to_thread(db.clear_member_poap_address, member_tag, None)
+        return f"Cleared POAP address for {label}."
+    if command == "set-note":
+        if preview:
+            return f"Preview: would set note for {label} to: {args['note']}"
+        await asyncio.to_thread(db.set_member_note, member_tag, None, args["note"])
+        return f"Set note for {label}."
+    if command == "clear-note":
+        if preview:
+            return f"Preview: would clear note for {label}."
+        await asyncio.to_thread(db.clear_member_note, member_tag, None)
+        return f"Cleared note for {label}."
+    raise ValueError(f"Unknown metadata command: {command}")
+
+
+async def dispatch_admin_command(command: str, *, preview: bool = False, short: bool = False, args: dict | None = None) -> str:
     import elixir
+    args = args or {}
 
     if command == "help":
         return render_admin_help()
@@ -334,6 +554,23 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
         if short:
             return elixir._build_clan_status_short_report(clan, war)
         return elixir._build_clan_status_report(clan, war)
+    if command == "clan-list":
+        return await asyncio.to_thread(_build_clan_list_report)
+    if command == "profile":
+        return await asyncio.to_thread(_build_member_profile_report, args["member"])
+    if command in {
+        "set-join-date",
+        "clear-join-date",
+        "set-birthday",
+        "clear-birthday",
+        "set-profile-url",
+        "clear-profile-url",
+        "set-poap-address",
+        "clear-poap-address",
+        "set-note",
+        "clear-note",
+    }:
+        return await _run_member_metadata_command(command, preview=preview, args=args)
     if command == "site-publish":
         return await _run_site_publish(preview=preview)
     if command == "home-message":

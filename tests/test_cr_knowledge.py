@@ -41,27 +41,6 @@ def test_is_war_battle_day():
     assert not cr_knowledge.is_war_battle_day(2)  # Wednesday
 
 
-def test_milestones_from_thresholds():
-    """Milestones are generated from CLAN.md thresholds."""
-    assert 1000 in cr_knowledge.TROPHY_MILESTONES
-    assert 5000 in cr_knowledge.TROPHY_MILESTONES
-    assert 10000 in cr_knowledge.TROPHY_MILESTONES
-    assert 15000 in cr_knowledge.TROPHY_MILESTONES
-    # Every entry is a multiple of the interval
-    for m in cr_knowledge.TROPHY_MILESTONES:
-        assert m % 1000 == 0
-
-
-def test_crossed_milestone():
-    """Correctly detects milestone crossings."""
-    assert cr_knowledge.crossed_milestone(9850, 10023) == 10000
-    assert cr_knowledge.crossed_milestone(4900, 5100) == 5000
-    assert cr_knowledge.crossed_milestone(5100, 5900) is None  # no crossing
-    assert cr_knowledge.crossed_milestone(11900, 12100) == 12000
-    assert cr_knowledge.crossed_milestone(900, 1100) == 1000
-    assert cr_knowledge.crossed_milestone(2500, 3100) == 3000
-
-
 def test_inactivity_threshold():
     """Inactivity threshold is loaded from CLAN.md."""
     assert cr_knowledge.INACTIVITY_DAYS == 3

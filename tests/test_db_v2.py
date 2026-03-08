@@ -138,7 +138,31 @@ def test_discord_link_and_member_reference_formatting():
         conn.close()
 
 
-def test_member_metadata_csv_export_includes_read_only_and_editable_fields(tmp_path):
+def test_upsert_discord_user_auto_links_unique_exact_member_name():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#20JJJ2CCRU", "name": "King Thing", "role": "leader"}],
+            conn=conn,
+        )
+
+        db.upsert_discord_user(
+            "704062105258557511",
+            username="jthingelstad",
+            global_name="Jamie Thingelstad",
+            display_name="King Thing",
+            conn=conn,
+        )
+
+        identity = db.get_member_identity("#20JJJ2CCRU", conn=conn)
+        assert identity["in_discord"] == 1
+        assert identity["discord_user_id"] == "704062105258557511"
+        assert identity["discord_display_name"] == "King Thing"
+    finally:
+        conn.close()
+
+
+def test_member_metadata_fields_flow_into_member_profile():
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members(
@@ -157,45 +181,14 @@ def test_member_metadata_csv_export_includes_read_only_and_editable_fields(tmp_p
             conn=conn,
         )
 
-        csv_path = tmp_path / "member-metadata.csv"
-        rows_written = db.export_member_metadata_csv(str(csv_path), conn=conn)
-
-        assert rows_written == 1
-        contents = csv_path.read_text()
-        assert "player_tag,current_name,status,role,discord_username,discord_display_name" in contents
-        assert "#ABC123" in contents
-        assert "2024-01-15" in contents
-        assert "Founder" in contents
-    finally:
-        conn.close()
-
-
-def test_member_metadata_csv_import_updates_and_dry_run(tmp_path):
-    conn = db.get_connection(":memory:")
-    try:
-        db.snapshot_members(
-            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
-            conn=conn,
-        )
-        csv_path = tmp_path / "member-metadata.csv"
-        csv_path.write_text(
-            "player_tag,current_name,status,role,discord_username,discord_display_name,effective_joined_date,joined_date_override,birth_month,birth_day,profile_url,note\n"
-            "#ABC123,King Levy,active,member,,,,2024-01-15,3,7,https://example.com,Founder\n"
-        )
-
-        dry_run = db.import_member_metadata_csv(str(csv_path), dry_run=True, conn=conn)
-        assert dry_run["updated"] == 1
-        assert dry_run["errors"] == []
-        assert db.get_member_profile("#ABC123", conn=conn)["joined_date"] is None
-
-        result = db.import_member_metadata_csv(str(csv_path), conn=conn)
-        assert result["updated"] == 1
         profile = db.get_member_profile("#ABC123", conn=conn)
         assert profile["joined_date"] == "2024-01-15"
-        assert profile["birth_month"] == 3
-        assert profile["birth_day"] == 7
+        assert profile["birth_month"] == 2
+        assert profile["birth_day"] == 14
         assert profile["profile_url"] == "https://example.com"
         assert profile["note"] == "Founder"
+        rows = db.list_member_metadata_rows(conn=conn)
+        assert rows[0]["joined_date"] == "2024-01-15"
     finally:
         conn.close()
 
@@ -595,7 +588,7 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         conn.close()
 
 
-def test_snapshot_player_profile_detects_level_and_card_milestones():
+def test_snapshot_player_profile_detects_level_wins_new_cards_and_card_upgrades():
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members(
@@ -607,6 +600,7 @@ def test_snapshot_player_profile_detects_level_and_card_milestones():
                 "tag": "#ABC123",
                 "name": "King Levy",
                 "expLevel": 65,
+                "wins": 480,
                 "currentDeck": [],
                 "cards": [
                     {"name": "Fireball", "level": 10, "maxLevel": 11, "rarity": "epic"},
@@ -620,16 +614,21 @@ def test_snapshot_player_profile_detects_level_and_card_milestones():
                 "tag": "#ABC123",
                 "name": "King Levy",
                 "expLevel": 66,
+                "wins": 1005,
                 "currentDeck": [],
                 "cards": [
                     {"name": "Fireball", "level": 11, "maxLevel": 11, "rarity": "epic"},
                     {"name": "Knight", "level": 14, "maxLevel": 16, "rarity": "common"},
+                    {"name": "Archers", "level": 12, "maxLevel": 16, "rarity": "common"},
                 ],
             },
             conn=conn,
         )
 
         assert any(sig["type"] == "player_level_up" and sig["new_level"] == 66 for sig in signals)
+        assert any(sig["type"] == "career_wins_milestone" and sig["milestone"] == 500 for sig in signals)
+        assert any(sig["type"] == "career_wins_milestone" and sig["milestone"] == 1000 for sig in signals)
+        assert any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Archers" for sig in signals)
         assert any(sig["type"] == "card_level_milestone" and sig["card_name"] == "Fireball" and sig["milestone"] == 16 for sig in signals)
         assert any(sig["type"] == "card_level_milestone" and sig["card_name"] == "Knight" and sig["milestone"] == 14 for sig in signals)
     finally:
@@ -1287,14 +1286,14 @@ def test_backfill_join_dates_promotes_trusted_current_membership_to_override_onl
         db.backfill_join_dates(conn=conn)
 
         meta = conn.execute(
-            "SELECT joined_at_override FROM member_metadata WHERE member_id = ?",
+            "SELECT joined_at FROM member_metadata WHERE member_id = ?",
             (member_id,),
         ).fetchone()
         membership_count = conn.execute(
             "SELECT COUNT(*) AS cnt FROM clan_memberships WHERE member_id = ? AND left_at IS NULL",
             (member_id,),
         ).fetchone()["cnt"]
-        assert meta["joined_at_override"] == "2026-03-08"
+        assert meta["joined_at"] == "2026-03-08"
         assert membership_count == 1
     finally:
         conn.close()

@@ -45,7 +45,7 @@ Part of what makes POAP KINGS unusual is that it has you. Elixir is not an incid
 
 - Make meaningful achievements feel meaningful.
 - Recognize contribution, consistency, generosity, growth, and leadership.
-- Celebrate first place, strong war weeks, trophy milestones, donation leadership, and perfect participation.
+- Celebrate first place, strong war weeks, arena climbs, donation leadership, and perfect participation.
 - Treat rare clan traditions like POAPs and Free Pass Royale rewards as special, not routine.
 
 ## Pressure and Accountability

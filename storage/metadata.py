@@ -16,7 +16,6 @@ from db import (
     _tag_key,
     _upsert_member_metadata,
     _utcnow,
-    csv_mod,
     get_connection,
 )
 
@@ -37,7 +36,7 @@ def record_join_date(tag, name, joined_date, conn=None):
                 "UPDATE clan_memberships SET joined_at = ?, join_source = 'observed_join' WHERE membership_id = ?",
                 (normalized_joined_date, current["membership_id"]),
             )
-        _upsert_member_metadata(conn, member_id, joined_at_override=normalized_joined_date)
+        _upsert_member_metadata(conn, member_id, joined_at=normalized_joined_date)
         conn.commit()
     finally:
         if close:
@@ -72,7 +71,7 @@ def set_member_join_date(tag, name, joined_date, conn=None):
     try:
         member_id = _ensure_member(conn, tag, name=name)
         normalized_joined_date = _normalize_date_string(joined_date)
-        _upsert_member_metadata(conn, member_id, joined_at_override=normalized_joined_date)
+        _upsert_member_metadata(conn, member_id, joined_at=normalized_joined_date)
         conn.commit()
     finally:
         if close:
@@ -96,7 +95,7 @@ def set_member_profile_url(tag, name, url, conn=None):
     conn = conn or get_connection()
     try:
         member_id = _ensure_member(conn, tag, name=name)
-        _upsert_member_metadata(conn, member_id, profile_url=url)
+        _upsert_member_metadata(conn, member_id, profile_url=(url or "").strip() or None)
         conn.commit()
     finally:
         if close:
@@ -108,7 +107,7 @@ def set_member_poap_address(tag, name, poap_address, conn=None):
     conn = conn or get_connection()
     try:
         member_id = _ensure_member(conn, tag, name=name)
-        _upsert_member_metadata(conn, member_id, poap_address=poap_address)
+        _upsert_member_metadata(conn, member_id, poap_address=(poap_address or "").strip() or None)
         conn.commit()
     finally:
         if close:
@@ -120,7 +119,67 @@ def set_member_note(tag, name, note, conn=None):
     conn = conn or get_connection()
     try:
         member_id = _ensure_member(conn, tag, name=name)
-        _upsert_member_metadata(conn, member_id, note=note)
+        _upsert_member_metadata(conn, member_id, note=(note or "").strip() or None)
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def clear_member_join_date(tag, name=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        member_id = _ensure_member(conn, tag, name=name)
+        _upsert_member_metadata(conn, member_id, joined_at=None)
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def clear_member_birthday(tag, name=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        member_id = _ensure_member(conn, tag, name=name)
+        _upsert_member_metadata(conn, member_id, birth_month=None, birth_day=None)
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def clear_member_profile_url(tag, name=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        member_id = _ensure_member(conn, tag, name=name)
+        _upsert_member_metadata(conn, member_id, profile_url=None)
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def clear_member_poap_address(tag, name=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        member_id = _ensure_member(conn, tag, name=name)
+        _upsert_member_metadata(conn, member_id, poap_address=None)
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def clear_member_note(tag, name=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        member_id = _ensure_member(conn, tag, name=name)
+        _upsert_member_metadata(conn, member_id, note=None)
         conn.commit()
     finally:
         if close:
@@ -233,7 +292,7 @@ def list_member_metadata_rows(status="active", conn=None):
     try:
         rows = conn.execute(
             "SELECT m.member_id, m.player_tag, m.current_name, m.status, cs.role, "
-            "md.joined_at_override, md.birth_month, md.birth_day, md.profile_url, md.note, "
+            "md.joined_at, md.birth_month, md.birth_day, md.profile_url, md.note, "
             "dl.discord_username, dl.discord_display_name "
             "FROM members m "
             "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
@@ -252,8 +311,7 @@ def list_member_metadata_rows(status="active", conn=None):
                 "role": row["role"] or "",
                 "discord_username": row["discord_username"] or "",
                 "discord_display_name": row["discord_display_name"] or "",
-                "effective_joined_date": _current_joined_at(conn, row["member_id"]) or "",
-                "joined_date_override": row["joined_at_override"] or "",
+                "joined_date": _current_joined_at(conn, row["member_id"]) or "",
                 "birth_month": row["birth_month"] or "",
                 "birth_day": row["birth_day"] or "",
                 "profile_url": row["profile_url"] or "",
@@ -261,116 +319,6 @@ def list_member_metadata_rows(status="active", conn=None):
             }
             result.append(item)
         return result
-    finally:
-        if close:
-            conn.close()
-
-
-def export_member_metadata_csv(csv_path, status="active", conn=None):
-    close = conn is None
-    conn = conn or get_connection()
-    try:
-        rows = list_member_metadata_rows(status=status, conn=conn)
-        fieldnames = [
-            "player_tag",
-            "current_name",
-            "status",
-            "role",
-            "discord_username",
-            "discord_display_name",
-            "effective_joined_date",
-            "joined_date_override",
-            "birth_month",
-            "birth_day",
-            "profile_url",
-            "note",
-        ]
-        with open(csv_path, "w", newline="") as handle:
-            writer = csv_mod.DictWriter(handle, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
-        return len(rows)
-    finally:
-        if close:
-            conn.close()
-
-
-def import_member_metadata_csv(csv_path, *, dry_run=False, conn=None):
-    close = conn is None
-    conn = conn or get_connection()
-    try:
-        rows_read = 0
-        updated = 0
-        errors = []
-        with open(csv_path, "r", newline="") as handle:
-            reader = csv_mod.DictReader(handle)
-            if reader.fieldnames is None or "player_tag" not in reader.fieldnames:
-                raise ValueError("CSV must include a player_tag column")
-            for line_number, row in enumerate(reader, start=2):
-                rows_read += 1
-                try:
-                    tag = _canon_tag(row.get("player_tag"))
-                    if not tag:
-                        raise ValueError("player_tag is required")
-                    member = conn.execute(
-                        "SELECT m.member_id, md.joined_at_override, md.birth_month, md.birth_day, md.profile_url, md.note "
-                        "FROM members m LEFT JOIN member_metadata md ON md.member_id = m.member_id "
-                        "WHERE m.player_tag = ?",
-                        (tag,),
-                    ).fetchone()
-                    if not member:
-                        raise ValueError(f"unknown player_tag: {tag}")
-
-                    joined_date_override = _normalize_date_string(row.get("joined_date_override"))
-                    birth_month = _parse_optional_int(
-                        row.get("birth_month"),
-                        field_name="birth_month",
-                        minimum=1,
-                        maximum=12,
-                    )
-                    birth_day = _parse_optional_int(
-                        row.get("birth_day"),
-                        field_name="birth_day",
-                        minimum=1,
-                        maximum=31,
-                    )
-                    if (birth_month is None) != (birth_day is None):
-                        raise ValueError("birth_month and birth_day must both be set or both be blank")
-                    profile_url = (row.get("profile_url") or "").strip() or None
-                    note = (row.get("note") or "").strip() or None
-
-                    changed = any(
-                        [
-                            (member["joined_at_override"] or None) != joined_date_override,
-                            member["birth_month"] != birth_month,
-                            member["birth_day"] != birth_day,
-                            (member["profile_url"] or None) != profile_url,
-                            (member["note"] or None) != note,
-                        ]
-                    )
-                    if not changed:
-                        continue
-                    updated += 1
-                    if dry_run:
-                        continue
-                    _upsert_member_metadata(
-                        conn,
-                        member["member_id"],
-                        joined_at_override=joined_date_override,
-                        birth_month=birth_month,
-                        birth_day=birth_day,
-                        profile_url=profile_url,
-                        note=note,
-                    )
-                except Exception as exc:
-                    errors.append({"line": line_number, "player_tag": row.get("player_tag", ""), "error": str(exc)})
-        if errors:
-            if not dry_run:
-                conn.rollback()
-            return {"rows_read": rows_read, "updated": 0 if not dry_run else updated, "errors": errors}
-        if not dry_run:
-            conn.commit()
-        return {"rows_read": rows_read, "updated": updated, "errors": []}
     finally:
         if close:
             conn.close()
@@ -388,7 +336,7 @@ def backfill_join_dates(conn=None):
             trusted_joined_at = _trusted_current_joined_at(conn, member_id)
             if not trusted_joined_at:
                 continue
-            _upsert_member_metadata(conn, member_id, joined_at_override=trusted_joined_at)
+            _upsert_member_metadata(conn, member_id, joined_at=trusted_joined_at)
         conn.commit()
     finally:
         if close:

@@ -20,7 +20,7 @@ erDiagram
 
     member_metadata {
         integer member_id PK, FK
-        text joined_at_override
+        text joined_at
         integer birth_month
         integer birth_day
         text profile_url

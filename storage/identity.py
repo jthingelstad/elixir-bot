@@ -11,6 +11,77 @@ from db import (
 
 # -- Discord identity and memory helpers -----------------------------------
 
+
+def _apply_discord_link(conn, discord_user_id, member_tag, *, username=None, display_name=None,
+                        source="manual_link", confidence=1.0, is_primary=True):
+    member_id = _ensure_member(conn, member_tag, name=None)
+    if is_primary:
+        conn.execute("UPDATE discord_links SET is_primary = 0 WHERE discord_user_id = ?", (str(discord_user_id),))
+        conn.execute("UPDATE discord_links SET is_primary = 0 WHERE member_id = ?", (member_id,))
+    conn.execute(
+        "INSERT INTO discord_links (discord_user_id, member_id, discord_username, discord_display_name, linked_at, source, confidence, is_primary) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(discord_user_id, member_id) DO UPDATE SET discord_username = excluded.discord_username, discord_display_name = excluded.discord_display_name, linked_at = excluded.linked_at, source = excluded.source, confidence = excluded.confidence, is_primary = excluded.is_primary",
+        (str(discord_user_id), member_id, username, display_name, _utcnow(), source, confidence, 1 if is_primary else 0),
+    )
+    return member_id
+
+
+def _infer_member_tag_for_discord_user(conn, discord_user_id, *, username=None, global_name=None, display_name=None):
+    existing = conn.execute(
+        "SELECT m.player_tag "
+        "FROM discord_links dl "
+        "JOIN members m ON m.member_id = dl.member_id "
+        "WHERE dl.discord_user_id = ? AND dl.is_primary = 1",
+        (str(discord_user_id),),
+    ).fetchone()
+    if existing:
+        return existing["player_tag"]
+
+    from storage.roster import resolve_member
+
+    candidate_values = []
+    for value in (display_name, global_name, username):
+        text = (value or "").strip()
+        if text and text not in candidate_values:
+            candidate_values.append(text)
+
+    matched_tags = []
+    for candidate in candidate_values:
+        matches = resolve_member(candidate, status="active", limit=3, conn=conn)
+        exact = [
+            item for item in matches
+            if item.get("match_source") in {"current_name_exact", "alias_exact"}
+        ]
+        if len(exact) == 1:
+            matched_tags.append(exact[0]["player_tag"])
+
+    unique_tags = list(dict.fromkeys(matched_tags))
+    if len(unique_tags) == 1:
+        return unique_tags[0]
+    return None
+
+
+def _maybe_auto_link_discord_user(conn, discord_user_id, *, username=None, global_name=None, display_name=None):
+    member_tag = _infer_member_tag_for_discord_user(
+        conn,
+        discord_user_id,
+        username=username,
+        global_name=global_name,
+        display_name=display_name,
+    )
+    if not member_tag:
+        return None
+    return _apply_discord_link(
+        conn,
+        discord_user_id,
+        member_tag,
+        username=username,
+        display_name=display_name or global_name,
+        source="auto_exact_name",
+        confidence=0.95,
+        is_primary=True,
+    )
+
 def upsert_discord_user(discord_user_id, username=None, global_name=None, display_name=None, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -27,6 +98,13 @@ def upsert_discord_user(discord_user_id, username=None, global_name=None, displa
                 "INSERT INTO discord_users (discord_user_id, username, global_name, display_name, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (str(discord_user_id), username, global_name, display_name, now, now),
             )
+        _maybe_auto_link_discord_user(
+            conn,
+            discord_user_id,
+            username=username,
+            global_name=global_name,
+            display_name=display_name,
+        )
         conn.commit()
     finally:
         if close:
@@ -39,14 +117,15 @@ def link_discord_user_to_member(discord_user_id, member_tag, username=None, disp
     conn = conn or get_connection()
     try:
         upsert_discord_user(discord_user_id, username=username, display_name=display_name, conn=conn)
-        member_id = _ensure_member(conn, member_tag, name=None)
-        if is_primary:
-            conn.execute("UPDATE discord_links SET is_primary = 0 WHERE discord_user_id = ?", (str(discord_user_id),))
-            conn.execute("UPDATE discord_links SET is_primary = 0 WHERE member_id = ?", (member_id,))
-        conn.execute(
-            "INSERT INTO discord_links (discord_user_id, member_id, discord_username, discord_display_name, linked_at, source, confidence, is_primary) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(discord_user_id, member_id) DO UPDATE SET discord_username = excluded.discord_username, discord_display_name = excluded.discord_display_name, linked_at = excluded.linked_at, source = excluded.source, confidence = excluded.confidence, is_primary = excluded.is_primary",
-            (str(discord_user_id), member_id, username, display_name, _utcnow(), source, confidence, 1 if is_primary else 0),
+        member_id = _apply_discord_link(
+            conn,
+            discord_user_id,
+            member_tag,
+            username=username,
+            display_name=display_name,
+            source=source,
+            confidence=confidence,
+            is_primary=is_primary,
         )
         conn.commit()
         return member_id

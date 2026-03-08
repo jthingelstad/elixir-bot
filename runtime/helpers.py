@@ -90,6 +90,20 @@ def _is_schedule_request(text: str) -> bool:
     }
 
 
+def _is_clan_list_request(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    return normalized in {
+        "clan list",
+        "list clan",
+        "clan roster",
+        "list roster",
+        "member list",
+        "list members",
+        "show clan members",
+        "show roster",
+    }
+
+
 def _clan_status_mode(text: str) -> str | None:
     normalized = " ".join((text or "").strip().lower().split())
     if normalized in {
@@ -110,6 +124,23 @@ def _clan_status_mode(text: str) -> str | None:
         "poap kings status short",
     }:
         return "short"
+    return None
+
+
+def _extract_profile_target(text: str) -> str | None:
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    try:
+        tokens = re.findall(r'''(?:"([^"]+)")|(?:'([^']+)')|(\S+)''', raw)
+        flat = [a or b or c for a, b, c in tokens]
+    except Exception:
+        flat = raw.split()
+    lowered = [token.lower() for token in flat]
+    if len(flat) >= 2 and lowered[0] == "profile":
+        return " ".join(flat[1:]).strip() or None
+    if len(flat) >= 3 and lowered[0] == "member" and lowered[1] == "profile":
+        return " ".join(flat[2:]).strip() or None
     return None
 
 
@@ -542,6 +573,15 @@ def _build_status_report():
         f"{_status_badge(openai.get('last_ok'))} OpenAI: last {(openai.get('last_workflow') or 'n/a')} via {(openai.get('last_model') or 'n/a')} {_fmt_relative(openai.get('last_call_at'))}; {'ok' if openai.get('last_ok') else 'error' if openai.get('last_ok') is not None else 'n/a'}; {openai.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {openai.get('last_prompt_tokens') or 'n/a'}/{openai.get('last_completion_tokens') or 'n/a'}/{openai.get('last_total_tokens') or 'n/a'}; total {openai.get('call_count', 0)} calls / {openai.get('error_count', 0)} errors",
         f"🔐 Env: Discord {discord_badge}, OpenAI {openai_env_badge}, CR {cr_env_badge}",
     ]
+    role_status = _app._member_role_grant_status()
+    if role_status["configured"]:
+        member_role_badge = "🟢" if role_status["ok"] else "🔴"
+        lines.append(
+            f"{member_role_badge} Member role auto-grant: {'ready' if role_status['ok'] else role_status['reason']} "
+            f"(bot top {role_status.get('bot_top_role_position') if role_status.get('bot_top_role_position') is not None else 'n/a'} / "
+            f"member {role_status.get('member_role_position') if role_status.get('member_role_position') is not None else 'n/a'} / "
+            f"manage_roles {role_status.get('manage_roles')})"
+        )
     if data.get("latest_signal"):
         lines.append(
             f"📣 Latest signal log: {data['latest_signal']['signal_type']} on {data['latest_signal']['signal_date']}"
@@ -728,9 +768,11 @@ def _build_help_report(role: str) -> str:
         return "\n".join(
             [
                 "**Elixir Help — ClanOps**",
-                "- Ask without mentioning me in this channel when you want operational input.",
-                "- Direct commands: `status`, `schedule`, `clan status`, `clan status short`, `help`.",
-                "- Admin runner: `do help`, `do heartbeat`, `do site-content`, `do promotion --preview`, `do site-publish`.",
+                "- Use `/elixir ...` for private operator commands in this channel.",
+                "- Use `@Elixir do ...` when you want the command and result to stay public in the room.",
+                "- Member workflow: `/elixir clan-list` to get exact names/tags, `/elixir profile` to inspect the stored record, then `/elixir member set-join-date`, `/elixir member set-birthday`, `/elixir member set-profile-url`, `/elixir member set-poap-address`, `/elixir member set-note` or the matching `clear-*` commands to edit metadata.",
+                "- Public examples: `@Elixir do clan-status`, `@Elixir do profile \"weird name\"`, `@Elixir do promotion --preview`.",
+                "- Job examples: `/elixir jobs heartbeat`, `/elixir jobs site-content`, `/elixir jobs promotion`.",
                 "- I can help with roster reviews, war participation, promotions, demotions, kicks, recent form, decks, donations, and member lookups.",
                 "- I can resolve members by in-game name, tag, alias, or Discord handle.",
                 "- If I have something useful to add to an ops discussion here, I may inject proactively.",

@@ -8,7 +8,6 @@ The module exposes the V2 identity, memory, roster, battle, and war query layer.
 
 from __future__ import annotations
 
-import csv as csv_mod
 import hashlib
 import json
 import logging
@@ -16,8 +15,6 @@ import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
-
-from cr_knowledge import TROPHY_MILESTONES
 
 log = logging.getLogger("elixir_db")
 
@@ -314,11 +311,11 @@ def _trusted_current_joined_at(conn: sqlite3.Connection, member_id: int) -> Opti
 
 def _current_joined_at(conn: sqlite3.Connection, member_id: int) -> Optional[str]:
     meta = conn.execute(
-        "SELECT joined_at_override FROM member_metadata WHERE member_id = ?",
+        "SELECT joined_at FROM member_metadata WHERE member_id = ?",
         (member_id,),
     ).fetchone()
-    if meta and meta["joined_at_override"]:
-        return meta["joined_at_override"]
+    if meta and meta["joined_at"]:
+        return meta["joined_at"]
     return None
 
 
@@ -450,7 +447,7 @@ def _migration_0(conn: sqlite3.Connection) -> None:
 
         CREATE TABLE IF NOT EXISTS member_metadata (
             member_id INTEGER PRIMARY KEY REFERENCES members(member_id) ON DELETE CASCADE,
-            joined_at_override TEXT,
+            joined_at TEXT,
             birth_month INTEGER,
             birth_day INTEGER,
             profile_url TEXT DEFAULT '',
@@ -867,6 +864,8 @@ def _migration_2(conn: sqlite3.Connection) -> None:
 
 
 def _migration_3(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "member_metadata")
+    joined_column = "joined_at" if "joined_at" in columns else "joined_at_override"
     conn.execute(
         "INSERT INTO member_metadata (member_id) "
         "SELECT m.member_id FROM members m "
@@ -878,18 +877,27 @@ def _migration_3(conn: sqlite3.Connection) -> None:
         if not trusted_joined_at:
             continue
         current = conn.execute(
-            "SELECT joined_at_override FROM member_metadata WHERE member_id = ?",
+            f"SELECT {joined_column} AS joined_at FROM member_metadata WHERE member_id = ?",
             (row["member_id"],),
         ).fetchone()
-        if current and current["joined_at_override"]:
+        if current and current["joined_at"]:
             continue
         conn.execute(
-            "UPDATE member_metadata SET joined_at_override = ? WHERE member_id = ?",
+            f"UPDATE member_metadata SET {joined_column} = ? WHERE member_id = ?",
             (trusted_joined_at, row["member_id"]),
         )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3]
+def _migration_4(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "member_metadata")
+    if "joined_at" not in columns and "joined_at_override" in columns:
+        conn.execute("ALTER TABLE member_metadata RENAME COLUMN joined_at_override TO joined_at")
+        columns = _table_columns(conn, "member_metadata")
+    if "joined_at" not in columns:
+        conn.execute("ALTER TABLE member_metadata ADD COLUMN joined_at TEXT")
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

@@ -130,8 +130,6 @@ def test_knowledge_block():
 def test_thresholds():
     """Thresholds are parsed from CLAN.md."""
     t = prompts.thresholds()
-    assert t["trophy_milestone_interval"] == 1000
-    assert t["trophy_milestone_max"] == 15000
     assert t["inactivity_days"] == 3
     assert t["donation_highlight_hour"] == 20
 
