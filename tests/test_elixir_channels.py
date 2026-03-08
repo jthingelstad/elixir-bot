@@ -828,7 +828,7 @@ def test_load_live_clan_context_attaches_same_cycle_recent_joins():
                 {"tag": "#BBB", "name": "Ditika"},
             ],
         }),
-        patch("elixir.db.get_active_roster_map", return_value={"AAA": "Existing"}),
+        patch("elixir.db.get_active_roster_map", return_value={"#AAA": "Existing"}),
         patch("elixir.db.snapshot_members"),
         patch("elixir.cr_api.get_current_war", return_value={}),
     ):
@@ -845,6 +845,29 @@ def test_load_live_clan_context_attaches_same_cycle_recent_joins():
             "joined_date": datetime.now(elixir.CHICAGO).date().isoformat(),
         }
     ]
+
+
+def test_load_live_clan_context_does_not_mark_existing_members_new_when_db_tags_keep_hash():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.cr_api.get_clan", return_value={
+            "name": "POAP KINGS",
+            "memberList": [
+                {"tag": "#AAA", "name": "Existing"},
+                {"tag": "#BBB", "name": "Also Existing"},
+            ],
+        }),
+        patch("elixir.db.get_active_roster_map", return_value={"#AAA": "Existing", "#BBB": "Also Existing"}),
+        patch("elixir.db.snapshot_members"),
+        patch("elixir.cr_api.get_current_war", return_value={}),
+    ):
+        clan, war = asyncio.run(elixir._load_live_clan_context())
+
+    assert war == {}
+    assert "_elixir_recent_joins" not in clan
 
 
 def test_build_roster_join_dates_report_uses_human_fallback_for_missing_dates():

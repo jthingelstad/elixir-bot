@@ -870,7 +870,7 @@ async def _load_live_clan_context():
     member_list = clan.get("memberList") or []
     if member_list:
         previous_roster = await asyncio.to_thread(db.get_active_roster_map)
-        previous_tags = set(previous_roster) if previous_roster else set()
+        previous_tags = {_canon_tag(tag) for tag in (previous_roster or {})}
         if previous_tags:
             today = datetime.now(CHICAGO).date().isoformat()
             live_recent_joins = []
