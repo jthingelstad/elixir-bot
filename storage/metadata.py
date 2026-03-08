@@ -381,7 +381,7 @@ def backfill_join_dates(conn=None):
         ).fetchall()
         for row in rows:
             member_id = row["member_id"]
-            if _current_joined_at(conn, member_id):
+            if _get_current_membership(conn, member_id):
                 continue
             conn.execute(
                 "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, 'backfill', NULL)",
