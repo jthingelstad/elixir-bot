@@ -285,7 +285,15 @@ def _ensure_thread(conn: sqlite3.Connection, scope: str, channel_id=None, discor
 
 def _get_current_membership(conn: sqlite3.Connection, member_id: int):
     return conn.execute(
-        "SELECT membership_id, joined_at, join_source FROM clan_memberships WHERE member_id = ? AND left_at IS NULL ORDER BY joined_at DESC LIMIT 1",
+        "SELECT membership_id, joined_at, join_source FROM clan_memberships "
+        "WHERE member_id = ? AND left_at IS NULL "
+        "ORDER BY CASE join_source "
+        "WHEN 'manual_record' THEN 1 "
+        "WHEN 'observed_join' THEN 2 "
+        "WHEN 'clan_api_snapshot' THEN 3 "
+        "WHEN 'backfill' THEN 4 "
+        "WHEN 'bootstrap_seed' THEN 5 "
+        "ELSE 99 END, joined_at DESC, membership_id DESC LIMIT 1",
         (member_id,),
     ).fetchone()
 
@@ -297,10 +305,17 @@ def _current_joined_at(conn: sqlite3.Connection, member_id: int) -> Optional[str
     ).fetchone()
     if meta and meta["joined_at_override"]:
         return meta["joined_at_override"]
-    membership = _get_current_membership(conn, member_id)
-    if membership and membership["join_source"] == "bootstrap_seed":
-        return None
-    return membership["joined_at"] if membership else None
+    memberships = conn.execute(
+        "SELECT joined_at, join_source FROM clan_memberships "
+        "WHERE member_id = ? AND left_at IS NULL "
+        "ORDER BY joined_at DESC, membership_id DESC",
+        (member_id,),
+    ).fetchall()
+    trusted_sources = {"manual_record", "observed_join", "clan_api_snapshot"}
+    for membership in memberships:
+        if membership["join_source"] in trusted_sources:
+            return membership["joined_at"]
+    return None
 
 
 def _upsert_member_metadata(conn: sqlite3.Connection, member_id: int, **fields) -> None:

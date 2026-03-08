@@ -401,24 +401,6 @@ def list_recent_joins(days=30, conn=None):
         from storage.war import get_current_season_id
         cutoff = (datetime.now(timezone.utc).date() - timedelta(days=days))
         season_id = get_current_season_id(conn=conn)
-        active_member_count = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM members WHERE status = 'active'"
-        ).fetchone()["cnt"]
-        baseline_seed_date = None
-        baseline_row = conn.execute(
-            "SELECT cm.joined_at AS joined_at, COUNT(*) AS cnt "
-            "FROM clan_memberships cm "
-            "JOIN members m ON m.member_id = cm.member_id "
-            "WHERE m.status = 'active' AND cm.left_at IS NULL "
-            "AND cm.join_source IN ('bootstrap_seed', 'clan_api_snapshot', 'backfill') "
-            "GROUP BY cm.joined_at "
-            "ORDER BY cm.joined_at ASC "
-            "LIMIT 1"
-        ).fetchone()
-        if baseline_row:
-            threshold = max(3, int(active_member_count * 0.25 + 0.9999))
-            if (baseline_row["cnt"] or 0) >= threshold:
-                baseline_seed_date = (baseline_row["joined_at"] or "")[:10]
         rows = conn.execute(
             "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.role, cs.exp_level, cs.trophies, cs.clan_rank, "
             "cm.joined_at AS membership_joined_at, cm.join_source, md.joined_at_override "
@@ -437,7 +419,7 @@ def list_recent_joins(days=30, conn=None):
                 joined_date = override_joined
             elif membership_source in {"manual_record", "observed_join"}:
                 joined_date = membership_joined
-            elif membership_source == "clan_api_snapshot" and membership_joined and membership_joined[:10] != baseline_seed_date:
+            elif membership_source == "clan_api_snapshot":
                 joined_date = membership_joined
             else:
                 joined_date = None

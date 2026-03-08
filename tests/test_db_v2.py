@@ -1142,6 +1142,56 @@ def test_record_join_date_upgrades_existing_membership_to_observed_join():
         conn.close()
 
 
+def test_current_joined_at_ignores_bootstrap_and_backfill_duplicates():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#DEF456", "name": "Vijay", "role": "member", "clanRank": 1}],
+            conn=conn,
+        )
+        member_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#DEF456'"
+        ).fetchone()["member_id"]
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-03-07', NULL, 'backfill', NULL)",
+            (member_id,),
+        )
+        conn.commit()
+
+        assert db._current_joined_at(conn, member_id) is None
+    finally:
+        conn.close()
+
+
+def test_current_joined_at_prefers_trusted_clan_api_snapshot_over_backfill():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#NEW1", "name": "Ditika", "role": "member", "clanRank": 1}],
+            conn=conn,
+        )
+        member_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#NEW1'"
+        ).fetchone()["member_id"]
+        conn.execute(
+            "UPDATE clan_memberships SET join_source = 'bootstrap_seed', joined_at = '2026-03-07' WHERE member_id = ? AND left_at IS NULL",
+            (member_id,),
+        )
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-03-07', NULL, 'backfill', NULL)",
+            (member_id,),
+        )
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-03-07', NULL, 'clan_api_snapshot', NULL)",
+            (member_id,),
+        )
+        conn.commit()
+
+        assert db._current_joined_at(conn, member_id) == "2026-03-07"
+    finally:
+        conn.close()
+
+
 def test_recent_joins_excludes_initial_snapshot_cluster_but_keeps_later_real_additions():
     conn = db.get_connection(":memory:")
     try:
@@ -1150,9 +1200,6 @@ def test_recent_joins_excludes_initial_snapshot_cluster_but_keeps_later_real_add
             for i in range(1, 6)
         ]
         db.snapshot_members(baseline_members, conn=conn)
-        conn.execute(
-            "UPDATE clan_memberships SET joined_at = '2026-03-07' WHERE left_at IS NULL"
-        )
 
         # Simulate a later real addition observed after the baseline snapshot date.
         newcomer_id = conn.execute(
@@ -1180,6 +1227,40 @@ def test_recent_joins_excludes_initial_snapshot_cluster_but_keeps_later_real_add
 
         assert [item["tag"] for item in recent] == ["#NEW1"]
         assert recent[0]["joined_date"] == "2026-03-08"
+    finally:
+        conn.close()
+
+
+def test_recent_joins_excludes_bootstrap_and_backfill_rows_but_keeps_clan_api_snapshot_same_day():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#OLD1", "name": "Vijay", "role": "member", "clanRank": 1},
+                {"tag": "#NEW1", "name": "Ditika", "role": "member", "clanRank": 2},
+            ],
+            conn=conn,
+        )
+        old_id = conn.execute("SELECT member_id FROM members WHERE player_tag = '#OLD1'").fetchone()["member_id"]
+        new_id = conn.execute("SELECT member_id FROM members WHERE player_tag = '#NEW1'").fetchone()["member_id"]
+        conn.execute(
+            "UPDATE clan_memberships SET join_source = 'bootstrap_seed', joined_at = '2026-03-07' WHERE member_id IN (?, ?) AND left_at IS NULL",
+            (old_id, new_id),
+        )
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-03-07', NULL, 'backfill', NULL)",
+            (old_id,),
+        )
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-03-07', NULL, 'clan_api_snapshot', NULL)",
+            (new_id,),
+        )
+        conn.commit()
+
+        recent = db.list_recent_joins(days=30, conn=conn)
+
+        assert [item["tag"] for item in recent] == ["#NEW1"]
+        assert recent[0]["joined_date"] == "2026-03-07"
     finally:
         conn.close()
 
