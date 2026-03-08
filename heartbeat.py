@@ -102,37 +102,141 @@ def detect_role_changes(conn=None):
 
 
 def detect_war_day_transition(now=None, conn=None):
-    """Check if today is a war battle day transition.
-
-    Returns a signal if today is the first battle day (Thursday)
-    or last battle day (Sunday), to prompt relevant observations.
-    Only fires once per day per signal type.
-    """
+    """Detect API-native war phase transitions and notable phase states."""
     now = now or datetime.now()
     today = now.strftime("%Y-%m-%d")
-    weekday = now.weekday()
+    states = db.get_recent_live_war_states(limit=2, conn=conn)
+    if not states:
+        return []
+
+    current = states[0]
+    previous = states[1] if len(states) > 1 else None
     signals = []
 
-    if weekday == 3:  # Thursday
-        if not db.was_signal_sent("war_day_start", today, conn=conn):
+    if current.get("battle_phase_active") and (
+        previous is None or not previous.get("battle_phase_active")
+    ):
+        if not db.was_signal_sent("war_battle_phase_active", today, conn=conn):
             signals.append({
-                "type": "war_day_start",
-                "day": "Thursday",
-                "message": "Battle days begin! Time to use those war decks.",
+                "type": "war_battle_phase_active",
+                "season_id": current.get("season_id"),
+                "week": current.get("week"),
+                "section_index": current.get("section_index"),
+                "period_index": current.get("period_index"),
+                "period_type": current.get("period_type"),
+                "message": "Battle phase is live. Time to use those war decks.",
             })
-    elif weekday == 6:  # Sunday
-        if not db.was_signal_sent("war_day_end", today, conn=conn):
+    if current.get("practice_phase_active") and (
+        previous is None or not previous.get("practice_phase_active")
+    ):
+        if not db.was_signal_sent("war_practice_phase_active", today, conn=conn):
             signals.append({
-                "type": "war_day_end",
-                "day": "Sunday",
+                "type": "war_practice_phase_active",
+                "season_id": current.get("season_id"),
+                "week": current.get("week"),
+                "section_index": current.get("section_index"),
+                "period_index": current.get("period_index"),
+                "period_type": current.get("period_type"),
+                "message": "Practice phase is live. Set boat defenses and get ready for battle days.",
+            })
+    if current.get("final_battle_day_active"):
+        if not db.was_signal_sent("war_final_battle_day", today, conn=conn):
+            signals.append({
+                "type": "war_final_battle_day",
+                "season_id": current.get("season_id"),
+                "week": current.get("week"),
+                "section_index": current.get("section_index"),
+                "period_index": current.get("period_index"),
+                "period_type": current.get("period_type"),
                 "message": "Last day of battles this week. Use remaining decks!",
             })
-    elif cr_knowledge.is_war_battle_day(weekday):
-        if not db.was_signal_sent("war_battle_day", today, conn=conn):
+    if (
+        previous
+        and previous.get("battle_phase_active")
+        and not current.get("battle_phase_active")
+    ):
+        if not db.was_signal_sent("war_battle_days_complete", today, conn=conn):
             signals.append({
-                "type": "war_battle_day",
-                "day": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][weekday],
+                "type": "war_battle_days_complete",
+                "previous_season_id": previous.get("season_id"),
+                "season_id": current.get("season_id"),
+                "previous_week": previous.get("week"),
+                "week": current.get("week"),
+                "previous_period_type": previous.get("period_type"),
+                "period_type": current.get("period_type"),
+                "message": "Battle phase has ended. River Race has moved out of battle days.",
             })
+
+    return signals
+
+
+def detect_war_rollovers(conn=None):
+    """Detect live war week and season rollovers from consecutive snapshots."""
+    states = db.get_recent_live_war_states(limit=2, conn=conn)
+    if len(states) < 2:
+        return []
+
+    current, previous = states[0], states[1]
+    if current["war_state"] in (None, "notInWar") or previous["war_state"] in (None, "notInWar"):
+        return []
+
+    current_section_index = current.get("section_index")
+    previous_section_index = previous.get("section_index")
+    if current_section_index is None or previous_section_index is None:
+        return []
+    if current_section_index == previous_section_index:
+        return []
+
+    current_season_id = current.get("season_id")
+    previous_season_id = previous.get("season_id")
+
+    signals = [{
+        "type": "war_week_rollover",
+        "previous_section_index": previous_section_index,
+        "section_index": current_section_index,
+        "previous_week": previous.get("week"),
+        "week": current.get("week"),
+        "previous_season_id": previous_season_id,
+        "season_id": current_season_id,
+        "season_changed": current_season_id != previous_season_id,
+        "war_state": current["war_state"],
+        "period_type": current.get("period_type"),
+        "period_index": current.get("period_index"),
+        "observed_at": current["observed_at"],
+        "fame": current["fame"],
+        "repair_points": current["repair_points"],
+        "period_points": current["period_points"],
+        "clan_score": current["clan_score"],
+        "message": (
+            f"War week rollover detected: season {current_season_id if current_season_id is not None else '?'} "
+            f"week {current.get('week') if current.get('week') is not None else '?'} is now live."
+        ),
+    }]
+
+    if (
+        previous_season_id is not None
+        and current_season_id is not None
+        and current_season_id != previous_season_id
+    ) or current_section_index < previous_section_index:
+        signals.append({
+            "type": "war_season_rollover",
+            "previous_season_id": previous_season_id,
+            "season_id": current_season_id,
+            "previous_week": previous.get("week"),
+            "week": current.get("week"),
+            "war_state": current["war_state"],
+            "period_type": current.get("period_type"),
+            "period_index": current.get("period_index"),
+            "observed_at": current["observed_at"],
+            "fame": current["fame"],
+            "repair_points": current["repair_points"],
+            "period_points": current["period_points"],
+            "clan_score": current["clan_score"],
+            "message": (
+                f"War season rollover detected: season "
+                f"{current_season_id if current_season_id is not None else '?'} has started."
+            ),
+        })
 
     return signals
 
@@ -211,7 +315,8 @@ def detect_war_deck_usage(war_data, conn=None):
     today = now.strftime("%Y-%m-%d")
     if db.was_signal_sent("war_deck_usage", today, conn=conn):
         return []
-    if not cr_knowledge.is_war_battle_day(now.weekday()):
+    current_war = db.get_current_war_status(conn=conn)
+    if not current_war or not current_war.get("battle_phase_active"):
         return []
 
     if not war_data or war_data.get("state") in (None, "notInWar"):
@@ -467,6 +572,9 @@ def tick(conn=None):
 
         # War day awareness
         signals.extend(detect_war_day_transition(conn=conn))
+
+        # Live war week/season rollovers
+        signals.extend(detect_war_rollovers(conn=conn))
 
         # War deck usage — thank players who used 4 decks, nudge those who haven't
         signals.extend(detect_war_deck_usage(war, conn=conn))
