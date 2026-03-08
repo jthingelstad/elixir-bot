@@ -569,7 +569,7 @@ def _build_status_report():
         f"📊 Data counts: raw payloads {data.get('counts', {}).get('raw_payload_count', 0)}, battle facts {data.get('counts', {}).get('battle_fact_count', 0)}, messages {data.get('counts', {}).get('message_count', 0)}, discord links {data.get('counts', {}).get('discord_links', 0)}",
         f"📥 Raw ingest: latest {((data.get('latest_raw_payload') or {}).get('endpoint') or 'n/a')} @ {_fmt_relative((data.get('latest_raw_payload') or {}).get('fetched_at'))}; endpoints {endpoint_summary}",
         f"🎯 Player intel backlog: {data.get('stale_player_intel_targets', 0)} stale target(s)",
-        f"{_status_badge(api.get('last_ok'))} CR API: last {(api.get('last_endpoint') or 'n/a')} ({api.get('last_entity_key') or '-'}) {_fmt_relative(api.get('last_call_at'))}; status {api.get('last_status_code') or 'n/a'}; {'ok' if api.get('last_ok') else 'error' if api.get('last_ok') is not None else 'n/a'}; {api.get('last_duration_ms') or 'n/a'}ms; total {api.get('call_count', 0)} calls / {api.get('error_count', 0)} errors",
+        f"{_status_badge(api.get('last_ok'))} CR API: last {(api.get('last_endpoint') or 'n/a')} ({api.get('last_entity_key') or '-'}) {_fmt_relative(api.get('last_call_at'))}; status {api.get('last_status_code') or 'n/a'}; {'ok' if api.get('last_ok') else 'error' if api.get('last_ok') is not None else 'n/a'}; {api.get('last_duration_ms') or 'n/a'}ms; total {api.get('call_count', 0)} calls / {api.get('error_count', 0)} errors / {api.get('consecutive_error_count', 0)} consecutive failures",
         f"{_status_badge(openai.get('last_ok'))} OpenAI: last {(openai.get('last_workflow') or 'n/a')} via {(openai.get('last_model') or 'n/a')} {_fmt_relative(openai.get('last_call_at'))}; {'ok' if openai.get('last_ok') else 'error' if openai.get('last_ok') is not None else 'n/a'}; {openai.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {openai.get('last_prompt_tokens') or 'n/a'}/{openai.get('last_completion_tokens') or 'n/a'}/{openai.get('last_total_tokens') or 'n/a'}; total {openai.get('call_count', 0)} calls / {openai.get('error_count', 0)} errors",
         f"🔐 Env: Discord {discord_badge}, OpenAI {openai_env_badge}, CR {cr_env_badge}",
     ]
@@ -908,7 +908,12 @@ def _clanops_cooldown_elapsed(channel_id):
 
 
 async def _load_live_clan_context():
-    clan = await asyncio.to_thread(cr_api.get_clan)
+    try:
+        clan = await asyncio.to_thread(cr_api.get_clan)
+        _app._clear_cr_api_failure_alert_if_recovered()
+    except Exception:
+        await _app._maybe_alert_cr_api_failure("live clan refresh")
+        raise
     member_list = clan.get("memberList") or []
     if member_list:
         previous_roster = await asyncio.to_thread(db.get_active_roster_map)
@@ -937,6 +942,7 @@ async def _load_live_clan_context():
     try:
         war = await asyncio.to_thread(cr_api.get_current_war)
     except Exception:
+        await _app._maybe_alert_cr_api_failure("live war refresh")
         war = {}
     if war:
         await asyncio.to_thread(db.upsert_war_current_state, war)

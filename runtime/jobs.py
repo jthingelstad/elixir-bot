@@ -212,6 +212,10 @@ async def _heartbeat_tick():
     try:
         # Run the heartbeat tick — fetches data, snapshots, detects signals
         tick_result = heartbeat.tick()
+        if tick_result.clan.get("memberList"):
+            _app._clear_cr_api_failure_alert_if_recovered()
+        else:
+            await _app._maybe_alert_cr_api_failure("heartbeat")
         signals = tick_result.signals
 
         if not signals:
@@ -333,8 +337,10 @@ async def _site_data_refresh():
     try:
         try:
             clan = cr_api.get_clan()
+            _app._clear_cr_api_failure_alert_if_recovered()
         except Exception:
             log.error("Site data refresh: CR API failed")
+            await _app._maybe_alert_cr_api_failure("site data refresh")
             clan = {}
 
         if not clan.get("memberList"):
@@ -362,11 +368,14 @@ async def _site_content_cycle():
     try:
         try:
             clan = cr_api.get_clan()
+            _app._clear_cr_api_failure_alert_if_recovered()
         except Exception:
+            await _app._maybe_alert_cr_api_failure("site content cycle")
             clan = {}
         try:
             war = cr_api.get_current_war()
         except Exception:
+            await _app._maybe_alert_cr_api_failure("site content war refresh")
             war = {}
 
         # Build and write data (second daily refresh)
@@ -432,8 +441,10 @@ async def _player_intel_refresh():
     runtime_status.mark_job_start("player_intel_refresh")
     try:
         clan = await asyncio.to_thread(cr_api.get_clan)
+        _app._clear_cr_api_failure_alert_if_recovered()
     except Exception as e:
         log.error("Player intel refresh: clan fetch failed: %s", e)
+        await _app._maybe_alert_cr_api_failure("player intel refresh")
         runtime_status.mark_job_failure("player_intel_refresh", f"clan fetch failed: {e}")
         return
 
@@ -449,6 +460,7 @@ async def _player_intel_refresh():
         if war:
             await asyncio.to_thread(db.upsert_war_current_state, war)
     except Exception:
+        await _app._maybe_alert_cr_api_failure("player intel war refresh")
         war = {}
 
     targets = await asyncio.to_thread(

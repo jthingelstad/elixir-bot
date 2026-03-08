@@ -20,6 +20,7 @@ _API_STATUS = {
     "call_count": 0,
     "success_count": 0,
     "error_count": 0,
+    "consecutive_error_count": 0,
     "last_call_at": None,
     "last_endpoint": None,
     "last_entity_key": None,
@@ -97,8 +98,10 @@ def record_api_call(endpoint: str, entity_key: str | None = None, *, ok: bool, s
         _API_STATUS["call_count"] += 1
         if ok:
             _API_STATUS["success_count"] += 1
+            _API_STATUS["consecutive_error_count"] = 0
         else:
             _API_STATUS["error_count"] += 1
+            _API_STATUS["consecutive_error_count"] += 1
         _API_STATUS["last_call_at"] = now
         _API_STATUS["last_endpoint"] = endpoint
         _API_STATUS["last_entity_key"] = entity_key

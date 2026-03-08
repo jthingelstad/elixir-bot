@@ -306,7 +306,7 @@ def get_member_profile(tag, conn=None):
             "pp.fetched_at AS player_profile_at, pp.wins AS career_wins, pp.losses AS career_losses, "
             "pp.battle_count AS career_battle_count, pp.total_donations AS career_total_donations, "
             "pp.war_day_wins, pp.challenge_max_wins, pp.three_crown_wins, pp.current_favourite_card_name, "
-            "dl.discord_user_id, dl.discord_username, dl.discord_display_name "
+            "dl.discord_user_id, dl.discord_username, dl.discord_display_name, du.last_seen_at AS discord_last_seen_at "
             "FROM members m "
             "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
             "LEFT JOIN member_metadata md ON md.member_id = m.member_id "
@@ -316,6 +316,7 @@ def get_member_profile(tag, conn=None):
             "  ORDER BY p2.fetched_at DESC, p2.snapshot_id DESC LIMIT 1"
             ") "
             "LEFT JOIN discord_links dl ON dl.member_id = m.member_id AND dl.is_primary = 1 "
+            "LEFT JOIN discord_users du ON du.discord_user_id = dl.discord_user_id "
             "WHERE m.player_tag = ?",
             (_canon_tag(tag),),
         ).fetchone()

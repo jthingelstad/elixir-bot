@@ -1,15 +1,18 @@
 # Elixir Bot
 
-Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py + OpenAI GPT-4o.
+Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py plus OpenAI model routing:
+- chat workflows default to `gpt-4.1-mini`
+- site/content workflows default to `gpt-5.2`
+- promotion workflows default to `gpt-5.2`
 
 `AGENTS.md` is the single source of truth for repository-specific instructions and architecture notes.
 
 ## Project Structure
 
 - `elixir.py` — Main bot: Discord events, APScheduler, channel routing
-- `elixir_agent.py` — LLM engine: observation + channel replies + site content generation via GPT-4o
+- `elixir_agent.py` — Stable public LLM entrypoint; routes observation, channel replies, and site generation through the `agent/` package
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log)
-- `heartbeat.py` — Hourly signal detection (milestones, joins/leaves, war transitions)
+- `heartbeat.py` — API-driven signal detection for clan, war, and progression events
 - `db/` — SQLite V2 data store package: identity, memory, current state, analytics, war, and raw payload capture
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
@@ -69,6 +72,9 @@ Migrations run automatically in `get_connection()`. This repo currently treats V
 Current migrations:
 - `_migration_0` — V2 baseline schema
 - `_migration_1` — prompt failure logging table for channel/reception LLM failures
+- `_migration_2` — generated roster profile fields in `member_metadata`
+- `_migration_3` — promote trusted join dates into metadata
+- `_migration_4` — rename `member_metadata.joined_at_override` to `joined_at`
 
 ## Site Content System
 
@@ -84,8 +90,11 @@ Filenames are camelCase (not hyphenated) because 11ty uses the filename stem as 
 
 ### Scheduled Jobs
 
+- **Every 47 minutes with up to 300s jitter, active 7:00 AM-10:00 PM Chicago** — `_heartbeat_tick()`: Observe signals, post noteworthy updates, and keep war/clan awareness current
 - **6:00 PM Chicago** — `_site_content_cycle()`: Refresh CR data, build roster + clan data, generate LLM bios/messages, commit/push
 - **Every 6 hours by default** — `_player_intel_refresh()`: Refresh a stale subset of active members' player profiles and battle logs into the V2 analytics tables, and emit progression signals like level-ups and card milestones
+- **Friday 7:00 PM Chicago** — `_clanops_weekly_review()`: Post the weekly leader review in the clanops channel
+- **Friday 9:00 AM Chicago** — `_promotion_content_cycle()`: Generate and publish the shared website + `#promote-the-clan` promotion payload
 
 ## Architecture: Prompts vs Code
 
@@ -95,7 +104,7 @@ Principle: **Prompts define what Elixir says and why. Code defines when, where, 
 
 - `PURPOSE.md` — Elixir's identity, voice, personality. Portable across any clan.
 - `GAME.md` — Clash Royale mechanics (game-generic, rarely changes).
-- `CLAN.md` — Clan-specific identity, rules, history, and configurable thresholds (trophy milestones, inactivity, promotion criteria, donation highlights, clan lore).
+- `CLAN.md` — Clan-specific identity, rules, history, and configurable thresholds (inactivity, promotion criteria, donation highlights, clan lore).
 - `DISCORD.md` — Discord server structure, channel behaviors, config IDs.
 
 ### What stays in code
