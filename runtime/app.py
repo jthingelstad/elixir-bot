@@ -21,6 +21,7 @@ import site_content
 import elixir_agent
 import heartbeat
 import prompts
+from runtime.admin import dispatch_admin_command, parse_admin_command
 from runtime import status as runtime_status
 
 load_dotenv()
@@ -577,6 +578,58 @@ async def on_message(message):
             display_name=message.author.display_name,
             workflow=workflow,
             event_type="top_war_contributors_report",
+        )
+        return
+
+    admin_command = parse_admin_command(raw_question, require_prefix=True) if role == "clanops" else None
+    if admin_command:
+        route = f"clanops_admin_{admin_command['command'].replace('-', '_')}"
+        if admin_command.get("preview"):
+            route += "_preview"
+        log.info(
+            "message_route route=%s channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            route,
+            message.channel.id,
+            message.author.id,
+            mentioned,
+            role,
+            workflow,
+            raw_question,
+            message.content,
+        )
+        admin_content = await dispatch_admin_command(
+            admin_command["command"],
+            preview=admin_command.get("preview", False),
+            short=admin_command.get("short", False),
+        )
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "user",
+            raw_question,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow="clanops",
+            discord_message_id=message.id,
+        )
+        await _reply_text(message, admin_content)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "assistant",
+            admin_content,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow="clanops",
+            event_type=route,
         )
         return
 

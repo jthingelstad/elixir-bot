@@ -37,27 +37,12 @@ load_dotenv()
 import prompts
 import elixir
 import site_content
+from runtime import admin as admin_commands
 from runtime import jobs as runtime_jobs
 from runtime.app import TOKEN
 
 
-COMMAND_HELP = {
-    "help": "Show this operator help page.",
-    "status": "Show Elixir runtime health, last jobs, and current telemetry.",
-    "schedule": "Show the configured job cadence and next scheduler runs.",
-    "clan-status": "Fetch live clan/war data and print the operational clan status report.",
-    "heartbeat": "Force one heartbeat cycle now.",
-    "site-data": "Force the site data refresh job now.",
-    "site-content": "Force the full site content cycle now.",
-    "site-publish": "Commit and push the current Elixir-owned website files now.",
-    "home-message": "Regenerate only the website home message.",
-    "members-message": "Regenerate only the website members message.",
-    "roster-bios": "Regenerate only the website roster intro and member bios.",
-    "promote-content": "Regenerate only the website promotion payload locally.",
-    "promotion": "Force the promotion content sync now. This updates the website and #promote-the-clan together.",
-    "player-intel": "Force the player intel refresh job now.",
-    "clanops-review": "Force the weekly clanops review post now.",
-}
+COMMAND_HELP = admin_commands.COMMAND_HELP
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -99,29 +84,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _render_help(parser: argparse.ArgumentParser) -> str:
-    lines = [
-        "**Elixir Do**",
-        "Run Elixir jobs and reports on demand.",
-        "",
-        "Commands:",
-    ]
-    for name, description in COMMAND_HELP.items():
-        lines.append(f"- `{name}`: {description}")
-    lines.extend([
-        "",
-        "Preview mode:",
-        "- Add `--preview` to job commands to suppress Discord sends and site git pushes.",
-        "- Preview mode still runs the job logic and will print would-be Discord posts.",
-        "",
-        "Examples:",
-        "- `venv/bin/python scripts/elixir_do.py promotion --preview`",
-        "- `venv/bin/python scripts/elixir_do.py heartbeat --preview`",
-        "- `venv/bin/python scripts/elixir_do.py site-content`",
-        "",
-        "Built-in argparse help:",
-        parser.format_help().rstrip(),
-    ])
-    return "\n".join(lines)
+    return (
+        admin_commands.render_admin_help(
+            channel_prefix="do",
+            cli_prefix="venv/bin/python scripts/elixir_do.py",
+        )
+        + "\n\nBuilt-in argparse help:\n"
+        + parser.format_help().rstrip()
+    )
 
 
 class _PreviewChannel:
@@ -306,31 +276,12 @@ async def _dispatch(args, parser: argparse.ArgumentParser) -> int:
     if command == "help":
         print(_render_help(parser))
         return 0
-    if command == "status":
-        print(elixir._build_status_report())
-        return 0
-    if command == "schedule":
-        print(elixir._build_schedule_report())
-        return 0
-    if command == "clan-status":
-        await _print_clan_status(short=args.short)
-        return 0
-    if command == "site-publish":
-        await _run_site_publish(preview=args.preview)
-        return 0
-    if command == "home-message":
-        await _run_home_message(preview=args.preview)
-        return 0
-    if command == "members-message":
-        await _run_members_message(preview=args.preview)
-        return 0
-    if command == "roster-bios":
-        await _run_roster_bios(preview=args.preview)
-        return 0
-    if command == "promote-content":
-        await _run_promote_content(preview=args.preview)
-        return 0
-    await _run_job(command, preview=getattr(args, "preview", False))
+    text = await admin_commands.dispatch_admin_command(
+        command,
+        preview=getattr(args, "preview", False),
+        short=getattr(args, "short", False),
+    )
+    print(text)
     return 0
 
 
