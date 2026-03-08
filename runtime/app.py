@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -21,7 +22,7 @@ import site_content
 import elixir_agent
 import heartbeat
 import prompts
-from runtime.admin import dispatch_admin_command, parse_admin_command
+from runtime.admin import dispatch_admin_command, parse_admin_command, render_admin_help
 from runtime import status as runtime_status
 
 load_dotenv()
@@ -35,6 +36,7 @@ _dc = prompts.discord_config()
 MEMBER_ROLE_ID = _dc.get("member_role", 0)
 LEADER_ROLE_ID = _dc.get("leader_role", 0)
 BOT_ROLE_ID = _dc.get("bot_role", 0)
+GUILD_ID = int(_dc.get("guild_id", 0) or 0)
 POAPKINGS_REPO = os.path.expanduser(os.getenv("POAPKINGS_REPO_PATH", "../poapkings.com"))
 CLANOPS_PROACTIVE_COOLDOWN_SECONDS = int(os.getenv("CLANOPS_PROACTIVE_COOLDOWN_SECONDS", "900"))
 CHANNEL_CONVERSATION_LIMIT = 20
@@ -52,12 +54,220 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 scheduler = AsyncIOScheduler(timezone=CHICAGO)
+APP_GUILD = discord.Object(id=GUILD_ID) if GUILD_ID else None
+SLASH_COMMANDS_SYNCED = False
 
 
 def _format_hour_label(hour: int) -> str:
     suffix = "am" if hour < 12 else "pm"
     display_hour = hour % 12 or 12
     return f"{display_hour}{suffix}"
+
+
+def _member_role_grant_status() -> dict:
+    status = {
+        "configured": bool(MEMBER_ROLE_ID),
+        "guild_found": False,
+        "member_role_found": False,
+        "bot_role_found": False,
+        "manage_roles": None,
+        "member_role_position": None,
+        "bot_top_role_position": None,
+        "ok": False,
+        "reason": "member role not configured",
+    }
+    if not MEMBER_ROLE_ID:
+        return status
+    guild = bot.get_guild(GUILD_ID) if GUILD_ID else None
+    if guild is None:
+        status["reason"] = "guild not cached"
+        return status
+    status["guild_found"] = True
+    member_role = guild.get_role(MEMBER_ROLE_ID)
+    bot_role = guild.get_role(BOT_ROLE_ID) if BOT_ROLE_ID else None
+    me = guild.me
+    if member_role is None:
+        status["reason"] = "member role not found"
+        return status
+    status["member_role_found"] = True
+    status["member_role_position"] = member_role.position
+    if bot_role is not None:
+        status["bot_role_found"] = True
+    if me is None:
+        status["reason"] = "bot member not cached"
+        return status
+    status["manage_roles"] = me.guild_permissions.manage_roles
+    status["bot_top_role_position"] = getattr(me.top_role, "position", None)
+    if not status["manage_roles"]:
+        status["reason"] = "Manage Roles permission missing"
+        return status
+    if getattr(me.top_role, "position", -1) <= member_role.position:
+        status["reason"] = "bot role must be above member role"
+        return status
+    status["ok"] = True
+    status["reason"] = "ok"
+    return status
+
+
+def _has_leader_role(member) -> bool:
+    if not LEADER_ROLE_ID:
+        return True
+    return any(getattr(role, "id", None) == LEADER_ROLE_ID for role in getattr(member, "roles", []))
+
+
+def _is_clanops_channel(channel) -> bool:
+    channel_config = _get_channel_behavior(getattr(channel, "id", 0))
+    return bool(channel_config and channel_config.get("role") == "clanops")
+
+
+def _chunk_discord_text(text: str, limit: int = 2000) -> list[str]:
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+    return [text[i:i + (limit - 10)] for i in range(0, len(text), limit - 10)]
+
+
+async def _send_interaction_text(interaction: discord.Interaction, content: str, *, ephemeral: bool = True):
+    chunks = _chunk_discord_text(content)
+    if not chunks:
+        chunks = ["_No content._"]
+    if not interaction.response.is_done():
+        await interaction.response.send_message(chunks[0], ephemeral=ephemeral)
+        start = 1
+    else:
+        await interaction.followup.send(chunks[0], ephemeral=ephemeral)
+        start = 1
+    for chunk in chunks[start:]:
+        await interaction.followup.send(chunk, ephemeral=ephemeral)
+
+
+async def _save_interaction_exchange(
+    interaction: discord.Interaction,
+    *,
+    command_text: str,
+    response_text: str,
+    workflow: str = "clanops",
+    event_type: str | None = None,
+):
+    if not interaction.channel or not interaction.user:
+        return
+    scope = _channel_conversation_scope(interaction.channel, interaction.user.id)
+    await asyncio.to_thread(
+        db.save_message,
+        scope,
+        "user",
+        command_text,
+        channel_id=interaction.channel.id,
+        channel_name=getattr(interaction.channel, "name", None),
+        channel_kind=str(getattr(interaction.channel, "type", "unknown")),
+        discord_user_id=interaction.user.id,
+        username=getattr(interaction.user, "name", None),
+        display_name=getattr(interaction.user, "display_name", None),
+        workflow=workflow,
+    )
+    await asyncio.to_thread(
+        db.save_message,
+        scope,
+        "assistant",
+        response_text,
+        channel_id=interaction.channel.id,
+        channel_name=getattr(interaction.channel, "name", None),
+        channel_kind=str(getattr(interaction.channel, "type", "unknown")),
+        discord_user_id=interaction.user.id,
+        username=getattr(interaction.user, "name", None),
+        display_name=getattr(interaction.user, "display_name", None),
+        workflow=workflow,
+        event_type=event_type,
+    )
+
+
+async def _validate_admin_interaction(
+    interaction: discord.Interaction,
+    *,
+    command_name: str,
+    write: bool = False,
+) -> bool:
+    if not _is_clanops_channel(interaction.channel):
+        await _send_interaction_text(
+            interaction,
+            "Use `/elixir ...` in `#clanops`.",
+            ephemeral=True,
+        )
+        return False
+    if write and not _has_leader_role(interaction.user):
+        await _send_interaction_text(
+            interaction,
+            "Leader role required for write commands.",
+            ephemeral=True,
+        )
+        return False
+    log.info(
+        "slash_command command=%s channel_id=%s author_id=%s write=%s",
+        command_name,
+        getattr(interaction.channel, "id", None),
+        getattr(interaction.user, "id", None),
+        write,
+    )
+    return True
+
+
+async def _run_admin_interaction(
+    interaction: discord.Interaction,
+    *,
+    command_name: str,
+    preview: bool = False,
+    short: bool = False,
+    args: dict | None = None,
+    event_type: str | None = None,
+    write: bool = False,
+):
+    if not await _validate_admin_interaction(interaction, command_name=command_name, write=write):
+        return
+    content = await dispatch_admin_command(
+        command_name,
+        preview=preview,
+        short=short,
+        args=args or {},
+    )
+    await _save_interaction_exchange(
+        interaction,
+        command_text=f"/elixir {command_name}",
+        response_text=content,
+        event_type=event_type or f"slash_{command_name.replace('-', '_')}",
+    )
+    await _send_interaction_text(interaction, content, ephemeral=True)
+
+
+async def _member_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    del interaction
+    query = (current or "").strip()
+    if query:
+        members = await asyncio.to_thread(db.resolve_member, query, "active", 25)
+    else:
+        members = await asyncio.to_thread(db.list_members, "active")
+        members = members[:25]
+    choices: list[app_commands.Choice[str]] = []
+    seen: set[str] = set()
+    for member in members:
+        tag = member.get("player_tag")
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        name = member.get("current_name") or member.get("member_name") or tag
+        label = f"{name} ({tag})"
+        choices.append(app_commands.Choice(name=label[:100], value=tag))
+        if len(choices) >= 25:
+            break
+    return choices
+
+
+ELIXIR_COMMANDS = app_commands.Group(name="elixir", description="Elixir clanops commands")
+ELIXIR_MEMBER_COMMANDS = app_commands.Group(name="member", description="Member lookup and metadata commands")
+ELIXIR_JOB_COMMANDS = app_commands.Group(name="jobs", description="Operational job commands")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -160,10 +370,358 @@ for _module in (_helpers_module, _jobs_module):
 
 __all__ = [name for name in globals() if not name.startswith("__")]
 
+
+@ELIXIR_COMMANDS.command(name="help", description="Show Elixir clanops help.")
+async def slash_help(interaction: discord.Interaction):
+    if not await _validate_admin_interaction(interaction, command_name="help", write=False):
+        return
+    content = render_admin_help()
+    await _save_interaction_exchange(
+        interaction,
+        command_text="/elixir help",
+        response_text=content,
+        event_type="slash_help",
+    )
+    await _send_interaction_text(interaction, content, ephemeral=True)
+
+
+@ELIXIR_COMMANDS.command(name="status", description="Show Elixir runtime health and telemetry.")
+async def slash_status(interaction: discord.Interaction):
+    await _run_admin_interaction(interaction, command_name="status", event_type="status_report")
+
+
+@ELIXIR_COMMANDS.command(name="schedule", description="Show scheduled jobs and next runs.")
+async def slash_schedule(interaction: discord.Interaction):
+    await _run_admin_interaction(interaction, command_name="schedule", event_type="schedule_report")
+
+
+@ELIXIR_COMMANDS.command(name="clan-status", description="Show the operational clan status report.")
+@app_commands.describe(short="Return the compact clan status variant.")
+async def slash_clan_status(interaction: discord.Interaction, short: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="clan-status",
+        short=short,
+        event_type="clan_status_short_report" if short else "clan_status_report",
+    )
+
+
+@ELIXIR_COMMANDS.command(name="clan-list", description="List active clan members with exact names and tags.")
+async def slash_clan_list(interaction: discord.Interaction):
+    await _run_admin_interaction(interaction, command_name="clan-list", event_type="clan_list_report")
+
+
+@ELIXIR_COMMANDS.command(name="profile", description="Show the stored member profile and metadata.")
+@app_commands.describe(member="Member name or tag.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_profile(interaction: discord.Interaction, member: str):
+    await _run_admin_interaction(
+        interaction,
+        command_name="profile",
+        args={"member": member},
+        event_type="member_profile_report",
+    )
+
+
+@ELIXIR_MEMBER_COMMANDS.command(name="set-join-date", description="Set a member join date.")
+@app_commands.describe(member="Member name or tag.", date="Join date in YYYY-MM-DD format.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_set_join_date(interaction: discord.Interaction, member: str, date: str):
+    await _run_admin_interaction(
+        interaction,
+        command_name="set-join-date",
+        args={"member": member, "date": date},
+        event_type="clanops_admin_set_join_date",
+        write=True,
+    )
+
+
+@ELIXIR_MEMBER_COMMANDS.command(name="clear-join-date", description="Clear a member join date.")
+@app_commands.describe(member="Member name or tag.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_clear_join_date(interaction: discord.Interaction, member: str):
+    await _run_admin_interaction(
+        interaction,
+        command_name="clear-join-date",
+        args={"member": member},
+        event_type="clanops_admin_clear_join_date",
+        write=True,
+    )
+
+
+@ELIXIR_MEMBER_COMMANDS.command(name="set-birthday", description="Set a member birthday.")
+@app_commands.describe(member="Member name or tag.", month="Birthday month.", day="Birthday day.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_set_birthday(interaction: discord.Interaction, member: str, month: int, day: int):
+    await _run_admin_interaction(
+        interaction,
+        command_name="set-birthday",
+        args={"member": member, "month": str(month), "day": str(day)},
+        event_type="clanops_admin_set_birthday",
+        write=True,
+    )
+
+
+@ELIXIR_MEMBER_COMMANDS.command(name="clear-birthday", description="Clear a member birthday.")
+@app_commands.describe(member="Member name or tag.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_clear_birthday(interaction: discord.Interaction, member: str):
+    await _run_admin_interaction(
+        interaction,
+        command_name="clear-birthday",
+        args={"member": member},
+        event_type="clanops_admin_clear_birthday",
+        write=True,
+    )
+
+
+@ELIXIR_MEMBER_COMMANDS.command(name="set-profile-url", description="Set a member profile URL.")
+@app_commands.describe(member="Member name or tag.", url="Profile URL.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_set_profile_url(interaction: discord.Interaction, member: str, url: str):
+    await _run_admin_interaction(
+        interaction,
+        command_name="set-profile-url",
+        args={"member": member, "url": url},
+        event_type="clanops_admin_set_profile_url",
+        write=True,
+    )
+
+
+@ELIXIR_MEMBER_COMMANDS.command(name="clear-profile-url", description="Clear a member profile URL.")
+@app_commands.describe(member="Member name or tag.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_clear_profile_url(interaction: discord.Interaction, member: str):
+    await _run_admin_interaction(
+        interaction,
+        command_name="clear-profile-url",
+        args={"member": member},
+        event_type="clanops_admin_clear_profile_url",
+        write=True,
+    )
+
+
+@ELIXIR_MEMBER_COMMANDS.command(name="set-poap-address", description="Set a member POAP address.")
+@app_commands.describe(member="Member name or tag.", poap_address="Wallet or POAP address.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_set_poap_address(interaction: discord.Interaction, member: str, poap_address: str):
+    await _run_admin_interaction(
+        interaction,
+        command_name="set-poap-address",
+        args={"member": member, "poap_address": poap_address},
+        event_type="clanops_admin_set_poap_address",
+        write=True,
+    )
+
+
+@ELIXIR_MEMBER_COMMANDS.command(name="clear-poap-address", description="Clear a member POAP address.")
+@app_commands.describe(member="Member name or tag.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_clear_poap_address(interaction: discord.Interaction, member: str):
+    await _run_admin_interaction(
+        interaction,
+        command_name="clear-poap-address",
+        args={"member": member},
+        event_type="clanops_admin_clear_poap_address",
+        write=True,
+    )
+
+
+@ELIXIR_MEMBER_COMMANDS.command(name="set-note", description="Set a member note.")
+@app_commands.describe(member="Member name or tag.", note="Leader note text.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_set_note(interaction: discord.Interaction, member: str, note: str):
+    await _run_admin_interaction(
+        interaction,
+        command_name="set-note",
+        args={"member": member, "note": note},
+        event_type="clanops_admin_set_note",
+        write=True,
+    )
+
+
+@ELIXIR_MEMBER_COMMANDS.command(name="clear-note", description="Clear a member note.")
+@app_commands.describe(member="Member name or tag.")
+@app_commands.autocomplete(member=_member_autocomplete)
+async def slash_clear_note(interaction: discord.Interaction, member: str):
+    await _run_admin_interaction(
+        interaction,
+        command_name="clear-note",
+        args={"member": member},
+        event_type="clanops_admin_clear_note",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="heartbeat", description="Force one heartbeat cycle now.")
+@app_commands.describe(preview="Suppress Discord sends and site pushes.")
+async def slash_heartbeat(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="heartbeat",
+        preview=preview,
+        event_type="clanops_admin_heartbeat_preview" if preview else "clanops_admin_heartbeat",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="site-data", description="Force the site data refresh job now.")
+@app_commands.describe(preview="Suppress Discord sends and site pushes.")
+async def slash_site_data(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="site-data",
+        preview=preview,
+        event_type="clanops_admin_site_data_preview" if preview else "clanops_admin_site_data",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="site-content", description="Force the full site content cycle now.")
+@app_commands.describe(preview="Suppress Discord sends and site pushes.")
+async def slash_site_content(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="site-content",
+        preview=preview,
+        event_type="clanops_admin_site_content_preview" if preview else "clanops_admin_site_content",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="site-publish", description="Commit and push current Elixir-owned site files.")
+@app_commands.describe(preview="Suppress site push.")
+async def slash_site_publish(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="site-publish",
+        preview=preview,
+        event_type="clanops_admin_site_publish_preview" if preview else "clanops_admin_site_publish",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="home-message", description="Regenerate only the website home message.")
+@app_commands.describe(preview="Suppress site push.")
+async def slash_home_message(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="home-message",
+        preview=preview,
+        event_type="clanops_admin_home_message_preview" if preview else "clanops_admin_home_message",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="members-message", description="Regenerate only the website members message.")
+@app_commands.describe(preview="Suppress site push.")
+async def slash_members_message(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="members-message",
+        preview=preview,
+        event_type="clanops_admin_members_message_preview" if preview else "clanops_admin_members_message",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="roster-bios", description="Regenerate only roster intro and member bios.")
+@app_commands.describe(preview="Suppress site push.")
+async def slash_roster_bios(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="roster-bios",
+        preview=preview,
+        event_type="clanops_admin_roster_bios_preview" if preview else "clanops_admin_roster_bios",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="promote-content", description="Regenerate only the promotion payload locally.")
+@app_commands.describe(preview="Suppress site push.")
+async def slash_promote_content(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="promote-content",
+        preview=preview,
+        event_type="clanops_admin_promote_content_preview" if preview else "clanops_admin_promote_content",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="promotion", description="Force the promotion sync now.")
+@app_commands.describe(preview="Suppress Discord sends and site pushes.")
+async def slash_promotion(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="promotion",
+        preview=preview,
+        event_type="clanops_admin_promotion_preview" if preview else "clanops_admin_promotion",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="player-intel", description="Force the player intel refresh job now.")
+@app_commands.describe(preview="Suppress Discord sends and site pushes.")
+async def slash_player_intel(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="player-intel",
+        preview=preview,
+        event_type="clanops_admin_player_intel_preview" if preview else "clanops_admin_player_intel",
+        write=True,
+    )
+
+
+@ELIXIR_JOB_COMMANDS.command(name="clanops-review", description="Force the weekly clanops review post now.")
+@app_commands.describe(preview="Suppress Discord sends and site pushes.")
+async def slash_clanops_review(interaction: discord.Interaction, preview: bool = False):
+    await _run_admin_interaction(
+        interaction,
+        command_name="clanops-review",
+        preview=preview,
+        event_type="clanops_admin_clanops_review_preview" if preview else "clanops_admin_clanops_review",
+        write=True,
+    )
+
+
+ELIXIR_COMMANDS.add_command(ELIXIR_MEMBER_COMMANDS)
+ELIXIR_COMMANDS.add_command(ELIXIR_JOB_COMMANDS)
+
+
+try:
+    if APP_GUILD is not None:
+        bot.tree.add_command(ELIXIR_COMMANDS, guild=APP_GUILD)
+    else:
+        bot.tree.add_command(ELIXIR_COMMANDS)
+except Exception:
+    pass
+
 @bot.event
 async def on_ready():
+    global SLASH_COMMANDS_SYNCED
     log.info("Elixir online as %s", bot.user)
     prompts.ensure_valid_discord_channel_config()
+    role_status = _member_role_grant_status()
+    if role_status["configured"] and not role_status["ok"]:
+        log.warning(
+            "Member role auto-grant unavailable: %s (manage_roles=%s, bot_top_role_position=%s, member_role_position=%s)",
+            role_status["reason"],
+            role_status["manage_roles"],
+            role_status["bot_top_role_position"],
+            role_status["member_role_position"],
+        )
+    if not SLASH_COMMANDS_SYNCED:
+        try:
+            if APP_GUILD is not None:
+                await bot.tree.sync(guild=APP_GUILD)
+                log.info("Synced /elixir commands to guild %s", GUILD_ID)
+            else:
+                await bot.tree.sync()
+                log.info("Synced global /elixir commands")
+            SLASH_COMMANDS_SYNCED = True
+        except Exception as exc:
+            log.error("Slash command sync failed: %s", exc)
     if not scheduler.running:
         # Single heartbeat job replaces both the 4x/day observations and hourly member check
         scheduler.add_job(
@@ -328,6 +886,25 @@ async def on_member_update(before, after):
         await channel.send(msg or f"Welcome aboard, {cr_name}! You now have full access.")
 
 
+def _is_legacy_clanops_command_text(text: str) -> bool:
+    return bool(
+        _is_help_request(text)
+        or _is_status_request(text)
+        or _is_schedule_request(text)
+        or _clan_status_mode(text)
+        or _is_clan_list_request(text)
+        or _extract_profile_target(text)
+        or parse_admin_command(text, require_prefix=True)
+    )
+
+
+def _build_clanops_command_hint() -> str:
+    return (
+        "Use `/elixir ...` for private clanops commands or mention me with `@Elixir do ...` "
+        "for public room commands."
+    )
+
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
@@ -360,7 +937,7 @@ async def on_message(message):
 
     clan_status_mode = _clan_status_mode(raw_question)
 
-    if role in {"clanops", "interactive"} and _is_help_request(raw_question):
+    if role == "interactive" and mentioned and _is_help_request(raw_question):
         log.info(
             "message_route route=help channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
             message.channel.id,
@@ -404,6 +981,40 @@ async def on_message(message):
             event_type=event_type,
         )
         return
+
+    if role == "clanops" and _is_legacy_clanops_command_text(raw_question):
+        if not mentioned or not parse_admin_command(raw_question, require_prefix=True):
+            hint_content = _build_clanops_command_hint()
+            await asyncio.to_thread(
+                db.save_message,
+                conversation_scope,
+                "user",
+                raw_question,
+                channel_id=message.channel.id,
+                channel_name=getattr(message.channel, "name", None),
+                channel_kind=str(message.channel.type),
+                discord_user_id=message.author.id,
+                username=message.author.name,
+                display_name=message.author.display_name,
+                workflow="clanops",
+                discord_message_id=message.id,
+            )
+            await _reply_text(message, hint_content)
+            await asyncio.to_thread(
+                db.save_message,
+                conversation_scope,
+                "assistant",
+                hint_content,
+                channel_id=message.channel.id,
+                channel_name=getattr(message.channel, "name", None),
+                channel_kind=str(message.channel.type),
+                discord_user_id=message.author.id,
+                username=message.author.name,
+                display_name=message.author.display_name,
+                workflow="clanops",
+                event_type="clanops_command_hint",
+            )
+            return
 
     if role in {"clanops", "interactive"} and _is_roster_join_dates_request(raw_question):
         log.info(
@@ -581,7 +1192,58 @@ async def on_message(message):
         )
         return
 
-    admin_command = parse_admin_command(raw_question, require_prefix=True) if role == "clanops" else None
+    profile_target = await asyncio.to_thread(_extract_profile_target, raw_question) if role == "clanops" else None
+    if role == "clanops" and (_is_clan_list_request(raw_question) or profile_target):
+        route = "clan_list_report" if _is_clan_list_request(raw_question) else "member_profile_report"
+        log.info(
+            "message_route route=%s channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            route,
+            message.channel.id,
+            message.author.id,
+            mentioned,
+            role,
+            workflow,
+            raw_question,
+            message.content,
+        )
+        admin_content = await dispatch_admin_command(
+            "clan-list" if _is_clan_list_request(raw_question) else "profile",
+            preview=False,
+            short=False,
+            args={} if _is_clan_list_request(raw_question) else {"member": profile_target},
+        )
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "user",
+            raw_question,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow="clanops",
+            discord_message_id=message.id,
+        )
+        await _reply_text(message, admin_content)
+        await asyncio.to_thread(
+            db.save_message,
+            conversation_scope,
+            "assistant",
+            admin_content,
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            channel_kind=str(message.channel.type),
+            discord_user_id=message.author.id,
+            username=message.author.name,
+            display_name=message.author.display_name,
+            workflow="clanops",
+            event_type=route,
+        )
+        return
+
+    admin_command = parse_admin_command(raw_question, require_prefix=True) if role == "clanops" and mentioned else None
     if admin_command:
         route = f"clanops_admin_{admin_command['command'].replace('-', '_')}"
         if admin_command.get("preview"):
@@ -601,6 +1263,7 @@ async def on_message(message):
             admin_command["command"],
             preview=admin_command.get("preview", False),
             short=admin_command.get("short", False),
+            args=admin_command.get("args", {}),
         )
         await asyncio.to_thread(
             db.save_message,

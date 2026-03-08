@@ -50,26 +50,6 @@ def detect_joins_leaves(current_members, known_snapshot):
     return signals, current
 
 
-def detect_trophy_milestones(conn=None):
-    """Check DB for trophy milestone crossings since last snapshot.
-
-    Wraps db.detect_milestones() and filters to trophy_milestone type.
-    """
-    milestones = db.detect_milestones(conn=conn)
-    return [
-        {
-            "type": "trophy_milestone",
-            "tag": m["tag"],
-            "name": m["name"],
-            "old": m["old_value"],
-            "new": m["new_value"],
-            "milestone": m["milestone"],
-        }
-        for m in milestones
-        if m["type"] == "trophy_milestone"
-    ]
-
-
 def detect_arena_changes(conn=None):
     """Check DB for arena changes since last snapshot."""
     milestones = db.detect_milestones(conn=conn)
@@ -571,9 +551,6 @@ def tick(conn=None):
 
         # Backfill join dates from historical snapshots (idempotent)
         db.backfill_join_dates(conn=conn)
-
-        # Trophy milestones
-        signals.extend(detect_trophy_milestones(conn=conn))
 
         # Arena changes
         signals.extend(detect_arena_changes(conn=conn))

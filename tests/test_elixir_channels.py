@@ -239,7 +239,7 @@ def test_on_message_handles_explicit_member_deck_request_without_llm():
     mock_process.assert_not_awaited()
 
 
-def test_on_message_handles_clanops_status_directly():
+def test_on_message_hints_for_bare_clanops_status_command():
     message = _make_message(200, "clan-ops", "status")
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -259,18 +259,23 @@ def test_on_message_handles_clanops_status_directly():
         }),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
-        patch("elixir._build_status_report", return_value="**Elixir Status**\n- Build: `abc123`"),
+        patch("elixir.dispatch_admin_command", new=AsyncMock()) as mock_admin,
+        patch("elixir._build_status_report", return_value="**Elixir Status**\n- Build: `abc123`") as mock_build,
         patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
     ):
         asyncio.run(elixir.on_message(message))
 
-    message.reply.assert_awaited_once_with("**Elixir Status**\n- Build: `abc123`")
+    message.reply.assert_awaited_once()
+    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
     assert mock_save.call_count == 2
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    mock_admin.assert_not_awaited()
+    mock_build.assert_not_called()
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
 
-def test_on_message_handles_clanops_schedule_directly():
+def test_on_message_hints_for_bare_clanops_schedule_command():
     message = _make_message(200, "clan-ops", "schedule")
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -290,15 +295,18 @@ def test_on_message_handles_clanops_schedule_directly():
         }),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
+        patch("elixir.dispatch_admin_command", new=AsyncMock()) as mock_admin,
         patch("elixir._build_schedule_report", return_value="**Elixir Schedule**\n- `heartbeat`: Every hour.") as mock_build,
         patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
     ):
         asyncio.run(elixir.on_message(message))
 
-    mock_build.assert_called_once_with()
-    message.reply.assert_awaited_once_with("**Elixir Schedule**\n- `heartbeat`: Every hour.")
+    message.reply.assert_awaited_once()
+    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
     assert mock_save.call_count == 2
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "schedule_report"
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    mock_admin.assert_not_awaited()
+    mock_build.assert_not_called()
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
@@ -312,7 +320,7 @@ def test_on_message_handles_clanops_admin_command_directly():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._is_bot_mentioned", return_value=True),
         patch("elixir._get_channel_behavior", return_value={
             "id": 200,
             "name": "#clan-ops",
@@ -328,10 +336,114 @@ def test_on_message_handles_clanops_admin_command_directly():
     ):
         asyncio.run(elixir.on_message(message))
 
-    mock_admin.assert_awaited_once_with("heartbeat", preview=True, short=False)
+    mock_admin.assert_awaited_once_with("heartbeat", preview=True, short=False, args={})
     message.reply.assert_awaited_once_with("Ran `heartbeat` in preview mode.")
     assert mock_save.call_count == 2
     assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_heartbeat_preview"
+    mock_respond.assert_not_called()
+    mock_process.assert_not_awaited()
+
+
+def test_on_message_handles_clanops_member_metadata_command():
+    message = _make_message(200, "clan-ops", "do set-join-date \"Ditika\" 2026-03-07")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.dispatch_admin_command", new=AsyncMock(return_value="Set join date for Ditika to 2026-03-07.")) as mock_admin,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_admin.assert_awaited_once_with(
+        "set-join-date",
+        preview=False,
+        short=False,
+        args={"member": "Ditika", "date": "2026-03-07"},
+    )
+    message.reply.assert_awaited_once_with("Set join date for Ditika to 2026-03-07.")
+    assert mock_save.call_count == 2
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_set_join_date"
+    mock_respond.assert_not_called()
+    mock_process.assert_not_awaited()
+
+
+def test_on_message_handles_clanops_clan_list_via_public_do_command():
+    message = _make_message(200, "clan-ops", "do clan-list")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.dispatch_admin_command", new=AsyncMock(return_value="**Clan List (2 active)**\n- raquaza — `#ABC`")) as mock_admin,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_admin.assert_awaited_once_with("clan-list", preview=False, short=False, args={})
+    message.reply.assert_awaited_once_with("**Clan List (2 active)**\n- raquaza — `#ABC`")
+    assert mock_save.call_count == 2
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_clan_list"
+    mock_respond.assert_not_called()
+    mock_process.assert_not_awaited()
+
+
+def test_on_message_handles_clanops_profile_via_public_do_command():
+    message = _make_message(200, "clan-ops", "do profile \"Ditika\"")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.dispatch_admin_command", new=AsyncMock(return_value="**Member Profile: Ditika**\n- Identity: Ditika")) as mock_admin,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_admin.assert_awaited_once_with("profile", preview=False, short=False, args={"member": "Ditika"})
+    message.reply.assert_awaited_once_with("**Member Profile: Ditika**\n- Identity: Ditika")
+    assert mock_save.call_count == 2
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_profile"
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
@@ -442,14 +554,23 @@ def test_build_status_report_omits_job_schedule_section():
             },
             "current_season_id": 130,
         }),
+        patch("elixir._app._member_role_grant_status", return_value={
+            "configured": True,
+            "ok": False,
+            "reason": "Manage Roles permission missing",
+            "bot_top_role_position": 2,
+            "member_role_position": 3,
+            "manage_roles": False,
+        }),
     ):
         report = elixir._build_status_report()
 
     assert "🛠️ Jobs:" not in report
     assert "Current war season id: 130" in report
+    assert "Member role auto-grant: Manage Roles permission missing" in report
 
 
-def test_on_message_handles_clanops_clan_status_directly():
+def test_on_message_hints_for_bare_clanops_clan_status_command():
     message = _make_message(200, "clan-ops", "clan status")
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -469,56 +590,25 @@ def test_on_message_handles_clanops_clan_status_directly():
         }),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
+        patch("elixir.dispatch_admin_command", new=AsyncMock()) as mock_admin,
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS", "members": 21}, {"clans": [{}, {}, {}]}))) as mock_load,
         patch("elixir._build_clan_status_report", return_value="**POAP KINGS Status**\n- Roster: 21/50 members") as mock_build,
         patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
     ):
         asyncio.run(elixir.on_message(message))
 
-    mock_load.assert_awaited_once()
-    mock_build.assert_called_once_with({"name": "POAP KINGS", "members": 21}, {"clans": [{}, {}, {}]})
-    message.reply.assert_awaited_once_with("**POAP KINGS Status**\n- Roster: 21/50 members")
+    message.reply.assert_awaited_once()
+    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
     assert mock_save.call_count == 2
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clan_status_report"
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    mock_admin.assert_not_awaited()
+    mock_load.assert_not_awaited()
+    mock_build.assert_not_called()
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
 
-def test_on_message_handles_clanops_clan_status_short_directly():
-    message = _make_message(200, "clan-ops", "clan status short")
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
-        patch("elixir._get_channel_behavior", return_value={
-            "id": 200,
-            "name": "#clan-ops",
-            "role": "clanops",
-            "workflow": "clanops",
-            "mention_required": False,
-            "allow_proactive": True,
-        }),
-        patch("elixir.db.upsert_discord_user"),
-        patch("elixir.db.save_message") as mock_save,
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS", "members": 21}, {}))) as mock_load,
-        patch("elixir._build_clan_status_short_report", return_value="**POAP KINGS Status (Short)**\n- Roster: 21/50") as mock_build,
-        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
-    ):
-        asyncio.run(elixir.on_message(message))
-
-    mock_load.assert_awaited_once()
-    mock_build.assert_called_once_with({"name": "POAP KINGS", "members": 21}, {})
-    message.reply.assert_awaited_once_with("**POAP KINGS Status (Short)**\n- Roster: 21/50")
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clan_status_short_report"
-    mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
-
-
-def test_on_message_handles_clanops_help_directly():
+def test_on_message_hints_for_bare_clanops_help_command():
     message = _make_message(200, "clan-ops", "help")
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -538,13 +628,15 @@ def test_on_message_handles_clanops_help_directly():
         }),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
+        patch("elixir.dispatch_admin_command", new=AsyncMock()) as mock_admin,
         patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
     ):
         asyncio.run(elixir.on_message(message))
 
     message.reply.assert_awaited_once()
-    assert "ClanOps" in message.reply.await_args.args[0]
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_help"
+    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    mock_admin.assert_not_awaited()
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 

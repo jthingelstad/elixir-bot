@@ -140,8 +140,6 @@ Elder is earned, not automatic.
 
 ## Thresholds
 
-- trophy_milestone_interval: 1000
-- trophy_milestone_max: 15000
 - inactivity_days: 3
 - donation_highlight_hour: 20
 - clan_founded: 2026-02-04

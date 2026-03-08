@@ -107,7 +107,7 @@ erDiagram
 
     member_metadata {
         integer member_id PK, FK
-        text joined_at_override
+        text joined_at
         integer birth_month
         integer birth_day
         text profile_url
@@ -476,7 +476,7 @@ Human-curated data that CR API does not provide.
 
 Columns:
 - `member_id`
-- `joined_at_override`
+- `joined_at`
 - `birth_month`
 - `birth_day`
 - `profile_url`

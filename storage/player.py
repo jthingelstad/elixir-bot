@@ -24,7 +24,7 @@ def snapshot_player_profile(player_data, conn=None):
         tag = _canon_tag(player_data.get("tag"))
         member_id = _ensure_member(conn, tag, player_data.get("name"), status=None)
         previous = conn.execute(
-            "SELECT exp_level, cards_json FROM player_profile_snapshots WHERE member_id = ? ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
+            "SELECT exp_level, wins, cards_json FROM player_profile_snapshots WHERE member_id = ? ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
             (member_id,),
         ).fetchone()
         fetched_at = _utcnow()
@@ -60,31 +60,52 @@ def snapshot_player_profile(player_data, conn=None):
                 "new_level": new_level,
             })
 
+        old_wins = previous["wins"] if previous else None
+        new_wins = player_data.get("wins")
+        if isinstance(old_wins, int) and isinstance(new_wins, int) and new_wins > old_wins:
+            first_milestone = ((old_wins // 500) + 1) * 500
+            for milestone in range(first_milestone, new_wins + 1, 500):
+                signals.append({
+                    "type": "career_wins_milestone",
+                    "tag": tag,
+                    "name": player_data.get("name"),
+                    "old_wins": old_wins,
+                    "new_wins": new_wins,
+                    "milestone": milestone,
+                })
+
         previous_cards = {}
         if previous and previous["cards_json"]:
             for card in json.loads(previous["cards_json"] or "[]"):
                 if card.get("name"):
                     previous_cards[card["name"]] = _card_level(card)
-        milestones = (14, 15, 16)
         for card in cards:
             name = card.get("name")
             if not name:
                 continue
             old_card_level = previous_cards.get(name)
             new_card_level = _card_level(card)
-            if old_card_level is None or new_card_level is None or new_card_level <= old_card_level:
+            if old_card_level is None:
+                signals.append({
+                    "type": "new_card_unlocked",
+                    "tag": tag,
+                    "name": player_data.get("name"),
+                    "card_name": name,
+                    "new_level": new_card_level,
+                })
                 continue
-            for milestone in milestones:
-                if old_card_level < milestone <= new_card_level:
-                    signals.append({
-                        "type": "card_level_milestone",
-                        "tag": tag,
-                        "name": player_data.get("name"),
-                        "card_name": name,
-                        "old_level": old_card_level,
-                        "new_level": new_card_level,
-                        "milestone": milestone,
-                    })
+            if new_card_level is None or new_card_level <= old_card_level:
+                continue
+            for milestone in range(old_card_level + 1, new_card_level + 1):
+                signals.append({
+                    "type": "card_level_milestone",
+                    "tag": tag,
+                    "name": player_data.get("name"),
+                    "card_name": name,
+                    "old_level": old_card_level,
+                    "new_level": new_card_level,
+                    "milestone": milestone,
+                })
         return signals
     finally:
         if close:
@@ -266,4 +287,3 @@ def _recompute_member_recent_form(member_id: int, conn=None):
     finally:
         if close:
             conn.close()
-

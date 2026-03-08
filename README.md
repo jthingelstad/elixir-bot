@@ -68,21 +68,19 @@ venv/bin/python scripts/eval_question_corpus_v2.py --mode fixture
 - `smoke_test_v2.py` hits the live Clash Royale API using your local `.env`
 - `eval_question_corpus_v2.py` runs representative leader/member questions in either `fixture` or `live` mode
 
-## Admin Metadata CSV Workflow
+## Admin Member Metadata
 
-For bulk metadata cleanup, export the current member sheet, edit it locally, then import it back:
+Use `elixir_do` for member metadata updates instead of CSV import/export:
 
 ```bash
-venv/bin/python scripts/member_metadata_csv.py export --out member-metadata.csv
-venv/bin/python scripts/member_metadata_csv.py import --in member-metadata.csv --dry-run
-venv/bin/python scripts/member_metadata_csv.py import --in member-metadata.csv
+venv/bin/python scripts/elixir_do.py set-join-date "Ditika" 2026-03-07
+venv/bin/python scripts/elixir_do.py clear-join-date "Ditika"
+venv/bin/python scripts/elixir_do.py set-birthday "King Levy" 2 14
+venv/bin/python scripts/elixir_do.py set-profile-url "King Thing" https://example.com
+venv/bin/python scripts/elixir_do.py set-note "King Thing" "Founder and systems builder"
 ```
 
-Rules:
-- `player_tag` is the required stable key
-- edit only the writable metadata columns: `joined_date_override`, `birth_month`, `birth_day`, `profile_url`, `note`
-- `effective_joined_date`, names, roles, and Discord columns are exported for context and ignored on import
-- blank writable cells clear that metadata value
+These same commands are also available in `#clanops` with the `do` prefix.
 
 ## Project Structure
 
