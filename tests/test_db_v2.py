@@ -953,6 +953,7 @@ def test_current_war_status_infers_new_season_after_section_index_rollover():
         assert war["phase"] == "battle"
         assert war["battle_phase_active"] is True
         assert war["practice_phase_active"] is False
+        assert war["final_practice_day_active"] is False
         assert war["battle_day_number"] == 3
         assert war["battle_day_total"] == 4
         assert war["phase_display"] == "Battle Day 3"
@@ -960,6 +961,43 @@ def test_current_war_status_infers_new_season_after_section_index_rollover():
         assert war["final_battle_day_active"] is False
         assert war["race_rank"] == 1
         assert db.get_current_season_id(conn=conn) == 130
+    finally:
+        conn.close()
+
+
+def test_current_war_status_marks_final_practice_day_from_api_period_index():
+    conn = db.get_connection(":memory:")
+    try:
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 1,
+                "periodIndex": 2,
+                "periodType": "trainingDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 0,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
+
+        war = db.get_current_war_status(conn=conn)
+
+        assert war["week"] == 2
+        assert war["phase"] == "practice"
+        assert war["battle_phase_active"] is False
+        assert war["practice_phase_active"] is True
+        assert war["final_practice_day_active"] is True
+        assert war["practice_day_number"] == 3
+        assert war["practice_day_total"] == 3
+        assert war["phase_display"] == "Practice Day 3"
+        assert war["final_battle_day_active"] is False
     finally:
         conn.close()
 

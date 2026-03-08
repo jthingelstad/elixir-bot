@@ -19,6 +19,7 @@ from db import (
 BATTLE_PERIOD_TYPE = "warDay"
 FIRST_BATTLE_PERIOD_INDEX = 3
 FINAL_BATTLE_PERIOD_INDEX = 6
+FINAL_PRACTICE_PERIOD_INDEX = FIRST_BATTLE_PERIOD_INDEX - 1
 
 def _format_member_reference(*args, **kwargs):
     from storage.identity import format_member_reference
@@ -134,6 +135,9 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
     result["phase"] = phase
     result["battle_phase_active"] = phase == "battle"
     result["practice_phase_active"] = phase == "practice"
+    result["final_practice_day_active"] = (
+        phase == "practice" and period_index == FINAL_PRACTICE_PERIOD_INDEX
+    )
     result["final_battle_day_active"] = phase == "battle" and period_index == FINAL_BATTLE_PERIOD_INDEX
     result["battle_day_number"] = _phase_day_number(phase, period_index) if phase == "battle" else None
     result["battle_day_total"] = 4 if phase == "battle" else None

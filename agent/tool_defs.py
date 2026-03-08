@@ -301,7 +301,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_current_war_status",
-            "description": "Get the current clan war state, season/week, live race rank, and user-facing phase labels like phase_display and battle_day_number. Prefer phase_display or battle_day_number over raw period_index when describing battle days.",
+            "description": "Get the current clan war state, season/week, live race rank, user-facing phase labels like phase_display and battle_day_number, and final-day flags like final_practice_day_active and final_battle_day_active. Prefer those labels and flags over raw period_index when describing war progress.",
             "parameters": {
                 "type": "object",
                 "properties": {},
