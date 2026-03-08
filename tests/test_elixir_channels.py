@@ -293,6 +293,102 @@ def test_on_message_handles_clanops_schedule_directly():
     mock_process.assert_not_awaited()
 
 
+def test_build_schedule_report_shows_47_minute_heartbeat():
+    scheduler = SimpleNamespace(
+        running=True,
+        get_jobs=lambda: [],
+    )
+
+    with (
+        patch("elixir.scheduler", scheduler),
+        patch.object(elixir, "HEARTBEAT_INTERVAL_MINUTES", 47),
+        patch.object(elixir, "HEARTBEAT_JITTER_SECONDS", 300),
+    ):
+        report = elixir._build_schedule_report()
+
+    assert "Every 47 minutes with up to 300s jitter." in report
+
+
+def test_build_status_report_omits_job_schedule_section():
+    scheduler = SimpleNamespace(
+        running=True,
+        get_jobs=lambda: [],
+    )
+
+    with (
+        patch("elixir.scheduler", scheduler),
+        patch("elixir.runtime_status.snapshot", return_value={
+            "started_at": "2026-03-08T10:00:00",
+            "env": {
+                "has_discord_token": True,
+                "has_openai_api_key": True,
+                "has_cr_api_key": True,
+            },
+            "api": {
+                "last_ok": True,
+                "last_endpoint": "clan",
+                "last_entity_key": "J2RGCRVG",
+                "last_call_at": "2026-03-08T10:30:00",
+                "last_status_code": 200,
+                "last_duration_ms": 125,
+                "call_count": 10,
+                "error_count": 0,
+            },
+            "openai": {
+                "last_ok": True,
+                "last_workflow": "observation",
+                "last_model": "gpt-4o",
+                "last_call_at": "2026-03-08T10:29:00",
+                "last_duration_ms": 500,
+                "last_prompt_tokens": 100,
+                "last_completion_tokens": 50,
+                "last_total_tokens": 150,
+                "call_count": 3,
+                "error_count": 0,
+            },
+            "jobs": {
+                "heartbeat": {"last_summary": "ok"},
+            },
+        }),
+        patch("elixir.db.get_system_status", return_value={
+            "db_path": "/tmp/elixir.db",
+            "db_size_bytes": 1024,
+            "schema_display": "V2 baseline (migration v2)",
+            "schema_version": 2,
+            "roster_summary": {"active_members": 21},
+            "freshness": {
+                "member_state_at": "2026-03-08T10:00:00",
+                "player_profile_at": "2026-03-08T09:00:00",
+                "battle_fact_at": "2026-03-08T08:00:00",
+                "war_state_at": "2026-03-08T10:30:00",
+            },
+            "counts": {
+                "raw_payload_count": 10,
+                "battle_fact_count": 20,
+                "message_count": 30,
+                "discord_links": 5,
+            },
+            "latest_raw_payload": {
+                "endpoint": "currentriverrace",
+                "fetched_at": "2026-03-08T10:30:00",
+            },
+            "raw_payloads_by_endpoint": [
+                {"endpoint": "currentriverrace", "count": 5},
+            ],
+            "stale_player_intel_targets": 2,
+            "latest_signal": {
+                "signal_type": "war_week_rollover",
+                "signal_date": "2026-03-08",
+            },
+            "current_season_id": 130,
+        }),
+    ):
+        report = elixir._build_status_report()
+
+    assert "🛠️ Jobs:" not in report
+    assert "Current war season id: 130" in report
+
+
 def test_on_message_handles_clanops_clan_status_directly():
     message = _make_message(200, "clan-ops", "clan status")
 

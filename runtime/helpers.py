@@ -372,12 +372,15 @@ def _schedule_specs():
     player_intel_refresh_hours = getattr(_app, "PLAYER_INTEL_REFRESH_HOURS", 6)
     clanops_weekly_review_day = getattr(_app, "CLANOPS_WEEKLY_REVIEW_DAY", "fri")
     clanops_weekly_review_hour = getattr(_app, "CLANOPS_WEEKLY_REVIEW_HOUR", 19)
+    heartbeat_interval_minutes = getattr(_app, "HEARTBEAT_INTERVAL_MINUTES", 47)
+    heartbeat_jitter_seconds = getattr(_app, "HEARTBEAT_JITTER_SECONDS", 300)
     return [
         {
             "id": "heartbeat",
             "label": "heartbeat",
             "schedule": (
-                f"Every hour. Posts only during active hours "
+                f"Every {heartbeat_interval_minutes} minutes with up to {heartbeat_jitter_seconds}s jitter. "
+                f"Posts only during active hours "
                 f"{HEARTBEAT_START_HOUR}:00-{HEARTBEAT_END_HOUR}:00 Chicago."
             ),
         },
@@ -486,7 +489,6 @@ def _build_status_report():
     openai = runtime["openai"]
     roster = data.get("roster_summary") or {}
     freshness = data.get("freshness") or {}
-    jobs = runtime.get("jobs") or {}
     endpoint_bits = []
     for item in (data.get("raw_payloads_by_endpoint") or [])[:4]:
         endpoint_bits.append(f"{item['endpoint']}={item['count']}")
@@ -516,16 +518,6 @@ def _build_status_report():
         )
     if data.get("current_season_id") is not None:
         lines.append(f"🏁 Current war season id: {data['current_season_id']}")
-    if jobs:
-        lines.append("🛠️ Jobs:")
-        for name in ("heartbeat", "player_intel_refresh", "site_data_refresh", "site_content_cycle", "clanops_weekly_review"):
-            state = jobs.get(name) or {}
-            next_run = next((item["next_run"] for item in _job_next_runs() if item["id"] == name), "n/a")
-            last = state.get("last_success_at") or state.get("last_failure_at") or state.get("last_started_at")
-            summary = state.get("last_summary") or state.get("last_error") or "n/a"
-            lines.append(
-                f"  {_status_badge(state.get('last_error') is None if last else None)} `{name}` next {next_run} | last {_fmt_relative(last)} | {summary}"
-            )
     return "\n".join(lines)
 
 
