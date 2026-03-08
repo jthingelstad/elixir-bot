@@ -126,7 +126,8 @@ def compare_member_war_to_clan_average(tag, season_id=None, conn=None):
             conn.close()
 
 def get_members_at_risk(inactivity_days=7, min_donations_week=20, require_war_participation=False,
-                        min_war_races=1, tenure_grace_days=14, season_id=None, conn=None):
+                        min_war_races=1, tenure_grace_days=14, include_leadership=False,
+                        season_id=None, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
@@ -144,6 +145,9 @@ def get_members_at_risk(inactivity_days=7, min_donations_week=20, require_war_pa
 
         flagged = []
         for row in rows:
+            role = (row["role"] or "").strip()
+            if not include_leadership and role in {"leader", "coLeader"}:
+                continue
             joined_date = _current_joined_at(conn, row["member_id"])
             tenure_days = None
             if joined_date:
@@ -213,6 +217,7 @@ def get_members_at_risk(inactivity_days=7, min_donations_week=20, require_war_pa
                 "require_war_participation": require_war_participation,
                 "min_war_races": min_war_races,
                 "tenure_grace_days": tenure_grace_days,
+                "include_leadership": include_leadership,
             },
             "members": flagged,
         }

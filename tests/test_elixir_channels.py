@@ -743,8 +743,10 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
     assert "weekly donations 1,400" in report
     assert "top donors King Levy (<@1474760692992180429>) 220, Finn 180, Vijay 140" in report
     assert "War now: season 77 | week 2 | state riverRace | rank 1" in report
-    assert "Watch list: 1 with no war decks this season | 1 at risk | 1 on losing streaks | 1 joined in last 30d" in report
+    assert "Watch list: 1 with no war decks this season | 1 at risk | 1 on cold streaks | 1 joined in last 30d" in report
     assert "War today: 2 used all 4 decks | 3 used some | 2 unused" in report
+    assert "Recent joins: New Guy (join date unknown)" in report
+    assert "Cold streaks: Finn lost 3 straight" in report
 
 
 def test_build_roster_join_dates_report_uses_human_fallback_for_missing_dates():
@@ -844,7 +846,7 @@ def test_build_clan_status_short_report_is_compact():
     assert "Roster: 21/50 | open 29" in report
     assert "War: season 77 | week 2 | rank 1 | fame 12,345" in report
     assert "Season: fame/member 1,117.0 | top King Levy (<@1474760692992180429>) 3,200, Finn 3,100" in report
-    assert "Watch: 1 at risk | 1 slumping" in report
+    assert "Watch: 1 at risk | 1 on cold streaks" in report
 
 
 def test_build_weekly_clanops_review_tags_leaders_and_summarizes_actions():

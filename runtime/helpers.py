@@ -613,7 +613,7 @@ def _build_clan_status_report(clan=None, war=None):
         )
         lines.append(
             f"- Watch list: {len(season_summary.get('nonparticipants') or [])} with no war decks this season | "
-            f"{len((at_risk or {}).get('members') or [])} at risk | {len(slumping or [])} on losing streaks | "
+            f"{len((at_risk or {}).get('members') or [])} at risk | {len(slumping or [])} on cold streaks | "
             f"{len(recent_joins or [])} joined in last 30d"
         )
 
@@ -625,17 +625,22 @@ def _build_clan_status_report(clan=None, war=None):
         )
 
     if recent_joins:
+        recent_joins_text = _join_member_bits(
+            recent_joins,
+            lambda member: f"{_member_label(member)} ({member.get('joined_date') or 'join date unknown'})",
+            limit=5,
+        )
         lines.append(
-            f"- Recent joins: {_join_member_bits(recent_joins, lambda member: _member_label(member))}"
+            f"- Recent joins: {recent_joins_text}"
         )
 
     if slumping:
         slumping_text = _join_member_bits(
             slumping,
-            lambda member: f"{_member_label(member)} L{member.get('current_streak')}",
+            lambda member: f"{_member_label(member)} lost {member.get('current_streak')} straight",
         )
         lines.append(
-            f"- Slumping: {slumping_text}"
+            f"- Cold streaks: {slumping_text}"
         )
 
     if at_risk and at_risk.get("members"):
@@ -684,7 +689,7 @@ def _build_clan_status_short_report(clan=None, war=None):
             f"- Season: fame/member {_fmt_num(season_summary.get('fame_per_active_member'), 1)} | top {top_contributors}"
         )
     lines.append(
-        f"- Watch: {len((at_risk or {}).get('members') or [])} at risk | {len(slumping or [])} slumping"
+        f"- Watch: {len((at_risk or {}).get('members') or [])} at risk | {len(slumping or [])} on cold streaks"
     )
     return "\n".join(lines)
 
