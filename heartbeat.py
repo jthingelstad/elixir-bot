@@ -92,6 +92,7 @@ def detect_war_day_transition(now=None, conn=None):
     current = states[0]
     previous = states[1] if len(states) > 1 else None
     signals = []
+    latest_clan_defense_status = db.get_latest_clan_boat_defense_status(conn=conn)
 
     if current.get("battle_phase_active") and (
         previous is None or not previous.get("battle_phase_active")
@@ -117,7 +118,18 @@ def detect_war_day_transition(now=None, conn=None):
                 "section_index": current.get("section_index"),
                 "period_index": current.get("period_index"),
                 "period_type": current.get("period_type"),
-                "message": "Practice phase is live. Set boat defenses and get ready for battle days.",
+                "boat_defense_setup_scope": "one_time_per_practice_week",
+                "boat_defense_tracking_available": False,
+                "latest_clan_defense_status": latest_clan_defense_status,
+                "boat_defense_tracking_note": (
+                    "The live River Race API does not expose which members have placed "
+                    "boat defenses. It only exposes clan-level defense performance in "
+                    "period logs after days are logged."
+                ),
+                "message": (
+                    "Practice phase is live. Boat defenses are a one-time setup during "
+                    "practice days, so get them in early before battle days."
+                ),
             })
     if current.get("final_practice_day_active"):
         if not db.was_signal_sent("war_final_practice_day", today, conn=conn):
@@ -128,7 +140,18 @@ def detect_war_day_transition(now=None, conn=None):
                 "section_index": current.get("section_index"),
                 "period_index": current.get("period_index"),
                 "period_type": current.get("period_type"),
-                "message": "Last day of practice this week. Finish boat defenses and get ready for battle days.",
+                "boat_defense_setup_scope": "one_time_per_practice_week",
+                "boat_defense_tracking_available": False,
+                "latest_clan_defense_status": latest_clan_defense_status,
+                "boat_defense_tracking_note": (
+                    "The live River Race API does not expose which members have placed "
+                    "boat defenses. It only exposes clan-level defense performance in "
+                    "period logs after days are logged."
+                ),
+                "message": (
+                    "Last day of practice this week. Boat defenses are a one-time setup, "
+                    "so make sure they are set before battle days start."
+                ),
             })
     if current.get("final_battle_day_active"):
         if not db.was_signal_sent("war_final_battle_day", today, conn=conn):
@@ -484,6 +507,18 @@ def detect_cake_days(today_str=None, conn=None):
             conn.close()
 
 
+def detect_pending_system_signals(today_str=None, conn=None):
+    today_str = today_str or datetime.now().strftime("%Y-%m-%d")
+    pending = db.list_pending_system_signals(conn=conn)
+    signals = []
+    for signal in pending:
+        log_type = signal.get("signal_log_type") or f"system_signal::{signal.get('signal_key')}"
+        if db.was_signal_sent(log_type, today_str, conn=conn):
+            continue
+        signals.append(signal)
+    return signals
+
+
 # ── Main heartbeat tick ──────────────────────────────────────────────────────
 
 
@@ -587,10 +622,13 @@ def tick(conn=None):
         # Cake days — birthdays, join anniversaries, clan birthday
         signals.extend(detect_cake_days(conn=conn))
 
+        # Upgrade and capability announcements queued by migrations or manual ops
+        signals.extend(detect_pending_system_signals(today_str=datetime.now().strftime("%Y-%m-%d"), conn=conn))
+
         # Mark emitted signals so they don't re-fire today
         today = datetime.now().strftime("%Y-%m-%d")
         for sig in signals:
-            db.mark_signal_sent(sig["type"], today, conn=conn)
+            db.mark_signal_sent(sig.get("signal_log_type") or sig["type"], today, conn=conn)
 
         log.info("Heartbeat: %d signals detected", len(signals))
         return HeartbeatTickResult(signals=signals, clan=clan, war=war)

@@ -24,6 +24,8 @@ Prioritize clear guidance, not wiki-style completeness.
 
 - Practice days are the setup window before battle days.
 - The main clan priority during practice is setting boat defenses.
+- Boat defenses are a one-time setup during practice days, not something members redo every day.
+- A member may have some boat defenses set without having finished every available defense slot yet.
 - Strong practice-day messaging should remind members to build or update boat defenses early.
 - Intact boat defenses at the end of a day award bonus movement points, so early setup matters.
 - On the final practice day, emphasize last-chance setup: finish boat defenses and get ready for battle days.
@@ -56,6 +58,10 @@ Prioritize clear guidance, not wiki-style completeness.
 - Boat defenses are separate from active war deck usage.
 - Cards used on defense towers can overlap with war deck cards.
 - A clan boat can hold multiple defenses, depending on league level.
+- The live River Race API does not expose which member has placed boat defenses or how many defense slots each member has filled.
+- The live River Race API does expose clan-level period-log defense metrics such as remaining intact defenses and progress earned from defenses after logged war days.
+- Treat those period-log metrics as clan-level defense performance, not as proof that a specific member placed or finished defenses.
+- Do not claim that a specific member finished or added boat defenses unless that came from another source besides the live API payload.
 - Damaged boat defenses stay damaged between attacks, so teamwork and cleanup attacks matter.
 - Elixir Collector, Mirror, and Clone cannot be placed on defense towers.
 

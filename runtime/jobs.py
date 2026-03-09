@@ -12,8 +12,6 @@ import site_content
 from runtime import app as _app
 from runtime.app import (
     CHICAGO,
-    HEARTBEAT_END_HOUR,
-    HEARTBEAT_START_HOUR,
     bot,
     log,
 )
@@ -196,7 +194,7 @@ async def _heartbeat_tick():
     runtime_status.mark_job_start("heartbeat")
     # Check active hours
     now_chicago = datetime.now(CHICAGO)
-    if not (HEARTBEAT_START_HOUR <= now_chicago.hour < HEARTBEAT_END_HOUR):
+    if not (_app.HEARTBEAT_START_HOUR <= now_chicago.hour < _app.HEARTBEAT_END_HOUR):
         log.info("Heartbeat: outside active hours (%d:%02d), skipping",
                  now_chicago.hour, now_chicago.minute)
         runtime_status.mark_job_success("heartbeat", "skipped outside active hours")
@@ -308,6 +306,12 @@ async def _heartbeat_tick():
                             channel_kind=str(channel.type),
                             workflow="observation",
                             event_type=post_event_type,
+                        )
+                for sig in other_signals:
+                    if sig.get("signal_key"):
+                        await asyncio.to_thread(
+                            db.mark_system_signal_announced,
+                            sig["signal_key"],
                         )
                 log.info("Posted observation: %s", result.get("summary"))
 

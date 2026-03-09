@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 from db import (
@@ -32,6 +33,64 @@ def mark_signal_sent(signal_type, date_str, conn=None):
     conn = conn or get_connection()
     try:
         conn.execute("INSERT OR IGNORE INTO signal_log (signal_type, signal_date) VALUES (?, ?)", (signal_type, date_str))
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def queue_system_signal(signal_key, signal_type, payload, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO system_signals (signal_key, signal_type, created_at, payload_json) VALUES (?, ?, ?, ?)",
+            (signal_key, signal_type, _utcnow(), _json_or_none(payload) or "{}"),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def list_pending_system_signals(conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT signal_key, signal_type, created_at, payload_json "
+            "FROM system_signals WHERE announced_at IS NULL "
+            "ORDER BY created_at ASC, system_signal_id ASC"
+        ).fetchall()
+        signals = []
+        for row in rows:
+            payload = {}
+            if row["payload_json"]:
+                try:
+                    payload = json.loads(row["payload_json"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    payload = {}
+            item = dict(payload)
+            item.setdefault("type", row["signal_type"])
+            item["signal_key"] = row["signal_key"]
+            item["signal_type"] = row["signal_type"]
+            item["created_at"] = row["created_at"]
+            item["signal_log_type"] = f"system_signal::{row['signal_key']}"
+            signals.append(item)
+        return signals
+    finally:
+        if close:
+            conn.close()
+
+
+def mark_system_signal_announced(signal_key, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "UPDATE system_signals SET announced_at = ? WHERE signal_key = ? AND announced_at IS NULL",
+            (_utcnow(), signal_key),
+        )
         conn.commit()
     finally:
         if close:

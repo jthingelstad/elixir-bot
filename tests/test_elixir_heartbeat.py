@@ -83,6 +83,48 @@ def test_heartbeat_tick_saves_multipart_observation_as_separate_messages():
     assert mock_save.call_args_list[1].kwargs["event_type"] == "war_update_part"
 
 
+def test_heartbeat_tick_marks_system_signal_announced_after_successful_post():
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[{
+            "type": "capability_unlock",
+            "signal_key": "capability_boat_defense_intelligence_v1",
+            "title": "Achievement Unlocked: Boat Defense Intel",
+        }],
+        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
+        war={"state": "training"},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 123
+    channel.name = "elixir"
+    channel.type = "text"
+
+    with (
+        patch.object(elixir, "HEARTBEAT_START_HOUR", 0),
+        patch.object(elixir, "HEARTBEAT_END_HOUR", 24),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.heartbeat.tick", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={"channel": {"state": None, "episodes": []}}),
+        patch("elixir.db.save_message"),
+        patch("elixir.db.mark_system_signal_announced") as mock_mark_announced,
+        patch("elixir.elixir_agent.observe_and_post", return_value={
+            "event_type": "clan_observation",
+            "summary": "New capability",
+            "content": "Achievement unlocked",
+        }),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+    ):
+        asyncio.run(elixir._heartbeat_tick())
+
+    mock_post.assert_awaited_once()
+    mock_mark_announced.assert_called_once_with("capability_boat_defense_intelligence_v1")
+
+
 def test_player_intel_refresh_uses_refresh_targets_without_llm():
     """_player_intel_refresh should refresh stale members without touching the LLM."""
     clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
@@ -532,7 +574,18 @@ def test_detect_war_day_transition_emits_practice_phase_active_from_api_state():
             "section_index": 1,
             "period_index": 1,
             "period_type": "trainingDay",
-            "message": "Practice phase is live. Set boat defenses and get ready for battle days.",
+            "boat_defense_setup_scope": "one_time_per_practice_week",
+            "boat_defense_tracking_available": False,
+            "latest_clan_defense_status": None,
+            "boat_defense_tracking_note": (
+                "The live River Race API does not expose which members have placed "
+                "boat defenses. It only exposes clan-level defense performance in "
+                "period logs after days are logged."
+            ),
+            "message": (
+                "Practice phase is live. Boat defenses are a one-time setup during "
+                "practice days, so get them in early before battle days."
+            ),
         }]
     finally:
         conn.close()
@@ -590,6 +643,72 @@ def test_detect_war_day_transition_marks_final_battle_day_from_api_period_index(
         conn.close()
 
 
+def test_detect_war_day_transition_includes_latest_clan_defense_status_when_available():
+    conn = db.get_connection(":memory:")
+    try:
+        db.store_war_log(
+            {
+                "items": [
+                    {
+                        "seasonId": 129,
+                        "sectionIndex": 0,
+                        "createdDate": "20260301T120000.000Z",
+                        "standings": [
+                            {"rank": 1, "clan": {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 12850}}
+                        ],
+                    }
+                ]
+            },
+            "J2RGCRVG",
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 1,
+                "periodIndex": 7,
+                "periodType": "training",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 0,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+                "periodLogs": [
+                    {
+                        "periodIndex": 6,
+                        "items": [
+                            {
+                                "clan": {"tag": "#J2RGCRVG"},
+                                "pointsEarned": 4200,
+                                "progressStartOfDay": 3311,
+                                "progressEndOfDay": 6622,
+                                "endOfDayRank": 0,
+                                "progressEarned": 3000,
+                                "numOfDefensesRemaining": 7,
+                                "progressEarnedFromDefenses": 311,
+                            }
+                        ],
+                    }
+                ],
+            },
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_war_day_transition(conn=conn)
+
+        assert signals[0]["type"] == "war_practice_phase_active"
+        assert signals[0]["latest_clan_defense_status"]["num_defenses_remaining"] == 7
+        assert signals[0]["latest_clan_defense_status"]["progress_earned_from_defenses"] == 311
+        assert signals[0]["latest_clan_defense_status"]["phase_display"] == "Battle Day 4"
+        assert signals[0]["latest_clan_defense_status"]["current_week_match"] is False
+    finally:
+        conn.close()
+
+
 def test_detect_war_day_transition_marks_final_practice_day_from_api_period_index():
     conn = db.get_connection(":memory:")
     try:
@@ -635,7 +754,18 @@ def test_detect_war_day_transition_marks_final_practice_day_from_api_period_inde
         assert [signal["type"] for signal in signals] == ["war_final_practice_day"]
         assert signals[0]["week"] == 1
         assert signals[0]["period_index"] == 2
-        assert signals[0]["message"] == "Last day of practice this week. Finish boat defenses and get ready for battle days."
+        assert signals[0]["boat_defense_setup_scope"] == "one_time_per_practice_week"
+        assert signals[0]["boat_defense_tracking_available"] is False
+        assert signals[0]["latest_clan_defense_status"] is None
+        assert signals[0]["boat_defense_tracking_note"] == (
+            "The live River Race API does not expose which members have placed "
+            "boat defenses. It only exposes clan-level defense performance in "
+            "period logs after days are logged."
+        )
+        assert signals[0]["message"] == (
+            "Last day of practice this week. Boat defenses are a one-time setup, "
+            "so make sure they are set before battle days start."
+        )
         assert db.get_current_war_status(conn=conn)["practice_day_number"] == 3
         assert db.get_current_war_status(conn=conn)["phase_display"] == "Practice Day 3"
     finally:

@@ -32,6 +32,7 @@ def test_v2_schema_initializes_core_tables():
             "member_recent_form",
             "war_races",
             "war_participation",
+            "war_period_clan_status",
             "raw_api_payloads",
         }
         assert expected.issubset(tables)
@@ -441,6 +442,34 @@ def test_prompt_failures_are_recorded_and_listed_for_review():
         assert failures[0]["channel_name"] == "clan-ops"
         assert failures[0]["openai_last_model"] == "gpt-4.1-mini"
         assert json.loads(failures[0]["raw_json"]) == {"event_type": "channel_response", "content": None}
+    finally:
+        conn.close()
+
+
+def test_system_signal_queue_round_trips_pending_and_announced_state():
+    conn = db.get_connection(":memory:")
+    try:
+        db.queue_system_signal(
+            "capability_boat_defense_intelligence_v1",
+            "capability_unlock",
+            {
+                "title": "Achievement Unlocked: Boat Defense Intel",
+                "message": "Elixir can now read clan-level boat defense performance.",
+            },
+            conn=conn,
+        )
+
+        pending = db.list_pending_system_signals(conn=conn)
+
+        assert len(pending) == 1
+        assert pending[0]["signal_key"] == "capability_boat_defense_intelligence_v1"
+        assert pending[0]["type"] == "capability_unlock"
+        assert pending[0]["title"] == "Achievement Unlocked: Boat Defense Intel"
+        assert pending[0]["signal_log_type"] == "system_signal::capability_boat_defense_intelligence_v1"
+
+        db.mark_system_signal_announced("capability_boat_defense_intelligence_v1", conn=conn)
+
+        assert db.list_pending_system_signals(conn=conn) == []
     finally:
         conn.close()
 
@@ -1072,6 +1101,99 @@ def test_current_war_status_marks_final_practice_day_from_api_period_index():
         assert war["practice_day_total"] == 3
         assert war["phase_display"] == "Practice Day 3"
         assert war["final_battle_day_active"] is False
+    finally:
+        conn.close()
+
+
+def test_current_war_status_supports_absolute_training_period_index_and_period_logs():
+    conn = db.get_connection(":memory:")
+    try:
+        db.store_war_log(
+            {
+                "items": [
+                    {
+                        "seasonId": 129,
+                        "sectionIndex": 0,
+                        "createdDate": "20260301T120000.000Z",
+                        "standings": [
+                            {
+                                "rank": 1,
+                                "clan": {
+                                    "tag": "#J2RGCRVG",
+                                    "name": "POAP KINGS",
+                                    "fame": 12850,
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+            "J2RGCRVG",
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 1,
+                "periodIndex": 7,
+                "periodType": "training",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 0,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+                "clans": [
+                    {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 0, "repairPoints": 0, "periodPoints": 0},
+                ],
+                "periodLogs": [
+                    {
+                        "periodIndex": 6,
+                        "items": [
+                            {
+                                "clan": {"tag": "#J2RGCRVG"},
+                                "pointsEarned": 4200,
+                                "progressStartOfDay": 3311,
+                                "progressEndOfDay": 6622,
+                                "endOfDayRank": 0,
+                                "progressEarned": 3000,
+                                "numOfDefensesRemaining": 7,
+                                "progressEarnedFromDefenses": 311,
+                            }
+                        ],
+                    }
+                ],
+            },
+            conn=conn,
+        )
+
+        war = db.get_current_war_status(conn=conn)
+        defense = db.get_latest_clan_boat_defense_status(conn=conn)
+
+        assert war["season_id"] == 129
+        assert war["section_index"] == 1
+        assert war["week"] == 2
+        assert war["period_type"] == "training"
+        assert war["period_index"] == 7
+        assert war["period_offset"] == 0
+        assert war["phase"] == "practice"
+        assert war["practice_day_number"] == 1
+        assert war["phase_display"] == "Practice Day 1"
+
+        assert defense["season_id"] == 129
+        assert defense["section_index"] == 0
+        assert defense["week"] == 1
+        assert defense["period_index"] == 6
+        assert defense["period_offset"] == 6
+        assert defense["phase"] == "battle"
+        assert defense["battle_day_number"] == 4
+        assert defense["phase_display"] == "Battle Day 4"
+        assert defense["num_defenses_remaining"] == 7
+        assert defense["progress_earned_from_defenses"] == 311
+        assert defense["current_week_match"] is False
     finally:
         conn.close()
 
