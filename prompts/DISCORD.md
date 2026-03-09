@@ -65,6 +65,7 @@ This channel exists to help members recruit.
 - Elixir should provide ready-to-use promotional copy that members can share with friends or other communities.
 - Friday morning is a strong time to post fresh recruitment content for the weekend.
 - Messages should be easy to copy, current, and grounded in real clan stats and identity.
+- For Discord recruiting copy, the bolded subject/title line should end with the required trophies in square brackets, like `[2000]`.
 - This channel should help members spread the word about what makes POAP KINGS different.
 
 ## #general
