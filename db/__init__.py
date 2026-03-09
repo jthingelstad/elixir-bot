@@ -897,7 +897,87 @@ def _migration_4(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE member_metadata ADD COLUMN joined_at TEXT")
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4]
+def _migration_5(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS war_period_clan_status (
+            status_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            season_id INTEGER,
+            section_index INTEGER,
+            period_index INTEGER NOT NULL,
+            period_offset INTEGER,
+            clan_tag TEXT NOT NULL,
+            clan_name TEXT,
+            points_earned INTEGER,
+            progress_start_of_day INTEGER,
+            progress_end_of_day INTEGER,
+            end_of_day_rank INTEGER,
+            progress_earned INTEGER,
+            num_defenses_remaining INTEGER,
+            progress_earned_from_defenses INTEGER,
+            observed_at TEXT NOT NULL,
+            raw_json TEXT,
+            UNIQUE(season_id, section_index, period_index, clan_tag)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_war_period_clan_status_lookup
+            ON war_period_clan_status(clan_tag, season_id, section_index, period_index DESC);
+        """
+    )
+
+
+def _migration_6(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS system_signals (
+            system_signal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_key TEXT NOT NULL UNIQUE,
+            signal_type TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            announced_at TEXT,
+            payload_json TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_system_signals_pending
+            ON system_signals(announced_at, created_at DESC);
+        """
+    )
+
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    if db_path in {"", ":memory:"}:
+        return
+
+    payload = {
+        "title": "Achievement Unlocked: Boat Defense Intel",
+        "capability": "boat_defense_intelligence",
+        "importance": "high",
+        "flavor": "clash_royale_achievement",
+        "message": (
+            "Elixir has unlocked a new clan-war intelligence upgrade. "
+            "It can now read clan-level boat defense performance from River Race "
+            "period logs, including defenses remaining and progress earned from defenses."
+        ),
+        "limitations": [
+            "This is clan-level intel, not member-level defense placement tracking.",
+            "The Clash Royale API still does not reveal which specific member placed defenses.",
+        ],
+        "announcement_style": (
+            "Use Clash Royale flavored wording, like an achievement unlock or new tower "
+            "ability, but keep the claims factual."
+        ),
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO system_signals (signal_key, signal_type, created_at, payload_json) VALUES (?, ?, ?, ?)",
+        (
+            "capability_boat_defense_intelligence_v1",
+            "capability_unlock",
+            _utcnow(),
+            json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
+        ),
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

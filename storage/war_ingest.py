@@ -8,6 +8,101 @@ from db import (
     get_connection,
 )
 
+PERIODS_PER_WEEK = 7
+
+
+def _get_latest_logged_race(conn):
+    return conn.execute(
+        "SELECT season_id, section_index FROM war_races ORDER BY season_id DESC, section_index DESC, war_race_id DESC LIMIT 1"
+    ).fetchone()
+
+
+def _infer_current_season_id_from_live_state(payload, latest_logged_race):
+    live_season_id = (payload or {}).get("seasonId")
+    if live_season_id is not None:
+        return live_season_id
+    if not latest_logged_race:
+        return None
+    live_section_index = (payload or {}).get("sectionIndex")
+    logged_section_index = latest_logged_race["section_index"]
+    if (
+        live_section_index is not None
+        and logged_section_index is not None
+        and live_section_index < logged_section_index
+    ):
+        return latest_logged_race["season_id"] + 1
+    return latest_logged_race["season_id"]
+
+
+def _period_offset(period_index):
+    if period_index is None:
+        return None
+    return period_index % PERIODS_PER_WEEK
+
+
+def _infer_period_section_index(period_index, current_section_index, current_period_index):
+    if period_index is None:
+        return current_section_index
+    if (current_period_index or 0) >= PERIODS_PER_WEEK or period_index >= PERIODS_PER_WEEK:
+        return period_index // PERIODS_PER_WEEK
+    return current_section_index
+
+
+def _upsert_period_logs(conn, observed_at, war_data, season_id):
+    current_section_index = (war_data or {}).get("sectionIndex")
+    current_period_index = (war_data or {}).get("periodIndex")
+    clan_name_by_tag = {}
+    for clan in ((war_data or {}).get("clans") or []):
+        canon_tag = _canon_tag(clan.get("tag"))
+        if canon_tag:
+            clan_name_by_tag[canon_tag] = clan.get("name")
+    primary_clan = (war_data or {}).get("clan") or {}
+    primary_clan_tag = _canon_tag(primary_clan.get("tag"))
+    if primary_clan_tag:
+        clan_name_by_tag[primary_clan_tag] = primary_clan.get("name")
+
+    for period_log in ((war_data or {}).get("periodLogs") or []):
+        period_index = period_log.get("periodIndex")
+        section_index = _infer_period_section_index(
+            period_index,
+            current_section_index=current_section_index,
+            current_period_index=current_period_index,
+        )
+        period_offset = _period_offset(period_index)
+        for item in (period_log.get("items") or []):
+            clan = item.get("clan") or {}
+            clan_tag = _canon_tag(clan.get("tag"))
+            if not clan_tag:
+                continue
+            conn.execute(
+                "INSERT INTO war_period_clan_status (season_id, section_index, period_index, period_offset, clan_tag, clan_name, points_earned, progress_start_of_day, progress_end_of_day, end_of_day_rank, progress_earned, num_defenses_remaining, progress_earned_from_defenses, observed_at, raw_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(season_id, section_index, period_index, clan_tag) DO UPDATE SET "
+                "period_offset = excluded.period_offset, clan_name = excluded.clan_name, points_earned = excluded.points_earned, "
+                "progress_start_of_day = excluded.progress_start_of_day, progress_end_of_day = excluded.progress_end_of_day, "
+                "end_of_day_rank = excluded.end_of_day_rank, progress_earned = excluded.progress_earned, "
+                "num_defenses_remaining = excluded.num_defenses_remaining, "
+                "progress_earned_from_defenses = excluded.progress_earned_from_defenses, observed_at = excluded.observed_at, raw_json = excluded.raw_json",
+                (
+                    season_id,
+                    section_index,
+                    period_index,
+                    period_offset,
+                    clan_tag,
+                    clan_name_by_tag.get(clan_tag),
+                    item.get("pointsEarned"),
+                    item.get("progressStartOfDay"),
+                    item.get("progressEndOfDay"),
+                    item.get("endOfDayRank"),
+                    item.get("progressEarned"),
+                    item.get("numOfDefensesRemaining"),
+                    item.get("progressEarnedFromDefenses"),
+                    observed_at,
+                    _json_or_none(item),
+                ),
+            )
+
+
 def store_war_log(race_log, clan_tag, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -73,6 +168,9 @@ def upsert_war_current_state(war_data, conn=None):
                 "ON CONFLICT(member_id, battle_date) DO UPDATE SET observed_at = excluded.observed_at, fame = excluded.fame, repair_points = excluded.repair_points, boat_attacks = excluded.boat_attacks, decks_used_total = excluded.decks_used_total, decks_used_today = excluded.decks_used_today, raw_json = excluded.raw_json",
                 (member_id, battle_date, observed_at, participant.get("fame", 0), participant.get("repairPoints", 0), participant.get("boatAttacks", 0), participant.get("decksUsed", 0), participant.get("decksUsedToday", 0), _json_or_none(participant)),
             )
+        latest_logged_race = _get_latest_logged_race(conn)
+        season_id = _infer_current_season_id_from_live_state(war_data, latest_logged_race)
+        _upsert_period_logs(conn, observed_at, war_data, season_id)
         conn.commit()
     finally:
         if close:

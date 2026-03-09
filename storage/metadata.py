@@ -415,6 +415,7 @@ def purge_old_data(conn=None):
         conn.execute("DELETE FROM war_races WHERE COALESCE(created_date, '') < ?", (war_cutoff,))
         conn.execute("DELETE FROM war_current_state WHERE observed_at < ?", (war_cutoff,))
         conn.execute("DELETE FROM war_day_status WHERE observed_at < ?", (war_cutoff,))
+        conn.execute("DELETE FROM war_period_clan_status WHERE observed_at < ?", (war_cutoff,))
         conn.execute("DELETE FROM raw_api_payloads WHERE fetched_at < ?", (raw_cutoff,))
         conn.execute("DELETE FROM messages WHERE created_at < ?", (conv_cutoff,))
         cake_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)).strftime("%Y-%m-%d")

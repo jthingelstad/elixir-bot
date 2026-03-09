@@ -15,10 +15,12 @@ from db import (
     get_connection,
 )
 
-BATTLE_PERIOD_TYPE = "warDay"
-FIRST_BATTLE_PERIOD_INDEX = 3
-FINAL_BATTLE_PERIOD_INDEX = 6
-FINAL_PRACTICE_PERIOD_INDEX = FIRST_BATTLE_PERIOD_INDEX - 1
+PERIODS_PER_WEEK = 7
+FIRST_BATTLE_PERIOD_OFFSET = 3
+FINAL_BATTLE_PERIOD_OFFSET = 6
+FINAL_PRACTICE_PERIOD_OFFSET = FIRST_BATTLE_PERIOD_OFFSET - 1
+PRACTICE_PERIOD_TYPES = {"training", "trainingday", "practice"}
+BATTLE_PERIOD_TYPES = {"warday", "battle", "battleday"}
 
 def _format_member_reference(*args, **kwargs):
     from storage.identity import format_member_reference
@@ -61,24 +63,43 @@ def _infer_current_season_id_from_live_state(payload: dict, latest_logged_race) 
     return latest_logged_race["season_id"]
 
 
+def _normalize_period_type(period_type: Optional[str]) -> Optional[str]:
+    if period_type is None:
+        return None
+    return str(period_type).strip().lower()
+
+
+def _period_offset(period_index: Optional[int]) -> Optional[int]:
+    if period_index is None:
+        return None
+    return period_index % PERIODS_PER_WEEK
+
+
 def _resolve_phase(period_type: Optional[str], period_index: Optional[int]) -> Optional[str]:
-    if period_type == BATTLE_PERIOD_TYPE:
+    normalized = _normalize_period_type(period_type)
+    if normalized in BATTLE_PERIOD_TYPES:
         return "battle"
-    if period_type:
+    if normalized in PRACTICE_PERIOD_TYPES:
+        return "practice"
+    if normalized:
         return "practice"
     if period_index is None:
         return None
-    if FIRST_BATTLE_PERIOD_INDEX <= period_index <= FINAL_BATTLE_PERIOD_INDEX:
+    offset = _period_offset(period_index)
+    if offset is None:
+        return None
+    if FIRST_BATTLE_PERIOD_OFFSET <= offset <= FINAL_BATTLE_PERIOD_OFFSET:
         return "battle"
     return "practice"
 
 
 def _phase_day_number(phase: Optional[str], period_index: Optional[int]) -> Optional[int]:
-    if period_index is None or phase not in {"battle", "practice"}:
+    offset = _period_offset(period_index)
+    if offset is None or phase not in {"battle", "practice"}:
         return None
     if phase == "battle":
-        return period_index - FIRST_BATTLE_PERIOD_INDEX + 1
-    return period_index + 1
+        return offset - FIRST_BATTLE_PERIOD_OFFSET + 1
+    return offset + 1
 
 
 def _resolve_live_race_rank(payload: dict, clan_tag: Optional[str]) -> Optional[int]:
@@ -114,6 +135,7 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
     period_index = payload.get("periodIndex")
     period_type = payload.get("periodType")
     phase = _resolve_phase(period_type, period_index)
+    period_offset = _period_offset(period_index)
 
     if season_id is not None:
         result["season_id"] = season_id
@@ -130,18 +152,19 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
         result["trophy_change"] = latest_logged_race["trophy_change"]
 
     result["period_index"] = period_index
+    result["period_offset"] = period_offset
     result["period_type"] = period_type
     result["phase"] = phase
     result["battle_phase_active"] = phase == "battle"
     result["practice_phase_active"] = phase == "practice"
     result["final_practice_day_active"] = (
-        phase == "practice" and period_index == FINAL_PRACTICE_PERIOD_INDEX
+        phase == "practice" and period_offset == FINAL_PRACTICE_PERIOD_OFFSET
     )
-    result["final_battle_day_active"] = phase == "battle" and period_index == FINAL_BATTLE_PERIOD_INDEX
+    result["final_battle_day_active"] = phase == "battle" and period_offset == FINAL_BATTLE_PERIOD_OFFSET
     result["battle_day_number"] = _phase_day_number(phase, period_index) if phase == "battle" else None
     result["battle_day_total"] = 4 if phase == "battle" else None
     result["practice_day_number"] = _phase_day_number(phase, period_index) if phase == "practice" else None
-    result["practice_day_total"] = FIRST_BATTLE_PERIOD_INDEX if phase == "practice" else None
+    result["practice_day_total"] = FIRST_BATTLE_PERIOD_OFFSET if phase == "practice" else None
     result["phase_display"] = (
         f"Battle Day {result['battle_day_number']}"
         if result["battle_day_number"] is not None
@@ -183,6 +206,70 @@ def get_recent_live_war_states(limit=2, conn=None):
 def get_current_war_status(conn=None):
     states = get_recent_live_war_states(limit=1, conn=conn)
     return states[0] if states else None
+
+
+def get_latest_clan_boat_defense_status(clan_tag=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        current = get_current_war_status(conn=conn)
+        canon_clan_tag = _canon_tag(clan_tag or (current or {}).get("clan_tag"))
+        if not canon_clan_tag:
+            return None
+
+        where = ["clan_tag = ?", "num_defenses_remaining IS NOT NULL"]
+        params = [canon_clan_tag]
+        if current and current.get("season_id") is not None:
+            where.append("season_id = ?")
+            params.append(current["season_id"])
+
+        row = conn.execute(
+            "SELECT season_id, section_index, period_index, period_offset, clan_tag, clan_name, "
+            "points_earned, progress_start_of_day, progress_end_of_day, end_of_day_rank, progress_earned, "
+            "num_defenses_remaining, progress_earned_from_defenses, observed_at, raw_json "
+            f"FROM war_period_clan_status WHERE {' AND '.join(where)} "
+            "ORDER BY section_index DESC, period_index DESC, observed_at DESC LIMIT 1",
+            tuple(params),
+        ).fetchone()
+        if not row:
+            return None
+
+        result = dict(row)
+        phase = _resolve_phase(None, result.get("period_index"))
+        result["phase"] = phase
+        result["week"] = (
+            result["section_index"] + 1
+            if result.get("section_index") is not None
+            else None
+        )
+        result["battle_day_number"] = (
+            _phase_day_number("battle", result.get("period_index"))
+            if phase == "battle"
+            else None
+        )
+        result["practice_day_number"] = (
+            _phase_day_number("practice", result.get("period_index"))
+            if phase == "practice"
+            else None
+        )
+        result["phase_display"] = (
+            f"Battle Day {result['battle_day_number']}"
+            if result["battle_day_number"] is not None
+            else f"Practice Day {result['practice_day_number']}"
+            if result["practice_day_number"] is not None
+            else None
+        )
+        if current:
+            result["current_week_match"] = (
+                current.get("season_id") == result.get("season_id")
+                and current.get("section_index") == result.get("section_index")
+            )
+        else:
+            result["current_week_match"] = None
+        return result
+    finally:
+        if close:
+            conn.close()
 
 def get_war_deck_status_today(conn=None):
     close = conn is None
