@@ -323,7 +323,11 @@ def get_system_status(conn=None):
             "(SELECT COUNT(*) FROM discord_links WHERE is_primary = 1) AS discord_links, "
             "(SELECT COUNT(*) FROM messages) AS message_count, "
             "(SELECT COUNT(*) FROM raw_api_payloads) AS raw_payload_count, "
-            "(SELECT COUNT(*) FROM member_battle_facts) AS battle_fact_count"
+            "(SELECT COUNT(*) FROM member_battle_facts) AS battle_fact_count, "
+            "(SELECT COUNT(*) FROM clan_memories) AS contextual_memory_count, "
+            "(SELECT COUNT(*) FROM clan_memories WHERE source_type = 'leader_note') AS contextual_leader_notes, "
+            "(SELECT COUNT(*) FROM clan_memories WHERE source_type = 'elixir_inference') AS contextual_inferences, "
+            "(SELECT COUNT(*) FROM clan_memories WHERE source_type = 'system') AS contextual_system_notes"
         ).fetchone()
         freshness = {
             "member_state_at": conn.execute(
@@ -337,6 +341,9 @@ def get_system_status(conn=None):
             ).fetchone()["ts"],
             "war_state_at": conn.execute(
                 "SELECT MAX(observed_at) AS ts FROM war_current_state"
+            ).fetchone()["ts"],
+            "contextual_memory_at": conn.execute(
+                "SELECT MAX(created_at) AS ts FROM clan_memories"
             ).fetchone()["ts"],
         }
         latest_raw = conn.execute(
@@ -352,6 +359,9 @@ def get_system_status(conn=None):
         stale_targets = len(get_player_intel_refresh_targets(limit=500, stale_after_hours=6, conn=conn))
         latest_signal = conn.execute(
             "SELECT signal_type, signal_date FROM signal_log ORDER BY signal_date DESC, signal_type ASC LIMIT 1"
+        ).fetchone()
+        memory_index_status = conn.execute(
+            "SELECT value FROM clan_memory_index_status WHERE key = 'sqlite_vec_enabled'"
         ).fetchone()
         roster_summary = get_clan_roster_summary(conn=conn)
         size_bytes = None
@@ -370,6 +380,14 @@ def get_system_status(conn=None):
             "current_season_id": current_season_id,
             "stale_player_intel_targets": stale_targets,
             "latest_signal": dict(latest_signal) if latest_signal else None,
+            "contextual_memory": {
+                "sqlite_vec_enabled": bool(memory_index_status and str(memory_index_status["value"]) == "1"),
+                "latest_memory_at": freshness["contextual_memory_at"],
+                "total": dict(counts).get("contextual_memory_count", 0),
+                "leader_notes": dict(counts).get("contextual_leader_notes", 0),
+                "inferences": dict(counts).get("contextual_inferences", 0),
+                "system_notes": dict(counts).get("contextual_system_notes", 0),
+            },
         }
     finally:
         if close:
