@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import elixir
 from runtime.admin import admin_command_requires_leader
+from runtime.discord_commands import register_elixir_app_commands
 
 
 class _TypingContext:
@@ -45,6 +46,20 @@ def _make_message(channel_id, channel_name, content, *, mentions=None, roles=Non
         id=555,
         reply=AsyncMock(),
     )
+
+
+class _FakeTree:
+    def __init__(self):
+        self.commands = []
+
+    def add_command(self, cmd, guild=None):
+        del guild
+        self.commands.append(cmd)
+
+
+class _FakeBot:
+    def __init__(self):
+        self.tree = _FakeTree()
 
 
 def test_on_message_routes_interactive_channel_when_mentioned():
@@ -491,6 +506,33 @@ def test_on_message_denies_memory_command_without_leader_role():
     assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_denied"
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
+
+
+def test_slash_help_does_not_save_conversation_history():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+    help_command = root.get_command("help")
+
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock())
+    followup = SimpleNamespace(send=AsyncMock())
+    interaction = SimpleNamespace(
+        channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
+        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[]),
+        response=response,
+        followup=followup,
+    )
+
+    with (
+        patch("runtime.app._is_clanops_channel", return_value=True),
+        patch("runtime.discord_commands.render_admin_help", return_value="help text"),
+        patch("runtime.discord_commands.db.save_message") as mock_save,
+    ):
+        asyncio.run(help_command.callback(interaction))
+
+    response.send_message.assert_awaited_once_with("help text", ephemeral=True)
+    followup.send.assert_not_awaited()
+    mock_save.assert_not_called()
 
 
 def test_dispatch_admin_command_handles_verify_discord():

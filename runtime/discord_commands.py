@@ -32,45 +32,6 @@ def register_elixir_app_commands(bot) -> None:
         for chunk in chunks[start:]:
             await interaction.followup.send(chunk, ephemeral=ephemeral)
 
-    async def save_interaction_exchange(
-        interaction: discord.Interaction,
-        *,
-        command_text: str,
-        response_text: str,
-        workflow: str = "clanops",
-        event_type: str | None = None,
-    ):
-        if not interaction.channel or not interaction.user:
-            return
-        scope = app._channel_conversation_scope(interaction.channel, interaction.user.id)
-        await asyncio.to_thread(
-            db.save_message,
-            scope,
-            "user",
-            command_text,
-            channel_id=interaction.channel.id,
-            channel_name=getattr(interaction.channel, "name", None),
-            channel_kind=str(getattr(interaction.channel, "type", "unknown")),
-            discord_user_id=interaction.user.id,
-            username=getattr(interaction.user, "name", None),
-            display_name=getattr(interaction.user, "display_name", None),
-            workflow=workflow,
-        )
-        await asyncio.to_thread(
-            db.save_message,
-            scope,
-            "assistant",
-            response_text,
-            channel_id=interaction.channel.id,
-            channel_name=getattr(interaction.channel, "name", None),
-            channel_kind=str(getattr(interaction.channel, "type", "unknown")),
-            discord_user_id=interaction.user.id,
-            username=getattr(interaction.user, "name", None),
-            display_name=getattr(interaction.user, "display_name", None),
-            workflow=workflow,
-            event_type=event_type,
-        )
-
     async def validate_admin_interaction(
         interaction: discord.Interaction,
         *,
@@ -110,12 +71,6 @@ def register_elixir_app_commands(bot) -> None:
             short=short,
             args=args or {},
         )
-        await save_interaction_exchange(
-            interaction,
-            command_text=f"/elixir {command_name}",
-            response_text=content,
-            event_type=event_type or f"slash_{command_name.replace('-', '_')}",
-        )
         await send_interaction_text(interaction, content, ephemeral=True)
 
     async def member_autocomplete(
@@ -148,12 +103,6 @@ def register_elixir_app_commands(bot) -> None:
         if not await validate_admin_interaction(interaction, command_name="help", write=False):
             return
         content = render_admin_help()
-        await save_interaction_exchange(
-            interaction,
-            command_text="/elixir help",
-            response_text=content,
-            event_type="slash_help",
-        )
         await send_interaction_text(interaction, content, ephemeral=True)
 
     @elixir_commands.command(name="status", description="Show Elixir runtime health and telemetry.")
