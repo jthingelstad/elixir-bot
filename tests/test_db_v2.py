@@ -682,6 +682,126 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         conn.close()
 
 
+def test_snapshot_player_profile_emits_path_of_legend_promotion_signal():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        first = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 7, "trophies": 1600, "rank": 9000},
+            },
+            conn=conn,
+        )
+        second = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 8, "trophies": 1800, "rank": 5000},
+            },
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+    assert first == []
+    assert second == [{
+        "type": "path_of_legend_promotion",
+        "tag": "#ABC123",
+        "name": "King Levy",
+        "old_league_number": 7,
+        "new_league_number": 8,
+        "trophies": 1800,
+        "rank": 5000,
+    }]
+
+
+def test_snapshot_player_battlelog_emits_battle_pulse_for_new_ladder_ranked_activity():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        initial = db.snapshot_player_battlelog(
+            "#ABC123",
+            [
+                {
+                    "type": "PvP",
+                    "battleTime": "20260307T090000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 3, "trophyChange": 30, "startingTrophies": 5000, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP1", "name": "Opp 1", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "PvP",
+                    "battleTime": "20260307T080000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 2, "trophyChange": 30, "startingTrophies": 4970, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP2", "name": "Opp 2", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "pathOfLegend",
+                    "battleTime": "20260307T070000.000Z",
+                    "gameMode": {"id": 72000464, "name": "Ranked1v1_NewArena2"},
+                    "leagueNumber": 7,
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 1, "trophyChange": 30, "startingTrophies": 4940, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP3", "name": "Opp 3", "crowns": 0, "cards": [], "supportCards": []}],
+                },
+            ],
+            conn=conn,
+        )
+        pulse = db.snapshot_player_battlelog(
+            "#ABC123",
+            [
+                {
+                    "type": "PvP",
+                    "battleTime": "20260307T120000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 2, "trophyChange": 30, "startingTrophies": 5095, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP4", "name": "Opp 4", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "pathOfLegend",
+                    "battleTime": "20260307T110000.000Z",
+                    "gameMode": {"id": 72000464, "name": "Ranked1v1_NewArena2"},
+                    "leagueNumber": 8,
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 1, "trophyChange": 40, "startingTrophies": 5060, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP5", "name": "Opp 5", "crowns": 0, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "PvP",
+                    "battleTime": "20260307T100000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 3, "trophyChange": 30, "startingTrophies": 5030, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP6", "name": "Opp 6", "crowns": 0, "cards": [], "supportCards": []}],
+                },
+            ],
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+    assert initial == []
+    assert [item["type"] for item in pulse] == ["battle_hot_streak", "battle_trophy_push"]
+    hot_streak = pulse[0]
+    assert hot_streak["streak"] == 6
+    assert hot_streak["new_battle_count"] == 3
+    assert hot_streak["form_label"] == "hot"
+    trophy_push = pulse[1]
+    assert trophy_push["trophy_delta"] == 100
+    assert trophy_push["from_trophies"] == 5030
+    assert trophy_push["to_trophies"] == 5125
+
+
 def test_snapshot_player_battlelog_uses_api_outcome_priority_and_normalizes_extra_metadata():
     conn = db.get_connection(":memory:")
     try:

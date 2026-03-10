@@ -499,11 +499,13 @@ async def _player_intel_refresh():
             profile = await asyncio.to_thread(cr_api.get_player, tag)
             if profile:
                 profile_signals = await asyncio.to_thread(db.snapshot_player_profile, profile)
-                if profile_signals:
+                if isinstance(profile_signals, list) and profile_signals:
                     progression_signals.extend(profile_signals)
             battle_log = await asyncio.to_thread(cr_api.get_player_battle_log, tag)
             if battle_log:
-                await asyncio.to_thread(db.snapshot_player_battlelog, tag, battle_log)
+                battle_signals = await asyncio.to_thread(db.snapshot_player_battlelog, tag, battle_log)
+                if isinstance(battle_signals, list) and battle_signals:
+                    progression_signals.extend(battle_signals)
             refreshed += 1
             await asyncio.sleep(PLAYER_INTEL_REQUEST_SPACING_SECONDS)
         except Exception as e:
