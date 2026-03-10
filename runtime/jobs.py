@@ -331,6 +331,7 @@ SITE_CONTENT_HOUR = int(os.getenv("SITE_CONTENT_HOUR", "18"))  # 6pm Chicago
 PLAYER_INTEL_REFRESH_HOURS = int(os.getenv("PLAYER_INTEL_REFRESH_HOURS", "6"))
 PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "12"))
 PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "6"))
+PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))
 CLANOPS_WEEKLY_REVIEW_DAY = os.getenv("CLANOPS_WEEKLY_REVIEW_DAY", "fri")
 CLANOPS_WEEKLY_REVIEW_HOUR = int(os.getenv("CLANOPS_WEEKLY_REVIEW_HOUR", "19"))
 
@@ -491,7 +492,7 @@ async def _player_intel_refresh():
             if battle_log:
                 await asyncio.to_thread(db.snapshot_player_battlelog, tag, battle_log)
             refreshed += 1
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(PLAYER_INTEL_REQUEST_SPACING_SECONDS)
         except Exception as e:
             log.warning("Player intel refresh failed for %s: %s", tag, e)
 

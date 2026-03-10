@@ -977,7 +977,51 @@ def _migration_6(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6]
+def _migration_7(conn: sqlite3.Connection) -> None:
+    profile_columns = _table_columns(conn, "player_profile_snapshots")
+    for name, sql_type in (
+        ("exp_points", "INTEGER"),
+        ("total_exp_points", "INTEGER"),
+        ("star_points", "INTEGER"),
+        ("clan_cards_collected", "INTEGER"),
+        ("current_deck_support_cards_json", "TEXT"),
+        ("support_cards_json", "TEXT"),
+        ("current_path_of_legend_season_result_json", "TEXT"),
+        ("last_path_of_legend_season_result_json", "TEXT"),
+        ("best_path_of_legend_season_result_json", "TEXT"),
+        ("legacy_trophy_road_high_score", "INTEGER"),
+        ("progress_json", "TEXT"),
+    ):
+        if name not in profile_columns:
+            conn.execute(f"ALTER TABLE player_profile_snapshots ADD COLUMN {name} {sql_type}")
+
+    collection_columns = _table_columns(conn, "member_card_collection_snapshots")
+    if "support_cards_json" not in collection_columns:
+        conn.execute("ALTER TABLE member_card_collection_snapshots ADD COLUMN support_cards_json TEXT")
+
+    deck_columns = _table_columns(conn, "member_deck_snapshots")
+    if "support_cards_json" not in deck_columns:
+        conn.execute("ALTER TABLE member_deck_snapshots ADD COLUMN support_cards_json TEXT")
+
+    battle_columns = _table_columns(conn, "member_battle_facts")
+    for name, sql_type in (
+        ("event_tag", "TEXT"),
+        ("league_number", "INTEGER"),
+        ("is_hosted_match", "INTEGER"),
+        ("modifiers_json", "TEXT"),
+        ("team_rounds_json", "TEXT"),
+        ("opponent_rounds_json", "TEXT"),
+        ("boat_battle_side", "TEXT"),
+        ("boat_battle_won", "INTEGER"),
+        ("new_towers_destroyed", "INTEGER"),
+        ("prev_towers_destroyed", "INTEGER"),
+        ("remaining_towers", "INTEGER"),
+    ):
+        if name not in battle_columns:
+            conn.execute(f"ALTER TABLE member_battle_facts ADD COLUMN {name} {sql_type}")
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

@@ -455,7 +455,7 @@ def get_member_current_deck(tag, conn=None):
     conn = conn or get_connection()
     try:
         row = conn.execute(
-            "SELECT p.current_deck_json, p.fetched_at "
+            "SELECT p.current_deck_json, p.current_deck_support_cards_json, p.fetched_at "
             "FROM player_profile_snapshots p "
             "JOIN members m ON m.member_id = p.member_id "
             "WHERE m.player_tag = ? "
@@ -472,9 +472,18 @@ def get_member_current_deck(tag, conn=None):
                 card["api_level"] = card.get("level")
                 card["level"] = display_level
             cards.append(card)
+        support_cards = []
+        for raw_card in json.loads(row["current_deck_support_cards_json"] or "[]"):
+            card = dict(raw_card)
+            display_level = _card_level(card)
+            if display_level is not None:
+                card["api_level"] = card.get("level")
+                card["level"] = display_level
+            support_cards.append(card)
         return {
             "fetched_at": row["fetched_at"],
             "cards": cards,
+            "support_cards": support_cards,
         }
     finally:
         if close:
