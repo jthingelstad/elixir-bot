@@ -243,6 +243,32 @@ def extract_current_deck_icons(player_data):
     return icons
 
 
+def _hydrate_member_card_data(member, conn, existing_member=None):
+    """Fill member card fields from cached DB data, then prior published data."""
+    tag = member["tag"]
+
+    cached_signature = db.get_member_signature_cards("#" + tag, conn=conn)
+    cached_cards = (cached_signature or {}).get("cards") or []
+    if cached_cards:
+        member["favorite_cards"] = cached_cards
+
+    cached_deck = db.get_member_current_deck("#" + tag, conn=conn)
+    cached_deck_cards = (cached_deck or {}).get("cards") or []
+    if cached_deck_cards:
+        member["current_deck"] = [c.get("name", "") for c in cached_deck_cards if c.get("name")]
+        member["_current_deck_icons"] = {
+            c.get("name", ""): c.get("iconUrls", {}).get("medium", "")
+            for c in cached_deck_cards
+            if c.get("name")
+        }
+
+    existing_member = existing_member or {}
+    if existing_member.get("favorite_cards") and not member.get("favorite_cards"):
+        member["favorite_cards"] = existing_member["favorite_cards"]
+    if existing_member.get("current_deck") and not member.get("current_deck"):
+        member["current_deck"] = existing_member["current_deck"]
+
+
 def build_card_stats(members):
     """Aggregate clan-wide current-deck stats from enriched roster members.
 
@@ -332,6 +358,8 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
         member_list = clan_data.get("memberList", [])
         metadata = db.get_member_metadata_map(conn=conn)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        existing = load_current("roster")
+        existing_by_tag = {m["tag"]: m for m in existing.get("members", [])} if existing else {}
 
         members = []
         for m in member_list:
@@ -373,8 +401,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                         db.snapshot_player_battlelog(tag, battle_log, conn=conn)
                     member["favorite_cards"] = aggregate_card_usage(battle_log, tag)
                 except Exception:
-                    cached = db.get_member_signature_cards("#" + tag, conn=conn)
-                    member["favorite_cards"] = (cached or {}).get("cards", [])
+                    _hydrate_member_card_data(member, conn, existing_member=existing_by_tag.get(tag))
 
                 try:
                     player_data = cr_api.get_player(tag)
@@ -386,22 +413,20 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                         snapshot_payload.setdefault("name", member["name"])
                         db.snapshot_player_profile(snapshot_payload, conn=conn)
                 except Exception:
-                    cached = db.get_member_current_deck("#" + tag, conn=conn)
-                    cached_cards = (cached or {}).get("cards") or []
-                    member["current_deck"] = [c.get("name", "") for c in cached_cards if c.get("name")]
-                    member["_current_deck_icons"] = {
-                        c.get("name", ""): c.get("iconUrls", {}).get("medium", "")
-                        for c in cached_cards
-                        if c.get("name")
-                    }
+                    _hydrate_member_card_data(member, conn, existing_member=existing_by_tag.get(tag))
 
                 time.sleep(0.3)
+        else:
+            for member in members:
+                _hydrate_member_card_data(
+                    member,
+                    conn,
+                    existing_member=existing_by_tag.get(member["tag"]),
+                )
 
         # Backfill from existing file when DB-shared generated profiles are not
         # present yet (mainly for older local snapshots).
-        existing = load_current("roster")
         if existing:
-            existing_by_tag = {m["tag"]: m for m in existing.get("members", [])}
             for member in members:
                 prev = existing_by_tag.get(member["tag"], {})
                 for field in ("bio", "highlight"):
@@ -414,8 +439,11 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
         result = {"updated": now, "members": members}
         if existing and existing.get("intro"):
             result["intro"] = existing["intro"]
-        if include_cards:
-            result["card_stats"] = build_card_stats(members)
+        card_stats = build_card_stats(members)
+        if card_stats:
+            result["card_stats"] = card_stats
+        elif not include_cards and existing and existing.get("card_stats"):
+            result["card_stats"] = existing["card_stats"]
         for member in members:
             member.pop("_current_deck_icons", None)
         return result

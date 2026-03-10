@@ -462,3 +462,59 @@ def test_build_roster_data_without_cards(conn):
     m = result["members"][0]
     assert "favorite_cards" not in m
     assert "current_deck" not in m
+
+
+def test_build_roster_data_without_cards_uses_cached_card_data(conn):
+    """Default roster builds should keep card data from the DB cache."""
+    db.snapshot_members(
+        [{"tag": "#ABC123", "name": "TestPlayer", "role": "member", "arena": {}}],
+        conn=conn,
+    )
+    db.snapshot_player_profile(
+        {
+            "tag": "#ABC123",
+            "name": "TestPlayer",
+            "currentDeck": [
+                {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog.png"}},
+                {"name": "Zap", "iconUrls": {"medium": "https://cdn/zap.png"}},
+            ],
+            "cards": [],
+        },
+        conn=conn,
+    )
+    db.snapshot_player_battlelog(
+        "#ABC123",
+        [
+            {
+                "type": "PvP",
+                "battleTime": "20260309T120000.000Z",
+                "team": [
+                    {
+                        "tag": "#ABC123",
+                        "cards": _make_deck(
+                            {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog.png"}},
+                            {"name": "Zap", "iconUrls": {"medium": "https://cdn/zap.png"}},
+                        ),
+                        "supportCards": [],
+                        "crowns": 3,
+                    }
+                ],
+                "opponent": [{"tag": "#XYZ999", "crowns": 1, "cards": []}],
+            }
+        ],
+        conn=conn,
+    )
+
+    clan_data = {
+        "memberList": [
+            {"tag": "#ABC123", "name": "TestPlayer", "role": "member", "arena": {}},
+        ],
+    }
+
+    with patch("site_content.load_current", return_value=None):
+        result = site_content.build_roster_data(clan_data, conn=conn)
+
+    m = result["members"][0]
+    assert m["favorite_cards"][0]["name"] == "Hog Rider"
+    assert m["current_deck"] == ["Hog Rider", "Zap"]
+    assert result["card_stats"][0]["name"] == "Hog Rider"
