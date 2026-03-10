@@ -428,7 +428,10 @@ def _job_next_runs():
 
 def _schedule_specs():
     site_content_hour = getattr(_app, "SITE_CONTENT_HOUR", 20)
-    player_intel_refresh_hours = getattr(_app, "PLAYER_INTEL_REFRESH_HOURS", 6)
+    player_intel_refresh_minutes = getattr(_app, "PLAYER_INTEL_REFRESH_MINUTES", None)
+    if player_intel_refresh_minutes is None:
+        player_intel_refresh_hours = getattr(_app, "PLAYER_INTEL_REFRESH_HOURS", 6)
+        player_intel_refresh_minutes = int(float(player_intel_refresh_hours) * 60)
     clanops_weekly_review_day = getattr(_app, "CLANOPS_WEEKLY_REVIEW_DAY", "fri")
     clanops_weekly_review_hour = getattr(_app, "CLANOPS_WEEKLY_REVIEW_HOUR", 19)
     promotion_content_day = getattr(_app, "PROMOTION_CONTENT_DAY", "fri")
@@ -453,7 +456,7 @@ def _schedule_specs():
         {
             "id": "player_intel_refresh",
             "label": "player intel refresh",
-            "schedule": f"Every {player_intel_refresh_hours} hour(s).",
+            "schedule": f"Every {player_intel_refresh_minutes} minutes.",
         },
         {
             "id": "clanops_weekly_review",

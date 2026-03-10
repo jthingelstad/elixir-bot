@@ -726,6 +726,22 @@ def test_build_schedule_report_includes_promotion_content_sync():
     assert "Every Fri at 09:00 CT." in report
 
 
+def test_build_schedule_report_shows_30_minute_player_intel_refresh():
+    scheduler = SimpleNamespace(
+        running=True,
+        get_jobs=lambda: [],
+    )
+
+    with (
+        patch("elixir.scheduler", scheduler),
+        patch.object(elixir, "PLAYER_INTEL_REFRESH_MINUTES", 30),
+    ):
+        report = elixir._build_schedule_report()
+
+    assert "player intel refresh" in report
+    assert "Every 30 minutes." in report
+
+
 def test_build_status_report_omits_job_schedule_section():
     scheduler = SimpleNamespace(
         running=True,
