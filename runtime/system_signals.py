@@ -23,6 +23,24 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "memory",
         },
     },
+    {
+        "signal_key": "capability_battle_pulse_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Battle Pulse",
+            "message": (
+                "Elixir now tracks fresh ladder and Path of Legend momentum, not just river race activity. "
+                "I can surface hot streaks, trophy pushes, and ranked climbs when clanmates are cooking."
+            ),
+            "details": [
+                "Elixir can now react to ladder and Path of Legend heaters.",
+                "Big trophy pushes and ranked promotions can now get called out to the clan.",
+                "Battle Pulse only reacts to fresh battle activity, so it should feel timely instead of noisy.",
+            ],
+            "audience": "clan",
+            "capability_area": "battle_pulse",
+        },
+    },
 ]
 
 

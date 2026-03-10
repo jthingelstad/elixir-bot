@@ -250,6 +250,45 @@ def test_player_intel_refresh_posts_progression_signals():
     mock_post.assert_awaited_once()
 
 
+def test_player_intel_refresh_posts_battle_pulse_signals():
+    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
+    targets = [{"tag": "#ABC", "name": "King Levy"}]
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.sleep", new=AsyncMock()),
+        patch("elixir.cr_api.get_clan", return_value=clan),
+        patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
+        patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
+        patch("elixir.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.db.snapshot_members"),
+        patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
+        patch("elixir.db.snapshot_player_profile", return_value=[]),
+        patch("elixir.db.snapshot_player_battlelog", return_value=[
+            {"type": "battle_hot_streak", "tag": "#ABC", "name": "King Levy", "streak": 4},
+            {"type": "battle_trophy_push", "tag": "#ABC", "name": "King Levy", "trophy_delta": 111},
+        ]),
+        patch("elixir.db.upsert_war_current_state"),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={"channel": {"state": None, "episodes": []}}),
+        patch("elixir.db.save_message"),
+        patch("elixir.elixir_agent.observe_and_post", return_value={"content": "battle pulse post", "summary": "s"}) as mock_observe,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+    ):
+        asyncio.run(elixir._player_intel_refresh())
+
+    mock_observe.assert_called_once()
+    signal_types = [signal["type"] for signal in mock_observe.call_args.args[2]]
+    assert signal_types == ["battle_hot_streak", "battle_trophy_push"]
+    mock_post.assert_awaited_once()
+
+
 def test_clanops_weekly_review_posts_to_clanops_channel():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)

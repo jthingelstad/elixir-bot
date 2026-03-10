@@ -24,7 +24,9 @@ def snapshot_player_profile(player_data, conn=None):
         tag = _canon_tag(player_data.get("tag"))
         member_id = _ensure_member(conn, tag, player_data.get("name"), status=None)
         previous = conn.execute(
-            "SELECT exp_level, wins, cards_json FROM player_profile_snapshots WHERE member_id = ? ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
+            "SELECT exp_level, wins, cards_json, current_path_of_legend_season_result_json "
+            "FROM player_profile_snapshots WHERE member_id = ? "
+            "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
             (member_id,),
         ).fetchone()
         fetched_at = _utcnow()
@@ -79,6 +81,23 @@ def snapshot_player_profile(player_data, conn=None):
                     "new_wins": new_wins,
                     "milestone": milestone,
                 })
+
+        old_pol = {}
+        if previous and previous["current_path_of_legend_season_result_json"]:
+            old_pol = json.loads(previous["current_path_of_legend_season_result_json"] or "{}")
+        new_pol = player_data.get("currentPathOfLegendSeasonResult") or {}
+        old_league = old_pol.get("leagueNumber")
+        new_league = new_pol.get("leagueNumber")
+        if isinstance(old_league, int) and isinstance(new_league, int) and new_league > old_league:
+            signals.append({
+                "type": "path_of_legend_promotion",
+                "tag": tag,
+                "name": player_data.get("name"),
+                "old_league_number": old_league,
+                "new_league_number": new_league,
+                "trophies": new_pol.get("trophies"),
+                "rank": new_pol.get("rank"),
+            })
 
         previous_cards = {}
         if previous and previous["cards_json"]:
@@ -201,18 +220,126 @@ def _resolve_battle_outcome(battle: dict, team: dict, opp: dict | None) -> str |
     return "D"
 
 
+def _latest_ladder_ranked_battle_time(member_id: int, conn=None):
+    row = conn.execute(
+        "SELECT MAX(battle_time) AS battle_time "
+        "FROM member_battle_facts WHERE member_id = ? AND (is_ladder = 1 OR is_ranked = 1)",
+        (member_id,),
+    ).fetchone()
+    return row["battle_time"] if row else None
+
+
+def _current_ladder_ranked_streak(member_id: int, conn=None) -> dict:
+    rows = conn.execute(
+        "SELECT outcome FROM member_battle_facts "
+        "WHERE member_id = ? AND (is_ladder = 1 OR is_ranked = 1) "
+        "ORDER BY battle_time DESC LIMIT 20",
+        (member_id,),
+    ).fetchall()
+    streak_type = rows[0]["outcome"] if rows and rows[0]["outcome"] else None
+    current_streak = 0
+    for row in rows:
+        if streak_type and row["outcome"] == streak_type:
+            current_streak += 1
+        else:
+            break
+    return {
+        "current_streak_type": streak_type,
+        "current_streak": current_streak,
+    }
+
+
+def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, previous_streak: dict, previous_latest_battle_time: str | None, conn=None) -> list[dict]:
+    if not previous_latest_battle_time:
+        return []
+
+    current_form = conn.execute(
+        "SELECT wins, losses, draws, sample_size, current_streak, current_streak_type, "
+        "win_rate, avg_trophy_change, form_label, summary "
+        "FROM member_recent_form WHERE member_id = ? AND scope = 'ladder_ranked_10'",
+        (member_id,),
+    ).fetchone()
+    new_rows = conn.execute(
+        "SELECT battle_time, battle_type, game_mode_name, outcome, trophy_change, starting_trophies, is_ranked "
+        "FROM member_battle_facts "
+        "WHERE member_id = ? AND (is_ladder = 1 OR is_ranked = 1) AND battle_time > ? "
+        "ORDER BY battle_time DESC",
+        (member_id, previous_latest_battle_time),
+    ).fetchall()
+    if not new_rows:
+        return []
+
+    signals = []
+    current_streak = dict(current_form) if current_form else _current_ladder_ranked_streak(member_id, conn=conn)
+    previous_count = int(previous_streak.get("current_streak") or 0)
+    previous_type = previous_streak.get("current_streak_type")
+    if (
+        current_streak.get("current_streak_type") == "W"
+        and int(current_streak.get("current_streak") or 0) >= 4
+        and not (previous_type == "W" and previous_count >= 4)
+    ):
+        signals.append({
+            "type": "battle_hot_streak",
+            "tag": tag,
+            "name": name,
+            "streak": int(current_streak.get("current_streak") or 0),
+            "sample_size": current_streak.get("sample_size"),
+            "wins": current_streak.get("wins"),
+            "losses": current_streak.get("losses"),
+            "draws": current_streak.get("draws"),
+            "win_rate": current_streak.get("win_rate"),
+            "avg_trophy_change": current_streak.get("avg_trophy_change"),
+            "form_label": current_streak.get("form_label"),
+            "summary": current_streak.get("summary"),
+            "new_battle_count": len(new_rows),
+            "latest_battle_type": new_rows[0]["battle_type"],
+            "latest_mode_name": new_rows[0]["game_mode_name"],
+        })
+
+    trophy_rows = [row for row in new_rows if row["trophy_change"] is not None and row["starting_trophies"] is not None]
+    trophy_delta = int(sum((row["trophy_change"] or 0) for row in trophy_rows))
+    if len(trophy_rows) >= 3 and trophy_delta >= 100:
+        chronological = list(reversed(trophy_rows))
+        from_trophies = chronological[0]["starting_trophies"]
+        newest = trophy_rows[0]
+        to_trophies = int(newest["starting_trophies"] + newest["trophy_change"])
+        wins = sum(1 for row in new_rows if row["outcome"] == "W")
+        losses = sum(1 for row in new_rows if row["outcome"] == "L")
+        draws = sum(1 for row in new_rows if row["outcome"] == "D")
+        signals.append({
+            "type": "battle_trophy_push",
+            "tag": tag,
+            "name": name,
+            "battle_count": len(trophy_rows),
+            "wins": wins,
+            "losses": losses,
+            "draws": draws,
+            "trophy_delta": trophy_delta,
+            "from_trophies": from_trophies,
+            "to_trophies": to_trophies,
+            "ranked_battle_count": sum(1 for row in trophy_rows if row["is_ranked"]),
+            "latest_battle_type": new_rows[0]["battle_type"],
+            "latest_mode_name": new_rows[0]["game_mode_name"],
+        })
+    return signals
+
+
 def snapshot_player_battlelog(player_tag, battle_log, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
         tag = _canon_tag(player_tag)
         member_id = _ensure_member(conn, tag, status=None)
+        previous_streak = _current_ladder_ranked_streak(member_id, conn=conn)
+        previous_latest_ladder_ranked_battle_time = _latest_ladder_ranked_battle_time(member_id, conn=conn)
         _store_raw_payload(conn, "player_battlelog", _tag_key(tag), battle_log)
+        latest_name = None
         for battle in battle_log or []:
             team = (battle.get("team") or [{}])[0]
             opp = (battle.get("opponent") or [{}])[0]
             if not team:
                 continue
+            latest_name = latest_name or team.get("name")
             crowns_for = team.get("crowns")
             crowns_against = opp.get("crowns") if opp else None
             outcome = _resolve_battle_outcome(battle, team, opp)
@@ -280,7 +407,20 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
                     (member_id, _utcnow(), _hash_payload(deck_payload), _json_or_none(latest_cards) or "[]", _json_or_none(latest_support_cards) or "[]", len(recent_rows)),
                 )
         _recompute_member_recent_form(member_id, conn=conn)
+        name = latest_name or conn.execute(
+            "SELECT current_name FROM members WHERE member_id = ?",
+            (member_id,),
+        ).fetchone()["current_name"]
+        signals = _detect_battle_pulse_signals(
+            member_id,
+            tag,
+            name,
+            previous_streak,
+            previous_latest_ladder_ranked_battle_time,
+            conn=conn,
+        )
         conn.commit()
+        return signals
     finally:
         if close:
             conn.close()
@@ -293,6 +433,7 @@ def _recompute_member_recent_form(member_id: int, conn=None):
         scopes = {
             "overall_10": "1=1",
             "competitive_10": "is_competitive = 1",
+            "ladder_ranked_10": "(is_ladder = 1 OR is_ranked = 1)",
             "war_10": "is_war = 1",
         }
         for scope, predicate in scopes.items():

@@ -601,13 +601,13 @@ def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
     with patch("elixir.db.queue_system_signal") as mock_queue:
         elixir.queue_startup_system_signals()
 
-    mock_queue.assert_called_once()
-    args = mock_queue.call_args.args
-    assert args[0] == "capability_memory_system_v1"
-    assert args[1] == "capability_unlock"
-    assert args[2]["title"] == "Achievement Unlocked: Stronger Memory"
-    assert args[2]["capability_area"] == "memory"
-    assert "/elixir memory show" in " ".join(args[2]["details"])
+    queued = {call.args[0]: call.args[2] for call in mock_queue.call_args_list}
+    assert queued["capability_memory_system_v1"]["title"] == "Achievement Unlocked: Stronger Memory"
+    assert queued["capability_memory_system_v1"]["capability_area"] == "memory"
+    assert "/elixir memory show" in " ".join(queued["capability_memory_system_v1"]["details"])
+    assert queued["capability_battle_pulse_v1"]["title"] == "Achievement Unlocked: Battle Pulse"
+    assert queued["capability_battle_pulse_v1"]["capability_area"] == "battle_pulse"
+    assert "Path of Legend" in " ".join(queued["capability_battle_pulse_v1"]["details"])
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
@@ -618,8 +618,10 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
     finally:
         conn.close()
 
-    assert len(pending) == 1
-    assert pending[0]["signal_key"] == "capability_memory_system_v1"
+    assert {item["signal_key"] for item in pending} == {
+        "capability_memory_system_v1",
+        "capability_battle_pulse_v1",
+    }
 
 
 def test_cr_api_auth_failure_alert_posts_once_per_signature():
