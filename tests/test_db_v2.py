@@ -531,6 +531,9 @@ def test_get_system_status_summarizes_v2_data_layer():
         assert status["freshness"]["battle_fact_at"] is not None
         assert status["freshness"]["war_state_at"] is not None
         assert isinstance(status["raw_payloads_by_endpoint"], list)
+        assert "contextual_memory" in status
+        assert status["contextual_memory"]["total"] == 0
+        assert status["contextual_memory"]["leader_notes"] == 0
     finally:
         conn.close()
 
