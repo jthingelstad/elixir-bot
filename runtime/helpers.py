@@ -559,6 +559,8 @@ def _build_status_report():
     openai_env_badge = "🟢" if runtime["env"]["has_openai_api_key"] else "🔴"
     cr_env_badge = "🟢" if runtime["env"]["has_cr_api_key"] else "🔴"
     schema_display = data.get("schema_display") or f"v{data.get('schema_version')}"
+    memory = data.get("contextual_memory") or {}
+    vec_badge = "🟢" if memory.get("sqlite_vec_enabled") else "🟡"
     lines = [
         "**Elixir Status**",
         f"🤖 Build: `{elixir_agent.BUILD_HASH}`",
@@ -569,6 +571,7 @@ def _build_status_report():
         f"📊 Data counts: raw payloads {data.get('counts', {}).get('raw_payload_count', 0)}, battle facts {data.get('counts', {}).get('battle_fact_count', 0)}, messages {data.get('counts', {}).get('message_count', 0)}, discord links {data.get('counts', {}).get('discord_links', 0)}",
         f"📥 Raw ingest: latest {((data.get('latest_raw_payload') or {}).get('endpoint') or 'n/a')} @ {_fmt_relative((data.get('latest_raw_payload') or {}).get('fetched_at'))}; endpoints {endpoint_summary}",
         f"🎯 Player intel backlog: {data.get('stale_player_intel_targets', 0)} stale target(s)",
+        f"🧠 Context memory: {memory.get('total', 0)} total ({memory.get('leader_notes', 0)} leader / {memory.get('inferences', 0)} inference / {memory.get('system_notes', 0)} system) | latest {_fmt_relative(memory.get('latest_memory_at'))} | vec {vec_badge}",
         f"{_status_badge(api.get('last_ok'))} CR API: last {(api.get('last_endpoint') or 'n/a')} ({api.get('last_entity_key') or '-'}) {_fmt_relative(api.get('last_call_at'))}; status {api.get('last_status_code') or 'n/a'}; {'ok' if api.get('last_ok') else 'error' if api.get('last_ok') is not None else 'n/a'}; {api.get('last_duration_ms') or 'n/a'}ms; total {api.get('call_count', 0)} calls / {api.get('error_count', 0)} errors / {api.get('consecutive_error_count', 0)} consecutive failures",
         f"{_status_badge(openai.get('last_ok'))} OpenAI: last {(openai.get('last_workflow') or 'n/a')} via {(openai.get('last_model') or 'n/a')} {_fmt_relative(openai.get('last_call_at'))}; {'ok' if openai.get('last_ok') else 'error' if openai.get('last_ok') is not None else 'n/a'}; {openai.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {openai.get('last_prompt_tokens') or 'n/a'}/{openai.get('last_completion_tokens') or 'n/a'}/{openai.get('last_total_tokens') or 'n/a'}; total {openai.get('call_count', 0)} calls / {openai.get('error_count', 0)} errors",
         f"🔐 Env: Discord {discord_badge}, OpenAI {openai_env_badge}, CR {cr_env_badge}",
