@@ -802,6 +802,127 @@ def test_snapshot_player_battlelog_emits_battle_pulse_for_new_ladder_ranked_acti
     assert trophy_push["to_trophies"] == 5125
 
 
+def test_weekly_digest_summary_collects_war_progression_and_hot_streaks():
+    conn = db.get_connection(":memory:")
+    try:
+        now = datetime.now(timezone.utc)
+        race_created = now.strftime("%Y%m%dT120000.000Z")
+        earlier_profile = (now - timedelta(days=5)).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
+
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member", "expLevel": 60, "trophies": 7000, "bestTrophies": 7100, "clanRank": 1, "donations": 200}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "expLevel": 60,
+                "wins": 100,
+                "trophies": 7000,
+                "bestTrophies": 7100,
+                "currentFavouriteCard": {"name": "Hog Rider"},
+                "currentDeck": [],
+                "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 7, "trophies": 1600, "rank": 9000},
+            },
+            conn=conn,
+        )
+        conn.execute("UPDATE player_profile_snapshots SET fetched_at = ? WHERE snapshot_id = 1", (earlier_profile,))
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "expLevel": 61,
+                "wins": 120,
+                "trophies": 7090,
+                "bestTrophies": 7220,
+                "currentFavouriteCard": {"name": "Hog Rider"},
+                "currentDeck": [],
+                "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 8, "trophies": 1800, "rank": 5000},
+            },
+            conn=conn,
+        )
+        db.snapshot_player_battlelog(
+            "#ABC123",
+            [
+                {
+                    "type": "PvP",
+                    "battleTime": "20260307T120000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 3, "trophyChange": 30, "startingTrophies": 7000, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP1", "name": "Opp 1", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "PvP",
+                    "battleTime": "20260307T110000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 2, "trophyChange": 30, "startingTrophies": 6970, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP2", "name": "Opp 2", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "pathOfLegend",
+                    "battleTime": "20260307T100000.000Z",
+                    "gameMode": {"id": 72000464, "name": "Ranked1v1_NewArena2"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 1, "trophyChange": 30, "startingTrophies": 6940, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP3", "name": "Opp 3", "crowns": 0, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "PvP",
+                    "battleTime": "20260307T090000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 2, "trophyChange": 30, "startingTrophies": 6910, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP4", "name": "Opp 4", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+            ],
+            conn=conn,
+        )
+        db.store_war_log(
+            {
+                "items": [
+                    {
+                        "seasonId": 130,
+                        "sectionIndex": 1,
+                        "createdDate": race_created,
+                        "standings": [
+                            {
+                                "rank": 1,
+                                "trophyChange": 20,
+                                "clan": {
+                                    "tag": "#J2RGCRVG",
+                                    "name": "POAP KINGS",
+                                    "fame": 12000,
+                                    "finishTime": race_created,
+                                    "participants": [
+                                        {"tag": "#ABC123", "name": "King Levy", "fame": 3200, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 0},
+                                    ],
+                                },
+                            },
+                            {
+                                "rank": 2,
+                                "trophyChange": -10,
+                                "clan": {"tag": "#RIVAL", "name": "Rivals", "fame": 11300, "finishTime": race_created, "participants": []},
+                            },
+                        ],
+                    }
+                ],
+            },
+            "#J2RGCRVG",
+            conn=conn,
+        )
+
+        summary = db.get_weekly_digest_summary(conn=conn)
+    finally:
+        conn.close()
+
+    assert summary["recent_war_races"][0]["our_rank"] == 1
+    assert summary["recent_war_races"][0]["top_participants"][0]["name"] == "King Levy"
+    assert summary["progression_highlights"][0]["level_gain"] == 1
+    assert summary["progression_highlights"][0]["pol_league_gain"] == 1
+    assert summary["hot_streaks"][0]["current_streak"] == 4
+
+
 def test_snapshot_player_battlelog_uses_api_outcome_priority_and_normalizes_extra_metadata():
     conn = db.get_connection(":memory:")
     try:

@@ -314,6 +314,34 @@ def test_clanops_weekly_review_posts_to_clanops_channel():
     assert mock_save.call_args.kwargs["event_type"] == "weekly_clanops_review"
 
 
+def test_weekly_clan_recap_posts_to_weekly_digest_channel():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 500
+    channel.name = "announcements"
+    channel.type = "text"
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._get_singleton_channel_id", return_value=500),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS"}, {"state": "warDay"}))),
+        patch("elixir._build_weekly_clan_recap_context", return_value="=== WEEKLY CLAN RECAP SNAPSHOT ===") as mock_build,
+        patch("elixir.db.list_channel_messages", return_value=[{"role": "assistant", "content": "last week's recap"}]),
+        patch("elixir.elixir_agent.generate_weekly_digest", return_value="This week POAP KINGS pushed hard.") as mock_generate,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.save_message") as mock_save,
+    ):
+        asyncio.run(elixir._weekly_clan_recap())
+
+    mock_build.assert_called_once_with({"name": "POAP KINGS"}, {"state": "warDay"})
+    mock_generate.assert_called_once_with("=== WEEKLY CLAN RECAP SNAPSHOT ===", "last week's recap")
+    mock_post.assert_awaited_once_with(channel, {"content": "This week POAP KINGS pushed hard."})
+    assert mock_save.call_args.kwargs["event_type"] == "weekly_clan_recap"
+
+
 def test_promotion_content_cycle_publishes_website_and_promotion_channel():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)

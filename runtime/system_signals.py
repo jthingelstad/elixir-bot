@@ -41,6 +41,24 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "battle_pulse",
         },
     },
+    {
+        "signal_key": "capability_weekly_clan_recap_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Weekly Clan Recap",
+            "message": (
+                "Elixir is getting a longer weekly recap for the clan. "
+                "Starting next week, I will post a must-read summary of river race storylines, clan momentum, and standout player progress."
+            ),
+            "details": [
+                "The recap will be a longer 3-5 paragraph post built for active clan members.",
+                "It will focus on the week's clan story, River Race progress, and individual highlights that mattered.",
+                "This week's announcement is a preview so everyone knows the recap is coming next week.",
+            ],
+            "audience": "clan",
+            "capability_area": "weekly_recap",
+        },
+    },
 ]
 
 

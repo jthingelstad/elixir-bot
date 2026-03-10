@@ -559,3 +559,184 @@ def get_members_on_losing_streak(min_streak=3, scope="competitive_10", conn=None
     finally:
         if close:
             conn.close()
+
+
+def get_members_on_hot_streak(min_streak=4, scope="ladder_ranked_10", conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role, "
+            "f.current_streak, f.current_streak_type, f.wins, f.losses, f.draws, f.sample_size, "
+            "f.form_label, f.summary, f.avg_trophy_change "
+            "FROM member_recent_form f "
+            "JOIN members m ON m.member_id = f.member_id "
+            "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
+            "WHERE m.status = 'active' AND f.scope = ? AND f.current_streak_type = 'W' AND f.current_streak >= ? "
+            "ORDER BY f.current_streak DESC, COALESCE(f.avg_trophy_change, 0) DESC, cs.clan_rank ASC, m.current_name COLLATE NOCASE",
+            (scope, min_streak),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            member_id = conn.execute(
+                "SELECT member_id FROM members WHERE player_tag = ?",
+                (_canon_tag(item["tag"]),),
+            ).fetchone()["member_id"]
+            result.append(_member_reference_fields(conn, member_id, item))
+        return result
+    finally:
+        if close:
+            conn.close()
+
+
+def get_weekly_digest_summary(days=7, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        from storage.war import get_current_season_id
+        from storage.war_analytics import get_trending_war_contributors, get_war_score_trend
+        from storage.war_status import get_trophy_changes, get_war_season_summary
+
+        roster = get_clan_roster_summary(conn=conn)
+        season_id = get_current_season_id(conn=conn)
+        cutoff_ts = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+        cutoff_race = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
+
+        top_donors = conn.execute(
+            "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.role, cs.clan_rank, cs.donations_week "
+            "FROM members m "
+            "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
+            "WHERE m.status = 'active' AND COALESCE(cs.donations_week, 0) > 0 "
+            "ORDER BY COALESCE(cs.donations_week, 0) DESC, cs.clan_rank ASC, m.current_name COLLATE NOCASE "
+            "LIMIT 5"
+        ).fetchall()
+        donors = [_member_reference_fields(conn, row["member_id"], dict(row)) for row in top_donors]
+
+        race_rows = conn.execute(
+            "SELECT war_race_id, season_id, section_index, our_rank, trophy_change, our_fame, total_clans, finish_time, created_date, raw_json "
+            "FROM war_races WHERE created_date >= ? "
+            "ORDER BY created_date DESC LIMIT 3",
+            (cutoff_race,),
+        ).fetchall()
+        recent_war_races = []
+        for row in race_rows:
+            payload = json.loads(row["raw_json"] or "{}")
+            standings = []
+            for standing in (payload.get("standings") or [])[:3]:
+                clan = standing.get("clan") or {}
+                standings.append({
+                    "rank": standing.get("rank"),
+                    "name": clan.get("name"),
+                    "tag": clan.get("tag"),
+                    "fame": clan.get("fame"),
+                    "trophy_change": standing.get("trophyChange"),
+                })
+            top_participants = conn.execute(
+                "SELECT wp.member_id, wp.player_tag AS tag, wp.player_name AS name, wp.fame, wp.repair_points, wp.decks_used "
+                "FROM war_participation wp "
+                "WHERE wp.war_race_id = ? "
+                "ORDER BY COALESCE(wp.fame, 0) DESC, COALESCE(wp.decks_used, 0) DESC, wp.player_name COLLATE NOCASE "
+                "LIMIT 3",
+                (row["war_race_id"],),
+            ).fetchall()
+            participants = []
+            for participant in top_participants:
+                item = dict(participant)
+                member_id = item.pop("member_id", None)
+                if member_id:
+                    participants.append(_member_reference_fields(conn, member_id, item))
+                else:
+                    participants.append(item)
+            recent_war_races.append({
+                "season_id": row["season_id"],
+                "week": (row["section_index"] + 1) if row["section_index"] is not None else None,
+                "section_index": row["section_index"],
+                "created_date": row["created_date"],
+                "our_rank": row["our_rank"],
+                "trophy_change": row["trophy_change"],
+                "our_fame": row["our_fame"],
+                "total_clans": row["total_clans"],
+                "finish_time": row["finish_time"],
+                "top_participants": participants,
+                "standings_preview": standings,
+            })
+
+        trophy_changes = get_trophy_changes(since_hours=max(24, days * 24), conn=conn)
+        trophy_risers = [item for item in trophy_changes if (item.get("change") or 0) > 0][:5]
+        trophy_drops = [item for item in trophy_changes if (item.get("change") or 0) < 0][:3]
+
+        progression = []
+        active_members = conn.execute(
+            "SELECT member_id, player_tag AS tag, current_name AS name FROM members WHERE status = 'active'"
+        ).fetchall()
+        for row in active_members:
+            snapshots = conn.execute(
+                "SELECT fetched_at, exp_level, wins, trophies, best_trophies, current_favourite_card_name, current_path_of_legend_season_result_json "
+                "FROM player_profile_snapshots WHERE member_id = ? AND fetched_at >= ? "
+                "ORDER BY fetched_at ASC, snapshot_id ASC",
+                (row["member_id"], cutoff_ts),
+            ).fetchall()
+            if len(snapshots) < 2:
+                continue
+            first = snapshots[0]
+            latest = snapshots[-1]
+            first_pol = json.loads(first["current_path_of_legend_season_result_json"] or "{}")
+            latest_pol = json.loads(latest["current_path_of_legend_season_result_json"] or "{}")
+            item = {
+                "tag": row["tag"],
+                "name": row["name"],
+                "level_gain": (latest["exp_level"] or 0) - (first["exp_level"] or 0) if latest["exp_level"] is not None and first["exp_level"] is not None else 0,
+                "wins_gain": (latest["wins"] or 0) - (first["wins"] or 0) if latest["wins"] is not None and first["wins"] is not None else 0,
+                "trophies_change": (latest["trophies"] or 0) - (first["trophies"] or 0) if latest["trophies"] is not None and first["trophies"] is not None else 0,
+                "best_trophies_gain": (latest["best_trophies"] or 0) - (first["best_trophies"] or 0) if latest["best_trophies"] is not None and first["best_trophies"] is not None else 0,
+                "pol_league_gain": (latest_pol.get("leagueNumber") or 0) - (first_pol.get("leagueNumber") or 0),
+                "pol_trophies_change": (latest_pol.get("trophies") or 0) - (first_pol.get("trophies") or 0),
+                "favorite_card": latest["current_favourite_card_name"],
+            }
+            if any(
+                item[key]
+                for key in ("level_gain", "wins_gain", "trophies_change", "best_trophies_gain", "pol_league_gain", "pol_trophies_change")
+            ):
+                progression.append(_member_reference_fields(conn, row["member_id"], item))
+        progression.sort(
+            key=lambda item: (
+                -(item.get("pol_league_gain") or 0),
+                -(item.get("level_gain") or 0),
+                -(item.get("best_trophies_gain") or 0),
+                -(item.get("trophies_change") or 0),
+                -(item.get("wins_gain") or 0),
+                (item.get("name") or "").lower(),
+            )
+        )
+
+        recent_joins = list_recent_joins(days=days, conn=conn)[:5]
+        hot_streaks = get_members_on_hot_streak(min_streak=4, conn=conn)[:5]
+        war_score_trend = get_war_score_trend(days=days, conn=conn)
+        season_summary = get_war_season_summary(season_id=season_id, top_n=5, conn=conn) if season_id is not None else None
+        recent_race_count = len(recent_war_races)
+        trending_war = get_trending_war_contributors(
+            season_id=season_id,
+            recent_races=max(1, min(3, recent_race_count)) if recent_race_count else 1,
+            limit=5,
+            conn=conn,
+        ) if season_id is not None else {"members": []}
+
+        return {
+            "window_days": days,
+            "roster": roster,
+            "season_id": season_id,
+            "top_donors": donors,
+            "recent_war_races": recent_war_races,
+            "war_score_trend": war_score_trend,
+            "war_season_summary": season_summary,
+            "trending_war_contributors": trending_war,
+            "trophy_risers": trophy_risers,
+            "trophy_drops": trophy_drops,
+            "progression_highlights": progression[:8],
+            "hot_streaks": hot_streaks,
+            "recent_joins": recent_joins,
+        }
+    finally:
+        if close:
+            conn.close()

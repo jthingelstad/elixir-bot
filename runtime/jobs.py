@@ -31,6 +31,10 @@ def _build_weekly_clanops_review(*args, **kwargs):
     return _app._build_weekly_clanops_review(*args, **kwargs)
 
 
+def _build_weekly_clan_recap_context(*args, **kwargs):
+    return _app._build_weekly_clan_recap_context(*args, **kwargs)
+
+
 def _relayworthy_war_signals(signals):
     relay_signal_types = {
         "war_final_practice_day",
@@ -347,6 +351,8 @@ PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "1"))
 PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))
 CLANOPS_WEEKLY_REVIEW_DAY = os.getenv("CLANOPS_WEEKLY_REVIEW_DAY", "fri")
 CLANOPS_WEEKLY_REVIEW_HOUR = int(os.getenv("CLANOPS_WEEKLY_REVIEW_HOUR", "19"))
+WEEKLY_RECAP_DAY = os.getenv("WEEKLY_RECAP_DAY", "mon")
+WEEKLY_RECAP_HOUR = int(os.getenv("WEEKLY_RECAP_HOUR", "9"))
 
 
 async def _site_data_refresh():
@@ -593,9 +599,56 @@ async def _clanops_weekly_review():
     runtime_status.mark_job_success("clanops_weekly_review", "weekly review posted")
 
 
+async def _weekly_clan_recap():
+    runtime_status.mark_job_start("weekly_clan_recap")
+    try:
+        recap_channel_id = _get_singleton_channel_id("weekly_digest")
+    except Exception as exc:
+        runtime_status.mark_job_failure("weekly_clan_recap", f"weekly digest channel config error: {exc}")
+        return
+
+    channel = bot.get_channel(recap_channel_id)
+    if not channel:
+        runtime_status.mark_job_failure("weekly_clan_recap", "weekly digest channel not found")
+        return
+
+    clan = {}
+    war = {}
+    try:
+        clan, war = await _load_live_clan_context()
+    except Exception as exc:
+        log.warning("Weekly clan recap refresh failed: %s", exc)
+
+    recap_context = await asyncio.to_thread(_build_weekly_clan_recap_context, clan, war)
+    recent_posts = await asyncio.to_thread(db.list_channel_messages, recap_channel_id, 5, "assistant")
+    previous_message = recent_posts[-1]["content"] if recent_posts else ""
+    recap_text = await asyncio.to_thread(
+        elixir_agent.generate_weekly_digest,
+        recap_context,
+        previous_message,
+    )
+    if not recap_text:
+        runtime_status.mark_job_success("weekly_clan_recap", "no recap generated")
+        return
+
+    await _post_to_elixir(channel, {"content": recap_text})
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(channel),
+        "assistant",
+        recap_text,
+        channel_id=channel.id,
+        channel_name=getattr(channel, "name", None),
+        channel_kind=str(channel.type),
+        workflow="observation",
+        event_type="weekly_clan_recap",
+    )
+    runtime_status.mark_job_success("weekly_clan_recap", "weekly recap posted")
+
+
 # ── Bot events ────────────────────────────────────────────────────────────────
 
 __all__ = [
     name for name in globals()
-    if not name.startswith("__") and name not in {"_post_to_elixir", "_load_live_clan_context", "_build_weekly_clanops_review"}
+    if not name.startswith("__") and name not in {"_post_to_elixir", "_load_live_clan_context", "_build_weekly_clanops_review", "_build_weekly_clan_recap_context"}
 ]

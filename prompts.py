@@ -24,6 +24,13 @@ CHANNEL_ROLE_CONFIG = {
         "singleton": True,
         "respond_allowed": False,
     },
+    "weekly_digest": {
+        "workflow": None,
+        "mention_required": False,
+        "allow_proactive": False,
+        "singleton": True,
+        "respond_allowed": False,
+    },
     "arena_relay": {
         "workflow": None,
         "mention_required": False,

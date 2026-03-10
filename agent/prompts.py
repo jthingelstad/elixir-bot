@@ -274,6 +274,32 @@ def _promote_system():
     )
 
 
+def _weekly_digest_system():
+    weekly_digest = prompts.discord_singleton_channel("weekly_digest")
+    return _build_system_prompt(
+        prompts.purpose(),
+        prompts.knowledge_block(),
+        prompts.channel_section(weekly_digest["name"]),
+        "Your job: write Elixir's weekly clan recap for Discord.\n\n"
+        "This is a must-read weekly digest for current clan members.\n"
+        "Write 3-5 paragraphs. Keep it readable and Discord-native, but longer and more reflective than a normal announcement.\n\n"
+        "Content priorities:\n"
+        "- Start with the clan-level story of the week.\n"
+        "- Weave in River Race outcomes, momentum swings, and standout contributors when the data supports it.\n"
+        "- Highlight individual player progression and Clash Royale milestones when they help tell the week's story.\n"
+        "- Prefer named members and concrete numbers over vague praise.\n"
+        "- Keep the focus on the clan first, but make room for player accomplishments that make the recap feel alive.\n\n"
+        "Style guidance:\n"
+        "- Write in first person as Elixir.\n"
+        "- Sound like a clan chronicler, not a stats dump.\n"
+        "- Avoid fake section headers, separator lines, bullet lists, or newsletter formatting.\n"
+        "- Paragraphs should flow naturally as one cohesive recap.\n"
+        "- Do not mention Discord channels, prompts, or hidden system behavior.\n"
+        "- End with one short forward-looking note about the coming week when it feels natural.\n\n"
+        "Respond with the recap text only. No JSON.",
+    )
+
+
 def _event_system():
     """System prompt for generating event-driven messages (welcome, join, leave, etc.)."""
     return _build_system_prompt(
@@ -296,5 +322,6 @@ __all__ = [
     "_members_message_system",
     "_roster_bios_system",
     "_promote_system",
+    "_weekly_digest_system",
     "_event_system",
 ]

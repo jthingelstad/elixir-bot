@@ -608,6 +608,9 @@ def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
     assert queued["capability_battle_pulse_v1"]["title"] == "Achievement Unlocked: Battle Pulse"
     assert queued["capability_battle_pulse_v1"]["capability_area"] == "battle_pulse"
     assert "Path of Legend" in " ".join(queued["capability_battle_pulse_v1"]["details"])
+    assert queued["capability_weekly_clan_recap_v1"]["title"] == "Achievement Unlocked: Weekly Clan Recap"
+    assert queued["capability_weekly_clan_recap_v1"]["capability_area"] == "weekly_recap"
+    assert "next week" in queued["capability_weekly_clan_recap_v1"]["message"]
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
@@ -621,6 +624,7 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
     assert {item["signal_key"] for item in pending} == {
         "capability_memory_system_v1",
         "capability_battle_pulse_v1",
+        "capability_weekly_clan_recap_v1",
     }
 
 
@@ -726,6 +730,23 @@ def test_build_schedule_report_includes_promotion_content_sync():
 
     assert "promotion content sync" in report
     assert "Every Fri at 09:00 CT." in report
+
+
+def test_build_schedule_report_includes_weekly_clan_recap():
+    scheduler = SimpleNamespace(
+        running=True,
+        get_jobs=lambda: [],
+    )
+
+    with (
+        patch("elixir.scheduler", scheduler),
+        patch.object(elixir, "WEEKLY_RECAP_DAY", "mon"),
+        patch.object(elixir, "WEEKLY_RECAP_HOUR", 9),
+    ):
+        report = elixir._build_schedule_report()
+
+    assert "weekly clan recap" in report
+    assert "Every Mon at 09:00 CT." in report
 
 
 def test_build_schedule_report_shows_30_minute_player_intel_refresh():
@@ -1377,6 +1398,45 @@ def test_build_weekly_clanops_review_tags_leaders_and_summarizes_actions():
     assert "Borderline (1): Finn — 120 donations, 2 war races, 20d tenure, seen 1d ago" in report
     assert "Demotion/kick watch (1): Vijay — last seen 8 days ago; 0 donations this week" in report
     assert "No war decks this season (1): Chanco" in report
+
+
+def test_build_weekly_clan_recap_context_summarizes_week():
+    with (
+        patch("elixir.db.get_weekly_digest_summary", return_value={
+            "window_days": 7,
+            "roster": {"active_members": 21, "open_slots": 29, "avg_exp_level": 60.5, "avg_trophies": 7523.4, "donations_week_total": 1400},
+            "war_score_trend": {"direction": "up", "score_change": 120, "trophy_change_total": 40, "races": 1, "avg_rank": 1.0, "avg_fame": 12345},
+            "war_season_summary": {"season_id": 77, "races": 3, "total_clan_fame": 50234, "fame_per_active_member": 2392.1, "top_contributors": [{"member_ref": "King Levy", "total_fame": 3200}]},
+            "recent_war_races": [{
+                "season_id": 77,
+                "week": 2,
+                "our_rank": 1,
+                "total_clans": 5,
+                "our_fame": 12345,
+                "trophy_change": 20,
+                "created_date": "20260308T180000.000Z",
+                "top_participants": [{"member_ref": "King Levy", "fame": 3200, "decks_used": 4}],
+                "standings_preview": [{"rank": 1, "name": "POAP KINGS", "fame": 12345}],
+            }],
+            "trending_war_contributors": {"members": [{"member_ref": "Finn", "fame_delta": 400}]},
+            "progression_highlights": [{"member_ref": "Vijay", "level_gain": 1, "pol_league_gain": 1, "best_trophies_gain": 120, "trophies_change": 95, "wins_gain": 18, "favorite_card": "Hog Rider"}],
+            "trophy_risers": [{"name": "Vijay", "change": 95, "old_trophies": 7000, "new_trophies": 7095}],
+            "trophy_drops": [],
+            "hot_streaks": [{"member_ref": "Finn", "current_streak": 5, "summary": "8-2 over the last 10 battles (hot)."}],
+            "top_donors": [{"member_ref": "Jamie", "donations_week": 220}],
+            "recent_joins": [{"member_ref": "Newbie", "joined_date": "2026-03-08"}],
+        }),
+    ):
+        report = elixir._build_weekly_clan_recap_context(
+            {"name": "POAP KINGS", "tag": "#J2RGCRVG"},
+            {"clan": {"fame": 13000, "repairPoints": 30, "clanScore": 4600, "participants": [{"tag": "#A"}]}},
+        )
+
+    assert "=== WEEKLY CLAN RECAP SNAPSHOT ===" in report
+    assert "=== RECENT RIVER RACES ===" in report
+    assert "=== PLAYER PROGRESSION HIGHLIGHTS ===" in report
+    assert "battle pulse heaters: Finn won 5 straight" in report
+    assert "recent joins this week: Newbie" in report
 
 
 def test_share_channel_result_tags_leader_role_for_arena_relay():
