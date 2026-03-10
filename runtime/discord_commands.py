@@ -309,6 +309,7 @@ def register_elixir_app_commands(bot) -> None:
         app_commands.Choice(name="promotion", value="promotion"),
         app_commands.Choice(name="player-intel", value="player-intel"),
         app_commands.Choice(name="clanops-review", value="clanops-review"),
+        app_commands.Choice(name="weekly-recap", value="weekly-recap"),
     ]
 
     @job_commands.command(name="run", description="Run one operational job now.")

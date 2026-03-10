@@ -53,7 +53,7 @@ def _model_for_workflow(workflow, model=None):
     workflow = workflow or ""
     if workflow == "site_promote_content":
         return _promotion_model_name()
-    if workflow.startswith("site_") or workflow == "roster_bios":
+    if workflow.startswith("site_") or workflow in {"roster_bios", "weekly_digest"}:
         return _content_model_name()
     return _chat_model_name()
 

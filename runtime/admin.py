@@ -38,6 +38,7 @@ COMMAND_HELP = {
     "promotion": "Force the promotion content sync now. This updates the website and #promote-the-clan together.",
     "player-intel": "Force the player intel refresh job now.",
     "clanops-review": "Force the weekly clanops review post now.",
+    "weekly-recap": "Force the weekly public clan recap post now.",
 }
 
 LEADER_ONLY_COMMANDS = {
@@ -64,6 +65,7 @@ LEADER_ONLY_COMMANDS = {
     "promotion",
     "player-intel",
     "clanops-review",
+    "weekly-recap",
 }
 
 COMMAND_ORDER = [
@@ -96,6 +98,7 @@ COMMAND_ORDER = [
     "promotion",
     "player-intel",
     "clanops-review",
+    "weekly-recap",
 ]
 
 
@@ -616,6 +619,7 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
         "promotion": elixir._promotion_content_cycle,
         "player-intel": elixir._player_intel_refresh,
         "clanops-review": elixir._clanops_weekly_review,
+        "weekly-recap": elixir._weekly_clan_recap,
     }
     if preview:
         async with _preview_job_runtime() as captured_posts:

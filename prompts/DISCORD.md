@@ -55,6 +55,26 @@ Posting guidance:
 - Avoid newsletter formatting, separator lines, or artificial multipart labels.
 - Members can react here, and those reactions are useful signals.
 
+## #announcements
+
+ID: 1474760975851982959
+Role: weekly_digest
+
+This is the long-form weekly recap channel for the whole clan.
+
+Use this channel for:
+- the weekly clan recap
+- longer story-driven summaries of the clan's progress
+- multi-paragraph clan-wide reflections that would be too long for #elixir
+
+Posting guidance:
+- One strong weekly post is the goal.
+- 3-5 paragraphs is the right shape.
+- Clan progress should be the center of gravity.
+- River Race storylines, momentum shifts, and member accomplishments should all show up when the data supports them.
+- The tone should feel like a must-read recap for active members, not a dry report.
+- Avoid fake headings, separator lines, or newsletter boilerplate.
+
 ## #promote-the-clan
 
 ID: 1475138086957613197

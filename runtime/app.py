@@ -409,6 +409,16 @@ async def on_ready():
         )
         scheduler.add_job(
             lambda: bot.loop.call_soon_threadsafe(
+                lambda: bot.loop.create_task(_weekly_clan_recap())
+            ),
+            "cron",
+            day_of_week=WEEKLY_RECAP_DAY,
+            hour=WEEKLY_RECAP_HOUR,
+            minute=0,
+            id="weekly_clan_recap",
+        )
+        scheduler.add_job(
+            lambda: bot.loop.call_soon_threadsafe(
                 lambda: bot.loop.create_task(_promotion_content_cycle())
             ),
             "cron",
@@ -419,11 +429,12 @@ async def on_ready():
         )
         scheduler.start()
         log.info("Scheduler started — heartbeat every %d minutes with up to %ds jitter (active %dam-%dpm Chicago), "
-                 "site publish at %s, player intel refresh every %d minutes, clanops review %s at %02d:00, "
+                 "site publish at %s, player intel refresh every %d minutes, clanops review %s at %02d:00, weekly recap %s at %02d:00, "
                  "promotion sync %s at %02d:00",
                  HEARTBEAT_INTERVAL_MINUTES, HEARTBEAT_JITTER_SECONDS, HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
                  _format_hour_label(SITE_CONTENT_HOUR), PLAYER_INTEL_REFRESH_MINUTES,
                  CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR,
+                 WEEKLY_RECAP_DAY, WEEKLY_RECAP_HOUR,
                  PROMOTION_CONTENT_DAY, PROMOTION_CONTENT_HOUR)
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")

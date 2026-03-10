@@ -20,6 +20,7 @@ from agent.prompts import (
     _promote_system,
     _reception_system,
     _roster_bios_system,
+    _weekly_digest_system,
 )
 from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
 
@@ -439,6 +440,31 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
         log.error("Promote API error: %s", e)
         return None
 
+
+def generate_weekly_digest(summary_context, previous_message=""):
+    """Generate a long-form weekly clan recap for Discord. Returns text or None."""
+    prev_text = f"Your previous weekly recap: {previous_message}" if previous_message else "(no previous recap provided)"
+    user_msg = f"{summary_context}\n\n{prev_text}\n\nWrite this week's clan recap."
+    messages = [
+        {"role": "system", "content": _weekly_digest_system()},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        resp = _create_chat_completion(
+            workflow="weekly_digest",
+            messages=messages,
+            temperature=0.8,
+            max_tokens=1200,
+            timeout=60,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if not text or text.lower() == "null":
+            return None
+        return text
+    except Exception as e:
+        log.error("Weekly digest API error: %s", e)
+        return None
+
 __all__ = [
     "observe_and_post",
     "respond_in_reception",
@@ -448,4 +474,5 @@ __all__ = [
     "generate_members_message",
     "generate_roster_bios",
     "generate_promote_content",
+    "generate_weekly_digest",
 ]

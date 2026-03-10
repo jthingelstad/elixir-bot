@@ -434,6 +434,8 @@ def _schedule_specs():
         player_intel_refresh_minutes = int(float(player_intel_refresh_hours) * 60)
     clanops_weekly_review_day = getattr(_app, "CLANOPS_WEEKLY_REVIEW_DAY", "fri")
     clanops_weekly_review_hour = getattr(_app, "CLANOPS_WEEKLY_REVIEW_HOUR", 19)
+    weekly_recap_day = getattr(_app, "WEEKLY_RECAP_DAY", "mon")
+    weekly_recap_hour = getattr(_app, "WEEKLY_RECAP_HOUR", 9)
     promotion_content_day = getattr(_app, "PROMOTION_CONTENT_DAY", "fri")
     promotion_content_hour = getattr(_app, "PROMOTION_CONTENT_HOUR", 9)
     heartbeat_interval_minutes = getattr(_app, "HEARTBEAT_INTERVAL_MINUTES", 47)
@@ -462,6 +464,11 @@ def _schedule_specs():
             "id": "clanops_weekly_review",
             "label": "clanops weekly review",
             "schedule": f"Every {clanops_weekly_review_day.title()} at {clanops_weekly_review_hour:02d}:00 CT.",
+        },
+        {
+            "id": "weekly_clan_recap",
+            "label": "weekly clan recap",
+            "schedule": f"Every {weekly_recap_day.title()} at {weekly_recap_hour:02d}:00 CT.",
         },
         {
             "id": "promotion_content_cycle",
@@ -868,6 +875,194 @@ def _build_weekly_clanops_review(clan=None, war=None):
             )
 
     return _with_leader_ping("\n".join(lines))
+
+
+def _build_weekly_clan_recap_context(clan=None, war=None):
+    clan = clan or {}
+    war = war or {}
+    summary = db.get_weekly_digest_summary(days=7)
+    roster = summary.get("roster") or {}
+    war_score_trend = summary.get("war_score_trend") or {}
+    season_summary = summary.get("war_season_summary") or {}
+    clan_name = clan.get("name") or "POAP KINGS"
+    clan_tag = clan.get("tag") or "#J2RGCRVG"
+
+    lines = [
+        "=== WEEKLY CLAN RECAP SNAPSHOT ===",
+        f"clan_name: {clan_name}",
+        f"clan_tag: {clan_tag}",
+        f"window_days: {summary.get('window_days', 7)}",
+        (
+            f"roster_now: {roster.get('active_members', 0)}/50 active | open_slots {roster.get('open_slots', 0)} | "
+            f"avg_level {_fmt_num(roster.get('avg_exp_level'), 2)} | avg_trophies {_fmt_num(roster.get('avg_trophies'), 0)} | "
+            f"weekly_donations {_fmt_num(roster.get('donations_week_total'), 0)}"
+        ),
+    ]
+
+    if war_score_trend:
+        lines.append(
+            "war_trend: "
+            f"direction {war_score_trend.get('direction') or 'unknown'} | "
+            f"score_change {_fmt_num(war_score_trend.get('score_change'))} | "
+            f"trophy_change_total {_fmt_num(war_score_trend.get('trophy_change_total'))} | "
+            f"races {war_score_trend.get('races') or 0} | "
+            f"avg_rank {_fmt_num(war_score_trend.get('avg_rank'), 2)} | "
+            f"avg_fame {_fmt_num(war_score_trend.get('avg_fame'), 2)}"
+        )
+
+    if season_summary:
+        top_contributors = _join_member_bits(
+            season_summary.get("top_contributors") or [],
+            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_fame') or 0)} fame",
+            limit=5,
+        )
+        lines.append(
+            "current_war_season: "
+            f"season {season_summary.get('season_id')} | races {season_summary.get('races') or 0} | "
+            f"total_fame {_fmt_num(season_summary.get('total_clan_fame'))} | "
+            f"fame_per_active_member {_fmt_num(season_summary.get('fame_per_active_member'), 2)} | "
+            f"top_contributors {top_contributors or 'n/a'}"
+        )
+
+    recent_races = summary.get("recent_war_races") or []
+    if recent_races:
+        lines.append("")
+        lines.append("=== RECENT RIVER RACES ===")
+        for race in recent_races:
+            lines.append(
+                f"- season {race.get('season_id')} week {race.get('week')} | rank {race.get('our_rank')} / {race.get('total_clans')} | "
+                f"fame {_fmt_num(race.get('our_fame'))} | trophy_change {_fmt_num(race.get('trophy_change'))} | "
+                f"finished {race.get('created_date')}"
+            )
+            top_participants = race.get("top_participants") or []
+            if top_participants:
+                lines.append(
+                    "  top participants: "
+                    + _join_member_bits(
+                        top_participants,
+                        lambda member: f"{_member_label(member)} {_fmt_num(member.get('fame') or 0)} fame / {member.get('decks_used') or 0} decks",
+                        limit=3,
+                    )
+                )
+            standings = race.get("standings_preview") or []
+            if standings:
+                lines.append(
+                    "  podium snapshot: "
+                    + ", ".join(
+                        f"#{item.get('rank')} {item.get('name')} ({_fmt_num(item.get('fame'))} fame)"
+                        for item in standings if item.get("name")
+                    )
+                )
+
+    trending_war = (summary.get("trending_war_contributors") or {}).get("members") or []
+    if trending_war:
+        lines.append("")
+        lines.append(
+            "war momentum leaders: "
+            + _join_member_bits(
+                trending_war,
+                lambda member: f"{_member_label(member)} trend {_fmt_num(member.get('fame_delta') or 0)} fame",
+                limit=5,
+            )
+        )
+
+    progression = summary.get("progression_highlights") or []
+    if progression:
+        lines.append("")
+        lines.append("=== PLAYER PROGRESSION HIGHLIGHTS ===")
+        for member in progression[:8]:
+            bits = []
+            if member.get("level_gain"):
+                bits.append(f"King Level +{member['level_gain']}")
+            if member.get("pol_league_gain"):
+                bits.append(f"Path of Legend +{member['pol_league_gain']} league(s)")
+            if member.get("best_trophies_gain"):
+                bits.append(f"best trophies +{_fmt_num(member['best_trophies_gain'])}")
+            if member.get("trophies_change"):
+                bits.append(f"current trophies {member['trophies_change']:+,}")
+            if member.get("wins_gain"):
+                bits.append(f"career wins +{_fmt_num(member['wins_gain'])}")
+            if member.get("favorite_card"):
+                bits.append(f"favorite card {member['favorite_card']}")
+            lines.append(f"- {_member_label(member)} | " + " | ".join(bits))
+
+    trophy_risers = summary.get("trophy_risers") or []
+    if trophy_risers:
+        lines.append("")
+        lines.append(
+            "biggest trophy rises: "
+            + _join_member_bits(
+                trophy_risers,
+                lambda member: (
+                    f"{_member_label(member)} {member.get('change', 0):+,.0f} "
+                    f"({_fmt_num(member.get('old_trophies'))} -> {_fmt_num(member.get('new_trophies'))})"
+                ),
+                limit=5,
+            )
+        )
+
+    hot_streaks = summary.get("hot_streaks") or []
+    if hot_streaks:
+        lines.append("")
+        lines.append(
+            "battle pulse heaters: "
+            + _join_member_bits(
+                hot_streaks,
+                lambda member: f"{_member_label(member)} won {member.get('current_streak')} straight ({member.get('summary')})",
+                limit=5,
+            )
+        )
+
+    top_donors = summary.get("top_donors") or []
+    if top_donors:
+        lines.append("")
+        lines.append(
+            "top donors right now: "
+            + _join_member_bits(
+                top_donors,
+                lambda member: f"{_member_label(member)} {_fmt_num(member.get('donations_week') or 0)}",
+                limit=5,
+            )
+        )
+
+    recent_joins = summary.get("recent_joins") or []
+    if recent_joins:
+        lines.append("")
+        lines.append(
+            "recent joins this week: "
+            + _join_member_bits(
+                recent_joins,
+                lambda member: f"{_member_label(member)} ({_format_relative_join_age(member.get('joined_date'))})",
+                limit=5,
+            )
+        )
+
+    trophy_drops = summary.get("trophy_drops") or []
+    if trophy_drops:
+        lines.append("")
+        lines.append(
+            "notable trophy slides: "
+            + _join_member_bits(
+                trophy_drops,
+                lambda member: (
+                    f"{_member_label(member)} {member.get('change', 0):+,.0f} "
+                    f"({_fmt_num(member.get('old_trophies'))} -> {_fmt_num(member.get('new_trophies'))})"
+                ),
+                limit=3,
+            )
+        )
+
+    if war:
+        clan_war = (war.get("clan") or {})
+        if clan_war:
+            lines.append("")
+            lines.append(
+                "live war snapshot now: "
+                f"fame {_fmt_num(clan_war.get('fame'))} | repair {_fmt_num(clan_war.get('repairPoints'))} | "
+                f"score {_fmt_num(clan_war.get('clanScore'))} | participants {len(clan_war.get('participants') or [])}"
+            )
+
+    return "\n".join(lines)
 
 
 def _strip_bot_mentions(text: str) -> str:
