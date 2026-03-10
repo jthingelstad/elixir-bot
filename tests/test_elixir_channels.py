@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import elixir
+from runtime.admin import admin_command_requires_leader
 
 
 class _TypingContext:
@@ -26,13 +27,14 @@ class _DummyChannel:
         return _TypingContext()
 
 
-def _make_message(channel_id, channel_name, content, *, mentions=None):
+def _make_message(channel_id, channel_name, content, *, mentions=None, roles=None):
     author = SimpleNamespace(
         bot=False,
         id=123,
         name="jamie",
         display_name="Jamie",
         global_name=None,
+        roles=roles or [],
     )
     return SimpleNamespace(
         author=author,
@@ -312,7 +314,12 @@ def test_on_message_hints_for_bare_clanops_schedule_command():
 
 
 def test_on_message_handles_clanops_admin_command_directly():
-    message = _make_message(200, "clan-ops", "do heartbeat --preview")
+    message = _make_message(
+        200,
+        "clan-ops",
+        "do heartbeat --preview",
+        roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
+    )
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -345,7 +352,12 @@ def test_on_message_handles_clanops_admin_command_directly():
 
 
 def test_on_message_handles_clanops_member_metadata_command():
-    message = _make_message(200, "clan-ops", "do set-join-date \"Ditika\" 2026-03-07")
+    message = _make_message(
+        200,
+        "clan-ops",
+        "do set-join-date \"Ditika\" 2026-03-07",
+        roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
+    )
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -448,6 +460,39 @@ def test_on_message_handles_clanops_profile_via_public_do_command():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_denies_memory_command_without_leader_role():
+    message = _make_message(200, "clan-ops", "do memory", roles=[])
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.dispatch_admin_command", new=AsyncMock()) as mock_admin,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_admin.assert_not_called()
+    message.reply.assert_awaited_once_with("Leader role required for this command.")
+    assert mock_save.call_count == 2
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_denied"
+    mock_respond.assert_not_called()
+    mock_process.assert_not_awaited()
+
+
 def test_dispatch_admin_command_handles_verify_discord():
     with (
         patch("runtime.admin._resolve_member_tag", return_value=("#ABC123", "King Levy")),
@@ -464,6 +509,75 @@ def test_dispatch_admin_command_handles_verify_discord():
 
     assert result == "Verified Discord identity for King Levy."
     mock_verify.assert_awaited_once_with("#ABC123")
+
+
+def test_parse_admin_command_handles_memory_filters():
+    parsed = elixir.parse_admin_command(
+        'do memory member "King Levy" search "war consistency" --limit 7 --system-internal',
+        require_prefix=True,
+    )
+
+    assert parsed == {
+        "command": "memory",
+        "preview": False,
+        "short": False,
+        "args": {
+            "limit": "7",
+            "member": "King Levy",
+            "query": "war consistency",
+            "include_system_internal": "true",
+        },
+    }
+
+
+def test_admin_command_requires_leader_for_memory():
+    assert admin_command_requires_leader("memory") is True
+    assert admin_command_requires_leader("status") is False
+
+
+def test_dispatch_admin_command_handles_memory():
+    with patch("runtime.admin._build_memory_report", return_value="**Elixir Memory**\n- Context store: 3 total") as mock_report:
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "memory",
+                preview=False,
+                short=False,
+                args={"member": "King Levy", "limit": "3", "include_system_internal": "true"},
+            )
+        )
+
+    assert result == "**Elixir Memory**\n- Context store: 3 total"
+    mock_report.assert_called_once_with(
+        member_query="King Levy",
+        query=None,
+        limit="3",
+        include_system_internal=True,
+    )
+
+
+def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
+    with patch("elixir.db.queue_system_signal") as mock_queue:
+        elixir.queue_startup_system_signals()
+
+    mock_queue.assert_called_once()
+    args = mock_queue.call_args.args
+    assert args[0] == "capability_memory_system_v1"
+    assert args[1] == "capability_unlock"
+    assert args[2]["title"] == "Achievement Unlocked: Stronger Memory"
+    assert args[2]["capability_area"] == "memory"
+    assert "/elixir memory show" in " ".join(args[2]["details"])
+
+
+def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
+    conn = elixir.db.get_connection(":memory:")
+    try:
+        elixir.queue_startup_system_signals(conn=conn)
+        pending = elixir.db.list_pending_system_signals(conn=conn)
+    finally:
+        conn.close()
+
+    assert len(pending) == 1
+    assert pending[0]["signal_key"] == "capability_memory_system_v1"
 
 
 def test_cr_api_auth_failure_alert_posts_once_per_signature():

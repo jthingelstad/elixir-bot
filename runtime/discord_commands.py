@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 
 import db
-from runtime.admin import dispatch_admin_command, render_admin_help
+from runtime.admin import admin_command_requires_leader, dispatch_admin_command, render_admin_help
 
 
 def register_elixir_app_commands(bot) -> None:
@@ -16,6 +16,7 @@ def register_elixir_app_commands(bot) -> None:
 
     elixir_commands = app_commands.Group(name="elixir", description="Elixir clanops commands")
     profile_commands = app_commands.Group(name="profile", description="Member profile and metadata commands")
+    memory_commands = app_commands.Group(name="memory", description="Inspect Elixir memory")
     job_commands = app_commands.Group(name="jobs", description="Operational job commands")
 
     async def send_interaction_text(interaction: discord.Interaction, content: str, *, ephemeral: bool = True):
@@ -79,8 +80,8 @@ def register_elixir_app_commands(bot) -> None:
         if not app._is_clanops_channel(interaction.channel):
             await send_interaction_text(interaction, "Use `/elixir ...` in `#clanops`.", ephemeral=True)
             return False
-        if write and not app._has_leader_role(interaction.user):
-            await send_interaction_text(interaction, "Leader role required for write commands.", ephemeral=True)
+        if admin_command_requires_leader(command_name) and not app._has_leader_role(interaction.user):
+            await send_interaction_text(interaction, "Leader role required for this command.", ephemeral=True)
             return False
         app.log.info(
             "slash_command command=%s channel_id=%s author_id=%s write=%s",
@@ -186,6 +187,33 @@ def register_elixir_app_commands(bot) -> None:
             command_name="profile",
             args={"member": member},
             event_type="member_profile_report",
+        )
+
+    @memory_commands.command(name="show", description="Inspect stored conversation and contextual memory.")
+    @app_commands.describe(
+        member="Optional member name or tag filter.",
+        query="Optional contextual-memory search text.",
+        limit="Maximum items to show per section.",
+        system_internal="Include system-internal contextual memories.",
+    )
+    @app_commands.autocomplete(member=member_autocomplete)
+    async def slash_memory_show(
+        interaction: discord.Interaction,
+        member: str | None = None,
+        query: str | None = None,
+        limit: app_commands.Range[int, 1, 10] = 5,
+        system_internal: bool = False,
+    ):
+        await run_admin_interaction(
+            interaction,
+            command_name="memory",
+            args={
+                "member": member,
+                "query": query,
+                "limit": str(limit),
+                "include_system_internal": "true" if system_internal else "false",
+            },
+            event_type="memory_report",
         )
 
     @profile_commands.command(name="verify-discord", description="Verify a member's Discord link and Member role.")
@@ -347,6 +375,7 @@ def register_elixir_app_commands(bot) -> None:
         )
 
     elixir_commands.add_command(profile_commands)
+    elixir_commands.add_command(memory_commands)
     elixir_commands.add_command(job_commands)
 
     try:

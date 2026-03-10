@@ -61,6 +61,16 @@ def _build_parser() -> argparse.ArgumentParser:
     profile = subparsers.add_parser("profile", help=COMMAND_HELP["profile"])
     profile.add_argument("member", help="Player tag, in-game name, alias, or Discord handle.")
 
+    memory = subparsers.add_parser("memory", help=COMMAND_HELP["memory"])
+    memory.add_argument("--member", help="Inspect memory for one member.")
+    memory.add_argument("--query", help="Search contextual memory text.")
+    memory.add_argument("--limit", type=int, default=5, help="Maximum items per section (1-10).")
+    memory.add_argument(
+        "--system-internal",
+        action="store_true",
+        help="Include system-internal contextual memories.",
+    )
+
     set_join_date = subparsers.add_parser("set-join-date", help=COMMAND_HELP["set-join-date"])
     set_join_date.add_argument("member", help="Player tag, in-game name, alias, or Discord handle.")
     set_join_date.add_argument("date", help="Join date in YYYY-MM-DD format.")

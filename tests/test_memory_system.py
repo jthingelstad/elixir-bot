@@ -13,6 +13,7 @@ from memory_store import (
     update_memory,
     upsert_embedding,
 )
+from runtime.admin import _build_memory_report
 
 
 def test_memory_schema_tables_exist_and_separate_from_authoritative_facts():
@@ -267,5 +268,103 @@ def test_summarization_and_safe_phrasing_helpers():
         infer_text = format_memory_for_response(infer)
         assert leader_text.startswith("Leadership noted")
         assert "inferred" in infer_text and "confidence" in infer_text
+    finally:
+        conn.close()
+
+
+def test_build_memory_report_shows_member_conversation_and_contextual_memory():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.link_discord_user_to_member(
+            "1474760692992180429",
+            "#ABC123",
+            username="jamie",
+            display_name="King Levy",
+            conn=conn,
+        )
+        db.save_message(
+            "leader:1474760692992180429",
+            "user",
+            "How am I doing lately?",
+            discord_user_id="1474760692992180429",
+            username="jamie",
+            display_name="King Levy",
+            conn=conn,
+        )
+        create_memory(
+            body="Leader noted steadier war usage from King Levy.",
+            summary="Steadier war usage",
+            source_type="leader_note",
+            is_inference=False,
+            confidence=1.0,
+            created_by="leader",
+            member_tag="#ABC123",
+            conn=conn,
+        )
+
+        report = _build_memory_report(member_query="King Levy", limit=3, conn=conn)
+
+        assert "**Elixir Memory**" in report
+        assert "King Levy" in report
+        assert "`#ABC123`" in report
+        assert "Conversation memory:" in report
+        assert "`last_user_summary`" in report
+        assert "Recent contextual memories for King Levy" in report
+        assert "Steadier war usage" in report
+    finally:
+        conn.close()
+
+
+def test_build_memory_report_search_can_include_system_internal():
+    conn = db.get_connection(":memory:")
+    try:
+        create_memory(
+            body="Internal tuning note for memory index degradation.",
+            summary="Memory index degradation",
+            source_type="system",
+            is_inference=False,
+            confidence=1.0,
+            created_by="system",
+            scope="system_internal",
+            conn=conn,
+        )
+
+        report = _build_memory_report(
+            query="index degradation",
+            include_system_internal=True,
+            limit=3,
+            conn=conn,
+        )
+
+        assert "- View: `system_internal`" in report
+        assert "Contextual memory search for `index degradation`:" in report
+        assert "Memory index degradation" in report
+    finally:
+        conn.close()
+
+
+def test_build_memory_report_global_view_shows_conversation_memory_counts():
+    conn = db.get_connection(":memory:")
+    try:
+        db.save_message(
+            "leader:user123",
+            "user",
+            "Who should we promote?",
+            discord_user_id="user123",
+            username="jamie",
+            display_name="Jamie",
+            conn=conn,
+        )
+
+        report = _build_memory_report(limit=2, conn=conn)
+
+        assert "- Conversation store: 1 facts | 1 episodes | 0 channel states" in report
+        assert "Recent conversation memory:" in report
+        assert "Fact `discord_user:user123` `last_user_summary`" in report
+        assert "Episode `discord_user:user123` `user` importance 1" in report
     finally:
         conn.close()

@@ -15,6 +15,7 @@ COMMAND_HELP = {
     "clan-status": "Fetch live clan/war data and print the operational clan status report.",
     "clan-list": "List active clan members with exact names, tags, roles, and clan ranks.",
     "profile": "Show the stored member profile and metadata for one member.",
+    "memory": "Inspect Elixir's stored conversation and contextual memory.",
     "verify-discord": "Verify a member's Discord link and ensure the Member role is assigned.",
     "set-join-date": "Set a member join date in YYYY-MM-DD format.",
     "clear-join-date": "Clear a member join date.",
@@ -39,6 +40,32 @@ COMMAND_HELP = {
     "clanops-review": "Force the weekly clanops review post now.",
 }
 
+LEADER_ONLY_COMMANDS = {
+    "memory",
+    "verify-discord",
+    "set-join-date",
+    "clear-join-date",
+    "set-birthday",
+    "clear-birthday",
+    "set-profile-url",
+    "clear-profile-url",
+    "set-poap-address",
+    "clear-poap-address",
+    "set-note",
+    "clear-note",
+    "heartbeat",
+    "site-data",
+    "site-content",
+    "site-publish",
+    "home-message",
+    "members-message",
+    "roster-bios",
+    "promote-content",
+    "promotion",
+    "player-intel",
+    "clanops-review",
+}
+
 COMMAND_ORDER = [
     "help",
     "status",
@@ -46,6 +73,7 @@ COMMAND_ORDER = [
     "clan-status",
     "clan-list",
     "profile",
+    "memory",
     "verify-discord",
     "set-join-date",
     "clear-join-date",
@@ -69,6 +97,10 @@ COMMAND_ORDER = [
     "player-intel",
     "clanops-review",
 ]
+
+
+def admin_command_requires_leader(command: str) -> bool:
+    return command in LEADER_ONLY_COMMANDS
 
 
 def _utcnow() -> str:
@@ -99,10 +131,12 @@ def render_admin_help(
             "Examples:",
             f"- `{slash_prefix} clan-list`",
             f"- `{slash_prefix} profile show member:Ditika`",
+            f"- `{slash_prefix} memory show member:Ditika`",
             f"- `{slash_prefix} profile verify-discord member:King Thing`",
             f"- `{slash_prefix} profile set-join-date member:Ditika date:2026-03-07`",
             f"- `{slash_prefix} jobs run job:heartbeat preview:true`",
             f"- `{mention_prefix} promotion --preview`",
+            f"- `{mention_prefix} memory member \"Ditika\" search \"war consistency\" --limit 5`",
             f"- `{mention_prefix} verify-discord \"King Thing\"`",
             f"- `{mention_prefix} set-join-date \"Ditika\" 2026-03-07`",
             f"- `{mention_prefix} set-poap-address \"King Levy\" 0xabc123...`",
@@ -156,6 +190,41 @@ def parse_admin_command(text: str, *, require_prefix: bool = False):
 
     command = filtered[0].lower()
     extra = filtered[1:]
+
+    if command == "memory":
+        args = {"limit": "5"}
+        i = 0
+        free_tokens = []
+        while i < len(extra):
+            token = extra[i]
+            lower = token.lower()
+            if lower in {"member", "--member"} and i + 1 < len(extra):
+                args["member"] = extra[i + 1]
+                i += 2
+                continue
+            if lower in {"search", "query", "--search", "--query"} and i + 1 < len(extra):
+                args["query"] = extra[i + 1]
+                i += 2
+                continue
+            if lower in {"--limit", "limit"} and i + 1 < len(extra):
+                args["limit"] = extra[i + 1]
+                i += 2
+                continue
+            if lower in {"--system-internal", "system-internal", "--internal", "internal"}:
+                args["include_system_internal"] = "true"
+                i += 1
+                continue
+            free_tokens.append(token)
+            i += 1
+
+        if free_tokens:
+            if len(free_tokens) == 1 and "member" not in args and "query" not in args:
+                args["member"] = free_tokens[0]
+            elif "query" not in args:
+                args["query"] = " ".join(free_tokens)
+            else:
+                return None
+        return {"command": "memory", "preview": preview, "short": False, "args": args}
 
     if command == "help" and not extra:
         return {"command": "help", "preview": preview, "short": False, "args": {}}
@@ -250,11 +319,11 @@ def _fmt_optional(value, empty="n/a"):
     return str(value)
 
 
-def _build_member_profile_report(member_query: str) -> str:
+def _build_member_profile_report(member_query: str, *, conn=None) -> str:
     import db
 
-    member_tag, label = _resolve_member_tag(member_query)
-    profile = db.get_member_profile(member_tag)
+    member_tag, label = _resolve_member_tag(member_query, conn=conn)
+    profile = db.get_member_profile(member_tag, conn=conn)
     if not profile:
         raise ValueError(f"No stored profile found for {label}.")
     birthday = None
@@ -303,6 +372,205 @@ def _build_member_profile_report(member_query: str) -> str:
     if profile.get("bio"):
         lines.append(f"- Bio: {profile['bio']}")
     return "\n".join(lines)
+
+
+def _truncate_for_report(text, limit=160):
+    value = " ".join(str(text or "").split())
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3].rstrip() + "..."
+
+
+def _format_contextual_memory_item(memory: dict) -> str:
+    source = memory.get("source_type") or "unknown"
+    if source == "leader_note":
+        source_label = "leader"
+    elif source == "elixir_inference":
+        source_label = f"inference {float(memory.get('confidence') or 0.0):.2f}"
+    else:
+        source_label = "system"
+    created_at = memory.get("created_at") or "n/a"
+    summary = _truncate_for_report(memory.get("summary") or memory.get("title") or memory.get("body") or "")
+    tags = memory.get("tags") or []
+    tag_text = f" | tags {', '.join(tags[:3])}" if tags else ""
+    return (
+        f"- `#{memory.get('memory_id')}` {created_at} | {memory.get('scope') or 'n/a'} | "
+        f"{source_label} | {memory.get('status') or 'n/a'}: {summary}{tag_text}"
+    )
+
+
+def _format_conversation_facts(title: str, facts: list[dict], limit: int) -> list[str]:
+    if not facts:
+        return [f"- {title}: none"]
+    lines = [f"- {title}: {len(facts)}"]
+    for fact in facts[:limit]:
+        confidence = float(fact.get("confidence") or 0.0)
+        lines.append(
+            f"- {title[:-1]} `{fact.get('fact_type')}` ({confidence:.2f}) updated {fact.get('updated_at') or 'n/a'}: "
+            f"{_truncate_for_report(fact.get('fact_value') or '')}"
+        )
+    return lines
+
+
+def _format_conversation_episodes(title: str, episodes: list[dict], limit: int) -> list[str]:
+    if not episodes:
+        return [f"- {title}: none"]
+    lines = [f"- {title}: {len(episodes)}"]
+    for episode in episodes[:limit]:
+        lines.append(
+            f"- {title[:-1]} `{episode.get('episode_type')}` importance {episode.get('importance') or 0} "
+            f"at {episode.get('created_at') or 'n/a'}: {_truncate_for_report(episode.get('summary') or '')}"
+        )
+    return lines
+
+
+def _get_conversation_memory_totals(conn) -> dict:
+    row = conn.execute(
+        "SELECT "
+        "(SELECT COUNT(*) FROM memory_facts) AS facts, "
+        "(SELECT COUNT(*) FROM memory_episodes) AS episodes, "
+        "(SELECT COUNT(*) FROM channel_state) AS channels"
+    ).fetchone()
+    return dict(row)
+
+
+def _list_recent_conversation_facts(limit: int, *, conn) -> list[dict]:
+    rows = conn.execute(
+        "SELECT subject_type, subject_key, fact_type, fact_value, confidence, updated_at "
+        "FROM memory_facts ORDER BY updated_at DESC, fact_id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _list_recent_conversation_episodes(limit: int, *, conn) -> list[dict]:
+    rows = conn.execute(
+        "SELECT subject_type, subject_key, episode_type, summary, importance, created_at "
+        "FROM memory_episodes ORDER BY created_at DESC, episode_id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _build_memory_report(*, member_query: str | None = None, query: str | None = None, limit: int = 5,
+                         include_system_internal: bool = False, conn=None) -> str:
+    import db
+    from memory_store import list_memories, search_memories
+
+    close = conn is None
+    conn = conn or db.get_connection()
+    try:
+        viewer_scope = "system_internal" if include_system_internal else "leadership"
+        limit = max(1, min(int(limit or 5), 10))
+        system_status = db.get_system_status(conn=conn)
+        memory_status = system_status.get("contextual_memory") or {}
+        conversation_totals = _get_conversation_memory_totals(conn)
+        lines = ["**Elixir Memory**"]
+        lines.append(
+            "- Conversation store: "
+            f"{conversation_totals.get('facts', 0)} facts | "
+            f"{conversation_totals.get('episodes', 0)} episodes | "
+            f"{conversation_totals.get('channels', 0)} channel states"
+        )
+        lines.append(
+            "- Context store: "
+            f"{memory_status.get('total', 0)} total | "
+            f"{memory_status.get('leader_notes', 0)} leader | "
+            f"{memory_status.get('inferences', 0)} inference | "
+            f"{memory_status.get('system_notes', 0)} system | "
+            f"sqlite-vec {'on' if memory_status.get('sqlite_vec_enabled') else 'off'}"
+        )
+        lines.append(f"- View: `{viewer_scope}`")
+
+        member_filter = None
+        member_label = None
+        member_profile = None
+        if member_query:
+            member_tag, member_label = _resolve_member_tag(member_query, conn=conn)
+            member_filter = {"member_tag": member_tag}
+            member_profile = db.get_member_profile(member_tag, conn=conn) or {}
+            lines.append(f"- Member: {member_label} (`{member_tag}`)")
+
+            memory_context = db.build_memory_context(
+                discord_user_id=member_profile.get("discord_user_id"),
+                member_tag=member_tag,
+                conn=conn,
+            )
+            lines.append("")
+            lines.append("Conversation memory:")
+            user_ctx = memory_context.get("discord_user") or {}
+            member_ctx = memory_context.get("member") or {}
+            lines.extend(_format_conversation_facts("User facts", user_ctx.get("facts") or [], limit))
+            lines.extend(_format_conversation_episodes("User episodes", user_ctx.get("episodes") or [], limit))
+            lines.extend(_format_conversation_facts("Member facts", member_ctx.get("facts") or [], limit))
+            lines.extend(_format_conversation_episodes("Member episodes", member_ctx.get("episodes") or [], limit))
+        else:
+            recent_facts = _list_recent_conversation_facts(limit, conn=conn)
+            recent_episodes = _list_recent_conversation_episodes(limit, conn=conn)
+            lines.append("")
+            lines.append("Recent conversation memory:")
+            if not recent_facts:
+                lines.append("- Recent facts: none")
+            else:
+                lines.append(f"- Recent facts: {len(recent_facts)}")
+                for fact in recent_facts:
+                    lines.append(
+                        f"- Fact `{fact.get('subject_type')}:{fact.get('subject_key')}` "
+                        f"`{fact.get('fact_type')}` ({float(fact.get('confidence') or 0.0):.2f}) "
+                        f"updated {fact.get('updated_at') or 'n/a'}: "
+                        f"{_truncate_for_report(fact.get('fact_value') or '')}"
+                    )
+            if not recent_episodes:
+                lines.append("- Recent episodes: none")
+            else:
+                lines.append(f"- Recent episodes: {len(recent_episodes)}")
+                for episode in recent_episodes:
+                    lines.append(
+                        f"- Episode `{episode.get('subject_type')}:{episode.get('subject_key')}` "
+                        f"`{episode.get('episode_type')}` importance {episode.get('importance') or 0} "
+                        f"at {episode.get('created_at') or 'n/a'}: {_truncate_for_report(episode.get('summary') or '')}"
+                    )
+
+        lines.append("")
+        if query:
+            results = search_memories(
+                query,
+                viewer_scope=viewer_scope,
+                include_system_internal=include_system_internal,
+                filters=member_filter,
+                limit=limit,
+                conn=conn,
+            )
+            lines.append(f"Contextual memory search for `{query}`:")
+            if not results:
+                lines.append("_No contextual memories matched._")
+            else:
+                for result in results:
+                    lines.append(_format_contextual_memory_item(result.memory))
+        else:
+            items = list_memories(
+                viewer_scope=viewer_scope,
+                include_system_internal=include_system_internal,
+                filters=member_filter,
+                limit=limit,
+                conn=conn,
+            )
+            subject = f" for {member_label}" if member_label else ""
+            lines.append(f"Recent contextual memories{subject}:")
+            if not items:
+                lines.append("_No contextual memories stored._")
+            else:
+                for item in items:
+                    lines.append(_format_contextual_memory_item(item))
+
+        latest_memory_at = memory_status.get("latest_memory_at")
+        if latest_memory_at:
+            lines.append("")
+            lines.append(f"- Latest contextual memory at {latest_memory_at}")
+        return "\n".join(lines)
+    finally:
+        if close:
+            conn.close()
 
 
 @asynccontextmanager
@@ -465,10 +733,10 @@ async def _run_promote_content(preview: bool) -> str:
     return json.dumps(promote, indent=2)
 
 
-def _resolve_member_tag(member_query: str) -> tuple[str, str]:
+def _resolve_member_tag(member_query: str, *, conn=None) -> tuple[str, str]:
     import db
 
-    matches = db.resolve_member(member_query, limit=3)
+    matches = db.resolve_member(member_query, limit=3, conn=conn)
     if not matches:
         raise ValueError(f"No clan member matched {member_query!r}.")
     exactish = [item for item in matches if item.get("match_score", 0) >= 850]
@@ -574,6 +842,14 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
         return await asyncio.to_thread(_build_clan_list_report)
     if command == "profile":
         return await asyncio.to_thread(_build_member_profile_report, args["member"])
+    if command == "memory":
+        return await asyncio.to_thread(
+            _build_memory_report,
+            member_query=args.get("member"),
+            query=args.get("query"),
+            limit=args.get("limit", 5),
+            include_system_internal=str(args.get("include_system_internal", "")).lower() in {"1", "true", "yes", "on"},
+        )
     if command == "verify-discord":
         return await _run_verify_discord(preview=preview, args=args)
     if command in {
@@ -603,6 +879,8 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
 
 
 __all__ = [
+    "LEADER_ONLY_COMMANDS",
+    "admin_command_requires_leader",
     "COMMAND_HELP",
     "COMMAND_ORDER",
     "dispatch_admin_command",
