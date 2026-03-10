@@ -1212,11 +1212,44 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _enable_sqlite_vec(conn: sqlite3.Connection) -> None:
+    try:
+        import sqlite_vec
+    except ImportError as exc:
+        raise RuntimeError(
+            "sqlite-vec is required but not installed. Run `venv/bin/python -m pip install -r requirements.txt`."
+        ) from exc
+
+    try:
+        conn.enable_load_extension(True)
+    except Exception:
+        pass
+
+    try:
+        sqlite_vec.load(conn)
+        conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS clan_memory_vec USING vec0(memory_id INTEGER PRIMARY KEY, embedding float[1536])"
+        )
+        if "clan_memory_index_status" in _existing_tables(conn):
+            conn.execute(
+                "UPDATE clan_memory_index_status SET value = '1' WHERE key = 'sqlite_vec_enabled'"
+            )
+            conn.commit()
+    except Exception as exc:
+        raise RuntimeError(f"sqlite-vec is required but failed to load: {exc}") from exc
+    finally:
+        try:
+            conn.enable_load_extension(False)
+        except Exception:
+            pass
+
+
 def get_connection(db_path=None):
     path = os.fspath(db_path or DB_PATH)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    _enable_sqlite_vec(conn)
     if path != ":memory:" and not _schema_is_compatible(conn):
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         tables = sorted(_existing_tables(conn))
@@ -1233,7 +1266,9 @@ def get_connection(db_path=None):
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        _enable_sqlite_vec(conn)
     _run_migrations(conn)
+    _enable_sqlite_vec(conn)
     return conn
 
 

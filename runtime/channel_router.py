@@ -340,6 +340,38 @@ async def route_message(message):
 
     admin_command = app.parse_admin_command(raw_question, require_prefix=True) if role == "clanops" and mentioned else None
     if admin_command:
+        if app.admin_command_requires_leader(admin_command["command"]) and not app._has_leader_role(message.author):
+            denial = "Leader role required for this command."
+            await asyncio.to_thread(
+                db.save_message,
+                conversation_scope,
+                "user",
+                raw_question,
+                channel_id=message.channel.id,
+                channel_name=getattr(message.channel, "name", None),
+                channel_kind=str(message.channel.type),
+                discord_user_id=message.author.id,
+                username=message.author.name,
+                display_name=message.author.display_name,
+                workflow="clanops",
+                discord_message_id=message.id,
+            )
+            await app._reply_text(message, denial)
+            await asyncio.to_thread(
+                db.save_message,
+                conversation_scope,
+                "assistant",
+                denial,
+                channel_id=message.channel.id,
+                channel_name=getattr(message.channel, "name", None),
+                channel_kind=str(message.channel.type),
+                discord_user_id=message.author.id,
+                username=message.author.name,
+                display_name=message.author.display_name,
+                workflow="clanops",
+                event_type="clanops_admin_denied",
+            )
+            return
         route = f"clanops_admin_{admin_command['command'].replace('-', '_')}"
         if admin_command.get("preview"):
             route += "_preview"

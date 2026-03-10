@@ -21,11 +21,12 @@ import site_content
 import elixir_agent
 import heartbeat
 import prompts
-from runtime.admin import dispatch_admin_command, parse_admin_command
+from runtime.admin import admin_command_requires_leader, dispatch_admin_command, parse_admin_command
 from runtime.channel_router import route_message
 from runtime.discord_commands import register_elixir_app_commands
 from runtime import onboarding
 from runtime import status as runtime_status
+from runtime.system_signals import queue_startup_system_signals
 
 load_dotenv()
 
@@ -344,6 +345,7 @@ async def on_ready():
     global SLASH_COMMANDS_SYNCED
     log.info("Elixir online as %s", bot.user)
     prompts.ensure_valid_discord_channel_config()
+    await asyncio.to_thread(queue_startup_system_signals)
     role_status = _member_role_grant_status()
     if role_status["configured"] and not role_status["ok"]:
         log.warning(

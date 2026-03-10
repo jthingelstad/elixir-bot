@@ -508,15 +508,8 @@ def detect_cake_days(today_str=None, conn=None):
 
 
 def detect_pending_system_signals(today_str=None, conn=None):
-    today_str = today_str or datetime.now().strftime("%Y-%m-%d")
-    pending = db.list_pending_system_signals(conn=conn)
-    signals = []
-    for signal in pending:
-        log_type = signal.get("signal_log_type") or f"system_signal::{signal.get('signal_key')}"
-        if db.was_signal_sent(log_type, today_str, conn=conn):
-            continue
-        signals.append(signal)
-    return signals
+    del today_str
+    return db.list_pending_system_signals(conn=conn)
 
 
 # ── Main heartbeat tick ──────────────────────────────────────────────────────
@@ -628,6 +621,8 @@ def tick(conn=None):
         # Mark emitted signals so they don't re-fire today
         today = datetime.now().strftime("%Y-%m-%d")
         for sig in signals:
+            if sig.get("signal_key"):
+                continue
             db.mark_signal_sent(sig.get("signal_log_type") or sig["type"], today, conn=conn)
 
         log.info("Heartbeat: %d signals detected", len(signals))

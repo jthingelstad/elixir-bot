@@ -158,6 +158,20 @@ venv/bin/python scripts/review_prompt_failures.py --workflow clanops --json
   - `war`
 - `elixir._heartbeat_tick()` consumes this bundle and does not re-fetch clan/war in the same cycle.
 
+## System Signals
+
+One-time capability or upgrade announcements should use the queued `system_signals` path, not an ad hoc Discord post.
+
+- Define startup-seeded system signals in `runtime/system_signals.py`
+- Add one entry to `STARTUP_SYSTEM_SIGNALS` with:
+  - stable `signal_key`
+  - `signal_type` such as `capability_unlock`
+  - `payload` fields the observation workflow can talk about
+- Startup queues these signals idempotently via `queue_startup_system_signals()`
+- Heartbeat surfaces pending signals through the normal observation workflow and marks them announced after a successful post
+
+This keeps feature announcements discoverable: future changes should usually mean “edit one list” instead of remembering startup-hook details.
+
 ## V2 Query Layer (Current)
 
 Elixir’s core member/leader questions should be answered from V2 query helpers and tools, not prompt reconstruction. Important read paths include:

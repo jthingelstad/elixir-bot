@@ -125,6 +125,65 @@ def test_heartbeat_tick_marks_system_signal_announced_after_successful_post():
     mock_mark_announced.assert_called_once_with("capability_boat_defense_intelligence_v1")
 
 
+def test_heartbeat_tick_does_not_mark_system_signal_sent_before_success():
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[{
+            "type": "capability_unlock",
+            "signal_key": "capability_memory_system_v1",
+            "title": "Achievement Unlocked: Stronger Memory",
+        }],
+        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
+        war={"state": "training"},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 123
+    channel.name = "elixir"
+    channel.type = "text"
+
+    with (
+        patch.object(elixir, "HEARTBEAT_START_HOUR", 0),
+        patch.object(elixir, "HEARTBEAT_END_HOUR", 24),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.heartbeat.tick", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={"channel": {"state": None, "episodes": []}}),
+        patch("elixir.db.save_message"),
+        patch("elixir.db.mark_signal_sent") as mock_mark_signal_sent,
+        patch("elixir.db.mark_system_signal_announced") as mock_mark_announced,
+        patch("elixir.elixir_agent.observe_and_post", return_value=None),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+    ):
+        asyncio.run(elixir._heartbeat_tick())
+
+    mock_post.assert_not_awaited()
+    mock_mark_signal_sent.assert_not_called()
+    mock_mark_announced.assert_not_called()
+
+
+def test_detect_pending_system_signals_retries_until_announced():
+    conn = db.get_connection(":memory:")
+    try:
+        db.queue_system_signal(
+            "capability_memory_system_v1",
+            "capability_unlock",
+            {"title": "Achievement Unlocked: Stronger Memory"},
+            conn=conn,
+        )
+        db.mark_signal_sent("system_signal::capability_memory_system_v1", "2026-03-10", conn=conn)
+
+        signals = heartbeat.detect_pending_system_signals(today_str="2026-03-10", conn=conn)
+    finally:
+        conn.close()
+
+    assert len(signals) == 1
+    assert signals[0]["signal_key"] == "capability_memory_system_v1"
+
+
 def test_player_intel_refresh_uses_refresh_targets_without_llm():
     """_player_intel_refresh should refresh stale members without touching the LLM."""
     clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
