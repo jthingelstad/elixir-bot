@@ -546,6 +546,9 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
             "tag": "#ABC123",
             "name": "King Levy",
             "expLevel": 66,
+            "expPoints": 12345,
+            "totalExpPoints": 54321,
+            "starPoints": 777,
             "trophies": 11429,
             "bestTrophies": 11433,
             "wins": 100,
@@ -560,6 +563,7 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
             "tournamentBattleCount": 10,
             "tournamentCardsWon": 100,
             "threeCrownWins": 20,
+            "clanCardsCollected": 3210,
             "currentFavouriteCard": {"id": 26000011, "name": "Valkyrie"},
             "currentDeck": [
                 {"name": "Valkyrie", "level": 14, "maxLevel": 14, "rarity": "rare", "iconUrls": {"medium": "icon://valk"}},
@@ -571,10 +575,21 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
                 {"name": "Inferno Tower", "level": 10, "maxLevel": 11, "rarity": "epic", "iconUrls": {"medium": "icon://inferno"}},
                 {"name": "Log", "level": 8, "maxLevel": 8, "rarity": "legendary", "iconUrls": {"medium": "icon://log"}},
             ],
+            "currentDeckSupportCards": [
+                {"name": "Dagger Duchess", "level": 4, "maxLevel": 4, "rarity": "legendary", "iconUrls": {"medium": "icon://duchess"}},
+            ],
             "cards": [],
+            "supportCards": [
+                {"name": "Dagger Duchess", "level": 4, "maxLevel": 4, "rarity": "legendary", "iconUrls": {"medium": "icon://duchess"}},
+            ],
             "badges": [],
             "achievements": [],
             "leagueStatistics": {"currentSeason": {"trophies": 11429}},
+            "currentPathOfLegendSeasonResult": {"leagueNumber": 9, "trophies": 2000, "rank": 1234},
+            "lastPathOfLegendSeasonResult": {"leagueNumber": 8, "trophies": 1800, "rank": 2345},
+            "bestPathOfLegendSeasonResult": {"leagueNumber": 10, "trophies": 2200, "rank": 345},
+            "legacyTrophyRoadHighScore": 9000,
+            "progress": {"AutoChess_2026_Mar": {"trophies": 3460, "bestTrophies": 3593}},
         }
         db.snapshot_player_profile(profile, conn=conn)
 
@@ -632,6 +647,25 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         assert deck["cards"][0]["api_level"] == 14
         assert deck["cards"][1]["level"] == 15
         assert deck["cards"][1]["api_level"] == 10
+        assert deck["support_cards"][0]["name"] == "Dagger Duchess"
+        assert deck["support_cards"][0]["level"] == 16
+        assert deck["support_cards"][0]["api_level"] == 4
+
+        profile_row = conn.execute(
+            "SELECT exp_points, total_exp_points, star_points, clan_cards_collected, "
+            "current_deck_support_cards_json, support_cards_json, current_path_of_legend_season_result_json, "
+            "legacy_trophy_road_high_score, progress_json "
+            "FROM player_profile_snapshots ORDER BY snapshot_id DESC LIMIT 1"
+        ).fetchone()
+        assert profile_row["exp_points"] == 12345
+        assert profile_row["total_exp_points"] == 54321
+        assert profile_row["star_points"] == 777
+        assert profile_row["clan_cards_collected"] == 3210
+        assert json.loads(profile_row["current_deck_support_cards_json"])[0]["name"] == "Dagger Duchess"
+        assert json.loads(profile_row["support_cards_json"])[0]["name"] == "Dagger Duchess"
+        assert json.loads(profile_row["current_path_of_legend_season_result_json"])["leagueNumber"] == 9
+        assert profile_row["legacy_trophy_road_high_score"] == 9000
+        assert json.loads(profile_row["progress_json"])["AutoChess_2026_Mar"]["trophies"] == 3460
 
         cards = db.get_member_signature_cards("#ABC123", conn=conn)
         assert cards["sample_battles"] == 2
@@ -641,6 +675,100 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         assert form["wins"] == 1
         assert form["losses"] == 1
         assert form["sample_size"] == 2
+    finally:
+        conn.close()
+
+
+def test_snapshot_player_battlelog_uses_api_outcome_priority_and_normalizes_extra_metadata():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_battlelog(
+            "#ABC123",
+            [
+                {
+                    "type": "boatBattle",
+                    "battleTime": "20260307T110000.000Z",
+                    "gameMode": {"id": 72000266, "name": "ClanWar_BoatBattle"},
+                    "deckSelection": "collection",
+                    "arena": {"id": 54000046, "name": "Legendary Arena"},
+                    "eventTag": "boat-weekend",
+                    "isHostedMatch": False,
+                    "leagueNumber": 1,
+                    "boatBattleSide": "defender",
+                    "boatBattleWon": True,
+                    "newTowersDestroyed": 0,
+                    "prevTowersDestroyed": 1,
+                    "remainingTowers": 2,
+                    "modifiers": [{"tag": "#ABC123", "modifiers": ["Rage1"]}],
+                    "team": [{
+                        "tag": "#ABC123",
+                        "name": "King Levy",
+                        "crowns": 0,
+                        "cards": [],
+                        "supportCards": [],
+                    }],
+                    "opponent": [{
+                        "tag": "#DEF456",
+                        "name": "Opponent",
+                        "crowns": 3,
+                        "cards": [],
+                        "supportCards": [],
+                    }],
+                },
+                {
+                    "type": "riverRaceDuel",
+                    "battleTime": "20260307T120000.000Z",
+                    "gameMode": {"id": 72000267, "name": "CW_Duel_1v1"},
+                    "deckSelection": "warDeckPick",
+                    "arena": {"id": 1, "name": "Arena 1"},
+                    "team": [{
+                        "tag": "#ABC123",
+                        "name": "King Levy",
+                        "crowns": 2,
+                        "cards": [],
+                        "supportCards": [],
+                        "rounds": [{"crowns": 1, "cards": [{"name": "Knight", "used": True}]}],
+                    }],
+                    "opponent": [{
+                        "tag": "#XYZ789",
+                        "name": "Opponent 2",
+                        "crowns": 1,
+                        "cards": [],
+                        "supportCards": [],
+                        "rounds": [{"crowns": 0, "cards": [{"name": "Knight", "used": False}]}],
+                    }],
+                },
+            ],
+            conn=conn,
+        )
+
+        boat = conn.execute(
+            "SELECT outcome, event_tag, league_number, is_hosted_match, modifiers_json, boat_battle_side, "
+            "boat_battle_won, new_towers_destroyed, prev_towers_destroyed, remaining_towers "
+            "FROM member_battle_facts WHERE battle_type = 'boatBattle'"
+        ).fetchone()
+        assert boat["outcome"] == "W"
+        assert boat["event_tag"] == "boat-weekend"
+        assert boat["league_number"] == 1
+        assert boat["is_hosted_match"] == 0
+        assert json.loads(boat["modifiers_json"])[0]["modifiers"] == ["Rage1"]
+        assert boat["boat_battle_side"] == "defender"
+        assert boat["boat_battle_won"] == 1
+        assert boat["new_towers_destroyed"] == 0
+        assert boat["prev_towers_destroyed"] == 1
+        assert boat["remaining_towers"] == 2
+
+        duel = conn.execute(
+            "SELECT outcome, team_rounds_json, opponent_rounds_json "
+            "FROM member_battle_facts WHERE battle_type = 'riverRaceDuel'"
+        ).fetchone()
+        assert duel["outcome"] == "W"
+        assert json.loads(duel["team_rounds_json"])[0]["cards"][0]["used"] is True
+        assert json.loads(duel["opponent_rounds_json"])[0]["cards"][0]["used"] is False
     finally:
         conn.close()
 

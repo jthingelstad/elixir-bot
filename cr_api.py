@@ -91,7 +91,7 @@ def get_player(tag):
 
 
 def get_player_battle_log(tag):
-    """Fetch a player's recent battle log (~25 battles).
+    """Fetch a player's recent battle log.
 
     tag: player tag with or without '#' prefix.
     Returns list of battle objects or None on error.

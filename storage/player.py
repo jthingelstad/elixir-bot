@@ -29,22 +29,28 @@ def snapshot_player_profile(player_data, conn=None):
         ).fetchone()
         fetched_at = _utcnow()
         current_deck = player_data.get("currentDeck") or []
+        current_deck_support_cards = player_data.get("currentDeckSupportCards") or []
         cards = player_data.get("cards") or []
+        support_cards = player_data.get("supportCards") or []
         favourite = player_data.get("currentFavouriteCard") or {}
         conn.execute(
-            "INSERT INTO player_profile_snapshots (member_id, fetched_at, exp_level, trophies, best_trophies, wins, losses, battle_count, total_donations, donations, donations_received, war_day_wins, challenge_max_wins, challenge_cards_won, tournament_battle_count, tournament_cards_won, three_crown_wins, current_favourite_card_id, current_favourite_card_name, league_statistics_json, current_deck_json, cards_json, badges_json, achievements_json, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO player_profile_snapshots (member_id, fetched_at, exp_level, exp_points, total_exp_points, star_points, trophies, best_trophies, wins, losses, battle_count, total_donations, donations, donations_received, war_day_wins, challenge_max_wins, challenge_cards_won, tournament_battle_count, tournament_cards_won, three_crown_wins, clan_cards_collected, current_favourite_card_id, current_favourite_card_name, league_statistics_json, current_deck_json, current_deck_support_cards_json, cards_json, support_cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json, last_path_of_legend_season_result_json, best_path_of_legend_season_result_json, legacy_trophy_road_high_score, progress_json, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                member_id, fetched_at, player_data.get("expLevel"), player_data.get("trophies"), player_data.get("bestTrophies"), player_data.get("wins"), player_data.get("losses"), player_data.get("battleCount"), player_data.get("totalDonations"), player_data.get("donations"), player_data.get("donationsReceived"), player_data.get("warDayWins"), player_data.get("challengeMaxWins"), player_data.get("challengeCardsWon"), player_data.get("tournamentBattleCount"), player_data.get("tournamentCardsWon"), player_data.get("threeCrownWins"), favourite.get("id"), favourite.get("name"), _json_or_none(player_data.get("leagueStatistics")), _json_or_none(current_deck), _json_or_none(cards), _json_or_none(player_data.get("badges") or []), _json_or_none(player_data.get("achievements") or []), _json_or_none(player_data)
+                member_id, fetched_at, player_data.get("expLevel"), player_data.get("expPoints"), player_data.get("totalExpPoints"), player_data.get("starPoints"), player_data.get("trophies"), player_data.get("bestTrophies"), player_data.get("wins"), player_data.get("losses"), player_data.get("battleCount"), player_data.get("totalDonations"), player_data.get("donations"), player_data.get("donationsReceived"), player_data.get("warDayWins"), player_data.get("challengeMaxWins"), player_data.get("challengeCardsWon"), player_data.get("tournamentBattleCount"), player_data.get("tournamentCardsWon"), player_data.get("threeCrownWins"), player_data.get("clanCardsCollected"), favourite.get("id"), favourite.get("name"), _json_or_none(player_data.get("leagueStatistics")), _json_or_none(current_deck), _json_or_none(current_deck_support_cards), _json_or_none(cards), _json_or_none(support_cards), _json_or_none(player_data.get("badges") or []), _json_or_none(player_data.get("achievements") or []), _json_or_none(player_data.get("currentPathOfLegendSeasonResult")), _json_or_none(player_data.get("lastPathOfLegendSeasonResult")), _json_or_none(player_data.get("bestPathOfLegendSeasonResult")), player_data.get("legacyTrophyRoadHighScore"), _json_or_none(player_data.get("progress")), _json_or_none(player_data)
             ),
         )
         conn.execute(
-            "INSERT INTO member_card_collection_snapshots (member_id, fetched_at, cards_json) VALUES (?, ?, ?)",
-            (member_id, fetched_at, _json_or_none(cards) or "[]"),
+            "INSERT INTO member_card_collection_snapshots (member_id, fetched_at, cards_json, support_cards_json) VALUES (?, ?, ?, ?)",
+            (member_id, fetched_at, _json_or_none(cards) or "[]", _json_or_none(support_cards) or "[]"),
         )
-        deck_hash = _hash_payload(current_deck) if current_deck else None
+        deck_payload = {
+            "cards": current_deck,
+            "support_cards": current_deck_support_cards,
+        }
+        deck_hash = _hash_payload(deck_payload) if (current_deck or current_deck_support_cards) else None
         conn.execute(
-            "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, sample_size) VALUES (?, ?, 'player_profile', 'overall', ?, ?, 1)",
-            (member_id, fetched_at, deck_hash, _json_or_none(current_deck) or "[]"),
+            "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, support_cards_json, sample_size) VALUES (?, ?, 'player_profile', 'overall', ?, ?, ?, 1)",
+            (member_id, fetched_at, deck_hash, _json_or_none(current_deck) or "[]", _json_or_none(current_deck_support_cards) or "[]"),
         )
         _store_raw_payload(conn, "player", _tag_key(tag), player_data)
         conn.commit()
@@ -171,6 +177,30 @@ def _classify_battle(battle: dict) -> dict:
     }
 
 
+def _resolve_battle_outcome(battle: dict, team: dict, opp: dict | None) -> str | None:
+    boat_battle_won = battle.get("boatBattleWon")
+    if isinstance(boat_battle_won, bool):
+        return "W" if boat_battle_won else "L"
+
+    trophy_change = team.get("trophyChange") if team else None
+    if isinstance(trophy_change, (int, float)):
+        if trophy_change > 0:
+            return "W"
+        if trophy_change < 0:
+            return "L"
+        return "D"
+
+    crowns_for = team.get("crowns") if team else None
+    crowns_against = opp.get("crowns") if opp else None
+    if crowns_for is None or crowns_against is None:
+        return None
+    if crowns_for > crowns_against:
+        return "W"
+    if crowns_for < crowns_against:
+        return "L"
+    return "D"
+
+
 def snapshot_player_battlelog(player_tag, battle_log, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -185,18 +215,11 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
                 continue
             crowns_for = team.get("crowns")
             crowns_against = opp.get("crowns") if opp else None
-            if crowns_for is None or crowns_against is None:
-                outcome = None
-            elif crowns_for > crowns_against:
-                outcome = "W"
-            elif crowns_for < crowns_against:
-                outcome = "L"
-            else:
-                outcome = "D"
+            outcome = _resolve_battle_outcome(battle, team, opp)
             arena = battle.get("arena") or {}
             classified = _classify_battle(battle)
             conn.execute(
-                "INSERT OR IGNORE INTO member_battle_facts (member_id, battle_time, battle_type, game_mode_name, game_mode_id, deck_selection, arena_id, arena_name, crowns_for, crowns_against, outcome, trophy_change, starting_trophies, is_competitive, is_ladder, is_ranked, is_war, is_special_event, deck_json, support_cards_json, opponent_name, opponent_tag, opponent_clan_tag, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO member_battle_facts (member_id, battle_time, battle_type, game_mode_name, game_mode_id, deck_selection, arena_id, arena_name, crowns_for, crowns_against, outcome, trophy_change, starting_trophies, is_competitive, is_ladder, is_ranked, is_war, is_special_event, deck_json, support_cards_json, opponent_name, opponent_tag, opponent_clan_tag, event_tag, league_number, is_hosted_match, modifiers_json, team_rounds_json, opponent_rounds_json, boat_battle_side, boat_battle_won, new_towers_destroyed, prev_towers_destroyed, remaining_towers, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     member_id,
                     battle.get("battleTime"),
@@ -221,11 +244,22 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
                     opp.get("name") if opp else None,
                     _canon_tag(opp.get("tag")) if opp and opp.get("tag") else None,
                     _canon_tag((opp.get("clan") or {}).get("tag")) if opp else None,
+                    battle.get("eventTag"),
+                    battle.get("leagueNumber"),
+                    int(bool(battle.get("isHostedMatch"))) if battle.get("isHostedMatch") is not None else None,
+                    _json_or_none(battle.get("modifiers") or []),
+                    _json_or_none(team.get("rounds") or []),
+                    _json_or_none(opp.get("rounds") or []),
+                    battle.get("boatBattleSide"),
+                    int(bool(battle.get("boatBattleWon"))) if battle.get("boatBattleWon") is not None else None,
+                    battle.get("newTowersDestroyed"),
+                    battle.get("prevTowersDestroyed"),
+                    battle.get("remainingTowers"),
                     _json_or_none(battle),
                 ),
             )
         recent_rows = conn.execute(
-            "SELECT deck_json, battle_time FROM member_battle_facts WHERE member_id = ? AND is_competitive = 1 ORDER BY battle_time DESC LIMIT 30",
+            "SELECT deck_json, support_cards_json, battle_time FROM member_battle_facts WHERE member_id = ? AND is_competitive = 1 ORDER BY battle_time DESC LIMIT 30",
             (member_id,),
         ).fetchall()
         sample_battles, card_usage = _aggregate_card_usage_from_battle_facts(recent_rows)
@@ -235,10 +269,15 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
         )
         if recent_rows:
             latest_cards = json.loads(recent_rows[0]["deck_json"] or "[]")
-            if latest_cards:
+            latest_support_cards = json.loads(recent_rows[0]["support_cards_json"] or "[]")
+            if latest_cards or latest_support_cards:
+                deck_payload = {
+                    "cards": latest_cards,
+                    "support_cards": latest_support_cards,
+                }
                 conn.execute(
-                    "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, sample_size) VALUES (?, ?, 'battle_log', 'recent', ?, ?, ?)",
-                    (member_id, _utcnow(), _hash_payload(latest_cards), _json_or_none(latest_cards) or "[]", len(recent_rows)),
+                    "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, support_cards_json, sample_size) VALUES (?, ?, 'battle_log', 'recent', ?, ?, ?, ?)",
+                    (member_id, _utcnow(), _hash_payload(deck_payload), _json_or_none(latest_cards) or "[]", _json_or_none(latest_support_cards) or "[]", len(recent_rows)),
                 )
         _recompute_member_recent_form(member_id, conn=conn)
         conn.commit()
