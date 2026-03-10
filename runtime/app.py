@@ -392,7 +392,7 @@ async def on_ready():
                 lambda: bot.loop.create_task(_player_intel_refresh())
             ),
             "interval",
-            hours=PLAYER_INTEL_REFRESH_HOURS,
+            minutes=PLAYER_INTEL_REFRESH_MINUTES,
             id="player_intel_refresh",
             max_instances=1,
             coalesce=True,
@@ -419,10 +419,10 @@ async def on_ready():
         )
         scheduler.start()
         log.info("Scheduler started — heartbeat every %d minutes with up to %ds jitter (active %dam-%dpm Chicago), "
-                 "site publish at %s, player intel refresh every %dh, clanops review %s at %02d:00, "
+                 "site publish at %s, player intel refresh every %d minutes, clanops review %s at %02d:00, "
                  "promotion sync %s at %02d:00",
                  HEARTBEAT_INTERVAL_MINUTES, HEARTBEAT_JITTER_SECONDS, HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
-                 _format_hour_label(SITE_CONTENT_HOUR), PLAYER_INTEL_REFRESH_HOURS,
+                 _format_hour_label(SITE_CONTENT_HOUR), PLAYER_INTEL_REFRESH_MINUTES,
                  CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR,
                  PROMOTION_CONTENT_DAY, PROMOTION_CONTENT_HOUR)
     else:

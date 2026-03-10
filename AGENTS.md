@@ -92,7 +92,7 @@ Filenames are camelCase (not hyphenated) because 11ty uses the filename stem as 
 
 - **Every 47 minutes with up to 300s jitter, active 7:00 AM-10:00 PM Chicago** — `_heartbeat_tick()`: Observe signals, post noteworthy updates, and keep war/clan awareness current
 - **6:00 PM Chicago** — `_site_content_cycle()`: Refresh CR data, build roster + clan data, generate LLM bios/messages, commit/push
-- **Every 6 hours by default** — `_player_intel_refresh()`: Refresh a stale subset of active members' player profiles and battle logs into the V2 analytics tables, and emit progression signals like level-ups and card milestones
+- **Every 30 minutes by default** — `_player_intel_refresh()`: Refresh a smaller stale subset of active members' player profiles and battle logs into the V2 analytics tables, and emit progression signals like level-ups and card milestones with less burstiness
 - **Friday 7:00 PM Chicago** — `_clanops_weekly_review()`: Post the weekly leader review in the clanops channel
 - **Friday 9:00 AM Chicago** — `_promotion_content_cycle()`: Generate and publish the shared website + `#promote-the-clan` promotion payload
 
