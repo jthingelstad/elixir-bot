@@ -1021,7 +1021,185 @@ def _migration_7(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE member_battle_facts ADD COLUMN {name} {sql_type}")
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7]
+def _migration_8(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS clan_memories (
+            memory_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            updated_by TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            is_inference INTEGER NOT NULL,
+            confidence REAL NOT NULL,
+            scope TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            title TEXT,
+            body TEXT NOT NULL,
+            summary TEXT,
+            member_id INTEGER,
+            member_tag TEXT,
+            role TEXT,
+            channel_id TEXT,
+            war_season_id TEXT,
+            war_week_id TEXT,
+            event_type TEXT,
+            event_id TEXT,
+            retention_class TEXT NOT NULL DEFAULT 'standard',
+            expires_at TEXT,
+            metadata_json TEXT,
+            embedding_model TEXT,
+            embedding_created_at TEXT,
+            FOREIGN KEY(member_id) REFERENCES members(member_id) ON DELETE SET NULL,
+            CHECK(source_type IN ('leader_note', 'elixir_inference', 'system')),
+            CHECK(scope IN ('public', 'leadership', 'system_internal')),
+            CHECK(status IN ('active', 'archived', 'deleted')),
+            CHECK(is_inference IN (0, 1)),
+            CHECK(confidence >= 0.0 AND confidence <= 1.0),
+            CHECK(source_type != 'elixir_inference' OR (is_inference = 1 AND confidence < 1.0))
+        );
+
+        CREATE TABLE IF NOT EXISTS clan_memory_tags (
+            tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tag TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS clan_memory_tag_links (
+            memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
+            tag_id INTEGER NOT NULL REFERENCES clan_memory_tags(tag_id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(memory_id, tag_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS clan_memory_member_links (
+            memory_member_link_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
+            member_id INTEGER REFERENCES members(member_id) ON DELETE SET NULL,
+            member_tag TEXT,
+            relation_type TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS clan_memory_event_links (
+            memory_event_link_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
+            event_type TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(memory_id, event_type, event_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS clan_memory_evidence_refs (
+            evidence_ref_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
+            evidence_type TEXT NOT NULL,
+            evidence_ref TEXT NOT NULL,
+            evidence_label TEXT,
+            evidence_url TEXT,
+            metadata_json TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS clan_memory_versions (
+            memory_version_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
+            version_number INTEGER NOT NULL,
+            changed_at TEXT NOT NULL,
+            changed_by TEXT NOT NULL,
+            title TEXT,
+            body TEXT,
+            summary TEXT,
+            status TEXT,
+            scope TEXT,
+            metadata_json TEXT,
+            confidence REAL,
+            UNIQUE(memory_id, version_number)
+        );
+
+        CREATE TABLE IF NOT EXISTS clan_memory_audit_log (
+            audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
+            changed_at TEXT NOT NULL,
+            changed_by TEXT NOT NULL,
+            action TEXT NOT NULL,
+            payload_json TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS clan_memory_embeddings (
+            memory_id INTEGER PRIMARY KEY REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
+            embedding_model TEXT NOT NULL,
+            vector_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS clan_memory_index_status (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        INSERT OR IGNORE INTO clan_memory_index_status (key, value) VALUES ('sqlite_vec_enabled', '0');
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS clan_memories_fts USING fts5(
+            title,
+            summary,
+            body,
+            content='clan_memories',
+            content_rowid='memory_id'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS clan_memories_ai AFTER INSERT ON clan_memories BEGIN
+            INSERT INTO clan_memories_fts(rowid, title, summary, body)
+            VALUES (new.memory_id, new.title, new.summary, new.body);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS clan_memories_ad AFTER DELETE ON clan_memories BEGIN
+            INSERT INTO clan_memories_fts(clan_memories_fts, rowid, title, summary, body)
+            VALUES('delete', old.memory_id, old.title, old.summary, old.body);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS clan_memories_au AFTER UPDATE ON clan_memories BEGIN
+            INSERT INTO clan_memories_fts(clan_memories_fts, rowid, title, summary, body)
+            VALUES('delete', old.memory_id, old.title, old.summary, old.body);
+            INSERT INTO clan_memories_fts(rowid, title, summary, body)
+            VALUES (new.memory_id, new.title, new.summary, new.body);
+        END;
+
+        CREATE INDEX IF NOT EXISTS idx_clan_memories_scope_status_created
+            ON clan_memories(scope, status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clan_memories_member
+            ON clan_memories(member_id, member_tag, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clan_memories_war
+            ON clan_memories(war_season_id, war_week_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clan_memories_event
+            ON clan_memories(event_type, event_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clan_memories_source
+            ON clan_memories(source_type, is_inference, confidence, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clan_memory_evidence_lookup
+            ON clan_memory_evidence_refs(memory_id, evidence_type, evidence_ref);
+        CREATE INDEX IF NOT EXISTS idx_clan_memory_member_links_lookup
+            ON clan_memory_member_links(member_id, member_tag, relation_type);
+        CREATE INDEX IF NOT EXISTS idx_clan_memory_event_links_lookup
+            ON clan_memory_event_links(event_type, event_id);
+        """
+    )
+
+    try:
+        conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS clan_memory_vec USING vec0(memory_id INTEGER PRIMARY KEY, embedding float[1536])"
+        )
+        conn.execute(
+            "UPDATE clan_memory_index_status SET value = '1' WHERE key = 'sqlite_vec_enabled'"
+        )
+    except sqlite3.OperationalError:
+        conn.execute(
+            "UPDATE clan_memory_index_status SET value = '0' WHERE key = 'sqlite_vec_enabled'"
+        )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
