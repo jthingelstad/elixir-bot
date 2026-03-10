@@ -642,6 +642,14 @@ def test_build_status_report_omits_job_schedule_section():
                 "signal_date": "2026-03-08",
             },
             "current_season_id": 130,
+            "contextual_memory": {
+                "sqlite_vec_enabled": True,
+                "latest_memory_at": "2026-03-08T10:20:00",
+                "total": 7,
+                "leader_notes": 3,
+                "inferences": 2,
+                "system_notes": 2,
+            },
         }),
         patch("elixir._app._member_role_grant_status", return_value={
             "configured": True,
@@ -657,6 +665,7 @@ def test_build_status_report_omits_job_schedule_section():
     assert "🛠️ Jobs:" not in report
     assert "Current war season id: 130" in report
     assert "Member role auto-grant: Manage Roles permission missing" in report
+    assert "🧠 Context memory: 7 total (3 leader / 2 inference / 2 system)" in report
 
 
 def test_on_message_hints_for_bare_clanops_clan_status_command():
