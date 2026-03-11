@@ -107,6 +107,36 @@ def test_post_to_elixir_sends_content_list_as_multiple_messages():
     assert channel.send.await_args_list[1].args == ("Second post",)
 
 
+def test_apply_member_refs_to_result_rewrites_content_and_share_content():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    def fake_format_member_reference(tag, style="plain_name", conn=None):
+        del conn
+        if tag != "#ABC123":
+            return tag
+        if style == "name_with_mention":
+            return "King Levy (<@456>)"
+        return "King Levy"
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.db.format_member_reference", side_effect=fake_format_member_reference),
+    ):
+        result = asyncio.run(
+            elixir._apply_member_refs_to_result(
+                {
+                    "content": "King Levy is heating up.",
+                    "share_content": "Tell King Levy to keep going.",
+                    "member_tags": ["#ABC123"],
+                }
+            )
+        )
+
+    assert result["content"] == "King Levy (<@456>) is heating up."
+    assert result["share_content"] == "Tell King Levy (<@456>) to keep going."
+
+
 def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
     message = _make_message(200, "clan-ops", "<@999> What is my current war participation rate over the last 4 weeks?")
 
@@ -161,6 +191,73 @@ def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
         openai_last_model="gpt-4.1-mini",
         openai_last_call_at="2026-03-07T19:12:00",
         raw_json=None,
+    )
+    mock_share.assert_not_awaited()
+    mock_process.assert_not_awaited()
+
+
+def test_on_message_logs_agent_failure_payload_details():
+    message = _make_message(200, "clan-ops", "<@999> Who is on the hottest streak right now?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={}),
+        patch("elixir.db.save_message"),
+        patch("elixir.db.record_prompt_failure", return_value=18) as mock_failure,
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch("elixir.elixir_agent.respond_in_channel", return_value={
+            "_error": {
+                "kind": "schema_error",
+                "detail": "missing required field: content",
+                "phase": "repair_response",
+                "result_preview": '{"event_type":"channel_response"}',
+                "raw_json": {"event_type": "channel_response"},
+            }
+        }),
+        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
+        patch("elixir.runtime_status.snapshot", return_value={
+            "openai": {
+                "last_error": None,
+                "last_model": "gpt-4.1-mini",
+                "last_call_at": "2026-03-11T07:00:00",
+            }
+        }),
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    message.reply.assert_awaited_once_with(
+        "I couldn't produce a clean answer from the data I have. Try asking a narrower clan ops question."
+    )
+    mock_failure.assert_called_once_with(
+        "Who is on the hottest streak right now?",
+        "schema_error",
+        "respond_in_channel",
+        workflow="clanops",
+        channel_id=200,
+        channel_name="clan-ops",
+        discord_user_id=123,
+        discord_message_id=555,
+        detail="repair_response: missing required field: content",
+        result_preview='{"event_type":"channel_response"}',
+        openai_last_error=None,
+        openai_last_model="gpt-4.1-mini",
+        openai_last_call_at="2026-03-11T07:00:00",
+        raw_json={"event_type": "channel_response"},
     )
     mock_share.assert_not_awaited()
     mock_process.assert_not_awaited()
@@ -497,6 +594,58 @@ def test_on_message_handles_clanops_profile_via_public_do_command():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_rewrites_member_refs_before_reply_and_save():
+    message = _make_message(100, "member-chat", "<@999> how is King Levy doing?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    def fake_format_member_reference(tag, style="plain_name", conn=None):
+        del conn
+        if tag != "#ABC123":
+            return tag
+        if style == "name_with_mention":
+            return "King Levy (<@456>)"
+        return "King Levy"
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 100,
+            "name": "#member-chat",
+            "role": "interactive",
+            "workflow": "interactive",
+            "mention_required": True,
+            "allow_proactive": False,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={}),
+        patch("elixir.db.format_member_reference", side_effect=fake_format_member_reference),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir.elixir_agent.respond_in_channel",
+            return_value={
+                "event_type": "channel_response",
+                "content": "King Levy is trending up.",
+                "summary": "up",
+                "member_tags": ["#ABC123"],
+            },
+        ) as mock_respond,
+        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    message.reply.assert_awaited_once_with("King Levy (<@456>) is trending up.")
+    assert mock_save.call_args_list[1].args[2] == "King Levy (<@456>) is trending up."
+    mock_respond.assert_called_once()
+    mock_share.assert_awaited_once()
+    mock_process.assert_not_awaited()
+
+
 def test_on_message_denies_memory_command_without_leader_role():
     message = _make_message(200, "clan-ops", "do memory", roles=[])
 
@@ -536,7 +685,7 @@ def test_slash_help_does_not_save_conversation_history():
     root = bot.tree.commands[0]
     help_command = root.get_command("help")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock())
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
@@ -590,9 +739,24 @@ def test_dispatch_admin_command_handles_clan_list_full():
     mock_report.assert_called_once_with(full=True)
 
 
+def test_dispatch_admin_command_returns_runtime_job_failure_text():
+    with patch("elixir._weekly_clan_recap", new=AsyncMock(side_effect=RuntimeError("weekly recap post failed: missing Discord permissions in #weekly-digest"))):
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "weekly-recap",
+                preview=False,
+                short=False,
+                args={},
+            )
+        )
+
+    assert result == "`weekly-recap` failed: weekly recap post failed: missing Discord permissions in #weekly-digest"
+
+
 def test_dispatch_admin_command_handles_set_discord():
     with (
-        patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None])) as mock_to_thread,
+        patch("runtime.onboarding.resolve_discord_member_input", new=AsyncMock(return_value=None)),
+        patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#ABC123", "King Levy")])) as mock_to_thread,
     ):
         result = asyncio.run(
             elixir.dispatch_admin_command(
@@ -603,8 +767,51 @@ def test_dispatch_admin_command_handles_set_discord():
             )
         )
 
-    assert result == "Set Discord identity for King Levy to @kinglevy."
-    assert mock_to_thread.await_args_list[1].args == (elixir.db.set_member_discord_identity, "#ABC123", "@kinglevy")
+    assert "Couldn't resolve `@kinglevy` to a unique Discord member for King Levy." in result
+    assert "Use a real mention" in result
+    assert len(mock_to_thread.await_args_list) == 1
+
+
+def test_dispatch_admin_command_handles_set_discord_with_resolved_guild_member():
+    guild_member = SimpleNamespace(id=456, name="ditaka_user", display_name="Ditaka")
+    with (
+        patch("runtime.onboarding.resolve_discord_member_input", new=AsyncMock(return_value=guild_member)),
+        patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#VGJJLC9PR", "Ditaka"), None])) as mock_to_thread,
+    ):
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "set-discord",
+                preview=False,
+                short=False,
+                args={"member": "Ditaka", "discord_name": "Ditaka"},
+            )
+        )
+
+    assert result == "Linked Discord identity for Ditaka to Ditaka (<@456>)."
+    assert mock_to_thread.await_args_list[1].args == (
+        elixir.db.link_discord_user_to_member,
+        456,
+        "#VGJJLC9PR",
+    )
+    assert mock_to_thread.await_args_list[1].kwargs == {
+        "username": "ditaka_user",
+        "display_name": "Ditaka",
+        "source": "manual_name_resolution",
+    }
+
+
+def test_resolve_member_tag_accepts_name_with_tag_label():
+    from runtime import admin as runtime_admin
+
+    with patch(
+        "db.resolve_member",
+        return_value=[{"player_tag": "#VGJJLC9PR", "match_score": 1000, "member_ref_with_handle": "Ditaka"}],
+    ) as mock_resolve:
+        tag, label = runtime_admin._resolve_member_tag("Ditaka (#VGJJLC9PR)")
+
+    assert tag == "#VGJJLC9PR"
+    assert label == "Ditaka"
+    mock_resolve.assert_called_once_with("#VGJJLC9PR", limit=3, conn=None)
 
 
 def test_parse_admin_command_handles_memory_filters():
@@ -657,13 +864,14 @@ def test_slash_clan_list_full_passes_flag_to_admin_dispatch():
     root = bot.tree.commands[0]
     clan_list_command = root.get_command("clan-list")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock())
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
         user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[]),
         response=response,
         followup=followup,
+        edit_original_response=AsyncMock(),
     )
 
     with (
@@ -678,7 +886,9 @@ def test_slash_clan_list_full_passes_flag_to_admin_dispatch():
         short=False,
         args={"full": "true"},
     )
-    response.send_message.assert_awaited_once_with("full list", ephemeral=True)
+    response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.edit_original_response.assert_awaited_once_with(content="full list")
+    followup.send.assert_not_awaited()
 
 
 def test_slash_set_discord_passes_identity_to_admin_dispatch():
@@ -688,13 +898,14 @@ def test_slash_set_discord_passes_identity_to_admin_dispatch():
     profile_group = root.get_command("profile")
     set_discord_command = profile_group.get_command("set-discord")
 
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock())
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
         channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
         user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
         response=response,
         followup=followup,
+        edit_original_response=AsyncMock(),
     )
 
     with (
@@ -710,7 +921,44 @@ def test_slash_set_discord_passes_identity_to_admin_dispatch():
         short=False,
         args={"member": "King Levy", "discord_name": "@kinglevy"},
     )
-    response.send_message.assert_awaited_once_with("linked", ephemeral=True)
+    response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.edit_original_response.assert_awaited_once_with(content="linked")
+    followup.send.assert_not_awaited()
+
+
+def test_slash_run_job_defers_before_dispatching():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+    jobs_group = root.get_command("jobs")
+    run_command = jobs_group.get_command("run")
+
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    followup = SimpleNamespace(send=AsyncMock())
+    interaction = SimpleNamespace(
+        channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
+        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
+        response=response,
+        followup=followup,
+        edit_original_response=AsyncMock(),
+    )
+
+    with (
+        patch("runtime.app._is_clanops_channel", return_value=True),
+        patch("runtime.app._has_leader_role", return_value=True),
+        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="job failed")) as mock_dispatch,
+    ):
+        asyncio.run(run_command.callback(interaction, job="weekly-recap", preview=False))
+
+    response.defer.assert_awaited_once_with(ephemeral=True)
+    mock_dispatch.assert_awaited_once_with(
+        "weekly-recap",
+        preview=False,
+        short=False,
+        args={},
+    )
+    interaction.edit_original_response.assert_awaited_once_with(content="job failed")
+    followup.send.assert_not_awaited()
 
 
 def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
@@ -724,9 +972,14 @@ def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
     assert queued["capability_battle_pulse_v1"]["title"] == "Achievement Unlocked: Battle Pulse"
     assert queued["capability_battle_pulse_v1"]["capability_area"] == "battle_pulse"
     assert "Path of Legend" in " ".join(queued["capability_battle_pulse_v1"]["details"])
-    assert queued["capability_weekly_clan_recap_v1"]["title"] == "Achievement Unlocked: Weekly Clan Recap"
-    assert queued["capability_weekly_clan_recap_v1"]["capability_area"] == "weekly_recap"
-    assert "next week" in queued["capability_weekly_clan_recap_v1"]["message"]
+    assert queued["capability_weekly_clan_recap_v2"]["title"] == "Achievement Unlocked: Weekly Clan Recap"
+    assert queued["capability_weekly_clan_recap_v2"]["capability_area"] == "weekly_recap"
+    assert "Every Monday" in queued["capability_weekly_clan_recap_v2"]["message"]
+    assert "best single snapshot" in " ".join(queued["capability_weekly_clan_recap_v2"]["details"])
+    assert queued["capability_long_term_trends_v1"]["title"] == "Achievement Unlocked: Long-Term Trend Tracking"
+    assert queued["capability_long_term_trends_v1"]["capability_area"] == "long_term_trends"
+    assert "time-series" in queued["capability_long_term_trends_v1"]["message"]
+    assert "future charts" in " ".join(queued["capability_long_term_trends_v1"]["details"])
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
@@ -740,7 +993,8 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
     assert {item["signal_key"] for item in pending} == {
         "capability_memory_system_v1",
         "capability_battle_pulse_v1",
-        "capability_weekly_clan_recap_v1",
+        "capability_weekly_clan_recap_v2",
+        "capability_long_term_trends_v1",
     }
 
 
@@ -1542,6 +1796,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
             "top_donors": [{"member_ref": "Jamie", "donations_week": 220}],
             "recent_joins": [{"member_ref": "Newbie", "joined_date": "2026-03-08"}],
         }),
+        patch("elixir.db.build_clan_trend_summary_context", return_value="=== CLAN TREND SUMMARY ===\nclan: POAP KINGS (#J2RGCRVG)"),
     ):
         report = elixir._build_weekly_clan_recap_context(
             {"name": "POAP KINGS", "tag": "#J2RGCRVG"},
@@ -1551,6 +1806,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
     assert "=== WEEKLY CLAN RECAP SNAPSHOT ===" in report
     assert "=== RECENT RIVER RACES ===" in report
     assert "=== PLAYER PROGRESSION HIGHLIGHTS ===" in report
+    assert "=== CLAN TREND SUMMARY ===" in report
     assert "battle pulse heaters: Finn won 5 straight" in report
     assert "recent joins this week: Newbie" in report
 
@@ -1575,3 +1831,44 @@ def test_share_channel_result_tags_leader_role_for_arena_relay():
         )
 
     mock_post.assert_awaited_once_with(channel, {"content": f"<@&{elixir.LEADER_ROLE_ID}>\nRelay this to clan chat."})
+
+
+def test_share_channel_result_rewrites_member_refs_before_posting():
+    channel = AsyncMock()
+    channel.id = 300
+    channel.name = "announcements"
+    channel.type = "text"
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    def fake_format_member_reference(tag, style="plain_name", conn=None):
+        del conn
+        if tag != "#ABC123":
+            return tag
+        if style == "name_with_mention":
+            return "King Levy (<@456>)"
+        return "King Levy"
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.db.format_member_reference", side_effect=fake_format_member_reference),
+        patch("elixir.prompts.resolve_channel_reference", return_value={"id": 300, "role": "announcements", "name": "#announcements"}),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.save_message") as mock_save,
+    ):
+        asyncio.run(
+            elixir._share_channel_result(
+                {
+                    "event_type": "channel_share",
+                    "share_content": "King Levy had a great week.",
+                    "share_channel": "#announcements",
+                    "member_tags": ["#ABC123"],
+                },
+                "clanops",
+            )
+        )
+
+    mock_post.assert_awaited_once_with(channel, {"content": "King Levy (<@456>) had a great week."})
+    assert mock_save.call_args.args[2] == "King Levy (<@456>) had a great week."

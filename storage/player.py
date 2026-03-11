@@ -7,6 +7,7 @@ from db import (
     _build_form_summary,
     _canon_tag,
     _card_level,
+    _rowdicts,
     _ensure_member,
     _hash_payload,
     _json_or_none,
@@ -14,6 +15,9 @@ from db import (
     _store_raw_payload,
     _tag_key,
     _utcnow,
+    chicago_today,
+    chicago_date_for_cr_timestamp,
+    chicago_day_bounds_utc,
     get_connection,
 )
 
@@ -196,6 +200,20 @@ def _classify_battle(battle: dict) -> dict:
     }
 
 
+def _battle_mode_group(*, is_war=0, is_ladder=0, is_ranked=0, is_special_event=0, is_hosted_match=None) -> str:
+    if is_war:
+        return "war"
+    if is_ranked:
+        return "ranked"
+    if is_ladder:
+        return "ladder"
+    if is_special_event:
+        return "special_event"
+    if is_hosted_match:
+        return "friendly"
+    return "other"
+
+
 def _resolve_battle_outcome(battle: dict, team: dict, opp: dict | None) -> str | None:
     boat_battle_won = battle.get("boatBattleWon")
     if isinstance(boat_battle_won, bool):
@@ -218,6 +236,276 @@ def _resolve_battle_outcome(battle: dict, team: dict, opp: dict | None) -> str |
     if crowns_for < crowns_against:
         return "L"
     return "D"
+
+
+def _expected_battle_delta_for_day(member_id: int, battle_date: str, conn=None):
+    start_utc, end_utc = chicago_day_bounds_utc(battle_date)
+    before_row = conn.execute(
+        "SELECT battle_count FROM player_profile_snapshots "
+        "WHERE member_id = ? AND fetched_at < ? AND battle_count IS NOT NULL "
+        "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
+        (member_id, start_utc),
+    ).fetchone()
+    end_row = conn.execute(
+        "SELECT battle_count FROM player_profile_snapshots "
+        "WHERE member_id = ? AND fetched_at < ? AND battle_count IS NOT NULL "
+        "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
+        (member_id, end_utc),
+    ).fetchone()
+    if not before_row or not end_row:
+        return None
+    before_count = before_row["battle_count"]
+    end_count = end_row["battle_count"]
+    if before_count is None or end_count is None:
+        return None
+    return max(0, int(end_count) - int(before_count))
+
+
+def _recompute_member_daily_battle_rollups(member_id: int, battle_dates=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        if battle_dates is None:
+            rows = conn.execute(
+                "SELECT DISTINCT battle_time FROM member_battle_facts WHERE member_id = ?",
+                (member_id,),
+            ).fetchall()
+            battle_dates = sorted(
+                {
+                    chicago_date_for_cr_timestamp(row["battle_time"])
+                    for row in rows
+                    if chicago_date_for_cr_timestamp(row["battle_time"])
+                }
+            )
+        else:
+            battle_dates = sorted({date for date in (battle_dates or []) if date})
+
+        for battle_date in battle_dates:
+            start_utc, end_utc = chicago_day_bounds_utc(battle_date)
+            rows = conn.execute(
+                "SELECT battle_time, game_mode_id, game_mode_name, outcome, crowns_for, crowns_against, trophy_change, is_war, is_ladder, is_ranked, is_special_event, is_hosted_match "
+                "FROM member_battle_facts "
+                "WHERE member_id = ? AND REPLACE(REPLACE(battle_time, '.000Z', ''), 'Z', '') >= REPLACE(REPLACE(?, '.000Z', ''), 'Z', '') "
+                "AND REPLACE(REPLACE(battle_time, '.000Z', ''), 'Z', '') < REPLACE(REPLACE(?, '.000Z', ''), 'Z', '')",
+                (member_id, start_utc.replace("-", "").replace(":", "").replace("T", "T"), end_utc.replace("-", "").replace(":", "").replace("T", "T")),
+            ).fetchall()
+            conn.execute(
+                "DELETE FROM member_daily_battle_rollups WHERE member_id = ? AND battle_date = ?",
+                (member_id, battle_date),
+            )
+            if not rows:
+                continue
+
+            buckets = {}
+            for row in rows:
+                mode_group = _battle_mode_group(
+                    is_war=row["is_war"],
+                    is_ladder=row["is_ladder"],
+                    is_ranked=row["is_ranked"],
+                    is_special_event=row["is_special_event"],
+                    is_hosted_match=row["is_hosted_match"],
+                )
+                key = (mode_group, row["game_mode_id"])
+                bucket = buckets.setdefault(
+                    key,
+                    {
+                        "mode_group": mode_group,
+                        "game_mode_id": row["game_mode_id"],
+                        "game_mode_name": row["game_mode_name"],
+                        "battles": 0,
+                        "wins": 0,
+                        "losses": 0,
+                        "draws": 0,
+                        "crowns_for": 0,
+                        "crowns_against": 0,
+                        "trophy_change_total": 0,
+                        "first_battle_at": None,
+                        "last_battle_at": None,
+                    },
+                )
+                bucket["battles"] += 1
+                if row["outcome"] == "W":
+                    bucket["wins"] += 1
+                elif row["outcome"] == "L":
+                    bucket["losses"] += 1
+                elif row["outcome"] == "D":
+                    bucket["draws"] += 1
+                bucket["crowns_for"] += int(row["crowns_for"] or 0)
+                bucket["crowns_against"] += int(row["crowns_against"] or 0)
+                bucket["trophy_change_total"] += int(row["trophy_change"] or 0)
+                if bucket["first_battle_at"] is None or row["battle_time"] < bucket["first_battle_at"]:
+                    bucket["first_battle_at"] = row["battle_time"]
+                if bucket["last_battle_at"] is None or row["battle_time"] > bucket["last_battle_at"]:
+                    bucket["last_battle_at"] = row["battle_time"]
+
+            expected_battle_delta = _expected_battle_delta_for_day(member_id, battle_date, conn=conn)
+            captured_battles = len(rows)
+            completeness_ratio = None
+            is_complete = 0
+            if expected_battle_delta is not None:
+                denominator = max(expected_battle_delta, 1)
+                completeness_ratio = min(1.0, round(captured_battles / denominator, 4))
+                is_complete = 1 if captured_battles >= expected_battle_delta else 0
+
+            aggregated_at = _utcnow()
+            for bucket in buckets.values():
+                conn.execute(
+                    "INSERT INTO member_daily_battle_rollups (member_id, battle_date, mode_group, game_mode_id, game_mode_name, battles, wins, losses, draws, crowns_for, crowns_against, trophy_change_total, first_battle_at, last_battle_at, captured_battles, expected_battle_delta, completeness_ratio, is_complete, last_aggregated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        member_id,
+                        battle_date,
+                        bucket["mode_group"],
+                        bucket["game_mode_id"],
+                        bucket["game_mode_name"],
+                        bucket["battles"],
+                        bucket["wins"],
+                        bucket["losses"],
+                        bucket["draws"],
+                        bucket["crowns_for"],
+                        bucket["crowns_against"],
+                        bucket["trophy_change_total"],
+                        bucket["first_battle_at"],
+                        bucket["last_battle_at"],
+                        captured_battles,
+                        expected_battle_delta,
+                        completeness_ratio,
+                        is_complete,
+                        aggregated_at,
+                    ),
+                )
+        if close:
+            conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def _current_clan_identity_for_rollups(battle_date: str, conn=None) -> tuple[str, str]:
+    row = conn.execute(
+        "SELECT clan_tag, clan_name FROM clan_daily_metrics WHERE metric_date = ? ORDER BY observed_at DESC, metric_id DESC LIMIT 1",
+        (battle_date,),
+    ).fetchone()
+    if not row:
+        row = conn.execute(
+            "SELECT clan_tag, clan_name FROM clan_daily_metrics ORDER BY metric_date DESC, observed_at DESC, metric_id DESC LIMIT 1"
+        ).fetchone()
+    if row:
+        return row["clan_tag"], row["clan_name"] or "POAP KINGS"
+    return "#J2RGCRVG", "POAP KINGS"
+
+
+def _recompute_clan_daily_battle_rollups(battle_dates=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        if battle_dates is None:
+            rows = conn.execute(
+                "SELECT DISTINCT battle_date FROM member_daily_battle_rollups"
+            ).fetchall()
+            battle_dates = sorted(row["battle_date"] for row in rows if row["battle_date"])
+        else:
+            battle_dates = sorted({date for date in (battle_dates or []) if date})
+
+        for battle_date in battle_dates:
+            clan_tag, clan_name = _current_clan_identity_for_rollups(battle_date, conn=conn)
+            member_rows = conn.execute(
+                "SELECT member_id, mode_group, game_mode_id, game_mode_name, battles, wins, losses, draws, crowns_for, crowns_against, trophy_change_total, captured_battles, expected_battle_delta, completeness_ratio, is_complete "
+                "FROM member_daily_battle_rollups "
+                "WHERE battle_date = ?",
+                (battle_date,),
+            ).fetchall()
+            conn.execute(
+                "DELETE FROM clan_daily_battle_rollups WHERE clan_tag = ? AND battle_date = ?",
+                (clan_tag, battle_date),
+            )
+            if not member_rows:
+                continue
+
+            member_day_summary = {}
+            for row in member_rows:
+                member_day_summary.setdefault(
+                    row["member_id"],
+                    {
+                        "captured_battles": row["captured_battles"],
+                        "expected_battle_delta": row["expected_battle_delta"],
+                        "is_complete": row["is_complete"],
+                    },
+                )
+
+            buckets = {}
+            for row in member_rows:
+                key = (row["mode_group"], row["game_mode_id"])
+                bucket = buckets.setdefault(
+                    key,
+                    {
+                        "mode_group": row["mode_group"],
+                        "game_mode_id": row["game_mode_id"],
+                        "game_mode_name": row["game_mode_name"],
+                        "members": set(),
+                        "battles": 0,
+                        "wins": 0,
+                        "losses": 0,
+                        "draws": 0,
+                        "crowns_for": 0,
+                        "crowns_against": 0,
+                        "trophy_change_total": 0,
+                    },
+                )
+                bucket["members"].add(row["member_id"])
+                bucket["battles"] += int(row["battles"] or 0)
+                bucket["wins"] += int(row["wins"] or 0)
+                bucket["losses"] += int(row["losses"] or 0)
+                bucket["draws"] += int(row["draws"] or 0)
+                bucket["crowns_for"] += int(row["crowns_for"] or 0)
+                bucket["crowns_against"] += int(row["crowns_against"] or 0)
+                bucket["trophy_change_total"] += int(row["trophy_change_total"] or 0)
+
+            aggregated_at = _utcnow()
+            for bucket in buckets.values():
+                contributing = [member_day_summary[member_id] for member_id in bucket["members"]]
+                expected_known = all(item.get("expected_battle_delta") is not None for item in contributing)
+                captured_battles = None
+                expected_battle_delta = None
+                completeness_ratio = None
+                is_complete = 0
+                if expected_known:
+                    captured_battles = sum(int(item.get("captured_battles") or 0) for item in contributing)
+                    expected_battle_delta = sum(int(item.get("expected_battle_delta") or 0) for item in contributing)
+                    denominator = max(expected_battle_delta, 1)
+                    completeness_ratio = min(1.0, round(captured_battles / denominator, 4))
+                    is_complete = 1 if all(int(item.get("is_complete") or 0) == 1 for item in contributing) else 0
+
+                conn.execute(
+                    "INSERT INTO clan_daily_battle_rollups (battle_date, clan_tag, clan_name, mode_group, game_mode_id, game_mode_name, members_active, battles, wins, losses, draws, crowns_for, crowns_against, trophy_change_total, captured_battles, expected_battle_delta, completeness_ratio, is_complete, last_aggregated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        battle_date,
+                        clan_tag,
+                        clan_name,
+                        bucket["mode_group"],
+                        bucket["game_mode_id"],
+                        bucket["game_mode_name"],
+                        len(bucket["members"]),
+                        bucket["battles"],
+                        bucket["wins"],
+                        bucket["losses"],
+                        bucket["draws"],
+                        bucket["crowns_for"],
+                        bucket["crowns_against"],
+                        bucket["trophy_change_total"],
+                        captured_battles,
+                        expected_battle_delta,
+                        completeness_ratio,
+                        is_complete,
+                        aggregated_at,
+                    ),
+                )
+        if close:
+            conn.commit()
+    finally:
+        if close:
+            conn.close()
 
 
 def _latest_ladder_ranked_battle_time(member_id: int, conn=None):
@@ -334,12 +622,16 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
         previous_latest_ladder_ranked_battle_time = _latest_ladder_ranked_battle_time(member_id, conn=conn)
         _store_raw_payload(conn, "player_battlelog", _tag_key(tag), battle_log)
         latest_name = None
+        affected_dates = set()
         for battle in battle_log or []:
             team = (battle.get("team") or [{}])[0]
             opp = (battle.get("opponent") or [{}])[0]
             if not team:
                 continue
             latest_name = latest_name or team.get("name")
+            battle_date = chicago_date_for_cr_timestamp(battle.get("battleTime"))
+            if battle_date:
+                affected_dates.add(battle_date)
             crowns_for = team.get("crowns")
             crowns_against = opp.get("crowns") if opp else None
             outcome = _resolve_battle_outcome(battle, team, opp)
@@ -406,6 +698,8 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
                     "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, support_cards_json, sample_size) VALUES (?, ?, 'battle_log', 'recent', ?, ?, ?, ?)",
                     (member_id, _utcnow(), _hash_payload(deck_payload), _json_or_none(latest_cards) or "[]", _json_or_none(latest_support_cards) or "[]", len(recent_rows)),
                 )
+        _recompute_member_daily_battle_rollups(member_id, affected_dates, conn=conn)
+        _recompute_clan_daily_battle_rollups(affected_dates, conn=conn)
         _recompute_member_recent_form(member_id, conn=conn)
         name = latest_name or conn.execute(
             "SELECT current_name FROM members WHERE member_id = ?",
@@ -421,6 +715,56 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
         )
         conn.commit()
         return signals
+    finally:
+        if close:
+            conn.close()
+
+
+def list_member_daily_battle_rollups(tag, days=30, mode_group=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        member_tag = _canon_tag(tag)
+        cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()
+        where = ["m.player_tag = ?", "r.battle_date >= ?"]
+        params = [member_tag, cutoff]
+        if mode_group:
+            where.append("r.mode_group = ?")
+            params.append(mode_group)
+        rows = conn.execute(
+            "SELECT r.battle_date, r.mode_group, r.game_mode_id, r.game_mode_name, r.battles, r.wins, r.losses, r.draws, r.crowns_for, r.crowns_against, r.trophy_change_total, r.first_battle_at, r.last_battle_at, r.captured_battles, r.expected_battle_delta, r.completeness_ratio, r.is_complete "
+            "FROM member_daily_battle_rollups r "
+            "JOIN members m ON m.member_id = r.member_id "
+            f"WHERE {' AND '.join(where)} "
+            "ORDER BY r.battle_date ASC, r.mode_group ASC, COALESCE(r.game_mode_id, 0) ASC",
+            tuple(params),
+        ).fetchall()
+        return _rowdicts(rows)
+    finally:
+        if close:
+            conn.close()
+
+
+def list_clan_daily_battle_rollups(days=30, clan_tag=None, mode_group=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()
+        where = ["battle_date >= ?"]
+        params = [cutoff]
+        if clan_tag:
+            where.append("clan_tag = ?")
+            params.append(_canon_tag(clan_tag))
+        if mode_group:
+            where.append("mode_group = ?")
+            params.append(mode_group)
+        rows = conn.execute(
+            "SELECT battle_date, clan_tag, clan_name, mode_group, game_mode_id, game_mode_name, members_active, battles, wins, losses, draws, crowns_for, crowns_against, trophy_change_total, captured_battles, expected_battle_delta, completeness_ratio, is_complete "
+            f"FROM clan_daily_battle_rollups WHERE {' AND '.join(where)} "
+            "ORDER BY battle_date ASC, mode_group ASC, COALESCE(game_mode_id, 0) ASC",
+            tuple(params),
+        ).fetchall()
+        return _rowdicts(rows)
     finally:
         if close:
             conn.close()

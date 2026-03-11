@@ -1,4 +1,5 @@
 import os
+import re
 
 from db import (
     _canon_tag,
@@ -10,6 +11,8 @@ from db import (
 )
 
 # -- Discord identity and memory helpers -----------------------------------
+
+_DISCORD_MENTION_RE = re.compile(r"^<@!?(\d+)>$")
 
 
 def _is_real_discord_user_id(discord_user_id) -> bool:
@@ -132,6 +135,31 @@ def set_member_discord_identity(member_tag, discord_name, conn=None):
         identity_text = (discord_name or "").strip()
         if not identity_text:
             raise ValueError("discord name is required")
+        mention_match = _DISCORD_MENTION_RE.match(identity_text)
+        if mention_match:
+            discord_user_id = mention_match.group(1)
+            existing_user = conn.execute(
+                "SELECT username, display_name FROM discord_users WHERE discord_user_id = ?",
+                (discord_user_id,),
+            ).fetchone()
+            _upsert_discord_user_record(
+                conn,
+                discord_user_id,
+                username=(existing_user["username"] if existing_user else None),
+                display_name=(existing_user["display_name"] if existing_user else None),
+            )
+            member_id = _apply_discord_link(
+                conn,
+                discord_user_id,
+                member_tag,
+                username=(existing_user["username"] if existing_user else None),
+                display_name=(existing_user["display_name"] if existing_user else None),
+                source="manual_user_id_assignment",
+                confidence=1.0,
+                is_primary=True,
+            )
+            conn.commit()
+            return member_id
         normalized_name = identity_text.lstrip("@").strip()
         if not normalized_name:
             raise ValueError("discord name is required")

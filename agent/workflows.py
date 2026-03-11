@@ -29,6 +29,14 @@ def _chat_with_tools(*args, **kwargs):
     return _app._chat_with_tools(*args, **kwargs)
 
 
+def _clan_trend_prompt_context(days=30, window_days=7):
+    try:
+        return db.build_clan_trend_summary_context(days=days, window_days=window_days) or ""
+    except Exception as exc:
+        log.warning("Clan trend summary context unavailable: %s", exc)
+        return ""
+
+
 def _roster_bio_context(clan_data, roster_data=None):
     members = roster_data.get("members", []) if roster_data else clan_data.get("memberList", clan_data.get("members", []))
     if not members:
@@ -256,6 +264,7 @@ def respond_in_reception(question, author_name, clan_data, memory_context=None):
         allowed_tools=TOOLSETS_BY_WORKFLOW["reception"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["reception"],
         strict_json=True,
+        return_errors=True,
     )
 
 
@@ -265,8 +274,11 @@ def respond_in_channel(question, author_name, channel_name, workflow, clan_data,
     if workflow not in {"interactive", "clanops"}:
         raise ValueError(f"unsupported channel workflow: {workflow}")
     context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
+    trend_context = _clan_trend_prompt_context()
     speaker = "Observed message from" if proactive else "Message from"
     user_msg = f"{speaker} '{author_name}' in {channel_name}: {question}\n\n{context}"
+    if trend_context:
+        user_msg += f"\n\n{trend_context}"
     user_msg += _format_memory_context(memory_context)
     workflow_key = f"{workflow}_proactive" if proactive else workflow
     system_prompt = (
@@ -282,6 +294,7 @@ def respond_in_channel(question, author_name, channel_name, workflow, clan_data,
         allowed_tools=TOOLSETS_BY_WORKFLOW[workflow_key],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW[workflow_key],
         strict_json=True,
+        return_errors=True,
     )
 
 

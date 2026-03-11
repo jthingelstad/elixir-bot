@@ -573,9 +573,11 @@ def tick(conn=None):
         for sig in join_leave_signals:
             if sig["type"] == "member_join":
                 db.record_join_date(sig["tag"], sig["name"],
-                                    datetime.now().strftime("%Y-%m-%d"), conn=conn)
+                                    db.chicago_today(), conn=conn)
             elif sig["type"] == "member_leave":
                 db.clear_member_tenure(sig["tag"], conn=conn)
+
+        db.snapshot_clan_daily_metrics(clan, conn=conn)
 
         # Backfill join dates from historical snapshots (idempotent)
         db.backfill_join_dates(conn=conn)

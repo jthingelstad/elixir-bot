@@ -16,6 +16,7 @@ from db import (
     _tag_key,
     _upsert_member_metadata,
     _utcnow,
+    chicago_today,
     get_connection,
 )
 
@@ -52,7 +53,7 @@ def clear_member_tenure(tag, conn=None):
         if current:
             conn.execute(
                 "UPDATE clan_memberships SET left_at = ?, leave_source = 'manual_clear' WHERE membership_id = ?",
-                (_utcnow()[:10], current["membership_id"]),
+                (chicago_today(), current["membership_id"]),
             )
         conn.execute("UPDATE members SET status = 'left', last_seen_at = ? WHERE member_id = ?", (_utcnow(), member_id))
         conn.execute(

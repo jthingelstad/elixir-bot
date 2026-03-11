@@ -42,21 +42,39 @@ STARTUP_SYSTEM_SIGNALS = [
         },
     },
     {
-        "signal_key": "capability_weekly_clan_recap_v1",
+        "signal_key": "capability_weekly_clan_recap_v2",
         "signal_type": "capability_unlock",
         "payload": {
             "title": "Achievement Unlocked: Weekly Clan Recap",
             "message": (
-                "Elixir is getting a longer weekly recap for the clan. "
-                "Starting next week, I will post a must-read summary of river race storylines, clan momentum, and standout player progress."
+                "A new weekly clan recap is now part of the rhythm. "
+                "Every Monday, Elixir will drop a bigger must-read summary built to capture the week's story, the clan's momentum, and the players who moved it."
             ),
             "details": [
-                "The recap will be a longer 3-5 paragraph post built for active clan members.",
-                "It will focus on the week's clan story, River Race progress, and individual highlights that mattered.",
-                "This week's announcement is a preview so everyone knows the recap is coming next week.",
+                "Expect a fuller read than a normal announcement, with the biggest clan beats pulled into one place.",
+                "River Race movement, trophy trends, hot streaks, and standout player progress will all feed into the recap.",
+                "If you want the best single snapshot of how POAP KINGS is doing each week, this will be the post to watch for.",
             ],
             "audience": "clan",
             "capability_area": "weekly_recap",
+        },
+    },
+    {
+        "signal_key": "capability_long_term_trends_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Long-Term Trend Tracking",
+            "message": (
+                "Elixir is now building a real long-term trend layer for POAP KINGS. "
+                "That means daily tracking for player and clan performance, not just isolated snapshots, and it sets us up with a real time-series foundation for understanding how the clan is evolving over time."
+            ),
+            "details": [
+                "Daily player trophy movement and clan-wide performance trends are now being captured into a growing time-series record.",
+                "Battle activity, wins, losses, and mode-based trends are being organized so Elixir can spot real momentum instead of reacting to one-off spikes.",
+                "This is the foundation for future charts, stronger weekly summaries, and sharper player and clan sentiment grounded in long-term data.",
+            ],
+            "audience": "clan",
+            "capability_area": "long_term_trends",
         },
     },
 ]

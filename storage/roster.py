@@ -11,6 +11,8 @@ from db import (
     _member_reference_fields,
     _rowdicts,
     _utcnow,
+    chicago_date_for_utc_timestamp,
+    chicago_today,
     get_connection,
 )
 def snapshot_members(member_list, conn=None):
@@ -18,7 +20,7 @@ def snapshot_members(member_list, conn=None):
     conn = conn or get_connection()
     try:
         observed_at = _utcnow()
-        today = observed_at[:10]
+        today = chicago_date_for_utc_timestamp(observed_at) or chicago_today()
         bootstrap_snapshot = conn.execute(
             "SELECT COUNT(*) AS cnt FROM member_current_state"
         ).fetchone()["cnt"] == 0
@@ -119,6 +121,84 @@ def snapshot_members(member_list, conn=None):
             )
         conn.commit()
         return len(seen_tags)
+    finally:
+        if close:
+            conn.close()
+
+
+def snapshot_clan_daily_metrics(clan_data, conn=None, observed_at=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        observed_at = observed_at or _utcnow()
+        metric_date = chicago_date_for_utc_timestamp(observed_at) or chicago_today()
+        clan_tag = _canon_tag((clan_data or {}).get("tag")) or "#J2RGCRVG"
+        clan_name = (clan_data or {}).get("name") or "POAP KINGS"
+        member_list = (clan_data or {}).get("memberList") or []
+        member_count = (clan_data or {}).get("members")
+        if not isinstance(member_count, int):
+            member_count = len(member_list)
+        total_member_trophies = sum((member.get("trophies") or 0) for member in member_list)
+        avg_member_trophies = round(total_member_trophies / member_count, 2) if member_count else 0.0
+        top_member_trophies = max((member.get("trophies") or 0) for member in member_list) if member_list else 0
+        weekly_donations_total = sum((member.get("donations") or 0) for member in member_list)
+        joins_today = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM clan_memberships WHERE joined_at = ?",
+            (metric_date,),
+        ).fetchone()["cnt"]
+        leaves_today = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM clan_memberships WHERE left_at = ?",
+            (metric_date,),
+        ).fetchone()["cnt"]
+        conn.execute(
+            "INSERT INTO clan_daily_metrics (metric_date, clan_tag, clan_name, member_count, open_slots, clan_score, clan_war_trophies, required_trophies, donations_per_week_requirement, weekly_donations_total, total_member_trophies, avg_member_trophies, top_member_trophies, joins_today, leaves_today, net_member_change, observed_at, raw_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(clan_tag, metric_date) DO UPDATE SET clan_name = excluded.clan_name, member_count = excluded.member_count, open_slots = excluded.open_slots, clan_score = excluded.clan_score, clan_war_trophies = excluded.clan_war_trophies, required_trophies = excluded.required_trophies, donations_per_week_requirement = excluded.donations_per_week_requirement, weekly_donations_total = excluded.weekly_donations_total, total_member_trophies = excluded.total_member_trophies, avg_member_trophies = excluded.avg_member_trophies, top_member_trophies = excluded.top_member_trophies, joins_today = excluded.joins_today, leaves_today = excluded.leaves_today, net_member_change = excluded.net_member_change, observed_at = excluded.observed_at, raw_json = excluded.raw_json",
+            (
+                metric_date,
+                clan_tag,
+                clan_name,
+                member_count,
+                max(0, 50 - member_count),
+                (clan_data or {}).get("clanScore"),
+                (clan_data or {}).get("clanWarTrophies"),
+                (clan_data or {}).get("requiredTrophies"),
+                (clan_data or {}).get("donationsPerWeek"),
+                weekly_donations_total,
+                total_member_trophies,
+                avg_member_trophies,
+                top_member_trophies,
+                joins_today,
+                leaves_today,
+                joins_today - leaves_today,
+                observed_at,
+                _json_or_none(clan_data),
+            ),
+        )
+        conn.commit()
+        return metric_date
+    finally:
+        if close:
+            conn.close()
+
+
+def list_clan_daily_metrics(days=30, clan_tag=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()
+        where = ["metric_date >= ?"]
+        params = [cutoff]
+        if clan_tag:
+            where.append("clan_tag = ?")
+            params.append(_canon_tag(clan_tag))
+        rows = conn.execute(
+            "SELECT metric_date, clan_tag, clan_name, member_count, open_slots, clan_score, clan_war_trophies, required_trophies, donations_per_week_requirement, weekly_donations_total, total_member_trophies, avg_member_trophies, top_member_trophies, joins_today, leaves_today, net_member_change, observed_at "
+            f"FROM clan_daily_metrics WHERE {' AND '.join(where)} "
+            "ORDER BY metric_date ASC, clan_tag ASC",
+            tuple(params),
+        ).fetchall()
+        return _rowdicts(rows)
     finally:
         if close:
             conn.close()
@@ -585,6 +665,63 @@ def get_members_on_hot_streak(min_streak=4, scope="ladder_ranked_10", conn=None)
             ).fetchone()["member_id"]
             result.append(_member_reference_fields(conn, member_id, item))
         return result
+    finally:
+        if close:
+            conn.close()
+
+
+def get_members_with_most_level_16_cards(limit=10, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role, "
+            "ccs.fetched_at, ccs.cards_json, ccs.support_cards_json "
+            "FROM members m "
+            "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
+            "LEFT JOIN member_card_collection_snapshots ccs ON ccs.snapshot_id = ("
+            "  SELECT c2.snapshot_id FROM member_card_collection_snapshots c2 "
+            "  WHERE c2.member_id = m.member_id "
+            "  ORDER BY c2.fetched_at DESC, c2.snapshot_id DESC LIMIT 1"
+            ") "
+            "WHERE m.status = 'active'"
+        ).fetchall()
+        result = []
+        for row in rows:
+            cards = []
+            for raw_card in json.loads(row["cards_json"] or "[]"):
+                if isinstance(raw_card, dict):
+                    cards.append(raw_card)
+            for raw_card in json.loads(row["support_cards_json"] or "[]"):
+                if isinstance(raw_card, dict):
+                    cards.append(raw_card)
+            level_16_cards = sorted(
+                {
+                    card.get("name")
+                    for card in cards
+                    if card.get("name") and _card_level(card) == 16
+                }
+            )
+            item = {
+                "tag": row["tag"],
+                "name": row["name"],
+                "clan_rank": row["clan_rank"],
+                "role": row["role"],
+                "snapshot_at": row["fetched_at"],
+                "level_16_count": len(level_16_cards),
+                "cards_tracked": len([card for card in cards if card.get("name")]),
+                "level_16_cards": level_16_cards,
+            }
+            result.append(_member_reference_fields(conn, row["member_id"], item))
+        result.sort(
+            key=lambda item: (
+                -(item.get("level_16_count") or 0),
+                -(item.get("cards_tracked") or 0),
+                item.get("clan_rank") if item.get("clan_rank") is not None else 999,
+                (item.get("name") or "").lower(),
+            )
+        )
+        return result[:limit]
     finally:
         if close:
             conn.close()

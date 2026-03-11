@@ -3,6 +3,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 import sqlite3
+from unittest.mock import patch
 
 import db
 
@@ -29,7 +30,10 @@ def test_v2_schema_initializes_core_tables():
             "member_current_state",
             "member_state_snapshots",
             "member_battle_facts",
+            "member_daily_battle_rollups",
+            "clan_daily_battle_rollups",
             "member_recent_form",
+            "clan_daily_metrics",
             "war_races",
             "war_participation",
             "war_period_clan_status",
@@ -106,6 +110,99 @@ def test_snapshot_members_populates_current_state_membership_and_history():
         conn.close()
 
 
+def test_snapshot_members_uses_chicago_day_for_daily_metrics():
+    conn = db.get_connection(":memory:")
+    try:
+        with patch("storage.roster._utcnow", return_value="2026-01-01T03:30:00"):
+            db.snapshot_members(
+                [{"tag": "#ABC123", "name": "King Levy", "role": "member", "trophies": 7000}],
+                conn=conn,
+            )
+
+        row = conn.execute(
+            "SELECT metric_date FROM member_daily_metrics"
+        ).fetchone()
+        assert row["metric_date"] == "2025-12-31"
+    finally:
+        conn.close()
+
+
+def test_snapshot_clan_daily_metrics_tracks_churn_and_updates_same_day():
+    conn = db.get_connection(":memory:")
+    try:
+        with patch("storage.roster._utcnow", return_value="2026-03-10T18:00:00"):
+            db.snapshot_members(
+                [
+                    {"tag": "#AAA111", "name": "Alpha", "role": "leader", "trophies": 7000, "clanRank": 1, "donations": 40},
+                    {"tag": "#BBB222", "name": "Bravo", "role": "member", "trophies": 6900, "clanRank": 2, "donations": 25},
+                ],
+                conn=conn,
+            )
+
+        with patch("storage.roster._utcnow", return_value="2026-03-11T18:00:00"):
+            db.snapshot_members(
+                [
+                    {"tag": "#AAA111", "name": "Alpha", "role": "leader", "trophies": 7100, "clanRank": 1, "donations": 50},
+                    {"tag": "#CCC333", "name": "Charlie", "role": "member", "trophies": 8000, "clanRank": 2, "donations": 75},
+                ],
+                conn=conn,
+            )
+
+        with patch("storage.metadata.chicago_today", return_value="2026-03-11"):
+            db.clear_member_tenure("#BBB222", conn=conn)
+
+        db.snapshot_clan_daily_metrics(
+            {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "members": 2,
+                "clanScore": 4567,
+                "clanWarTrophies": 1234,
+                "requiredTrophies": 9000,
+                "donationsPerWeek": 100,
+                "memberList": [
+                    {"tag": "#AAA111", "name": "Alpha", "trophies": 7100, "donations": 50},
+                    {"tag": "#CCC333", "name": "Charlie", "trophies": 8000, "donations": 75},
+                ],
+            },
+            observed_at="2026-03-11T18:00:00",
+            conn=conn,
+        )
+        db.snapshot_clan_daily_metrics(
+            {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "members": 2,
+                "clanScore": 4600,
+                "clanWarTrophies": 1234,
+                "requiredTrophies": 9000,
+                "donationsPerWeek": 100,
+                "memberList": [
+                    {"tag": "#AAA111", "name": "Alpha", "trophies": 7100, "donations": 50},
+                    {"tag": "#CCC333", "name": "Charlie", "trophies": 8000, "donations": 75},
+                ],
+            },
+            observed_at="2026-03-11T19:00:00",
+            conn=conn,
+        )
+
+        rows = db.list_clan_daily_metrics(days=10, conn=conn)
+        assert len(rows) == 1
+        assert rows[0]["metric_date"] == "2026-03-11"
+        assert rows[0]["member_count"] == 2
+        assert rows[0]["open_slots"] == 48
+        assert rows[0]["clan_score"] == 4600
+        assert rows[0]["weekly_donations_total"] == 125
+        assert rows[0]["total_member_trophies"] == 15100
+        assert rows[0]["avg_member_trophies"] == 7550.0
+        assert rows[0]["top_member_trophies"] == 8000
+        assert rows[0]["joins_today"] == 1
+        assert rows[0]["leaves_today"] == 1
+        assert rows[0]["net_member_change"] == 0
+    finally:
+        conn.close()
+
+
 def test_discord_link_and_member_reference_formatting():
     conn = db.get_connection(":memory:")
     try:
@@ -158,6 +255,32 @@ def test_manual_discord_identity_uses_handle_not_fake_mention():
         assert (
             db.format_member_reference("#ABC123", style="name_with_mention", conn=conn)
             == "King Levy (@kinglevy)"
+        )
+    finally:
+        conn.close()
+
+
+def test_manual_discord_identity_parses_real_discord_mention():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.upsert_discord_user(
+            "1478515435606380687",
+            username="jamie",
+            display_name="King Levy",
+            conn=conn,
+        )
+        db.set_member_discord_identity("#ABC123", "<@1478515435606380687>", conn=conn)
+
+        identity = db.get_member_identity("#ABC123", conn=conn)
+        assert identity["discord_user_id"] == "1478515435606380687"
+        assert identity["discord_username"] == "jamie"
+        assert (
+            db.format_member_reference("#ABC123", style="name_with_mention", conn=conn)
+            == "King Levy (<@1478515435606380687>)"
         )
     finally:
         conn.close()
@@ -703,6 +826,282 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         assert form["wins"] == 1
         assert form["losses"] == 1
         assert form["sample_size"] == 2
+    finally:
+        conn.close()
+
+
+def test_member_daily_battle_rollups_group_by_chicago_day_and_mode_group():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        member_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#ABC123'"
+        ).fetchone()["member_id"]
+        conn.execute(
+            "INSERT INTO player_profile_snapshots (member_id, fetched_at, battle_count) VALUES (?, ?, ?)",
+            (member_id, "2026-01-10T05:00:00", 100),
+        )
+        conn.execute(
+            "INSERT INTO player_profile_snapshots (member_id, fetched_at, battle_count) VALUES (?, ?, ?)",
+            (member_id, "2026-01-11T05:00:00", 103),
+        )
+        conn.execute(
+            "INSERT INTO player_profile_snapshots (member_id, fetched_at, battle_count) VALUES (?, ?, ?)",
+            (member_id, "2026-01-12T05:00:00", 104),
+        )
+        conn.commit()
+
+        db.snapshot_player_battlelog(
+            "#ABC123",
+            [
+                {
+                    "type": "PvP",
+                    "battleTime": "20260111T013000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 2, "trophyChange": 30, "startingTrophies": 5000, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP1", "name": "Opp 1", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "pathOfLegend",
+                    "battleTime": "20260111T023000.000Z",
+                    "gameMode": {"id": 72000464, "name": "Ranked1v1_NewArena2"},
+                    "leagueNumber": 7,
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 0, "trophyChange": -20, "startingTrophies": 5030, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP2", "name": "Opp 2", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "boatBattle",
+                    "battleTime": "20260111T030000.000Z",
+                    "gameMode": {"id": 72000061, "name": "Boat Battle"},
+                    "boatBattleWon": False,
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 0, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP3", "name": "Opp 3", "crowns": 0, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "PvP",
+                    "battleTime": "20260111T070000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 3, "trophyChange": 25, "startingTrophies": 5010, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP4", "name": "Opp 4", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+            ],
+            conn=conn,
+        )
+
+        rollups = db.list_member_daily_battle_rollups("#ABC123", days=120, conn=conn)
+
+        assert [(row["battle_date"], row["mode_group"]) for row in rollups] == [
+            ("2026-01-10", "ladder"),
+            ("2026-01-10", "ranked"),
+            ("2026-01-10", "war"),
+            ("2026-01-11", "ladder"),
+        ]
+        assert rollups[0]["battles"] == 1
+        assert rollups[0]["wins"] == 1
+        assert rollups[0]["trophy_change_total"] == 30
+        assert rollups[0]["captured_battles"] == 3
+        assert rollups[0]["expected_battle_delta"] == 3
+        assert rollups[0]["completeness_ratio"] == 1.0
+        assert rollups[0]["is_complete"] == 1
+        assert rollups[1]["losses"] == 1
+        assert rollups[1]["trophy_change_total"] == -20
+        assert rollups[2]["losses"] == 1
+        assert rollups[3]["battle_date"] == "2026-01-11"
+        assert rollups[3]["captured_battles"] == 1
+        assert rollups[3]["expected_battle_delta"] == 1
+        assert rollups[3]["is_complete"] == 1
+    finally:
+        conn.close()
+
+
+def test_clan_daily_battle_rollups_aggregate_member_daily_rollups():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#ABC123", "name": "Alpha", "role": "leader"},
+                {"tag": "#DEF456", "name": "Bravo", "role": "member"},
+            ],
+            conn=conn,
+        )
+        alpha_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#ABC123'"
+        ).fetchone()["member_id"]
+        bravo_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#DEF456'"
+        ).fetchone()["member_id"]
+        for member_id, before_count, after_count in ((alpha_id, 100, 102), (bravo_id, 50, 51)):
+            conn.execute(
+                "INSERT INTO player_profile_snapshots (member_id, fetched_at, battle_count) VALUES (?, ?, ?)",
+                (member_id, "2026-01-10T05:00:00", before_count),
+            )
+            conn.execute(
+                "INSERT INTO player_profile_snapshots (member_id, fetched_at, battle_count) VALUES (?, ?, ?)",
+                (member_id, "2026-01-11T05:00:00", after_count),
+            )
+        conn.commit()
+
+        db.snapshot_clan_daily_metrics(
+            {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "members": 2,
+                "memberList": [
+                    {"tag": "#ABC123", "name": "Alpha", "trophies": 7100, "donations": 10},
+                    {"tag": "#DEF456", "name": "Bravo", "trophies": 6900, "donations": 20},
+                ],
+            },
+            observed_at="2026-01-11T18:00:00",
+            conn=conn,
+        )
+
+        db.snapshot_player_battlelog(
+            "#ABC123",
+            [
+                {
+                    "type": "PvP",
+                    "battleTime": "20260111T013000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "Alpha", "crowns": 2, "trophyChange": 30, "startingTrophies": 5000, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP1", "name": "Opp 1", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "PvP",
+                    "battleTime": "20260111T023000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "Alpha", "crowns": 3, "trophyChange": 20, "startingTrophies": 5030, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP2", "name": "Opp 2", "crowns": 0, "cards": [], "supportCards": []}],
+                },
+            ],
+            conn=conn,
+        )
+        db.snapshot_player_battlelog(
+            "#DEF456",
+            [
+                {
+                    "type": "PvP",
+                    "battleTime": "20260111T033000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#DEF456", "name": "Bravo", "crowns": 1, "trophyChange": -10, "startingTrophies": 4000, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP3", "name": "Opp 3", "crowns": 2, "cards": [], "supportCards": []}],
+                },
+            ],
+            conn=conn,
+        )
+
+        rollups = db.list_clan_daily_battle_rollups(days=120, conn=conn)
+
+        assert len(rollups) == 1
+        assert rollups[0]["battle_date"] == "2026-01-10"
+        assert rollups[0]["clan_tag"] == "#J2RGCRVG"
+        assert rollups[0]["mode_group"] == "ladder"
+        assert rollups[0]["members_active"] == 2
+        assert rollups[0]["battles"] == 3
+        assert rollups[0]["wins"] == 2
+        assert rollups[0]["losses"] == 1
+        assert rollups[0]["draws"] == 0
+        assert rollups[0]["trophy_change_total"] == 40
+        assert rollups[0]["captured_battles"] == 3
+        assert rollups[0]["expected_battle_delta"] == 3
+        assert rollups[0]["completeness_ratio"] == 1.0
+        assert rollups[0]["is_complete"] == 1
+    finally:
+        conn.close()
+
+
+def test_trend_query_helpers_and_prompt_ready_summaries():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        member_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#ABC123'"
+        ).fetchone()["member_id"]
+        conn.execute("DELETE FROM member_daily_metrics WHERE member_id = ?", (member_id,))
+
+        member_daily_rows = [
+            ("2026-03-06", 7000, 7100, 3, 60),
+            ("2026-03-07", 7020, 7100, 3, 60),
+            ("2026-03-08", 7040, 7100, 2, 60),
+            ("2026-03-09", 7060, 7120, 2, 61),
+            ("2026-03-10", 7090, 7130, 2, 61),
+            ("2026-03-11", 7110, 7140, 1, 61),
+        ]
+        for metric_date, trophies, best_trophies, clan_rank, exp_level in member_daily_rows:
+            conn.execute(
+                "INSERT INTO member_daily_metrics (member_id, metric_date, trophies, best_trophies, clan_rank, exp_level) VALUES (?, ?, ?, ?, ?, ?)",
+                (member_id, metric_date, trophies, best_trophies, clan_rank, exp_level),
+            )
+
+        member_battle_rows = [
+            ("2026-03-06", "ladder", 1, 1, 0, 0, 20),
+            ("2026-03-07", "ladder", 2, 1, 1, 0, 5),
+            ("2026-03-08", "ranked", 1, 1, 0, 0, 15),
+            ("2026-03-09", "ladder", 2, 2, 0, 0, 30),
+            ("2026-03-10", "ranked", 2, 1, 1, 0, 10),
+            ("2026-03-11", "ladder", 3, 2, 1, 0, 25),
+        ]
+        for battle_date, mode_group, battles, wins, losses, draws, trophy_delta in member_battle_rows:
+            conn.execute(
+                "INSERT INTO member_daily_battle_rollups (member_id, battle_date, mode_group, battles, wins, losses, draws, trophy_change_total, captured_battles, expected_battle_delta, completeness_ratio, is_complete, last_aggregated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (member_id, battle_date, mode_group, battles, wins, losses, draws, trophy_delta, battles, battles, 1.0, 1, "2026-03-11T12:00:00"),
+            )
+
+        clan_daily_rows = [
+            ("2026-03-06", 20, 4500, 140000),
+            ("2026-03-07", 20, 4510, 140500),
+            ("2026-03-08", 21, 4520, 141200),
+            ("2026-03-09", 21, 4540, 142000),
+            ("2026-03-10", 22, 4560, 143100),
+            ("2026-03-11", 22, 4580, 144200),
+        ]
+        for metric_date, member_count, clan_score, total_member_trophies in clan_daily_rows:
+            conn.execute(
+                "INSERT INTO clan_daily_metrics (metric_date, clan_tag, clan_name, member_count, open_slots, clan_score, total_member_trophies, avg_member_trophies, top_member_trophies, joins_today, leaves_today, net_member_change, observed_at) VALUES (?, '#J2RGCRVG', 'POAP KINGS', ?, ?, ?, ?, ?, ?, 0, 0, 0, '2026-03-11T12:00:00')",
+                (metric_date, member_count, 50 - member_count, clan_score, total_member_trophies, round(total_member_trophies / member_count, 2), 7200),
+            )
+
+        clan_battle_rows = [
+            ("2026-03-06", 6, 4, 2, 0, 40),
+            ("2026-03-07", 7, 4, 3, 0, 25),
+            ("2026-03-08", 5, 3, 2, 0, 15),
+            ("2026-03-09", 8, 5, 3, 0, 35),
+            ("2026-03-10", 9, 6, 3, 0, 30),
+            ("2026-03-11", 10, 7, 3, 0, 45),
+        ]
+        for battle_date, battles, wins, losses, draws, trophy_delta in clan_battle_rows:
+            conn.execute(
+                "INSERT INTO clan_daily_battle_rollups (battle_date, clan_tag, clan_name, mode_group, members_active, battles, wins, losses, draws, trophy_change_total, captured_battles, expected_battle_delta, completeness_ratio, is_complete, last_aggregated_at) VALUES (?, '#J2RGCRVG', 'POAP KINGS', 'ladder', 5, ?, ?, ?, ?, ?, ?, ?, 1.0, 1, '2026-03-11T12:00:00')",
+                (battle_date, battles, wins, losses, draws, trophy_delta, battles, battles),
+            )
+        conn.commit()
+
+        with patch("storage.trends.chicago_today", return_value="2026-03-11"):
+            trophy_history = db.get_member_trophy_history("#ABC123", days=7, conn=conn)
+            member_cmp = db.compare_member_trend_windows("#ABC123", window_days=3, conn=conn)
+            clan_cmp = db.compare_clan_trend_windows(window_days=3, conn=conn)
+            member_summary = db.build_member_trend_summary_context("#ABC123", days=7, window_days=3, conn=conn)
+            clan_summary = db.build_clan_trend_summary_context(days=7, window_days=3, conn=conn)
+
+        assert len(trophy_history) == 6
+        assert trophy_history[-1]["trophies"] == 7110
+        assert member_cmp["current"]["trophies"]["delta"] == 50
+        assert member_cmp["previous"]["trophies"]["delta"] == 40
+        assert member_cmp["current"]["battle_activity"]["battles"] == 7
+        assert member_cmp["previous"]["battle_activity"]["battles"] == 4
+        assert clan_cmp["current"]["clan_score"]["delta"] == 40
+        assert clan_cmp["previous"]["clan_score"]["delta"] == 20
+        assert clan_cmp["current"]["battle_activity"]["battles"] == 27
+        assert clan_cmp["previous"]["battle_activity"]["battles"] == 18
+        assert "=== MEMBER TREND SUMMARY ===" in member_summary
+        assert "current_3d_vs_previous_3d:" in member_summary
+        assert "=== CLAN TREND SUMMARY ===" in clan_summary
+        assert "clan: POAP KINGS (#J2RGCRVG)" in clan_summary
     finally:
         conn.close()
 
@@ -1663,6 +2062,69 @@ def test_tenure_recent_join_and_losing_streak_queries():
         assert len(slumping) == 1
         assert slumping[0]["tag"] == "#DEF456"
         assert slumping[0]["current_streak"] == 5
+    finally:
+        conn.close()
+
+
+def test_hot_streak_and_level_16_card_queries():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#ABC123", "name": "King Levy", "role": "leader", "expLevel": 66, "trophies": 11429, "clanRank": 1},
+                {"tag": "#DEF456", "name": "Vijay", "role": "member", "expLevel": 64, "trophies": 9020, "clanRank": 2},
+            ],
+            conn=conn,
+        )
+        levy_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#ABC123'"
+        ).fetchone()["member_id"]
+        vijay_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#DEF456'"
+        ).fetchone()["member_id"]
+        conn.execute(
+            "INSERT INTO member_recent_form (member_id, computed_at, scope, sample_size, wins, losses, draws, current_streak, current_streak_type, win_rate, avg_crown_diff, avg_trophy_change, form_label, summary) "
+            "VALUES (?, ?, 'ladder_ranked_10', 10, 8, 2, 0, 6, 'W', 0.8, 1.6, 28.0, 'hot', '8-2 over the last 10 battles (hot).')",
+            (levy_id, "2026-03-07T12:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO member_card_collection_snapshots (member_id, fetched_at, cards_json, support_cards_json) VALUES (?, ?, ?, ?)",
+            (
+                levy_id,
+                "2026-03-11T01:00:00",
+                json.dumps([
+                    {"name": "Hog Rider", "level": 14, "maxLevel": 14},
+                    {"name": "Fireball", "level": 14, "maxLevel": 14},
+                    {"name": "Cannon", "level": 13, "maxLevel": 14},
+                ]),
+                json.dumps([]),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO member_card_collection_snapshots (member_id, fetched_at, cards_json, support_cards_json) VALUES (?, ?, ?, ?)",
+            (
+                vijay_id,
+                "2026-03-11T01:00:00",
+                json.dumps([
+                    {"name": "Arrows", "level": 14, "maxLevel": 14},
+                ]),
+                json.dumps([
+                    {"name": "Ice Spirit", "level": 14, "maxLevel": 14},
+                ]),
+            ),
+        )
+        conn.commit()
+
+        hot = db.get_members_on_hot_streak(min_streak=4, conn=conn)
+        elite = db.get_members_with_most_level_16_cards(limit=2, conn=conn)
+
+        assert hot[0]["tag"] == "#ABC123"
+        assert hot[0]["current_streak"] == 6
+        assert elite[0]["tag"] == "#ABC123"
+        assert elite[0]["level_16_count"] == 2
+        assert elite[0]["level_16_cards"] == ["Fireball", "Hog Rider"]
+        assert elite[1]["tag"] == "#DEF456"
+        assert elite[1]["level_16_count"] == 2
     finally:
         conn.close()
 

@@ -6,6 +6,7 @@ import shlex
 from contextlib import ExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import patch
+import re
 
 
 COMMAND_HELP = {
@@ -352,10 +353,10 @@ def _build_clan_list_report(*, full: bool = False) -> str:
             continue
 
         tag = member.get("player_tag") or member.get("tag") or "n/a"
-        discord_name = (member.get("discord_username") or "").strip()
         line = f"- {name} — `{tag}`"
-        if discord_name:
-            line += f" — {discord_name if discord_name.startswith('@') else '@' + discord_name}"
+        discord_user_id = str(member.get("discord_user_id") or "").strip()
+        if discord_user_id.isdigit():
+            line += f" — <@{discord_user_id}>"
         lines.append(line)
     return "\n".join(lines)
 
@@ -667,9 +668,15 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
     }
     if preview:
         async with _preview_job_runtime() as captured_posts:
-            await job_map[job_name]()
+            try:
+                await job_map[job_name]()
+            except Exception as exc:
+                return f"`{job_name}` failed in preview mode: {exc}"
             return f"Ran `{job_name}` in preview mode.\n\n{_format_preview_posts(captured_posts)}"
-    await job_map[job_name]()
+    try:
+        await job_map[job_name]()
+    except Exception as exc:
+        return f"`{job_name}` failed: {exc}"
     return f"Ran `{job_name}`."
 
 
@@ -784,7 +791,13 @@ async def _run_promote_content(preview: bool) -> str:
 def _resolve_member_tag(member_query: str, *, conn=None) -> tuple[str, str]:
     import db
 
-    matches = db.resolve_member(member_query, limit=3, conn=conn)
+    query = (member_query or "").strip()
+    tag_match = re.search(r"(#?[A-Z0-9]+)\)$", query, re.IGNORECASE)
+    if tag_match:
+        candidate_tag = tag_match.group(1)
+        matches = db.resolve_member(candidate_tag, limit=3, conn=conn)
+    else:
+        matches = db.resolve_member(query, limit=3, conn=conn)
     if not matches:
         raise ValueError(f"No clan member matched {member_query!r}.")
     exactish = [item for item in matches if item.get("match_score", 0) >= 850]
@@ -805,14 +818,29 @@ def _resolve_member_tag(member_query: str, *, conn=None) -> tuple[str, str]:
 
 async def _run_member_metadata_command(command: str, *, preview: bool, args: dict) -> str:
     import db
+    import runtime.onboarding as onboarding
 
     member_tag, label = await asyncio.to_thread(_resolve_member_tag, args["member"])
     if command == "set-discord":
         discord_name = args["discord_name"].strip()
-        if preview:
-            return f"Preview: would set Discord identity for {label} to {discord_name}."
-        await asyncio.to_thread(db.set_member_discord_identity, member_tag, discord_name)
-        return f"Set Discord identity for {label} to {discord_name}."
+        guild_member = await onboarding.resolve_discord_member_input(discord_name)
+        if guild_member is not None:
+            linked_label = f"{guild_member.display_name} (<@{guild_member.id}>)"
+            if preview:
+                return f"Preview: would link Discord identity for {label} to {linked_label}."
+            await asyncio.to_thread(
+                db.link_discord_user_to_member,
+                guild_member.id,
+                member_tag,
+                username=guild_member.name,
+                display_name=guild_member.display_name,
+                source="manual_name_resolution",
+            )
+            return f"Linked Discord identity for {label} to {linked_label}."
+        return (
+            f"Couldn't resolve `{discord_name}` to a unique Discord member for {label}. "
+            "Use a real mention, a numeric Discord user ID, or a unique exact username/display name that exists in the server."
+        )
     if command == "set-join-date":
         if preview:
             return f"Preview: would set join date for {label} to {args['date']}."

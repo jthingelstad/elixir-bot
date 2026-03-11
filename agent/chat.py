@@ -18,6 +18,34 @@ from agent.tool_policy import (
 )
 from agent.tool_exec import _execute_tool
 
+
+def _preview_text(value, limit=500):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, default=str, ensure_ascii=False)
+        except Exception:
+            text = repr(value)
+    return text[:limit]
+
+
+def _failure_payload(kind, detail=None, *, response_text=None, parsed_obj=None, phase=None):
+    payload = {"kind": kind}
+    if detail is not None:
+        payload["detail"] = str(detail)
+    if phase:
+        payload["phase"] = phase
+    if response_text is not None:
+        payload["response_text"] = response_text
+    if parsed_obj is not None:
+        payload["raw_json"] = parsed_obj
+    preview_source = parsed_obj if parsed_obj is not None else response_text
+    payload["result_preview"] = _preview_text(preview_source)
+    return {"_error": payload}
+
 def _parse_response(text):
     """Parse LLM JSON response, handling markdown fences.
 
@@ -223,7 +251,8 @@ def _build_tool_result_envelope(name, raw_result):
 
 def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                      temperature=0.7, max_tokens=800, workflow="generic",
-                     allowed_tools=None, response_schema=None, strict_json=True):
+                     allowed_tools=None, response_schema=None, strict_json=True,
+                     return_errors=False):
     """Run a chat completion with tool-calling loop.
 
     conversation_history: optional list of {role, content} dicts to inject
@@ -265,7 +294,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         completion_latencies_ms.append(round((time.perf_counter() - start) * 1000, 2))
         return resp
 
-    def _parse_and_validate(content, repair_allowed):
+    def _parse_and_validate(content, repair_allowed, phase):
         nonlocal validation_failure_count
         try:
             parsed = _parse_json_response(content) if strict_json else _parse_response(content or "null")
@@ -273,6 +302,8 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             validation_failure_count += 1
             if not repair_allowed:
                 log.warning("validation_failure workflow=%s reason=parse_error detail=%s", workflow, e)
+                if return_errors:
+                    return _failure_payload("parse_error", e, response_text=content, phase=phase)
                 return None
             return "__REPAIR__", f"Invalid JSON. Error: {e}"
 
@@ -282,6 +313,8 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         validation_failure_count += 1
         if not repair_allowed:
             log.warning("validation_failure workflow=%s reason=schema_error detail=%s", workflow, error)
+            if return_errors:
+                return _failure_payload("schema_error", error, response_text=content, parsed_obj=parsed, phase=phase)
             return None
         return "__REPAIR__", f"Schema validation failed: {error}"
 
@@ -290,6 +323,8 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             resp = _create_completion(messages)
         except Exception as e:
             log.error("OpenAI API error: %s", e)
+            if return_errors:
+                return _failure_payload("openai_api_error", e, phase="initial_completion")
             return None
 
         choice = resp.choices[0]
@@ -297,7 +332,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         # If no tool calls, we have the final answer
         if not choice.message.tool_calls:
             completion_chars += len(choice.message.content or "")
-            parsed = _parse_and_validate(choice.message.content or "null", repair_allowed=True)
+            parsed = _parse_and_validate(choice.message.content or "null", repair_allowed=True, phase="initial_response")
             if isinstance(parsed, tuple) and parsed[0] == "__REPAIR__":
                 messages.append({"role": "assistant", "content": choice.message.content or ""})
                 messages.append({
@@ -311,11 +346,13 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                     repair_resp = _create_completion(messages)
                 except Exception as e:
                     log.error("OpenAI API repair error: %s", e)
+                    if return_errors:
+                        return _failure_payload("openai_api_error", e, phase="repair_completion")
                     return None
 
                 repaired = repair_resp.choices[0].message.content or "null"
                 completion_chars += len(repaired)
-                parsed = _parse_and_validate(repaired, repair_allowed=False)
+                parsed = _parse_and_validate(repaired, repair_allowed=False, phase="repair_response")
 
             prompt_chars = _estimate_message_chars(messages)
             log.info(
@@ -378,7 +415,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     try:
         resp = _create_completion(messages)
         completion_chars += len(resp.choices[0].message.content or "")
-        parsed = _parse_and_validate(resp.choices[0].message.content or "null", repair_allowed=False)
+        parsed = _parse_and_validate(resp.choices[0].message.content or "null", repair_allowed=False, phase="final_response")
         prompt_chars = _estimate_message_chars(messages)
         log.info(
             "agent_loop workflow=%s tool_rounds=%d tools_called=%s denied_tools=%d "
@@ -389,6 +426,8 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         return parsed
     except Exception as e:
         log.error("Final answer error: %s", e)
+        if return_errors:
+            return _failure_payload("openai_api_error", e, phase="final_completion")
         return None
 
 
