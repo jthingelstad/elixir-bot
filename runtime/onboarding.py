@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import discord
 
 import db
 import elixir_agent
+
+_DISCORD_REF_RE = re.compile(r"^<@!?(\d+)>$")
 
 
 def _candidate_display_values(member: discord.Member) -> list[str]:
@@ -40,6 +43,53 @@ def _find_unique_guild_member_for_clan_member(guild: discord.Guild, clan_name: s
     if len(unique) == 1:
         return unique[0]
     return None
+
+
+def _find_unique_guild_member_for_discord_ref(guild: discord.Guild, discord_ref: str):
+    ref = (discord_ref or "").strip()
+    if not ref:
+        return None
+
+    mention_match = _DISCORD_REF_RE.match(ref)
+    if mention_match:
+        return guild.get_member(int(mention_match.group(1)))
+
+    if ref.isdigit():
+        return guild.get_member(int(ref))
+
+    normalized = ref.lstrip("@").strip().lower()
+    if not normalized:
+        return None
+
+    matches = []
+    for member in getattr(guild, "members", []) or []:
+        candidates = []
+        for value in (
+            getattr(member, "name", None),
+            getattr(member, "display_name", None),
+            getattr(member, "global_name", None),
+            getattr(member, "nick", None),
+        ):
+            text = (value or "").strip()
+            if text:
+                candidates.append(text)
+                candidates.append(text.lstrip("@"))
+        if any(candidate.lower() == normalized for candidate in candidates):
+            matches.append(member)
+
+    unique = list({member.id: member for member in matches}.values())
+    if len(unique) == 1:
+        return unique[0]
+    return None
+
+
+async def resolve_discord_member_input(discord_ref: str):
+    import runtime.app as app
+
+    guild = app.bot.get_guild(app.GUILD_ID) if app.GUILD_ID else None
+    if guild is None:
+        return None
+    return _find_unique_guild_member_for_discord_ref(guild, discord_ref)
 
 
 async def _onboarding_channel():
@@ -242,5 +292,6 @@ async def verify_discord_membership(member_tag: str) -> str:
 __all__ = [
     "handle_member_join",
     "handle_member_update",
+    "resolve_discord_member_input",
     "verify_discord_membership",
 ]

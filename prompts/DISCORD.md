@@ -74,6 +74,7 @@ Posting guidance:
 - River Race storylines, momentum shifts, and member accomplishments should all show up when the data supports them.
 - The tone should feel like a must-read recap for active members, not a dry report.
 - Avoid fake headings, separator lines, or newsletter boilerplate.
+- Discord limits messages to 2,000 characters so keep the update within that limit.
 
 ## #promote-the-clan
 

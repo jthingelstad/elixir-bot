@@ -1,8 +1,10 @@
 import asyncio
 import json
 import os
+import re
 from datetime import datetime, timezone
 
+import discord
 import cr_api
 import db
 import elixir_agent
@@ -17,6 +19,8 @@ from runtime.app import (
 )
 from runtime.helpers import _channel_scope, _get_singleton_channel_id, _with_leader_ping
 from runtime import status as runtime_status
+
+_WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
 
 
 async def _post_to_elixir(*args, **kwargs):
@@ -35,6 +39,27 @@ def _build_weekly_clan_recap_context(*args, **kwargs):
     return _app._build_weekly_clan_recap_context(*args, **kwargs)
 
 
+def _strip_weekly_recap_header(text: str) -> str:
+    body = (text or "").strip()
+    if not body:
+        return ""
+    lines = body.splitlines()
+    if lines and _WEEKLY_RECAP_HEADER_RE.match(lines[0] or ""):
+        lines = lines[1:]
+        while lines and not (lines[0] or "").strip():
+            lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
+def _format_weekly_recap_post(recap_text: str, *, now: datetime | None = None) -> str:
+    body = _strip_weekly_recap_header(recap_text)
+    current = (now or datetime.now(timezone.utc)).astimezone(CHICAGO)
+    title = f"**Weekly Recap | {current.strftime('%B')} {current.day}, {current.year}**"
+    if not body:
+        return title
+    return f"{title}\n\n{body}"
+
+
 def _relayworthy_war_signals(signals):
     relay_signal_types = {
         "war_final_practice_day",
@@ -51,6 +76,76 @@ def _relayworthy_war_signals(signals):
         if signal_type == "war_completed" and (signal.get("won") or signal.get("our_rank") == 1):
             relayworthy.append(signal)
     return relayworthy
+
+
+def _system_signal_updates(signals):
+    return [signal for signal in (signals or []) if signal.get("signal_key")]
+
+
+def _build_system_signal_context(signal, channel_name):
+    payload = signal.get("payload") or {}
+    details = payload.get("details") or []
+    lines = [
+        "This is a standalone clan-wide system update about a new Elixir capability.",
+        f"Post it for {channel_name}.",
+        "Write exactly one Discord message. Do not split it into parts or a series.",
+        "Do not mention hidden system mechanics or call it a system signal.",
+        "Make it feel like a self-contained clan update from Elixir.",
+        "",
+        f"signal_type: {signal.get('type') or 'unknown'}",
+        f"signal_key: {signal.get('signal_key') or 'unknown'}",
+        f"title: {payload.get('title') or signal.get('title') or ''}",
+        f"message: {payload.get('message') or signal.get('message') or ''}",
+        f"audience: {payload.get('audience') or 'clan'}",
+        f"capability_area: {payload.get('capability_area') or 'general'}",
+    ]
+    if details:
+        lines.append("details:")
+        lines.extend(f"- {detail}" for detail in details)
+    return "\n".join(lines)
+
+
+async def _post_system_signal_updates(signals, clan, war):
+    system_signals = _system_signal_updates(signals)
+    if not system_signals:
+        return
+
+    channel_id = _get_singleton_channel_id("weekly_digest")
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        raise RuntimeError("weekly digest channel not found for system signal updates")
+
+    recent_posts = await asyncio.to_thread(
+        db.list_channel_messages, channel_id, 10, "assistant",
+    )
+
+    for signal in system_signals:
+        context = _build_system_signal_context(signal, f"#{getattr(channel, 'name', 'announcements')}")
+        message = await asyncio.to_thread(
+            elixir_agent.generate_message,
+            "system_signal_broadcast",
+            context,
+            recent_posts,
+        )
+        if not message:
+            continue
+        await _post_to_elixir(channel, {"content": message})
+        await asyncio.to_thread(
+            db.save_message,
+            _channel_scope(channel), "assistant", message,
+            summary=(signal.get("payload") or {}).get("title") or signal.get("title"),
+            channel_id=channel.id,
+            channel_name=getattr(channel, "name", None),
+            channel_kind=str(channel.type),
+            workflow="observation",
+            event_type=signal.get("type") or "system_signal",
+        )
+        if signal.get("signal_key"):
+            await asyncio.to_thread(
+                db.mark_system_signal_announced,
+                signal["signal_key"],
+            )
+        recent_posts = [*recent_posts, {"content": message}][-10:]
 
 
 async def _maybe_post_arena_relay(signals, clan, war):
@@ -204,13 +299,6 @@ async def _heartbeat_tick():
         runtime_status.mark_job_success("heartbeat", "skipped outside active hours")
         return
 
-    announcements_channel_id = _get_singleton_channel_id("announcements")
-    channel = bot.get_channel(announcements_channel_id)
-    if not channel:
-        log.error("Announcements channel %s not found", announcements_channel_id)
-        runtime_status.mark_job_failure("heartbeat", "announcements channel not found")
-        return
-
     try:
         # Run the heartbeat tick — fetches data, snapshots, detects signals
         tick_result = heartbeat.tick()
@@ -230,6 +318,20 @@ async def _heartbeat_tick():
         # Use clan + war data fetched during heartbeat.tick()
         clan = tick_result.clan
         war = tick_result.war
+
+        await _post_system_signal_updates(signals, clan, war)
+        signals = [signal for signal in signals if not signal.get("signal_key")]
+
+        if not signals:
+            runtime_status.mark_job_success("heartbeat", "only system signals processed")
+            return
+
+        announcements_channel_id = _get_singleton_channel_id("announcements")
+        channel = bot.get_channel(announcements_channel_id)
+        if not channel:
+            log.error("Announcements channel %s not found", announcements_channel_id)
+            runtime_status.mark_job_failure("heartbeat", "announcements channel not found")
+            return
 
         # Fetch recent announcements-channel post history to avoid repetition
         recent_posts = await asyncio.to_thread(
@@ -293,6 +395,7 @@ async def _heartbeat_tick():
             if result is None:
                 log.info("Heartbeat: LLM decided signals not worth posting")
             else:
+                result = await _app._apply_member_refs_to_result(result)
                 await _post_to_elixir(channel, result)
                 posts = _app._entry_posts(result)
                 if posts:
@@ -310,12 +413,6 @@ async def _heartbeat_tick():
                             channel_kind=str(channel.type),
                             workflow="observation",
                             event_type=post_event_type,
-                        )
-                for sig in other_signals:
-                    if sig.get("signal_key"):
-                        await asyncio.to_thread(
-                            db.mark_system_signal_announced,
-                            sig["signal_key"],
                         )
                 log.info("Posted observation: %s", result.get("summary"))
 
@@ -536,6 +633,7 @@ async def _player_intel_refresh():
                 ),
             )
             if result:
+                result = await _app._apply_member_refs_to_result(result)
                 await _post_to_elixir(channel, result)
                 posts = _app._entry_posts(result)
                 if posts:
@@ -621,7 +719,7 @@ async def _weekly_clan_recap():
 
     recap_context = await asyncio.to_thread(_build_weekly_clan_recap_context, clan, war)
     recent_posts = await asyncio.to_thread(db.list_channel_messages, recap_channel_id, 5, "assistant")
-    previous_message = recent_posts[-1]["content"] if recent_posts else ""
+    previous_message = _strip_weekly_recap_header(recent_posts[-1]["content"] if recent_posts else "")
     recap_text = await asyncio.to_thread(
         elixir_agent.generate_weekly_digest,
         recap_context,
@@ -630,13 +728,19 @@ async def _weekly_clan_recap():
     if not recap_text:
         runtime_status.mark_job_success("weekly_clan_recap", "no recap generated")
         return
+    recap_post = _format_weekly_recap_post(recap_text)
 
-    await _post_to_elixir(channel, {"content": recap_text})
+    try:
+        await _post_to_elixir(channel, {"content": recap_post})
+    except discord.Forbidden as exc:
+        detail = f"missing Discord permissions in #{getattr(channel, 'name', 'unknown')}"
+        runtime_status.mark_job_failure("weekly_clan_recap", detail)
+        raise RuntimeError(f"weekly recap post failed: {detail}") from exc
     await asyncio.to_thread(
         db.save_message,
         _channel_scope(channel),
         "assistant",
-        recap_text,
+        recap_post,
         channel_id=channel.id,
         channel_name=getattr(channel, "name", None),
         channel_kind=str(channel.type),

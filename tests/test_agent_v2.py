@@ -127,6 +127,43 @@ def test_execute_tool_get_war_season_summary_uses_db():
         mock_db.get_war_season_summary.assert_called_once_with(season_id=None, top_n=5)
 
 
+def test_execute_tool_level_16_and_hot_streak_queries_use_db():
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.get_members_with_most_level_16_cards.return_value = [{"tag": "#ABC123", "level_16_count": 42}]
+        mock_db.get_members_on_hot_streak.return_value = [{"tag": "#ABC123", "current_streak": 6}]
+
+        elite = json.loads(elixir_agent._execute_tool("get_members_with_most_level_16_cards", {"limit": 5}))
+        hot = json.loads(elixir_agent._execute_tool("get_members_on_hot_streak", {"min_streak": 5}))
+
+        assert elite == [{"tag": "#ABC123", "level_16_count": 42}]
+        assert hot == [{"tag": "#ABC123", "current_streak": 6}]
+        mock_db.get_members_with_most_level_16_cards.assert_called_once_with(limit=5)
+        mock_db.get_members_on_hot_streak.assert_called_once_with(min_streak=5, scope="ladder_ranked_10")
+
+
+def test_execute_tool_trend_queries_use_db():
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 950}]
+        mock_db.compare_member_trend_windows.return_value = {"member": {"tag": "#ABC123"}, "window_days": 14}
+        mock_db.build_member_trend_summary_context.return_value = "=== MEMBER TREND SUMMARY ==="
+        mock_db.compare_clan_trend_windows.return_value = {"clan": {"clan_tag": "#J2RGCRVG"}, "window_days": 14}
+        mock_db.build_clan_trend_summary_context.return_value = "=== CLAN TREND SUMMARY ==="
+
+        member_cmp = json.loads(elixir_agent._execute_tool("compare_member_trend_windows", {"member_tag": "King Levy", "window_days": 14}))
+        member_summary = json.loads(elixir_agent._execute_tool("get_member_trend_summary", {"member_tag": "King Levy", "days": 21, "window_days": 14}))
+        clan_cmp = json.loads(elixir_agent._execute_tool("compare_clan_trend_windows", {"window_days": 14}))
+        clan_summary = json.loads(elixir_agent._execute_tool("get_clan_trend_summary", {"days": 21, "window_days": 14}))
+
+        assert member_cmp["window_days"] == 14
+        assert member_summary == "=== MEMBER TREND SUMMARY ==="
+        assert clan_cmp["window_days"] == 14
+        assert clan_summary == "=== CLAN TREND SUMMARY ==="
+        mock_db.compare_member_trend_windows.assert_called_once_with("#ABC123", window_days=14)
+        mock_db.build_member_trend_summary_context.assert_called_once_with("#ABC123", days=21, window_days=14)
+        mock_db.compare_clan_trend_windows.assert_called_once_with(window_days=14)
+        mock_db.build_clan_trend_summary_context.assert_called_once_with(days=21, window_days=14)
+
+
 def test_execute_tool_get_trending_war_contributors_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_trending_war_contributors.return_value = {"season_id": 129, "members": []}
@@ -240,7 +277,10 @@ def test_execute_tool_get_member_missed_war_days_resolves_member():
 
 
 def test_respond_in_channel_uses_interactive_read_only_workflow():
-    with patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "hi"}) as mock_chat:
+    with (
+        patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "hi"}) as mock_chat,
+        patch("agent.workflows.db.build_clan_trend_summary_context", return_value="=== CLAN TREND SUMMARY ===\nclan: POAP KINGS"),
+    ):
         result = elixir_agent.respond_in_channel(
             question="How am I doing?",
             author_name="Jamie",
@@ -255,6 +295,7 @@ def test_respond_in_channel_uses_interactive_read_only_workflow():
         assert result["event_type"] == "channel_response"
         assert mock_chat.call_args.kwargs["workflow"] == "interactive"
         assert mock_chat.call_args.kwargs["allowed_tools"] == elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]
+        assert "=== CLAN TREND SUMMARY ===" in mock_chat.call_args.args[1]
 
 
 def test_respond_in_channel_uses_clanops_proactive_workflow():
@@ -393,3 +434,30 @@ def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
 
     assert result["event_type"] == "channel_response"
     assert result["content"] == "We are in war day."
+
+
+def test_chat_with_tools_returns_error_payload_for_invalid_final_json():
+    bad_message = SimpleNamespace(role="assistant", content='{"event_type":"channel_response"', tool_calls=[])
+    repair_message = SimpleNamespace(role="assistant", content='{"event_type":"channel_response"', tool_calls=[])
+    responses = [
+        SimpleNamespace(choices=[SimpleNamespace(message=bad_message)]),
+        SimpleNamespace(choices=[SimpleNamespace(message=repair_message)]),
+    ]
+
+    def fake_create_chat_completion(**kwargs):
+        return responses.pop(0)
+
+    with patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion):
+        result = elixir_agent._chat_with_tools(
+            "system",
+            "user",
+            workflow="interactive",
+            allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["interactive"],
+            strict_json=True,
+            return_errors=True,
+        )
+
+    assert result["_error"]["kind"] == "parse_error"
+    assert result["_error"]["phase"] == "repair_response"
+    assert "{\"event_type\":\"channel_response\"" in result["_error"]["result_preview"]

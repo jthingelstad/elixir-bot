@@ -9,6 +9,24 @@ import db
 import elixir_agent
 
 
+def _agent_failure_payload(result):
+    if isinstance(result, dict):
+        error = result.get("_error")
+        if isinstance(error, dict):
+            return error
+    return None
+
+
+def _agent_failure_detail(error: dict) -> str | None:
+    detail = (error.get("detail") or "").strip()
+    phase = (error.get("phase") or "").strip()
+    if phase and detail:
+        return f"{phase}: {detail}"
+    if phase:
+        return phase
+    return detail or None
+
+
 async def route_message(message):
     import runtime.app as app
 
@@ -550,6 +568,22 @@ async def route_message(message):
                     clan_data=clan,
                     memory_context=memory_context,
                 )
+                agent_error = _agent_failure_payload(result)
+                if agent_error:
+                    app._log_prompt_failure(
+                        question=question,
+                        workflow="reception",
+                        failure_type=agent_error.get("kind") or "agent_error",
+                        failure_stage="respond_in_reception",
+                        channel=message.channel,
+                        author=message.author,
+                        discord_message_id=message.id,
+                        detail=_agent_failure_detail(agent_error),
+                        result_preview=agent_error.get("result_preview"),
+                        raw_json=agent_error.get("raw_json") or {"response_text": agent_error.get("response_text")},
+                    )
+                    await message.reply("Having a hiccup. Try again in a sec.")
+                    return
                 if result is None:
                     app._log_prompt_failure(
                         question=question,
@@ -672,6 +706,23 @@ async def route_message(message):
                     memory_context=memory_context,
                     proactive=proactive,
                 )
+                agent_error = _agent_failure_payload(result)
+                if agent_error:
+                    app._log_prompt_failure(
+                        question=raw_question,
+                        workflow=workflow,
+                        failure_type=agent_error.get("kind") or "agent_error",
+                        failure_stage="respond_in_channel",
+                        channel=message.channel,
+                        author=message.author,
+                        discord_message_id=message.id,
+                        detail=_agent_failure_detail(agent_error),
+                        result_preview=agent_error.get("result_preview"),
+                        raw_json=agent_error.get("raw_json") or {"response_text": agent_error.get("response_text")},
+                    )
+                    if mentioned:
+                        await message.reply(app._fallback_channel_response(raw_question, workflow))
+                    return
                 if result is None:
                     app._log_prompt_failure(
                         question=raw_question,
@@ -702,6 +753,7 @@ async def route_message(message):
                         await message.reply(app._fallback_channel_response(raw_question, workflow))
                     return
 
+                result = await app._apply_member_refs_to_result(result)
                 content = result.get("content", result.get("summary", ""))
                 if not content:
                     app.log.error("%s channel error: empty result payload %s", workflow, result)

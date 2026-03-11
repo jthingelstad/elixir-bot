@@ -99,11 +99,37 @@ def _execute_tool(name, arguments):
                 member_tag,
                 mode_scope=arguments.get("mode_scope", "overall"),
             )
+        elif name == "get_members_with_most_level_16_cards":
+            result = db.get_members_with_most_level_16_cards(
+                limit=arguments.get("limit", 10),
+            )
         elif name == "get_member_history":
             member_tag = _resolve_member_tag(arguments["member_tag"])
             result = db.get_member_history(
                 member_tag,
                 days=arguments.get("days", 30),
+            )
+        elif name == "compare_member_trend_windows":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            result = db.compare_member_trend_windows(
+                member_tag,
+                window_days=arguments.get("window_days", 7),
+            )
+        elif name == "get_member_trend_summary":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            result = db.build_member_trend_summary_context(
+                member_tag,
+                days=arguments.get("days", 30),
+                window_days=arguments.get("window_days", 7),
+            )
+        elif name == "compare_clan_trend_windows":
+            result = db.compare_clan_trend_windows(
+                window_days=arguments.get("window_days", 7),
+            )
+        elif name == "get_clan_trend_summary":
+            result = db.build_clan_trend_summary_context(
+                days=arguments.get("days", 30),
+                window_days=arguments.get("window_days", 7),
             )
         elif name == "get_member_war_stats":
             member_tag = _resolve_member_tag(arguments["member_tag"])
@@ -162,6 +188,11 @@ def _execute_tool(name, arguments):
                 min_war_races=arguments.get("min_war_races", 1),
                 tenure_grace_days=arguments.get("tenure_grace_days", 14),
                 season_id=arguments.get("season_id"),
+            )
+        elif name == "get_members_on_hot_streak":
+            result = db.get_members_on_hot_streak(
+                min_streak=arguments.get("min_streak", 4),
+                scope=arguments.get("scope", "ladder_ranked_10"),
             )
         elif name == "get_members_on_losing_streak":
             result = db.get_members_on_losing_streak(

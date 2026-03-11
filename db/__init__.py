@@ -15,6 +15,7 @@ import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger("elixir_db")
 
@@ -22,6 +23,7 @@ PACKAGE_DIR = os.path.dirname(__file__)
 PROJECT_ROOT = os.path.dirname(PACKAGE_DIR)
 
 DB_PATH = os.getenv("ELIXIR_DB_PATH", os.path.join(PROJECT_ROOT, "elixir.db"))
+CHICAGO_TZ = ZoneInfo("America/Chicago")
 
 SNAPSHOT_RETENTION_DAYS = 90
 WAR_RETENTION_DAYS = 180
@@ -91,6 +93,41 @@ _V2_SCHEMA_CORE = {
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def chicago_today(now: Optional[datetime] = None) -> str:
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return current.astimezone(CHICAGO_TZ).date().isoformat()
+
+
+def chicago_date_for_utc_timestamp(value: Optional[str]) -> Optional[str]:
+    dt = _parse_iso_time(value)
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(CHICAGO_TZ).date().isoformat()
+
+
+def chicago_date_for_cr_timestamp(value: Optional[str]) -> Optional[str]:
+    dt = _parse_cr_time(value)
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(CHICAGO_TZ).date().isoformat()
+
+
+def chicago_day_bounds_utc(metric_date: str) -> tuple[str, str]:
+    local_start = datetime.strptime(metric_date, "%Y-%m-%d").replace(tzinfo=CHICAGO_TZ)
+    utc_start = local_start.astimezone(timezone.utc).replace(tzinfo=None)
+    utc_end = (local_start + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
+    return (
+        utc_start.strftime("%Y-%m-%dT%H:%M:%S"),
+        utc_end.strftime("%Y-%m-%dT%H:%M:%S"),
+    )
 
 
 def _canon_tag(tag: Optional[str]) -> str:
@@ -1199,7 +1236,111 @@ def _migration_8(conn: sqlite3.Connection) -> None:
         )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8]
+def _migration_9(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS clan_daily_metrics (
+            metric_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            metric_date TEXT NOT NULL,
+            clan_tag TEXT NOT NULL,
+            clan_name TEXT,
+            member_count INTEGER NOT NULL DEFAULT 0,
+            open_slots INTEGER NOT NULL DEFAULT 0,
+            clan_score INTEGER,
+            clan_war_trophies INTEGER,
+            required_trophies INTEGER,
+            donations_per_week_requirement INTEGER,
+            weekly_donations_total INTEGER,
+            total_member_trophies INTEGER,
+            avg_member_trophies REAL,
+            top_member_trophies INTEGER,
+            joins_today INTEGER NOT NULL DEFAULT 0,
+            leaves_today INTEGER NOT NULL DEFAULT 0,
+            net_member_change INTEGER NOT NULL DEFAULT 0,
+            observed_at TEXT NOT NULL,
+            raw_json TEXT,
+            UNIQUE(clan_tag, metric_date)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_clan_daily_metrics_date
+            ON clan_daily_metrics(metric_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_clan_daily_metrics_clan_date
+            ON clan_daily_metrics(clan_tag, metric_date DESC);
+        """
+    )
+
+
+def _migration_10(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS member_daily_battle_rollups (
+            rollup_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            member_id INTEGER NOT NULL REFERENCES members(member_id) ON DELETE CASCADE,
+            battle_date TEXT NOT NULL,
+            mode_group TEXT NOT NULL,
+            game_mode_id INTEGER,
+            game_mode_name TEXT,
+            battles INTEGER NOT NULL DEFAULT 0,
+            wins INTEGER NOT NULL DEFAULT 0,
+            losses INTEGER NOT NULL DEFAULT 0,
+            draws INTEGER NOT NULL DEFAULT 0,
+            crowns_for INTEGER NOT NULL DEFAULT 0,
+            crowns_against INTEGER NOT NULL DEFAULT 0,
+            trophy_change_total INTEGER NOT NULL DEFAULT 0,
+            first_battle_at TEXT,
+            last_battle_at TEXT,
+            captured_battles INTEGER NOT NULL DEFAULT 0,
+            expected_battle_delta INTEGER,
+            completeness_ratio REAL,
+            is_complete INTEGER NOT NULL DEFAULT 0,
+            last_aggregated_at TEXT NOT NULL,
+            UNIQUE(member_id, battle_date, mode_group, game_mode_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_member_daily_battle_rollups_member_date
+            ON member_daily_battle_rollups(member_id, battle_date DESC, mode_group);
+        CREATE INDEX IF NOT EXISTS idx_member_daily_battle_rollups_date
+            ON member_daily_battle_rollups(battle_date DESC, mode_group);
+        """
+    )
+
+
+def _migration_11(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS clan_daily_battle_rollups (
+            rollup_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            battle_date TEXT NOT NULL,
+            clan_tag TEXT NOT NULL,
+            clan_name TEXT,
+            mode_group TEXT NOT NULL,
+            game_mode_id INTEGER,
+            game_mode_name TEXT,
+            members_active INTEGER NOT NULL DEFAULT 0,
+            battles INTEGER NOT NULL DEFAULT 0,
+            wins INTEGER NOT NULL DEFAULT 0,
+            losses INTEGER NOT NULL DEFAULT 0,
+            draws INTEGER NOT NULL DEFAULT 0,
+            crowns_for INTEGER NOT NULL DEFAULT 0,
+            crowns_against INTEGER NOT NULL DEFAULT 0,
+            trophy_change_total INTEGER NOT NULL DEFAULT 0,
+            captured_battles INTEGER,
+            expected_battle_delta INTEGER,
+            completeness_ratio REAL,
+            is_complete INTEGER NOT NULL DEFAULT 0,
+            last_aggregated_at TEXT NOT NULL,
+            UNIQUE(clan_tag, battle_date, mode_group, game_mode_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_clan_daily_battle_rollups_date
+            ON clan_daily_battle_rollups(battle_date DESC, mode_group);
+        CREATE INDEX IF NOT EXISTS idx_clan_daily_battle_rollups_clan_date
+            ON clan_daily_battle_rollups(clan_tag, battle_date DESC, mode_group);
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
@@ -1286,6 +1427,7 @@ from storage import identity as _identity_module
 from storage import war as _war_module
 from storage import roster as _roster_module
 from storage import player as _player_module
+from storage import trends as _trends_module
 from storage import messages as _messages_module
 from storage import metadata as _metadata_module
 
@@ -1295,6 +1437,7 @@ for _module in (
     _war_module,
     _roster_module,
     _player_module,
+    _trends_module,
     _messages_module,
     _metadata_module,
 ):

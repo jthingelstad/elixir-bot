@@ -25,6 +25,97 @@ from runtime import status as runtime_status
 async def _post_to_elixir(*args, **kwargs):
     return await _app._post_to_elixir(*args, **kwargs)
 
+
+def _pick_resolved_member(matches):
+    if not matches:
+        return None
+    exactish = [item for item in matches if item.get("match_score", 0) >= 850]
+    if len(exactish) == 1:
+        return exactish[0]
+    if len(matches) == 1:
+        return matches[0]
+    top = matches[0]
+    second = matches[1]
+    if (top.get("match_score", 0) - second.get("match_score", 0)) >= 100:
+        return top
+    return None
+
+
+def _rewrite_member_refs_in_text(text: str, replacements: list[tuple[str, str]]) -> str:
+    updated = text or ""
+    if not updated:
+        return updated
+    for alias, ref in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        if not alias or not ref or ref == alias:
+            continue
+        pattern = re.compile(
+            rf"(?<![\w<]){re.escape(alias)}(?![\w>])(?!\s*\((?:<@|@))",
+            re.IGNORECASE,
+        )
+        updated = pattern.sub(ref, updated)
+    return updated
+
+
+async def _apply_member_refs_to_result(result: dict | None):
+    if not isinstance(result, dict):
+        return result
+
+    tags_by_alias: dict[str, set[str]] = {}
+
+    for raw_tag in result.get("member_tags") or []:
+        tag = (raw_tag or "").strip()
+        if not tag:
+            continue
+        tags_by_alias.setdefault(tag, set())
+
+    for raw_name in result.get("member_names") or []:
+        name = (raw_name or "").strip()
+        if not name:
+            continue
+        matches = await asyncio.to_thread(db.resolve_member, name, "active", 3)
+        resolved = _pick_resolved_member(matches)
+        if not resolved:
+            continue
+        tag = resolved.get("player_tag")
+        if not tag:
+            continue
+        tags_by_alias.setdefault(tag, set()).add(name)
+
+    replacements: list[tuple[str, str]] = []
+    for tag, aliases in tags_by_alias.items():
+        plain_name = await asyncio.to_thread(db.format_member_reference, tag, "plain_name")
+        mention_name = await asyncio.to_thread(db.format_member_reference, tag, "name_with_mention")
+        if not mention_name or mention_name in {plain_name, tag}:
+            continue
+        aliases.add((plain_name or "").strip())
+        for alias in aliases:
+            alias_text = (alias or "").strip()
+            if alias_text:
+                replacements.append((alias_text, mention_name))
+
+    if not replacements:
+        return result
+
+    updated = dict(result)
+    content = updated.get("content")
+    if isinstance(content, str):
+        updated["content"] = _rewrite_member_refs_in_text(content, replacements)
+    elif isinstance(content, list):
+        updated["content"] = [
+            _rewrite_member_refs_in_text(item, replacements) if isinstance(item, str) else item
+            for item in content
+        ]
+
+    share_content = updated.get("share_content")
+    if isinstance(share_content, str):
+        updated["share_content"] = _rewrite_member_refs_in_text(share_content, replacements)
+    elif isinstance(share_content, list):
+        updated["share_content"] = [
+            _rewrite_member_refs_in_text(item, replacements) if isinstance(item, str) else item
+            for item in share_content
+        ]
+    return updated
+
 def _match_clan_member(nickname):
     """Match a Discord nickname to a clan member. Returns (tag, name) or None.
 
@@ -881,6 +972,11 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
     clan = clan or {}
     war = war or {}
     summary = db.get_weekly_digest_summary(days=7)
+    try:
+        clan_trend_summary = db.build_clan_trend_summary_context(days=30, window_days=7)
+    except Exception as exc:
+        log.warning("Weekly recap clan trend summary unavailable: %s", exc)
+        clan_trend_summary = ""
     roster = summary.get("roster") or {}
     war_score_trend = summary.get("war_score_trend") or {}
     season_summary = summary.get("war_season_summary") or {}
@@ -1013,6 +1109,10 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             )
         )
 
+    if clan_trend_summary:
+        lines.append("")
+        lines.append(clan_trend_summary)
+
     top_donors = summary.get("top_donors") or []
     if top_donors:
         lines.append("")
@@ -1140,6 +1240,7 @@ async def _load_live_clan_context():
                     key=lambda item: (item.get("current_name") or "").lower(),
                 )
         await asyncio.to_thread(db.snapshot_members, member_list)
+        await asyncio.to_thread(db.snapshot_clan_daily_metrics, clan)
     try:
         war = await asyncio.to_thread(cr_api.get_current_war)
     except Exception:
@@ -1151,6 +1252,7 @@ async def _load_live_clan_context():
 
 
 async def _share_channel_result(result, workflow):
+    result = await _apply_member_refs_to_result(result)
     if result.get("event_type") != "channel_share":
         return
     share_content = result.get("share_content", "")

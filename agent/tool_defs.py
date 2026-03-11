@@ -198,6 +198,24 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_members_with_most_level_16_cards",
+            "description": "Rank active members by how many level 16 cards they currently have in their tracked card collection.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of members to return. Default 10.",
+                        "default": 10,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_member_history",
             "description": "Get a clan member's trophy and donation history over time from the stored state snapshots.",
             "parameters": {
@@ -214,6 +232,96 @@ TOOLS = [
                     },
                 },
                 "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_member_trend_windows",
+            "description": "Compare a member's recent trophy movement and battle activity to the previous same-length window using the long-term trend tables.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                    "window_days": {
+                        "type": "integer",
+                        "description": "How many recent days to compare against the prior same-length window. Default 7.",
+                        "default": 7,
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_member_trend_summary",
+            "description": "Get a compact prompt-ready member trend summary covering recent trophies, battle activity, and current-vs-previous window movement.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "How many total days of trend context to summarize. Default 30.",
+                        "default": 30,
+                    },
+                    "window_days": {
+                        "type": "integer",
+                        "description": "How many recent days to compare against the prior same-length window. Default 7.",
+                        "default": 7,
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_clan_trend_windows",
+            "description": "Compare clan member count, clan score, total member trophies, and battle activity across the recent window versus the previous same-length window.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "window_days": {
+                        "type": "integer",
+                        "description": "How many recent days to compare against the prior same-length window. Default 7.",
+                        "default": 7,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_clan_trend_summary",
+            "description": "Get a compact prompt-ready clan trend summary covering member count, clan score, total member trophies, and recent battle activity.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "How many total days of trend context to summarize. Default 30.",
+                        "default": 30,
+                    },
+                    "window_days": {
+                        "type": "integer",
+                        "description": "How many recent days to compare against the prior same-length window. Default 7.",
+                        "default": 7,
+                    },
+                },
+                "required": [],
             },
         },
     },
@@ -592,6 +700,29 @@ TOOLS = [
                     "season_id": {
                         "type": "integer",
                         "description": "Optional season ID for war participation checks.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_members_on_hot_streak",
+            "description": "List active members on a current winning streak so the clan can see who is cooking right now.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_streak": {
+                        "type": "integer",
+                        "description": "Minimum current winning streak to include. Default 4.",
+                        "default": 4,
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Recent form scope. Default ladder_ranked_10.",
+                        "default": "ladder_ranked_10",
                     },
                 },
                 "required": [],

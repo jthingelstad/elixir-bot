@@ -19,11 +19,14 @@ def register_elixir_app_commands(bot) -> None:
     memory_commands = app_commands.Group(name="memory", description="Inspect Elixir memory")
     job_commands = app_commands.Group(name="jobs", description="Operational job commands")
 
-    async def send_interaction_text(interaction: discord.Interaction, content: str, *, ephemeral: bool = True):
+    async def send_interaction_text(interaction: discord.Interaction, content: str, *, ephemeral: bool = True, use_followup: bool = False):
         chunks = app._chunk_discord_text(content)
         if not chunks:
             chunks = ["_No content._"]
-        if not interaction.response.is_done():
+        if use_followup:
+            await interaction.edit_original_response(content=chunks[0])
+            start = 1
+        elif not interaction.response.is_done():
             await interaction.response.send_message(chunks[0], ephemeral=ephemeral)
             start = 1
         else:
@@ -65,13 +68,17 @@ def register_elixir_app_commands(bot) -> None:
     ):
         if not await validate_admin_interaction(interaction, command_name=command_name, write=write):
             return
+        use_followup = False
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+            use_followup = True
         content = await dispatch_admin_command(
             command_name,
             preview=preview,
             short=short,
             args=args or {},
         )
-        await send_interaction_text(interaction, content, ephemeral=True)
+        await send_interaction_text(interaction, content, ephemeral=True, use_followup=use_followup)
 
     async def member_autocomplete(
         interaction: discord.Interaction,
