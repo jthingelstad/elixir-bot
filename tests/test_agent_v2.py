@@ -40,6 +40,38 @@ def test_execute_tool_get_member_profile_refreshes_member_cache():
         mock_db.get_member_profile.assert_called_once_with("#ABC123")
 
 
+def test_build_tool_result_envelope_strips_card_image_fields_from_context():
+    raw = json.dumps(
+        {
+            "player_tag": "#ABC123",
+            "profile_url": "https://example.com/profile",
+            "current_deck": {
+                "cards": [
+                    {
+                        "name": "Hog Rider",
+                        "iconUrls": {"medium": "https://cdn.example/hog.png"},
+                    }
+                ]
+            },
+            "signature_cards": {
+                "cards": [
+                    {
+                        "name": "Fireball",
+                        "icon_url": "https://cdn.example/fireball.png",
+                        "usage_pct": 64,
+                    }
+                ]
+            },
+        }
+    )
+
+    envelope = json.loads(elixir_agent._build_tool_result_envelope("get_member_overview", raw))
+
+    assert envelope["data"]["profile_url"] == "https://example.com/profile"
+    assert "iconUrls" not in envelope["data"]["current_deck"]["cards"][0]
+    assert "icon_url" not in envelope["data"]["signature_cards"]["cards"][0]
+
+
 def test_execute_tool_get_member_profile_resolves_handle_before_refresh():
     with (
         patch("elixir_agent.cr_api.get_player", return_value={"tag": "#ABC123", "name": "King Levy"}),

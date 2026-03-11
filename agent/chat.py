@@ -166,12 +166,27 @@ def _estimate_message_chars(messages):
     return total
 
 
+def _strip_context_image_fields(value):
+    """Remove image asset fields before tool data is added to model context."""
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            if str(key).lower() in {"iconurls", "icon_url", "iconurl", "image_url", "imageurl"}:
+                continue
+            cleaned[key] = _strip_context_image_fields(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_strip_context_image_fields(item) for item in value]
+    return value
+
+
 def _build_tool_result_envelope(name, raw_result):
     """Normalize tool output into a compact envelope for model context."""
     try:
         parsed = json.loads(raw_result)
     except Exception:
         parsed = {"error": "tool_result_not_json", "raw": str(raw_result)[:500]}
+    parsed = _strip_context_image_fields(parsed)
 
     envelope = {
         "ok": True,
@@ -492,6 +507,7 @@ __all__ = [
     "_validate_response",
     "_tool_names",
     "_estimate_message_chars",
+    "_strip_context_image_fields",
     "_build_tool_result_envelope",
     "_chat_with_tools",
     "_clan_context",
