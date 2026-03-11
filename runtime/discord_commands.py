@@ -123,9 +123,15 @@ def register_elixir_app_commands(bot) -> None:
             event_type="clan_status_short_report" if short else "clan_status_report",
         )
 
-    @elixir_commands.command(name="clan-list", description="List active clan members with exact names and tags.")
-    async def slash_clan_list(interaction: discord.Interaction):
-        await run_admin_interaction(interaction, command_name="clan-list", event_type="clan_list_report")
+    @elixir_commands.command(name="clan-list", description="List active clan members.")
+    @app_commands.describe(full="Return the expanded metadata variant.")
+    async def slash_clan_list(interaction: discord.Interaction, full: bool = False):
+        await run_admin_interaction(
+            interaction,
+            command_name="clan-list",
+            args={"full": "true" if full else "false"},
+            event_type="clan_list_full_report" if full else "clan_list_report",
+        )
 
     @profile_commands.command(name="show", description="Show the stored member profile and metadata.")
     @app_commands.describe(member="Member name or tag.")
@@ -174,6 +180,18 @@ def register_elixir_app_commands(bot) -> None:
             command_name="verify-discord",
             args={"member": member},
             event_type="clanops_admin_verify_discord",
+            write=True,
+        )
+
+    @profile_commands.command(name="set-discord", description="Manually assign a Discord identity to a member.")
+    @app_commands.describe(member="Member name or tag.", discord_name="Discord username or display name.")
+    @app_commands.autocomplete(member=member_autocomplete)
+    async def slash_set_discord(interaction: discord.Interaction, member: str, discord_name: str):
+        await run_admin_interaction(
+            interaction,
+            command_name="set-discord",
+            args={"member": member, "discord_name": discord_name},
+            event_type="clanops_admin_set_discord",
             write=True,
         )
 

@@ -442,6 +442,28 @@ def test_on_message_handles_clanops_clan_list_via_public_do_command():
     mock_process.assert_not_awaited()
 
 
+def test_parse_admin_command_handles_clan_list_full_flag():
+    parsed = elixir.parse_admin_command("do clan-list full", require_prefix=True)
+
+    assert parsed == {
+        "command": "clan-list",
+        "preview": False,
+        "short": False,
+        "args": {"full": "true"},
+    }
+
+
+def test_parse_admin_command_handles_set_discord():
+    parsed = elixir.parse_admin_command('do set-discord "King Levy" @kinglevy', require_prefix=True)
+
+    assert parsed == {
+        "command": "set-discord",
+        "preview": False,
+        "short": False,
+        "args": {"member": "King Levy", "discord_name": "@kinglevy"},
+    }
+
+
 def test_on_message_handles_clanops_profile_via_public_do_command():
     message = _make_message(200, "clan-ops", "do profile \"Ditika\"")
 
@@ -553,6 +575,38 @@ def test_dispatch_admin_command_handles_verify_discord():
     mock_verify.assert_awaited_once_with("#ABC123")
 
 
+def test_dispatch_admin_command_handles_clan_list_full():
+    with patch("runtime.admin._build_clan_list_report", return_value="**Clan List Full (2 active)**") as mock_report:
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "clan-list",
+                preview=False,
+                short=False,
+                args={"full": "true"},
+            )
+        )
+
+    assert result == "**Clan List Full (2 active)**"
+    mock_report.assert_called_once_with(full=True)
+
+
+def test_dispatch_admin_command_handles_set_discord():
+    with (
+        patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None])) as mock_to_thread,
+    ):
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "set-discord",
+                preview=False,
+                short=False,
+                args={"member": "King Levy", "discord_name": "@kinglevy"},
+            )
+        )
+
+    assert result == "Set Discord identity for King Levy to @kinglevy."
+    assert mock_to_thread.await_args_list[1].args == (elixir.db.set_member_discord_identity, "#ABC123", "@kinglevy")
+
+
 def test_parse_admin_command_handles_memory_filters():
     parsed = elixir.parse_admin_command(
         'do memory member "King Levy" search "war consistency" --limit 7 --system-internal',
@@ -595,6 +649,68 @@ def test_dispatch_admin_command_handles_memory():
         limit="3",
         include_system_internal=True,
     )
+
+
+def test_slash_clan_list_full_passes_flag_to_admin_dispatch():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+    clan_list_command = root.get_command("clan-list")
+
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock())
+    followup = SimpleNamespace(send=AsyncMock())
+    interaction = SimpleNamespace(
+        channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
+        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[]),
+        response=response,
+        followup=followup,
+    )
+
+    with (
+        patch("runtime.app._is_clanops_channel", return_value=True),
+        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="full list")) as mock_dispatch,
+    ):
+        asyncio.run(clan_list_command.callback(interaction, full=True))
+
+    mock_dispatch.assert_awaited_once_with(
+        "clan-list",
+        preview=False,
+        short=False,
+        args={"full": "true"},
+    )
+    response.send_message.assert_awaited_once_with("full list", ephemeral=True)
+
+
+def test_slash_set_discord_passes_identity_to_admin_dispatch():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+    profile_group = root.get_command("profile")
+    set_discord_command = profile_group.get_command("set-discord")
+
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock())
+    followup = SimpleNamespace(send=AsyncMock())
+    interaction = SimpleNamespace(
+        channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
+        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
+        response=response,
+        followup=followup,
+    )
+
+    with (
+        patch("runtime.app._is_clanops_channel", return_value=True),
+        patch("runtime.app._has_leader_role", return_value=True),
+        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="linked")) as mock_dispatch,
+    ):
+        asyncio.run(set_discord_command.callback(interaction, member="King Levy", discord_name="@kinglevy"))
+
+    mock_dispatch.assert_awaited_once_with(
+        "set-discord",
+        preview=False,
+        short=False,
+        args={"member": "King Levy", "discord_name": "@kinglevy"},
+    )
+    response.send_message.assert_awaited_once_with("linked", ephemeral=True)
 
 
 def test_queue_startup_system_signals_enqueues_memory_capability_announcement():

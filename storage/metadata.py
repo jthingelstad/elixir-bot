@@ -292,7 +292,7 @@ def list_member_metadata_rows(status="active", conn=None):
     try:
         rows = conn.execute(
             "SELECT m.member_id, m.player_tag, m.current_name, m.status, cs.role, "
-            "md.joined_at, md.birth_month, md.birth_day, md.profile_url, md.note, "
+            "md.joined_at, md.birth_month, md.birth_day, md.profile_url, md.poap_address, md.note, "
             "dl.discord_username, dl.discord_display_name "
             "FROM members m "
             "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
@@ -315,6 +315,7 @@ def list_member_metadata_rows(status="active", conn=None):
                 "birth_month": row["birth_month"] or "",
                 "birth_day": row["birth_day"] or "",
                 "profile_url": row["profile_url"] or "",
+                "poap_address": row["poap_address"] or "",
                 "note": row["note"] or "",
             }
             result.append(item)
