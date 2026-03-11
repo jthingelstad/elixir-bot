@@ -783,7 +783,7 @@ def _build_help_report(role: str) -> str:
                 "**Elixir Help — ClanOps**",
                 "- Use `/elixir ...` for private operator commands in this channel.",
                 "- Use `@Elixir do ...` when you want the command and result to stay public in the room.",
-                "- Member workflow: `/elixir clan-list` to get exact names/tags, `/elixir profile` to inspect the stored record, then `/elixir member set-join-date`, `/elixir member set-birthday`, `/elixir member set-profile-url`, `/elixir member set-poap-address`, `/elixir member set-note` or the matching `clear-*` commands to edit metadata.",
+                "- Member workflow: `/elixir clan-list` or `/elixir clan-list full:true` to inspect the roster, `/elixir profile show` to inspect one stored record, then `/elixir profile set-discord`, `/elixir profile set-join-date`, `/elixir profile set-birthday`, `/elixir profile set-profile-url`, `/elixir profile set-poap-address`, `/elixir profile set-note` or the matching `clear-*` commands to edit metadata.",
                 "- Public examples: `@Elixir do clan-status`, `@Elixir do profile \"weird name\"`, `@Elixir do promotion --preview`.",
                 "- Job examples: `/elixir jobs heartbeat`, `/elixir jobs site-content`, `/elixir jobs promotion`.",
                 "- I can help with roster reviews, war participation, promotions, demotions, kicks, recent form, decks, donations, and member lookups.",

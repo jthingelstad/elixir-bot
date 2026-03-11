@@ -139,6 +139,30 @@ def test_discord_link_and_member_reference_formatting():
         conn.close()
 
 
+def test_manual_discord_identity_uses_handle_not_fake_mention():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.set_member_discord_identity("#ABC123", "@kinglevy", conn=conn)
+
+        identity = db.get_member_identity("#ABC123", conn=conn)
+        assert identity["discord_user_id"] == "manual:kinglevy"
+        assert identity["discord_username"] == "kinglevy"
+        assert (
+            db.format_member_reference("#ABC123", style="name_with_handle", conn=conn)
+            == "King Levy (@kinglevy)"
+        )
+        assert (
+            db.format_member_reference("#ABC123", style="name_with_mention", conn=conn)
+            == "King Levy (@kinglevy)"
+        )
+    finally:
+        conn.close()
+
+
 def test_upsert_discord_user_auto_links_unique_exact_member_name():
     conn = db.get_connection(":memory:")
     try:
@@ -190,6 +214,7 @@ def test_member_metadata_fields_flow_into_member_profile():
         assert profile["note"] == "Founder"
         rows = db.list_member_metadata_rows(conn=conn)
         assert rows[0]["joined_date"] == "2024-01-15"
+        assert rows[0]["poap_address"] == ""
     finally:
         conn.close()
 

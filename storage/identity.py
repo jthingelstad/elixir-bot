@@ -12,6 +12,25 @@ from db import (
 # -- Discord identity and memory helpers -----------------------------------
 
 
+def _is_real_discord_user_id(discord_user_id) -> bool:
+    return str(discord_user_id or "").isdigit()
+
+
+def _upsert_discord_user_record(conn, discord_user_id, *, username=None, global_name=None, display_name=None):
+    now = _utcnow()
+    row = conn.execute("SELECT discord_user_id FROM discord_users WHERE discord_user_id = ?", (str(discord_user_id),)).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE discord_users SET username = COALESCE(?, username), global_name = COALESCE(?, global_name), display_name = COALESCE(?, display_name), last_seen_at = ? WHERE discord_user_id = ?",
+            (username, global_name, display_name, now, str(discord_user_id)),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO discord_users (discord_user_id, username, global_name, display_name, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(discord_user_id), username, global_name, display_name, now, now),
+        )
+
+
 def _apply_discord_link(conn, discord_user_id, member_tag, *, username=None, display_name=None,
                         source="manual_link", confidence=1.0, is_primary=True):
     member_id = _ensure_member(conn, member_tag, name=None)
@@ -86,18 +105,13 @@ def upsert_discord_user(discord_user_id, username=None, global_name=None, displa
     close = conn is None
     conn = conn or get_connection()
     try:
-        now = _utcnow()
-        row = conn.execute("SELECT discord_user_id FROM discord_users WHERE discord_user_id = ?", (str(discord_user_id),)).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE discord_users SET username = COALESCE(?, username), global_name = COALESCE(?, global_name), display_name = COALESCE(?, display_name), last_seen_at = ? WHERE discord_user_id = ?",
-                (username, global_name, display_name, now, str(discord_user_id)),
-            )
-        else:
-            conn.execute(
-                "INSERT INTO discord_users (discord_user_id, username, global_name, display_name, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (str(discord_user_id), username, global_name, display_name, now, now),
-            )
+        _upsert_discord_user_record(
+            conn,
+            discord_user_id,
+            username=username,
+            global_name=global_name,
+            display_name=display_name,
+        )
         _maybe_auto_link_discord_user(
             conn,
             discord_user_id,
@@ -106,6 +120,40 @@ def upsert_discord_user(discord_user_id, username=None, global_name=None, displa
             display_name=display_name,
         )
         conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def set_member_discord_identity(member_tag, discord_name, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        identity_text = (discord_name or "").strip()
+        if not identity_text:
+            raise ValueError("discord name is required")
+        normalized_name = identity_text.lstrip("@").strip()
+        if not normalized_name:
+            raise ValueError("discord name is required")
+        manual_user_id = f"manual:{normalized_name.casefold()}"
+        _upsert_discord_user_record(
+            conn,
+            manual_user_id,
+            username=normalized_name,
+            display_name=normalized_name,
+        )
+        member_id = _apply_discord_link(
+            conn,
+            manual_user_id,
+            member_tag,
+            username=normalized_name,
+            display_name=normalized_name,
+            source="manual_name_assignment",
+            confidence=1.0,
+            is_primary=True,
+        )
+        conn.commit()
+        return member_id
     finally:
         if close:
             conn.close()
@@ -199,14 +247,17 @@ def format_member_reference(member_or_tag, style="plain_name", conn=None):
         name = member.get("member_name") or member.get("current_name") or member.get("player_tag")
         user_id = member.get("discord_user_id")
         username = member.get("discord_username") or member.get("discord_display_name")
-        if style == "name_with_mention" and user_id:
+        if style == "name_with_mention" and _is_real_discord_user_id(user_id):
             return f"{name} (<@{user_id}>)"
         if style == "name_with_handle":
-            if user_id:
+            if _is_real_discord_user_id(user_id):
                 return f"{name} (<@{user_id}>)"
             if username:
                 handle = username if str(username).startswith("@") else f"@{username}"
                 return f"{name} ({handle})"
+        if style == "name_with_mention" and username:
+            handle = username if str(username).startswith("@") else f"@{username}"
+            return f"{name} ({handle})"
         return name
     finally:
         if close:

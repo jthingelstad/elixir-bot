@@ -185,14 +185,15 @@ async def verify_discord_membership(member_tag: str) -> str:
     discord_user_id = identity.get("discord_user_id")
     guild_member = None
 
-    if discord_user_id:
+    if discord_user_id and str(discord_user_id).isdigit():
         guild_member = guild.get_member(int(discord_user_id))
         if guild_member is None:
             try:
                 guild_member = await guild.fetch_member(int(discord_user_id))
             except Exception:
                 guild_member = None
-    else:
+
+    if guild_member is None:
         guild_member = _find_unique_guild_member_for_clan_member(guild, identity.get("member_name") or "")
         if guild_member is not None:
             await asyncio.to_thread(
