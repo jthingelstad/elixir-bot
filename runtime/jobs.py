@@ -386,7 +386,7 @@ async def _heartbeat_tick():
                     recent_posts,
                 )
                 if msg:
-                    await channel.send(msg)
+                    await _post_to_elixir(channel, {"content": msg})
                     await asyncio.to_thread(
                         db.save_message,
                         _channel_scope(channel), "assistant", msg,
@@ -406,7 +406,7 @@ async def _heartbeat_tick():
                     recent_posts,
                 )
                 if msg:
-                    await channel.send(msg)
+                    await _post_to_elixir(channel, {"content": msg})
                     await asyncio.to_thread(
                         db.save_message,
                         _channel_scope(channel), "assistant", msg,

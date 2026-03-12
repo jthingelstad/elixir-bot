@@ -1,5 +1,6 @@
 """Tests for prompts.py — prompt file loading and config parsing."""
 
+import agent.prompts as agent_prompts
 import prompts
 
 
@@ -148,3 +149,10 @@ def test_clan_tag():
     """Clan tag is extracted from CLAN.md."""
     tag = prompts.clan_tag()
     assert tag == "J2RGCRVG"
+
+
+def test_observation_prompt_includes_custom_emoji_guidance():
+    system_prompt = agent_prompts._observe_system()
+
+    assert "Use at most 1-2 custom emoji in most messages." in system_prompt
+    assert ":elixir_hype:" in system_prompt

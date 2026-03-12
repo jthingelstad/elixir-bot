@@ -2,6 +2,22 @@ import prompts
 
 from agent.core import _build_system_prompt
 
+
+def _discord_emoji_guidance(*, allow_in_sensitive: bool = False) -> str:
+    lines = [
+        "Elixir has custom server emoji that can be used as emotional accents in Discord-ready messages.",
+        "Use them as Elixir emoting, not as generic decorative clutter.",
+        "Use at most 1-2 custom emoji in most messages.",
+        "Prefer these when they fit naturally: :elixir_hype:, :elixir_trophy:, :elixir_gg:, :elixir_cheers:, :elixir_happy:, :elixir_thinking:.",
+        "Use more intense emoji like :elixir_rage:, :elixir_angry:, :elixir_evil_laugh:, :elixir_facepalm:, and :elixir_fireball: sparingly.",
+        "Prefer placing emoji at the start or end of a sentence instead of stuffing them throughout the message.",
+        "Use the literal :emoji_name: shortcode syntax when you use them.",
+    ]
+    if not allow_in_sensitive:
+        lines.append("Avoid custom emoji in sensitive, corrective, or serious leadership messages.")
+    return "\n".join(lines) + "\n\n"
+
+
 def _observe_system():
     announcements = prompts.discord_singleton_channel("announcements")
     return _build_system_prompt(
@@ -19,6 +35,7 @@ def _observe_system():
         "If there are 2-4 distinct beats worth sharing, return content as an array of separate Discord messages "
         "instead of one long message. Each message should stand on its own and feel natural as a single Discord post. "
         "Avoid multipart labels like 'Part 1' or separator lines.\n\n"
+        f"{_discord_emoji_guidance()}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "clan_observation|arena_milestone|donation_milestone|war_update|member_join|member_leave", '
         '"member_tags": [], "member_names": [], "summary": "one sentence", '
@@ -49,6 +66,7 @@ def _interactive_system(channel_name, proactive=False):
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
         "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to the primary announcements channel.\n\n"
+        f"{_discord_emoji_guidance()}"
         f"{proactive_block}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
@@ -82,6 +100,7 @@ def _clanops_system(channel_name, proactive=False):
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
         "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to the primary announcements channel.\n\n"
+        f"{_discord_emoji_guidance(allow_in_sensitive=True)}"
         f"{proactive_block}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
@@ -99,6 +118,7 @@ def _reception_system():
         prompts.purpose(),
         prompts.channel_section(onboarding["name"]),
         "Don't use tools — just answer from the roster provided.\n\n"
+        f"{_discord_emoji_guidance()}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "reception_response", "content": "your Discord-ready response"}',
     )

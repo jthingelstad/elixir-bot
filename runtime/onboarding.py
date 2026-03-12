@@ -103,8 +103,10 @@ async def _send_onboarding_message(event_type: str, prompt_text: str, fallback: 
     channel = await _onboarding_channel()
     if not channel:
         return
+    import runtime.app as app
+
     msg = await asyncio.to_thread(elixir_agent.generate_message, event_type, prompt_text)
-    await channel.send(msg or fallback)
+    await app._post_to_elixir(channel, {"content": msg or fallback})
 
 
 async def _ensure_member_role(discord_member: discord.Member, member_tag: str, cr_name: str) -> tuple[bool, str]:

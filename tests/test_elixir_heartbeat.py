@@ -86,6 +86,41 @@ def test_heartbeat_tick_saves_multipart_observation_as_separate_messages():
     assert mock_save.call_args_list[1].kwargs["event_type"] == "war_update_part"
 
 
+def test_heartbeat_tick_posts_join_messages_through_shared_sender():
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[{"type": "member_join", "name": "King Levy", "tag": "#ABC"}],
+        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
+        war={"state": "warDay"},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 123
+    channel.name = "elixir"
+    channel.type = "text"
+
+    with (
+        patch.object(elixir, "HEARTBEAT_START_HOUR", 0),
+        patch.object(elixir, "HEARTBEAT_END_HOUR", 24),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.heartbeat.tick", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={"channel": {"state": None, "episodes": []}}),
+        patch("elixir.db.save_message"),
+        patch("elixir.db.mark_signal_sent"),
+        patch("elixir.elixir_agent.generate_message", return_value="Welcome aboard :elixir_hype:"),
+        patch("elixir.elixir_agent.observe_and_post") as mock_observe,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+    ):
+        asyncio.run(elixir._heartbeat_tick())
+
+    mock_post.assert_awaited_once_with(channel, {"content": "Welcome aboard :elixir_hype:"})
+    mock_observe.assert_not_called()
+
+
 def test_heartbeat_tick_marks_non_system_signal_sent_after_successful_post():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[{"type": "war_week_rollover", "season_id": 130, "week": 1}],

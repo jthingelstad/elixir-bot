@@ -107,6 +107,15 @@ def test_post_to_elixir_sends_content_list_as_multiple_messages():
     assert channel.send.await_args_list[1].args == ("Second post",)
 
 
+def test_post_to_elixir_resolves_custom_emoji_shortcodes():
+    guild = SimpleNamespace(emojis=[SimpleNamespace(name="elixir_hype", id=321, animated=False)])
+    channel = SimpleNamespace(send=AsyncMock(), guild=guild)
+
+    asyncio.run(elixir._post_to_elixir(channel, {"content": "Keep climbing :elixir_hype:"}))
+
+    channel.send.assert_awaited_once_with("Keep climbing <:elixir_hype:321>")
+
+
 def test_apply_member_refs_to_result_rewrites_content_and_share_content():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
