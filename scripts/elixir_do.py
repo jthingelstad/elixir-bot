@@ -11,6 +11,7 @@ Usage examples:
     venv/bin/python scripts/elixir_do.py set-join-date "Ditika" 2026-03-07
     venv/bin/python scripts/elixir_do.py set-note "King Thing" "Founder and systems builder"
     venv/bin/python scripts/elixir_do.py heartbeat --preview
+    venv/bin/python scripts/elixir_do.py system-signals --preview
     venv/bin/python scripts/elixir_do.py poap-kings-data-sync --preview
     venv/bin/python scripts/elixir_do.py poap-kings-sync
     venv/bin/python scripts/elixir_do.py promotion --preview
@@ -119,6 +120,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     for name in (
         "heartbeat",
+        "system-signals",
         "poap-kings-sync",
         "poap-kings-data-sync",
         "poap-kings-site-sync",

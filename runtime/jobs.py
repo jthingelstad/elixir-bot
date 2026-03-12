@@ -19,6 +19,7 @@ from runtime.app import (
 )
 from runtime.helpers import _channel_scope, _get_singleton_channel_id, _with_leader_ping
 from runtime import status as runtime_status
+from runtime.system_signals import queue_startup_system_signals
 
 _WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
 
@@ -127,7 +128,7 @@ def _format_system_signal_message(signal, message: str) -> str:
                 while lines and not (lines[0] or "").strip():
                     lines = lines[1:]
                 body = "\n".join(lines).strip()
-    subject = f"{emoji} **{title}**"
+    subject = f"**{title}** {emoji}"
     return f"{subject}\n{body}".strip() if body else subject
 
 
@@ -173,6 +174,16 @@ async def _post_system_signal_updates(signals, clan, war):
                 signal["signal_key"],
             )
         recent_posts = [*recent_posts, {"content": message}][-10:]
+
+
+async def _publish_pending_system_signal_updates(*, seed_startup_signals: bool = False) -> int:
+    if seed_startup_signals:
+        await asyncio.to_thread(queue_startup_system_signals)
+    pending = await asyncio.to_thread(db.list_pending_system_signals)
+    if not pending:
+        return 0
+    await _post_system_signal_updates(pending, {}, {})
+    return len(pending)
 
 
 async def _maybe_post_arena_relay(signals, clan, war):
@@ -369,6 +380,8 @@ async def _heartbeat_tick():
         return
 
     try:
+        await asyncio.to_thread(queue_startup_system_signals)
+
         # Run the heartbeat tick — fetches data, snapshots, detects signals
         tick_result = heartbeat.tick()
         if tick_result.clan.get("memberList"):
