@@ -451,7 +451,7 @@ def detect_cake_days(today_str=None, conn=None):
     """Check for clan birthday, join anniversaries, and member birthdays.
 
     Uses cake_day_announcements table for dedup — only returns signals
-    for events not yet announced today. Marks them as announced.
+    for events not yet announced today.
 
     Returns list of signal dicts.
     """
@@ -473,7 +473,6 @@ def detect_cake_days(today_str=None, conn=None):
                     "type": "clan_birthday",
                     "years": years,
                 })
-                db.mark_announcement_sent(today_str, "clan_birthday", None, conn=conn)
 
         # Join anniversaries
         anniversaries = db.get_join_anniversaries_today(today_str, conn=conn)
@@ -481,7 +480,6 @@ def detect_cake_days(today_str=None, conn=None):
         for a in anniversaries:
             if not db.was_announcement_sent(today_str, "join_anniversary", a["tag"], conn=conn):
                 unannounced.append(a)
-                db.mark_announcement_sent(today_str, "join_anniversary", a["tag"], conn=conn)
         if unannounced:
             signals.append({
                 "type": "join_anniversary",
@@ -494,7 +492,6 @@ def detect_cake_days(today_str=None, conn=None):
         for b in birthdays:
             if not db.was_announcement_sent(today_str, "birthday", b["tag"], conn=conn):
                 unannounced_bdays.append(b)
-                db.mark_announcement_sent(today_str, "birthday", b["tag"], conn=conn)
         if unannounced_bdays:
             signals.append({
                 "type": "member_birthday",
@@ -619,13 +616,6 @@ def tick(conn=None):
 
         # Upgrade and capability announcements queued by migrations or manual ops
         signals.extend(detect_pending_system_signals(today_str=datetime.now().strftime("%Y-%m-%d"), conn=conn))
-
-        # Mark emitted signals so they don't re-fire today
-        today = datetime.now().strftime("%Y-%m-%d")
-        for sig in signals:
-            if sig.get("signal_key"):
-                continue
-            db.mark_signal_sent(sig.get("signal_log_type") or sig["type"], today, conn=conn)
 
         log.info("Heartbeat: %d signals detected", len(signals))
         return HeartbeatTickResult(signals=signals, clan=clan, war=war)

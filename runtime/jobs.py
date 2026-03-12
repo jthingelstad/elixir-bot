@@ -225,6 +225,38 @@ def _promotion_channel_posts(promote):
     return posts
 
 
+def _write_site_content_or_raise(content_type: str, data) -> None:
+    if not site_content.write_content(content_type, data):
+        raise RuntimeError(f"{content_type} content write failed")
+
+
+def _commit_site_content_or_raise(message: str) -> None:
+    if not site_content.commit_and_push(message):
+        raise RuntimeError("site publish failed")
+
+
+def _mark_delivered_signals(signals, *, today: str | None = None):
+    signal_date = today or db.chicago_today()
+    for signal in signals or []:
+        if signal.get("signal_key"):
+            continue
+        signal_type = signal.get("signal_log_type") or signal.get("type")
+        if signal_type:
+            db.mark_signal_sent(signal_type, signal_date)
+        if signal.get("type") == "clan_birthday":
+            db.mark_announcement_sent(signal_date, "clan_birthday", None)
+        elif signal.get("type") == "join_anniversary":
+            for member in signal.get("members") or []:
+                tag = member.get("tag")
+                if tag:
+                    db.mark_announcement_sent(signal_date, "join_anniversary", tag)
+        elif signal.get("type") == "member_birthday":
+            for member in signal.get("members") or []:
+                tag = member.get("tag")
+                if tag:
+                    db.mark_announcement_sent(signal_date, "birthday", tag)
+
+
 async def _promotion_content_cycle():
     runtime_status.mark_job_start("promotion_content_cycle")
     try:
@@ -261,8 +293,8 @@ async def _promotion_content_cycle():
         return
 
     try:
-        await asyncio.to_thread(site_content.write_content, "promote", promote)
-        await asyncio.to_thread(site_content.commit_and_push, "Elixir promotion content update")
+        await asyncio.to_thread(_write_site_content_or_raise, "promote", promote)
+        await asyncio.to_thread(_commit_site_content_or_raise, "Elixir promotion content update")
     except Exception as exc:
         log.error("Promotion content publish error: %s", exc, exc_info=True)
         runtime_status.mark_job_failure("promotion_content_cycle", f"site publish failed: {exc}")
@@ -364,6 +396,7 @@ async def _heartbeat_tick():
                         workflow="observation",
                         event_type="member_join_broadcast",
                     )
+                    await asyncio.to_thread(_mark_delivered_signals, [sig])
             elif sig["type"] == "member_leave":
                 msg = await asyncio.to_thread(
                     elixir_agent.generate_message,
@@ -383,6 +416,7 @@ async def _heartbeat_tick():
                         workflow="observation",
                         event_type="member_leave_broadcast",
                     )
+                    await asyncio.to_thread(_mark_delivered_signals, [sig])
             else:
                 other_signals.append(sig)
 
@@ -414,6 +448,7 @@ async def _heartbeat_tick():
                             workflow="observation",
                             event_type=post_event_type,
                         )
+                    await asyncio.to_thread(_mark_delivered_signals, other_signals)
                 log.info("Posted observation: %s", result.get("summary"))
 
             await _maybe_post_arena_relay(other_signals, clan, war)
@@ -470,12 +505,12 @@ async def _site_data_refresh():
             return
 
         roster_data = site_content.build_roster_data(clan)
-        site_content.write_content("roster", roster_data)
+        _write_site_content_or_raise("roster", roster_data)
 
         clan_stats = site_content.build_clan_data(clan)
-        site_content.write_content("clan", clan_stats)
+        _write_site_content_or_raise("clan", clan_stats)
 
-        site_content.commit_and_push("Elixir data refresh")
+        _commit_site_content_or_raise("Elixir data refresh")
         log.info("Site data refresh complete: %d members", len(roster_data.get("members", [])))
         runtime_status.mark_job_success("site_data_refresh", f"{len(roster_data.get('members', []))} members")
     except Exception as e:
@@ -520,36 +555,38 @@ async def _site_content_cycle():
             except Exception as e:
                 log.error("Roster bio generation error: %s", e)
 
-            site_content.write_content("roster", roster_data)
-            site_content.write_content("clan", clan_stats)
+            _write_site_content_or_raise("roster", roster_data)
+            _write_site_content_or_raise("clan", clan_stats)
 
         # Generate home message
         try:
             prev_home = site_content.load_current("home")
             prev_msg = prev_home.get("message", "") if prev_home else ""
             home_text = elixir_agent.generate_home_message(clan, war, prev_msg, roster_data=roster_data)
-            if home_text:
-                site_content.write_content("home", {
-                    "message": home_text,
-                    "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                })
         except Exception as e:
             log.error("Home message error: %s", e)
+            home_text = None
+        if home_text:
+            _write_site_content_or_raise("home", {
+                "message": home_text,
+                "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            })
 
         # Generate members message
         try:
             prev_members = site_content.load_current("members")
             prev_msg = prev_members.get("message", "") if prev_members else ""
             members_text = elixir_agent.generate_members_message(clan, war, prev_msg, roster_data=roster_data)
-            if members_text:
-                site_content.write_content("members", {
-                    "message": members_text,
-                    "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                })
         except Exception as e:
             log.error("Members message error: %s", e)
+            members_text = None
+        if members_text:
+            _write_site_content_or_raise("members", {
+                "message": members_text,
+                "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            })
 
-        site_content.commit_and_push("Elixir content update")
+        _commit_site_content_or_raise("Elixir content update")
         log.info("Site content cycle complete")
         runtime_status.mark_job_success("site_content_cycle", "content updated")
     except Exception as e:
