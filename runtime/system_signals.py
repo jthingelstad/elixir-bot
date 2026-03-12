@@ -78,6 +78,24 @@ STARTUP_SYSTEM_SIGNALS = [
         },
     },
     {
+        "signal_key": "capability_poap_kings_integration_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Formal POAP KINGS Integration",
+            "message": (
+                "Elixir now has a formal POAP KINGS integration layer behind the scenes. "
+                "That is a big internal cleanup win: the website publishing flow is now explicit, cleaner, and easier to reason about instead of living in a confusing fake-generic publish path."
+            ),
+            "details": [
+                "POAP KINGS website publishing now lives in a dedicated integration instead of being mixed into Elixir core.",
+                "The site update flow is cleaner for leadership to operate and easier to extend with future POAP KINGS-specific features.",
+                "This kind of cleanup is mostly invisible day to day, but it makes Elixir more reliable and gives us a better foundation for future website and POAP work.",
+            ],
+            "audience": "clan",
+            "capability_area": "poap_kings_integration",
+        },
+    },
+    {
         "signal_key": "feature_custom_emoji_v1",
         "signal_type": "capability_unlock",
         "payload": {

@@ -1015,6 +1015,12 @@ def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
     assert queued["capability_long_term_trends_v1"]["capability_area"] == "long_term_trends"
     assert "time-series" in queued["capability_long_term_trends_v1"]["message"]
     assert "future charts" in " ".join(queued["capability_long_term_trends_v1"]["details"])
+    assert queued["capability_poap_kings_integration_v1"]["title"] == "Achievement Unlocked: Formal POAP KINGS Integration"
+    assert queued["capability_poap_kings_integration_v1"]["capability_area"] == "poap_kings_integration"
+    assert "behind the scenes" in queued["capability_poap_kings_integration_v1"]["message"]
+    assert "website publishing now lives in a dedicated integration" in " ".join(
+        queued["capability_poap_kings_integration_v1"]["details"]
+    )
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
@@ -1030,6 +1036,7 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
         "capability_battle_pulse_v1",
         "capability_weekly_clan_recap_v2",
         "capability_long_term_trends_v1",
+        "capability_poap_kings_integration_v1",
         "feature_custom_emoji_v1",
     }
 
