@@ -26,6 +26,7 @@ from runtime.channel_router import route_message
 from runtime.discord_commands import register_elixir_app_commands
 from runtime import onboarding
 from runtime import status as runtime_status
+from runtime.emoji import sync_emoji
 from runtime.system_signals import queue_startup_system_signals
 
 load_dotenv()
@@ -366,6 +367,10 @@ async def on_ready():
             SLASH_COMMANDS_SYNCED = True
         except Exception as exc:
             log.error("Slash command sync failed: %s", exc)
+    # Sync custom emoji
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        await sync_emoji(guild)
     if not scheduler.running:
         # Single heartbeat job replaces both the 4x/day observations and hourly member check
         scheduler.add_job(
