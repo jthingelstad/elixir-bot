@@ -1,10 +1,10 @@
 # Elixir - POAP KINGS Discord Bot
 
-LLM-powered clan management bot for **POAP KINGS**, a Clash Royale clan (#J2RGCRVG). Uses discord.py + OpenAI GPT-4o with function calling for intelligent, context-aware responses.
+LLM-powered clan management bot for **POAP KINGS**, a Clash Royale clan (#J2RGCRVG). Uses discord.py plus OpenAI model routing for intelligent, context-aware responses.
 
 ## What Elixir Does
 
-- **Hourly heartbeat**: Fetches clan data, detects changes (milestones, joins/leaves, war status, deck usage), and posts about what matters — skips when nothing interesting happened
+- **Heartbeat cadence**: Fetches clan data every 47 minutes with jitter, detects changes (milestones, joins/leaves, war status, deck usage), and posts about what matters — skips when nothing interesting happened
 - **Scheduled player-intel refresh**: Keeps a stale subset of active members' profiles and battle logs warm between the daily site-content runs, and surfaces progression moments like level-ups and card milestone upgrades
 - **Channel-aware operations**: Elixir answers member questions in `interactive` channels, participates proactively in `clanops`, and routes announcements/onboarding by prompt-defined channel roles
 - **War tracking**: Monitors deck usage on battle days (Thu-Sun), tracks War Champ standings across seasons, and celebrates perfect participation
@@ -16,7 +16,7 @@ LLM-powered clan management bot for **POAP KINGS**, a Clash Royale clan (#J2RGCR
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 # create .env with DISCORD_TOKEN, OPENAI_API_KEY, CR_API_KEY
-python elixir.py
+venv/bin/python elixir.py
 ```
 
 See [SETUP.md](SETUP.md) for full setup, configuration, and operations guide.
@@ -24,7 +24,7 @@ See [SETUP.md](SETUP.md) for full setup, configuration, and operations guide.
 ## Running Tests
 
 ```bash
-pytest tests/ -v
+venv/bin/python -m pytest tests/ -v
 ```
 
 Focused tests use in-memory SQLite and mocked external services. No API keys needed.
@@ -87,7 +87,7 @@ These same commands are also available in `#clanops` with the `do` prefix.
 | File | Purpose |
 |------|---------|
 | `elixir.py` | Main bot: Discord events, APScheduler heartbeat, channel routing |
-| `elixir_agent.py` | LLM engine: GPT-4o with function calling for observations, channel replies, and site content |
+| `elixir_agent.py` | Stable public LLM entrypoint; routes observation, channel replies, and site generation through the `agent/` package |
 | `heartbeat.py` | Hourly signal detection: milestones, war decks, joins/leaves, donations |
 | `db/` | SQLite V2 store package: identity, memory, current state, player analytics, war, raw payloads |
 | `cr_api.py` | Clash Royale API client: clan roster, war status, river race log, player profiles |
