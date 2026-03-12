@@ -40,6 +40,7 @@ COMMAND_HELP = {
     "set-note": "Set a member note.",
     "clear-note": "Clear a member note.",
     "heartbeat": "Force one heartbeat cycle now.",
+    "system-signals": "Queue any missing startup system signals and publish pending system announcements now.",
     "poap-kings-sync": "Publish the full POAP KINGS website bundle now. This refreshes daily site data plus the members-page weekly recap payload.",
     "poap-kings-data-sync": "Publish only the POAP KINGS structured site data now (clan + roster).",
     "poap-kings-site-sync": "Publish the POAP KINGS daily site bundle now (clan, roster, home).",
@@ -68,6 +69,7 @@ LEADER_ONLY_COMMANDS = {
     "set-note",
     "clear-note",
     "heartbeat",
+    "system-signals",
     "poap-kings-sync",
     "poap-kings-data-sync",
     "poap-kings-site-sync",
@@ -102,6 +104,7 @@ COMMAND_ORDER = [
     "set-note",
     "clear-note",
     "heartbeat",
+    "system-signals",
     "poap-kings-sync",
     "poap-kings-data-sync",
     "poap-kings-site-sync",
@@ -121,6 +124,7 @@ ZERO_ARG_COMMANDS = {
     "schedule",
     "clan-status",
     "heartbeat",
+    "system-signals",
     "poap-kings-sync",
     "poap-kings-data-sync",
     "poap-kings-site-sync",
@@ -699,6 +703,25 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
     return f"Ran `{job_name}`."
 
 
+async def _run_system_signals(preview: bool) -> str:
+    import elixir
+
+    if preview:
+        async with _preview_job_runtime() as captured_posts:
+            try:
+                count = await elixir._publish_pending_system_signal_updates(seed_startup_signals=True)
+            except Exception as exc:
+                return f"`system-signals` failed in preview mode: {exc}"
+            summary = f"Ran `system-signals` in preview mode for {count} pending signal(s)."
+            return f"{summary}\n\n{_format_preview_posts(captured_posts)}"
+
+    try:
+        count = await elixir._publish_pending_system_signal_updates(seed_startup_signals=True)
+    except Exception as exc:
+        return f"`system-signals` failed: {exc}"
+    return f"Ran `system-signals` for {count} pending signal(s)."
+
+
 async def _run_poap_kings_sync(preview: bool) -> str:
     import elixir
 
@@ -996,6 +1019,8 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
         "clear-note",
     }:
         return await _run_member_metadata_command(command, preview=preview, args=args)
+    if command == "system-signals":
+        return await _run_system_signals(preview=preview)
     if command == "poap-kings-sync":
         return await _run_poap_kings_sync(preview=preview)
     if command == "poap-kings-home-sync":

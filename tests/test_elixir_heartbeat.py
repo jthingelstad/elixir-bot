@@ -45,6 +45,29 @@ def test_heartbeat_tick_uses_bundle_without_refetch():
     mock_get_war.assert_not_called()
 
 
+def test_heartbeat_tick_reseeds_startup_system_signals_before_tick():
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[],
+        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
+        war={"state": "warDay"},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir, "HEARTBEAT_START_HOUR", 0),
+        patch.object(elixir, "HEARTBEAT_END_HOUR", 24),
+        patch("runtime.jobs.queue_startup_system_signals") as mock_queue,
+        patch("elixir.heartbeat.tick", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.runtime_status.mark_job_success"),
+    ):
+        asyncio.run(elixir._heartbeat_tick())
+
+    mock_queue.assert_called_once_with()
+
+
 def test_heartbeat_tick_saves_multipart_observation_as_separate_messages():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[{"type": "war_week_rollover", "season_id": 130, "week": 1}],
@@ -236,7 +259,7 @@ def test_heartbeat_tick_routes_system_signal_to_weekly_digest_and_marks_announce
     assert mock_generate.call_args.args[0] == "system_signal_broadcast"
     mock_post.assert_awaited_once_with(
         weekly_channel,
-        {"content": ":elixir_hype: **Achievement Unlocked: Boat Defense Intel**\nAchievement unlocked"},
+        {"content": "**Achievement Unlocked: Boat Defense Intel** :elixir_hype:\nAchievement unlocked"},
     )
     assert mock_save.call_args.kwargs["channel_id"] == 456
     mock_mark_announced.assert_called_once_with("capability_boat_defense_intelligence_v1")
@@ -331,11 +354,11 @@ def test_heartbeat_tick_posts_multiple_system_signals_as_separate_updates():
     assert mock_post.await_count == 2
     assert mock_post.await_args_list[0].args == (
         weekly_channel,
-        {"content": ":elixir_hype: **Achievement Unlocked: Stronger Memory**\nMessage A"},
+        {"content": "**Achievement Unlocked: Stronger Memory** :elixir_hype:\nMessage A"},
     )
     assert mock_post.await_args_list[1].args == (
         weekly_channel,
-        {"content": ":elixir_hype: **Achievement Unlocked: Battle Pulse**\nMessage B"},
+        {"content": "**Achievement Unlocked: Battle Pulse** :elixir_hype:\nMessage B"},
     )
     mock_observe.assert_not_called()
 
@@ -353,9 +376,22 @@ def test_format_system_signal_message_reuses_title_without_duplicate_heading():
     )
 
     assert formatted == (
-        ":elixir_hype: **Achievement Unlocked: Custom Elixir Emoji**\n"
+        "**Achievement Unlocked: Custom Elixir Emoji** :elixir_hype:\n"
         "Now live for the whole server."
     )
+
+
+def test_format_system_signal_message_starts_with_bold_subject_line():
+    signal = {
+        "type": "capability_unlock",
+        "signal_key": "capability_poap_kings_integration_v1",
+        "payload": {"title": "Achievement Unlocked: Formal POAP KINGS Integration"},
+    }
+
+    formatted = elixir._format_system_signal_message(signal, "Body copy")
+
+    assert formatted.startswith("**")
+    assert formatted.splitlines()[0] == "**Achievement Unlocked: Formal POAP KINGS Integration** :elixir_hype:"
 
 
 def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():

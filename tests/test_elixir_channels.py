@@ -581,6 +581,17 @@ def test_parse_admin_command_normalizes_legacy_poap_kings_alias():
     }
 
 
+def test_parse_admin_command_handles_system_signals_preview():
+    parsed = elixir.parse_admin_command("do system-signals --preview", require_prefix=True)
+
+    assert parsed == {
+        "command": "system-signals",
+        "preview": True,
+        "short": False,
+        "args": {},
+    }
+
+
 def test_on_message_handles_clanops_profile_via_public_do_command():
     message = _make_message(200, "clan-ops", "do profile \"Ditika\"")
 
@@ -771,6 +782,21 @@ def test_dispatch_admin_command_returns_runtime_job_failure_text():
         )
 
     assert result == "`weekly-recap` failed: weekly recap post failed: missing Discord permissions in #weekly-digest"
+
+
+def test_dispatch_admin_command_handles_system_signals():
+    with patch("runtime.admin._run_system_signals", new=AsyncMock(return_value="Ran `system-signals` for 1 pending signal(s).")) as mock_run:
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "system-signals",
+                preview=False,
+                short=False,
+                args={},
+            )
+        )
+
+    assert result == "Ran `system-signals` for 1 pending signal(s)."
+    mock_run.assert_awaited_once_with(preview=False)
 
 
 def test_dispatch_admin_command_normalizes_legacy_site_alias():
