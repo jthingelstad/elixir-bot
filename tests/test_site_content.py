@@ -67,6 +67,18 @@ def test_write_content_invalid_schema(tmp_repo, monkeypatch):
     """Invalid data fails schema validation and is not written."""
     monkeypatch.setattr(site_content, "DATA_DIR", str(tmp_repo / "src" / "_data"))
     monkeypatch.setattr(site_content, "SCHEMA_DIR", str(tmp_repo / "src" / "_data" / "schemas"))
+    schema_path = tmp_repo / "src" / "_data" / "schemas" / "elixirClan.schema.json"
+    schema_path.write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "required": ["memberCount"],
+                "properties": {
+                    "memberCount": {"type": "integer"},
+                },
+            }
+        )
+    )
 
     data = {"memberCount": "not_an_int"}  # Missing required fields, wrong type
     assert site_content.write_content("clan", data) is False
