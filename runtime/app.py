@@ -242,9 +242,26 @@ def _chunk_discord_text(text: str, limit: int = 2000) -> list[str]:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _resolve_custom_emoji(text: str, guild) -> str:
+    """Replace :emoji_name: shortcodes with <:emoji_name:id> for guild custom emoji."""
+    if not guild or not guild.emojis:
+        return text
+    emoji_map = {e.name: e for e in guild.emojis}
+    def _replace(m):
+        name = m.group(1)
+        e = emoji_map.get(name)
+        if e:
+            prefix = "a" if e.animated else ""
+            return f"<{prefix}:{e.name}:{e.id}>"
+        return m.group(0)
+    return re.sub(r":([a-zA-Z0-9_]{2,32}):", _replace, text)
+
+
 async def _post_to_elixir(channel, entry: dict):
     """Post an entry's content to a configured Discord channel."""
+    guild = getattr(channel, "guild", None)
     for post in _entry_posts(entry):
+        post = _resolve_custom_emoji(post, guild)
         if len(post) > 2000:
             for chunk in [post[i:i+1990] for i in range(0, len(post), 1990)]:
                 await channel.send(chunk)
