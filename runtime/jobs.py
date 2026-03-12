@@ -89,6 +89,8 @@ def _build_system_signal_context(signal, channel_name):
         "This is a standalone clan-wide system update about a new Elixir capability.",
         f"Post it for {channel_name}.",
         "Write exactly one Discord message. Do not split it into parts or a series.",
+        "The first line MUST be a bolded subject line.",
+        "Include an Elixir custom emoji in that subject line using :emoji_name: shortcode syntax.",
         "Do not mention hidden system mechanics or call it a system signal.",
         "Make it feel like a self-contained clan update from Elixir.",
         "",
@@ -103,6 +105,30 @@ def _build_system_signal_context(signal, channel_name):
         lines.append("details:")
         lines.extend(f"- {detail}" for detail in details)
     return "\n".join(lines)
+
+
+def _clean_system_signal_heading_text(text: str) -> str:
+    cleaned = re.sub(r":[a-zA-Z0-9_]{2,32}:", "", text or "")
+    cleaned = re.sub(r"[*_`#>\-\s]+", "", cleaned)
+    return cleaned.strip().lower()
+
+
+def _format_system_signal_message(signal, message: str) -> str:
+    payload = signal.get("payload") or {}
+    title = (payload.get("title") or signal.get("title") or "Elixir Update").strip()
+    emoji = ":elixir_hype:"
+    body = (message or "").strip()
+    if body:
+        lines = body.splitlines()
+        if lines:
+            first_line = lines[0].strip()
+            if title and _clean_system_signal_heading_text(first_line) == _clean_system_signal_heading_text(title):
+                lines = lines[1:]
+                while lines and not (lines[0] or "").strip():
+                    lines = lines[1:]
+                body = "\n".join(lines).strip()
+    subject = f"{emoji} **{title}**"
+    return f"{subject}\n{body}".strip() if body else subject
 
 
 async def _post_system_signal_updates(signals, clan, war):
@@ -129,6 +155,7 @@ async def _post_system_signal_updates(signals, clan, war):
         )
         if not message:
             continue
+        message = _format_system_signal_message(signal, message)
         await _post_to_elixir(channel, {"content": message})
         await asyncio.to_thread(
             db.save_message,
