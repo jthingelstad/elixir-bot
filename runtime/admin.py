@@ -836,6 +836,7 @@ async def _run_roster_bios(preview: bool) -> str:
 async def _run_promote_content(preview: bool) -> str:
     import elixir
     from integrations.poap_kings import site as poap_kings_site
+    from runtime import jobs as runtime_jobs
 
     clan, war, roster = await _load_site_context()
     promote = await asyncio.to_thread(
@@ -846,6 +847,7 @@ async def _run_promote_content(preview: bool) -> str:
     )
     if not promote:
         raise RuntimeError("promotion content generation returned nothing")
+    runtime_jobs._validate_promote_content_or_raise(promote)
     if not preview:
         await asyncio.to_thread(
             poap_kings_site.publish_site_content,

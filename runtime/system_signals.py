@@ -78,7 +78,7 @@ STARTUP_SYSTEM_SIGNALS = [
         },
     },
     {
-        "signal_key": "capability_poap_kings_integration_v1",
+        "signal_key": "capability_poap_kings_integration_v2",
         "signal_type": "capability_unlock",
         "payload": {
             "title": "Achievement Unlocked: Formal POAP KINGS Integration",
