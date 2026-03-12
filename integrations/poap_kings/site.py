@@ -158,6 +158,17 @@ def load_published(content_type: str, *, branch: str | None = None):
     return json.loads(raw) if raw.strip() else None
 
 
+def _load_existing_content(content_type: str):
+    if site_enabled():
+        try:
+            published = load_published(content_type)
+            if published is not None:
+                return published
+        except Exception as exc:
+            log.warning("POAP KINGS site load fallback for %s: %s", content_type, exc)
+    return load_current(content_type)
+
+
 def publish_site_content(payloads: dict[str, object], message: str = "Elixir POAP KINGS site update") -> bool:
     """Publish one coherent POAP KINGS site bundle to GitHub.
 
@@ -545,7 +556,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
         member_list = clan_data.get("memberList", [])
         metadata = db.get_member_metadata_map(conn=conn)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        existing = load_published("roster") or load_current("roster")
+        existing = _load_existing_content("roster")
         existing_by_tag = {m["tag"]: m for m in existing.get("members", [])} if existing else {}
 
         members = []

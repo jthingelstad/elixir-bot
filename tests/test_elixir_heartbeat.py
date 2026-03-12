@@ -234,7 +234,10 @@ def test_heartbeat_tick_routes_system_signal_to_weekly_digest_and_marks_announce
 
     mock_generate.assert_called_once()
     assert mock_generate.call_args.args[0] == "system_signal_broadcast"
-    mock_post.assert_awaited_once_with(weekly_channel, {"content": "Achievement unlocked"})
+    mock_post.assert_awaited_once_with(
+        weekly_channel,
+        {"content": ":elixir_hype: **Achievement Unlocked: Boat Defense Intel**\nAchievement unlocked"},
+    )
     assert mock_save.call_args.kwargs["channel_id"] == 456
     mock_mark_announced.assert_called_once_with("capability_boat_defense_intelligence_v1")
     mock_observe.assert_not_called()
@@ -326,9 +329,33 @@ def test_heartbeat_tick_posts_multiple_system_signals_as_separate_updates():
         asyncio.run(elixir._heartbeat_tick())
 
     assert mock_post.await_count == 2
-    assert mock_post.await_args_list[0].args == (weekly_channel, {"content": "Message A"})
-    assert mock_post.await_args_list[1].args == (weekly_channel, {"content": "Message B"})
+    assert mock_post.await_args_list[0].args == (
+        weekly_channel,
+        {"content": ":elixir_hype: **Achievement Unlocked: Stronger Memory**\nMessage A"},
+    )
+    assert mock_post.await_args_list[1].args == (
+        weekly_channel,
+        {"content": ":elixir_hype: **Achievement Unlocked: Battle Pulse**\nMessage B"},
+    )
     mock_observe.assert_not_called()
+
+
+def test_format_system_signal_message_reuses_title_without_duplicate_heading():
+    signal = {
+        "type": "capability_unlock",
+        "signal_key": "feature_custom_emoji_v1",
+        "payload": {"title": "Achievement Unlocked: Custom Elixir Emoji"},
+    }
+
+    formatted = elixir._format_system_signal_message(
+        signal,
+        "**Achievement Unlocked: Custom Elixir Emoji**\nNow live for the whole server.",
+    )
+
+    assert formatted == (
+        ":elixir_hype: **Achievement Unlocked: Custom Elixir Emoji**\n"
+        "Now live for the whole server."
+    )
 
 
 def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
