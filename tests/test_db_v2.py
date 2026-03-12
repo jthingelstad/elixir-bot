@@ -1473,6 +1473,7 @@ def test_snapshot_player_profile_detects_level_wins_new_cards_and_card_upgrades(
                     {"name": "Fireball", "level": 11, "maxLevel": 11, "rarity": "epic"},
                     {"name": "Knight", "level": 14, "maxLevel": 16, "rarity": "common"},
                     {"name": "Archers", "level": 12, "maxLevel": 16, "rarity": "common"},
+                    {"name": "Little Prince", "level": 1, "maxLevel": 6, "rarity": "champion"},
                 ],
             },
             conn=conn,
@@ -1482,6 +1483,9 @@ def test_snapshot_player_profile_detects_level_wins_new_cards_and_card_upgrades(
         assert any(sig["type"] == "career_wins_milestone" and sig["milestone"] == 500 for sig in signals)
         assert any(sig["type"] == "career_wins_milestone" and sig["milestone"] == 1000 for sig in signals)
         assert any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Archers" for sig in signals)
+        assert any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Little Prince" for sig in signals)
+        assert any(sig["type"] == "new_champion_unlocked" and sig["card_name"] == "Little Prince" for sig in signals)
+        assert any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Little Prince" and sig["is_champion"] is True for sig in signals)
         assert any(sig["type"] == "card_level_milestone" and sig["card_name"] == "Fireball" and sig["milestone"] == 16 for sig in signals)
         assert any(sig["type"] == "card_level_milestone" and sig["card_name"] == "Knight" and sig["milestone"] == 14 for sig in signals)
     finally:
@@ -1618,6 +1622,82 @@ def test_role_change_and_war_battle_queries():
         win_rates = db.get_war_battle_win_rates(season_id=129, conn=conn)
         assert win_rates["members"][0]["tag"] == "#ABC123"
         assert win_rates["members"][0]["win_rate"] == 0.5
+    finally:
+        conn.close()
+
+
+def test_detect_milestones_skips_already_logged_arena_change():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "role": "member",
+                "arena": {"name": "Legendary Arena"},
+            }],
+            conn=conn,
+        )
+        conn.execute(
+            "UPDATE member_current_state SET observed_at = ? WHERE member_id = (SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-03-01T10:00:00",),
+        )
+        conn.execute(
+            "UPDATE member_state_snapshots SET observed_at = ? WHERE member_id = (SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-03-01T10:00:00",),
+        )
+        conn.commit()
+
+        db.snapshot_members(
+            [{
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "role": "member",
+                "arena": {"name": "Lumberlove Cabin"},
+            }],
+            conn=conn,
+        )
+
+        first = db.detect_milestones(conn=conn)
+        assert len(first) == 1
+        signal_log_type = first[0]["signal_log_type"]
+
+        db.mark_signal_sent(signal_log_type, "2026-03-01", conn=conn)
+        second = db.detect_milestones(conn=conn)
+        assert second == []
+    finally:
+        conn.close()
+
+
+def test_detect_role_changes_skips_already_logged_role_change():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        conn.execute(
+            "UPDATE member_current_state SET observed_at = ? WHERE member_id = (SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-03-01T10:00:00",),
+        )
+        conn.execute(
+            "UPDATE member_state_snapshots SET observed_at = ? WHERE member_id = (SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-03-01T10:00:00",),
+        )
+        conn.commit()
+
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "elder"}],
+            conn=conn,
+        )
+
+        first = db.detect_role_changes(conn=conn)
+        assert len(first) == 1
+        signal_log_type = first[0]["signal_log_type"]
+
+        db.mark_signal_sent(signal_log_type, "2026-03-01", conn=conn)
+        second = db.detect_role_changes(conn=conn)
+        assert second == []
     finally:
         conn.close()
 

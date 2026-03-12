@@ -421,8 +421,9 @@ def purge_old_data(conn=None):
         conn.execute("DELETE FROM raw_api_payloads WHERE fetched_at < ?", (raw_cutoff,))
         conn.execute("DELETE FROM messages WHERE created_at < ?", (conv_cutoff,))
         cake_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)).strftime("%Y-%m-%d")
+        signal_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=SNAPSHOT_RETENTION_DAYS)).strftime("%Y-%m-%d")
         conn.execute("DELETE FROM cake_day_announcements WHERE announcement_date < ?", (cake_cutoff,))
-        conn.execute("DELETE FROM signal_log WHERE signal_date < ?", (cake_cutoff,))
+        conn.execute("DELETE FROM signal_log WHERE signal_date < ?", (signal_cutoff,))
         conn.commit()
     finally:
         if close:

@@ -995,6 +995,7 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
         "capability_battle_pulse_v1",
         "capability_weekly_clan_recap_v2",
         "capability_long_term_trends_v1",
+        "feature_custom_emoji_v1",
     }
 
 
