@@ -14,7 +14,7 @@ pip install -r requirements.txt
 Verify the install:
 
 ```bash
-pytest tests/ -v
+venv/bin/python -m pytest tests/ -v
 ```
 
 All 121 tests use in-memory SQLite and mocked services — no API keys or network needed. If tests pass, the install is good.
@@ -109,7 +109,7 @@ The bot logs to **stdout/stderr** only. launchd captures this — check the plis
 
 ```
 Elixir online as Elixir#1234
-Scheduler started — hourly heartbeat ...
+Scheduler started — heartbeat every 47 minutes with up to 300s jitter ...
 Heartbeat: 3 signals detected, consulting LLM
 Posted observation: ...
 ```
