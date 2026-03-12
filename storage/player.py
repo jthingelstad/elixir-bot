@@ -21,6 +21,8 @@ from db import (
     get_connection,
 )
 
+CARD_UPGRADE_SIGNAL_MIN_LEVEL = 14
+
 def snapshot_player_profile(player_data, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -126,6 +128,8 @@ def snapshot_player_profile(player_data, conn=None):
             if new_card_level is None or new_card_level <= old_card_level:
                 continue
             for milestone in range(old_card_level + 1, new_card_level + 1):
+                if milestone < CARD_UPGRADE_SIGNAL_MIN_LEVEL:
+                    continue
                 signals.append({
                     "type": "card_level_milestone",
                     "tag": tag,

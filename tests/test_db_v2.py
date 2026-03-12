@@ -1488,6 +1488,48 @@ def test_snapshot_player_profile_detects_level_wins_new_cards_and_card_upgrades(
         conn.close()
 
 
+def test_snapshot_player_profile_ignores_lower_level_card_upgrade_signals():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "expLevel": 65,
+                "wins": 480,
+                "currentDeck": [],
+                "cards": [
+                    {"name": "Knight", "level": 10, "maxLevel": 16, "rarity": "common"},
+                ],
+            },
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "expLevel": 65,
+                "wins": 480,
+                "currentDeck": [],
+                "cards": [
+                    {"name": "Knight", "level": 11, "maxLevel": 16, "rarity": "common"},
+                ],
+            },
+            conn=conn,
+        )
+
+        assert not any(
+            sig["type"] == "card_level_milestone" and sig["card_name"] == "Knight"
+            for sig in signals
+        )
+    finally:
+        conn.close()
+
+
 def test_role_change_and_war_battle_queries():
     conn = db.get_connection(":memory:")
     try:
