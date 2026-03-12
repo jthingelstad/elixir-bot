@@ -77,6 +77,35 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "long_term_trends",
         },
     },
+    {
+        "signal_key": "feature_custom_emoji_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Custom Elixir Emoji",
+            "message": (
+                "POAP KINGS now has 19 custom Elixir-themed emoji available across the server. "
+                "Use them in your messages, reactions, and anywhere Discord lets you drop emoji. "
+                "They're all Elixir-flavored and ready for battle."
+            ),
+            "details": [
+                "19 custom Elixir emoji are now registered as server emoji and available to everyone.",
+                (
+                    "The full set: :elixir: :elixir_angry: :elixir_celebrate: :elixir_cheers: "
+                    ":elixir_elixir: :elixir_evil_laugh: :elixir_facepalm: :elixir_fireball: "
+                    ":elixir_gg: :elixir_happy: :elixir_hype: :elixir_rage: :elixir_shield: "
+                    ":elixir_skelly: :elixir_sleepy: :elixir_spell: :elixir_thinking: "
+                    ":elixir_time: :elixir_trophy:"
+                ),
+                (
+                    "IMPORTANT: You MUST use many of these emoji inline throughout your announcement message. "
+                    "Show them off by weaving them naturally into the text and showcase the variety. "
+                    "Use the actual :emoji_name: syntax so they render in Discord."
+                ),
+            ],
+            "audience": "clan",
+            "capability_area": "custom_emoji",
+        },
+    },
 ]
 
 
