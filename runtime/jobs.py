@@ -22,6 +22,8 @@ from runtime import status as runtime_status
 from runtime.system_signals import queue_startup_system_signals
 
 _WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
+_PROMOTION_DISCORD_REQUIRED_TEXT = "Required Trophies: [2000]"
+_PROMOTION_REDDIT_REQUIRED_TOKEN = "[2000]"
 
 
 async def _post_to_elixir(*args, **kwargs):
@@ -90,8 +92,10 @@ def _build_system_signal_context(signal, channel_name):
         "This is a standalone clan-wide system update about a new Elixir capability.",
         f"Post it for {channel_name}.",
         "Write exactly one Discord message. Do not split it into parts or a series.",
+        "Write the full final Discord message yourself, including the subject line.",
         "The first line MUST be a bolded subject line.",
         "Include an Elixir custom emoji in that subject line using :emoji_name: shortcode syntax.",
+        "Do not restate the subject line or title again immediately after the first line.",
         "Do not mention hidden system mechanics or call it a system signal.",
         "Make it feel like a self-contained clan update from Elixir.",
         "",
@@ -106,30 +110,6 @@ def _build_system_signal_context(signal, channel_name):
         lines.append("details:")
         lines.extend(f"- {detail}" for detail in details)
     return "\n".join(lines)
-
-
-def _clean_system_signal_heading_text(text: str) -> str:
-    cleaned = re.sub(r":[a-zA-Z0-9_]{2,32}:", "", text or "")
-    cleaned = re.sub(r"[*_`#>\-\s]+", "", cleaned)
-    return cleaned.strip().lower()
-
-
-def _format_system_signal_message(signal, message: str) -> str:
-    payload = signal.get("payload") or {}
-    title = (payload.get("title") or signal.get("title") or "Elixir Update").strip()
-    emoji = ":elixir_hype:"
-    body = (message or "").strip()
-    if body:
-        lines = body.splitlines()
-        if lines:
-            first_line = lines[0].strip()
-            if title and _clean_system_signal_heading_text(first_line) == _clean_system_signal_heading_text(title):
-                lines = lines[1:]
-                while lines and not (lines[0] or "").strip():
-                    lines = lines[1:]
-                body = "\n".join(lines).strip()
-    subject = f"**{title}** {emoji}"
-    return f"{subject}\n{body}".strip() if body else subject
 
 
 async def _post_system_signal_updates(signals, clan, war):
@@ -154,9 +134,9 @@ async def _post_system_signal_updates(signals, clan, war):
             context,
             recent_posts,
         )
+        message = (message or "").strip()
         if not message:
             continue
-        message = _format_system_signal_message(signal, message)
         await _post_to_elixir(channel, {"content": message})
         await asyncio.to_thread(
             db.save_message,
@@ -263,6 +243,37 @@ def _promotion_channel_posts(promote):
     return posts
 
 
+def _unwrap_outer_bold(text: str) -> str:
+    stripped = (text or "").strip()
+    if stripped.startswith("**") and stripped.endswith("**") and len(stripped) >= 4:
+        return stripped[2:-2].strip()
+    return stripped
+
+
+def _validate_promote_content_or_raise(promote) -> None:
+    discord = (promote or {}).get("discord") or {}
+    discord_body = (discord.get("body") or "").strip()
+    if discord_body:
+        first_line = next((line.strip() for line in discord_body.splitlines() if line.strip()), "")
+        first_line = _unwrap_outer_bold(first_line)
+        if _PROMOTION_DISCORD_REQUIRED_TEXT not in first_line:
+            raise ValueError(
+                f"discord.body first line must include exact text `{_PROMOTION_DISCORD_REQUIRED_TEXT}`"
+            )
+        if not first_line.endswith(_PROMOTION_DISCORD_REQUIRED_TEXT):
+            raise ValueError(
+                f"discord.body first line must end with exact text `{_PROMOTION_DISCORD_REQUIRED_TEXT}`"
+            )
+
+    reddit = (promote or {}).get("reddit") or {}
+    reddit_title = (reddit.get("title") or "").strip()
+    reddit_body = (reddit.get("body") or "").strip()
+    if (reddit_title or reddit_body) and _PROMOTION_REDDIT_REQUIRED_TOKEN not in reddit_title:
+        raise ValueError(
+            f"reddit.title must include exact token `{_PROMOTION_REDDIT_REQUIRED_TOKEN}`"
+        )
+
+
 def _write_site_content_or_raise(content_type: str, data) -> None:
     if not poap_kings_site.write_content(content_type, data):
         raise RuntimeError(f"{content_type} content write failed")
@@ -335,6 +346,12 @@ async def _promotion_content_cycle():
     )
     if not promote:
         runtime_status.mark_job_success("promotion_content_cycle", "no promotion content")
+        return
+    try:
+        _validate_promote_content_or_raise(promote)
+    except Exception as exc:
+        log.error("Promotion content validation failed: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("promotion_content_cycle", f"invalid promotion content: {exc}")
         return
 
     try:

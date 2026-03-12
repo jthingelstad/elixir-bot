@@ -259,7 +259,7 @@ def test_heartbeat_tick_routes_system_signal_to_weekly_digest_and_marks_announce
     assert mock_generate.call_args.args[0] == "system_signal_broadcast"
     mock_post.assert_awaited_once_with(
         weekly_channel,
-        {"content": "**Achievement Unlocked: Boat Defense Intel** :elixir_hype:\nAchievement unlocked"},
+        {"content": "Achievement unlocked"},
     )
     assert mock_save.call_args.kwargs["channel_id"] == 456
     mock_mark_announced.assert_called_once_with("capability_boat_defense_intelligence_v1")
@@ -354,44 +354,13 @@ def test_heartbeat_tick_posts_multiple_system_signals_as_separate_updates():
     assert mock_post.await_count == 2
     assert mock_post.await_args_list[0].args == (
         weekly_channel,
-        {"content": "**Achievement Unlocked: Stronger Memory** :elixir_hype:\nMessage A"},
+        {"content": "Message A"},
     )
     assert mock_post.await_args_list[1].args == (
         weekly_channel,
-        {"content": "**Achievement Unlocked: Battle Pulse** :elixir_hype:\nMessage B"},
+        {"content": "Message B"},
     )
     mock_observe.assert_not_called()
-
-
-def test_format_system_signal_message_reuses_title_without_duplicate_heading():
-    signal = {
-        "type": "capability_unlock",
-        "signal_key": "feature_custom_emoji_v1",
-        "payload": {"title": "Achievement Unlocked: Custom Elixir Emoji"},
-    }
-
-    formatted = elixir._format_system_signal_message(
-        signal,
-        "**Achievement Unlocked: Custom Elixir Emoji**\nNow live for the whole server.",
-    )
-
-    assert formatted == (
-        "**Achievement Unlocked: Custom Elixir Emoji** :elixir_hype:\n"
-        "Now live for the whole server."
-    )
-
-
-def test_format_system_signal_message_starts_with_bold_subject_line():
-    signal = {
-        "type": "capability_unlock",
-        "signal_key": "capability_poap_kings_integration_v1",
-        "payload": {"title": "Achievement Unlocked: Formal POAP KINGS Integration"},
-    }
-
-    formatted = elixir._format_system_signal_message(signal, "Body copy")
-
-    assert formatted.startswith("**")
-    assert formatted.splitlines()[0] == "**Achievement Unlocked: Formal POAP KINGS Integration** :elixir_hype:"
 
 
 def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
@@ -673,7 +642,7 @@ def test_promotion_content_cycle_publishes_website_and_promotion_channel():
         patch(
             "elixir.elixir_agent.generate_promote_content",
             return_value={
-                "discord": {"body": "Join POAP KINGS this weekend."},
+                "discord": {"body": "**POAP KINGS is recruiting | Required Trophies: [2000]**\nJoin POAP KINGS this weekend."},
                 "reddit": {"title": "POAP KINGS #J2RGCRVG [2000]", "body": "Recruiting body"},
             },
         ) as mock_generate,
@@ -688,7 +657,7 @@ def test_promotion_content_cycle_publishes_website_and_promotion_channel():
     mock_publish.assert_called_once_with(
         {
             "promote": {
-                "discord": {"body": "Join POAP KINGS this weekend."},
+                "discord": {"body": "**POAP KINGS is recruiting | Required Trophies: [2000]**\nJoin POAP KINGS this weekend."},
                 "reddit": {"title": "POAP KINGS #J2RGCRVG [2000]", "body": "Recruiting body"},
             }
         },
@@ -726,7 +695,7 @@ def test_promotion_content_cycle_fails_when_site_write_returns_false():
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
         patch(
             "elixir.elixir_agent.generate_promote_content",
-            return_value={"discord": {"body": "Join POAP KINGS this weekend."}},
+            return_value={"discord": {"body": "**POAP KINGS is recruiting | Required Trophies: [2000]**\nJoin POAP KINGS this weekend."}},
         ),
         patch("runtime.jobs.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
@@ -735,12 +704,93 @@ def test_promotion_content_cycle_fails_when_site_write_returns_false():
         asyncio.run(elixir._promotion_content_cycle())
 
     mock_publish.assert_called_once_with(
-        {"promote": {"discord": {"body": "Join POAP KINGS this weekend."}}},
+        {"promote": {"discord": {"body": "**POAP KINGS is recruiting | Required Trophies: [2000]**\nJoin POAP KINGS this weekend."}}},
         "Elixir POAP KINGS promotion content update",
     )
     mock_post.assert_not_awaited()
     failure_message = mock_failure.call_args.args[1]
     assert failure_message == "site publish failed: GitHub publish failed"
+
+
+def test_promotion_content_cycle_fails_when_discord_header_misses_required_trophy_text():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 400
+    channel.name = "promote-the-clan"
+    channel.type = "text"
+    clan = {
+        "name": "POAP KINGS",
+        "tag": "#J2RGCRVG",
+        "memberList": [{"name": "King Levy", "tag": "#ABC"}],
+    }
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._get_singleton_channel_id", return_value=400),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=(clan, {"state": "warDay"}))),
+        patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
+        patch(
+            "elixir.elixir_agent.generate_promote_content",
+            return_value={
+                "discord": {"body": "**POAP KINGS is recruiting [2000]**\nJoin POAP KINGS this weekend."},
+                "reddit": {"title": "POAP KINGS #J2RGCRVG [2000]", "body": "Recruiting body"},
+            },
+        ),
+        patch("runtime.jobs.poap_kings_site.publish_site_content") as mock_publish,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(elixir._promotion_content_cycle())
+
+    mock_publish.assert_not_called()
+    mock_post.assert_not_awaited()
+    assert mock_failure.call_args.args[1] == (
+        "invalid promotion content: discord.body first line must include exact text "
+        "`Required Trophies: [2000]`"
+    )
+
+
+def test_promotion_content_cycle_fails_when_reddit_title_misses_required_token():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 400
+    channel.name = "promote-the-clan"
+    channel.type = "text"
+    clan = {
+        "name": "POAP KINGS",
+        "tag": "#J2RGCRVG",
+        "memberList": [{"name": "King Levy", "tag": "#ABC"}],
+    }
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._get_singleton_channel_id", return_value=400),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=(clan, {"state": "warDay"}))),
+        patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
+        patch(
+            "elixir.elixir_agent.generate_promote_content",
+            return_value={
+                "discord": {"body": "**POAP KINGS is recruiting | Required Trophies: [2000]**\nJoin POAP KINGS this weekend."},
+                "reddit": {"title": "POAP KINGS #J2RGCRVG", "body": "Recruiting body"},
+            },
+        ),
+        patch("runtime.jobs.poap_kings_site.publish_site_content") as mock_publish,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(elixir._promotion_content_cycle())
+
+    mock_publish.assert_not_called()
+    mock_post.assert_not_awaited()
+    assert mock_failure.call_args.args[1] == "invalid promotion content: reddit.title must include exact token `[2000]`"
 
 def test_site_data_refresh_fails_when_poap_kings_publish_raises():
     clan = {
