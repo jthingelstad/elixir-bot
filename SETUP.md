@@ -34,7 +34,10 @@ CR_API_KEY=your_clash_royale_api_key
 **Optional** (defaults shown):
 
 ```env
-POAPKINGS_REPO_PATH=../poapkings.com               # Sibling repo for site content
+POAP_KINGS_SITE_ENABLED=1                           # Enable the POAP KINGS site integration
+POAP_KINGS_SITE_REPO=jthingelstad/poapkings.com    # GitHub repo slug for the site
+POAP_KINGS_SITE_BRANCH=main                        # Branch to update
+POAP_KINGS_SITE_TOKEN=github_pat_xxx               # GitHub token with repo contents write access
 HEARTBEAT_START_HOUR=7                              # Start hour (Chicago time)
 HEARTBEAT_END_HOUR=22                               # End hour (Chicago time)
 SITE_CONTENT_HOUR=20                                # Evening content cycle hour (Chicago time)
@@ -200,6 +203,6 @@ Lives at `ELIXIR_DB_PATH` (default: `./elixir.db` in the project root). Contains
 
 Only exists if launchd is configured to write stdout to a file. The bot doesn't rotate it. If it grows large, it's safe to truncate (`> elixir.log`) or delete while the bot is stopped.
 
-### `../poapkings.com/src/_data/elixir*.json`
+### POAP KINGS site repo
 
-Dynamic site content files (elixirClan.json, elixirRoster.json, etc.). The bot writes and pushes these. This is in a separate repo.
+Dynamic site content files (`src/_data/elixirClan.json`, `elixirRoster.json`, etc.) live in the configured GitHub site repo. The POAP KINGS integration publishes these files directly via the GitHub API.

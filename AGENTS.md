@@ -16,7 +16,7 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 - `db/` — SQLite V2 data store package: identity, memory, current state, analytics, war, and raw payload capture
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
-- `site_content.py` — JSON content management for poapkings.com (write, validate, commit/push)
+- `integrations/poap_kings/` — POAP KINGS-specific site integration and GitHub publishing
 - `scripts/review_prompt_failures.py` — Review recent LLM/channel failures from SQLite for debugging and prompt/tool routing analysis
 - `storage/`, `agent/`, `runtime/` — Domain-first implementation packages for persistence, LLM behavior, and Discord runtime; root modules remain the stable public API surface
 
@@ -84,19 +84,19 @@ Elixir is the single authority for all dynamic data on poapkings.com. All Elixir
 - `elixirClan.json` — Dynamic clan stats (memberCount, scores, donations, etc.)
 - `elixirRoster.json` — Full roster with member data + bios + intro
 - `elixirHome.json` — Home page message of the day
-- `elixirMembers.json` — Members page message of the day
+- `elixirMembers.json` — Members page weekly recap payload
 - `elixirPromote.json` — Promotional messages (5 channels)
 
-Filenames are camelCase (not hyphenated) because 11ty uses the filename stem as the data key — `elixirClan.json` becomes `elixirClan` in templates. JSON schemas live in `poapkings.com/src/_data/schemas/`. `site.json` contains only static site config (url, joinUrl, discordUrl, tagline, clanTag).
+Filenames are camelCase (not hyphenated) because 11ty uses the filename stem as the data key — `elixirClan.json` becomes `elixirClan` in templates. The POAP KINGS integration publishes these files directly to GitHub paths in the site repo; local sibling-repo writes are now a legacy/dev-only path. `site.json` contains only static site config (url, joinUrl, discordUrl, tagline, clanTag).
 
 ### Scheduled Jobs
 
 - **Every 47 minutes with up to 300s jitter, active 7:00 AM-10:00 PM Chicago** — `_heartbeat_tick()`: Observe signals, post noteworthy updates, and keep war/clan awareness current
-- **6:00 PM Chicago** — `_site_content_cycle()`: Refresh CR data, build roster + clan data, generate LLM bios/messages, commit/push
+- **6:00 PM Chicago** — `_site_content_cycle()`: Refresh POAP KINGS site data, publish roster + clan + home payloads to GitHub
 - **Every 30 minutes by default** — `_player_intel_refresh()`: Refresh a smaller stale subset of active members' player profiles and battle logs into the V2 analytics tables, and emit progression signals like level-ups and card milestones with less burstiness
 - **Friday 7:00 PM Chicago** — `_clanops_weekly_review()`: Post the weekly leader review in the clanops channel
 - **Monday 9:00 AM Chicago** — `_weekly_clan_recap()`: Post the public weekly clan recap with River Race storylines, clan momentum, and standout member progression
-- **Friday 9:00 AM Chicago** — `_promotion_content_cycle()`: Generate and publish the shared website + `#promote-the-clan` promotion payload
+- **Friday 9:00 AM Chicago** — `_promotion_content_cycle()`: Generate and publish the POAP KINGS website + `#promote-the-clan` promotion payload
 
 ## Architecture: Prompts vs Code
 
@@ -200,4 +200,4 @@ A new clan forks elixir-bot and only rewrites CLAN.md (their clan name, tag, rul
 
 - All times in America/Chicago timezone
 - Clan tag: J2RGCRVG (POAP KINGS)
-- Site content goes to `../poapkings.com/src/_data/elixir*.json`
+- POAP KINGS site content publishes to `src/_data/elixir*.json` in the configured GitHub site repo

@@ -30,13 +30,13 @@ COMMAND_HELP = {
     "set-note": "Set a member note.",
     "clear-note": "Clear a member note.",
     "heartbeat": "Force one heartbeat cycle now.",
-    "site-data": "Force the site data refresh job now.",
-    "site-content": "Force the full site content cycle now.",
-    "site-publish": "Commit and push the current Elixir-owned website files now.",
+    "site-data": "Force the POAP KINGS site data refresh job now.",
+    "site-content": "Force the POAP KINGS daily site sync now.",
+    "site-publish": "Alias for running the POAP KINGS site-content sync now.",
     "home-message": "Regenerate only the website home message.",
-    "members-message": "Regenerate only the website members message.",
+    "members-message": "Regenerate the members-page weekly recap payload.",
     "roster-bios": "Regenerate only the website roster intro and member bios.",
-    "promote-content": "Regenerate only the website promotion payload locally.",
+    "promote-content": "Regenerate only the website promotion payload.",
     "promotion": "Force the promotion content sync now. This updates the website and #promote-the-clan together.",
     "player-intel": "Force the player intel refresh job now.",
     "clanops-review": "Force the weekly clanops review post now.",
@@ -635,7 +635,10 @@ async def _preview_job_runtime():
     try:
         stack.enter_context(patch.object(runtime_jobs, "bot", _ChannelLookup(channels)))
         stack.enter_context(
-            patch("runtime.jobs.site_content.commit_and_push", side_effect=lambda *args, **kwargs: None)
+            patch("runtime.jobs.poap_kings_site.commit_and_push", side_effect=lambda *args, **kwargs: None)
+        )
+        stack.enter_context(
+            patch("runtime.jobs.poap_kings_site.publish_site_content", side_effect=lambda *args, **kwargs: False)
         )
         yield captured_posts
     finally:
@@ -644,13 +647,15 @@ async def _preview_job_runtime():
 
 async def _load_site_context():
     import elixir
-    import site_content
+    from integrations.poap_kings import site as site_content
+    from integrations.poap_kings import site as poap_kings_site
 
     clan, war = await elixir._load_live_clan_context()
-    roster = await asyncio.to_thread(site_content.load_current, "roster")
+    roster = await asyncio.to_thread(poap_kings_site.load_published, "roster")
+    if roster is None:
+        roster = await asyncio.to_thread(site_content.load_current, "roster")
     if roster is None and clan.get("memberList"):
         roster = await asyncio.to_thread(site_content.build_roster_data, clan, True)
-        await asyncio.to_thread(site_content.write_content, "roster", roster)
     return clan, war, roster
 
 
@@ -681,22 +686,20 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
 
 
 async def _run_site_publish(preview: bool) -> str:
-    import site_content
+    import elixir
 
     if preview:
-        return "Preview mode: site publish skipped."
-    ok = await asyncio.to_thread(site_content.commit_and_push, "Elixir manual site publish")
-    if not ok:
-        raise RuntimeError("site publish failed")
-    return "Site content published."
+        return "Preview mode: site publish now maps to `site-content`; no remote publish executed."
+    await elixir._site_content_cycle()
+    return "Ran `site-content` to publish the current POAP KINGS site bundle."
 
 
 async def _run_home_message(preview: bool) -> str:
     import elixir
-    import site_content
+    from integrations.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
-    previous = await asyncio.to_thread(site_content.load_current, "home")
+    previous = await asyncio.to_thread(poap_kings_site.load_published, "home")
     previous_message = previous.get("message", "") if previous else ""
     text = await asyncio.to_thread(
         elixir.elixir_agent.generate_home_message,
@@ -708,39 +711,49 @@ async def _run_home_message(preview: bool) -> str:
     if not text:
         raise RuntimeError("home message generation returned nothing")
     payload = {"message": text, "generated": _utcnow()}
-    await asyncio.to_thread(site_content.write_content, "home", payload)
     if not preview:
-        await asyncio.to_thread(site_content.commit_and_push, "Elixir home message update")
+        await asyncio.to_thread(
+            poap_kings_site.publish_site_content,
+            {"home": payload},
+            "Elixir POAP KINGS home message update",
+        )
     return text
 
 
 async def _run_members_message(preview: bool) -> str:
     import elixir
-    import site_content
+    from integrations.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
-    previous = await asyncio.to_thread(site_content.load_current, "members")
+    recap_context = await asyncio.to_thread(elixir._build_weekly_clan_recap_context, clan, war)
+    previous = await asyncio.to_thread(poap_kings_site.load_published, "members")
     previous_message = previous.get("message", "") if previous else ""
     text = await asyncio.to_thread(
-        elixir.elixir_agent.generate_members_message,
-        clan,
-        war,
+        elixir.elixir_agent.generate_weekly_digest,
+        recap_context,
         previous_message,
-        roster_data=roster,
     )
     if not text:
-        raise RuntimeError("members message generation returned nothing")
-    payload = {"message": text, "generated": _utcnow()}
-    await asyncio.to_thread(site_content.write_content, "members", payload)
+        raise RuntimeError("members page weekly recap generation returned nothing")
+    payload = {
+        "title": "Weekly Recap",
+        "message": text,
+        "generated": _utcnow(),
+        "source": "weekly_clan_recap",
+    }
     if not preview:
-        await asyncio.to_thread(site_content.commit_and_push, "Elixir members message update")
+        await asyncio.to_thread(
+            poap_kings_site.publish_site_content,
+            {"members": payload},
+            "Elixir POAP KINGS members page weekly recap update",
+        )
     return text
 
 
 async def _run_roster_bios(preview: bool) -> str:
     import db
     import elixir
-    import site_content
+    from integrations.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
     result = await asyncio.to_thread(
@@ -763,15 +776,18 @@ async def _run_roster_bios(preview: bool) -> str:
         if item:
             member["bio"] = item.get("bio", "")
             member["highlight"] = item.get("highlight", "general")
-    await asyncio.to_thread(site_content.write_content, "roster", roster_payload)
     if not preview:
-        await asyncio.to_thread(site_content.commit_and_push, "Elixir roster bio update")
+        await asyncio.to_thread(
+            poap_kings_site.publish_site_content,
+            {"roster": roster_payload},
+            "Elixir POAP KINGS roster bio update",
+        )
     return roster_payload.get("intro", "")
 
 
 async def _run_promote_content(preview: bool) -> str:
     import elixir
-    import site_content
+    from integrations.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
     promote = await asyncio.to_thread(
@@ -782,9 +798,12 @@ async def _run_promote_content(preview: bool) -> str:
     )
     if not promote:
         raise RuntimeError("promotion content generation returned nothing")
-    await asyncio.to_thread(site_content.write_content, "promote", promote)
     if not preview:
-        await asyncio.to_thread(site_content.commit_and_push, "Elixir promotion content update")
+        await asyncio.to_thread(
+            poap_kings_site.publish_site_content,
+            {"promote": promote},
+            "Elixir POAP KINGS promotion content update",
+        )
     return json.dumps(promote, indent=2)
 
 

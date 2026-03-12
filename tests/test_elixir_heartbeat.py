@@ -331,6 +331,44 @@ def test_heartbeat_tick_posts_multiple_system_signals_as_separate_updates():
     mock_observe.assert_not_called()
 
 
+def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 456
+    channel.name = "announcements"
+    channel.type = "text"
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._get_singleton_channel_id", return_value=456),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {"state": "training"}))),
+        patch("elixir._build_weekly_clan_recap_context", return_value="summary context"),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.elixir_agent.generate_weekly_digest", return_value="This week POAP KINGS pushed hard."),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.save_message"),
+        patch("runtime.jobs.poap_kings_site.publish_site_content", return_value=True) as mock_publish,
+    ):
+        asyncio.run(elixir._weekly_clan_recap())
+
+    mock_post.assert_awaited_once()
+    mock_publish.assert_called_once_with(
+        {
+            "members": {
+                "title": "Weekly Recap",
+                "message": "This week POAP KINGS pushed hard.",
+                "generated": mock_publish.call_args.args[0]["members"]["generated"],
+                "source": "weekly_clan_recap",
+            }
+        },
+        "Elixir POAP KINGS weekly recap sync",
+    )
+
+
 def test_detect_pending_system_signals_retries_until_announced():
     conn = db.get_connection(":memory:")
     try:
@@ -564,10 +602,11 @@ def test_promotion_content_cycle_publishes_website_and_promotion_channel():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
         patch("runtime.jobs._get_singleton_channel_id", return_value=400),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=(clan, {"state": "warDay"}))),
-        patch("elixir.site_content.build_roster_data", return_value={"members": [{"name": "King Levy"}]}) as mock_roster,
+        patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}) as mock_roster,
         patch(
             "elixir.elixir_agent.generate_promote_content",
             return_value={
@@ -575,8 +614,7 @@ def test_promotion_content_cycle_publishes_website_and_promotion_channel():
                 "reddit": {"title": "POAP KINGS #J2RGCRVG [2000]", "body": "Recruiting body"},
             },
         ) as mock_generate,
-        patch("elixir.site_content.write_content", return_value=True) as mock_write,
-        patch("elixir.site_content.commit_and_push") as mock_push,
+        patch("runtime.jobs.poap_kings_site.publish_site_content", return_value=True) as mock_publish,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
     ):
@@ -584,8 +622,15 @@ def test_promotion_content_cycle_publishes_website_and_promotion_channel():
 
     mock_roster.assert_called_once_with(clan, True)
     mock_generate.assert_called_once()
-    mock_write.assert_called_once()
-    mock_push.assert_called_once_with("Elixir promotion content update")
+    mock_publish.assert_called_once_with(
+        {
+            "promote": {
+                "discord": {"body": "Join POAP KINGS this weekend."},
+                "reddit": {"title": "POAP KINGS #J2RGCRVG [2000]", "body": "Recruiting body"},
+            }
+        },
+        "Elixir POAP KINGS promotion content update",
+    )
     channel_posts = mock_post.await_args.args[1]["content"]
     assert len(channel_posts) == 2
     assert "Discord recruiting copy" in channel_posts[0]
@@ -611,29 +656,30 @@ def test_promotion_content_cycle_fails_when_site_write_returns_false():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
         patch("runtime.jobs._get_singleton_channel_id", return_value=400),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=(clan, {"state": "warDay"}))),
-        patch("elixir.site_content.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
+        patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
         patch(
             "elixir.elixir_agent.generate_promote_content",
             return_value={"discord": {"body": "Join POAP KINGS this weekend."}},
         ),
-        patch("elixir.site_content.write_content", return_value=False) as mock_write,
-        patch("elixir.site_content.commit_and_push") as mock_push,
+        patch("runtime.jobs.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
         asyncio.run(elixir._promotion_content_cycle())
 
-    mock_write.assert_called_once_with("promote", {"discord": {"body": "Join POAP KINGS this weekend."}})
-    mock_push.assert_not_called()
+    mock_publish.assert_called_once_with(
+        {"promote": {"discord": {"body": "Join POAP KINGS this weekend."}}},
+        "Elixir POAP KINGS promotion content update",
+    )
     mock_post.assert_not_awaited()
     failure_message = mock_failure.call_args.args[1]
-    assert failure_message == "site publish failed: promote content write failed"
+    assert failure_message == "site publish failed: GitHub publish failed"
 
-
-def test_site_data_refresh_fails_when_site_publish_returns_false():
+def test_site_data_refresh_fails_when_poap_kings_publish_raises():
     clan = {
         "name": "POAP KINGS",
         "tag": "#J2RGCRVG",
@@ -641,20 +687,23 @@ def test_site_data_refresh_fails_when_site_publish_returns_false():
     }
 
     with (
+        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
         patch("elixir.cr_api.get_clan", return_value=clan),
-        patch("elixir.site_content.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
-        patch("elixir.site_content.build_clan_data", return_value={"memberCount": 1}),
-        patch("elixir.site_content.write_content", return_value=True),
-        patch("elixir.site_content.commit_and_push", return_value=False) as mock_push,
+        patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
+        patch("elixir.poap_kings_site.build_clan_data", return_value={"memberCount": 1}),
+        patch("runtime.jobs.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
         asyncio.run(elixir._site_data_refresh())
 
-    mock_push.assert_called_once_with("Elixir data refresh")
-    assert mock_failure.call_args.args[1] == "site publish failed"
+    mock_publish.assert_called_once_with(
+        {"roster": {"members": [{"name": "King Levy"}]}, "clan": {"memberCount": 1}},
+        "Elixir POAP KINGS site data refresh",
+    )
+    assert mock_failure.call_args.args[1] == "GitHub publish failed"
 
 
-def test_site_content_cycle_fails_when_members_write_returns_false():
+def test_site_content_cycle_fails_when_daily_site_publish_raises():
     clan = {
         "name": "POAP KINGS",
         "tag": "#J2RGCRVG",
@@ -662,23 +711,27 @@ def test_site_content_cycle_fails_when_members_write_returns_false():
     }
 
     with (
+        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
         patch("elixir.cr_api.get_clan", return_value=clan),
         patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
-        patch("elixir.site_content.build_roster_data", return_value={"members": [{"name": "King Levy", "tag": "ABC"}]}),
-        patch("elixir.site_content.build_clan_data", return_value={"memberCount": 1}),
-        patch("elixir.elixir_agent.generate_roster_bios", return_value=None),
+        patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy", "tag": "ABC"}]}),
+        patch("elixir.poap_kings_site.build_clan_data", return_value={"memberCount": 1}),
         patch("elixir.elixir_agent.generate_home_message", return_value="Home message"),
-        patch("elixir.elixir_agent.generate_members_message", return_value="Members message"),
-        patch("elixir.site_content.load_current", return_value=None),
-        patch("elixir.site_content.write_content", side_effect=[True, True, True, False]) as mock_write,
-        patch("elixir.site_content.commit_and_push") as mock_push,
+        patch("runtime.jobs.poap_kings_site.load_published", return_value=None),
+        patch("runtime.jobs.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
         asyncio.run(elixir._site_content_cycle())
 
-    assert mock_write.call_args_list[3].args[0] == "members"
-    mock_push.assert_not_called()
-    assert mock_failure.call_args.args[1] == "members content write failed"
+    mock_publish.assert_called_once_with(
+        {
+            "roster": {"members": [{"name": "King Levy", "tag": "ABC"}]},
+            "clan": {"memberCount": 1},
+            "home": {"message": "Home message", "generated": mock_publish.call_args.args[0]["home"]["generated"]},
+        },
+        "Elixir POAP KINGS daily site sync",
+    )
+    assert mock_failure.call_args.args[1] == "GitHub publish failed"
 
 
 def test_detect_cake_days_uses_effective_join_date_and_birthdays():

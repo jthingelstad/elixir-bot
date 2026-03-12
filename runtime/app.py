@@ -17,10 +17,10 @@ import pytz
 
 import cr_api
 import db
-import site_content
 import elixir_agent
 import heartbeat
 import prompts
+from integrations.poap_kings import site as poap_kings_site
 from runtime.admin import admin_command_requires_leader, dispatch_admin_command, parse_admin_command
 from runtime.channel_router import route_message
 from runtime.discord_commands import register_elixir_app_commands

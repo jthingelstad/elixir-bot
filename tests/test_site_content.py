@@ -1,4 +1,4 @@
-"""Tests for site_content.py — JSON content management for poapkings.com."""
+"""Tests for the POAP KINGS site integration."""
 
 import json
 import os
@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 import db
-import site_content
+from integrations.poap_kings import site as site_content
 
 
 @pytest.fixture
@@ -358,9 +358,9 @@ def test_build_roster_data_with_cards(conn):
         ],
     }
 
-    with patch("site_content.cr_api.get_player_battle_log", return_value=mock_battle_log), \
-         patch("site_content.cr_api.get_player", return_value=mock_player), \
-         patch("site_content.time.sleep"):
+    with patch("integrations.poap_kings.site.cr_api.get_player_battle_log", return_value=mock_battle_log), \
+         patch("integrations.poap_kings.site.cr_api.get_player", return_value=mock_player), \
+         patch("integrations.poap_kings.site.time.sleep"):
         result = site_content.build_roster_data(clan_data, include_cards=True, conn=conn)
 
     m = result["members"][0]
@@ -441,9 +441,9 @@ def test_build_roster_data_includes_card_stats(conn):
             {"tag": "#ABC123", "name": "TestPlayer", "role": "member", "arena": {}},
         ],
     }
-    with patch("site_content.cr_api.get_player_battle_log", return_value=mock_battle_log), \
-         patch("site_content.cr_api.get_player", return_value=mock_player), \
-         patch("site_content.time.sleep"):
+    with patch("integrations.poap_kings.site.cr_api.get_player_battle_log", return_value=mock_battle_log), \
+         patch("integrations.poap_kings.site.cr_api.get_player", return_value=mock_player), \
+         patch("integrations.poap_kings.site.time.sleep"):
         result = site_content.build_roster_data(clan_data, include_cards=True, conn=conn)
     assert "card_stats" in result
     assert len(result["card_stats"]) >= 1
@@ -511,7 +511,7 @@ def test_build_roster_data_without_cards_uses_cached_card_data(conn):
         ],
     }
 
-    with patch("site_content.load_current", return_value=None):
+    with patch("integrations.poap_kings.site.load_current", return_value=None):
         result = site_content.build_roster_data(clan_data, conn=conn)
 
     m = result["members"][0]
