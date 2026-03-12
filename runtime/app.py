@@ -407,7 +407,7 @@ async def on_ready():
             "cron",
             hour=SITE_CONTENT_HOUR,
             minute=0,
-            id="site_content_cycle",
+            id="poap-kings-site-sync",
         )
         scheduler.add_job(
             lambda: bot.loop.call_soon_threadsafe(
@@ -415,7 +415,7 @@ async def on_ready():
             ),
             "interval",
             minutes=PLAYER_INTEL_REFRESH_MINUTES,
-            id="player_intel_refresh",
+            id="player-intel",
             max_instances=1,
             coalesce=True,
         )
@@ -427,7 +427,7 @@ async def on_ready():
             day_of_week=CLANOPS_WEEKLY_REVIEW_DAY,
             hour=CLANOPS_WEEKLY_REVIEW_HOUR,
             minute=0,
-            id="clanops_weekly_review",
+            id="clanops-review",
         )
         scheduler.add_job(
             lambda: bot.loop.call_soon_threadsafe(
@@ -437,7 +437,7 @@ async def on_ready():
             day_of_week=WEEKLY_RECAP_DAY,
             hour=WEEKLY_RECAP_HOUR,
             minute=0,
-            id="weekly_clan_recap",
+            id="weekly-recap",
         )
         scheduler.add_job(
             lambda: bot.loop.call_soon_threadsafe(
@@ -447,12 +447,12 @@ async def on_ready():
             day_of_week=PROMOTION_CONTENT_DAY,
             hour=PROMOTION_CONTENT_HOUR,
             minute=0,
-            id="promotion_content_cycle",
+            id="promotion",
         )
         scheduler.start()
         log.info("Scheduler started — heartbeat every %d minutes with up to %ds jitter (active %dam-%dpm Chicago), "
-                 "site publish at %s, player intel refresh every %d minutes, clanops review %s at %02d:00, weekly recap %s at %02d:00, "
-                 "promotion sync %s at %02d:00",
+                 "poap-kings-site-sync at %s, player-intel every %d minutes, clanops-review %s at %02d:00, weekly-recap %s at %02d:00, "
+                 "promotion %s at %02d:00",
                  HEARTBEAT_INTERVAL_MINUTES, HEARTBEAT_JITTER_SECONDS, HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
                  _format_hour_label(SITE_CONTENT_HOUR), PLAYER_INTEL_REFRESH_MINUTES,
                  CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR,

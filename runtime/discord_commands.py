@@ -324,13 +324,7 @@ def register_elixir_app_commands(bot) -> None:
 
     JOB_CHOICES = [
         app_commands.Choice(name="heartbeat", value="heartbeat"),
-        app_commands.Choice(name="site-data", value="site-data"),
-        app_commands.Choice(name="site-content", value="site-content"),
-        app_commands.Choice(name="site-publish", value="site-publish"),
-        app_commands.Choice(name="home-message", value="home-message"),
-        app_commands.Choice(name="members-message", value="members-message"),
-        app_commands.Choice(name="roster-bios", value="roster-bios"),
-        app_commands.Choice(name="promote-content", value="promote-content"),
+        app_commands.Choice(name="poap-kings-sync", value="poap-kings-sync"),
         app_commands.Choice(name="promotion", value="promotion"),
         app_commands.Choice(name="player-intel", value="player-intel"),
         app_commands.Choice(name="clanops-review", value="clanops-review"),
