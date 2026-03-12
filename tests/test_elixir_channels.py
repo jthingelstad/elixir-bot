@@ -570,6 +570,17 @@ def test_parse_admin_command_handles_set_discord():
     }
 
 
+def test_parse_admin_command_normalizes_legacy_poap_kings_alias():
+    parsed = elixir.parse_admin_command("do site-content --preview", require_prefix=True)
+
+    assert parsed == {
+        "command": "poap-kings-site-sync",
+        "preview": True,
+        "short": False,
+        "args": {},
+    }
+
+
 def test_on_message_handles_clanops_profile_via_public_do_command():
     message = _make_message(200, "clan-ops", "do profile \"Ditika\"")
 
@@ -760,6 +771,21 @@ def test_dispatch_admin_command_returns_runtime_job_failure_text():
         )
 
     assert result == "`weekly-recap` failed: weekly recap post failed: missing Discord permissions in #weekly-digest"
+
+
+def test_dispatch_admin_command_normalizes_legacy_site_alias():
+    with patch("runtime.admin._run_runtime_job", new=AsyncMock(return_value="Ran `poap-kings-site-sync`.")) as mock_job:
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "site-content",
+                preview=False,
+                short=False,
+                args={},
+            )
+        )
+
+    assert result == "Ran `poap-kings-site-sync`."
+    mock_job.assert_awaited_once_with("poap-kings-site-sync", preview=False)
 
 
 def test_dispatch_admin_command_handles_set_discord():
@@ -1108,7 +1134,7 @@ def test_build_schedule_report_includes_promotion_content_sync():
     ):
         report = elixir._build_schedule_report()
 
-    assert "promotion content sync" in report
+    assert "promotion" in report
     assert "Every Fri at 09:00 CT." in report
 
 
@@ -1125,7 +1151,7 @@ def test_build_schedule_report_includes_weekly_clan_recap():
     ):
         report = elixir._build_schedule_report()
 
-    assert "weekly clan recap" in report
+    assert "weekly-recap" in report
     assert "Every Mon at 09:00 CT." in report
 
 
@@ -1141,7 +1167,7 @@ def test_build_schedule_report_shows_30_minute_player_intel_refresh():
     ):
         report = elixir._build_schedule_report()
 
-    assert "player intel refresh" in report
+    assert "player-intel" in report
     assert "Every 30 minutes." in report
 
 

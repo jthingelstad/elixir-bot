@@ -9,6 +9,16 @@ from unittest.mock import patch
 import re
 
 
+COMMAND_ALIASES = {
+    "site-data": "poap-kings-data-sync",
+    "site-content": "poap-kings-site-sync",
+    "site-publish": "poap-kings-sync",
+    "home-message": "poap-kings-home-sync",
+    "members-message": "poap-kings-members-sync",
+    "roster-bios": "poap-kings-roster-bios-sync",
+    "promote-content": "poap-kings-promotion-sync",
+}
+
 COMMAND_HELP = {
     "help": "Show the Elixir operator help page.",
     "status": "Show Elixir runtime health, last jobs, and current telemetry.",
@@ -30,13 +40,13 @@ COMMAND_HELP = {
     "set-note": "Set a member note.",
     "clear-note": "Clear a member note.",
     "heartbeat": "Force one heartbeat cycle now.",
-    "site-data": "Force the POAP KINGS site data refresh job now.",
-    "site-content": "Force the POAP KINGS daily site sync now.",
-    "site-publish": "Alias for running the POAP KINGS site-content sync now.",
-    "home-message": "Regenerate only the website home message.",
-    "members-message": "Regenerate the members-page weekly recap payload.",
-    "roster-bios": "Regenerate only the website roster intro and member bios.",
-    "promote-content": "Regenerate only the website promotion payload.",
+    "poap-kings-sync": "Publish the full POAP KINGS website bundle now. This refreshes daily site data plus the members-page weekly recap payload.",
+    "poap-kings-data-sync": "Publish only the POAP KINGS structured site data now (clan + roster).",
+    "poap-kings-site-sync": "Publish the POAP KINGS daily site bundle now (clan, roster, home).",
+    "poap-kings-home-sync": "Regenerate and publish only the POAP KINGS website home message.",
+    "poap-kings-members-sync": "Regenerate and publish only the POAP KINGS members-page weekly recap payload.",
+    "poap-kings-roster-bios-sync": "Regenerate and publish only the POAP KINGS roster intro and member bios.",
+    "poap-kings-promotion-sync": "Regenerate and publish only the POAP KINGS website promotion payload.",
     "promotion": "Force the promotion content sync now. This updates the website and #promote-the-clan together.",
     "player-intel": "Force the player intel refresh job now.",
     "clanops-review": "Force the weekly clanops review post now.",
@@ -58,13 +68,13 @@ LEADER_ONLY_COMMANDS = {
     "set-note",
     "clear-note",
     "heartbeat",
-    "site-data",
-    "site-content",
-    "site-publish",
-    "home-message",
-    "members-message",
-    "roster-bios",
-    "promote-content",
+    "poap-kings-sync",
+    "poap-kings-data-sync",
+    "poap-kings-site-sync",
+    "poap-kings-home-sync",
+    "poap-kings-members-sync",
+    "poap-kings-roster-bios-sync",
+    "poap-kings-promotion-sync",
     "promotion",
     "player-intel",
     "clanops-review",
@@ -92,13 +102,13 @@ COMMAND_ORDER = [
     "set-note",
     "clear-note",
     "heartbeat",
-    "site-data",
-    "site-content",
-    "site-publish",
-    "home-message",
-    "members-message",
-    "roster-bios",
-    "promote-content",
+    "poap-kings-sync",
+    "poap-kings-data-sync",
+    "poap-kings-site-sync",
+    "poap-kings-home-sync",
+    "poap-kings-members-sync",
+    "poap-kings-roster-bios-sync",
+    "poap-kings-promotion-sync",
     "promotion",
     "player-intel",
     "clanops-review",
@@ -111,13 +121,13 @@ ZERO_ARG_COMMANDS = {
     "schedule",
     "clan-status",
     "heartbeat",
-    "site-data",
-    "site-content",
-    "site-publish",
-    "home-message",
-    "members-message",
-    "roster-bios",
-    "promote-content",
+    "poap-kings-sync",
+    "poap-kings-data-sync",
+    "poap-kings-site-sync",
+    "poap-kings-home-sync",
+    "poap-kings-members-sync",
+    "poap-kings-roster-bios-sync",
+    "poap-kings-promotion-sync",
     "promotion",
     "player-intel",
     "clanops-review",
@@ -126,7 +136,11 @@ ZERO_ARG_COMMANDS = {
 
 
 def admin_command_requires_leader(command: str) -> bool:
-    return command in LEADER_ONLY_COMMANDS
+    return COMMAND_ALIASES.get(command, command) in LEADER_ONLY_COMMANDS
+
+
+def normalize_admin_command(command: str) -> str:
+    return COMMAND_ALIASES.get((command or "").lower(), (command or "").lower())
 
 
 def _utcnow() -> str:
@@ -162,7 +176,7 @@ def render_admin_help(
             f"- `{slash_prefix} profile verify-discord member:King Thing`",
             f"- `{slash_prefix} profile set-join-date member:Ditika date:2026-03-07`",
             f"- `{slash_prefix} jobs run job:heartbeat preview:true`",
-            f"- `{mention_prefix} promotion --preview`",
+            f"- `{mention_prefix} poap-kings-sync --preview`",
             f"- `{mention_prefix} memory member \"Ditika\" search \"war consistency\" --limit 5`",
             f"- `{mention_prefix} verify-discord \"King Thing\"`",
             f"- `{mention_prefix} set-discord \"King Thing\" @kingthing`",
@@ -216,7 +230,7 @@ def parse_admin_command(text: str, *, require_prefix: bool = False):
     if not filtered:
         return None
 
-    command = filtered[0].lower()
+    command = normalize_admin_command(filtered[0])
     extra = filtered[1:]
 
     if command == "memory":
@@ -664,8 +678,8 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
 
     job_map = {
         "heartbeat": elixir._heartbeat_tick,
-        "site-data": elixir._site_data_refresh,
-        "site-content": elixir._site_content_cycle,
+        "poap-kings-data-sync": elixir._site_data_refresh,
+        "poap-kings-site-sync": elixir._site_content_cycle,
         "promotion": elixir._promotion_content_cycle,
         "player-intel": elixir._player_intel_refresh,
         "clanops-review": elixir._clanops_weekly_review,
@@ -685,13 +699,24 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
     return f"Ran `{job_name}`."
 
 
-async def _run_site_publish(preview: bool) -> str:
+async def _run_poap_kings_sync(preview: bool) -> str:
     import elixir
 
     if preview:
-        return "Preview mode: site publish now maps to `site-content`; no remote publish executed."
+        async with _preview_job_runtime() as captured_posts:
+            try:
+                await elixir._site_content_cycle()
+                members_text = await _run_members_message(preview=True)
+            except Exception as exc:
+                return f"`poap-kings-sync` failed in preview mode: {exc}"
+            sections = ["Ran `poap-kings-sync` in preview mode.", "", _format_preview_posts(captured_posts)]
+            if members_text:
+                sections.extend(["", "**Members Page Weekly Recap Preview**", members_text])
+            return "\n".join(section for section in sections if section is not None)
+
     await elixir._site_content_cycle()
-    return "Ran `site-content` to publish the current POAP KINGS site bundle."
+    await _run_members_message(preview=False)
+    return "Ran `poap-kings-sync`."
 
 
 async def _run_home_message(preview: bool) -> str:
@@ -927,6 +952,7 @@ async def _run_verify_discord(*, preview: bool, args: dict) -> str:
 async def dispatch_admin_command(command: str, *, preview: bool = False, short: bool = False, args: dict | None = None) -> str:
     import elixir
     args = args or {}
+    command = normalize_admin_command(command)
 
     if command == "help":
         return render_admin_help()
@@ -970,15 +996,15 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
         "clear-note",
     }:
         return await _run_member_metadata_command(command, preview=preview, args=args)
-    if command == "site-publish":
-        return await _run_site_publish(preview=preview)
-    if command == "home-message":
+    if command == "poap-kings-sync":
+        return await _run_poap_kings_sync(preview=preview)
+    if command == "poap-kings-home-sync":
         return await _run_home_message(preview=preview)
-    if command == "members-message":
+    if command == "poap-kings-members-sync":
         return await _run_members_message(preview=preview)
-    if command == "roster-bios":
+    if command == "poap-kings-roster-bios-sync":
         return await _run_roster_bios(preview=preview)
-    if command == "promote-content":
+    if command == "poap-kings-promotion-sync":
         return await _run_promote_content(preview=preview)
     return await _run_runtime_job(command, preview=preview)
 
@@ -989,6 +1015,7 @@ __all__ = [
     "COMMAND_HELP",
     "COMMAND_ORDER",
     "dispatch_admin_command",
+    "normalize_admin_command",
     "parse_admin_command",
     "render_admin_help",
 ]

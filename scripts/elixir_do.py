@@ -11,8 +11,8 @@ Usage examples:
     venv/bin/python scripts/elixir_do.py set-join-date "Ditika" 2026-03-07
     venv/bin/python scripts/elixir_do.py set-note "King Thing" "Founder and systems builder"
     venv/bin/python scripts/elixir_do.py heartbeat --preview
-    venv/bin/python scripts/elixir_do.py site-data --preview
-    venv/bin/python scripts/elixir_do.py site-content
+    venv/bin/python scripts/elixir_do.py poap-kings-data-sync --preview
+    venv/bin/python scripts/elixir_do.py poap-kings-sync
     venv/bin/python scripts/elixir_do.py promotion --preview
     venv/bin/python scripts/elixir_do.py player-intel
     venv/bin/python scripts/elixir_do.py clanops-review --preview
@@ -119,6 +119,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
     for name in (
         "heartbeat",
+        "poap-kings-sync",
+        "poap-kings-data-sync",
+        "poap-kings-site-sync",
+        "poap-kings-home-sync",
+        "poap-kings-members-sync",
+        "poap-kings-roster-bios-sync",
+        "poap-kings-promotion-sync",
+        "promotion",
+        "player-intel",
+        "clanops-review",
+        "weekly-recap",
+    ):
+        sub = subparsers.add_parser(name, help=COMMAND_HELP[name])
+        sub.add_argument(
+            "--preview",
+            action="store_true",
+            help="Do not post to Discord or push site commits. Preview Discord posts to stdout instead.",
+        )
+
+    for legacy_name in (
         "site-data",
         "site-content",
         "site-publish",
@@ -126,15 +146,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "members-message",
         "roster-bios",
         "promote-content",
-        "promotion",
-        "player-intel",
-        "clanops-review",
     ):
-        sub = subparsers.add_parser(name, help=COMMAND_HELP[name])
+        sub = subparsers.add_parser(legacy_name, help=argparse.SUPPRESS)
         sub.add_argument(
             "--preview",
             action="store_true",
-            help="Do not post to Discord or push site commits. Preview Discord posts to stdout instead.",
+            help=argparse.SUPPRESS,
         )
 
     return parser
@@ -215,11 +232,12 @@ async def _job_runtime(preview: bool):
 async def _run_job(job_name: str, preview: bool):
     job_map = {
         "heartbeat": elixir._heartbeat_tick,
-        "site-data": elixir._site_data_refresh,
-        "site-content": elixir._site_content_cycle,
+        "poap-kings-data-sync": elixir._site_data_refresh,
+        "poap-kings-site-sync": elixir._site_content_cycle,
         "promotion": elixir._promotion_content_cycle,
         "player-intel": elixir._player_intel_refresh,
         "clanops-review": elixir._clanops_weekly_review,
+        "weekly-recap": elixir._weekly_clan_recap,
     }
     async with _job_runtime(preview=preview):
         await job_map[job_name]()
@@ -239,14 +257,17 @@ async def _load_site_context():
     return clan, war, roster
 
 
-async def _run_site_publish(preview: bool):
+async def _run_poap_kings_sync(preview: bool):
     import elixir
 
     if preview:
-        print("Preview mode: site publish now maps to `site-content`; no remote publish executed.")
+        print("Preview mode: `poap-kings-sync` suppresses remote site publishing.")
         return
     await elixir._site_content_cycle()
-    print("Ran `site-content` to publish the current POAP KINGS site bundle.")
+    members_text = await admin_commands.dispatch_admin_command("poap-kings-members-sync", preview=False, short=False, args={})
+    if members_text:
+        print(members_text)
+    print("Ran `poap-kings-sync` to publish the current POAP KINGS site bundle.")
 
 
 async def _run_home_message(preview: bool):
