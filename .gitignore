@@ -6,3 +6,4 @@ __pycache__/
 elixir.db
 .pytest_cache/
 elixir.pid
+.DS_Store
