@@ -23,6 +23,15 @@ from db import (
 
 CARD_UPGRADE_SIGNAL_MIN_LEVEL = 14
 
+
+def _is_champion_card(card: dict) -> bool:
+    rarity = str(card.get("rarity") or "").strip().lower()
+    if rarity == "champion":
+        return True
+    max_level = card.get("maxLevel")
+    return isinstance(max_level, int) and max_level == 6
+
+
 def snapshot_player_profile(player_data, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -116,14 +125,28 @@ def snapshot_player_profile(player_data, conn=None):
                 continue
             old_card_level = previous_cards.get(name)
             new_card_level = _card_level(card)
+            rarity = str(card.get("rarity") or "").strip().lower() or None
+            is_champion = _is_champion_card(card)
             if old_card_level is None:
                 signals.append({
                     "type": "new_card_unlocked",
                     "tag": tag,
                     "name": player_data.get("name"),
                     "card_name": name,
+                    "rarity": rarity,
+                    "is_champion": is_champion,
                     "new_level": new_card_level,
                 })
+                if is_champion:
+                    signals.append({
+                        "type": "new_champion_unlocked",
+                        "tag": tag,
+                        "name": player_data.get("name"),
+                        "card_name": name,
+                        "rarity": rarity,
+                        "is_champion": True,
+                        "new_level": new_card_level,
+                    })
                 continue
             if new_card_level is None or new_card_level <= old_card_level:
                 continue

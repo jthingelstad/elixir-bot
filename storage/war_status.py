@@ -39,6 +39,13 @@ def _load_war_payload(raw_json) -> dict:
         return {}
 
 
+def _was_signal_sent_any_date(conn: sqlite3.Connection, signal_type: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM signal_log WHERE signal_type = ?",
+        (signal_type,),
+    ).fetchone() is not None
+
+
 def _get_latest_logged_race(conn: sqlite3.Connection):
     return conn.execute(
         "SELECT season_id, section_index, created_date, our_rank, trophy_change, our_fame, total_clans, finish_time "
@@ -420,7 +427,8 @@ def detect_milestones(conn=None):
             )
             SELECT a.tag, a.name,
                    b.trophies AS old_trophies, a.trophies AS new_trophies,
-                   b.arena_name AS old_arena, a.arena_name AS new_arena
+                   b.arena_name AS old_arena, a.arena_name AS new_arena,
+                   a.observed_at AS observed_at
             FROM ranked a
             JOIN ranked b ON a.member_id = b.member_id
             WHERE a.rn = 1 AND b.rn = 2
@@ -429,12 +437,18 @@ def detect_milestones(conn=None):
         milestones = []
         for row in rows:
             if row["old_arena"] and row["new_arena"] and row["old_arena"] != row["new_arena"]:
+                signal_log_type = (
+                    f"arena_change:{row['tag']}:{row['old_arena']}->{row['new_arena']}:{row['observed_at']}"
+                )
+                if _was_signal_sent_any_date(conn, signal_log_type):
+                    continue
                 milestones.append({
                     "tag": row["tag"],
                     "name": row["name"],
                     "type": "arena_change",
                     "old_value": row["old_arena"],
                     "new_value": row["new_arena"],
+                    "signal_log_type": signal_log_type,
                 })
         return milestones
     finally:
@@ -453,13 +467,23 @@ def detect_role_changes(conn=None):
                 FROM member_state_snapshots s
                 JOIN members m ON m.member_id = s.member_id
             )
-            SELECT a.tag, a.name, b.role AS old_role, a.role AS new_role
+            SELECT a.tag, a.name, b.role AS old_role, a.role AS new_role, a.observed_at AS observed_at
             FROM ranked a
             JOIN ranked b ON a.member_id = b.member_id
             WHERE a.rn = 1 AND b.rn = 2 AND COALESCE(a.role, '') != COALESCE(b.role, '')
             """
         ).fetchall()
-        return _rowdicts(rows)
+        changes = []
+        for row in rows:
+            change = dict(row)
+            signal_log_type = (
+                f"role_change:{row['tag']}:{row['old_role']}->{row['new_role']}:{row['observed_at']}"
+            )
+            if _was_signal_sent_any_date(conn, signal_log_type):
+                continue
+            change["signal_log_type"] = signal_log_type
+            changes.append(change)
+        return changes
     finally:
         if close:
             conn.close()

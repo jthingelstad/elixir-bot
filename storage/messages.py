@@ -28,6 +28,16 @@ def was_signal_sent(signal_type, date_str, conn=None):
             conn.close()
 
 
+def was_signal_sent_any_date(signal_type, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        return conn.execute("SELECT 1 FROM signal_log WHERE signal_type = ?", (signal_type,)).fetchone() is not None
+    finally:
+        if close:
+            conn.close()
+
+
 def mark_signal_sent(signal_type, date_str, conn=None):
     close = conn is None
     conn = conn or get_connection()
