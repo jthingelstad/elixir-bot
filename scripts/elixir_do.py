@@ -192,7 +192,7 @@ async def _job_runtime(preview: bool):
                 for channel in prompts.discord_channel_configs()
             }
             stack.enter_context(
-                patch("runtime.jobs.site_content.commit_and_push", side_effect=lambda *args, **kwargs: None)
+                patch("runtime.jobs.poap_kings_site.commit_and_push", side_effect=lambda *args, **kwargs: None)
             )
         else:
             if not TOKEN:
@@ -227,34 +227,34 @@ async def _run_job(job_name: str, preview: bool):
 
 async def _load_site_context():
     import elixir
-    import site_content
+    from integrations.poap_kings import site as site_content
+    from integrations.poap_kings import site as poap_kings_site
 
     clan, war = await elixir._load_live_clan_context()
-    roster = await asyncio.to_thread(site_content.load_current, "roster")
+    roster = await asyncio.to_thread(poap_kings_site.load_published, "roster")
+    if roster is None:
+        roster = await asyncio.to_thread(site_content.load_current, "roster")
     if roster is None and clan.get("memberList"):
         roster = await asyncio.to_thread(site_content.build_roster_data, clan, True)
-        await asyncio.to_thread(site_content.write_content, "roster", roster)
     return clan, war, roster
 
 
 async def _run_site_publish(preview: bool):
-    import site_content
+    import elixir
 
     if preview:
-        print("Preview mode: site publish skipped.")
+        print("Preview mode: site publish now maps to `site-content`; no remote publish executed.")
         return
-    ok = await asyncio.to_thread(site_content.commit_and_push, "Elixir manual site publish")
-    if not ok:
-        raise RuntimeError("site publish failed")
-    print("Site content published.")
+    await elixir._site_content_cycle()
+    print("Ran `site-content` to publish the current POAP KINGS site bundle.")
 
 
 async def _run_home_message(preview: bool):
     import elixir
-    import site_content
+    from integrations.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
-    previous = await asyncio.to_thread(site_content.load_current, "home")
+    previous = await asyncio.to_thread(poap_kings_site.load_published, "home")
     previous_message = previous.get("message", "") if previous else ""
     text = await asyncio.to_thread(
         elixir.elixir_agent.generate_home_message,
@@ -266,38 +266,48 @@ async def _run_home_message(preview: bool):
     if not text:
         raise RuntimeError("home message generation returned nothing")
     payload = {"message": text, "generated": _utcnow()}
-    await asyncio.to_thread(site_content.write_content, "home", payload)
     print(text)
     if not preview:
-        await asyncio.to_thread(site_content.commit_and_push, "Elixir home message update")
+        await asyncio.to_thread(
+            poap_kings_site.publish_site_content,
+            {"home": payload},
+            "Elixir POAP KINGS home message update",
+        )
 
 
 async def _run_members_message(preview: bool):
     import elixir
-    import site_content
+    from integrations.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
-    previous = await asyncio.to_thread(site_content.load_current, "members")
+    recap_context = await asyncio.to_thread(elixir._build_weekly_clan_recap_context, clan, war)
+    previous = await asyncio.to_thread(poap_kings_site.load_published, "members")
     previous_message = previous.get("message", "") if previous else ""
     text = await asyncio.to_thread(
-        elixir.elixir_agent.generate_members_message,
-        clan,
-        war,
+        elixir.elixir_agent.generate_weekly_digest,
+        recap_context,
         previous_message,
-        roster_data=roster,
     )
     if not text:
-        raise RuntimeError("members message generation returned nothing")
-    payload = {"message": text, "generated": _utcnow()}
-    await asyncio.to_thread(site_content.write_content, "members", payload)
+        raise RuntimeError("members page weekly recap generation returned nothing")
+    payload = {
+        "title": "Weekly Recap",
+        "message": text,
+        "generated": _utcnow(),
+        "source": "weekly_clan_recap",
+    }
     print(text)
     if not preview:
-        await asyncio.to_thread(site_content.commit_and_push, "Elixir members message update")
+        await asyncio.to_thread(
+            poap_kings_site.publish_site_content,
+            {"members": payload},
+            "Elixir POAP KINGS members page weekly recap update",
+        )
 
 
 async def _run_roster_bios(preview: bool):
     import elixir
-    import site_content
+    from integrations.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
     result = await asyncio.to_thread(
@@ -318,15 +328,18 @@ async def _run_roster_bios(preview: bool):
         if item:
             member["bio"] = item.get("bio", "")
             member["highlight"] = item.get("highlight", "general")
-    await asyncio.to_thread(site_content.write_content, "roster", roster_payload)
     print(roster_payload.get("intro", ""))
     if not preview:
-        await asyncio.to_thread(site_content.commit_and_push, "Elixir roster bio update")
+        await asyncio.to_thread(
+            poap_kings_site.publish_site_content,
+            {"roster": roster_payload},
+            "Elixir POAP KINGS roster bio update",
+        )
 
 
 async def _run_promote_content(preview: bool):
     import elixir
-    import site_content
+    from integrations.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
     promote = await asyncio.to_thread(
@@ -337,10 +350,13 @@ async def _run_promote_content(preview: bool):
     )
     if not promote:
         raise RuntimeError("promotion content generation returned nothing")
-    await asyncio.to_thread(site_content.write_content, "promote", promote)
     print(json.dumps(promote, indent=2))
     if not preview:
-        await asyncio.to_thread(site_content.commit_and_push, "Elixir promotion content update")
+        await asyncio.to_thread(
+            poap_kings_site.publish_site_content,
+            {"promote": promote},
+            "Elixir POAP KINGS promotion content update",
+        )
 
 
 async def _print_clan_status(short: bool):

@@ -1,30 +1,37 @@
-"""site_content.py — JSON content management for poapkings.com website.
+"""POAP KINGS site integration.
 
-Responsible for writing, validating, and committing
-Elixir-owned JSON data files to the poapkings.com repository.
+Owns POAP KINGS website payload building and publishing.
+
+Legacy local file helpers remain here for compatibility and tests, but the
+runtime publishing path should use the explicit GitHub-backed publish helpers.
 """
 
+import base64
 import json
 import logging
 import os
 import subprocess
 from collections import Counter
 from datetime import datetime, timezone
+from urllib import error as urlerror
+from urllib import parse as urlparse
+from urllib import request as urlrequest
 
 import jsonschema
 
 import time
 
-import cr_api
 import db
+import cr_api
 
-log = logging.getLogger("site_content")
+log = logging.getLogger("poap_kings.site")
 
 POAPKINGS_REPO = os.path.expanduser(
     os.getenv("POAPKINGS_REPO_PATH", os.path.join(os.path.dirname(__file__), "..", "poapkings.com"))
 )
 DATA_DIR = os.path.join(POAPKINGS_REPO, "src", "_data")
 SCHEMA_DIR = os.path.join(DATA_DIR, "schemas")
+GITHUB_API_BASE = "https://api.github.com"
 
 CONTENT_FILES = {
     "clan": "elixirClan.json",
@@ -41,6 +48,186 @@ ROLE_MAP = {
     "member": "Member",
 }
 CARD_STATS_MEMBER_LIST_LIMIT = 5
+
+
+def _site_repo() -> str:
+    return os.getenv("POAP_KINGS_SITE_REPO", "jthingelstad/poapkings.com")
+
+
+def _site_branch() -> str:
+    return os.getenv("POAP_KINGS_SITE_BRANCH", "main")
+
+
+def _site_token() -> str:
+    return (os.getenv("POAP_KINGS_SITE_TOKEN") or os.getenv("GITHUB_TOKEN") or "").strip()
+
+
+def _site_flag_enabled() -> bool:
+    return os.getenv("POAP_KINGS_SITE_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def site_enabled() -> bool:
+    return bool(_site_flag_enabled() and _site_repo() and _site_token())
+
+
+def target_path(content_type: str) -> str:
+    if content_type not in CONTENT_FILES:
+        raise ValueError(f"Unknown content type: {content_type}")
+    return f"src/_data/{CONTENT_FILES[content_type]}"
+
+
+def serialize_content(data) -> str:
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+def _repo_parts(repo_slug: str | None = None) -> tuple[str, str]:
+    slug = (repo_slug or _site_repo() or "").strip()
+    if "/" not in slug:
+        raise ValueError("POAP KINGS site repo must be in 'owner/repo' form")
+    owner, repo = slug.split("/", 1)
+    return owner, repo
+
+
+def _github_request(method: str, path: str, *, payload=None, expected=(200,), token: str | None = None):
+    owner, repo = _repo_parts()
+    auth_token = token or _site_token()
+    if not auth_token:
+        raise RuntimeError("POAP KINGS site publishing is not configured: missing GitHub token")
+    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}{path}"
+    data = None
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {auth_token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "elixir-bot",
+    }
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urlrequest.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urlrequest.urlopen(req, timeout=30) as resp:
+            body = resp.read().decode("utf-8") if resp.length != 0 else ""
+            if resp.status not in expected:
+                raise RuntimeError(f"GitHub API {method} {path} returned {resp.status}")
+            if not body:
+                return None
+            return json.loads(body)
+    except urlerror.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        if exc.code in expected and not body:
+            return None
+        raise RuntimeError(f"GitHub API {method} {path} failed with {exc.code}: {body[:240]}") from exc
+
+
+def load_published(content_type: str, *, branch: str | None = None):
+    if content_type not in CONTENT_FILES:
+        return None
+    branch_name = branch or _site_branch()
+    path = target_path(content_type)
+    encoded_path = urlparse.quote(path, safe="/")
+    owner, repo = _repo_parts()
+    auth_token = _site_token()
+    if not auth_token:
+        return None
+    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/contents/{encoded_path}?ref={urlparse.quote(branch_name)}"
+    req = urlrequest.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {auth_token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "elixir-bot",
+        },
+        method="GET",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urlerror.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        body = exc.read().decode("utf-8", "replace")
+        raise RuntimeError(f"GitHub API GET /contents/{encoded_path} failed with {exc.code}: {body[:240]}") from exc
+
+    content = payload.get("content") or ""
+    if payload.get("encoding") == "base64":
+        raw = base64.b64decode(content.encode("ascii")).decode("utf-8")
+    else:
+        raw = content
+    return json.loads(raw) if raw.strip() else None
+
+
+def publish_site_content(payloads: dict[str, object], message: str = "Elixir POAP KINGS site update") -> bool:
+    """Publish one coherent POAP KINGS site bundle to GitHub.
+
+    Returns True when a commit was created, False when nothing changed.
+    """
+    if not site_enabled():
+        raise RuntimeError("POAP KINGS site integration is disabled or missing GitHub configuration")
+
+    branch = _site_branch()
+    changed_entries = []
+    for content_type, data in (payloads or {}).items():
+        if content_type not in CONTENT_FILES:
+            raise ValueError(f"Unknown content type: {content_type}")
+        serialized = serialize_content(data)
+        current = load_published(content_type, branch=branch)
+        current_serialized = serialize_content(current) if current is not None else None
+        if current_serialized == serialized:
+            continue
+        blob = _github_request(
+            "POST",
+            "/git/blobs",
+            payload={"content": serialized, "encoding": "utf-8"},
+            expected=(201,),
+        )
+        changed_entries.append(
+            {
+                "path": target_path(content_type),
+                "mode": "100644",
+                "type": "blob",
+                "sha": blob["sha"],
+            }
+        )
+
+    if not changed_entries:
+        log.info("POAP KINGS site publish: no changes")
+        return False
+
+    ref = _github_request("GET", f"/git/ref/heads/{branch}")
+    parent_commit_sha = ((ref or {}).get("object") or {}).get("sha")
+    if not parent_commit_sha:
+        raise RuntimeError(f"Could not resolve branch head for {branch}")
+    parent_commit = _github_request("GET", f"/git/commits/{parent_commit_sha}")
+    base_tree_sha = ((parent_commit or {}).get("tree") or {}).get("sha")
+    if not base_tree_sha:
+        raise RuntimeError("Could not resolve base tree for POAP KINGS site publish")
+
+    tree = _github_request(
+        "POST",
+        "/git/trees",
+        payload={"base_tree": base_tree_sha, "tree": changed_entries},
+        expected=(201,),
+    )
+    commit = _github_request(
+        "POST",
+        "/git/commits",
+        payload={
+            "message": message,
+            "tree": tree["sha"],
+            "parents": [parent_commit_sha],
+        },
+        expected=(201,),
+    )
+    _github_request(
+        "PATCH",
+        f"/git/refs/heads/{branch}",
+        payload={"sha": commit["sha"]},
+        expected=(200,),
+    )
+    log.info("Published POAP KINGS site bundle to %s@%s (%d file(s))", _site_repo(), branch, len(changed_entries))
+    return True
 
 
 def validate_against_schema(content_type, data):
@@ -358,7 +545,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
         member_list = clan_data.get("memberList", [])
         metadata = db.get_member_metadata_map(conn=conn)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        existing = load_current("roster")
+        existing = load_published("roster") or load_current("roster")
         existing_by_tag = {m["tag"]: m for m in existing.get("members", [])} if existing else {}
 
         members = []
@@ -450,3 +637,23 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
     finally:
         if close:
             conn.close()
+
+
+__all__ = [
+    "CONTENT_FILES",
+    "build_card_stats",
+    "build_clan_data",
+    "build_roster_data",
+    "commit_and_push",
+    "extract_current_deck",
+    "extract_current_deck_icons",
+    "load_current",
+    "load_published",
+    "publish_site_content",
+    "serialize_content",
+    "site_enabled",
+    "target_path",
+    "validate_against_schema",
+    "write_content",
+    "aggregate_card_usage",
+]

@@ -10,7 +10,7 @@ import db
 import elixir_agent
 import heartbeat
 import prompts
-import site_content
+from integrations.poap_kings import site as poap_kings_site
 from runtime import app as _app
 from runtime.app import (
     CHICAGO,
@@ -226,13 +226,17 @@ def _promotion_channel_posts(promote):
 
 
 def _write_site_content_or_raise(content_type: str, data) -> None:
-    if not site_content.write_content(content_type, data):
+    if not poap_kings_site.write_content(content_type, data):
         raise RuntimeError(f"{content_type} content write failed")
 
 
 def _commit_site_content_or_raise(message: str) -> None:
-    if not site_content.commit_and_push(message):
+    if not poap_kings_site.commit_and_push(message):
         raise RuntimeError("site publish failed")
+
+
+def _publish_poap_kings_site_or_raise(payloads: dict[str, object], message: str) -> bool:
+    return poap_kings_site.publish_site_content(payloads, message)
 
 
 def _mark_delivered_signals(signals, *, today: str | None = None):
@@ -259,6 +263,9 @@ def _mark_delivered_signals(signals, *, today: str | None = None):
 
 async def _promotion_content_cycle():
     runtime_status.mark_job_start("promotion_content_cycle")
+    if not poap_kings_site.site_enabled():
+        runtime_status.mark_job_success("promotion_content_cycle", "POAP KINGS site integration disabled")
+        return
     try:
         promotion_channel_id = _get_singleton_channel_id("promotion")
     except Exception as exc:
@@ -281,7 +288,7 @@ async def _promotion_content_cycle():
         runtime_status.mark_job_success("promotion_content_cycle", "no member data")
         return
 
-    roster_data = await asyncio.to_thread(site_content.build_roster_data, clan, True)
+    roster_data = await asyncio.to_thread(poap_kings_site.build_roster_data, clan, True)
     promote = await asyncio.to_thread(
         elixir_agent.generate_promote_content,
         clan,
@@ -293,8 +300,11 @@ async def _promotion_content_cycle():
         return
 
     try:
-        await asyncio.to_thread(_write_site_content_or_raise, "promote", promote)
-        await asyncio.to_thread(_commit_site_content_or_raise, "Elixir promotion content update")
+        await asyncio.to_thread(
+            _publish_poap_kings_site_or_raise,
+            {"promote": promote},
+            "Elixir POAP KINGS promotion content update",
+        )
     except Exception as exc:
         log.error("Promotion content publish error: %s", exc, exc_info=True)
         runtime_status.mark_job_failure("promotion_content_cycle", f"site publish failed: {exc}")
@@ -490,6 +500,9 @@ WEEKLY_RECAP_HOUR = int(os.getenv("WEEKLY_RECAP_HOUR", "9"))
 async def _site_data_refresh():
     """On-demand site data refresh — refresh clan data and roster on poapkings.com."""
     runtime_status.mark_job_start("site_data_refresh")
+    if not poap_kings_site.site_enabled():
+        runtime_status.mark_job_success("site_data_refresh", "POAP KINGS site integration disabled")
+        return
     try:
         try:
             clan = cr_api.get_clan()
@@ -504,13 +517,13 @@ async def _site_data_refresh():
             runtime_status.mark_job_success("site_data_refresh", "no member data")
             return
 
-        roster_data = site_content.build_roster_data(clan)
-        _write_site_content_or_raise("roster", roster_data)
-
-        clan_stats = site_content.build_clan_data(clan)
-        _write_site_content_or_raise("clan", clan_stats)
-
-        _commit_site_content_or_raise("Elixir data refresh")
+        roster_data = poap_kings_site.build_roster_data(clan)
+        clan_stats = poap_kings_site.build_clan_data(clan)
+        await asyncio.to_thread(
+            _publish_poap_kings_site_or_raise,
+            {"roster": roster_data, "clan": clan_stats},
+            "Elixir POAP KINGS site data refresh",
+        )
         log.info("Site data refresh complete: %d members", len(roster_data.get("members", [])))
         runtime_status.mark_job_success("site_data_refresh", f"{len(roster_data.get('members', []))} members")
     except Exception as e:
@@ -521,6 +534,9 @@ async def _site_data_refresh():
 async def _site_content_cycle():
     """Daily site publish — refresh data, generate content, and push updates."""
     runtime_status.mark_job_start("site_content_cycle")
+    if not poap_kings_site.site_enabled():
+        runtime_status.mark_job_success("site_content_cycle", "POAP KINGS site integration disabled")
+        return
     try:
         try:
             clan = cr_api.get_clan()
@@ -536,57 +552,33 @@ async def _site_content_cycle():
 
         # Build and write data (second daily refresh)
         roster_data = None
+        payloads = {}
         if clan.get("memberList"):
-            roster_data = site_content.build_roster_data(clan, include_cards=True)
-            clan_stats = site_content.build_clan_data(clan)
-
-            # Generate roster bios and merge
-            try:
-                bios = elixir_agent.generate_roster_bios(clan, war, roster_data=roster_data)
-                if bios:
-                    roster_data["intro"] = bios.get("intro", "")
-                    member_bios = bios.get("members", {})
-                    db.upsert_member_generated_profiles(member_bios)
-                    for m in roster_data["members"]:
-                        mc = member_bios.get(m["tag"], {}) or member_bios.get("#" + m["tag"], {})
-                        if mc:
-                            m["bio"] = mc.get("bio", "")
-                            m["highlight"] = mc.get("highlight", "general")
-            except Exception as e:
-                log.error("Roster bio generation error: %s", e)
-
-            _write_site_content_or_raise("roster", roster_data)
-            _write_site_content_or_raise("clan", clan_stats)
+            roster_data = poap_kings_site.build_roster_data(clan, include_cards=True)
+            clan_stats = poap_kings_site.build_clan_data(clan)
+            payloads["roster"] = roster_data
+            payloads["clan"] = clan_stats
 
         # Generate home message
         try:
-            prev_home = site_content.load_current("home")
+            prev_home = poap_kings_site.load_published("home") or poap_kings_site.load_current("home")
             prev_msg = prev_home.get("message", "") if prev_home else ""
             home_text = elixir_agent.generate_home_message(clan, war, prev_msg, roster_data=roster_data)
         except Exception as e:
             log.error("Home message error: %s", e)
             home_text = None
         if home_text:
-            _write_site_content_or_raise("home", {
+            payloads["home"] = {
                 "message": home_text,
                 "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            })
+            }
 
-        # Generate members message
-        try:
-            prev_members = site_content.load_current("members")
-            prev_msg = prev_members.get("message", "") if prev_members else ""
-            members_text = elixir_agent.generate_members_message(clan, war, prev_msg, roster_data=roster_data)
-        except Exception as e:
-            log.error("Members message error: %s", e)
-            members_text = None
-        if members_text:
-            _write_site_content_or_raise("members", {
-                "message": members_text,
-                "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            })
-
-        _commit_site_content_or_raise("Elixir content update")
+        if payloads:
+            await asyncio.to_thread(
+                _publish_poap_kings_site_or_raise,
+                payloads,
+                "Elixir POAP KINGS daily site sync",
+            )
         log.info("Site content cycle complete")
         runtime_status.mark_job_success("site_content_cycle", "content updated")
     except Exception as e:
@@ -784,6 +776,24 @@ async def _weekly_clan_recap():
         workflow="observation",
         event_type="weekly_clan_recap",
     )
+    if poap_kings_site.site_enabled():
+        try:
+            await asyncio.to_thread(
+                _publish_poap_kings_site_or_raise,
+                {
+                    "members": {
+                        "title": "Weekly Recap",
+                        "message": recap_text,
+                        "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "source": "weekly_clan_recap",
+                    }
+                },
+                "Elixir POAP KINGS weekly recap sync",
+            )
+        except Exception as exc:
+            log.error("Weekly recap site sync failed: %s", exc, exc_info=True)
+            runtime_status.mark_job_failure("weekly_clan_recap", f"site sync failed: {exc}")
+            return
     runtime_status.mark_job_success("weekly_clan_recap", "weekly recap posted")
 
 
