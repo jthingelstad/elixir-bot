@@ -1,11 +1,13 @@
 """Tests for #reception onboarding — name matching and event handlers."""
 
+import asyncio
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 import elixir
+from runtime import onboarding
 
 
 SAMPLE_SNAPSHOT = {
@@ -61,3 +63,22 @@ class TestMatchClanMember:
              patch("elixir.db.get_active_roster_map", return_value={}):
             result = elixir._match_clan_member("King Levy")
         assert result is None
+
+
+def test_send_onboarding_message_uses_shared_sender():
+    channel = object()
+
+    with (
+        patch("runtime.onboarding._onboarding_channel", new=AsyncMock(return_value=channel)),
+        patch("runtime.onboarding.elixir_agent.generate_message", return_value="Welcome :elixir_happy:"),
+        patch("runtime.app._post_to_elixir", new=AsyncMock()) as mock_post,
+    ):
+        asyncio.run(
+            onboarding._send_onboarding_message(
+                "discord_member_join",
+                "welcome prompt",
+                "fallback",
+            )
+        )
+
+    mock_post.assert_awaited_once_with(channel, {"content": "Welcome :elixir_happy:"})

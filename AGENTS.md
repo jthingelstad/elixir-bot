@@ -25,7 +25,8 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 - Python with venv (`source venv/bin/activate`)
 - Requires `.env` with: DISCORD_TOKEN, OPENAI_API_KEY, CR_API_KEY
 - Non-secret config (channel IDs, clan tag) lives in `prompts/DISCORD.md` and `prompts/CLAN.md`
-- Start with `./run.sh`
+- Local start: `venv/bin/python elixir.py`
+- Production process management uses `launchd`; see `SETUP.md`
 
 ## Running Tests
 
