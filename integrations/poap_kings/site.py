@@ -126,6 +126,79 @@ def _mastery_card_name(name: str | None) -> str | None:
     return _split_identifier_words(badge_name[len("Mastery"):])
 
 
+def _normalized_icon_urls(icon_urls) -> dict:
+    if not isinstance(icon_urls, dict):
+        return {}
+    return {
+        str(key): value
+        for key, value in icon_urls.items()
+        if isinstance(value, str) and value
+    }
+
+
+def _best_icon_url(icon_urls, preferred_keys) -> str:
+    normalized = _normalized_icon_urls(icon_urls)
+    for key in preferred_keys:
+        value = normalized.get(key)
+        if value:
+            return value
+    for key in sorted(normalized):
+        value = normalized.get(key)
+        if value:
+            return value
+    return ""
+
+
+def _site_card_payload(card: dict) -> dict:
+    item = {
+        "name": card.get("name"),
+    }
+    for source_key, target_key in (
+        ("id", "id"),
+        ("level", "level"),
+        ("api_level", "api_level"),
+        ("maxLevel", "max_level"),
+        ("max_level", "max_level"),
+        ("starLevel", "star_level"),
+        ("star_level", "star_level"),
+        ("evolutionLevel", "evolution_level"),
+        ("evolution_level", "evolution_level"),
+        ("maxEvolutionLevel", "max_evolution_level"),
+        ("max_evolution_level", "max_evolution_level"),
+        ("rarity", "rarity"),
+        ("elixirCost", "elixir_cost"),
+        ("elixir_cost", "elixir_cost"),
+    ):
+        value = card.get(source_key)
+        if value is not None:
+            item[target_key] = value
+
+    icon_urls = _normalized_icon_urls(card.get("iconUrls") or card.get("icon_urls"))
+    if icon_urls:
+        item["icon_urls"] = icon_urls
+        item["icon_url"] = _best_icon_url(icon_urls, ("medium", "evolutionMedium", "heroMedium"))
+    return item
+
+
+def _apply_current_deck_payload(member: dict, deck: dict | None):
+    deck = deck or {}
+    cards = deck.get("cards") or []
+    support_cards = deck.get("support_cards") or []
+    if cards:
+        current_deck_cards = [_site_card_payload(card) for card in cards if card.get("name")]
+        member["current_deck"] = [card["name"] for card in current_deck_cards if card.get("name")]
+        member["current_deck_cards"] = current_deck_cards
+        member["_current_deck_icons"] = {
+            card["name"]: card["icon_url"]
+            for card in current_deck_cards
+            if card.get("name") and card.get("icon_url")
+        }
+    if support_cards:
+        member["current_deck_support_cards"] = [
+            _site_card_payload(card) for card in support_cards if card.get("name")
+        ]
+
+
 def _normalize_badge(badge: dict) -> dict:
     name = badge.get("name")
     item = {
@@ -138,6 +211,10 @@ def _normalize_badge(badge: dict) -> dict:
         "target": badge.get("target"),
         "is_one_time": badge.get("level") is None,
     }
+    icon_urls = _normalized_icon_urls(badge.get("iconUrls") or badge.get("icon_urls"))
+    if icon_urls:
+        item["icon_urls"] = icon_urls
+        item["icon_url"] = _best_icon_url(icon_urls, ("large",))
     mastery_card = _mastery_card_name(name)
     if mastery_card:
         item["card_name"] = mastery_card
@@ -618,20 +695,29 @@ def _hydrate_member_card_data(member, conn, existing_member=None):
         member["favorite_cards"] = cached_cards
 
     cached_deck = db.get_member_current_deck("#" + tag, conn=conn)
-    cached_deck_cards = (cached_deck or {}).get("cards") or []
-    if cached_deck_cards:
-        member["current_deck"] = [c.get("name", "") for c in cached_deck_cards if c.get("name")]
-        member["_current_deck_icons"] = {
-            c.get("name", ""): c.get("iconUrls", {}).get("medium", "")
-            for c in cached_deck_cards
-            if c.get("name")
-        }
+    if cached_deck:
+        _apply_current_deck_payload(member, cached_deck)
 
     existing_member = existing_member or {}
     if existing_member.get("favorite_cards") and not member.get("favorite_cards"):
         member["favorite_cards"] = existing_member["favorite_cards"]
-    if existing_member.get("current_deck") and not member.get("current_deck"):
+    if existing_member.get("current_deck_cards") and not member.get("current_deck_cards"):
+        member["current_deck_cards"] = existing_member["current_deck_cards"]
+        if not member.get("current_deck"):
+            member["current_deck"] = [
+                card.get("name", "")
+                for card in existing_member["current_deck_cards"]
+                if card.get("name")
+            ]
+        member["_current_deck_icons"] = {
+            card.get("name", ""): card.get("icon_url", "")
+            for card in existing_member["current_deck_cards"]
+            if card.get("name")
+        }
+    elif existing_member.get("current_deck") and not member.get("current_deck"):
         member["current_deck"] = existing_member["current_deck"]
+    if existing_member.get("current_deck_support_cards") and not member.get("current_deck_support_cards"):
+        member["current_deck_support_cards"] = existing_member["current_deck_support_cards"]
 
 
 def build_card_stats(members):
@@ -784,13 +870,19 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
 
                 try:
                     player_data = cr_api.get_player(tag)
-                    member["current_deck"] = extract_current_deck(player_data)
-                    member["_current_deck_icons"] = extract_current_deck_icons(player_data)
                     if player_data:
                         snapshot_payload = dict(player_data)
                         snapshot_payload.setdefault("tag", "#" + tag)
                         snapshot_payload.setdefault("name", member["name"])
                         db.snapshot_player_profile(snapshot_payload, conn=conn)
+                        _apply_current_deck_payload(
+                            member,
+                            db.get_member_current_deck("#" + tag, conn=conn)
+                            or {
+                                "cards": player_data.get("currentDeck") or [],
+                                "support_cards": player_data.get("currentDeckSupportCards") or [],
+                            },
+                        )
                         showcase = _profile_showcase_fields(snapshot_payload)
                         member["badge_count"] = showcase.get("badge_count")
                         member["badge_highlights"] = showcase.get("badge_highlights", [])

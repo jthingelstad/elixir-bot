@@ -154,9 +154,9 @@ def test_build_roster_data(conn):
             "currentDeck": [],
             "cards": [],
             "badges": [
-                {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825},
-                {"name": "BattleWins", "level": 5, "maxLevel": 8, "progress": 2079, "target": 2500},
-                {"name": "MasteryGoblinBarrel", "level": 3, "maxLevel": 10, "progress": 180, "target": 200},
+                {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825, "iconUrls": {"large": "https://cdn/years.png"}},
+                {"name": "BattleWins", "level": 5, "maxLevel": 8, "progress": 2079, "target": 2500, "iconUrls": {"large": "https://cdn/wins.png"}},
+                {"name": "MasteryGoblinBarrel", "level": 3, "maxLevel": 10, "progress": 180, "target": 200, "iconUrls": {"large": "https://cdn/mastery-gb.png"}},
             ],
             "achievements": [
                 {"name": "Team Player", "stars": 3, "value": 1, "target": 1, "info": "Join a Clan", "completionInfo": None},
@@ -234,7 +234,9 @@ def test_build_roster_data(conn):
     assert levy["badge_count"] == 3
     assert levy["badge_highlights"][0]["name"] == "YearsPlayed"
     assert levy["badge_highlights"][1]["name"] == "BattleWins"
+    assert levy["badge_highlights"][0]["icon_url"] == "https://cdn/years.png"
     assert levy["mastery_highlights"][0]["card_name"] == "Goblin Barrel"
+    assert levy["mastery_highlights"][0]["icon_url"] == "https://cdn/mastery-gb.png"
     assert levy["achievement_star_count"] == 5
     assert levy["achievement_completed_count"] == 1
     assert levy["achievement_progress"][0]["name"] == "Team Player"
@@ -420,10 +422,16 @@ def test_build_roster_data_with_cards(conn):
         )}]},
     ]
     mock_player = {
-        "currentDeck": [{"name": "Hog Rider"}, {"name": "Zap"}],
+        "currentDeck": [
+            {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog-medium.png"}, "level": 14, "maxLevel": 14, "rarity": "rare"},
+            {"name": "Zap", "iconUrls": {"medium": "https://cdn/zap-medium.png"}, "level": 11, "maxLevel": 11, "rarity": "epic"},
+        ],
+        "currentDeckSupportCards": [
+            {"name": "Dagger Duchess", "iconUrls": {"medium": "https://cdn/duchess-medium.png"}, "level": 4, "maxLevel": 4, "rarity": "legendary"},
+        ],
         "badges": [
-            {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825},
-            {"name": "MasteryHogRider", "level": 4, "maxLevel": 10, "progress": 220, "target": 240},
+            {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825, "iconUrls": {"large": "https://cdn/years.png"}},
+            {"name": "MasteryHogRider", "level": 4, "maxLevel": 10, "progress": 220, "target": 240, "iconUrls": {"large": "https://cdn/mastery-hog.png"}},
         ],
         "achievements": [
             {"name": "Team Player", "stars": 3, "value": 1, "target": 1, "info": "Join a Clan", "completionInfo": None},
@@ -446,8 +454,12 @@ def test_build_roster_data_with_cards(conn):
     assert m["favorite_cards"][0]["name"] == "Hog Rider"
     assert "Hog Rider" in m["current_deck"]
     assert "Zap" in m["current_deck"]
+    assert m["current_deck_cards"][0]["icon_url"] == "https://cdn/hog-medium.png"
+    assert m["current_deck_support_cards"][0]["icon_url"] == "https://cdn/duchess-medium.png"
     assert m["badge_highlights"][0]["name"] == "YearsPlayed"
+    assert m["badge_highlights"][0]["icon_url"] == "https://cdn/years.png"
     assert m["mastery_highlights"][0]["card_name"] == "Hog Rider"
+    assert m["mastery_highlights"][0]["icon_url"] == "https://cdn/mastery-hog.png"
     assert m["achievement_progress"][0]["name"] == "Team Player"
 
 
@@ -559,6 +571,9 @@ def test_build_roster_data_without_cards_uses_cached_card_data(conn):
                 {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog.png"}},
                 {"name": "Zap", "iconUrls": {"medium": "https://cdn/zap.png"}},
             ],
+            "currentDeckSupportCards": [
+                {"name": "Tower Princess", "iconUrls": {"medium": "https://cdn/tower-princess.png"}},
+            ],
             "cards": [],
         },
         conn=conn,
@@ -598,4 +613,7 @@ def test_build_roster_data_without_cards_uses_cached_card_data(conn):
     m = result["members"][0]
     assert m["favorite_cards"][0]["name"] == "Hog Rider"
     assert m["current_deck"] == ["Hog Rider", "Zap"]
+    assert m["current_deck_cards"][0]["icon_url"] == "https://cdn/hog.png"
+    assert m["current_deck_support_cards"][0]["name"] == "Tower Princess"
+    assert m["current_deck_support_cards"][0]["icon_url"] == "https://cdn/tower-princess.png"
     assert result["card_stats"][0]["name"] == "Hog Rider"
