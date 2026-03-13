@@ -155,6 +155,8 @@ def _execute_tool(name, arguments):
             )
         elif name == "get_current_war_status":
             result = db.get_current_war_status()
+        elif name == "get_current_war_day_state":
+            result = db.get_current_war_day_state()
         elif name == "get_war_season_summary":
             result = db.get_war_season_summary(
                 season_id=arguments.get("season_id"),

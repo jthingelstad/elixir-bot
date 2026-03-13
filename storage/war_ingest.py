@@ -9,6 +9,8 @@ from db import (
 )
 
 PERIODS_PER_WEEK = 7
+PRACTICE_PERIOD_TYPES = {"training", "trainingday", "practice"}
+BATTLE_PERIOD_TYPES = {"warday", "battle", "battleday"}
 
 
 def _get_latest_logged_race(conn):
@@ -38,6 +40,44 @@ def _period_offset(period_index):
     if period_index is None:
         return None
     return period_index % PERIODS_PER_WEEK
+
+
+def _normalize_period_type(period_type):
+    if period_type is None:
+        return None
+    return str(period_type).strip().lower()
+
+
+def _resolve_phase(period_type, period_index):
+    normalized = _normalize_period_type(period_type)
+    if normalized in BATTLE_PERIOD_TYPES:
+        return "battle"
+    if normalized in PRACTICE_PERIOD_TYPES:
+        return "practice"
+    if normalized:
+        return "practice"
+    offset = _period_offset(period_index)
+    if offset is None:
+        return None
+    if 3 <= offset <= 6:
+        return "battle"
+    return "practice"
+
+
+def _phase_day_number(phase, period_index):
+    offset = _period_offset(period_index)
+    if offset is None or phase not in {"battle", "practice"}:
+        return None
+    if phase == "battle":
+        return offset - 3 + 1
+    return offset + 1
+
+
+def _war_day_key(season_id, section_index, period_index, observed_at=None):
+    if section_index is None or period_index is None:
+        return observed_at[:10] if observed_at else None
+    season_token = f"s{season_id:05d}" if season_id is not None else "slive"
+    return f"{season_token}-w{section_index:02d}-p{period_index:03d}"
 
 
 def _infer_period_section_index(period_index, current_section_index, current_period_index):
@@ -160,16 +200,44 @@ def upsert_war_current_state(war_data, conn=None):
             "INSERT INTO war_current_state (observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (observed_at, war_data.get("state"), _canon_tag(clan.get("tag")), clan.get("name"), clan.get("fame"), clan.get("repairPoints"), clan.get("periodPoints"), clan.get("clanScore"), _json_or_none(war_data)),
         )
-        battle_date = observed_at[:10]
+        latest_logged_race = _get_latest_logged_race(conn)
+        season_id = _infer_current_season_id_from_live_state(war_data, latest_logged_race)
+        section_index = war_data.get("sectionIndex")
+        period_index = war_data.get("periodIndex")
+        phase = _resolve_phase(war_data.get("periodType"), period_index)
+        phase_day_number = _phase_day_number(phase, period_index)
+        battle_date = _war_day_key(season_id, section_index, period_index, observed_at)
         for participant in clan.get("participants", []):
             member_id = _ensure_member(conn, participant.get("tag"), participant.get("name"), status=None)
             conn.execute(
-                "INSERT INTO war_day_status (member_id, battle_date, observed_at, fame, repair_points, boat_attacks, decks_used_total, decks_used_today, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(member_id, battle_date) DO UPDATE SET observed_at = excluded.observed_at, fame = excluded.fame, repair_points = excluded.repair_points, boat_attacks = excluded.boat_attacks, decks_used_total = excluded.decks_used_total, decks_used_today = excluded.decks_used_today, raw_json = excluded.raw_json",
-                (member_id, battle_date, observed_at, participant.get("fame", 0), participant.get("repairPoints", 0), participant.get("boatAttacks", 0), participant.get("decksUsed", 0), participant.get("decksUsedToday", 0), _json_or_none(participant)),
+                "INSERT INTO war_day_status (member_id, battle_date, observed_at, fame, repair_points, boat_attacks, decks_used_total, decks_used_today, season_id, section_index, period_index, phase, phase_day_number, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(member_id, battle_date) DO UPDATE SET observed_at = excluded.observed_at, fame = excluded.fame, repair_points = excluded.repair_points, boat_attacks = excluded.boat_attacks, decks_used_total = excluded.decks_used_total, decks_used_today = excluded.decks_used_today, season_id = excluded.season_id, section_index = excluded.section_index, period_index = excluded.period_index, phase = excluded.phase, phase_day_number = excluded.phase_day_number, raw_json = excluded.raw_json",
+                (member_id, battle_date, observed_at, participant.get("fame", 0), participant.get("repairPoints", 0), participant.get("boatAttacks", 0), participant.get("decksUsed", 0), participant.get("decksUsedToday", 0), season_id, section_index, period_index, phase, phase_day_number, _json_or_none(participant)),
             )
-        latest_logged_race = _get_latest_logged_race(conn)
-        season_id = _infer_current_season_id_from_live_state(war_data, latest_logged_race)
+            conn.execute(
+                "INSERT OR IGNORE INTO war_participant_snapshots (observed_at, war_day_key, season_id, section_index, period_index, phase, phase_day_number, clan_tag, clan_name, member_id, player_tag, player_name, fame, repair_points, boat_attacks, decks_used_total, decks_used_today, raw_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    observed_at,
+                    battle_date,
+                    season_id,
+                    section_index,
+                    period_index,
+                    phase,
+                    phase_day_number,
+                    _canon_tag(clan.get("tag")),
+                    clan.get("name"),
+                    member_id,
+                    _canon_tag(participant.get("tag")),
+                    participant.get("name"),
+                    participant.get("fame", 0),
+                    participant.get("repairPoints", 0),
+                    participant.get("boatAttacks", 0),
+                    participant.get("decksUsed", 0),
+                    participant.get("decksUsedToday", 0),
+                    _json_or_none(participant),
+                ),
+            )
         _upsert_period_logs(conn, observed_at, war_data, season_id)
         conn.commit()
     finally:

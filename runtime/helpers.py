@@ -218,6 +218,19 @@ def _clan_status_mode(text: str) -> str | None:
     return None
 
 
+def _is_war_status_request(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    return normalized in {
+        "war status",
+        "!war-status",
+        "/war-status",
+        "river race status",
+        "war health",
+        "current war status",
+        "poap kings war status",
+    }
+
+
 def _extract_profile_target(text: str) -> str | None:
     raw = (text or "").strip()
     if not raw:
@@ -823,6 +836,124 @@ def _build_clan_status_report(clan=None, war=None):
 
     if war and war.get("clans"):
         lines.append(f"- Live war feed: {len(war.get('clans') or [])} clans in current river race")
+
+    return "\n".join(lines)
+
+
+def _build_war_status_report(clan=None, war=None):
+    clan = clan or {}
+    war = war or {}
+    war_status = db.get_current_war_status() or {}
+    current_day = db.get_current_war_day_state() or {}
+    season_id = current_day.get("season_id") if current_day else war_status.get("season_id")
+    section_index = current_day.get("section_index") if current_day else war_status.get("section_index")
+    week_summary = db.get_war_week_summary(season_id=season_id, section_index=section_index)
+    season_summary = db.get_war_season_summary(season_id=season_id, top_n=3)
+    recent_days = db.list_recent_war_day_summaries(limit=4)
+    defense_status = db.get_latest_clan_boat_defense_status()
+
+    clan_name = clan.get("name") or war_status.get("clan_name") or "Clan"
+    lines = [f"**{clan_name} War Status**"]
+
+    def _fame_today_label(member):
+        return f"{_member_label(member)} {_fmt_num(member.get('fame_today') or 0)}"
+
+    def _fame_total_label(member):
+        return f"{_member_label(member)} {_fmt_num(member.get('fame') or 0)}"
+
+    def _season_fame_label(member):
+        return f"{_member_label(member)} {_fmt_num(member.get('total_fame') or 0)}"
+
+    if war_status:
+        live_bits = [
+            f"state {war_status.get('war_state') or 'n/a'}",
+            f"season {war_status.get('season_id')}" if war_status.get("season_id") is not None else None,
+            f"week {war_status.get('week')}" if war_status.get("week") is not None else None,
+            war_status.get("phase_display"),
+            f"rank {war_status.get('race_rank')}" if war_status.get("race_rank") is not None else None,
+            f"fame {_fmt_num(war_status.get('fame'))}",
+            f"score {_fmt_num(war_status.get('clan_score'))}",
+            f"period {_fmt_num(war_status.get('period_points'))}" if war_status.get("period_points") is not None else None,
+        ]
+        lines.append(f"- Live: {' | '.join(bit for bit in live_bits if bit)}")
+    else:
+        lines.append("- Live: no stored war state yet.")
+
+    if current_day:
+        lines.append(
+            f"- Clock: {current_day.get('phase_display') or current_day.get('phase') or 'current war day'} | "
+            f"time left {current_day.get('time_left_text') or 'n/a'} | key `{current_day.get('war_day_key') or 'n/a'}`"
+        )
+        if current_day.get("phase") == "battle":
+            lines.append(
+                f"- Engagement: {current_day.get('engaged_count', 0)} engaged | "
+                f"{current_day.get('finished_count', 0)} finished all 4 | "
+                f"{current_day.get('untouched_count', 0)} untouched | "
+                f"{current_day.get('total_participants', 0)} tracked"
+            )
+            lines.append(
+                f"- Leaders today: {_join_member_bits(current_day.get('top_fame_today') or [], _fame_today_label, limit=5)}"
+            )
+            lines.append(
+                f"- Waiting on: {_join_member_bits(current_day.get('used_none') or [], lambda member: _member_label(member), limit=6)}"
+            )
+        else:
+            defense_bits = []
+            if defense_status:
+                if defense_status.get("num_defenses_remaining") is not None:
+                    defense_bits.append(f"defenses remaining {_fmt_num(defense_status.get('num_defenses_remaining'))}")
+                if defense_status.get("progress_earned_from_defenses") is not None:
+                    defense_bits.append(f"defense points {_fmt_num(defense_status.get('progress_earned_from_defenses'))}")
+                if defense_status.get("phase_display"):
+                    defense_bits.append(f"latest logged {defense_status.get('phase_display')}")
+            lines.append(
+                "- Practice focus: boat defenses matter before battle days."
+                + (f" Latest defense log: {' | '.join(defense_bits)}" if defense_bits else "")
+            )
+
+    if week_summary:
+        race = week_summary.get("race") or {}
+        top_participants = week_summary.get("top_participants") or []
+        day_summaries = week_summary.get("day_summaries") or []
+        if race:
+            lines.append(
+                f"- This week: rank {_fmt_num(race.get('our_rank'))}/{_fmt_num(race.get('total_clans'))} | "
+                f"fame {_fmt_num(race.get('our_fame'))} | participants {_fmt_num(week_summary.get('participant_count'))} | "
+                f"top {_join_member_bits(top_participants, _fame_total_label, limit=3)}"
+            )
+        elif day_summaries:
+            lines.append(
+                f"- This week so far: {len(day_summaries)} tracked war day(s) | "
+                f"top {_join_member_bits(top_participants, _fame_total_label, limit=3)}"
+            )
+
+    if recent_days:
+        lines.append(
+            "- Recent war days: "
+            + " | ".join(
+                (
+                    f"{day.get('phase_display')}: {day.get('engaged_count', 0)} engaged, "
+                    f"{day.get('finished_count', 0)} finished, "
+                    f"leader {(_member_label((day.get('top_fame_today') or [{}])[0]) if day.get('top_fame_today') else 'none')}"
+                )
+                if day.get("phase") == "battle"
+                else f"{day.get('phase_display')}: tracked"
+                for day in recent_days[:3]
+            )
+        )
+
+    if season_summary:
+        lines.append(
+            f"- This season: {season_summary.get('races', 0)} race(s) | total fame {_fmt_num(season_summary.get('total_clan_fame'))} | "
+            f"fame/member {_fmt_num(season_summary.get('fame_per_active_member'), 2)} | "
+            f"top {_join_member_bits(season_summary.get('top_contributors') or [], _season_fame_label, limit=3)}"
+        )
+        lines.append(
+            f"- Season watch: {len(season_summary.get('nonparticipants') or [])} with no war participation yet"
+        )
+
+    if war and war.get("clans"):
+        lines.append(f"- Live feed: {len(war.get('clans') or [])} clan(s) in the current river race")
 
     return "\n".join(lines)
 

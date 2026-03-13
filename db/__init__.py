@@ -1368,7 +1368,59 @@ def _migration_13(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE member_metadata ADD COLUMN {name} {sql_type}")
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13]
+def _migration_14(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "war_day_status")
+    for name, sql_type in (
+        ("season_id", "INTEGER"),
+        ("section_index", "INTEGER"),
+        ("period_index", "INTEGER"),
+        ("phase", "TEXT"),
+        ("phase_day_number", "INTEGER"),
+    ):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE war_day_status ADD COLUMN {name} {sql_type}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_war_day_status_period ON war_day_status(season_id, section_index, period_index, phase)"
+    )
+
+
+def _migration_15(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS war_participant_snapshots (
+            snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            observed_at TEXT NOT NULL,
+            war_day_key TEXT NOT NULL,
+            season_id INTEGER,
+            section_index INTEGER,
+            period_index INTEGER,
+            phase TEXT,
+            phase_day_number INTEGER,
+            clan_tag TEXT,
+            clan_name TEXT,
+            member_id INTEGER REFERENCES members(member_id) ON DELETE SET NULL,
+            player_tag TEXT NOT NULL,
+            player_name TEXT,
+            fame INTEGER,
+            repair_points INTEGER,
+            boat_attacks INTEGER,
+            decks_used_total INTEGER,
+            decks_used_today INTEGER,
+            raw_json TEXT,
+            UNIQUE(war_day_key, observed_at, player_tag)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_war_participant_snapshots_day_time
+            ON war_participant_snapshots(war_day_key, observed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_war_participant_snapshots_member_time
+            ON war_participant_snapshots(member_id, observed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_war_participant_snapshots_period
+            ON war_participant_snapshots(season_id, section_index, period_index, observed_at DESC);
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

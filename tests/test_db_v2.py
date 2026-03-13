@@ -2785,6 +2785,147 @@ def test_current_war_participants_do_not_promote_non_roster_members_to_active():
         conn.close()
 
 
+def test_upsert_war_current_state_uses_period_key_for_war_day_status():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "leader", "expLevel": 66, "trophies": 11429, "clanRank": 1}],
+            conn=conn,
+        )
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T01:00:00"):
+            db.upsert_war_current_state(
+                {
+                    "seasonId": 129,
+                    "sectionIndex": 1,
+                    "periodIndex": 10,
+                    "periodType": "warDay",
+                    "state": "full",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "participants": [
+                            {"tag": "#ABC123", "name": "King Levy", "fame": 400, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 2, "decksUsedToday": 1},
+                        ],
+                    },
+                },
+                conn=conn,
+            )
+
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T11:00:00"):
+            db.upsert_war_current_state(
+                {
+                    "seasonId": 129,
+                    "sectionIndex": 1,
+                    "periodIndex": 10,
+                    "periodType": "warDay",
+                    "state": "full",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "participants": [
+                            {"tag": "#ABC123", "name": "King Levy", "fame": 800, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 2},
+                        ],
+                    },
+                },
+                conn=conn,
+            )
+
+        row = conn.execute(
+            "SELECT battle_date, observed_at, fame, decks_used_today, season_id, section_index, period_index, phase, phase_day_number FROM war_day_status"
+        ).fetchone()
+        count = conn.execute("SELECT COUNT(*) AS cnt FROM war_day_status").fetchone()["cnt"]
+        assert count == 1
+        assert row["battle_date"] == "s00129-w01-p010"
+        assert row["observed_at"] == "2026-03-13T11:00:00"
+        assert row["fame"] == 800
+        assert row["decks_used_today"] == 2
+        assert row["season_id"] == 129
+        assert row["section_index"] == 1
+        assert row["period_index"] == 10
+        assert row["phase"] == "battle"
+        assert row["phase_day_number"] == 1
+    finally:
+        conn.close()
+
+
+def test_current_war_day_state_tracks_engagement_points_and_time_left():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#ABC123", "name": "King Levy", "role": "leader", "expLevel": 66, "trophies": 11429, "clanRank": 1},
+                {"tag": "#DEF456", "name": "Vijay", "role": "member", "expLevel": 64, "trophies": 9020, "clanRank": 2},
+            ],
+            conn=conn,
+        )
+
+        first_payload = {
+            "seasonId": 129,
+            "sectionIndex": 1,
+            "periodIndex": 10,
+            "periodType": "warDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 300,
+                "repairPoints": 0,
+                "periodPoints": 300,
+                "clanScore": 150,
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 100, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 1, "decksUsedToday": 1},
+                    {"tag": "#DEF456", "name": "Vijay", "fame": 0, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 0, "decksUsedToday": 0},
+                ],
+            },
+            "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 300, "repairPoints": 0, "periodPoints": 300, "clanScore": 150}],
+        }
+        second_payload = {
+            "seasonId": 129,
+            "sectionIndex": 1,
+            "periodIndex": 10,
+            "periodType": "warDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 1000,
+                "repairPoints": 0,
+                "periodPoints": 1000,
+                "clanScore": 155,
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 600, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 4},
+                    {"tag": "#DEF456", "name": "Vijay", "fame": 200, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 2, "decksUsedToday": 2},
+                ],
+            },
+            "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 1000, "repairPoints": 0, "periodPoints": 1000, "clanScore": 155}],
+        }
+
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T10:00:00"):
+            db.upsert_war_current_state(first_payload, conn=conn)
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T12:30:00"):
+            db.upsert_war_current_state(second_payload, conn=conn)
+
+        state = db.get_current_war_day_state(conn=conn)
+        deck_status = db.get_war_deck_status_today(conn=conn)
+        snapshot_count = conn.execute("SELECT COUNT(*) AS cnt FROM war_participant_snapshots").fetchone()["cnt"]
+
+        assert snapshot_count == 4
+        assert state["week"] == 2
+        assert state["phase"] == "battle"
+        assert state["phase_display"] == "Battle Day 1"
+        assert state["engaged_count"] == 2
+        assert state["finished_count"] == 1
+        assert state["untouched_count"] == 0
+        assert state["time_left_seconds"] == 77400
+        assert state["top_fame_today"][0]["name"] == "King Levy"
+        assert state["top_fame_today"][0]["fame_today"] == 500
+        assert deck_status["time_left_text"] == "21h 30m"
+        assert deck_status["used_all_4"][0]["name"] == "King Levy"
+        assert deck_status["used_some"][0]["name"] == "Vijay"
+    finally:
+        conn.close()
+
+
 def test_war_analytics_ignore_historical_only_participants():
     conn = db.get_connection(":memory:")
     try:

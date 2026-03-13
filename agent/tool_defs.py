@@ -420,6 +420,18 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_current_war_day_state",
+            "description": "Get the live current war-day state for the active practice or battle day, including phase/day labels, week, time left in the current war day, engagement counts, who used all/some/none of their decks, the top fame earners today, and the full tracked participant list.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_war_season_summary",
             "description": "Get a season-level war summary including races, fame-per-member, top contributors, and members with no war participation.",
             "parameters": {
@@ -443,7 +455,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_war_deck_status_today",
-            "description": "List who has used all, some, or none of their war decks today.",
+            "description": "Get the current war-day deck and engagement snapshot: who used all, some, or none of their decks, how many members are engaged or finished, the live phase/day label, week, time left, current rank/score context, and the top fame earners today.",
             "parameters": {
                 "type": "object",
                 "properties": {},
