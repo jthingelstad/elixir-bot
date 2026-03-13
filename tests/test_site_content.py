@@ -147,6 +147,39 @@ def test_build_roster_data(conn):
         "war",
         conn=conn,
     )
+    db.snapshot_player_profile(
+        {
+            "tag": "#ABC123",
+            "name": "King Levy",
+            "currentDeck": [],
+            "cards": [],
+            "badges": [
+                {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825},
+            ],
+        },
+        conn=conn,
+    )
+    with patch("storage.player.chicago_today", return_value="2026-03-14"):
+        db.snapshot_player_battlelog(
+            "#ABC123",
+            [
+                {
+                    "type": "PvP",
+                    "battleTime": "20260314T100000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 2, "trophyChange": 30, "startingTrophies": 7000, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP1", "name": "Opp 1", "crowns": 1, "cards": [], "supportCards": []}],
+                },
+                {
+                    "type": "PvP",
+                    "battleTime": "20260310T110000.000Z",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                    "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 3, "trophyChange": 31, "startingTrophies": 6970, "cards": [], "supportCards": []}],
+                    "opponent": [{"tag": "#OPP2", "name": "Opp 2", "crowns": 0, "cards": [], "supportCards": []}],
+                },
+            ],
+            conn=conn,
+        )
 
     clan_data = {
         "memberList": [
@@ -186,12 +219,20 @@ def test_build_roster_data(conn):
     assert levy["note"] == "Founder"
     assert levy["profile_url"] == "https://example.com"
     assert levy["date_joined"] == "2026-02-04T04:00:00Z"
+    assert levy["cr_account_age_days"] == 1473
+    assert levy["cr_account_age_years"] == 4
+    assert levy["cr_account_age_updated_at"] is not None
+    assert levy["cr_games_per_day"] == 0.14
+    assert levy["cr_games_per_day_window_days"] == 14
+    assert levy["cr_games_per_day_updated_at"] is not None
     assert levy["bio"] == "King Levy is one of the clan's war leaders and a steady ladder force."
     assert levy["highlight"] == "war"
 
     # Unknown join dates stay unknown until observed elsewhere or overridden.
     newbie = result["members"][1]
     assert newbie["date_joined"] is None
+    assert newbie["cr_account_age_days"] is None
+    assert newbie["cr_games_per_day"] is None
 
 
 def test_build_roster_data_sorted_by_join_date(conn):

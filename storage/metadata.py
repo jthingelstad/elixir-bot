@@ -234,8 +234,9 @@ def get_member_metadata(tag, conn=None):
     conn = conn or get_connection()
     try:
         row = conn.execute(
-            "SELECT m.member_id, md.birth_month, md.birth_day, md.profile_url, md.poap_address, md.note, "
-            "md.generated_bio, md.generated_highlight, md.generated_profile_updated_at "
+            "SELECT m.member_id, md.birth_month, md.birth_day, md.cr_account_age_days, md.cr_account_age_years, md.cr_account_age_updated_at, "
+            "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
+            "md.profile_url, md.poap_address, md.note, md.generated_bio, md.generated_highlight, md.generated_profile_updated_at "
             "FROM members m LEFT JOIN member_metadata md ON md.member_id = m.member_id WHERE m.player_tag = ?",
             (_canon_tag(tag),),
         ).fetchone()
@@ -247,6 +248,12 @@ def get_member_metadata(tag, conn=None):
             "joined_date": _current_joined_at(conn, member_id),
             "birth_month": row["birth_month"],
             "birth_day": row["birth_day"],
+            "cr_account_age_days": row["cr_account_age_days"],
+            "cr_account_age_years": row["cr_account_age_years"],
+            "cr_account_age_updated_at": row["cr_account_age_updated_at"],
+            "cr_games_per_day": row["cr_games_per_day"],
+            "cr_games_per_day_window_days": row["cr_games_per_day_window_days"],
+            "cr_games_per_day_updated_at": row["cr_games_per_day_updated_at"],
             "profile_url": row["profile_url"] or "",
             "poap_address": row["poap_address"] or "",
             "note": row["note"] or "",
@@ -264,8 +271,9 @@ def get_member_metadata_map(conn=None):
     conn = conn or get_connection()
     try:
         rows = conn.execute(
-            "SELECT m.member_id, m.player_tag, md.birth_month, md.birth_day, md.profile_url, md.poap_address, md.note, "
-            "md.generated_bio, md.generated_highlight, md.generated_profile_updated_at "
+            "SELECT m.member_id, m.player_tag, md.birth_month, md.birth_day, md.cr_account_age_days, md.cr_account_age_years, md.cr_account_age_updated_at, "
+            "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
+            "md.profile_url, md.poap_address, md.note, md.generated_bio, md.generated_highlight, md.generated_profile_updated_at "
             "FROM members m LEFT JOIN member_metadata md ON md.member_id = m.member_id"
         ).fetchall()
         result = {}
@@ -274,6 +282,12 @@ def get_member_metadata_map(conn=None):
                 "joined_date": _current_joined_at(conn, row["member_id"]),
                 "birth_month": row["birth_month"],
                 "birth_day": row["birth_day"],
+                "cr_account_age_days": row["cr_account_age_days"],
+                "cr_account_age_years": row["cr_account_age_years"],
+                "cr_account_age_updated_at": row["cr_account_age_updated_at"],
+                "cr_games_per_day": row["cr_games_per_day"],
+                "cr_games_per_day_window_days": row["cr_games_per_day_window_days"],
+                "cr_games_per_day_updated_at": row["cr_games_per_day_updated_at"],
                 "profile_url": row["profile_url"] or "",
                 "poap_address": row["poap_address"] or "",
                 "note": row["note"] or "",
@@ -293,7 +307,9 @@ def list_member_metadata_rows(status="active", conn=None):
     try:
         rows = conn.execute(
             "SELECT m.member_id, m.player_tag, m.current_name, m.status, cs.role, "
-            "md.joined_at, md.birth_month, md.birth_day, md.profile_url, md.poap_address, md.note, "
+            "md.joined_at, md.birth_month, md.birth_day, md.cr_account_age_days, md.cr_account_age_years, md.cr_account_age_updated_at, "
+            "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
+            "md.profile_url, md.poap_address, md.note, "
             "dl.discord_username, dl.discord_display_name "
             "FROM members m "
             "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
@@ -315,6 +331,12 @@ def list_member_metadata_rows(status="active", conn=None):
                 "joined_date": _current_joined_at(conn, row["member_id"]) or "",
                 "birth_month": row["birth_month"] or "",
                 "birth_day": row["birth_day"] or "",
+                "cr_account_age_days": row["cr_account_age_days"],
+                "cr_account_age_years": row["cr_account_age_years"],
+                "cr_account_age_updated_at": row["cr_account_age_updated_at"],
+                "cr_games_per_day": row["cr_games_per_day"],
+                "cr_games_per_day_window_days": row["cr_games_per_day_window_days"],
+                "cr_games_per_day_updated_at": row["cr_games_per_day_updated_at"],
                 "profile_url": row["profile_url"] or "",
                 "poap_address": row["poap_address"] or "",
                 "note": row["note"] or "",

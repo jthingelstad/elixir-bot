@@ -584,6 +584,12 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                 "profile_url": extra.get("profile_url", ""),
                 "poap_address": extra.get("poap_address", ""),
                 "date_joined": extra.get("joined_date"),
+                "cr_account_age_days": extra.get("cr_account_age_days"),
+                "cr_account_age_years": extra.get("cr_account_age_years"),
+                "cr_account_age_updated_at": extra.get("cr_account_age_updated_at"),
+                "cr_games_per_day": extra.get("cr_games_per_day"),
+                "cr_games_per_day_window_days": extra.get("cr_games_per_day_window_days"),
+                "cr_games_per_day_updated_at": extra.get("cr_games_per_day_updated_at"),
                 "bio": extra.get("bio", ""),
                 "highlight": extra.get("highlight", ""),
             }
@@ -610,6 +616,13 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                         snapshot_payload.setdefault("tag", "#" + tag)
                         snapshot_payload.setdefault("name", member["name"])
                         db.snapshot_player_profile(snapshot_payload, conn=conn)
+                        refreshed_meta = db.get_member_metadata("#" + tag, conn=conn) or {}
+                        member["cr_account_age_days"] = refreshed_meta.get("cr_account_age_days")
+                        member["cr_account_age_years"] = refreshed_meta.get("cr_account_age_years")
+                        member["cr_account_age_updated_at"] = refreshed_meta.get("cr_account_age_updated_at")
+                        member["cr_games_per_day"] = refreshed_meta.get("cr_games_per_day")
+                        member["cr_games_per_day_window_days"] = refreshed_meta.get("cr_games_per_day_window_days")
+                        member["cr_games_per_day_updated_at"] = refreshed_meta.get("cr_games_per_day_updated_at")
                 except Exception:
                     _hydrate_member_card_data(member, conn, existing_member=existing_by_tag.get(tag))
 
