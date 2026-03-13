@@ -155,6 +155,12 @@ def test_build_roster_data(conn):
             "cards": [],
             "badges": [
                 {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825},
+                {"name": "BattleWins", "level": 5, "maxLevel": 8, "progress": 2079, "target": 2500},
+                {"name": "MasteryGoblinBarrel", "level": 3, "maxLevel": 10, "progress": 180, "target": 200},
+            ],
+            "achievements": [
+                {"name": "Team Player", "stars": 3, "value": 1, "target": 1, "info": "Join a Clan", "completionInfo": None},
+                {"name": "Friend in Need", "stars": 2, "value": 1200, "target": 2500, "info": "Donate 2500 cards", "completionInfo": None},
             ],
         },
         conn=conn,
@@ -225,6 +231,14 @@ def test_build_roster_data(conn):
     assert levy["cr_games_per_day"] == 0.14
     assert levy["cr_games_per_day_window_days"] == 14
     assert levy["cr_games_per_day_updated_at"] is not None
+    assert levy["badge_count"] == 3
+    assert levy["badge_highlights"][0]["name"] == "YearsPlayed"
+    assert levy["badge_highlights"][1]["name"] == "BattleWins"
+    assert levy["mastery_highlights"][0]["card_name"] == "Goblin Barrel"
+    assert levy["achievement_star_count"] == 5
+    assert levy["achievement_completed_count"] == 1
+    assert levy["achievement_progress"][0]["name"] == "Team Player"
+    assert levy["achievement_progress"][0]["completed"] is True
     assert levy["bio"] == "King Levy is one of the clan's war leaders and a steady ladder force."
     assert levy["highlight"] == "war"
 
@@ -233,6 +247,8 @@ def test_build_roster_data(conn):
     assert newbie["date_joined"] is None
     assert newbie["cr_account_age_days"] is None
     assert newbie["cr_games_per_day"] is None
+    assert newbie["badge_highlights"] == []
+    assert newbie["achievement_progress"] == []
 
 
 def test_build_roster_data_sorted_by_join_date(conn):
@@ -403,7 +419,16 @@ def test_build_roster_data_with_cards(conn):
             {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog.png"}},
         )}]},
     ]
-    mock_player = {"currentDeck": [{"name": "Hog Rider"}, {"name": "Zap"}]}
+    mock_player = {
+        "currentDeck": [{"name": "Hog Rider"}, {"name": "Zap"}],
+        "badges": [
+            {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825},
+            {"name": "MasteryHogRider", "level": 4, "maxLevel": 10, "progress": 220, "target": 240},
+        ],
+        "achievements": [
+            {"name": "Team Player", "stars": 3, "value": 1, "target": 1, "info": "Join a Clan", "completionInfo": None},
+        ],
+    }
 
     clan_data = {
         "memberList": [
@@ -421,6 +446,9 @@ def test_build_roster_data_with_cards(conn):
     assert m["favorite_cards"][0]["name"] == "Hog Rider"
     assert "Hog Rider" in m["current_deck"]
     assert "Zap" in m["current_deck"]
+    assert m["badge_highlights"][0]["name"] == "YearsPlayed"
+    assert m["mastery_highlights"][0]["card_name"] == "Hog Rider"
+    assert m["achievement_progress"][0]["name"] == "Team Player"
 
 
 def test_build_card_stats():

@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import os
+import re
 import subprocess
 from collections import Counter
 from datetime import datetime, timezone
@@ -48,6 +49,172 @@ ROLE_MAP = {
     "member": "Member",
 }
 CARD_STATS_MEMBER_LIST_LIMIT = 5
+PROFILE_BADGE_HIGHLIGHT_NAMES = {
+    "YearsPlayed",
+    "BattleWins",
+    "ClanWarsVeteran",
+    "ClanWarWins",
+    "LadderTop1000",
+    "CollectionLevel",
+    "ClanDonations",
+    "EmoteCollection",
+    "BannerCollection",
+    "Classic12Wins",
+    "Grand12Wins",
+    "2v2",
+}
+PROFILE_BADGE_PRIORITY = {
+    "YearsPlayed": 0,
+    "BattleWins": 1,
+    "ClanWarsVeteran": 2,
+    "ClanWarWins": 3,
+    "LadderTop1000": 4,
+    "CollectionLevel": 5,
+    "ClanDonations": 6,
+    "EmoteCollection": 7,
+    "BannerCollection": 8,
+    "Classic12Wins": 9,
+    "Grand12Wins": 10,
+    "2v2": 11,
+}
+
+
+def _split_identifier_words(value: str) -> str:
+    text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", value or "")
+    text = text.replace("_", " ").strip()
+    return re.sub(r"\s+", " ", text)
+
+
+def _badge_category(name: str | None) -> str:
+    badge_name = str(name or "").strip()
+    if not badge_name:
+        return "general"
+    if badge_name.startswith("Mastery"):
+        return "mastery"
+    if badge_name in {"Classic12Wins", "Grand12Wins"}:
+        return "challenge"
+    if badge_name in {"2v2", "RampUp", "SuddenDeath", "Draft", "2xElixir"}:
+        return "mode"
+    if badge_name in {"EmoteCollection", "BannerCollection", "CollectionLevel", "ClanDonations"}:
+        return "collection"
+    if badge_name in {"YearsPlayed", "BattleWins", "ClanWarsVeteran", "ClanWarWins", "LadderTop1000"}:
+        return "career"
+    return "general"
+
+
+def _badge_label(name: str | None) -> str | None:
+    badge_name = str(name or "").strip()
+    if not badge_name:
+        return None
+    overrides = {
+        "Classic12Wins": "Classic Challenge 12 Wins",
+        "Grand12Wins": "Grand Challenge 12 Wins",
+        "2xElixir": "2x Elixir",
+        "2v2": "2v2",
+    }
+    if badge_name in overrides:
+        return overrides[badge_name]
+    if badge_name.startswith("Mastery") and len(badge_name) > len("Mastery"):
+        return f"{_split_identifier_words(badge_name[len('Mastery'):])} Mastery"
+    return _split_identifier_words(badge_name)
+
+
+def _mastery_card_name(name: str | None) -> str | None:
+    badge_name = str(name or "").strip()
+    if not badge_name.startswith("Mastery") or len(badge_name) <= len("Mastery"):
+        return None
+    return _split_identifier_words(badge_name[len("Mastery"):])
+
+
+def _normalize_badge(badge: dict) -> dict:
+    name = badge.get("name")
+    item = {
+        "name": name,
+        "label": _badge_label(name),
+        "category": _badge_category(name),
+        "level": badge.get("level"),
+        "max_level": badge.get("maxLevel"),
+        "progress": badge.get("progress"),
+        "target": badge.get("target"),
+        "is_one_time": badge.get("level") is None,
+    }
+    mastery_card = _mastery_card_name(name)
+    if mastery_card:
+        item["card_name"] = mastery_card
+    return item
+
+
+def _normalize_achievement(achievement: dict) -> dict:
+    stars = achievement.get("stars")
+    return {
+        "name": achievement.get("name"),
+        "stars": stars,
+        "value": achievement.get("value"),
+        "target": achievement.get("target"),
+        "info": achievement.get("info"),
+        "completion_info": achievement.get("completionInfo"),
+        "completed": isinstance(stars, int) and stars >= 3,
+    }
+
+
+def _profile_showcase_fields(player_data: dict | None) -> dict:
+    profile = player_data or {}
+    badges = profile.get("badges") or []
+    achievements = profile.get("achievements") or []
+    normalized_badges = [_normalize_badge(badge) for badge in badges if badge.get("name")]
+    badge_highlights = [
+        badge for badge in normalized_badges
+        if badge["name"] in PROFILE_BADGE_HIGHLIGHT_NAMES and badge["category"] != "mastery"
+    ]
+    badge_highlights.sort(
+        key=lambda badge: (
+            PROFILE_BADGE_PRIORITY.get(badge["name"], 99),
+            {"career": 0, "challenge": 1, "collection": 2, "mode": 3, "general": 4}.get(badge["category"], 9),
+            -(badge.get("level") or 0),
+            -(badge.get("progress") or 0),
+            (badge.get("label") or badge.get("name") or "").lower(),
+        )
+    )
+    mastery_highlights = [badge for badge in normalized_badges if badge["category"] == "mastery"]
+    mastery_highlights.sort(
+        key=lambda badge: (
+            -(badge.get("level") or 0),
+            -(badge.get("progress") or 0),
+            (badge.get("card_name") or badge.get("label") or badge.get("name") or "").lower(),
+        )
+    )
+    normalized_achievements = [_normalize_achievement(item) for item in achievements if item.get("name")]
+    achievement_star_count = sum(int(item.get("stars") or 0) for item in normalized_achievements)
+    achievement_completed_count = sum(1 for item in normalized_achievements if item.get("completed"))
+    return {
+        "badge_count": len(normalized_badges),
+        "badge_highlights": badge_highlights[:8],
+        "mastery_highlights": mastery_highlights[:5],
+        "achievement_star_count": achievement_star_count,
+        "achievement_completed_count": achievement_completed_count,
+        "achievement_progress": normalized_achievements,
+    }
+
+
+def _latest_profile_showcase_map(conn) -> dict[str, dict]:
+    rows = conn.execute(
+        "SELECT m.player_tag, p.badges_json, p.achievements_json "
+        "FROM members m "
+        "JOIN player_profile_snapshots p ON p.snapshot_id = ("
+        "  SELECT p2.snapshot_id FROM player_profile_snapshots p2 "
+        "  WHERE p2.member_id = m.member_id "
+        "  ORDER BY p2.fetched_at DESC, p2.snapshot_id DESC LIMIT 1"
+        ")"
+    ).fetchall()
+    result = {}
+    for row in rows:
+        result[row["player_tag"].lstrip("#")] = _profile_showcase_fields(
+            {
+                "badges": json.loads(row["badges_json"] or "[]"),
+                "achievements": json.loads(row["achievements_json"] or "[]"),
+            }
+        )
+    return result
 
 
 def _site_repo() -> str:
@@ -555,6 +722,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
     try:
         member_list = clan_data.get("memberList", [])
         metadata = db.get_member_metadata_map(conn=conn)
+        profile_showcase = _latest_profile_showcase_map(conn)
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         existing = _load_existing_content("roster")
         existing_by_tag = {m["tag"]: m for m in existing.get("members", [])} if existing else {}
@@ -568,6 +736,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
             arena_name = arena.get("name", "") if isinstance(arena, dict) else ""
 
             extra = metadata.get(tag, {})
+            showcase = profile_showcase.get(tag, {})
 
             member = {
                 "name": m.get("name", "Unknown"),
@@ -590,6 +759,12 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                 "cr_games_per_day": extra.get("cr_games_per_day"),
                 "cr_games_per_day_window_days": extra.get("cr_games_per_day_window_days"),
                 "cr_games_per_day_updated_at": extra.get("cr_games_per_day_updated_at"),
+                "badge_count": showcase.get("badge_count"),
+                "badge_highlights": showcase.get("badge_highlights", []),
+                "mastery_highlights": showcase.get("mastery_highlights", []),
+                "achievement_star_count": showcase.get("achievement_star_count"),
+                "achievement_completed_count": showcase.get("achievement_completed_count"),
+                "achievement_progress": showcase.get("achievement_progress", []),
                 "bio": extra.get("bio", ""),
                 "highlight": extra.get("highlight", ""),
             }
@@ -616,6 +791,13 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                         snapshot_payload.setdefault("tag", "#" + tag)
                         snapshot_payload.setdefault("name", member["name"])
                         db.snapshot_player_profile(snapshot_payload, conn=conn)
+                        showcase = _profile_showcase_fields(snapshot_payload)
+                        member["badge_count"] = showcase.get("badge_count")
+                        member["badge_highlights"] = showcase.get("badge_highlights", [])
+                        member["mastery_highlights"] = showcase.get("mastery_highlights", [])
+                        member["achievement_star_count"] = showcase.get("achievement_star_count")
+                        member["achievement_completed_count"] = showcase.get("achievement_completed_count")
+                        member["achievement_progress"] = showcase.get("achievement_progress", [])
                         refreshed_meta = db.get_member_metadata("#" + tag, conn=conn) or {}
                         member["cr_account_age_days"] = refreshed_meta.get("cr_account_age_days")
                         member["cr_account_age_years"] = refreshed_meta.get("cr_account_age_years")
