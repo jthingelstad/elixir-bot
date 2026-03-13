@@ -1065,6 +1065,12 @@ def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
     assert queued["capability_battle_pulse_v1"]["title"] == "Achievement Unlocked: Battle Pulse"
     assert queued["capability_battle_pulse_v1"]["capability_area"] == "battle_pulse"
     assert "Path of Legend" in " ".join(queued["capability_battle_pulse_v1"]["details"])
+    assert queued["capability_badge_and_achievement_celebrations_v1"]["title"] == "Achievement Unlocked: Badge Celebrations"
+    assert queued["capability_badge_and_achievement_celebrations_v1"]["capability_area"] == "badge_celebrations"
+    assert "Years Played" in " ".join(queued["capability_badge_and_achievement_celebrations_v1"]["details"])
+    assert queued["capability_player_profile_depth_v1"]["title"] == "Achievement Unlocked: Deeper Player Profiles"
+    assert queued["capability_player_profile_depth_v1"]["capability_area"] == "player_profile_depth"
+    assert "games-per-day" in queued["capability_player_profile_depth_v1"]["message"]
     assert queued["capability_weekly_clan_recap_v2"]["title"] == "Achievement Unlocked: Weekly Clan Recap"
     assert queued["capability_weekly_clan_recap_v2"]["capability_area"] == "weekly_recap"
     assert "Every Monday" in queued["capability_weekly_clan_recap_v2"]["message"]
@@ -1073,6 +1079,9 @@ def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
     assert queued["capability_long_term_trends_v1"]["capability_area"] == "long_term_trends"
     assert "time-series" in queued["capability_long_term_trends_v1"]["message"]
     assert "future charts" in " ".join(queued["capability_long_term_trends_v1"]["details"])
+    assert queued["capability_roster_showcase_depth_v1"]["title"] == "Achievement Unlocked: Deeper Roster Showcase"
+    assert queued["capability_roster_showcase_depth_v1"]["capability_area"] == "roster_showcase"
+    assert "badge highlights" in queued["capability_roster_showcase_depth_v1"]["message"].lower()
     assert queued["capability_poap_kings_integration_v2"]["title"] == "Achievement Unlocked: Formal POAP KINGS Integration"
     assert queued["capability_poap_kings_integration_v2"]["capability_area"] == "poap_kings_integration"
     assert "behind the scenes" in queued["capability_poap_kings_integration_v2"]["message"]
@@ -1092,8 +1101,11 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
     assert {item["signal_key"] for item in pending} == {
         "capability_memory_system_v1",
         "capability_battle_pulse_v1",
+        "capability_badge_and_achievement_celebrations_v1",
+        "capability_player_profile_depth_v1",
         "capability_weekly_clan_recap_v2",
         "capability_long_term_trends_v1",
+        "capability_roster_showcase_depth_v1",
         "capability_poap_kings_integration_v2",
         "feature_custom_emoji_v1",
     }
