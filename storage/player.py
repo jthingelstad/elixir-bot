@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 from db import (
@@ -22,6 +23,17 @@ from db import (
 )
 
 CARD_UPGRADE_SIGNAL_MIN_LEVEL = 14
+BADGE_NAME_OVERRIDES = {
+    "Classic12Wins": "Classic Challenge 12 Wins",
+    "Grand12Wins": "Grand Challenge 12 Wins",
+    "2xElixir": "2x Elixir",
+}
+
+
+def _split_identifier_words(value: str) -> str:
+    text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", value or "")
+    text = text.replace("_", " ").strip()
+    return re.sub(r"\s+", " ", text)
 
 
 def _is_champion_card(card: dict) -> bool:
@@ -32,6 +44,85 @@ def _is_champion_card(card: dict) -> bool:
     return isinstance(max_level, int) and max_level == 6
 
 
+def _badge_category(name: str | None) -> str:
+    badge_name = str(name or "").strip()
+    if not badge_name:
+        return "general"
+    if badge_name.startswith("Mastery"):
+        return "mastery"
+    if badge_name in {"Classic12Wins", "Grand12Wins"}:
+        return "challenge"
+    if badge_name in {"2v2", "RampUp", "SuddenDeath", "Draft", "2xElixir"}:
+        return "mode"
+    if badge_name in {"EmoteCollection", "BannerCollection", "CollectionLevel", "ClanDonations"}:
+        return "collection"
+    if badge_name.startswith("SeasonalBadge_") or badge_name.startswith("MergeTacticsBadge_"):
+        return "seasonal"
+    if badge_name.startswith("Crl") or badge_name in {"EasterEgg"}:
+        return "event"
+    if badge_name in {"YearsPlayed", "BattleWins", "ClanWarsVeteran", "LadderTop1000"}:
+        return "career"
+    return "general"
+
+
+def _badge_label(name: str | None) -> str | None:
+    badge_name = str(name or "").strip()
+    if not badge_name:
+        return None
+    if badge_name in BADGE_NAME_OVERRIDES:
+        return BADGE_NAME_OVERRIDES[badge_name]
+    if badge_name.startswith("Mastery") and len(badge_name) > len("Mastery"):
+        return f"{_split_identifier_words(badge_name[len('Mastery'):])} Mastery"
+    return _split_identifier_words(badge_name)
+
+
+def _badge_card_name(name: str | None) -> str | None:
+    badge_name = str(name or "").strip()
+    if not badge_name.startswith("Mastery") or len(badge_name) <= len("Mastery"):
+        return None
+    return _split_identifier_words(badge_name[len("Mastery"):])
+
+
+def _badge_signal_fields(badge: dict | None) -> dict:
+    badge = badge or {}
+    name = badge.get("name")
+    fields = {
+        "badge_name": name,
+        "badge_label": _badge_label(name),
+        "badge_category": _badge_category(name),
+        "badge_level": badge.get("level"),
+        "badge_max_level": badge.get("maxLevel"),
+        "progress": badge.get("progress"),
+        "target": badge.get("target"),
+        "is_one_time": badge.get("level") is None,
+    }
+    card_name = _badge_card_name(name)
+    if card_name:
+        fields["badge_card_name"] = card_name
+    return fields
+
+
+def _achievement_signal_fields(achievement: dict | None) -> dict:
+    achievement = achievement or {}
+    return {
+        "achievement_name": achievement.get("name"),
+        "achievement_stars": achievement.get("stars"),
+        "achievement_value": achievement.get("value"),
+        "achievement_target": achievement.get("target"),
+        "achievement_info": achievement.get("info"),
+        "completion_info": achievement.get("completionInfo"),
+    }
+
+
+def _indexed_items(items: list[dict] | None) -> dict[str, dict]:
+    indexed = {}
+    for item in items or []:
+        name = str(item.get("name") or "").strip()
+        if name:
+            indexed[name] = item
+    return indexed
+
+
 def snapshot_player_profile(player_data, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -39,7 +130,7 @@ def snapshot_player_profile(player_data, conn=None):
         tag = _canon_tag(player_data.get("tag"))
         member_id = _ensure_member(conn, tag, player_data.get("name"), status=None)
         previous = conn.execute(
-            "SELECT exp_level, wins, cards_json, current_path_of_legend_season_result_json "
+            "SELECT exp_level, wins, cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json "
             "FROM player_profile_snapshots WHERE member_id = ? "
             "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
             (member_id,),
@@ -161,6 +252,48 @@ def snapshot_player_profile(player_data, conn=None):
                     "old_level": old_card_level,
                     "new_level": new_card_level,
                     "milestone": milestone,
+                })
+
+        previous_badges = _indexed_items(json.loads(previous["badges_json"] or "[]")) if previous and previous["badges_json"] else {}
+        current_badges = _indexed_items(player_data.get("badges") or [])
+        for badge_name, badge in current_badges.items():
+            previous_badge = previous_badges.get(badge_name)
+            if previous_badge is None:
+                signals.append({
+                    "type": "badge_earned",
+                    "tag": tag,
+                    "name": player_data.get("name"),
+                    **_badge_signal_fields(badge),
+                })
+                continue
+            old_level = previous_badge.get("level")
+            new_level = badge.get("level")
+            if isinstance(old_level, int) and isinstance(new_level, int) and new_level > old_level:
+                signals.append({
+                    "type": "badge_level_milestone",
+                    "tag": tag,
+                    "name": player_data.get("name"),
+                    "old_level": old_level,
+                    "new_level": new_level,
+                    **_badge_signal_fields(badge),
+                })
+
+        previous_achievements = _indexed_items(json.loads(previous["achievements_json"] or "[]")) if previous and previous["achievements_json"] else {}
+        current_achievements = _indexed_items(player_data.get("achievements") or [])
+        for achievement_name, achievement in current_achievements.items():
+            previous_achievement = previous_achievements.get(achievement_name) or {}
+            old_stars = previous_achievement.get("stars")
+            new_stars = achievement.get("stars")
+            prior_stars = old_stars if isinstance(old_stars, int) else 0
+            if isinstance(new_stars, int) and new_stars > prior_stars:
+                signals.append({
+                    "type": "achievement_star_milestone",
+                    "tag": tag,
+                    "name": player_data.get("name"),
+                    "old_stars": prior_stars,
+                    "new_stars": new_stars,
+                    "completed": new_stars >= 3,
+                    **_achievement_signal_fields(achievement),
                 })
         return signals
     finally:

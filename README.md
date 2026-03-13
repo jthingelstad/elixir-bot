@@ -5,7 +5,7 @@ LLM-powered clan management bot for **POAP KINGS**, a Clash Royale clan (#J2RGCR
 ## What Elixir Does
 
 - **Heartbeat cadence**: Fetches clan data every 47 minutes with jitter, detects changes (milestones, joins/leaves, war status, deck usage), and posts about what matters — skips when nothing interesting happened
-- **Scheduled player-intel refresh**: Keeps a stale subset of active members' profiles and battle logs warm between the daily POAP KINGS site sync runs, and surfaces progression moments like level-ups and card milestone upgrades
+- **Scheduled player-intel refresh**: Keeps a stale subset of active members' profiles and battle logs warm between the daily POAP KINGS site sync runs, and surfaces progression moments like level-ups, badge/achievement unlocks, and card milestone upgrades
 - **Channel-aware operations**: Elixir answers member questions in `interactive` channels, participates proactively in `clanops`, and routes announcements/onboarding by prompt-defined channel roles
 - **War tracking**: Monitors deck usage on battle days (Thu-Sun), tracks War Champ standings across seasons, and celebrates perfect participation
 - **V2 clan intelligence**: SQLite-backed identity, roster, war, battle-log, and conversation-memory tables support deterministic member and leader answers
