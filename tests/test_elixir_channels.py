@@ -107,6 +107,38 @@ def test_post_to_elixir_sends_content_list_as_multiple_messages():
     assert channel.send.await_args_list[1].args == ("Second post",)
 
 
+def test_entry_posts_merges_related_multipart_updates_into_one_message():
+    posts = elixir._entry_posts(
+        {
+            "content": [
+                "Battle Day 1 is live. Use all 4 decks today.",
+                "We are in 2nd place right now, so early decks matter.",
+                "If you have not started yet, get those war decks in early.",
+            ]
+        }
+    )
+
+    assert len(posts) == 1
+    assert "Battle Day 1 is live." in posts[0]
+    assert "We are in 2nd place right now" in posts[0]
+
+
+def test_entry_posts_keeps_distinct_updates_separate():
+    posts = elixir._entry_posts(
+        {
+            "content": [
+                "King Levy just crossed 9000 trophies.",
+                "Vijay is leading donations this week with 2500 cards given.",
+            ]
+        }
+    )
+
+    assert posts == [
+        "King Levy just crossed 9000 trophies.",
+        "Vijay is leading donations this week with 2500 cards given.",
+    ]
+
+
 def test_post_to_elixir_resolves_custom_emoji_shortcodes():
     guild = SimpleNamespace(emojis=[SimpleNamespace(name="elixir_hype", id=321, animated=False)])
     channel = SimpleNamespace(send=AsyncMock(), guild=guild)
