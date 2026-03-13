@@ -42,6 +42,42 @@ STARTUP_SYSTEM_SIGNALS = [
         },
     },
     {
+        "signal_key": "capability_badge_and_achievement_celebrations_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Badge Celebrations",
+            "message": (
+                "Elixir can now celebrate more of the real Clash Royale milestone moments that matter to the clan. "
+                "Badge tier-ups, achievement star gains, and big profile unlocks can now show up as proper callouts instead of staying buried inside player profiles."
+            ),
+            "details": [
+                "Years Played badge jumps can now be surfaced as real clan celebration moments.",
+                "Achievement star gains and notable badge unlocks can now feed the observation workflow.",
+                "The goal is to make meaningful player progression feel visible and worth reacting to.",
+            ],
+            "audience": "clan",
+            "capability_area": "badge_celebrations",
+        },
+    },
+    {
+        "signal_key": "capability_player_profile_depth_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Deeper Player Profiles",
+            "message": (
+                "Elixir now carries a richer player-profile layer behind the scenes. "
+                "That includes derived Clash Royale account age and a recent games-per-day activity read, so member profiles can talk about more than trophies and role."
+            ),
+            "details": [
+                "Profiles can now carry how long a member has been playing Clash Royale based on Years Played badge data.",
+                "Recent battle activity can now be summarized into a games-per-day style signal instead of raw battle history only.",
+                "This gives roster bios and site experiences more texture when talking about grinders, veterans, and long-time players.",
+            ],
+            "audience": "clan",
+            "capability_area": "player_profile_depth",
+        },
+    },
+    {
         "signal_key": "capability_weekly_clan_recap_v2",
         "signal_type": "capability_unlock",
         "payload": {
@@ -75,6 +111,24 @@ STARTUP_SYSTEM_SIGNALS = [
             ],
             "audience": "clan",
             "capability_area": "long_term_trends",
+        },
+    },
+    {
+        "signal_key": "capability_roster_showcase_depth_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Deeper Roster Showcase",
+            "message": (
+                "The POAP KINGS website roster now has a deeper stat layer available behind the scenes. "
+                "Badge highlights, mastery standouts, achievement progress, account age, and recent activity data can now flow into the website payload instead of stopping at basic roster facts."
+            ),
+            "details": [
+                "Roster payloads can now carry curated badge highlights instead of only bare member basics.",
+                "Top mastery progress and achievement progress are now available for richer site presentation.",
+                "This opens the door to deeper player cards, richer bios, and more personality on poapkings.com.",
+            ],
+            "audience": "clan",
+            "capability_area": "roster_showcase",
         },
     },
     {
