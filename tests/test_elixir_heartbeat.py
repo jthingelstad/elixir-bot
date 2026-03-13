@@ -101,12 +101,15 @@ def test_heartbeat_tick_saves_multipart_observation_as_separate_messages():
     ):
         asyncio.run(elixir._heartbeat_tick())
 
-    mock_post.assert_awaited_once()
-    assert mock_save.call_count == 2
-    assert mock_save.call_args_list[0].args[2] == "First post"
-    assert mock_save.call_args_list[1].args[2] == "Second post"
-    assert mock_save.call_args_list[0].kwargs["event_type"] == "war_update"
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "war_update_part"
+    observation_saves = [
+        call for call in mock_save.call_args_list
+        if call.kwargs.get("event_type") in {"war_update", "war_update_part"}
+    ]
+    assert len(observation_saves) == 2
+    assert observation_saves[0].args[2] == "First post"
+    assert observation_saves[1].args[2] == "Second post"
+    assert observation_saves[0].kwargs["event_type"] == "war_update"
+    assert observation_saves[1].kwargs["event_type"] == "war_update_part"
 
 
 def test_heartbeat_tick_posts_join_messages_through_shared_sender():

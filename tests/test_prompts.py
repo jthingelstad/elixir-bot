@@ -157,3 +157,5 @@ def test_observation_prompt_includes_custom_emoji_guidance():
     assert "Use at most 1-2 custom emoji in most messages." in system_prompt
     assert ":elixir_hype:" in system_prompt
     assert "badge unlocks, badge tier-ups, achievement star gains" in system_prompt
+    assert "default to one Discord message" in system_prompt
+    assert "Do not split one update across multiple near-duplicate messages." in system_prompt
