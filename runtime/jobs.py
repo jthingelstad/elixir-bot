@@ -65,10 +65,19 @@ def _format_weekly_recap_post(recap_text: str, *, now: datetime | None = None) -
 
 def _relayworthy_war_signals(signals):
     relay_signal_types = {
+        "war_battle_day_started",
+        "war_battle_day_live_update",
+        "war_battle_rank_change",
+        "war_battle_day_final_hours",
+        "war_battle_day_complete",
         "war_final_practice_day",
         "war_final_battle_day",
+        "war_practice_day_started",
+        "war_practice_day_complete",
         "war_week_rollover",
         "war_season_rollover",
+        "war_week_complete",
+        "war_season_complete",
     }
     relayworthy = []
     for signal in signals or []:
@@ -79,6 +88,33 @@ def _relayworthy_war_signals(signals):
         if signal_type == "war_completed" and (signal.get("won") or signal.get("our_rank") == 1):
             relayworthy.append(signal)
     return relayworthy
+
+
+def _observation_signal_batches(signals):
+    if not signals:
+        return []
+    grouped = []
+    completion_batch = []
+    batches = []
+    completion_signal_types = {
+        "war_completed",
+        "war_week_complete",
+        "war_champ_standings",
+    }
+    for signal in signals:
+        signal_type = signal.get("type") or ""
+        if signal_type.startswith("war_"):
+            if signal_type in completion_signal_types:
+                completion_batch.append(signal)
+                continue
+            batches.append([signal])
+        else:
+            grouped.append(signal)
+    if grouped:
+        batches.insert(0, grouped)
+    if completion_batch:
+        batches.append(completion_batch)
+    return batches
 
 
 def _system_signal_updates(signals):
@@ -400,7 +436,7 @@ async def _heartbeat_tick():
         await asyncio.to_thread(queue_startup_system_signals)
 
         # Run the heartbeat tick — fetches data, snapshots, detects signals
-        tick_result = heartbeat.tick()
+        tick_result = heartbeat.tick(include_war=False)
         if tick_result.clan.get("memberList"):
             _app._clear_cr_api_failure_alert_if_recovered()
         else:
@@ -487,15 +523,16 @@ async def _heartbeat_tick():
             else:
                 other_signals.append(sig)
 
-        # If there are non-join/leave signals, let the LLM craft a post
+        # If there are non-join/leave signals, let the LLM craft posts
         if other_signals:
-            result = await asyncio.to_thread(
-                elixir_agent.observe_and_post, clan, war,
-                other_signals, recent_posts, channel_memory,
-            )
-            if result is None:
-                log.info("Heartbeat: LLM decided signals not worth posting")
-            else:
+            for signal_batch in _observation_signal_batches(other_signals):
+                result = await asyncio.to_thread(
+                    elixir_agent.observe_and_post, clan, war,
+                    signal_batch, recent_posts, channel_memory,
+                )
+                if result is None:
+                    log.info("Heartbeat: LLM decided signal batch not worth posting")
+                    continue
                 result = await _app._apply_member_refs_to_result(result)
                 await _post_to_elixir(channel, result)
                 posts = _app._entry_posts(result)
@@ -515,16 +552,87 @@ async def _heartbeat_tick():
                             workflow="observation",
                             event_type=post_event_type,
                         )
-                    await asyncio.to_thread(_mark_delivered_signals, other_signals)
+                    await asyncio.to_thread(_mark_delivered_signals, signal_batch)
+                    recent_posts = [*recent_posts, *({"content": post} for post in posts)][-20:]
                 log.info("Posted observation: %s", result.get("summary"))
 
-            await _maybe_post_arena_relay(other_signals, clan, war)
+                await _maybe_post_arena_relay(signal_batch, clan, war)
 
         runtime_status.mark_job_success("heartbeat", f"{len(signals)} signal(s) processed")
 
     except Exception as e:
         log.error("Heartbeat error: %s", e, exc_info=True)
         runtime_status.mark_job_failure("heartbeat", str(e))
+
+
+async def _war_awareness_tick():
+    """Dedicated 24/7 war observer so day rollovers and recaps are not tied to Chicago daytime."""
+    runtime_status.mark_job_start("war_awareness")
+    try:
+        tick_result = heartbeat.tick(include_nonwar=False, include_war=True)
+        if tick_result.clan.get("memberList"):
+            _app._clear_cr_api_failure_alert_if_recovered()
+        else:
+            await _app._maybe_alert_cr_api_failure("war awareness")
+        signals = tick_result.signals
+
+        if not signals:
+            runtime_status.mark_job_success("war_awareness", "no war signals")
+            return
+
+        clan = tick_result.clan
+        war = tick_result.war
+
+        announcements_channel_id = _get_singleton_channel_id("announcements")
+        channel = bot.get_channel(announcements_channel_id)
+        if not channel:
+            runtime_status.mark_job_failure("war_awareness", "announcements channel not found")
+            return
+
+        recent_posts = await asyncio.to_thread(
+            db.list_channel_messages, announcements_channel_id, 20, "assistant",
+        )
+        channel_memory = await asyncio.to_thread(
+            db.build_memory_context,
+            channel_id=announcements_channel_id,
+        )
+
+        for signal_batch in _observation_signal_batches(signals):
+            result = await asyncio.to_thread(
+                elixir_agent.observe_and_post, clan, war,
+                signal_batch, recent_posts, channel_memory,
+            )
+            if result is None:
+                log.info("War awareness: LLM decided signal batch not worth posting")
+                continue
+            result = await _app._apply_member_refs_to_result(result)
+            await _post_to_elixir(channel, result)
+            posts = _app._entry_posts(result)
+            if posts:
+                summary = result.get("summary")
+                event_type = result.get("event_type")
+                for index, post in enumerate(posts):
+                    post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
+                    post_event_type = event_type if index == 0 else f"{event_type}_part" if event_type else None
+                    await asyncio.to_thread(
+                        db.save_message,
+                        _channel_scope(channel), "assistant", post,
+                        summary=post_summary,
+                        channel_id=channel.id,
+                        channel_name=getattr(channel, "name", None),
+                        channel_kind=str(channel.type),
+                        workflow="observation",
+                        event_type=post_event_type,
+                    )
+                await asyncio.to_thread(_mark_delivered_signals, signal_batch)
+                recent_posts = [*recent_posts, *({"content": post} for post in posts)][-20:]
+
+            await _maybe_post_arena_relay(signal_batch, clan, war)
+
+        runtime_status.mark_job_success("war_awareness", f"{len(signals)} war signal(s) processed")
+    except Exception as e:
+        log.error("War awareness error: %s", e, exc_info=True)
+        runtime_status.mark_job_failure("war_awareness", str(e))
 
 
 # ── Site content for poapkings.com ────────────────────────────────────────────
@@ -545,6 +653,7 @@ def _player_intel_refresh_minutes() -> int:
 
 PLAYER_INTEL_REFRESH_MINUTES = _player_intel_refresh_minutes()
 PLAYER_INTEL_REFRESH_HOURS = PLAYER_INTEL_REFRESH_MINUTES / 60
+WAR_AWARENESS_INTERVAL_MINUTES = int(os.getenv("WAR_AWARENESS_INTERVAL_MINUTES", "15"))
 PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "5"))
 PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "1"))
 PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))

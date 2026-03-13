@@ -130,6 +130,14 @@ def register_elixir_app_commands(bot) -> None:
             event_type="clan_status_short_report" if short else "clan_status_report",
         )
 
+    @elixir_commands.command(name="war-status", description="Show the live war-awareness status report.")
+    async def slash_war_status(interaction: discord.Interaction):
+        await run_admin_interaction(
+            interaction,
+            command_name="war-status",
+            event_type="war_status_report",
+        )
+
     @elixir_commands.command(name="clan-list", description="List active clan members.")
     @app_commands.describe(full="Return the expanded metadata variant.")
     async def slash_clan_list(interaction: discord.Interaction, full: bool = False):

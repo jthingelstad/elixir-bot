@@ -68,6 +68,39 @@ def test_heartbeat_tick_reseeds_startup_system_signals_before_tick():
     mock_queue.assert_called_once_with()
 
 
+def test_war_awareness_tick_uses_war_only_bundle():
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[{"type": "war_battle_day_live_update", "season_id": 129, "day_number": 1}],
+        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
+        war={"state": "warDay"},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 123
+    channel.name = "announcements"
+    channel.type = "text"
+
+    with (
+        patch("runtime.jobs._get_singleton_channel_id", return_value=123),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.heartbeat.tick", return_value=bundle) as mock_tick,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={"channel": {"state": None, "episodes": []}}),
+        patch("elixir.db.save_message"),
+        patch("elixir.db.mark_signal_sent"),
+        patch("elixir.elixir_agent.observe_and_post", return_value={"content": "msg", "summary": "s"}),
+        patch("elixir._post_to_elixir", new=AsyncMock()),
+        patch("elixir._maybe_post_arena_relay", new=AsyncMock()),
+    ):
+        asyncio.run(elixir._war_awareness_tick())
+
+    mock_tick.assert_called_once_with(include_nonwar=False, include_war=True)
+
+
 def test_heartbeat_tick_saves_multipart_observation_as_separate_messages():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[{"type": "war_week_rollover", "season_id": 130, "week": 1}],
@@ -181,7 +214,7 @@ def test_heartbeat_tick_marks_non_system_signal_sent_after_successful_post():
     ):
         asyncio.run(elixir._heartbeat_tick())
 
-    mock_post.assert_awaited_once()
+    assert mock_post.await_count >= 1
     mock_mark_signal_sent.assert_called_once_with("war_week_rollover", db.chicago_today())
 
 
@@ -1163,6 +1196,7 @@ def test_detect_war_day_transition_emits_battle_phase_active_from_api_state():
 
         assert signals == [{
             "type": "war_battle_phase_active",
+            "signal_log_type": "war_battle_phase_active::slive-w00-p003",
             "season_id": None,
             "week": 1,
             "section_index": 0,
@@ -1200,6 +1234,7 @@ def test_detect_war_day_transition_emits_practice_phase_active_from_api_state():
 
         assert signals == [{
             "type": "war_practice_phase_active",
+            "signal_log_type": "war_practice_phase_active::slive-w01-p001",
             "season_id": None,
             "week": 2,
             "section_index": 1,
@@ -1453,6 +1488,7 @@ def test_detect_war_day_transition_marks_battle_phase_complete_from_api_transiti
         assert signals[0]["period_type"] == "trainingDay"
         assert signals[1] == {
             "type": "war_battle_days_complete",
+            "signal_log_type": "war_battle_days_complete::slive-w00-p006",
             "previous_season_id": None,
             "season_id": None,
             "previous_week": 1,
@@ -1463,3 +1499,227 @@ def test_detect_war_day_transition_marks_battle_phase_complete_from_api_transiti
         }
     finally:
         conn.close()
+
+
+def test_detect_war_deck_usage_skips_empty_battle_day_snapshots():
+    conn = db.get_connection(":memory:")
+    try:
+        war = {
+            "state": "full",
+            "sectionIndex": 1,
+            "periodIndex": 10,
+            "periodType": "warDay",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 0, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 0, "decksUsedToday": 0},
+                    {"tag": "#DEF456", "name": "Vijay", "fame": 0, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 0, "decksUsedToday": 0},
+                ],
+            },
+        }
+        db.upsert_war_current_state(war, conn=conn)
+
+        signals = heartbeat.detect_war_deck_usage(war, conn=conn)
+
+        assert signals == []
+    finally:
+        conn.close()
+
+
+def test_detect_war_day_markers_emits_day_start_and_prior_day_recap():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#ABC123", "name": "King Levy", "role": "leader"},
+                {"tag": "#DEF456", "name": "Vijay", "role": "member"},
+            ],
+            conn=conn,
+        )
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T10:00:00"):
+            db.upsert_war_current_state(
+                {
+                    "seasonId": 129,
+                    "sectionIndex": 1,
+                    "periodIndex": 10,
+                    "periodType": "warDay",
+                    "state": "full",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 800,
+                        "repairPoints": 0,
+                        "periodPoints": 800,
+                        "clanScore": 151,
+                        "participants": [
+                            {"tag": "#ABC123", "name": "King Levy", "fame": 500, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 4},
+                            {"tag": "#DEF456", "name": "Vijay", "fame": 100, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 1, "decksUsedToday": 1},
+                        ],
+                    },
+                    "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 800, "repairPoints": 0, "periodPoints": 800, "clanScore": 151}],
+                },
+                conn=conn,
+            )
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-14T10:05:00"):
+            db.upsert_war_current_state(
+                {
+                    "seasonId": 129,
+                    "sectionIndex": 1,
+                    "periodIndex": 11,
+                    "periodType": "warDay",
+                    "state": "full",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 1200,
+                        "repairPoints": 0,
+                        "periodPoints": 400,
+                        "clanScore": 152,
+                        "participants": [
+                            {"tag": "#ABC123", "name": "King Levy", "fame": 500, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 0},
+                            {"tag": "#DEF456", "name": "Vijay", "fame": 100, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 1, "decksUsedToday": 0},
+                        ],
+                    },
+                    "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 1200, "repairPoints": 0, "periodPoints": 400, "clanScore": 152}],
+                },
+                conn=conn,
+            )
+
+        signals = heartbeat.detect_war_day_markers(conn=conn)
+
+        assert [signal["type"] for signal in signals] == [
+            "war_battle_day_started",
+            "war_battle_day_complete",
+        ]
+        assert signals[0]["phase_display"] == "Battle Day 2"
+        assert signals[1]["phase_display"] == "Battle Day 1"
+        assert signals[1]["finished_count"] == 1
+        assert signals[1]["engaged_count"] == 2
+        assert signals[1]["top_fame_today"][0]["name"] == "King Levy"
+    finally:
+        conn.close()
+
+
+def test_detect_war_week_complete_enriches_completion_signal():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#ABC123", "name": "King Levy", "role": "leader"},
+                {"tag": "#DEF456", "name": "Vijay", "role": "member"},
+            ],
+            conn=conn,
+        )
+        db.store_war_log(
+            {
+                "items": [
+                    {
+                        "seasonId": 129,
+                        "sectionIndex": 1,
+                        "createdDate": "20260308T120000.000Z",
+                        "standings": [
+                            {
+                                "rank": 1,
+                                "trophyChange": 20,
+                                "clan": {
+                                    "tag": "#J2RGCRVG",
+                                    "name": "POAP KINGS",
+                                    "fame": 14000,
+                                    "finishTime": "20260308T180000.000Z",
+                                    "participants": [
+                                        {"tag": "#ABC123", "name": "King Levy", "fame": 3600, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 0},
+                                        {"tag": "#DEF456", "name": "Vijay", "fame": 2400, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 0},
+                                    ],
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+            "J2RGCRVG",
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_war_week_complete(
+            [{
+                "type": "war_completed",
+                "season_id": 129,
+                "section_index": 1,
+                "our_rank": 1,
+                "our_fame": 14000,
+                "total_clans": 5,
+                "won": True,
+            }],
+            conn=conn,
+        )
+
+        assert signals[0]["type"] == "war_week_complete"
+        assert signals[0]["week"] == 2
+        assert signals[0]["week_summary"]["top_participants"][0]["name"] == "King Levy"
+    finally:
+        conn.close()
+
+
+def test_detect_war_completion_retries_until_signal_is_marked():
+    conn = db.get_connection(":memory:")
+    try:
+        race_log = {
+            "items": [
+                {
+                    "seasonId": 129,
+                    "sectionIndex": 1,
+                    "createdDate": "20260308T120000.000Z",
+                    "standings": [
+                        {
+                            "rank": 1,
+                            "trophyChange": 20,
+                            "clan": {
+                                "tag": "#J2RGCRVG",
+                                "name": "POAP KINGS",
+                                "fame": 14000,
+                                "finishTime": "20260308T180000.000Z",
+                                "participants": [],
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+
+        with patch("heartbeat.cr_api.get_river_race_log", return_value=race_log):
+            first = heartbeat.detect_war_completion("J2RGCRVG", conn=conn)
+            second = heartbeat.detect_war_completion("J2RGCRVG", conn=conn)
+
+        assert len(first) == 1
+        assert first[0]["type"] == "war_completed"
+        assert first[0]["signal_log_type"] == "war_completed::129:1"
+        assert len(second) == 1
+
+        db.mark_signal_sent("war_completed::129:1", db.chicago_today(), conn=conn)
+
+        with patch("heartbeat.cr_api.get_river_race_log", return_value=race_log):
+            third = heartbeat.detect_war_completion("J2RGCRVG", conn=conn)
+
+        assert third == []
+    finally:
+        conn.close()
+
+
+def test_observation_signal_batches_group_completion_family_together():
+    batches = elixir._observation_signal_batches(
+        [
+            {"type": "war_completed", "season_id": 129, "section_index": 1},
+            {"type": "war_week_complete", "season_id": 129, "section_index": 1},
+            {"type": "war_champ_standings", "season_id": 129, "section_index": 1},
+            {"type": "war_battle_day_complete", "season_id": 129, "day_number": 1},
+        ]
+    )
+
+    assert len(batches) == 2
+    assert [signal["type"] for signal in batches[0]] == ["war_battle_day_complete"]
+    assert [signal["type"] for signal in batches[1]] == [
+        "war_completed",
+        "war_week_complete",
+        "war_champ_standings",
+    ]

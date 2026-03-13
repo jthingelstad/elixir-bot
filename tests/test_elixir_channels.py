@@ -951,6 +951,25 @@ def test_dispatch_admin_command_handles_memory():
     )
 
 
+def test_dispatch_admin_command_handles_war_status():
+    with (
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS"}, {"clans": [{}, {}]}))) as mock_load,
+        patch("elixir._build_war_status_report", return_value="**POAP KINGS War Status**\n- Live: Battle Day 2") as mock_report,
+    ):
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "war-status",
+                preview=False,
+                short=False,
+                args={},
+            )
+        )
+
+    assert result == "**POAP KINGS War Status**\n- Live: Battle Day 2"
+    mock_load.assert_awaited_once_with()
+    mock_report.assert_called_once_with({"name": "POAP KINGS"}, {"clans": [{}, {}]})
+
+
 def test_slash_clan_list_full_passes_flag_to_admin_dispatch():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
@@ -981,6 +1000,39 @@ def test_slash_clan_list_full_passes_flag_to_admin_dispatch():
     )
     response.defer.assert_awaited_once_with(ephemeral=True)
     interaction.edit_original_response.assert_awaited_once_with(content="full list")
+    followup.send.assert_not_awaited()
+
+
+def test_slash_war_status_dispatches_to_admin():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+    war_status_command = root.get_command("war-status")
+
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    followup = SimpleNamespace(send=AsyncMock())
+    interaction = SimpleNamespace(
+        channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
+        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[]),
+        response=response,
+        followup=followup,
+        edit_original_response=AsyncMock(),
+    )
+
+    with (
+        patch("runtime.app._is_clanops_channel", return_value=True),
+        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="war report")) as mock_dispatch,
+    ):
+        asyncio.run(war_status_command.callback(interaction))
+
+    mock_dispatch.assert_awaited_once_with(
+        "war-status",
+        preview=False,
+        short=False,
+        args={},
+    )
+    response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.edit_original_response.assert_awaited_once_with(content="war report")
     followup.send.assert_not_awaited()
 
 
@@ -1088,6 +1140,10 @@ def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
     assert "website publishing now lives in a dedicated integration" in " ".join(
         queued["capability_poap_kings_integration_v2"]["details"]
     )
+    assert queued["capability_war_awareness_v1"]["title"] == "Achievement Unlocked: War Awareness"
+    assert queued["capability_war_awareness_v1"]["capability_area"] == "war_awareness"
+    assert "live game-driven phases" in queued["capability_war_awareness_v1"]["message"]
+    assert "day-by-day battle recaps" in " ".join(queued["capability_war_awareness_v1"]["details"])
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
@@ -1107,6 +1163,7 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
         "capability_long_term_trends_v1",
         "capability_roster_showcase_depth_v1",
         "capability_poap_kings_integration_v2",
+        "capability_war_awareness_v1",
         "feature_custom_emoji_v1",
     }
 
@@ -1384,6 +1441,39 @@ def test_on_message_hints_for_bare_clanops_clan_status_command():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_hints_for_bare_clanops_war_status_command():
+    message = _make_message(200, "clan-ops", "war status")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.dispatch_admin_command", new=AsyncMock()) as mock_admin,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    message.reply.assert_awaited_once()
+    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    mock_admin.assert_not_awaited()
+    mock_respond.assert_not_called()
+    mock_process.assert_not_awaited()
+
+
 def test_on_message_hints_for_bare_clanops_help_command():
     message = _make_message(200, "clan-ops", "help")
 
@@ -1616,6 +1706,81 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
     assert "War today: 2 used all 4 decks | 3 used some | 2 unused" in report
     assert "Recent joins: New Guy (join timing unknown)" in report
     assert "Cold streaks: Finn lost 3 straight" in report
+
+
+def test_build_war_status_report_summarizes_current_war_awareness():
+    with (
+        patch("elixir.db.get_current_war_status", return_value={
+            "clan_name": "POAP KINGS",
+            "war_state": "full",
+            "season_id": 129,
+            "week": 2,
+            "phase_display": "Battle Day 2",
+            "race_rank": 2,
+            "fame": 15400,
+            "clan_score": 4780,
+            "period_points": 800,
+        }),
+        patch("elixir.db.get_current_war_day_state", return_value={
+            "season_id": 129,
+            "section_index": 1,
+            "phase": "battle",
+            "phase_display": "Battle Day 2",
+            "time_left_text": "22h 29m",
+            "war_day_key": "s00129-w01-p011",
+            "engaged_count": 17,
+            "finished_count": 9,
+            "untouched_count": 8,
+            "total_participants": 25,
+            "top_fame_today": [
+                {"member_ref": "King Levy", "fame_today": 800},
+                {"member_ref": "Finn", "fame_today": 600},
+            ],
+            "used_none": [
+                {"member_ref": "Vijay"},
+                {"member_ref": "Ditika"},
+            ],
+        }),
+        patch("elixir.db.get_war_week_summary", return_value={
+            "participant_count": 23,
+            "top_participants": [
+                {"member_ref": "King Levy", "fame": 3200},
+                {"member_ref": "Finn", "fame": 2900},
+            ],
+            "day_summaries": [
+                {"phase": "battle", "phase_display": "Battle Day 1", "engaged_count": 20, "finished_count": 11, "top_fame_today": [{"member_ref": "King Levy"}]},
+            ],
+            "race": None,
+        }),
+        patch("elixir.db.get_war_season_summary", return_value={
+            "races": 2,
+            "total_clan_fame": 30100,
+            "fame_per_active_member": 1204.0,
+            "top_contributors": [
+                {"member_ref": "King Levy", "total_fame": 6200},
+                {"member_ref": "Finn", "total_fame": 5800},
+            ],
+            "nonparticipants": [{"member_ref": "Vijay"}],
+        }),
+        patch("elixir.db.list_recent_war_day_summaries", return_value=[
+            {"phase": "battle", "phase_display": "Battle Day 2", "engaged_count": 17, "finished_count": 9, "top_fame_today": [{"member_ref": "King Levy"}]},
+            {"phase": "battle", "phase_display": "Battle Day 1", "engaged_count": 20, "finished_count": 11, "top_fame_today": [{"member_ref": "Finn"}]},
+        ]),
+        patch("elixir.db.get_latest_clan_boat_defense_status", return_value=None),
+    ):
+        report = elixir._build_war_status_report(
+            {"name": "POAP KINGS"},
+            {"clans": [{}, {}, {}, {}, {}]},
+        )
+
+    assert report.startswith("**POAP KINGS War Status**")
+    assert "Live: state full | season 129 | week 2 | Battle Day 2 | rank 2" in report
+    assert "Clock: Battle Day 2 | time left 22h 29m | key `s00129-w01-p011`" in report
+    assert "Engagement: 17 engaged | 9 finished all 4 | 8 untouched | 25 tracked" in report
+    assert "Leaders today: King Levy 800, Finn 600" in report
+    assert "Waiting on: Vijay, Ditika" in report
+    assert "This season: 2 race(s) | total fame 30,100 | fame/member 1,204.00 | top King Levy 6,200, Finn 5,800" in report
+    assert "Live feed: 5 clan(s) in the current river race" in report
 
 
 def test_build_clan_status_report_uses_non_war_risk_watchlist():

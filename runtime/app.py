@@ -467,6 +467,16 @@ async def on_ready():
         )
         scheduler.add_job(
             lambda: bot.loop.call_soon_threadsafe(
+                lambda: bot.loop.create_task(_war_awareness_tick())
+            ),
+            "interval",
+            minutes=WAR_AWARENESS_INTERVAL_MINUTES,
+            id="war-awareness",
+            max_instances=1,
+            coalesce=True,
+        )
+        scheduler.add_job(
+            lambda: bot.loop.call_soon_threadsafe(
                 lambda: bot.loop.create_task(_clanops_weekly_review())
             ),
             "cron",
@@ -497,10 +507,10 @@ async def on_ready():
         )
         scheduler.start()
         log.info("Scheduler started — heartbeat every %d minutes with up to %ds jitter (active %dam-%dpm Chicago), "
-                 "poap-kings-site-sync at %s, player-intel every %d minutes, clanops-review %s at %02d:00, weekly-recap %s at %02d:00, "
+                 "war-awareness every %d minutes (24/7), poap-kings-site-sync at %s, player-intel every %d minutes, clanops-review %s at %02d:00, weekly-recap %s at %02d:00, "
                  "promotion %s at %02d:00",
                  HEARTBEAT_INTERVAL_MINUTES, HEARTBEAT_JITTER_SECONDS, HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
-                 _format_hour_label(SITE_CONTENT_HOUR), PLAYER_INTEL_REFRESH_MINUTES,
+                 WAR_AWARENESS_INTERVAL_MINUTES, _format_hour_label(SITE_CONTENT_HOUR), PLAYER_INTEL_REFRESH_MINUTES,
                  CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR,
                  WEEKLY_RECAP_DAY, WEEKLY_RECAP_HOUR,
                  PROMOTION_CONTENT_DAY, PROMOTION_CONTENT_HOUR)
@@ -525,6 +535,7 @@ def _is_legacy_clanops_command_text(text: str) -> bool:
         _is_help_request(text)
         or _is_status_request(text)
         or _is_schedule_request(text)
+        or _is_war_status_request(text)
         or _clan_status_mode(text)
         or _is_clan_list_request(text)
         or _extract_profile_target(text)

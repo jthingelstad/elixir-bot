@@ -6,10 +6,9 @@ from db import (
     _canon_tag,
     _member_reference_fields,
     _parse_cr_time,
-    _utcnow,
     get_connection,
 )
-from storage.war_status import _season_bounds, get_current_season_id
+from storage.war_status import _season_bounds, get_current_season_id, get_current_war_status
 
 def _format_member_reference(*args, **kwargs):
     from storage.identity import format_member_reference
@@ -24,13 +23,23 @@ def get_member_war_status(tag, season_id=None, conn=None):
         if season_id is None:
             season_id = get_current_season_id(conn=conn)
         current_day = None
-        today = _utcnow()[:10]
-        current_day_row = conn.execute(
-            "SELECT w.battle_date, w.decks_used_today, w.decks_used_total, w.fame, w.repair_points "
-            "FROM war_day_status w JOIN members m ON m.member_id = w.member_id "
-            "WHERE m.player_tag = ? AND w.battle_date = ?",
-            (canon_tag, today),
-        ).fetchone()
+        current_war = get_current_war_status(conn=conn)
+        current_war_key = (current_war or {}).get("war_day_key")
+        current_day_row = None
+        if current_war and current_war.get("battle_phase_active") and current_war_key:
+            current_day_row = conn.execute(
+                "SELECT w.battle_date, w.decks_used_today, w.decks_used_total, w.fame, w.repair_points "
+                "FROM war_day_status w JOIN members m ON m.member_id = w.member_id "
+                "WHERE m.player_tag = ? AND w.battle_date = ?",
+                (canon_tag, current_war_key),
+            ).fetchone()
+        elif not current_war or current_war.get("phase") is None:
+            current_day_row = conn.execute(
+                "SELECT w.battle_date, w.decks_used_today, w.decks_used_total, w.fame, w.repair_points "
+                "FROM war_day_status w JOIN members m ON m.member_id = w.member_id "
+                "WHERE m.player_tag = ? ORDER BY w.observed_at DESC, w.battle_date DESC LIMIT 1",
+                (canon_tag,),
+            ).fetchone()
         if current_day_row:
             current_day = dict(current_day_row)
             current_day["decks_left_today"] = max(0, 4 - (current_day["decks_used_today"] or 0))
@@ -210,12 +219,20 @@ def get_member_missed_war_days(tag, season_id=None, conn=None):
         start_bound, end_bound = _season_bounds(conn, season_id)
         if not start_bound or not end_bound:
             return None
-        start_dt = _parse_cr_time(start_bound)
-        end_dt = _parse_cr_time(end_bound)
         tracked_days = conn.execute(
-            "SELECT DISTINCT battle_date FROM war_day_status WHERE battle_date >= ? AND battle_date < ? ORDER BY battle_date",
-            (start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")),
+            "SELECT DISTINCT battle_date, section_index, period_index, phase_day_number "
+            "FROM war_day_status WHERE season_id = ? AND phase = 'battle' "
+            "ORDER BY section_index ASC, period_index ASC, battle_date ASC",
+            (season_id,),
         ).fetchall()
+        if not tracked_days:
+            start_dt = _parse_cr_time(start_bound)
+            end_dt = _parse_cr_time(end_bound)
+            tracked_days = conn.execute(
+                "SELECT DISTINCT battle_date, NULL AS section_index, NULL AS period_index, NULL AS phase_day_number "
+                "FROM war_day_status WHERE battle_date >= ? AND battle_date < ? ORDER BY battle_date",
+                (start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")),
+            ).fetchall()
         missed = []
         participated = 0
         for row in tracked_days:
@@ -226,7 +243,10 @@ def get_member_missed_war_days(tag, season_id=None, conn=None):
             if status and (status["decks_used_today"] or 0) > 0:
                 participated += 1
             else:
-                missed.append(row["battle_date"])
+                if row["section_index"] is not None and row["phase_day_number"] is not None:
+                    missed.append(f"Week {row['section_index'] + 1} Battle Day {row['phase_day_number']}")
+                else:
+                    missed.append(row["battle_date"])
         return {
             "season_id": season_id,
             "tag": canon_tag,

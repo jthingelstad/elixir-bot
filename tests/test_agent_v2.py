@@ -224,6 +224,14 @@ def test_execute_tool_get_current_war_status_uses_db():
         mock_db.get_current_war_status.assert_called_once_with()
 
 
+def test_execute_tool_get_current_war_day_state_uses_db():
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.get_current_war_day_state.return_value = {"war_day_key": "s00129-w01-p010", "phase_display": "Battle Day 1"}
+        result = json.loads(elixir_agent._execute_tool("get_current_war_day_state", {}))
+        assert result == {"war_day_key": "s00129-w01-p010", "phase_display": "Battle Day 1"}
+        mock_db.get_current_war_day_state.assert_called_once_with()
+
+
 def test_execute_tool_get_member_war_attendance_resolves_member():
     with patch("elixir_agent.db") as mock_db:
         mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 950}]

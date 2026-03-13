@@ -24,6 +24,7 @@ COMMAND_HELP = {
     "status": "Show Elixir runtime health, last jobs, and current telemetry.",
     "schedule": "Show the configured job cadence and next scheduler runs.",
     "clan-status": "Fetch live clan/war data and print the operational clan status report.",
+    "war-status": "Fetch live clan/war data and print Elixir's current war-awareness report.",
     "clan-list": "List active clan members. Default shows name, tag, and Discord name; `full` adds join/birthday/profile/POAP status.",
     "profile": "Show the stored member profile and metadata for one member.",
     "memory": "Inspect Elixir's stored conversation and contextual memory.",
@@ -88,6 +89,7 @@ COMMAND_ORDER = [
     "status",
     "schedule",
     "clan-status",
+    "war-status",
     "clan-list",
     "profile",
     "memory",
@@ -123,6 +125,7 @@ ZERO_ARG_COMMANDS = {
     "status",
     "schedule",
     "clan-status",
+    "war-status",
     "heartbeat",
     "system-signals",
     "poap-kings-sync",
@@ -274,7 +277,7 @@ def parse_admin_command(text: str, *, require_prefix: bool = False):
 
     if command == "help" and not extra:
         return {"command": "help", "preview": preview, "short": False, "args": {}}
-    if command in {"status", "schedule"} and not extra:
+    if command in {"status", "schedule", "war-status"} and not extra:
         return {"command": command, "preview": preview, "short": False, "args": {}}
     if command == "clan-status" and not extra:
         return {"command": command, "preview": preview, "short": short, "args": {}}
@@ -990,6 +993,9 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
         if short:
             return elixir._build_clan_status_short_report(clan, war)
         return elixir._build_clan_status_report(clan, war)
+    if command == "war-status":
+        clan, war = await elixir._load_live_clan_context()
+        return elixir._build_war_status_report(clan, war)
     if command == "clan-list":
         return await asyncio.to_thread(
             _build_clan_list_report,

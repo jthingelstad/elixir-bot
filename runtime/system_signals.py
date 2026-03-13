@@ -150,6 +150,25 @@ STARTUP_SYSTEM_SIGNALS = [
         },
     },
     {
+        "signal_key": "capability_war_awareness_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: War Awareness",
+            "message": (
+                "Elixir just got a massive River Race intelligence upgrade. "
+                "I now track war periods as live game-driven phases instead of relying on calendar assumptions, "
+                "which means I can follow each practice day and battle day with much stronger awareness of what is actually happening in the race."
+            ),
+            "details": [
+                "Elixir now knows the active war phase, which day of practice or battle we are in, which week of the season it is, and how much time is left in the current war day.",
+                "Battle-day tracking is much deeper now: Elixir can follow who has used all, some, or none of their decks, who is leading the day in fame, and who still needs a nudge.",
+                "War storytelling is much stronger now too, with day-by-day battle recaps, richer weekly war recaps, and season-level war context built from tracked participation over time.",
+            ],
+            "audience": "clan",
+            "capability_area": "war_awareness",
+        },
+    },
+    {
         "signal_key": "feature_custom_emoji_v1",
         "signal_type": "capability_unlock",
         "payload": {
