@@ -1534,6 +1534,128 @@ def test_snapshot_player_profile_ignores_lower_level_card_upgrade_signals():
         conn.close()
 
 
+def test_snapshot_player_profile_detects_badge_and_achievement_milestones():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "badges": [
+                    {"name": "MasteryKnight", "level": 1, "maxLevel": 10, "progress": 10, "target": 25},
+                    {"name": "CrlSpectator2022", "progress": 1},
+                ],
+                "achievements": [
+                    {"name": "Friend in Need", "stars": 1, "value": 240, "target": 250, "info": "Donate 250 cards", "completionInfo": None},
+                    {"name": "Team Player", "stars": 0, "value": 0, "target": 1, "info": "Join a Clan", "completionInfo": None},
+                ],
+            },
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "badges": [
+                    {"name": "MasteryKnight", "level": 2, "maxLevel": 10, "progress": 30, "target": 50},
+                    {"name": "CrlSpectator2022", "progress": 1},
+                    {"name": "Classic12Wins", "level": 1, "maxLevel": 8, "progress": 1, "target": 10},
+                ],
+                "achievements": [
+                    {"name": "Friend in Need", "stars": 2, "value": 520, "target": 500, "info": "Donate 500 cards", "completionInfo": None},
+                    {"name": "Team Player", "stars": 1, "value": 1, "target": 1, "info": "Join a Clan", "completionInfo": "Clan joined"},
+                ],
+            },
+            conn=conn,
+        )
+
+        assert any(
+            sig["type"] == "badge_level_milestone"
+            and sig["badge_name"] == "MasteryKnight"
+            and sig["badge_card_name"] == "Knight"
+            and sig["old_level"] == 1
+            and sig["new_level"] == 2
+            for sig in signals
+        )
+        assert any(
+            sig["type"] == "badge_earned"
+            and sig["badge_name"] == "Classic12Wins"
+            and sig["badge_category"] == "challenge"
+            and sig["badge_label"] == "Classic Challenge 12 Wins"
+            and sig["is_one_time"] is False
+            for sig in signals
+        )
+        assert any(
+            sig["type"] == "achievement_star_milestone"
+            and sig["achievement_name"] == "Friend in Need"
+            and sig["old_stars"] == 1
+            and sig["new_stars"] == 2
+            and sig["completed"] is False
+            for sig in signals
+        )
+        assert any(
+            sig["type"] == "achievement_star_milestone"
+            and sig["achievement_name"] == "Team Player"
+            and sig["old_stars"] == 0
+            and sig["new_stars"] == 1
+            and sig["achievement_info"] == "Join a Clan"
+            for sig in signals
+        )
+    finally:
+        conn.close()
+
+
+def test_snapshot_player_profile_ignores_badge_progress_without_tier_change():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "badges": [
+                    {"name": "MasteryKnight", "level": 1, "maxLevel": 10, "progress": 10, "target": 25},
+                ],
+                "achievements": [
+                    {"name": "Friend in Need", "stars": 1, "value": 240, "target": 250, "info": "Donate 250 cards", "completionInfo": None},
+                ],
+            },
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "badges": [
+                    {"name": "MasteryKnight", "level": 1, "maxLevel": 10, "progress": 24, "target": 25},
+                ],
+                "achievements": [
+                    {"name": "Friend in Need", "stars": 1, "value": 249, "target": 250, "info": "Donate 250 cards", "completionInfo": None},
+                ],
+            },
+            conn=conn,
+        )
+
+        assert signals == []
+    finally:
+        conn.close()
+
+
 def test_role_change_and_war_battle_queries():
     conn = db.get_connection(":memory:")
     try:
