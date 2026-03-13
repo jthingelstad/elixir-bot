@@ -487,6 +487,12 @@ def _migration_0(conn: sqlite3.Connection) -> None:
             joined_at TEXT,
             birth_month INTEGER,
             birth_day INTEGER,
+            cr_account_age_days INTEGER,
+            cr_account_age_years INTEGER,
+            cr_account_age_updated_at TEXT,
+            cr_games_per_day REAL,
+            cr_games_per_day_window_days INTEGER,
+            cr_games_per_day_updated_at TEXT,
             profile_url TEXT DEFAULT '',
             poap_address TEXT DEFAULT '',
             note TEXT DEFAULT '',
@@ -1340,7 +1346,29 @@ def _migration_11(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11]
+def _migration_12(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "member_metadata")
+    for name, sql_type in (
+        ("cr_account_age_days", "INTEGER"),
+        ("cr_account_age_years", "INTEGER"),
+        ("cr_account_age_updated_at", "TEXT"),
+    ):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE member_metadata ADD COLUMN {name} {sql_type}")
+
+
+def _migration_13(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "member_metadata")
+    for name, sql_type in (
+        ("cr_games_per_day", "REAL"),
+        ("cr_games_per_day_window_days", "INTEGER"),
+        ("cr_games_per_day_updated_at", "TEXT"),
+    ):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE member_metadata ADD COLUMN {name} {sql_type}")
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

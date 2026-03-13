@@ -15,6 +15,7 @@ from db import (
     _member_reference_fields,
     _store_raw_payload,
     _tag_key,
+    _upsert_member_metadata,
     _utcnow,
     chicago_today,
     chicago_date_for_cr_timestamp,
@@ -23,6 +24,7 @@ from db import (
 )
 
 CARD_UPGRADE_SIGNAL_MIN_LEVEL = 14
+GAMES_PER_DAY_WINDOW_DAYS = 14
 BADGE_NAME_OVERRIDES = {
     "Classic12Wins": "Classic Challenge 12 Wins",
     "Grand12Wins": "Grand Challenge 12 Wins",
@@ -123,6 +125,39 @@ def _indexed_items(items: list[dict] | None) -> dict[str, dict]:
     return indexed
 
 
+def _years_played_metadata_fields(player_data: dict, *, fetched_at: str) -> dict:
+    badges = player_data.get("badges") or []
+    years_played = next((badge for badge in badges if badge.get("name") == "YearsPlayed"), None)
+    if not years_played:
+        return {
+            "cr_account_age_days": None,
+            "cr_account_age_years": None,
+            "cr_account_age_updated_at": fetched_at,
+        }
+    age_days = years_played.get("progress")
+    age_years = years_played.get("level")
+    return {
+        "cr_account_age_days": age_days if isinstance(age_days, int) and age_days >= 0 else None,
+        "cr_account_age_years": age_years if isinstance(age_years, int) and age_years >= 0 else None,
+        "cr_account_age_updated_at": fetched_at,
+    }
+
+
+def _games_per_day_metadata_fields(member_id: int, *, computed_at: str, conn) -> dict:
+    cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(GAMES_PER_DAY_WINDOW_DAYS - 1, 0))).date().isoformat()
+    row = conn.execute(
+        "SELECT COALESCE(SUM(battles), 0) AS total_battles "
+        "FROM member_daily_battle_rollups WHERE member_id = ? AND battle_date >= ?",
+        (member_id, cutoff),
+    ).fetchone()
+    total_battles = int((row["total_battles"] or 0) if row else 0)
+    return {
+        "cr_games_per_day": round(total_battles / GAMES_PER_DAY_WINDOW_DAYS, 2),
+        "cr_games_per_day_window_days": GAMES_PER_DAY_WINDOW_DAYS,
+        "cr_games_per_day_updated_at": computed_at,
+    }
+
+
 def snapshot_player_profile(player_data, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -161,6 +196,7 @@ def snapshot_player_profile(player_data, conn=None):
             (member_id, fetched_at, deck_hash, _json_or_none(current_deck) or "[]", _json_or_none(current_deck_support_cards) or "[]"),
         )
         _store_raw_payload(conn, "player", _tag_key(tag), player_data)
+        _upsert_member_metadata(conn, member_id, **_years_played_metadata_fields(player_data, fetched_at=fetched_at))
         conn.commit()
         signals = []
         old_level = previous["exp_level"] if previous else None
@@ -861,6 +897,7 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
         _recompute_member_daily_battle_rollups(member_id, affected_dates, conn=conn)
         _recompute_clan_daily_battle_rollups(affected_dates, conn=conn)
         _recompute_member_recent_form(member_id, conn=conn)
+        _upsert_member_metadata(conn, member_id, **_games_per_day_metadata_fields(member_id, computed_at=_utcnow(), conn=conn))
         name = latest_name or conn.execute(
             "SELECT current_name FROM members WHERE member_id = ?",
             (member_id,),

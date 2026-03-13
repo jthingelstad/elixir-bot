@@ -389,6 +389,98 @@ def test_member_generated_profile_and_player_snapshot_flow_into_member_profile()
         conn.close()
 
 
+def test_snapshot_player_profile_derives_clash_royale_account_age_metadata():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "coLeader"}],
+            conn=conn,
+        )
+
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "badges": [
+                    {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825},
+                ],
+            },
+            conn=conn,
+        )
+
+        metadata = db.get_member_metadata("#ABC123", conn=conn)
+        profile = db.get_member_profile("#ABC123", conn=conn)
+
+        assert metadata["cr_account_age_days"] == 1473
+        assert metadata["cr_account_age_years"] == 4
+        assert metadata["cr_account_age_updated_at"] is not None
+        assert profile["cr_account_age_days"] == 1473
+        assert profile["cr_account_age_years"] == 4
+
+        rows = db.list_member_metadata_rows(conn=conn)
+        assert rows[0]["cr_account_age_days"] == 1473
+        assert rows[0]["cr_account_age_years"] == 4
+    finally:
+        conn.close()
+
+
+def test_snapshot_player_battlelog_derives_recent_games_per_day_metadata():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        with patch("storage.player.chicago_today", return_value="2026-03-14"):
+            db.snapshot_player_battlelog(
+                "#ABC123",
+                [
+                    {
+                        "type": "PvP",
+                        "battleTime": "20260314T100000.000Z",
+                        "gameMode": {"id": 72000006, "name": "Ladder"},
+                        "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 2, "trophyChange": 30, "startingTrophies": 7000, "cards": [], "supportCards": []}],
+                        "opponent": [{"tag": "#OPP1", "name": "Opp 1", "crowns": 1, "cards": [], "supportCards": []}],
+                    },
+                    {
+                        "type": "PvP",
+                        "battleTime": "20260314T090000.000Z",
+                        "gameMode": {"id": 72000006, "name": "Ladder"},
+                        "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 2, "trophyChange": 28, "startingTrophies": 6972, "cards": [], "supportCards": []}],
+                        "opponent": [{"tag": "#OPP2", "name": "Opp 2", "crowns": 1, "cards": [], "supportCards": []}],
+                    },
+                    {
+                        "type": "PvP",
+                        "battleTime": "20260310T110000.000Z",
+                        "gameMode": {"id": 72000006, "name": "Ladder"},
+                        "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 3, "trophyChange": 31, "startingTrophies": 6941, "cards": [], "supportCards": []}],
+                        "opponent": [{"tag": "#OPP3", "name": "Opp 3", "crowns": 0, "cards": [], "supportCards": []}],
+                    },
+                    {
+                        "type": "pathOfLegend",
+                        "battleTime": "20260305T120000.000Z",
+                        "gameMode": {"id": 72000464, "name": "Ranked1v1_NewArena2"},
+                        "team": [{"tag": "#ABC123", "name": "King Levy", "crowns": 1, "trophyChange": 29, "startingTrophies": 6912, "cards": [], "supportCards": []}],
+                        "opponent": [{"tag": "#OPP4", "name": "Opp 4", "crowns": 0, "cards": [], "supportCards": []}],
+                    },
+                ],
+                conn=conn,
+            )
+
+        metadata = db.get_member_metadata("#ABC123", conn=conn)
+        profile = db.get_member_profile("#ABC123", conn=conn)
+
+        assert metadata["cr_games_per_day"] == 0.29
+        assert metadata["cr_games_per_day_window_days"] == 14
+        assert metadata["cr_games_per_day_updated_at"] is not None
+        assert profile["cr_games_per_day"] == 0.29
+        assert profile["cr_games_per_day_window_days"] == 14
+    finally:
+        conn.close()
+
+
 def test_join_anniversary_uses_effective_join_date_override():
     conn = db.get_connection(":memory:")
     try:
