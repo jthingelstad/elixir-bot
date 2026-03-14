@@ -327,8 +327,6 @@ def discord_channel_configs():
 
         id_match = re.search(r"^ID:\s*(\d+)\s*$", section, re.MULTILINE)
         subagent_match = re.search(r"^Subagent:\s*([A-Za-z0-9_-]+)\s*$", section, re.MULTILINE)
-        if not subagent_match:
-            subagent_match = re.search(r"^Role:\s*([A-Za-z0-9_-]+)\s*$", section, re.MULTILINE)
         if not id_match or not subagent_match:
             continue
 
@@ -356,7 +354,6 @@ def discord_channel_configs():
                 "name": heading,
                 "id": channel_id,
                 "subagent": subagent,
-                "role": subagent,
                 "subagent_key": subagent,
                 "workflow": workflow,
                 "tool_policy": tool_policy,

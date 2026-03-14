@@ -614,6 +614,44 @@ def test_on_message_handles_explicit_member_deck_request_without_llm():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_keeps_interpretive_main_deck_questions_in_llm_path():
+    message = _make_message(1482368505058955467, "ask-elixir", "What is the average level of the cards I use in my current main deck?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1482368505058955467,
+            "name": "#ask-elixir",
+            "subagent": "ask-elixir",
+            "workflow": "interactive",
+            "reply_policy": "open_channel",
+            "memory_scope": "public",
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={"channel": {"state": None, "episodes": []}}),
+        patch("elixir.db.save_message"),
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch("elixir.elixir_agent.respond_in_channel", return_value={"event_type": "channel_response", "content": "LLM answer", "summary": "llm"}) as mock_respond,
+        patch("elixir.db.resolve_member") as mock_resolve,
+        patch("elixir.db.get_member_current_deck") as mock_current_deck,
+        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_current_deck.assert_not_called()
+    mock_resolve.assert_not_called()
+    mock_respond.assert_called_once()
+    message.reply.assert_awaited_once_with("LLM answer")
+    mock_share.assert_awaited_once()
+    mock_process.assert_not_awaited()
+
+
 def test_on_message_hints_for_bare_clanops_status_command():
     message = _make_message(200, "clan-ops", "status")
 
@@ -844,6 +882,17 @@ def test_parse_admin_command_handles_system_signals_preview():
     }
 
 
+def test_parse_admin_command_handles_signals():
+    parsed = elixir.parse_admin_command("do signals", require_prefix=True)
+
+    assert parsed == {
+        "command": "signals",
+        "preview": False,
+        "short": False,
+        "args": {},
+    }
+
+
 def test_on_message_handles_clanops_profile_via_public_do_command():
     message = _make_message(200, "clan-ops", "do profile \"Ditika\"")
 
@@ -989,6 +1038,14 @@ def test_slash_help_does_not_save_conversation_history():
     mock_save.assert_not_called()
 
 
+def test_register_elixir_app_commands_includes_signals():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+
+    assert root.get_command("signals") is not None
+
+
 def test_dispatch_admin_command_handles_verify_discord():
     with (
         patch("runtime.admin._resolve_member_tag", return_value=("#ABC123", "King Levy")),
@@ -1049,6 +1106,74 @@ def test_dispatch_admin_command_handles_system_signals():
 
     assert result == "Ran `system-signals` for 1 pending signal(s)."
     mock_run.assert_awaited_once_with(preview=False)
+
+
+def test_dispatch_admin_command_handles_signals():
+    with patch("runtime.admin._build_signals_report", return_value="**Elixir Signals**") as mock_report:
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "signals",
+                preview=False,
+                short=False,
+                args={},
+            )
+        )
+
+    assert result == "**Elixir Signals**"
+    mock_report.assert_called_once_with()
+
+
+def test_build_signals_report_includes_routing_recent_and_pending():
+    conn = elixir.db.get_connection(":memory:")
+    try:
+        elixir.db.upsert_signal_outcome(
+            "member_join:#ABC123",
+            "member_join",
+            "clan-events",
+            1482352241628414013,
+            "member_join_public",
+            required=True,
+            delivery_status="delivered",
+            payload={"signals": [{"type": "member_join", "tag": "#ABC123", "name": "King Levy"}]},
+            delivered=True,
+            conn=conn,
+        )
+        elixir.db.upsert_signal_outcome(
+            "member_join:#ABC123",
+            "member_join",
+            "leader-lounge",
+            1474762000000000000,
+            "member_join_ops",
+            required=True,
+            delivery_status="failed",
+            error_detail="missing channel permissions",
+            payload={"signals": [{"type": "member_join", "tag": "#ABC123", "name": "King Levy"}]},
+            mark_attempt=True,
+            conn=conn,
+        )
+        elixir.db.queue_system_signal(
+            "capability_three_lane_elixir_v3",
+            "capability_unlock",
+            {"type": "capability_unlock", "payload": {"audience": "clan"}},
+            conn=conn,
+        )
+
+        from runtime.admin import _build_signals_report
+
+        report = _build_signals_report(conn=conn)
+    finally:
+        conn.close()
+
+    assert "**Elixir Signals**" in report
+    assert "Routing:" in report
+    assert "`member_join`" in report or "`member_join_public`" in report
+    assert "Recent routed signals" in report
+    assert "`member_join:#ABC123`" in report
+    assert "`clan-events` `member_join_public` delivered" in report
+    assert "`leader-lounge` `member_join_ops` failed" in report
+    assert "missing channel permissions" in report
+    assert "Pending system signals (1)" in report
+    assert "`capability_three_lane_elixir_v3`" in report
 
 
 def test_dispatch_admin_command_normalizes_legacy_site_alias():

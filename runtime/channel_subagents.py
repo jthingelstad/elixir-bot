@@ -35,7 +35,6 @@ CLAN_EVENT_SIGNAL_TYPES = {
 
 LEADERSHIP_ONLY_SIGNAL_TYPES = {
     "inactive_members",
-    "capability_unlock",
 }
 
 RELAYABLE_WAR_SIGNAL_TYPES = {
@@ -66,6 +65,65 @@ DURABLE_EVENT_SIGNAL_TYPES = {
     "war_season_complete",
     "weekly_clan_recap",
 }
+
+
+def signal_routing_summary() -> list[dict]:
+    return [
+        {
+            "family": "war_*",
+            "match": "all signals in the batch are war signals",
+            "targets": [
+                {"subagent": "river-race", "intent": "war_update", "required": True},
+                {"subagent": "arena-relay", "intent": "war_relay", "required": False, "condition": "relay-worthy war update"},
+                {"subagent": "leader-lounge", "intent": "war_ops_note", "required": False, "condition": "important rank swing, recovery need, or ops-relevant war state"},
+            ],
+        },
+        {
+            "family": "progression",
+            "match": "all signals in the batch are progression signals",
+            "targets": [
+                {"subagent": "player-progress", "intent": "player_progress", "required": True},
+            ],
+        },
+        {
+            "family": "member_join",
+            "match": "any signal in the batch is member_join",
+            "targets": [
+                {"subagent": "clan-events", "intent": "member_join_public", "required": True},
+                {"subagent": "leader-lounge", "intent": "member_join_ops", "required": True},
+                {"subagent": "arena-relay", "intent": "member_join_relay", "required": False},
+            ],
+        },
+        {
+            "family": "public_system_update",
+            "match": "capability_unlock with clan audience",
+            "targets": [
+                {"subagent": "clan-events", "intent": "system_update", "required": True},
+            ],
+        },
+        {
+            "family": "leadership_only",
+            "match": "leadership-only signal type or leadership audience",
+            "targets": [
+                {"subagent": "leader-lounge", "intent": "leadership_note", "required": True},
+            ],
+        },
+        {
+            "family": "clan_event",
+            "match": "any clan event signal not matched earlier",
+            "targets": [
+                {"subagent": "clan-events", "intent": "clan_event_public", "required": True},
+                {"subagent": "leader-lounge", "intent": "clan_event_ops", "required": False, "condition": "elder promotion"},
+            ],
+        },
+        {
+            "family": "fallback",
+            "match": "anything else",
+            "targets": [
+                {"subagent": "leader-lounge", "intent": "leadership_note", "required": True},
+            ],
+        },
+    ]
 
 
 def signal_source_key(signal: dict) -> str:
@@ -109,8 +167,20 @@ def is_clan_event_signal(signal: dict) -> bool:
     return (signal or {}).get("type") in CLAN_EVENT_SIGNAL_TYPES
 
 
+def signal_audience(signal: dict) -> str:
+    payload = (signal or {}).get("payload") or {}
+    audience = (payload.get("audience") or (signal or {}).get("audience") or "").strip().lower()
+    return audience or "clan"
+
+
 def is_leadership_only_signal(signal: dict) -> bool:
-    return (signal or {}).get("type") in LEADERSHIP_ONLY_SIGNAL_TYPES or bool((signal or {}).get("signal_key"))
+    if (signal or {}).get("type") in LEADERSHIP_ONLY_SIGNAL_TYPES:
+        return True
+    return signal_audience(signal) == "leadership"
+
+
+def is_public_system_signal(signal: dict) -> bool:
+    return (signal or {}).get("type") == "capability_unlock" and signal_audience(signal) == "clan"
 
 
 def _member_tag_from_signals(signals: list[dict]) -> str | None:
@@ -131,6 +201,7 @@ def build_subagent_memory_context(channel_config: dict, *, discord_user_id=None,
         discord_user_id=discord_user_id,
         member_tag=member_tag,
         channel_id=channel_config["id"],
+        viewer_scope=channel_config.get("memory_scope") or "public",
     )
     if not channel_config.get("durable_memory_enabled"):
         return context
@@ -205,6 +276,10 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
         add("arena-relay", "member_join_relay", required=False)
         return outcomes
 
+    if any(is_public_system_signal(signal) for signal in signals):
+        add("clan-events", "system_update", required=True)
+        return outcomes
+
     if any(is_leadership_only_signal(signal) for signal in signals):
         add("leader-lounge", "leadership_note", required=True)
         return outcomes
@@ -263,5 +338,6 @@ __all__ = [
     "is_war_signal",
     "maybe_upsert_signal_memory",
     "plan_signal_outcomes",
+    "signal_routing_summary",
     "signal_source_key",
 ]

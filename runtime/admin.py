@@ -32,6 +32,7 @@ COMMAND_HELP = {
     "status": "Show Elixir runtime health, last jobs, and current telemetry.",
     "db-status": "Show a grouped SQLite database status view. Use `db-status clan`, `db-status war`, or `db-status memory`.",
     "schedule": "Show the configured job cadence and next scheduler runs.",
+    "signals": "Show signal routing rules, recent routed signals, and pending system signals.",
     "clan-status": "Fetch live clan/war data and print the operational clan status report.",
     "war-status": "Fetch live clan/war data and print Elixir's current war-awareness report.",
     "clan-list": "List active clan members. Default shows name, tag, and Discord name; `full` adds join/birthday/profile/POAP status.",
@@ -100,6 +101,7 @@ COMMAND_ORDER = [
     "status",
     "db-status",
     "schedule",
+    "signals",
     "clan-status",
     "war-status",
     "clan-list",
@@ -137,6 +139,7 @@ ZERO_ARG_COMMANDS = {
     "help",
     "status",
     "schedule",
+    "signals",
     "clan-status",
     "war-status",
     "clan-awareness",
@@ -293,7 +296,7 @@ def parse_admin_command(text: str, *, require_prefix: bool = False):
 
     if command == "help" and not extra:
         return {"command": "help", "preview": preview, "short": False, "args": {}}
-    if command in {"status", "schedule", "war-status"} and not extra:
+    if command in {"status", "schedule", "signals", "war-status"} and not extra:
         return {"command": command, "preview": preview, "short": False, "args": {}}
     if command == "db-status" and not extra:
         return {"command": command, "preview": preview, "short": False, "args": {}}
@@ -470,6 +473,87 @@ def _truncate_for_report(text, limit=160):
     return value[: limit - 3].rstrip() + "..."
 
 
+def _build_signals_report(*, recent_limit: int = 10, conn=None) -> str:
+    import db
+    from runtime.channel_subagents import signal_routing_summary
+
+    close = conn is None
+    conn = conn or db.get_connection()
+    try:
+        recent_limit = max(1, min(int(recent_limit or 10), 20))
+        routing = signal_routing_summary()
+        pending_system = db.list_pending_system_signals(conn=conn)
+        recent_outcomes = db.list_recent_signal_outcomes(limit=recent_limit * 3, conn=conn)
+
+        grouped_outcomes: dict[str, dict] = {}
+        for outcome in recent_outcomes:
+            source_key = outcome.get("source_signal_key") or "unknown"
+            group = grouped_outcomes.setdefault(
+                source_key,
+                {
+                    "source_signal_key": source_key,
+                    "source_signal_type": outcome.get("source_signal_type") or "unknown",
+                    "updated_at": outcome.get("updated_at") or outcome.get("created_at"),
+                    "outcomes": [],
+                },
+            )
+            timestamp = outcome.get("updated_at") or outcome.get("created_at")
+            if timestamp and (group["updated_at"] is None or timestamp > group["updated_at"]):
+                group["updated_at"] = timestamp
+            group["outcomes"].append(outcome)
+
+        recent_groups = sorted(
+            grouped_outcomes.values(),
+            key=lambda item: ((item.get("updated_at") or ""), item.get("source_signal_key") or ""),
+            reverse=True,
+        )[:recent_limit]
+
+        lines = ["**Elixir Signals**", "", "Routing:"]
+        for item in routing:
+            lines.append(f"- `{item['family']}`: {item['match']}")
+            for target in item["targets"]:
+                requirement = "required" if target.get("required") else "optional"
+                condition = f" - {target['condition']}" if target.get("condition") else ""
+                lines.append(
+                    f"  -> `{target['subagent']}` `{target['intent']}` ({requirement}){condition}"
+                )
+
+        lines.extend(["", f"Recent routed signals ({len(recent_groups)}):"])
+        if not recent_groups:
+            lines.append("_No routed signals recorded yet._")
+        else:
+            for group in recent_groups:
+                timestamp = group.get("updated_at") or "n/a"
+                lines.append(
+                    f"- `{group['source_signal_type']}` at {timestamp} - `{group['source_signal_key']}`"
+                )
+                for outcome in sorted(
+                    group["outcomes"],
+                    key=lambda item: ((item.get("target_channel_key") or ""), (item.get("intent") or "")),
+                ):
+                    requirement = "required" if outcome.get("required") else "optional"
+                    error_detail = outcome.get("error_detail")
+                    error_text = f" - {_truncate_for_report(error_detail, 90)}" if error_detail else ""
+                    lines.append(
+                        f"  -> `{outcome.get('target_channel_key')}` `{outcome.get('intent')}` "
+                        f"{outcome.get('delivery_status') or 'unknown'} ({requirement}){error_text}"
+                    )
+
+        lines.extend(["", f"Pending system signals ({len(pending_system)}):"])
+        if not pending_system:
+            lines.append("_No pending system signals._")
+        else:
+            for signal in pending_system[:5]:
+                lines.append(
+                    f"- `{signal.get('type') or signal.get('signal_type') or 'unknown'}` "
+                    f"`{signal.get('signal_key')}` created {signal.get('created_at') or 'n/a'}"
+                )
+        return "\n".join(lines)
+    finally:
+        if close:
+            conn.close()
+
+
 def _format_contextual_memory_item(memory: dict) -> str:
     source = memory.get("source_type") or "unknown"
     if source == "leader_note":
@@ -583,6 +667,7 @@ def _build_memory_report(*, member_query: str | None = None, query: str | None =
             memory_context = db.build_memory_context(
                 discord_user_id=member_profile.get("discord_user_id"),
                 member_tag=member_tag,
+                viewer_scope=viewer_scope,
                 conn=conn,
             )
             lines.append("")
@@ -1024,6 +1109,8 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
         return elixir._build_db_status_report(group=args.get("group"))
     if command == "schedule":
         return elixir._build_schedule_report()
+    if command == "signals":
+        return await asyncio.to_thread(_build_signals_report)
     if command == "clan-status":
         clan, war = await elixir._load_live_clan_context()
         if short:
@@ -1081,6 +1168,7 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
 __all__ = [
     "LEADER_ONLY_COMMANDS",
     "admin_command_requires_leader",
+    "_build_signals_report",
     "COMMAND_HELP",
     "COMMAND_ORDER",
     "dispatch_admin_command",

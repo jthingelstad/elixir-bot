@@ -283,11 +283,28 @@ def test_clan_awareness_tick_does_not_mark_non_system_signal_sent_when_post_fail
     assert not all(row.get("delivery_status") in {"delivered", "skipped"} for row in outcome_rows)
 
 
-def test_plan_signal_outcomes_routes_system_signal_to_leader_lounge():
+def test_plan_signal_outcomes_routes_clan_audience_system_signal_to_clan_events():
     outcomes = plan_signal_outcomes([{
         "type": "capability_unlock",
         "signal_key": "capability_boat_defense_intelligence_v1",
-        "payload": {"title": "Achievement Unlocked: Boat Defense Intel"},
+        "payload": {
+            "title": "Achievement Unlocked: Boat Defense Intel",
+            "audience": "clan",
+        },
+    }])
+
+    assert len(outcomes) == 1
+    assert outcomes[0]["target_channel_key"] == "clan-events"
+
+
+def test_plan_signal_outcomes_routes_leadership_audience_system_signal_to_leader_lounge():
+    outcomes = plan_signal_outcomes([{
+        "type": "capability_unlock",
+        "signal_key": "capability_private_ops_note_v1",
+        "payload": {
+            "title": "Achievement Unlocked: Ops Note",
+            "audience": "leadership",
+        },
     }])
 
     assert len(outcomes) == 1

@@ -583,14 +583,23 @@ def test_save_message_auto_links_discord_user_to_member_identity():
         ).fetchone()
         assert member["player_tag"] == "#ABC123"
 
-        memory = db.build_memory_context(
+        public_memory = db.build_memory_context(
             discord_user_id="1474760692992180429",
             member_tag="#ABC123",
             conn=conn,
         )
-        assert memory["discord_user"]["episodes"]
-        assert memory["member"]["episodes"]
-        assert memory["discord_user"]["facts"][0]["fact_type"] == "last_user_summary"
+        assert public_memory["discord_user"] is None
+        assert public_memory["member"] is None
+
+        leadership_memory = db.build_memory_context(
+            discord_user_id="1474760692992180429",
+            member_tag="#ABC123",
+            viewer_scope="leadership",
+            conn=conn,
+        )
+        assert leadership_memory["discord_user"]["episodes"]
+        assert leadership_memory["member"]["episodes"]
+        assert leadership_memory["discord_user"]["facts"][0]["fact_type"] == "last_user_summary"
     finally:
         conn.close()
 

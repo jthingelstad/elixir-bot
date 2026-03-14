@@ -8,20 +8,47 @@ import db
 import elixir_agent
 import prompts
 from runtime.activities import schedule_specs_from_registry
-from runtime import app as _app
-from runtime.app import (
-    BOT_ROLE_ID,
-    CHICAGO,
-    LEADER_ROLE_ID,
-    bot,
-    log,
-    scheduler,
-)
 from runtime import status as runtime_status
+
+BOT_ROLE_ID = None
+CHICAGO = None
+LEADER_ROLE_ID = None
+bot = None
+log = None
+scheduler = None
+
+
+def _runtime_app():
+    from runtime import app as app_module
+    return app_module
+
+
+def _bot():
+    return bot if bot is not None else _runtime_app().bot
+
+
+def _scheduler():
+    return scheduler if scheduler is not None else _runtime_app().scheduler
+
+
+def _log():
+    return log if log is not None else _runtime_app().log
+
+
+def _chicago():
+    return CHICAGO if CHICAGO is not None else _runtime_app().CHICAGO
+
+
+def _leader_role_id():
+    return LEADER_ROLE_ID if LEADER_ROLE_ID is not None else _runtime_app().LEADER_ROLE_ID
+
+
+def _bot_role_id():
+    return BOT_ROLE_ID if BOT_ROLE_ID is not None else _runtime_app().BOT_ROLE_ID
 
 
 async def _post_to_elixir(*args, **kwargs):
-    return await _app._post_to_elixir(*args, **kwargs)
+    return await _runtime_app()._post_to_elixir(*args, **kwargs)
 
 
 def _pick_resolved_member(matches):
@@ -308,19 +335,21 @@ def _is_member_deck_request(text: str) -> bool:
     normalized = " ".join((text or "").strip().lower().split())
     if "deck" not in normalized:
         return False
-    return any(
-        phrase in normalized
-        for phrase in (
-            "what cards are in",
-            "what cards were in",
-            "current deck",
-            "show",
-            "what is in",
-            "what's in",
-            "deck for",
-            "deck of",
-        )
+    if "current deck" in normalized:
+        return True
+    explicit_patterns = (
+        r"\bwhat cards are in my deck\b",
+        r"\bwhat cards were in my deck\b",
+        r"\bwhat is in my deck\b",
+        r"\bwhat's in my deck\b",
+        r"\bshow (?:me )?my deck\b",
+        r"\bshow (?:me )?@?[a-z0-9_.-]+'?s deck\b",
+        r"\bwhat cards are in @?[a-z0-9_.-]+'?s deck\b",
+        r"\bwhat cards are in @?[a-z0-9_.-]+ deck\b",
+        r"\bwhat is in @?[a-z0-9_.-]+'?s deck\b",
+        r"\bwhat's in @?[a-z0-9_.-]+'?s deck\b",
     )
+    return any(re.search(pattern, normalized) for pattern in explicit_patterns)
 
 
 def _resolve_member_candidate(query: str):
@@ -351,7 +380,7 @@ def _extract_member_deck_target(text: str, message):
             return linked["player_tag"]
     mentioned_users = [
         user for user in getattr(message, "mentions", [])
-        if getattr(user, "id", None) != getattr(getattr(bot, "user", None), "id", None)
+        if getattr(user, "id", None) != getattr(getattr(_bot(), "user", None), "id", None)
     ]
     if len(mentioned_users) == 1:
         linked = db.get_linked_member_for_discord_user(mentioned_users[0].id)
@@ -420,7 +449,7 @@ def _fmt_iso_short(value):
         return "n/a"
     try:
         dt = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-        return dt.astimezone(CHICAGO).strftime("%Y-%m-%d %I:%M %p CT")
+        return dt.astimezone(_chicago()).strftime("%Y-%m-%d %I:%M %p CT")
     except ValueError:
         return str(value)
 
@@ -503,7 +532,7 @@ def _format_relative_join_age(joined_date):
         joined_day = datetime.strptime(joined_date[:10], "%Y-%m-%d").date()
     except ValueError:
         return "join timing unknown"
-    today = datetime.now(CHICAGO).date()
+    today = datetime.now(_chicago()).date()
     age_days = max(0, (today - joined_day).days)
     if age_days == 0:
         return "today"
@@ -522,7 +551,8 @@ def _recent_join_display_rows(clan):
 
 
 def _leader_role_mention():
-    return f"<@&{LEADER_ROLE_ID}>" if LEADER_ROLE_ID else ""
+    leader_role_id = _leader_role_id()
+    return f"<@&{leader_role_id}>" if leader_role_id else ""
 
 
 def _with_leader_ping(content):
@@ -534,14 +564,14 @@ def _with_leader_ping(content):
 
 def _job_next_runs():
     items = []
-    for job in scheduler.get_jobs():
-        next_run = job.next_run_time.astimezone(CHICAGO).strftime("%Y-%m-%d %I:%M %p CT") if job.next_run_time else "n/a"
+    for job in _scheduler().get_jobs():
+        next_run = job.next_run_time.astimezone(_chicago()).strftime("%Y-%m-%d %I:%M %p CT") if job.next_run_time else "n/a"
         items.append({"id": job.id, "next_run": next_run})
     return sorted(items, key=lambda item: item["id"])
 
 
 def _schedule_specs():
-    return schedule_specs_from_registry(_app)
+    return schedule_specs_from_registry(_runtime_app())
 
 
 async def _reply_text(message, content):
@@ -556,7 +586,7 @@ async def _reply_text(message, content):
         return re.sub(r"!\[([^\]]*)\]\((https?://[^)]+)\)", _replace_image, text)
 
     content = _discord_safe_content(content)
-    content = _app._resolve_custom_emoji(content, getattr(message, "guild", None))
+    content = _runtime_app()._resolve_custom_emoji(content, getattr(message, "guild", None))
     if len(content) > 2000:
         for chunk in [content[i:i + 1990] for i in range(0, len(content), 1990)]:
             await message.reply(chunk)
@@ -631,6 +661,7 @@ def _build_status_report():
     for item in (data.get("raw_payloads_by_endpoint") or [])[:4]:
         endpoint_bits.append(f"{item['endpoint']}={item['count']}")
     endpoint_summary = ", ".join(endpoint_bits) or "none"
+    scheduler = _scheduler()
     scheduler_badge = "🟢" if scheduler.running else "🔴"
     discord_badge = "🟢" if runtime["env"]["has_discord_token"] else "🔴"
     openai_env_badge = "🟢" if runtime["env"]["has_openai_api_key"] else "🔴"
@@ -654,7 +685,7 @@ def _build_status_report():
         f"{_status_badge(openai.get('last_ok'))} OpenAI: last {(openai.get('last_workflow') or 'n/a')} via {(openai.get('last_model') or 'n/a')} {_fmt_relative(openai.get('last_call_at'))}; {'ok' if openai.get('last_ok') else 'error' if openai.get('last_ok') is not None else 'n/a'}; {openai.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {openai.get('last_prompt_tokens') or 'n/a'}/{openai.get('last_completion_tokens') or 'n/a'}/{openai.get('last_total_tokens') or 'n/a'}; total {openai.get('call_count', 0)} calls / {openai.get('error_count', 0)} errors",
         f"🔐 Env: Discord {discord_badge}, OpenAI {openai_env_badge}, CR {cr_env_badge}",
     ]
-    role_status = _app._member_role_grant_status()
+    role_status = _runtime_app()._member_role_grant_status()
     if role_status["configured"]:
         member_role_badge = "🟢" if role_status["ok"] else "🔴"
         lines.append(
@@ -674,6 +705,7 @@ def _build_status_report():
 
 def _build_schedule_report():
     next_runs = {item["id"]: item["next_run"] for item in _job_next_runs()}
+    scheduler = _scheduler()
     scheduler_badge = "🟢" if scheduler.running else "🔴"
     lines = [
         "**Elixir Schedule**",
@@ -1077,10 +1109,9 @@ def _build_help_report(role: str) -> str:
                 "- Use `@Elixir do ...` when you want the command and result to stay public in the room.",
                 "- Member workflow: `/elixir clan-list` or `/elixir clan-list full:true` to inspect the roster, `/elixir profile show` to inspect one stored record, then `/elixir profile set-discord`, `/elixir profile set-join-date`, `/elixir profile set-birthday`, `/elixir profile set-profile-url`, `/elixir profile set-poap-address`, `/elixir profile set-note` or the matching `clear-*` commands to edit metadata.",
                 "- Public examples: `@Elixir do clan-status`, `@Elixir do profile \"weird name\"`, `@Elixir do poap-kings-sync --preview`.",
-                "- Job examples: `/elixir jobs heartbeat`, `/elixir jobs poap-kings-sync`, `/elixir jobs promotion`.",
+                "- Job examples: `/elixir jobs clan-awareness`, `/elixir jobs site-content`, `/elixir jobs promotion-content`.",
                 "- I can help with roster reviews, war participation, promotions, demotions, kicks, recent form, decks, donations, and member lookups.",
                 "- I can resolve members by in-game name, tag, alias, or Discord handle.",
-                "- If I have something useful to add to an ops discussion here, I may inject proactively.",
             ]
         )
     return "\n".join(
@@ -1181,7 +1212,7 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
     try:
         clan_trend_summary = db.build_clan_trend_summary_context(days=30, window_days=7)
     except Exception as exc:
-        log.warning("Weekly recap clan trend summary unavailable: %s", exc)
+        _log().warning("Weekly recap clan trend summary unavailable: %s", exc)
         clan_trend_summary = ""
     roster = summary.get("roster") or {}
     war_score_trend = summary.get("war_score_trend") or {}
@@ -1393,12 +1424,13 @@ def _is_bot_mentioned(message) -> bool:
 
 def _leading_bot_mention_pattern():
     parts = []
-    bot_user = getattr(bot, "user", None)
+    bot_user = getattr(_bot(), "user", None)
     bot_id = getattr(bot_user, "id", None)
     if bot_id:
         parts.append(rf"<@!?{bot_id}>")
-    if BOT_ROLE_ID:
-        parts.append(rf"<@&{BOT_ROLE_ID}>")
+    bot_role_id = _bot_role_id()
+    if bot_role_id:
+        parts.append(rf"<@&{bot_role_id}>")
     if not parts:
         return None
     return re.compile(rf"^\s*(?:{'|'.join(parts)})(?:\s+|$)")
@@ -1423,16 +1455,16 @@ def _channel_reply_target_name(channel_config):
 async def _load_live_clan_context():
     try:
         clan = await asyncio.to_thread(cr_api.get_clan)
-        _app._clear_cr_api_failure_alert_if_recovered()
+        _runtime_app()._clear_cr_api_failure_alert_if_recovered()
     except Exception:
-        await _app._maybe_alert_cr_api_failure("live clan refresh")
+        await _runtime_app()._maybe_alert_cr_api_failure("live clan refresh")
         raise
     member_list = clan.get("memberList") or []
     if member_list:
         previous_roster = await asyncio.to_thread(db.get_active_roster_map)
         previous_tags = {_canon_tag(tag) for tag in (previous_roster or {})}
         if previous_tags:
-            today = datetime.now(CHICAGO).date().isoformat()
+            today = datetime.now(_chicago()).date().isoformat()
             live_recent_joins = []
             for member in member_list:
                 tag = _canon_tag(member.get("tag"))
@@ -1456,7 +1488,7 @@ async def _load_live_clan_context():
     try:
         war = await asyncio.to_thread(cr_api.get_current_war)
     except Exception:
-        await _app._maybe_alert_cr_api_failure("live war refresh")
+        await _runtime_app()._maybe_alert_cr_api_failure("live war refresh")
         war = {}
     if war:
         await asyncio.to_thread(db.upsert_war_current_state, war)
@@ -1473,9 +1505,9 @@ async def _share_channel_result(result, workflow):
     target_ref = result.get("share_channel") or "#clan-events"
     target = prompts.resolve_channel_reference(target_ref)
     if not target:
-        log.warning("Unknown share target channel: %s", target_ref)
+        _log().warning("Unknown share target channel: %s", target_ref)
         return
-    target_channel = bot.get_channel(target["id"])
+    target_channel = _bot().get_channel(target["id"])
     if not target_channel:
         return
     target_subagent = (target.get("subagent") or target.get("role") or "").strip().lower()

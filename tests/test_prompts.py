@@ -128,6 +128,7 @@ def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
     assert channels[100]["subagent"] == "general"
     assert channels[100]["tool_policy"] == "read_only"
     assert channels[100]["reply_policy"] == "mention_only"
+    assert "role" not in channels[100]
     assert "interaction_mode" not in channels[100]
     assert "mention_required" not in channels[100]
     assert "allow_proactive" not in channels[100]

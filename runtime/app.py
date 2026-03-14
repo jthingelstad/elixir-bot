@@ -524,7 +524,10 @@ def __export_public(module):
     names = getattr(module, "__all__", None) or [
         name for name in vars(module) if not name.startswith("__")
     ]
+    protected = {"BOT_ROLE_ID", "CHICAGO", "LEADER_ROLE_ID", "bot", "log", "scheduler"}
     for name in names:
+        if name in protected:
+            continue
         globals()[name] = getattr(module, name)
     return names
 

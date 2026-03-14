@@ -138,6 +138,10 @@ def register_elixir_app_commands(bot) -> None:
     async def slash_schedule(interaction: discord.Interaction):
         await run_admin_interaction(interaction, command_name="schedule", event_type="schedule_report")
 
+    @elixir_commands.command(name="signals", description="Show signal routing and recent routed signals.")
+    async def slash_signals(interaction: discord.Interaction):
+        await run_admin_interaction(interaction, command_name="signals", event_type="signals_report")
+
     @elixir_commands.command(name="clan-status", description="Show the operational clan status report.")
     @app_commands.describe(short="Return the compact clan status variant.")
     async def slash_clan_status(interaction: discord.Interaction, short: bool = False):
