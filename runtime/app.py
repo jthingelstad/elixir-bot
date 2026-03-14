@@ -7,6 +7,7 @@ import os
 import re
 import signal
 import logging
+import sys
 from datetime import datetime, timezone
 
 import discord
@@ -214,6 +215,71 @@ async def _maybe_alert_cr_api_failure(context: str) -> bool:
     return sent
 
 
+async def _resolve_runtime_channel(channel_id: int):
+    channel = bot.get_channel(channel_id)
+    if channel is not None:
+        return channel
+    try:
+        return await bot.fetch_channel(channel_id)
+    except Exception:
+        return None
+
+
+async def _startup_channel_audit_summary() -> str:
+    active_channels = [
+        channel
+        for channel in prompts.discord_channel_configs()
+        if channel.get("workflow")
+    ]
+    if not active_channels:
+        return "Channel audit: no active configured channels found."
+
+    ok_names = []
+    issues = []
+    bot_member_cache = {}
+
+    for channel_config in active_channels:
+        channel = await _resolve_runtime_channel(channel_config["id"])
+        channel_name = channel_config.get("name") or f"#{channel_config['id']}"
+        if channel is None:
+            issues.append(f"{channel_name} missing or unreachable")
+            continue
+
+        guild = getattr(channel, "guild", None)
+        permissions_for = getattr(channel, "permissions_for", None)
+        if guild is not None and callable(permissions_for) and getattr(bot, "user", None):
+            me = getattr(guild, "me", None)
+            if me is None and hasattr(guild, "get_member"):
+                cache_key = getattr(guild, "id", channel_config["id"])
+                me = bot_member_cache.get(cache_key)
+                if me is None:
+                    me = guild.get_member(bot.user.id)
+                    bot_member_cache[cache_key] = me
+            if me is not None:
+                perms = permissions_for(me)
+                can_view = getattr(perms, "view_channel", True)
+                can_send = getattr(perms, "send_messages", True)
+                if not can_view:
+                    issues.append(f"{channel_name} not visible")
+                    continue
+                if not can_send:
+                    issues.append(f"{channel_name} not writable")
+                    continue
+
+        ok_names.append(channel_name)
+
+    if not issues:
+        return f"Channel audit: {len(ok_names)}/{len(active_channels)} active channels reachable and writable."
+
+    ok_text = (
+        f"Channel audit: {len(ok_names)}/{len(active_channels)} active channels reachable and writable."
+    )
+    issue_text = "Issues: " + "; ".join(issues[:6])
+    if len(issues) > 6:
+        issue_text += f"; +{len(issues) - 6} more"
+    return f"{ok_text}\n{issue_text}"
+
+
 async def _post_startup_message() -> bool:
     channel_configs = prompts.discord_channels_by_workflow("clanops")
     if not channel_configs:
@@ -221,15 +287,9 @@ async def _post_startup_message() -> bool:
         return False
 
     channel_id = channel_configs[0]["id"]
-    channel = bot.get_channel(channel_id)
-    if channel is None:
-        try:
-            channel = await bot.fetch_channel(channel_id)
-        except Exception as exc:
-            log.warning("Startup message skipped: leadership channel fetch failed: %s", exc)
-            return False
+    channel = await _resolve_runtime_channel(channel_id)
     if not channel:
-        log.warning("Startup message skipped: leadership channel not found")
+        log.warning("Startup message skipped: leadership channel not found or unreachable")
         return False
 
     recent_posts = await asyncio.to_thread(
@@ -269,11 +329,13 @@ async def _post_startup_message() -> bool:
     if not fun_line:
         fun_line = ":elixir_hype: Elixir is in the arena and the decks are shuffled. Leadership view is live."
 
+    channel_audit = await _startup_channel_audit_summary()
     content = (
         "**Elixir Online**\n"
         f"Release: `{elixir_agent.RELEASE_LABEL}`\n"
         f"Build: `{elixir_agent.BUILD_HASH}`\n"
-        f"{fun_line.strip()}"
+        f"{fun_line.strip()}\n"
+        f"{channel_audit}"
     )
     try:
         await _post_to_elixir(channel, {"content": content})

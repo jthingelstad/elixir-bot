@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, PropertyMock, patch
 
 import elixir
 from runtime.activities import (
@@ -216,9 +216,15 @@ def test_post_startup_message_posts_build_hash_to_clanops():
 
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
+    proactive_channels = [
+        {"id": 200, "name": "#leader-lounge", "workflow": "clanops"},
+        {"id": 300, "name": "#ask-elixir", "workflow": "interactive"},
+    ]
+
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge"}]),
+        patch("elixir.prompts.discord_channel_configs", return_value=proactive_channels),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir.db.list_channel_messages", return_value=[]),
         patch("elixir.elixir_agent.RELEASE_LABEL", 'v3.0 "Three-Lane Elixir"'),
@@ -236,6 +242,7 @@ def test_post_startup_message_posts_build_hash_to_clanops():
     assert 'Release: `v3.0 "Three-Lane Elixir"`' in posted
     assert "Build: `abc1234`" in posted
     assert "king tower is awake" in posted
+    assert "Channel audit: 2/2 active channels reachable and writable." in posted
     assert mock_save.call_args.kwargs["workflow"] == "clanops"
     assert mock_save.call_args.kwargs["event_type"] == "startup_announcement"
 
@@ -249,6 +256,7 @@ def test_post_startup_message_fetches_channel_when_not_cached():
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge"}]),
+        patch("elixir.prompts.discord_channel_configs", return_value=[{"id": 200, "name": "#leader-lounge", "workflow": "clanops"}]),
         patch.object(elixir.bot, "get_channel", return_value=None),
         patch.object(elixir.bot, "fetch_channel", new=AsyncMock(return_value=channel)) as mock_fetch,
         patch("elixir.db.list_channel_messages", return_value=[]),
@@ -261,10 +269,52 @@ def test_post_startup_message_fetches_channel_when_not_cached():
         sent = asyncio.run(elixir._post_startup_message())
 
     assert sent is True
-    mock_fetch.assert_awaited_once_with(200)
+    assert mock_fetch.await_count == 2
+    mock_fetch.assert_any_await(200)
     mock_generate.assert_called_once()
     mock_post.assert_awaited_once()
     assert mock_save.call_args.kwargs["event_type"] == "startup_announcement"
+
+
+def test_startup_channel_audit_reports_missing_or_unwritable_channels():
+    channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
+    writable = SimpleNamespace(id=300, name="ask-elixir", type="text")
+    blocked_perms = SimpleNamespace(view_channel=True, send_messages=False)
+    blocked_channel = SimpleNamespace(
+        id=400,
+        name="river-race",
+        type="text",
+        guild=SimpleNamespace(id=1, me=object()),
+        permissions_for=lambda member: blocked_perms,
+    )
+
+    def fake_get_channel(channel_id):
+        return {200: channel, 300: writable}.get(channel_id)
+
+    async def fake_fetch_channel(channel_id):
+        if channel_id == 400:
+            return blocked_channel
+        raise RuntimeError("missing")
+
+    with (
+        patch.object(elixir.bot, "get_channel", side_effect=fake_get_channel),
+        patch.object(elixir.bot, "fetch_channel", new=AsyncMock(side_effect=fake_fetch_channel)),
+        patch.object(type(elixir.bot), "user", new_callable=PropertyMock, return_value=SimpleNamespace(id=999)),
+        patch(
+            "elixir.prompts.discord_channel_configs",
+            return_value=[
+                {"id": 200, "name": "#leader-lounge", "workflow": "clanops"},
+                {"id": 300, "name": "#ask-elixir", "workflow": "interactive"},
+                {"id": 400, "name": "#river-race", "workflow": "channel_update"},
+                {"id": 500, "name": "#missing", "workflow": "channel_update"},
+            ],
+        ),
+    ):
+        summary = asyncio.run(elixir._startup_channel_audit_summary())
+
+    assert "Channel audit: 2/4 active channels reachable and writable." in summary
+    assert "#river-race not writable" in summary
+    assert "#missing missing or unreachable" in summary
 
 
 def test_ask_elixir_daily_insight_posts_fun_fact():
@@ -2439,6 +2489,16 @@ def test_reply_text_converts_markdown_images_to_discord_friendly_text():
     message.reply.assert_awaited_once_with(
         "Royal Ghost: https://example.com/ghost.png\nWitch: https://example.com/witch.png"
     )
+
+
+def test_reply_text_resolves_custom_emoji_shortcodes():
+    guild = SimpleNamespace(emojis=[SimpleNamespace(name="elixir_trophy", id=987, animated=False)])
+    message = _make_message(200, "ask-elixir", "nice")
+    message.guild = guild
+
+    asyncio.run(elixir._reply_text(message, "Huge climb today :elixir_trophy:"))
+
+    message.reply.assert_awaited_once_with("Huge climb today <:elixir_trophy:987>")
 
 
 def test_build_clan_status_short_report_is_compact():

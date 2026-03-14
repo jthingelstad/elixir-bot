@@ -888,11 +888,17 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         assert deck["cards"][0]["name"] == "Valkyrie"
         assert deck["cards"][0]["level"] == 16
         assert deck["cards"][0]["api_level"] == 14
+        assert deck["cards"][0]["maxLevel"] == 16
+        assert deck["cards"][0]["api_max_level"] == 14
         assert deck["cards"][1]["level"] == 15
         assert deck["cards"][1]["api_level"] == 10
+        assert deck["cards"][1]["maxLevel"] == 16
+        assert deck["cards"][1]["api_max_level"] == 11
         assert deck["support_cards"][0]["name"] == "Dagger Duchess"
         assert deck["support_cards"][0]["level"] == 16
         assert deck["support_cards"][0]["api_level"] == 4
+        assert deck["support_cards"][0]["maxLevel"] == 16
+        assert deck["support_cards"][0]["api_max_level"] == 4
 
         profile_row = conn.execute(
             "SELECT exp_points, total_exp_points, star_points, clan_cards_collected, "
@@ -905,7 +911,11 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         assert profile_row["star_points"] == 777
         assert profile_row["clan_cards_collected"] == 3210
         assert json.loads(profile_row["current_deck_support_cards_json"])[0]["name"] == "Dagger Duchess"
+        assert json.loads(profile_row["current_deck_support_cards_json"])[0]["level"] == 16
+        assert json.loads(profile_row["current_deck_support_cards_json"])[0]["api_level"] == 4
         assert json.loads(profile_row["support_cards_json"])[0]["name"] == "Dagger Duchess"
+        assert json.loads(profile_row["support_cards_json"])[0]["maxLevel"] == 16
+        assert json.loads(profile_row["support_cards_json"])[0]["api_max_level"] == 4
         assert json.loads(profile_row["current_path_of_legend_season_result_json"])["leagueNumber"] == 9
         assert profile_row["legacy_trophy_road_high_score"] == 9000
         assert json.loads(profile_row["progress_json"])["AutoChess_2026_Mar"]["trophies"] == 3460
@@ -918,6 +928,98 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         assert form["wins"] == 1
         assert form["losses"] == 1
         assert form["sample_size"] == 2
+    finally:
+        conn.close()
+
+
+def test_get_member_card_collection_returns_collection_summary_and_levels():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "cards": [
+                    {"name": "Knight", "level": 16, "maxLevel": 16, "rarity": "common"},
+                    {"name": "Hog Rider", "level": 14, "maxLevel": 14, "rarity": "rare"},
+                    {"name": "Fireball", "level": 10, "maxLevel": 11, "rarity": "epic"},
+                ],
+                "supportCards": [
+                    {"name": "Dagger Duchess", "level": 4, "maxLevel": 4, "rarity": "legendary"},
+                ],
+            },
+            conn=conn,
+        )
+
+        collection = db.get_member_card_collection("#ABC123", conn=conn)
+        profile = db.get_member_profile("#ABC123", conn=conn)
+
+        assert {card["name"] for card in collection["cards"][:2]} == {"Knight", "Hog Rider"}
+        assert collection["cards"][0]["level"] == 16
+        assert collection["cards"][0]["maxLevel"] == 16
+        assert collection["support_cards"][0]["name"] == "Dagger Duchess"
+        assert collection["support_cards"][0]["maxLevel"] == 16
+        assert collection["support_cards"][0]["levels_to_max"] == 0
+        assert collection["summary"]["cards_tracked"] == 3
+        assert collection["summary"]["support_cards_tracked"] == 1
+        assert collection["summary"]["highest_level"] == 16
+        assert collection["summary"]["maxed_cards_count"] == 3
+        assert profile["card_collection_summary"]["highest_level"] == 16
+        assert "Knight" in {
+            card["name"] for card in profile["card_collection_summary"]["strongest_cards"][:3]
+        }
+    finally:
+        conn.close()
+
+
+def test_get_member_card_collection_can_filter_by_rarity_for_full_collection_questions():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Thing", "role": "leader"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Thing",
+                "cards": [
+                    {"name": "Royal Ghost", "level": 14, "maxLevel": 16, "rarity": "legendary"},
+                    {"name": "Inferno Dragon", "level": 14, "maxLevel": 16, "rarity": "legendary"},
+                    {"name": "Princess", "level": 13, "maxLevel": 16, "rarity": "legendary"},
+                    {"name": "Log", "level": 12, "maxLevel": 16, "rarity": "legendary"},
+                    {"name": "Knight", "level": 16, "maxLevel": 16, "rarity": "common"},
+                ],
+                "supportCards": [
+                    {"name": "Tower Princess", "level": 15, "maxLevel": 16, "rarity": "legendary"},
+                ],
+            },
+            conn=conn,
+        )
+
+        collection = db.get_member_card_collection("#ABC123", rarity="legendaries", conn=conn)
+
+        assert collection["rarity_filter"] == "legendary"
+        assert collection["matching_total_cards"] == 5
+        assert {card["name"] for card in collection["cards"]} == {
+            "Royal Ghost",
+            "Inferno Dragon",
+            "Princess",
+            "Log",
+        }
+        assert {card["name"] for card in collection["support_cards"]} == {"Tower Princess"}
+        assert set(collection["cards_by_rarity"]["legendary"]) == {
+            "Royal Ghost",
+            "Inferno Dragon",
+            "Princess",
+            "Log",
+            "Tower Princess (support)",
+        }
+        assert collection["collection_summary"]["rarity_counts"]["legendary"] == 5
     finally:
         conn.close()
 

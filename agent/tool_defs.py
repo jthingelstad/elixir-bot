@@ -159,6 +159,41 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_member_card_collection",
+            "description": "Get a member's tracked Clash Royale card collection with card levels, rarity summaries, and strongest cards. Use this for collection-wide questions such as unlocked legendary or champion cards, not just the current deck.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "member_tag": {
+                        "type": "string",
+                        "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of main collection cards to return. Default 60.",
+                        "default": 60,
+                    },
+                    "min_level": {
+                        "type": "integer",
+                        "description": "Optional minimum displayed card level filter.",
+                    },
+                    "rarity": {
+                        "type": "string",
+                        "description": "Optional rarity filter such as common, rare, epic, legendary, or champion.",
+                    },
+                    "include_support": {
+                        "type": "boolean",
+                        "description": "Whether to include support cards such as tower troops. Default true.",
+                        "default": True,
+                    },
+                },
+                "required": ["member_tag"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_member_next_chests",
             "description": "Fetch a member's upcoming chest cycle directly from the Clash Royale API.",
             "parameters": {

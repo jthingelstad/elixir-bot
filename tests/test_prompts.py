@@ -155,6 +155,13 @@ def test_subagent_prompt_poapkings_com_loads():
     assert "commit sha" in text.lower()
 
 
+def test_subagent_prompt_ask_elixir_mentions_conversational_followups():
+    text = prompts.subagent_prompt("ask-elixir")
+    assert "short follow-ups" in text.lower()
+    assert "repeating the previous factual answer" in text.lower()
+    assert "correct yourself" in text.lower()
+
+
 def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
     monkeypatch.setattr(
         prompts,

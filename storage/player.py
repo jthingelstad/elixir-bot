@@ -158,6 +158,40 @@ def _games_per_day_metadata_fields(member_id: int, *, computed_at: str, conn) ->
     }
 
 
+def _card_display_max_level(card: dict) -> int | None:
+    max_level = card.get("maxLevel")
+    if not isinstance(max_level, int) or max_level <= 0:
+        return None
+    if max_level > 16:
+        return max_level
+    return max_level + max(0, 16 - max_level)
+
+
+def _normalize_cards_for_storage(cards: list[dict] | None) -> list[dict]:
+    normalized = []
+    for raw_card in cards or []:
+        if not isinstance(raw_card, dict):
+            continue
+        card = dict(raw_card)
+        raw_level = card.get("level")
+        raw_max_level = card.get("maxLevel")
+        display_level = _card_level(card)
+        display_max_level = _card_display_max_level(card)
+        if isinstance(raw_level, int):
+            card["api_level"] = raw_level
+        if isinstance(raw_max_level, int):
+            card["api_max_level"] = raw_max_level
+        if display_level is not None:
+            card["level"] = display_level
+        if display_max_level is not None:
+            card["maxLevel"] = display_max_level
+        if isinstance(card.get("level"), int) and isinstance(card.get("maxLevel"), int):
+            card["levels_to_max"] = max(0, card["maxLevel"] - card["level"])
+            card["is_max_level"] = card["level"] >= card["maxLevel"]
+        normalized.append(card)
+    return normalized
+
+
 def snapshot_player_profile(player_data, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -171,10 +205,10 @@ def snapshot_player_profile(player_data, conn=None):
             (member_id,),
         ).fetchone()
         fetched_at = _utcnow()
-        current_deck = player_data.get("currentDeck") or []
-        current_deck_support_cards = player_data.get("currentDeckSupportCards") or []
-        cards = player_data.get("cards") or []
-        support_cards = player_data.get("supportCards") or []
+        current_deck = _normalize_cards_for_storage(player_data.get("currentDeck") or [])
+        current_deck_support_cards = _normalize_cards_for_storage(player_data.get("currentDeckSupportCards") or [])
+        cards = _normalize_cards_for_storage(player_data.get("cards") or [])
+        support_cards = _normalize_cards_for_storage(player_data.get("supportCards") or [])
         favourite = player_data.get("currentFavouriteCard") or {}
         conn.execute(
             "INSERT INTO player_profile_snapshots (member_id, fetched_at, exp_level, exp_points, total_exp_points, star_points, trophies, best_trophies, wins, losses, battle_count, total_donations, donations, donations_received, war_day_wins, challenge_max_wins, challenge_cards_won, tournament_battle_count, tournament_cards_won, three_crown_wins, clan_cards_collected, current_favourite_card_id, current_favourite_card_name, league_statistics_json, current_deck_json, current_deck_support_cards_json, cards_json, support_cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json, last_path_of_legend_season_result_json, best_path_of_legend_season_result_json, legacy_trophy_road_high_score, progress_json, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -854,8 +888,8 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
                     classified["is_ranked"],
                     classified["is_war"],
                     classified["is_special_event"],
-                    _json_or_none(team.get("cards") or []),
-                    _json_or_none(team.get("supportCards") or []),
+                    _json_or_none(_normalize_cards_for_storage(team.get("cards") or [])),
+                    _json_or_none(_normalize_cards_for_storage(team.get("supportCards") or [])),
                     opp.get("name") if opp else None,
                     _canon_tag(opp.get("tag")) if opp and opp.get("tag") else None,
                     _canon_tag((opp.get("clan") or {}).get("tag")) if opp else None,

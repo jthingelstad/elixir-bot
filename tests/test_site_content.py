@@ -634,7 +634,14 @@ def test_build_roster_data_without_cards_uses_cached_card_data(conn):
             "currentDeckSupportCards": [
                 {"name": "Tower Princess", "iconUrls": {"medium": "https://cdn/tower-princess.png"}},
             ],
-            "cards": [],
+            "cards": [
+                {"name": "Hog Rider", "level": 14, "maxLevel": 14, "rarity": "rare", "iconUrls": {"medium": "https://cdn/hog.png"}},
+                {"name": "Zap", "level": 11, "maxLevel": 11, "rarity": "epic", "iconUrls": {"medium": "https://cdn/zap.png"}},
+                {"name": "Knight", "level": 16, "maxLevel": 16, "rarity": "common", "iconUrls": {"medium": "https://cdn/knight.png"}},
+            ],
+            "supportCards": [
+                {"name": "Tower Princess", "level": 4, "maxLevel": 4, "rarity": "legendary", "iconUrls": {"medium": "https://cdn/tower-princess.png"}},
+            ],
         },
         conn=conn,
     )
@@ -676,4 +683,6 @@ def test_build_roster_data_without_cards_uses_cached_card_data(conn):
     assert m["current_deck_cards"][0]["icon_url"] == "https://cdn/hog.png"
     assert m["current_deck_support_cards"][0]["name"] == "Tower Princess"
     assert m["current_deck_support_cards"][0]["icon_url"] == "https://cdn/tower-princess.png"
+    assert m["card_collection_summary"]["highest_level"] == 16
+    assert "Knight" in {card["name"] for card in m["collection_highlights"]}
     assert result["card_stats"][0]["name"] == "Hog Rider"
