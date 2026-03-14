@@ -210,6 +210,19 @@ def link_discord_user_to_member(discord_user_id, member_tag, username=None, disp
             conn.close()
 
 
+def clear_member_discord_link(member_tag, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        member_id = _ensure_member(conn, member_tag)
+        conn.execute("UPDATE discord_links SET is_primary = 0 WHERE member_id = ?", (member_id,))
+        conn.commit()
+        return member_id
+    finally:
+        if close:
+            conn.close()
+
+
 def get_discord_link(member_tag, conn=None):
     close = conn is None
     conn = conn or get_connection()

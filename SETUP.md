@@ -177,40 +177,43 @@ Current recurring activity set:
 
 Use the live admin surface when you want the actual schedule rendered from the registry instead of trusting this file:
 
-```bash
-venv/bin/python scripts/elixir_do.py schedule
+```text
+/elixir system schedule
+@Elixir do system schedule
 ```
 
 Or in Discord:
-- `/elixir schedule`
-- `@Elixir do schedule`
+- `/elixir system schedule`
+- `@Elixir do system schedule`
 
 ## Health Checks
 
 Useful live checks:
 
-```bash
-venv/bin/python scripts/elixir_do.py status
-venv/bin/python scripts/elixir_do.py schedule
-venv/bin/python scripts/elixir_do.py db-status
-venv/bin/python scripts/elixir_do.py war-status
-venv/bin/python scripts/elixir_do.py clan-status
+```text
+/elixir system status
+@Elixir do system status
+@Elixir do signal show recent --limit 5
+@Elixir do activity list
 ```
 
 Useful Discord checks:
-- `/elixir status`
-- `/elixir schedule`
-- `/elixir db-status`
-- `/elixir db-status view:clan`
-- `/elixir db-status view:war`
-- `/elixir db-status view:memory`
+- `/elixir system status`
+- `/elixir system schedule`
+- `/elixir system storage`
+- `/elixir system storage view:clan`
+- `/elixir system storage view:war`
+- `/elixir system storage view:memory`
+- `/elixir clan war`
+- `/elixir clan status`
 
 Manual non-posting previews are available for many admin jobs:
 
-```bash
-venv/bin/python scripts/elixir_do.py site-content --preview
-venv/bin/python scripts/elixir_do.py weekly-recap --preview
-venv/bin/python scripts/elixir_do.py promotion-content --preview
+```text
+/elixir activity run activity:site-content preview:true
+/elixir activity run activity:weekly-recap preview:true
+/elixir activity run activity:promotion-content preview:true
+@Elixir do activity run site-content --preview
 ```
 
 Preview mode suppresses Discord sends and GitHub site pushes, but still runs the job logic.
@@ -278,23 +281,24 @@ This reads from the Clash Royale API and writes to the local DB, but does not po
 
 If you want to run a recurring activity directly through the supported admin surface, use:
 
-```bash
-venv/bin/python scripts/elixir_do.py clan-awareness --preview
-venv/bin/python scripts/elixir_do.py war-awareness --preview
-venv/bin/python scripts/elixir_do.py player-progression --preview
+```text
+/elixir activity run activity:clan-awareness preview:true
+/elixir activity run activity:war-awareness preview:true
+/elixir activity run activity:player-progression preview:true
+@Elixir do activity run clan-awareness --preview
 ```
 
 ## Member Metadata Operations
 
 Use the admin surface instead of direct database edits:
 
-```bash
-venv/bin/python scripts/elixir_do.py set-join-date "Ditika" 2026-03-07
-venv/bin/python scripts/elixir_do.py clear-join-date "Ditika"
-venv/bin/python scripts/elixir_do.py set-birthday "King Levy" 2 14
-venv/bin/python scripts/elixir_do.py set-profile-url "King Thing" https://example.com
-venv/bin/python scripts/elixir_do.py set-poap-address "King Levy" 0xabc123...
-venv/bin/python scripts/elixir_do.py set-note "King Thing" "Founder and systems builder"
+```text
+/elixir member set member:Ditika field:join-date value:2026-03-07
+/elixir member clear member:Ditika field:join-date
+/elixir member set member:"King Levy" field:birthday value:02-14
+/elixir member set member:"King Thing" field:profile-url value:https://example.com
+/elixir member set member:"King Levy" field:poap-address value:0xabc123...
+/elixir member set member:"King Thing" field:note value:"Founder and systems builder"
 ```
 
 These commands are also exposed in Discord leadership/admin flows.

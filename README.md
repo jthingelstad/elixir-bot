@@ -225,20 +225,30 @@ No-change publishes stay quiet.
 
 ## Admin and Operations
 
-Elixir supports admin-style commands in `#leader-lounge` and through slash commands.
+Elixir's operator surface now lives entirely in Discord `#leader-lounge`.
+
+Use:
+- private slash commands under `/elixir ...`
+- public room commands with `@Elixir do ...`
 
 Examples:
 
-```bash
-venv/bin/python scripts/elixir_do.py status
-venv/bin/python scripts/elixir_do.py schedule
-venv/bin/python scripts/elixir_do.py clan-awareness
-venv/bin/python scripts/elixir_do.py site-content --preview
-venv/bin/python scripts/elixir_do.py set-join-date "Ditika" 2026-03-07
-venv/bin/python scripts/elixir_do.py set-note "King Thing" "Founder and systems builder"
+```text
+/elixir system status
+/elixir activity show activity:clan-awareness
+/elixir integration poap-kings publish target:data preview:true
+@Elixir do member set Ditika join-date 2026-03-07
+@Elixir do signal show recent --limit 5
 ```
 
-The same admin surface is available in Discord through `/elixir ...` and leadership message commands.
+The command model is object-first and grouped around:
+- `system`
+- `clan`
+- `member`
+- `memory`
+- `signal`
+- `activity`
+- `integration`
 
 Useful operational docs:
 - [SETUP.md](SETUP.md)

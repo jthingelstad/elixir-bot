@@ -728,7 +728,7 @@ def test_on_message_handles_clanops_admin_command_directly():
     message = _make_message(
         200,
         "clan-ops",
-        "do heartbeat --preview",
+        "do activity run clan-awareness --preview",
         roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
     )
 
@@ -754,10 +754,13 @@ def test_on_message_handles_clanops_admin_command_directly():
     ):
         asyncio.run(elixir.on_message(message))
 
-    mock_admin.assert_awaited_once_with("clan-awareness", preview=True, short=False, args={})
+    request = mock_admin.await_args.args[0]
+    assert request["key"] == "activity.run"
+    assert request["preview"] is True
+    assert request["args"] == {"activity": "clan-awareness"}
     message.reply.assert_awaited_once_with("Ran `clan-awareness` in preview mode.")
     assert mock_save.call_count == 2
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_clan_awareness_preview"
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_activity_run_preview"
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
@@ -766,7 +769,7 @@ def test_on_message_handles_clanops_member_metadata_command():
     message = _make_message(
         200,
         "clan-ops",
-        "do set-join-date \"Ditika\" 2026-03-07",
+        "do member set \"Ditika\" join-date 2026-03-07",
         roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
     )
 
@@ -792,21 +795,18 @@ def test_on_message_handles_clanops_member_metadata_command():
     ):
         asyncio.run(elixir.on_message(message))
 
-    mock_admin.assert_awaited_once_with(
-        "set-join-date",
-        preview=False,
-        short=False,
-        args={"member": "Ditika", "date": "2026-03-07"},
-    )
+    request = mock_admin.await_args.args[0]
+    assert request["key"] == "member.set"
+    assert request["args"] == {"member": "Ditika", "field": "join-date", "value": "2026-03-07"}
     message.reply.assert_awaited_once_with("Set join date for Ditika to 2026-03-07.")
     assert mock_save.call_count == 2
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_set_join_date"
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_member_set"
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
 
 def test_on_message_handles_clanops_clan_list_via_public_do_command():
-    message = _make_message(200, "clan-ops", "do clan-list")
+    message = _make_message(200, "clan-ops", "do clan members")
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -830,71 +830,59 @@ def test_on_message_handles_clanops_clan_list_via_public_do_command():
     ):
         asyncio.run(elixir.on_message(message))
 
-    mock_admin.assert_awaited_once_with("clan-list", preview=False, short=False, args={})
+    request = mock_admin.await_args.args[0]
+    assert request["key"] == "clan.members"
+    assert request["args"] == {"detail": "summary"}
     message.reply.assert_awaited_once_with("**Clan List (2 active)**\n- raquaza — `#ABC`")
     assert mock_save.call_count == 2
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_clan_list"
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_clan_members"
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
 
 def test_parse_admin_command_handles_clan_list_full_flag():
-    parsed = elixir.parse_admin_command("do clan-list full", require_prefix=True)
+    parsed = elixir.parse_admin_command("do clan members full", require_prefix=True)
 
-    assert parsed == {
-        "command": "clan-list",
-        "preview": False,
-        "short": False,
-        "args": {"full": "true"},
-    }
+    assert parsed["key"] == "clan.members"
+    assert parsed["preview"] is False
+    assert parsed["short"] is False
+    assert parsed["args"] == {"detail": "full"}
 
 
 def test_parse_admin_command_handles_set_discord():
-    parsed = elixir.parse_admin_command('do set-discord "King Levy" @kinglevy', require_prefix=True)
+    parsed = elixir.parse_admin_command('do member set "King Levy" discord @kinglevy', require_prefix=True)
 
-    assert parsed == {
-        "command": "set-discord",
-        "preview": False,
-        "short": False,
-        "args": {"member": "King Levy", "discord_name": "@kinglevy"},
-    }
+    assert parsed["key"] == "member.set"
+    assert parsed["args"] == {"member": "King Levy", "field": "discord", "value": "@kinglevy"}
 
 
 def test_parse_admin_command_normalizes_legacy_poap_kings_alias():
     parsed = elixir.parse_admin_command("do site-content --preview", require_prefix=True)
 
-    assert parsed == {
-        "command": "site-content",
-        "preview": True,
-        "short": False,
-        "args": {},
-    }
+    assert parsed["kind"] == "legacy_hint"
+    assert parsed["key"] == "site-content"
+    assert parsed["preview"] is True
+    assert "activity run site-content" in parsed["hint"]
 
 
 def test_parse_admin_command_handles_system_signals_preview():
     parsed = elixir.parse_admin_command("do system-signals --preview", require_prefix=True)
 
-    assert parsed == {
-        "command": "system-signals",
-        "preview": True,
-        "short": False,
-        "args": {},
-    }
+    assert parsed["kind"] == "legacy_hint"
+    assert parsed["key"] == "system-signals"
+    assert parsed["preview"] is True
+    assert "signal publish-pending" in parsed["hint"]
 
 
 def test_parse_admin_command_handles_signals():
-    parsed = elixir.parse_admin_command("do signals", require_prefix=True)
+    parsed = elixir.parse_admin_command("do signal show", require_prefix=True)
 
-    assert parsed == {
-        "command": "signals",
-        "preview": False,
-        "short": False,
-        "args": {},
-    }
+    assert parsed["key"] == "signal.show"
+    assert parsed["args"] == {"view": "all", "limit": "10"}
 
 
 def test_on_message_handles_clanops_profile_via_public_do_command():
-    message = _make_message(200, "clan-ops", "do profile \"Ditika\"")
+    message = _make_message(200, "clan-ops", "do member show \"Ditika\"")
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -918,10 +906,12 @@ def test_on_message_handles_clanops_profile_via_public_do_command():
     ):
         asyncio.run(elixir.on_message(message))
 
-    mock_admin.assert_awaited_once_with("profile", preview=False, short=False, args={"member": "Ditika"})
+    request = mock_admin.await_args.args[0]
+    assert request["key"] == "member.show"
+    assert request["args"] == {"member": "Ditika"}
     message.reply.assert_awaited_once_with("**Member Profile: Ditika**\n- Identity: Ditika")
     assert mock_save.call_count == 2
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_profile"
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_admin_member_show"
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
 
@@ -979,7 +969,7 @@ def test_on_message_rewrites_member_refs_before_reply_and_save():
 
 
 def test_on_message_denies_memory_command_without_leader_role():
-    message = _make_message(200, "clan-ops", "do memory", roles=[])
+    message = _make_message(200, "clan-ops", "do memory show", roles=[])
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -1042,8 +1032,9 @@ def test_register_elixir_app_commands_includes_signals():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
     root = bot.tree.commands[0]
-
-    assert root.get_command("signals") is not None
+    signal_group = root.get_command("signal")
+    assert signal_group is not None
+    assert signal_group.get_command("show") is not None
 
 
 def test_dispatch_admin_command_handles_verify_discord():
@@ -1053,7 +1044,7 @@ def test_dispatch_admin_command_handles_verify_discord():
     ):
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "verify-discord",
+                "member.verify-discord",
                 preview=False,
                 short=False,
                 args={"member": "King Levy"},
@@ -1068,10 +1059,10 @@ def test_dispatch_admin_command_handles_clan_list_full():
     with patch("runtime.admin._build_clan_list_report", return_value="**Clan List Full (2 active)**") as mock_report:
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "clan-list",
+                "clan.members",
                 preview=False,
                 short=False,
-                args={"full": "true"},
+                args={"detail": "full"},
             )
         )
 
@@ -1083,10 +1074,10 @@ def test_dispatch_admin_command_returns_runtime_job_failure_text():
     with patch("elixir._weekly_clan_recap", new=AsyncMock(side_effect=RuntimeError("weekly recap post failed: missing Discord permissions in #weekly-digest"))):
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "weekly-recap",
+                "activity.run",
                 preview=False,
                 short=False,
-                args={},
+                args={"activity": "weekly-recap"},
             )
         )
 
@@ -1094,17 +1085,17 @@ def test_dispatch_admin_command_returns_runtime_job_failure_text():
 
 
 def test_dispatch_admin_command_handles_system_signals():
-    with patch("runtime.admin._run_system_signals", new=AsyncMock(return_value="Ran `system-signals` for 1 pending signal(s).")) as mock_run:
+    with patch("runtime.admin._run_system_signals", new=AsyncMock(return_value="Published 1 pending system signal(s).")) as mock_run:
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "system-signals",
+                "signal.publish-pending",
                 preview=False,
                 short=False,
                 args={},
             )
         )
 
-    assert result == "Ran `system-signals` for 1 pending signal(s)."
+    assert result == "Published 1 pending system signal(s)."
     mock_run.assert_awaited_once_with(preview=False)
 
 
@@ -1112,15 +1103,15 @@ def test_dispatch_admin_command_handles_signals():
     with patch("runtime.admin._build_signals_report", return_value="**Elixir Signals**") as mock_report:
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "signals",
+                "signal.show",
                 preview=False,
                 short=False,
-                args={},
+                args={"view": "all", "limit": "10"},
             )
         )
 
     assert result == "**Elixir Signals**"
-    mock_report.assert_called_once_with()
+    mock_report.assert_called_once_with(view="all", recent_limit="10")
 
 
 def test_build_signals_report_includes_routing_recent_and_pending():
@@ -1176,14 +1167,14 @@ def test_build_signals_report_includes_routing_recent_and_pending():
     assert "`capability_three_lane_elixir_v3`" in report
 
 
-def test_dispatch_admin_command_normalizes_legacy_site_alias():
+def test_dispatch_admin_command_handles_activity_run():
     with patch("runtime.admin._run_runtime_job", new=AsyncMock(return_value="Ran `site-content`.")) as mock_job:
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "site-content",
+                "activity.run",
                 preview=False,
                 short=False,
-                args={},
+                args={"activity": "site-content"},
             )
         )
 
@@ -1198,10 +1189,10 @@ def test_dispatch_admin_command_handles_set_discord():
     ):
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "set-discord",
+                "member.set",
                 preview=False,
                 short=False,
-                args={"member": "King Levy", "discord_name": "@kinglevy"},
+                args={"member": "King Levy", "field": "discord", "value": "@kinglevy"},
             )
         )
 
@@ -1218,10 +1209,10 @@ def test_dispatch_admin_command_handles_set_discord_with_resolved_guild_member()
     ):
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "set-discord",
+                "member.set",
                 preview=False,
                 short=False,
-                args={"member": "Ditaka", "discord_name": "Ditaka"},
+                args={"member": "Ditaka", "field": "discord", "value": "Ditaka"},
             )
         )
 
@@ -1244,10 +1235,10 @@ def test_dispatch_admin_command_handles_set_note_and_writes_contextual_memory():
     with patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None, None])) as mock_to_thread:
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "set-note",
+                "member.set",
                 preview=False,
                 short=False,
-                args={"member": "King Levy", "note": "Reliable war leader."},
+                args={"member": "King Levy", "field": "note", "value": "Reliable war leader."},
             )
         )
 
@@ -1274,10 +1265,10 @@ def test_dispatch_admin_command_handles_clear_note_and_archives_contextual_memor
     with patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None, None])) as mock_to_thread:
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "clear-note",
+                "member.clear",
                 preview=False,
                 short=False,
-                args={"member": "King Levy"},
+                args={"member": "King Levy", "field": "note"},
             )
         )
 
@@ -1310,44 +1301,36 @@ def test_resolve_member_tag_accepts_name_with_tag_label():
 
 def test_parse_admin_command_handles_memory_filters():
     parsed = elixir.parse_admin_command(
-        'do memory member "King Levy" search "war consistency" --limit 7 --system-internal',
+        'do memory show member "King Levy" search "war consistency" --limit 7 --system-internal',
         require_prefix=True,
     )
 
-    assert parsed == {
-        "command": "memory",
-        "preview": False,
-        "short": False,
-        "args": {
-            "limit": "7",
-            "member": "King Levy",
-            "query": "war consistency",
-            "include_system_internal": "true",
-        },
+    assert parsed["key"] == "memory.show"
+    assert parsed["args"] == {
+        "limit": "7",
+        "member": "King Levy",
+        "query": "war consistency",
+        "include_system_internal": "true",
     }
 
 
 def test_parse_admin_command_handles_db_status_group():
-    parsed = elixir.parse_admin_command("do db-status memory", require_prefix=True)
+    parsed = elixir.parse_admin_command("do system storage memory", require_prefix=True)
 
-    assert parsed == {
-        "command": "db-status",
-        "preview": False,
-        "short": False,
-        "args": {"group": "memory"},
-    }
+    assert parsed["key"] == "system.storage"
+    assert parsed["args"] == {"view": "memory"}
 
 
 def test_admin_command_requires_leader_for_memory():
-    assert admin_command_requires_leader("memory") is True
-    assert admin_command_requires_leader("status") is False
+    assert admin_command_requires_leader("memory.show") is True
+    assert admin_command_requires_leader("system.status") is False
 
 
 def test_dispatch_admin_command_handles_memory():
     with patch("runtime.admin._build_memory_report", return_value="**Elixir Memory**\n- Context store: 3 total") as mock_report:
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "memory",
+                "memory.show",
                 preview=False,
                 short=False,
                 args={"member": "King Levy", "limit": "3", "include_system_internal": "true"},
@@ -1367,10 +1350,10 @@ def test_dispatch_admin_command_handles_db_status():
     with patch("elixir._build_db_status_report", return_value="**Elixir DB Status | Memory**\n- Tables:") as mock_report:
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "db-status",
+                "system.storage",
                 preview=False,
                 short=False,
-                args={"group": "memory"},
+                args={"view": "memory"},
             )
         )
 
@@ -1385,7 +1368,7 @@ def test_dispatch_admin_command_handles_war_status():
     ):
         result = asyncio.run(
             elixir.dispatch_admin_command(
-                "war-status",
+                "clan.war",
                 preview=False,
                 short=False,
                 args={},
@@ -1397,11 +1380,12 @@ def test_dispatch_admin_command_handles_war_status():
     mock_report.assert_called_once_with({"name": "POAP KINGS"}, {"clans": [{}, {}]})
 
 
-def test_slash_clan_list_full_passes_flag_to_admin_dispatch():
+def test_slash_clan_members_full_passes_flag_to_admin_dispatch():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
     root = bot.tree.commands[0]
-    clan_list_command = root.get_command("clan-list")
+    clan_group = root.get_command("clan")
+    clan_list_command = clan_group.get_command("members")
 
     response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
@@ -1417,24 +1401,25 @@ def test_slash_clan_list_full_passes_flag_to_admin_dispatch():
         patch("runtime.app._is_clanops_channel", return_value=True),
         patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="full list")) as mock_dispatch,
     ):
-        asyncio.run(clan_list_command.callback(interaction, full=True))
+        asyncio.run(clan_list_command.callback(interaction, detail="full"))
 
     mock_dispatch.assert_awaited_once_with(
-        "clan-list",
+        "clan.members",
         preview=False,
         short=False,
-        args={"full": "true"},
+        args={"detail": "full"},
     )
     response.defer.assert_awaited_once_with(ephemeral=True)
     interaction.edit_original_response.assert_awaited_once_with(content="full list")
     followup.send.assert_not_awaited()
 
 
-def test_slash_db_status_dispatches_to_admin():
+def test_slash_system_storage_dispatches_to_admin():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
     root = bot.tree.commands[0]
-    db_status_command = root.get_command("db-status")
+    system_group = root.get_command("system")
+    db_status_command = system_group.get_command("storage")
 
     response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
@@ -1453,21 +1438,22 @@ def test_slash_db_status_dispatches_to_admin():
         asyncio.run(db_status_command.callback(interaction, view="memory"))
 
     mock_dispatch.assert_awaited_once_with(
-        "db-status",
+        "system.storage",
         preview=False,
         short=False,
-        args={"group": "memory"},
+        args={"view": "memory"},
     )
     response.defer.assert_awaited_once_with(ephemeral=True)
     interaction.edit_original_response.assert_awaited_once_with(content="db report")
     followup.send.assert_not_awaited()
 
 
-def test_slash_war_status_dispatches_to_admin():
+def test_slash_clan_war_dispatches_to_admin():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
     root = bot.tree.commands[0]
-    war_status_command = root.get_command("war-status")
+    clan_group = root.get_command("clan")
+    war_status_command = clan_group.get_command("war")
 
     response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
@@ -1486,7 +1472,7 @@ def test_slash_war_status_dispatches_to_admin():
         asyncio.run(war_status_command.callback(interaction))
 
     mock_dispatch.assert_awaited_once_with(
-        "war-status",
+        "clan.war",
         preview=False,
         short=False,
         args={},
@@ -1496,12 +1482,12 @@ def test_slash_war_status_dispatches_to_admin():
     followup.send.assert_not_awaited()
 
 
-def test_slash_set_discord_passes_identity_to_admin_dispatch():
+def test_slash_member_set_discord_passes_identity_to_admin_dispatch():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
     root = bot.tree.commands[0]
-    profile_group = root.get_command("profile")
-    set_discord_command = profile_group.get_command("set-discord")
+    member_group = root.get_command("member")
+    set_discord_command = member_group.get_command("set")
 
     response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
@@ -1518,24 +1504,24 @@ def test_slash_set_discord_passes_identity_to_admin_dispatch():
         patch("runtime.app._has_leader_role", return_value=True),
         patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="linked")) as mock_dispatch,
     ):
-        asyncio.run(set_discord_command.callback(interaction, member="King Levy", discord_name="@kinglevy"))
+        asyncio.run(set_discord_command.callback(interaction, member="King Levy", field="discord", value="@kinglevy"))
 
     mock_dispatch.assert_awaited_once_with(
-        "set-discord",
+        "member.set",
         preview=False,
         short=False,
-        args={"member": "King Levy", "discord_name": "@kinglevy"},
+        args={"member": "King Levy", "field": "discord", "value": "@kinglevy"},
     )
     response.defer.assert_awaited_once_with(ephemeral=True)
     interaction.edit_original_response.assert_awaited_once_with(content="linked")
     followup.send.assert_not_awaited()
 
 
-def test_slash_run_job_defers_before_dispatching():
+def test_slash_activity_run_defers_before_dispatching():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
     root = bot.tree.commands[0]
-    jobs_group = root.get_command("jobs")
+    jobs_group = root.get_command("activity")
     run_command = jobs_group.get_command("run")
 
     response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
@@ -1553,14 +1539,14 @@ def test_slash_run_job_defers_before_dispatching():
         patch("runtime.app._has_leader_role", return_value=True),
         patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="job failed")) as mock_dispatch,
     ):
-        asyncio.run(run_command.callback(interaction, job="weekly-recap", preview=False))
+        asyncio.run(run_command.callback(interaction, activity="weekly-recap", preview=False))
 
     response.defer.assert_awaited_once_with(ephemeral=True)
     mock_dispatch.assert_awaited_once_with(
-        "weekly-recap",
+        "activity.run",
         preview=False,
         short=False,
-        args={},
+        args={"activity": "weekly-recap"},
     )
     interaction.edit_original_response.assert_awaited_once_with(content="job failed")
     followup.send.assert_not_awaited()
@@ -2394,7 +2380,10 @@ def test_build_db_status_report_lists_group_summaries():
     assert report.startswith("**Elixir DB Status**")
     assert "File: `elixir.db` | schema v15 | size 40.0 KB | WAL 8.0 KB | SHM 32.0 KB" in report
     assert "Storage: page size 4,096 B | pages 10 | free pages 2 | journal wal | tables 3" in report
-    assert "Use `/elixir db-status` for the full rollup or `/elixir db-status view:<group>` for a focused section." in report
+    assert (
+        "Use `/elixir system storage` for the full rollup or "
+        "`/elixir system storage view:<all|clan|war|memory>` for a focused section."
+    ) in report
     assert "Clan: 1 tables | 50 rows | 4.0 KB" in report
     assert "War: 1 tables | 320 rows | 12.0 KB" in report
     assert "Memory: 1 tables | 1,200 rows | 24.0 KB" in report
