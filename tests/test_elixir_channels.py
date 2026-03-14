@@ -71,7 +71,7 @@ def test_on_message_routes_interactive_channel_when_mentioned():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
         patch("elixir._get_channel_behavior", return_value={
             "id": 100,
             "name": "#member-chat",
@@ -96,6 +96,26 @@ def test_on_message_routes_interactive_channel_when_mentioned():
     message.reply.assert_awaited_once_with("You look solid.")
     mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()
+
+
+def test_is_bot_mentioned_requires_leading_mention():
+    bot_user = SimpleNamespace(id=999)
+    direct_message = _make_message(100, "member-chat", "<@999> how am I doing?")
+    mid_message = _make_message(100, "member-chat", "how am I doing, <@999>?")
+
+    with patch("runtime.helpers.bot", new=SimpleNamespace(user=bot_user)):
+        assert elixir._is_bot_mentioned(direct_message) is True
+        assert elixir._is_bot_mentioned(mid_message) is False
+
+
+def test_strip_bot_mentions_removes_only_leading_mention():
+    with (
+        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
+        patch("runtime.helpers.BOT_ROLE_ID", 777),
+    ):
+        assert elixir._strip_bot_mentions("<@999> help <@999>") == "help <@999>"
+        assert elixir._strip_bot_mentions("help <@999>") == "help <@999>"
+        assert elixir._strip_bot_mentions("<@&777> help") == "help"
 
 
 def test_post_to_elixir_sends_content_list_as_multiple_messages():
@@ -187,7 +207,7 @@ def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
         patch("elixir._get_channel_behavior", return_value={
             "id": 200,
             "name": "#clan-ops",
@@ -246,7 +266,7 @@ def test_on_message_logs_agent_failure_payload_details():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
         patch("elixir._get_channel_behavior", return_value={
             "id": 200,
             "name": "#clan-ops",
@@ -304,7 +324,7 @@ def test_on_message_logs_agent_failure_payload_details():
     mock_process.assert_not_awaited()
 
 
-def test_on_message_routes_clanops_proactively_without_mention():
+def test_on_message_ignores_unmentioned_clanops_chat():
     message = _make_message(200, "clan-ops", "I think we need to review promotions this week.")
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -333,13 +353,12 @@ def test_on_message_routes_clanops_proactively_without_mention():
     ):
         asyncio.run(elixir.on_message(message))
 
-    assert mock_respond.call_args.kwargs["workflow"] == "clanops"
-    assert mock_respond.call_args.kwargs["proactive"] is True
-    mock_history.assert_called_once_with("channel_user:200:123", elixir.CHANNEL_CONVERSATION_LIMIT)
-    assert mock_save.call_args_list[0].args[0] == "channel_user:200:123"
-    message.reply.assert_awaited_once_with("I can pull the current promotion candidates if you want.")
-    mock_share.assert_awaited_once()
-    mock_process.assert_not_awaited()
+    mock_history.assert_not_called()
+    mock_save.assert_not_called()
+    mock_respond.assert_not_called()
+    mock_share.assert_not_awaited()
+    message.reply.assert_not_awaited()
+    mock_process.assert_awaited_once_with(message)
 
 
 def test_on_message_handles_explicit_member_deck_request_without_llm():
@@ -420,14 +439,12 @@ def test_on_message_hints_for_bare_clanops_status_command():
     ):
         asyncio.run(elixir.on_message(message))
 
-    message.reply.assert_awaited_once()
-    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
-    assert mock_save.call_count == 2
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    message.reply.assert_not_awaited()
+    mock_save.assert_not_called()
     mock_admin.assert_not_awaited()
     mock_build.assert_not_called()
     mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
+    mock_process.assert_awaited_once_with(message)
 
 
 def test_on_message_hints_for_bare_clanops_schedule_command():
@@ -456,14 +473,12 @@ def test_on_message_hints_for_bare_clanops_schedule_command():
     ):
         asyncio.run(elixir.on_message(message))
 
-    message.reply.assert_awaited_once()
-    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
-    assert mock_save.call_count == 2
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    message.reply.assert_not_awaited()
+    mock_save.assert_not_called()
     mock_admin.assert_not_awaited()
     mock_build.assert_not_called()
     mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
+    mock_process.assert_awaited_once_with(message)
 
 
 def test_on_message_handles_clanops_admin_command_directly():
@@ -1478,15 +1493,13 @@ def test_on_message_hints_for_bare_clanops_clan_status_command():
     ):
         asyncio.run(elixir.on_message(message))
 
-    message.reply.assert_awaited_once()
-    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
-    assert mock_save.call_count == 2
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    message.reply.assert_not_awaited()
+    mock_save.assert_not_called()
     mock_admin.assert_not_awaited()
     mock_load.assert_not_awaited()
     mock_build.assert_not_called()
     mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
+    mock_process.assert_awaited_once_with(message)
 
 
 def test_on_message_hints_for_bare_clanops_db_status_command():
@@ -1514,12 +1527,11 @@ def test_on_message_hints_for_bare_clanops_db_status_command():
     ):
         asyncio.run(elixir.on_message(message))
 
-    message.reply.assert_awaited_once()
-    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    message.reply.assert_not_awaited()
+    mock_save.assert_not_called()
     mock_admin.assert_not_awaited()
     mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
+    mock_process.assert_awaited_once_with(message)
 
 
 def test_on_message_hints_for_bare_clanops_war_status_command():
@@ -1547,12 +1559,11 @@ def test_on_message_hints_for_bare_clanops_war_status_command():
     ):
         asyncio.run(elixir.on_message(message))
 
-    message.reply.assert_awaited_once()
-    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    message.reply.assert_not_awaited()
+    mock_save.assert_not_called()
     mock_admin.assert_not_awaited()
     mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
+    mock_process.assert_awaited_once_with(message)
 
 
 def test_on_message_hints_for_bare_clanops_help_command():
@@ -1580,12 +1591,11 @@ def test_on_message_hints_for_bare_clanops_help_command():
     ):
         asyncio.run(elixir.on_message(message))
 
-    message.reply.assert_awaited_once()
-    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
-    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    message.reply.assert_not_awaited()
+    mock_save.assert_not_called()
     mock_admin.assert_not_awaited()
     mock_respond.assert_not_called()
-    mock_process.assert_not_awaited()
+    mock_process.assert_awaited_once_with(message)
 
 
 def test_on_message_handles_interactive_help_directly():
@@ -1620,7 +1630,7 @@ def test_on_message_handles_interactive_help_directly():
 
 
 def test_on_message_handles_roster_join_dates_directly():
-    message = _make_message(200, "clan-ops", "Who are the members of the clan and when did they join?")
+    message = _make_message(200, "clan-ops", "<@999> Who are the members of the clan and when did they join?")
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -1628,7 +1638,7 @@ def test_on_message_handles_roster_join_dates_directly():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
         patch("elixir._get_channel_behavior", return_value={
             "id": 200,
             "name": "#clan-ops",

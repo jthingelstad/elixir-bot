@@ -1333,19 +1333,36 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
 
 
 def _strip_bot_mentions(text: str) -> str:
-    if bot.user is None:
-        return (text or "").strip()
-    return (
-        (text or "")
-        .replace(f"<@{bot.user.id}>", "")
-        .replace(f"<@!{bot.user.id}>", "")
-        .replace(f"<@&{BOT_ROLE_ID}>", "")
-        .strip()
-    )
+    text = (text or "").lstrip()
+    pattern = _leading_bot_mention_pattern()
+    if pattern is None:
+        return text.strip()
+    while True:
+        match = pattern.match(text)
+        if not match:
+            break
+        text = text[match.end():].lstrip()
+    return text.strip()
 
 
 def _is_bot_mentioned(message) -> bool:
-    return bot.user in message.mentions or any(r.id == BOT_ROLE_ID for r in message.role_mentions)
+    pattern = _leading_bot_mention_pattern()
+    if pattern is None:
+        return False
+    return bool(pattern.match(getattr(message, "content", "") or ""))
+
+
+def _leading_bot_mention_pattern():
+    parts = []
+    bot_user = getattr(bot, "user", None)
+    bot_id = getattr(bot_user, "id", None)
+    if bot_id:
+        parts.append(rf"<@!?{bot_id}>")
+    if BOT_ROLE_ID:
+        parts.append(rf"<@&{BOT_ROLE_ID}>")
+    if not parts:
+        return None
+    return re.compile(rf"^\s*(?:{'|'.join(parts)})(?:\s+|$)")
 
 
 def _get_channel_behavior(channel_id):
