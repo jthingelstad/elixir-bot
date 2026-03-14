@@ -23,7 +23,6 @@ def register_elixir_app_commands(bot) -> None:
     signal_commands = app_commands.Group(name="signal", description="Signal routing and system-signal commands")
     activity_commands = app_commands.Group(name="activity", description="Recurring activity inspection and manual run commands")
     integration_commands = app_commands.Group(name="integration", description="Integration modules and external publishing")
-    poap_kings_commands = app_commands.Group(name="poap-kings", description="POAP KINGS website integration commands")
 
     async def send_interaction_text(interaction: discord.Interaction, content: str, *, ephemeral: bool = True, use_followup: bool = False):
         chunks = app._chunk_discord_text(content)
@@ -336,16 +335,30 @@ def register_elixir_app_commands(bot) -> None:
             event_type=COMMAND_SPECS["integration.list"].event_type,
         )
 
-    @poap_kings_commands.command(name="status", description=COMMAND_SPECS["integration.poap-kings.status"].description)
-    async def slash_poap_kings_status(interaction: discord.Interaction):
+    @integration_commands.command(name="status", description="Show status for an integration module.")
+    @app_commands.describe(integration="Integration module to inspect.")
+    @app_commands.choices(integration=[
+        app_commands.Choice(name="POAP KINGS", value="poap-kings"),
+    ])
+    async def slash_integration_status(interaction: discord.Interaction, integration: str):
+        if integration != "poap-kings":
+            await send_interaction_text(interaction, f"Unsupported integration: {integration}", ephemeral=True)
+            return
         await run_admin_interaction(
             interaction,
             command_name="integration.poap-kings.status",
             event_type=COMMAND_SPECS["integration.poap-kings.status"].event_type,
         )
 
-    @poap_kings_commands.command(name="publish", description=COMMAND_SPECS["integration.poap-kings.publish"].description)
-    @app_commands.describe(target="POAP KINGS publish target.", preview="Suppress Discord sends and site pushes when supported.")
+    @integration_commands.command(name="publish", description="Publish content through an integration module.")
+    @app_commands.describe(
+        integration="Integration module to publish through.",
+        target="POAP KINGS publish target.",
+        preview="Suppress Discord sends and site pushes when supported.",
+    )
+    @app_commands.choices(integration=[
+        app_commands.Choice(name="POAP KINGS", value="poap-kings"),
+    ])
     @app_commands.choices(target=[
         app_commands.Choice(name="All", value="all"),
         app_commands.Choice(name="Data", value="data"),
@@ -354,7 +367,15 @@ def register_elixir_app_commands(bot) -> None:
         app_commands.Choice(name="Roster Bios", value="roster-bios"),
         app_commands.Choice(name="Promote", value="promote"),
     ])
-    async def slash_poap_kings_publish(interaction: discord.Interaction, target: str, preview: bool = False):
+    async def slash_integration_publish(
+        interaction: discord.Interaction,
+        integration: str,
+        target: str,
+        preview: bool = False,
+    ):
+        if integration != "poap-kings":
+            await send_interaction_text(interaction, f"Unsupported integration: {integration}", ephemeral=True)
+            return
         await run_admin_interaction(
             interaction,
             command_name="integration.poap-kings.publish",
@@ -364,7 +385,6 @@ def register_elixir_app_commands(bot) -> None:
             write=True,
         )
 
-    integration_commands.add_command(poap_kings_commands)
     elixir_commands.add_command(system_commands)
     elixir_commands.add_command(clan_commands)
     elixir_commands.add_command(member_commands)
