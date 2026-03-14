@@ -70,7 +70,7 @@ STARTUP_SYSTEM_SIGNALS = [
             ),
             "details": [
                 "Years Played badge jumps can now be surfaced as real clan celebration moments.",
-                "Achievement star gains and notable badge unlocks can now feed the observation workflow.",
+                "Achievement star gains and notable badge unlocks can now feed the channel-update workflow.",
                 "The goal is to make meaningful player progression feel visible and worth reacting to.",
             ],
             "audience": "clan",

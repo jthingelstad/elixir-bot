@@ -530,6 +530,7 @@ async def route_message(message):
                     db.build_memory_context,
                     discord_user_id=message.author.id,
                     channel_id=message.channel.id,
+                    viewer_scope=channel_config.get("memory_scope") or "public",
                 )
                 await asyncio.to_thread(
                     db.save_message,
@@ -661,6 +662,7 @@ async def route_message(message):
                     db.build_memory_context,
                     discord_user_id=message.author.id,
                     channel_id=message.channel.id,
+                    viewer_scope=channel_config.get("memory_scope") or "public",
                 )
 
                 await asyncio.to_thread(

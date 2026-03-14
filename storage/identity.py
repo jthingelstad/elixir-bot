@@ -551,7 +551,7 @@ def get_database_status(conn=None):
             conn.close()
 
 
-def build_memory_context(discord_user_id=None, member_tag=None, channel_id=None, conn=None):
+def build_memory_context(discord_user_id=None, member_tag=None, channel_id=None, *, viewer_scope="public", conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
@@ -560,13 +560,14 @@ def build_memory_context(discord_user_id=None, member_tag=None, channel_id=None,
             "member": None,
             "channel": None,
         }
-        if discord_user_id is not None:
+        include_cross_channel_conversation = (viewer_scope or "public") == "leadership"
+        if include_cross_channel_conversation and discord_user_id is not None:
             key = str(discord_user_id)
             context["discord_user"] = {
                 "facts": get_memory_facts("discord_user", key, conn=conn),
                 "episodes": get_memory_episodes("discord_user", key, conn=conn),
             }
-        if member_tag:
+        if include_cross_channel_conversation and member_tag:
             member = conn.execute(
                 "SELECT member_id FROM members WHERE player_tag = ?",
                 (_canon_tag(member_tag),),

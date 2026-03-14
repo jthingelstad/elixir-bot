@@ -247,6 +247,31 @@ def list_signal_outcomes(source_signal_key=None, *, delivery_status=None, conn=N
             conn.close()
 
 
+def list_recent_signal_outcomes(limit=25, *, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM signal_outcomes
+            ORDER BY COALESCE(updated_at, created_at) DESC, outcome_id DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit or 25)),),
+        ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["payload_json"] = json.loads(item["payload_json"] or "{}")
+            item["required"] = bool(item.get("required"))
+            items.append(item)
+        return items
+    finally:
+        if close:
+            conn.close()
+
+
 def was_signal_outcome_delivered(source_signal_key, target_channel_key, intent, conn=None):
     outcome = get_signal_outcome(source_signal_key, target_channel_key, intent, conn=conn)
     return bool(outcome and outcome.get("delivery_status") == "delivered")
@@ -313,7 +338,7 @@ def save_message(scope, author_type, content, summary=None, channel_id=None, cha
                 (str(channel_id), now, summary),
             )
         if discord_user_id is not None:
-            importance = 2 if workflow in {"leader", "reception"} else 1
+            importance = 2 if workflow in {"clanops", "reception"} else 1
             save_memory_episode(
                 "discord_user",
                 str(discord_user_id),
@@ -334,7 +359,7 @@ def save_message(scope, author_type, content, summary=None, channel_id=None, cha
                     conn=conn,
                 )
         if member_id is not None:
-            importance = 2 if workflow in {"leader", "reception"} else 1
+            importance = 2 if workflow in {"clanops", "reception"} else 1
             save_memory_episode(
                 "member",
                 str(member_id),
