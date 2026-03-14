@@ -560,8 +560,11 @@ async def on_ready():
     if not SLASH_COMMANDS_SYNCED:
         try:
             if APP_GUILD is not None:
+                # Clear stale global commands from older releases when we are
+                # intentionally operating with a guild-scoped slash surface.
+                await bot.tree.sync()
                 await bot.tree.sync(guild=APP_GUILD)
-                log.info("Synced /elixir commands to guild %s", GUILD_ID)
+                log.info("Synced /elixir commands to guild %s and cleared stale global commands", GUILD_ID)
             else:
                 await bot.tree.sync()
                 log.info("Synced global /elixir commands")
