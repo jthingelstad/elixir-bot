@@ -15,6 +15,31 @@ import prompts
 
 log = logging.getLogger("elixir_heartbeat")
 
+BATTLE_DAY_SECONDS = 24 * 60 * 60
+_BATTLE_DAY_CHECKPOINTS = (
+    {
+        "hour": 21,
+        "signal_type": "war_battle_day_final_hours",
+        "signal_key": "war_battle_day_checkpoint",
+        "label": "final push",
+        "hours_remaining": 3,
+    },
+    {
+        "hour": 18,
+        "signal_type": "war_battle_day_live_update",
+        "signal_key": "war_battle_day_checkpoint",
+        "label": "late push",
+        "hours_remaining": 6,
+    },
+    {
+        "hour": 12,
+        "signal_type": "war_battle_day_live_update",
+        "signal_key": "war_battle_day_checkpoint",
+        "label": "midday check-in",
+        "hours_remaining": 12,
+    },
+)
+
 
 # ── Signal detectors ─────────────────────────────────────────────────────────
 # Each returns a list of signal dicts (may be empty).
@@ -34,6 +59,31 @@ def _war_period_signal_log_type(base_type, war_state):
     if season_token is None:
         season_token = "live"
     return f"{base_type}::s{season_token}:w{section_index}:p{period_index}"
+
+
+def _battle_lead_payload(race_rank, previous_rank=None):
+    payload = {
+        "race_rank": race_rank,
+        "in_first_place": race_rank == 1 if race_rank is not None else None,
+        "needs_lead_recovery": bool(race_rank and race_rank > 1),
+    }
+    if race_rank and race_rank > 1:
+        payload.update({
+            "lead_pressure": "high",
+            "lead_story": f"POAP KINGS is currently in place {race_rank} and needs battle wins to restore first place.",
+            "lead_call_to_action": "Encourage members to finish their war battles and help restore first place.",
+        })
+    elif race_rank == 1:
+        payload.update({
+            "lead_pressure": "hold",
+            "lead_story": "POAP KINGS is in first place right now and should protect the lead.",
+            "lead_call_to_action": "Encourage members to keep battling so we stay on top.",
+        })
+    if previous_rank is not None and race_rank is not None and previous_rank != race_rank:
+        payload["previous_rank"] = previous_rank
+        payload["lost_ground"] = race_rank > previous_rank
+        payload["gained_ground"] = race_rank < previous_rank
+    return payload
 
 
 def _completed_war_races(conn=None):
@@ -351,6 +401,7 @@ def detect_war_day_markers(conn=None):
                         "time_left_seconds": current_day.get("time_left_seconds"),
                         "time_left_text": current_day.get("time_left_text"),
                         "top_fame_total": current_day.get("top_fame_total") or [],
+                        **_battle_lead_payload(current_day.get("race_rank")),
                     })
 
     if previous and previous_key and current_key != previous_key:
@@ -394,6 +445,7 @@ def detect_war_day_markers(conn=None):
                         "used_none": previous_day.get("used_none") or [],
                         "top_fame_today": previous_day.get("top_fame_today") or [],
                         "top_fame_total": previous_day.get("top_fame_total") or [],
+                        **_battle_lead_payload(previous_day.get("race_rank")),
                     })
     return signals
 
@@ -423,6 +475,7 @@ def detect_war_battle_final_hours(conn=None, threshold_hours=6):
         "used_some": current.get("used_some") or [],
         "used_none": current.get("used_none") or [],
         "top_fame_today": current.get("top_fame_today") or [],
+        **_battle_lead_payload(current.get("race_rank")),
     }]
 
 
@@ -456,6 +509,7 @@ def detect_war_rank_changes(conn=None):
         "time_left_seconds": (current_day or {}).get("time_left_seconds"),
         "time_left_text": (current_day or {}).get("time_left_text"),
         "top_fame_today": (current_day or {}).get("top_fame_today") or [],
+        **_battle_lead_payload(current_rank, previous_rank=previous_rank),
     }]
 
 
@@ -522,35 +576,48 @@ def detect_inactivity(current_members, now=None, conn=None):
     return signals
 
 
-def detect_war_deck_usage(war_data, conn=None):
-    """Check who has and hasn't used their 4 war decks today.
+def detect_war_battle_checkpoints(conn=None):
+    """Emit battle-day updates at 12h, 18h, and 21h elapsed.
 
-    war_data: dict from cr_api.get_current_war().
-    Returns a signal with players who used decks and who haven't, only on battle days.
-    Only fires once per day.
+    If Elixir wakes up late, emit only the latest reached unsent checkpoint
+    instead of replaying older checkpoints.
     """
-    current_war = db.get_current_war_status(conn=conn)
-    if not current_war or not current_war.get("battle_phase_active"):
-        return []
-    now = datetime.now()
-    today = now.strftime("%Y-%m-%d")
-    signal_log_type = _war_period_signal_log_type("war_deck_usage", current_war)
-    if db.was_signal_sent(signal_log_type, today, conn=conn):
-        return []
-
-    if not war_data or war_data.get("state") in (None, "notInWar"):
-        return []
-
-    participants = war_data.get("clan", {}).get("participants", [])
-    if not participants:
-        return []
-
-    if not any((p.get("decksUsedToday") or 0) > 0 for p in participants):
-        return []
-
     day_state = db.get_current_war_day_state(conn=conn) or {}
+    if day_state.get("phase") != "battle":
+        return []
+
+    time_left_seconds = day_state.get("time_left_seconds")
+    if time_left_seconds is None:
+        return []
+
+    elapsed_seconds = max(0, BATTLE_DAY_SECONDS - time_left_seconds)
+    today = datetime.now().strftime("%Y-%m-%d")
+    war_state = {
+        "war_day_key": day_state.get("war_day_key"),
+        "season_id": day_state.get("season_id"),
+        "section_index": day_state.get("section_index"),
+        "period_index": day_state.get("period_index"),
+    }
+
+    chosen_checkpoint = None
+    for checkpoint in _BATTLE_DAY_CHECKPOINTS:
+        if elapsed_seconds < checkpoint["hour"] * 3600:
+            continue
+        signal_log_type = (
+            f"{_war_period_signal_log_type(checkpoint['signal_key'], war_state)}"
+            f"::h{checkpoint['hour']}"
+        )
+        if db.was_signal_sent(signal_log_type, today, conn=conn):
+            continue
+        chosen_checkpoint = (checkpoint, signal_log_type)
+        break
+
+    if chosen_checkpoint is None:
+        return []
+
+    checkpoint, signal_log_type = chosen_checkpoint
     return [{
-        "type": "war_battle_day_live_update",
+        "type": checkpoint["signal_type"],
         "signal_log_type": signal_log_type,
         "season_id": day_state.get("season_id"),
         "week": day_state.get("week"),
@@ -561,7 +628,7 @@ def detect_war_deck_usage(war_data, conn=None):
         "clan_fame": day_state.get("clan_fame"),
         "clan_score": day_state.get("clan_score"),
         "period_points": day_state.get("period_points"),
-        "time_left_seconds": day_state.get("time_left_seconds"),
+        "time_left_seconds": time_left_seconds,
         "time_left_text": day_state.get("time_left_text"),
         "used_all_4": day_state.get("used_all_4") or [],
         "used_some": day_state.get("used_some") or [],
@@ -571,8 +638,24 @@ def detect_war_deck_usage(war_data, conn=None):
         "engaged_count": day_state.get("engaged_count") or 0,
         "finished_count": day_state.get("finished_count") or 0,
         "untouched_count": day_state.get("untouched_count") or 0,
-        "total_participants": day_state.get("total_participants") or len(participants),
+        "total_participants": day_state.get("total_participants") or 0,
+        "checkpoint_hour": checkpoint["hour"],
+        "checkpoint_label": checkpoint["label"],
+        "checkpoint_hours_remaining": checkpoint["hours_remaining"],
+        "hours_elapsed": elapsed_seconds // 3600,
+        "hours_remaining": max(0, time_left_seconds) // 3600,
+        **_battle_lead_payload(day_state.get("race_rank")),
     }]
+
+
+def detect_war_deck_usage(war_data, conn=None):
+    """Compatibility wrapper for older callers.
+
+    Battle-day engagement updates are now time-based checkpoints, not first
+    activity detection. `war_data` is ignored.
+    """
+    del war_data
+    return detect_war_battle_checkpoints(conn=conn)
 
 
 def detect_war_week_complete(completion_signals, conn=None):
@@ -869,9 +952,8 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
             # Battle-day rank swings
             signals.extend(detect_war_rank_changes(conn=conn))
 
-            # War deck usage / live battle-day engagement
-            signals.extend(detect_war_deck_usage(war, conn=conn))
-            signals.extend(detect_war_battle_final_hours(conn=conn))
+            # Battle-day checkpoint updates
+            signals.extend(detect_war_battle_checkpoints(conn=conn))
 
             # War completion + week/season summaries
             clan_tag = cr_api.CLAN_TAG

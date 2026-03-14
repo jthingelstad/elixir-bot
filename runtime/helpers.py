@@ -1094,34 +1094,39 @@ def _build_weekly_clanops_review(clan=None, war=None):
 
     lines = [
         "**Weekly ClanOps Review**",
-        f"- {clan_name}: {roster.get('active_members', 0)}/50 active | elders {composition.get('elders', 0)} | target elder band {composition.get('target_elder_min', 0)}-{composition.get('target_elder_max', 0)} | remaining elder capacity {composition.get('elder_capacity_remaining', 0)}",
+        (
+            f"- **{clan_name}**: {roster.get('active_members', 0)}/50 active | "
+            f"**elders** {composition.get('elders', 0)} | "
+            f"**target elder band** {composition.get('target_elder_min', 0)}-{composition.get('target_elder_max', 0)} | "
+            f"**remaining elder capacity** {composition.get('elder_capacity_remaining', 0)}"
+        ),
     ]
 
     if recommended:
         lines.append(
-            f"- Promote now ({len(recommended)}): "
+            f"- ⬆️ **Promote now ({len(recommended)}):** "
             + _join_member_bits(recommended, lambda member: f"{_member_label(member)} — {_promotion_reason(member)}", limit=5)
         )
     else:
-        lines.append("- Promote now: none this week")
+        lines.append("- ⬆️ **Promote now:** none this week")
 
     if borderline:
         lines.append(
-            f"- Borderline ({len(borderline)}): "
+            f"- ⚠️ **Borderline ({len(borderline)}):** "
             + _join_member_bits(borderline, lambda member: f"{_member_label(member)} — {_promotion_reason(member)}", limit=3)
         )
 
     if flagged:
         lines.append(
-            f"- Demotion/kick watch ({len(flagged)}): "
+            f"- ⬇️ **Demotion/kick watch ({len(flagged)}):** "
             + _join_member_bits(flagged, lambda member: f"{_member_label(member)} — {_risk_reason(member)}", limit=5)
         )
     else:
-        lines.append("- Demotion/kick watch: none right now")
+        lines.append("- ⬇️ **Demotion/kick watch:** none right now")
 
     if nonparticipants:
         lines.append(
-            f"- No war decks this season ({len(nonparticipants)}): "
+            f"- 💤 **No war decks this season ({len(nonparticipants)}):** "
             + _join_member_bits(nonparticipants, lambda member: _member_label(member), limit=5)
         )
 
@@ -1129,7 +1134,7 @@ def _build_weekly_clanops_review(clan=None, war=None):
         clan_war = (war or {}).get("clan") or {}
         if clan_war:
             lines.append(
-                f"- Current river race: fame {_fmt_num(clan_war.get('fame'))} | repair {_fmt_num(clan_war.get('repairPoints'))} | score {_fmt_num(clan_war.get('clanScore'))}"
+                f"- 🚤 **Current river race:** fame {_fmt_num(clan_war.get('fame'))} | repair {_fmt_num(clan_war.get('repairPoints'))} | score {_fmt_num(clan_war.get('clanScore'))}"
             )
 
     return _with_leader_ping("\n".join(lines))

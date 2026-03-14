@@ -2160,10 +2160,12 @@ def test_build_weekly_clanops_review_tags_leaders_and_summarizes_actions():
 
     assert report.startswith(f"<@&{elixir.LEADER_ROLE_ID}>")
     assert "**Weekly ClanOps Review**" in report
-    assert "Promote now (1): King Levy (<@1474760692992180429>) — 220 donations, 4 war races, 90d tenure, seen 0d ago" in report
-    assert "Borderline (1): Finn — 120 donations, 2 war races, 20d tenure, seen 1d ago" in report
-    assert "Demotion/kick watch (1): Vijay — last seen 8 days ago; 0 donations this week" in report
-    assert "No war decks this season (1): Chanco" in report
+    assert "- **POAP KINGS**: 21/50 active | **elders** 5 | **target elder band** 4-6 | **remaining elder capacity** 1" in report
+    assert "⬆️ **Promote now (1):** King Levy (<@1474760692992180429>) — 220 donations, 4 war races, 90d tenure, seen 0d ago" in report
+    assert "⚠️ **Borderline (1):** Finn — 120 donations, 2 war races, 20d tenure, seen 1d ago" in report
+    assert "⬇️ **Demotion/kick watch (1):** Vijay — last seen 8 days ago; 0 donations this week" in report
+    assert "💤 **No war decks this season (1):** Chanco" in report
+    assert "🚤 **Current river race:** fame 12,345 | repair 120 | score 4,560" in report
 
 
 def test_build_weekly_clan_recap_context_summarizes_week():
