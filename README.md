@@ -65,13 +65,13 @@ Recurring automated work is defined in [runtime/activities.py](runtime/activitie
 
 Current activities:
 - `clan-awareness`
-  Every 47 minutes with jitter, 24/7. Processes non-war clan signals and routes outcomes to subagents like `clan-events` and `leader-lounge`.
+  Every 30 minutes with up to 15 minutes of jitter, 24/7. Processes non-war clan signals and routes outcomes to subagents like `clan-events` and `leader-lounge`.
 - `war-awareness`
-  Every 15 minutes. Owns scheduled River Race coordination and war-only signal handling.
+  Every 30 minutes with up to 15 minutes of jitter. Owns scheduled River Race coordination and war-only signal handling.
 - `player-progression`
-  Every 30 minutes by default. Refreshes player profiles and battle logs, then emits progression milestones.
+  Every 30 minutes with up to 15 minutes of jitter. Refreshes player profiles and battle logs, then emits progression milestones.
 - `daily-clan-insight`
-  Daily in `#ask-elixir` with 60 minutes of jitter. Posts one short hidden fact when the data supports a genuinely interesting insight.
+  Daily in `#ask-elixir` at 12:00 PM CT with up to 30 minutes of jitter. Posts one short hidden fact when the data supports a genuinely interesting insight.
 - `leadership-review`
   Weekly post in `#leader-lounge`.
 - `weekly-recap`

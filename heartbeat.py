@@ -691,6 +691,90 @@ def detect_war_battle_checkpoints(conn=None):
     }]
 
 
+def detect_war_member_used_all_decks(conn=None):
+    day_state = db.get_current_war_day_state(conn=conn) or {}
+    if day_state.get("phase") != "battle":
+        return []
+
+    war_day_key = day_state.get("war_day_key")
+    if not war_day_key:
+        return []
+
+    close = conn is None
+    conn = conn or db.get_connection()
+    try:
+        observed_rows = conn.execute(
+            "SELECT DISTINCT observed_at FROM war_participant_snapshots "
+            "WHERE war_day_key = ? ORDER BY observed_at DESC LIMIT 2",
+            (war_day_key,),
+        ).fetchall()
+        if len(observed_rows) < 2:
+            return []
+
+        current_observed_at = observed_rows[0]["observed_at"]
+        previous_observed_at = observed_rows[1]["observed_at"]
+        previous_finished_tags = {
+            str(row["player_tag"])
+            for row in conn.execute(
+                "SELECT player_tag FROM war_participant_snapshots "
+                "WHERE war_day_key = ? AND observed_at = ? AND COALESCE(decks_used_today, 0) >= 4",
+                (war_day_key, previous_observed_at),
+            ).fetchall()
+            if row["player_tag"]
+        }
+
+        newly_finished = []
+        for member in day_state.get("used_all_4") or []:
+            tag = str(member.get("tag") or "").strip()
+            if not tag or tag in previous_finished_tags:
+                continue
+            newly_finished.append(member)
+
+        if not newly_finished:
+            return []
+
+        tag_suffix = ",".join(sorted(tag.lstrip("#") for tag in (member.get("tag") or "" for member in newly_finished) if tag))
+        signal_log_type = (
+            f"{_war_period_signal_log_type('war_member_used_all_decks', day_state)}"
+            f"::{tag_suffix}"
+        )
+        signal_date = _war_signal_date_for_state(day_state)
+        if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
+            return []
+
+        return [{
+            "type": "war_member_used_all_decks",
+            "signal_log_type": signal_log_type,
+            "signal_date": signal_date,
+            "season_id": day_state.get("season_id"),
+            "week": day_state.get("week"),
+            "phase_display": day_state.get("phase_display"),
+            "day_number": day_state.get("day_number"),
+            "day_total": day_state.get("day_total"),
+            "race_rank": day_state.get("race_rank"),
+            "clan_fame": day_state.get("clan_fame"),
+            "clan_score": day_state.get("clan_score"),
+            "period_points": day_state.get("period_points"),
+            "time_left_seconds": day_state.get("time_left_seconds"),
+            "time_left_text": day_state.get("time_left_text"),
+            "members": newly_finished,
+            "member_count": len(newly_finished),
+            "used_all_4": day_state.get("used_all_4") or [],
+            "used_some": day_state.get("used_some") or [],
+            "used_none": day_state.get("used_none") or [],
+            "top_fame_today": day_state.get("top_fame_today") or [],
+            "top_fame_total": day_state.get("top_fame_total") or [],
+            "engaged_count": day_state.get("engaged_count") or 0,
+            "finished_count": day_state.get("finished_count") or 0,
+            "untouched_count": day_state.get("untouched_count") or 0,
+            "total_participants": day_state.get("total_participants") or 0,
+            **_battle_lead_payload(day_state.get("race_rank")),
+        }]
+    finally:
+        if close:
+            conn.close()
+
+
 def detect_war_deck_usage(war_data, conn=None):
     """Compatibility wrapper for older callers.
 
@@ -999,6 +1083,7 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
 
             # Battle-day rank swings
             signals.extend(detect_war_rank_changes(conn=conn))
+            signals.extend(detect_war_member_used_all_decks(conn=conn))
 
             # Battle-day checkpoint updates
             signals.extend(detect_war_battle_checkpoints(conn=conn))

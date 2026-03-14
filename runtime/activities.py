@@ -39,8 +39,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         job_function="_clan_awareness_tick",
         schedule_kind="interval",
         schedule_config={
-            "minutes": _attr("HEARTBEAT_INTERVAL_MINUTES", 47),
-            "jitter": _attr("HEARTBEAT_JITTER_SECONDS", 300),
+            "minutes": _attr("HEARTBEAT_INTERVAL_MINUTES", 30),
+            "jitter": _attr("HEARTBEAT_JITTER_SECONDS", 900),
         },
         delivery_targets=(
             "Discord routed outcomes: #clan-events, #leader-lounge, optional #arena-relay",
@@ -55,7 +55,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         job_function="_war_awareness_tick",
         schedule_kind="interval",
         schedule_config={
-            "minutes": _attr("WAR_AWARENESS_INTERVAL_MINUTES", 15),
+            "minutes": _attr("WAR_AWARENESS_INTERVAL_MINUTES", 30),
+            "jitter": _attr("WAR_AWARENESS_JITTER_SECONDS", 900),
             "max_instances": 1,
             "coalesce": True,
         },
@@ -72,6 +73,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         schedule_kind="interval",
         schedule_config={
             "minutes": _attr("PLAYER_INTEL_REFRESH_MINUTES", 30),
+            "jitter": _attr("PLAYER_INTEL_REFRESH_JITTER_SECONDS", 900),
             "max_instances": 1,
             "coalesce": True,
         },
@@ -88,9 +90,9 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         job_function="_ask_elixir_daily_insight",
         schedule_kind="cron",
         schedule_config={
-            "hour": _attr("ASK_ELIXIR_DAILY_INSIGHT_HOUR", 13),
+            "hour": _attr("ASK_ELIXIR_DAILY_INSIGHT_HOUR", 12),
             "minute": _attr("ASK_ELIXIR_DAILY_INSIGHT_MINUTE", 0),
-            "jitter": _attr("ASK_ELIXIR_DAILY_INSIGHT_JITTER_SECONDS", 3600),
+            "jitter": _attr("ASK_ELIXIR_DAILY_INSIGHT_JITTER_SECONDS", 1800),
         },
         delivery_targets=(
             "Discord: #ask-elixir",

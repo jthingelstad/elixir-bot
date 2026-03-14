@@ -1351,6 +1351,47 @@ def test_snapshot_player_profile_emits_path_of_legend_promotion_signal():
     }]
 
 
+def test_snapshot_player_profile_treats_first_load_as_baseline_discovery():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+
+        signals = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "expLevel": 66,
+                "wins": 1005,
+                "currentDeck": [],
+                "cards": [
+                    {"name": "Archers", "level": 12, "maxLevel": 16, "rarity": "common"},
+                    {"name": "Little Prince", "level": 1, "maxLevel": 6, "rarity": "champion"},
+                ],
+                "badges": [
+                    {"name": "MasteryKnight", "level": 1, "maxLevel": 10, "progress": 10, "target": 25},
+                    {"name": "Classic12Wins", "level": 1, "maxLevel": 8, "progress": 1, "target": 10},
+                ],
+                "achievements": [
+                    {"name": "Friend in Need", "stars": 2, "value": 520, "target": 500, "info": "Donate 500 cards", "completionInfo": None},
+                ],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 8, "trophies": 1800, "rank": 5000},
+            },
+            conn=conn,
+        )
+
+        snapshot_count = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM player_profile_snapshots WHERE member_id = (SELECT member_id FROM members WHERE player_tag = '#ABC123')"
+        ).fetchone()["cnt"]
+    finally:
+        conn.close()
+
+    assert signals == []
+    assert snapshot_count == 1
+
+
 def test_snapshot_player_battlelog_emits_battle_pulse_for_new_ladder_ranked_activity():
     conn = db.get_connection(":memory:")
     try:

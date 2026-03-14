@@ -66,8 +66,8 @@ DurableMemory: true
 
 Elixir's dedicated war coordination channel.
 
-- Use this channel for war updates, race momentum, deck-usage nudges, and battle-day calls to action.
-- Keep the focus on what the clan should know or do right now.
+- Use this channel for war updates, race momentum, contributor spotlights, and battle-day turning points.
+- Keep the focus on what the clan should notice right now, with only occasional tactical asks when they are genuinely important.
 - Prefer one sharp tactical message over a long recap.
 - This is not a general chat, milestone feed, or Q&A room.
 
@@ -223,4 +223,4 @@ Elixir's Clan Chat relay channel.
 - Messages here must be short, clear, and immediately usable.
 - Optimize for the 160-character Clan Chat constraint whenever possible.
 - This is not a back-and-forth discussion channel.
-- One or two strong relay messages in a day is plenty.
+- Keep this lane sparse. Around 3-4 strong relay requests in a week is enough.
