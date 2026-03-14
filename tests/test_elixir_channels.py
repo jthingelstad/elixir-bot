@@ -997,6 +997,17 @@ def test_parse_admin_command_handles_memory_filters():
     }
 
 
+def test_parse_admin_command_handles_db_status_group():
+    parsed = elixir.parse_admin_command("do db-status memory", require_prefix=True)
+
+    assert parsed == {
+        "command": "db-status",
+        "preview": False,
+        "short": False,
+        "args": {"group": "memory"},
+    }
+
+
 def test_admin_command_requires_leader_for_memory():
     assert admin_command_requires_leader("memory") is True
     assert admin_command_requires_leader("status") is False
@@ -1023,18 +1034,18 @@ def test_dispatch_admin_command_handles_memory():
 
 
 def test_dispatch_admin_command_handles_db_status():
-    with patch("elixir._build_db_status_report", return_value="**Elixir DB Status**\n- Tables:") as mock_report:
+    with patch("elixir._build_db_status_report", return_value="**Elixir DB Status | Memory**\n- Tables:") as mock_report:
         result = asyncio.run(
             elixir.dispatch_admin_command(
                 "db-status",
                 preview=False,
                 short=False,
-                args={},
+                args={"group": "memory"},
             )
         )
 
-    assert result == "**Elixir DB Status**\n- Tables:"
-    mock_report.assert_called_once_with()
+    assert result == "**Elixir DB Status | Memory**\n- Tables:"
+    mock_report.assert_called_once_with(group="memory")
 
 
 def test_dispatch_admin_command_handles_war_status():
@@ -1093,7 +1104,8 @@ def test_slash_db_status_dispatches_to_admin():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
     root = bot.tree.commands[0]
-    db_status_command = root.get_command("db-status")
+    db_status_group = root.get_command("db-status")
+    db_status_command = db_status_group.get_command("memory")
 
     response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
@@ -1115,7 +1127,7 @@ def test_slash_db_status_dispatches_to_admin():
         "db-status",
         preview=False,
         short=False,
-        args={},
+        args={"group": "memory"},
     )
     response.defer.assert_awaited_once_with(ephemeral=True)
     interaction.edit_original_response.assert_awaited_once_with(content="db report")
@@ -1930,7 +1942,7 @@ def test_build_war_status_report_summarizes_current_war_awareness():
     assert "Live feed: 5 clan(s) in the current river race" in report
 
 
-def test_build_db_status_report_lists_table_counts_and_sizes():
+def test_build_db_status_report_lists_group_summaries():
     with patch("elixir.db.get_database_status", return_value={
         "db_path": "/tmp/elixir.db",
         "schema_version": 15,
@@ -1953,8 +1965,36 @@ def test_build_db_status_report_lists_table_counts_and_sizes():
     assert report.startswith("**Elixir DB Status**")
     assert "File: `elixir.db` | schema v15 | size 40.0 KB | WAL 8.0 KB | SHM 32.0 KB" in report
     assert "Storage: page size 4,096 B | pages 10 | free pages 2 | journal wal | tables 3" in report
+    assert "Views: `/elixir db-status clan`, `/elixir db-status war`, `/elixir db-status memory`" in report
+    assert "Clan: 1 tables | 50 rows | 4.0 KB" in report
+    assert "War: 1 tables | 320 rows | 12.0 KB" in report
+    assert "Memory: 1 tables | 1,200 rows | 24.0 KB" in report
+
+
+def test_build_db_status_report_lists_table_counts_and_sizes_for_group():
+    with patch("elixir.db.get_database_status", return_value={
+        "db_path": "/tmp/elixir.db",
+        "schema_version": 15,
+        "db_size_bytes": 40960,
+        "wal_size_bytes": 8192,
+        "shm_size_bytes": 32768,
+        "page_size": 4096,
+        "page_count": 10,
+        "freelist_count": 2,
+        "journal_mode": "wal",
+        "table_count": 3,
+        "tables": [
+            {"name": "messages", "row_count": 1200, "approx_bytes": 24576},
+            {"name": "war_participation", "row_count": 320, "approx_bytes": 12288},
+            {"name": "members", "row_count": 50, "approx_bytes": 4096},
+        ],
+    }):
+        report = elixir._build_db_status_report(group="memory")
+
+    assert report.startswith("**Elixir DB Status | Memory**")
+    assert "Group: 1 tables | 1,200 rows | 24.0 KB" in report
     assert "messages: 1,200 rows | 24.0 KB" in report
-    assert "war_participant_snapshots: 320 rows | 12.0 KB" in report
+    assert "war_participation" not in report
 
 
 def test_build_clan_status_report_uses_non_war_risk_watchlist():

@@ -734,8 +734,43 @@ def _build_schedule_report():
     return "\n".join(lines)
 
 
-def _build_db_status_report():
+_DB_STATUS_MEMORY_TABLES = {
+    "channel_state",
+    "clan_memories",
+    "clan_memory_audit",
+    "clan_memory_embeddings",
+    "clan_memory_index_status",
+    "clan_memory_links",
+    "clan_memory_tag_links",
+    "clan_memory_tags",
+    "clan_memory_versions",
+    "conversation_threads",
+    "memory_episodes",
+    "memory_facts",
+    "messages",
+}
+
+
+def _db_status_group_for_table(table_name: str) -> str:
+    if table_name in _DB_STATUS_MEMORY_TABLES:
+        return "memory"
+    if (table_name or "").startswith("war_"):
+        return "war"
+    return "clan"
+
+
+def _db_status_group_label(group: str) -> str:
+    return {
+        "clan": "Clan",
+        "war": "War",
+        "memory": "Memory",
+    }.get(group, group.title())
+
+
+def _build_db_status_report(group: str | None = None):
     data = db.get_database_status()
+    requested_group = (group or "").strip().lower() or None
+    tables = data.get("tables") or []
     lines = [
         "**Elixir DB Status**",
         (
@@ -749,11 +784,37 @@ def _build_db_status_report():
             f"free pages {_fmt_num(data.get('freelist_count'))} | "
             f"journal {data.get('journal_mode') or 'n/a'} | tables {_fmt_num(data.get('table_count'))}"
         ),
-        "- Tables:",
     ]
-    for table in data.get("tables") or []:
+
+    if requested_group:
+        group_tables = [table for table in tables if _db_status_group_for_table(table.get("name") or "") == requested_group]
+        group_rows = sum(int(table.get("row_count") or 0) for table in group_tables)
+        group_bytes = sum(int(table.get("approx_bytes") or 0) for table in group_tables)
+        lines[0] = f"**Elixir DB Status | {_db_status_group_label(requested_group)}**"
         lines.append(
-            f"  {table.get('name')}: {_fmt_num(table.get('row_count'))} rows | {_fmt_bytes(table.get('approx_bytes'))}"
+            f"- Group: {_fmt_num(len(group_tables))} tables | {_fmt_num(group_rows)} rows | {_fmt_bytes(group_bytes)}"
+        )
+        lines.append("- Tables:")
+        for table in group_tables:
+            lines.append(
+                f"  {table.get('name')}: {_fmt_num(table.get('row_count'))} rows | {_fmt_bytes(table.get('approx_bytes'))}"
+            )
+        return "\n".join(lines)
+
+    group_totals = {}
+    for table in tables:
+        table_group = _db_status_group_for_table(table.get("name") or "")
+        bucket = group_totals.setdefault(table_group, {"tables": 0, "rows": 0, "bytes": 0})
+        bucket["tables"] += 1
+        bucket["rows"] += int(table.get("row_count") or 0)
+        bucket["bytes"] += int(table.get("approx_bytes") or 0)
+
+    lines.append("- Views: `/elixir db-status clan`, `/elixir db-status war`, `/elixir db-status memory`")
+    for table_group in ("clan", "war", "memory"):
+        bucket = group_totals.get(table_group, {"tables": 0, "rows": 0, "bytes": 0})
+        lines.append(
+            f"- {_db_status_group_label(table_group)}: {_fmt_num(bucket['tables'])} tables | "
+            f"{_fmt_num(bucket['rows'])} rows | {_fmt_bytes(bucket['bytes'])}"
         )
     return "\n".join(lines)
 
