@@ -220,7 +220,14 @@ async def _post_startup_message() -> bool:
         log.warning("Startup message skipped: no leadership channel configured")
         return False
 
-    channel = bot.get_channel(channel_configs[0]["id"])
+    channel_id = channel_configs[0]["id"]
+    channel = bot.get_channel(channel_id)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(channel_id)
+        except Exception as exc:
+            log.warning("Startup message skipped: leadership channel fetch failed: %s", exc)
+            return False
     if not channel:
         log.warning("Startup message skipped: leadership channel not found")
         return False
@@ -268,19 +275,23 @@ async def _post_startup_message() -> bool:
         f"Build: `{elixir_agent.BUILD_HASH}`\n"
         f"{fun_line.strip()}"
     )
-    await _post_to_elixir(channel, {"content": content})
-    await asyncio.to_thread(
-        db.save_message,
-        _channel_scope(channel),
-        "assistant",
-        content,
-        channel_id=channel.id,
-        channel_name=getattr(channel, "name", None),
-        channel_kind=str(channel.type),
-        workflow="clanops",
-        event_type="startup_announcement",
-    )
-    return True
+    try:
+        await _post_to_elixir(channel, {"content": content})
+        await asyncio.to_thread(
+            db.save_message,
+            _channel_scope(channel),
+            "assistant",
+            content,
+            channel_id=channel.id,
+            channel_name=getattr(channel, "name", None),
+            channel_kind=str(channel.type),
+            workflow="clanops",
+            event_type="startup_announcement",
+        )
+        return True
+    except Exception as exc:
+        log.error("Startup message post failed: %s", exc, exc_info=True)
+        return False
 
 
 def _has_leader_role(member) -> bool:
@@ -508,7 +519,9 @@ async def on_ready():
             create_task=_job_runner,
         )
         scheduler.start()
-        await _post_startup_message()
+        startup_posted = await _post_startup_message()
+        if not startup_posted:
+            log.warning("Startup announcement was not posted to leadership")
         log.info("Scheduler started — %s", format_scheduler_startup_summary(sys.modules[__name__]))
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")

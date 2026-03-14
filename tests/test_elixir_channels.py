@@ -240,6 +240,33 @@ def test_post_startup_message_posts_build_hash_to_clanops():
     assert mock_save.call_args.kwargs["event_type"] == "startup_announcement"
 
 
+def test_post_startup_message_fetches_channel_when_not_cached():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge"}]),
+        patch.object(elixir.bot, "get_channel", return_value=None),
+        patch.object(elixir.bot, "fetch_channel", new=AsyncMock(return_value=channel)) as mock_fetch,
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.elixir_agent.RELEASE_LABEL", 'v3.0 "Three-Lane Elixir"'),
+        patch("elixir.elixir_agent.BUILD_HASH", "abc1234"),
+        patch("elixir.elixir_agent.generate_message", return_value="Elixir has entered the arena.") as mock_generate,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.save_message") as mock_save,
+    ):
+        sent = asyncio.run(elixir._post_startup_message())
+
+    assert sent is True
+    mock_fetch.assert_awaited_once_with(200)
+    mock_generate.assert_called_once()
+    mock_post.assert_awaited_once()
+    assert mock_save.call_args.kwargs["event_type"] == "startup_announcement"
+
+
 def test_ask_elixir_daily_insight_posts_fun_fact():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
