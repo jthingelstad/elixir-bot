@@ -534,6 +534,7 @@ def _is_legacy_clanops_command_text(text: str) -> bool:
     return bool(
         _is_help_request(text)
         or _is_status_request(text)
+        or _is_db_status_request(text)
         or _is_schedule_request(text)
         or _is_war_status_request(text)
         or _clan_status_mode(text)

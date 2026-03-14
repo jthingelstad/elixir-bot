@@ -116,6 +116,10 @@ def register_elixir_app_commands(bot) -> None:
     async def slash_status(interaction: discord.Interaction):
         await run_admin_interaction(interaction, command_name="status", event_type="status_report")
 
+    @elixir_commands.command(name="db-status", description="Show database health, table row counts, and table sizes.")
+    async def slash_db_status(interaction: discord.Interaction):
+        await run_admin_interaction(interaction, command_name="db-status", event_type="db_status_report")
+
     @elixir_commands.command(name="schedule", description="Show scheduled jobs and next runs.")
     async def slash_schedule(interaction: discord.Interaction):
         await run_admin_interaction(interaction, command_name="schedule", event_type="schedule_report")

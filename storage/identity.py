@@ -473,6 +473,84 @@ def get_system_status(conn=None):
             conn.close()
 
 
+def get_database_status(conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        db_row = conn.execute("PRAGMA database_list").fetchone()
+        db_path = db_row["file"] if db_row else None
+        schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
+        page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+        page_count = conn.execute("PRAGMA page_count").fetchone()[0]
+        freelist_count = conn.execute("PRAGMA freelist_count").fetchone()[0]
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+
+        db_size_bytes = None
+        wal_size_bytes = None
+        shm_size_bytes = None
+        if db_path and os.path.exists(db_path):
+            db_size_bytes = os.path.getsize(db_path)
+            wal_path = f"{db_path}-wal"
+            shm_path = f"{db_path}-shm"
+            if os.path.exists(wal_path):
+                wal_size_bytes = os.path.getsize(wal_path)
+            if os.path.exists(shm_path):
+                shm_size_bytes = os.path.getsize(shm_path)
+
+        table_names = [
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name ASC"
+            ).fetchall()
+        ]
+
+        size_by_name = {}
+        try:
+            for row in conn.execute(
+                "SELECT name, SUM(pgsize) AS total_bytes FROM dbstat GROUP BY name"
+            ).fetchall():
+                size_by_name[row["name"]] = row["total_bytes"] or 0
+        except Exception:
+            size_by_name = {}
+
+        tables = []
+        for table_name in table_names:
+            quoted = table_name.replace('"', '""')
+            row_count = conn.execute(
+                f'SELECT COUNT(*) AS cnt FROM "{quoted}"'
+            ).fetchone()["cnt"]
+            tables.append({
+                "name": table_name,
+                "row_count": row_count,
+                "approx_bytes": size_by_name.get(table_name),
+            })
+
+        tables.sort(
+            key=lambda item: (
+                -(item.get("approx_bytes") or -1),
+                -(item.get("row_count") or 0),
+                item["name"],
+            )
+        )
+
+        return {
+            "db_path": db_path,
+            "schema_version": schema_version,
+            "page_size": page_size,
+            "page_count": page_count,
+            "freelist_count": freelist_count,
+            "journal_mode": journal_mode,
+            "db_size_bytes": db_size_bytes,
+            "wal_size_bytes": wal_size_bytes,
+            "shm_size_bytes": shm_size_bytes,
+            "table_count": len(tables),
+            "tables": tables,
+        }
+    finally:
+        if close:
+            conn.close()
+
+
 def build_memory_context(discord_user_id=None, member_tag=None, channel_id=None, conn=None):
     close = conn is None
     conn = conn or get_connection()

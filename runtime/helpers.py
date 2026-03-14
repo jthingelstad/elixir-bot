@@ -181,6 +181,18 @@ def _is_schedule_request(text: str) -> bool:
     }
 
 
+def _is_db_status_request(text: str) -> bool:
+    normalized = " ".join((text or "").strip().lower().split())
+    return normalized in {
+        "db status",
+        "database status",
+        "!db-status",
+        "/db-status",
+        "elixir db status",
+        "@elixir db status",
+    }
+
+
 def _is_clan_list_request(text: str) -> bool:
     normalized = " ".join((text or "").strip().lower().split())
     return normalized in {
@@ -718,6 +730,30 @@ def _build_schedule_report():
     for spec in _schedule_specs():
         lines.append(
             f"- `{spec['label']}`: {spec['schedule']} Next run: {next_runs.get(spec['id'], 'n/a')}"
+        )
+    return "\n".join(lines)
+
+
+def _build_db_status_report():
+    data = db.get_database_status()
+    lines = [
+        "**Elixir DB Status**",
+        (
+            f"- File: `{os.path.basename(data.get('db_path') or 'n/a')}` | schema v{data.get('schema_version')} | "
+            f"size {_fmt_bytes(data.get('db_size_bytes'))} | WAL {_fmt_bytes(data.get('wal_size_bytes'))} | "
+            f"SHM {_fmt_bytes(data.get('shm_size_bytes'))}"
+        ),
+        (
+            f"- Storage: page size {_fmt_num(data.get('page_size'))} B | "
+            f"pages {_fmt_num(data.get('page_count'))} | "
+            f"free pages {_fmt_num(data.get('freelist_count'))} | "
+            f"journal {data.get('journal_mode') or 'n/a'} | tables {_fmt_num(data.get('table_count'))}"
+        ),
+        "- Tables:",
+    ]
+    for table in data.get("tables") or []:
+        lines.append(
+            f"  {table.get('name')}: {_fmt_num(table.get('row_count'))} rows | {_fmt_bytes(table.get('approx_bytes'))}"
         )
     return "\n".join(lines)
 
