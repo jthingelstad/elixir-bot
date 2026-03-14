@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Live smoke harness for the V2 data model.
+"""Live smoke harness for Elixir's data model.
 
-Uses the local CR API key from .env, refreshes a small sample into the V2 DB,
+Uses the local CR API key from .env, refreshes a small sample into the local DB,
 and prints deterministic answers for representative leader/member questions.
 """
 
@@ -56,7 +56,7 @@ def _refresh_sample(conn, sample_limit: int):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run a live V2 smoke test against the Clash Royale API.")
+    parser = argparse.ArgumentParser(description="Run a live smoke test against the Clash Royale API.")
     parser.add_argument("--db-path", default=":memory:", help="SQLite path to use. Default: in-memory.")
     parser.add_argument("--sample-limit", type=int, default=5, help="How many members to refresh with profile+battle data.")
     parser.add_argument("--member-tag", help="Optional member tag to use for member-specific questions. Defaults to first refreshed target.")

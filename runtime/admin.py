@@ -8,17 +8,23 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 import re
 
+from runtime.activities import normalize_activity_key, resolve_activity
 from storage.contextual_memory import archive_member_note_memory, upsert_member_note_memory
 
 
 COMMAND_ALIASES = {
     "site-data": "poap-kings-data-sync",
-    "site-content": "poap-kings-site-sync",
+    "site-content": "site-content",
     "site-publish": "poap-kings-sync",
     "home-message": "poap-kings-home-sync",
     "members-message": "poap-kings-members-sync",
     "roster-bios": "poap-kings-roster-bios-sync",
     "promote-content": "poap-kings-promotion-sync",
+    "heartbeat": "clan-awareness",
+    "player-intel": "player-progression",
+    "clanops-review": "leadership-review",
+    "poap-kings-site-sync": "site-content",
+    "promotion": "promotion-content",
 }
 
 COMMAND_HELP = {
@@ -43,18 +49,19 @@ COMMAND_HELP = {
     "clear-poap-address": "Clear a member POAP address.",
     "set-note": "Set a member note.",
     "clear-note": "Clear a member note.",
-    "heartbeat": "Force one heartbeat cycle now.",
+    "clan-awareness": "Force the recurring clan-awareness activity now. This processes non-war clan signals and routed clan-event outcomes.",
+    "war-awareness": "Force the recurring war-awareness activity now. This is Elixir's single scheduled owner for River Race coordination.",
+    "player-progression": "Force the recurring player-progression activity now.",
+    "leadership-review": "Force the weekly leadership-review activity now.",
     "system-signals": "Queue any missing startup system signals and publish pending system announcements now.",
     "poap-kings-sync": "Publish the full POAP KINGS website bundle now. This refreshes daily site data plus the members-page weekly recap payload.",
     "poap-kings-data-sync": "Publish only the POAP KINGS structured site data now (clan + roster).",
-    "poap-kings-site-sync": "Publish the POAP KINGS daily site bundle now (clan, roster, home).",
+    "site-content": "Force the recurring site-content activity now. This publishes the POAP KINGS daily clan, roster, and home payloads.",
     "poap-kings-home-sync": "Regenerate and publish only the POAP KINGS website home message.",
     "poap-kings-members-sync": "Regenerate and publish only the POAP KINGS members-page weekly recap payload.",
     "poap-kings-roster-bios-sync": "Regenerate and publish only the POAP KINGS roster intro and member bios.",
     "poap-kings-promotion-sync": "Regenerate and publish only the POAP KINGS website promotion payload.",
-    "promotion": "Force the promotion content sync now. This updates the website and #promote-the-clan together.",
-    "player-intel": "Force the player intel refresh job now.",
-    "clanops-review": "Force the weekly clanops review post now.",
+    "promotion-content": "Force the recurring promotion-content activity now. This updates the website and #promote-the-clan together.",
     "weekly-recap": "Force the weekly public clan recap post now.",
 }
 
@@ -72,18 +79,19 @@ LEADER_ONLY_COMMANDS = {
     "clear-poap-address",
     "set-note",
     "clear-note",
-    "heartbeat",
+    "clan-awareness",
+    "war-awareness",
+    "player-progression",
+    "leadership-review",
     "system-signals",
     "poap-kings-sync",
     "poap-kings-data-sync",
-    "poap-kings-site-sync",
+    "site-content",
     "poap-kings-home-sync",
     "poap-kings-members-sync",
     "poap-kings-roster-bios-sync",
     "poap-kings-promotion-sync",
-    "promotion",
-    "player-intel",
-    "clanops-review",
+    "promotion-content",
     "weekly-recap",
 }
 
@@ -109,18 +117,19 @@ COMMAND_ORDER = [
     "clear-poap-address",
     "set-note",
     "clear-note",
-    "heartbeat",
+    "clan-awareness",
+    "war-awareness",
+    "player-progression",
+    "leadership-review",
     "system-signals",
     "poap-kings-sync",
     "poap-kings-data-sync",
-    "poap-kings-site-sync",
+    "site-content",
     "poap-kings-home-sync",
     "poap-kings-members-sync",
     "poap-kings-roster-bios-sync",
     "poap-kings-promotion-sync",
-    "promotion",
-    "player-intel",
-    "clanops-review",
+    "promotion-content",
     "weekly-recap",
 ]
 
@@ -130,18 +139,19 @@ ZERO_ARG_COMMANDS = {
     "schedule",
     "clan-status",
     "war-status",
-    "heartbeat",
+    "clan-awareness",
+    "war-awareness",
+    "player-progression",
+    "leadership-review",
     "system-signals",
     "poap-kings-sync",
     "poap-kings-data-sync",
-    "poap-kings-site-sync",
+    "site-content",
     "poap-kings-home-sync",
     "poap-kings-members-sync",
     "poap-kings-roster-bios-sync",
     "poap-kings-promotion-sync",
-    "promotion",
-    "player-intel",
-    "clanops-review",
+    "promotion-content",
     "weekly-recap",
 }
 
@@ -188,7 +198,7 @@ def render_admin_help(
             f"- `{slash_prefix} memory show member:Ditika`",
             f"- `{slash_prefix} profile verify-discord member:King Thing`",
             f"- `{slash_prefix} profile set-join-date member:Ditika date:2026-03-07`",
-            f"- `{slash_prefix} jobs run job:heartbeat preview:true`",
+            f"- `{slash_prefix} jobs run job:clan-awareness preview:true`",
             f"- `{mention_prefix} poap-kings-sync --preview`",
             f"- `{mention_prefix} memory member \"Ditika\" search \"war consistency\" --limit 5`",
             f"- `{mention_prefix} verify-discord \"King Thing\"`",
@@ -692,28 +702,29 @@ async def _load_site_context():
 
 async def _run_runtime_job(job_name: str, preview: bool) -> str:
     import elixir
-
-    job_map = {
-        "heartbeat": elixir._heartbeat_tick,
-        "poap-kings-data-sync": elixir._site_data_refresh,
-        "poap-kings-site-sync": elixir._site_content_cycle,
-        "promotion": elixir._promotion_content_cycle,
-        "player-intel": elixir._player_intel_refresh,
-        "clanops-review": elixir._clanops_weekly_review,
-        "weekly-recap": elixir._weekly_clan_recap,
-    }
+    activity_key = normalize_activity_key(job_name)
+    if activity_key:
+        resolved = resolve_activity(activity_key, elixir)
+        job_callable = resolved["job_callable"]
+        display_name = resolved["activity_key"]
+    else:
+        job_map = {
+            "poap-kings-data-sync": elixir._site_data_refresh,
+        }
+        job_callable = job_map[job_name]
+        display_name = job_name
     if preview:
         async with _preview_job_runtime() as captured_posts:
             try:
-                await job_map[job_name]()
+                await job_callable()
             except Exception as exc:
-                return f"`{job_name}` failed in preview mode: {exc}"
-            return f"Ran `{job_name}` in preview mode.\n\n{_format_preview_posts(captured_posts)}"
+                return f"`{display_name}` failed in preview mode: {exc}"
+            return f"Ran `{display_name}` in preview mode.\n\n{_format_preview_posts(captured_posts)}"
     try:
-        await job_map[job_name]()
+        await job_callable()
     except Exception as exc:
-        return f"`{job_name}` failed: {exc}"
-    return f"Ran `{job_name}`."
+        return f"`{display_name}` failed: {exc}"
+    return f"Ran `{display_name}`."
 
 
 async def _run_system_signals(preview: bool) -> str:

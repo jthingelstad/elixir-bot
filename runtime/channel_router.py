@@ -46,17 +46,15 @@ async def route_message(message):
         await app.bot.process_commands(message)
         return
 
-    role = channel_config.get("role")
+    subagent = channel_config.get("subagent") or channel_config.get("role")
     workflow = channel_config.get("workflow", "interactive")
+    reply_policy = channel_config.get("reply_policy", "mention_only")
+    allows_open_channel_reply = reply_policy == "open_channel"
     scope = app._channel_scope(message.channel)
     conversation_scope = app._channel_conversation_scope(message.channel, message.author.id)
     raw_question = app._strip_bot_mentions(message.content).strip() if mentioned else message.content.strip()
 
-    if not mentioned:
-        await app.bot.process_commands(message)
-        return
-
-    if role == "clanops" and app._is_legacy_clanops_command_text(raw_question):
+    if workflow == "clanops" and app._is_legacy_clanops_command_text(raw_question):
         if not mentioned or not app.parse_admin_command(raw_question, require_prefix=True):
             hint_content = app._build_clanops_command_hint()
             await asyncio.to_thread(
@@ -90,13 +88,13 @@ async def route_message(message):
             )
             return
 
-    if role in {"clanops", "interactive"} and app._is_roster_join_dates_request(raw_question):
+    if workflow in {"clanops", "interactive"} and app._is_roster_join_dates_request(raw_question):
         app.log.info(
-            "message_route route=roster_join_dates_report channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            "message_route route=roster_join_dates_report channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
             message.channel.id,
             message.author.id,
             mentioned,
-            role,
+            subagent,
             workflow,
             raw_question,
             message.content,
@@ -133,13 +131,13 @@ async def route_message(message):
         )
         return
 
-    if role == "interactive" and app._is_help_request(raw_question):
+    if workflow == "interactive" and app._is_help_request(raw_question):
         app.log.info(
-            "message_route route=interactive_help channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            "message_route route=interactive_help channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
             message.channel.id,
             message.author.id,
             mentioned,
-            role,
+            subagent,
             workflow,
             raw_question,
             message.content,
@@ -177,15 +175,15 @@ async def route_message(message):
         return
 
     deck_target = None
-    if role in {"clanops", "interactive"} and app._is_member_deck_request(raw_question):
+    if workflow in {"clanops", "interactive"} and app._is_member_deck_request(raw_question):
         deck_target = await asyncio.to_thread(app._extract_member_deck_target, raw_question, message)
-    if role in {"clanops", "interactive"} and deck_target:
+    if workflow in {"clanops", "interactive"} and deck_target:
         app.log.info(
-            "message_route route=member_deck_report channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s deck_target=%r raw_question=%r original=%r",
+            "message_route route=member_deck_report channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s deck_target=%r raw_question=%r original=%r",
             message.channel.id,
             message.author.id,
             mentioned,
-            role,
+            subagent,
             workflow,
             deck_target,
             raw_question,
@@ -223,13 +221,13 @@ async def route_message(message):
         )
         return
 
-    if role == "clanops" and app._is_kick_risk_request(raw_question):
+    if workflow == "clanops" and app._is_kick_risk_request(raw_question):
         app.log.info(
-            "message_route route=kick_risk_report channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            "message_route route=kick_risk_report channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
             message.channel.id,
             message.author.id,
             mentioned,
-            role,
+            subagent,
             workflow,
             raw_question,
             message.content,
@@ -266,13 +264,13 @@ async def route_message(message):
         )
         return
 
-    if role == "clanops" and app._is_top_war_contributors_request(raw_question):
+    if workflow == "clanops" and app._is_top_war_contributors_request(raw_question):
         app.log.info(
-            "message_route route=top_war_contributors_report channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            "message_route route=top_war_contributors_report channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
             message.channel.id,
             message.author.id,
             mentioned,
-            role,
+            subagent,
             workflow,
             raw_question,
             message.content,
@@ -309,16 +307,16 @@ async def route_message(message):
         )
         return
 
-    profile_target = await asyncio.to_thread(app._extract_profile_target, raw_question) if role == "clanops" else None
-    if role == "clanops" and (app._is_clan_list_request(raw_question) or profile_target):
+    profile_target = await asyncio.to_thread(app._extract_profile_target, raw_question) if workflow == "clanops" else None
+    if workflow == "clanops" and (app._is_clan_list_request(raw_question) or profile_target):
         route = "clan_list_report" if app._is_clan_list_request(raw_question) else "member_profile_report"
         app.log.info(
-            "message_route route=%s channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            "message_route route=%s channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
             route,
             message.channel.id,
             message.author.id,
             mentioned,
-            role,
+            subagent,
             workflow,
             raw_question,
             message.content,
@@ -360,7 +358,7 @@ async def route_message(message):
         )
         return
 
-    admin_command = app.parse_admin_command(raw_question, require_prefix=True) if role == "clanops" and mentioned else None
+    admin_command = app.parse_admin_command(raw_question, require_prefix=True) if workflow == "clanops" and mentioned else None
     if admin_command:
         if app.admin_command_requires_leader(admin_command["command"]) and not app._has_leader_role(message.author):
             denial = "Leader role required for this command."
@@ -398,12 +396,12 @@ async def route_message(message):
         if admin_command.get("preview"):
             route += "_preview"
         app.log.info(
-            "message_route route=%s channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            "message_route route=%s channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
             route,
             message.channel.id,
             message.author.id,
             mentioned,
-            role,
+            subagent,
             workflow,
             raw_question,
             message.content,
@@ -445,8 +443,8 @@ async def route_message(message):
         )
         return
 
-    clan_status_mode = app._clan_status_mode(raw_question) if role == "clanops" else None
-    if role == "clanops" and (app._is_status_request(raw_question) or app._is_schedule_request(raw_question) or clan_status_mode):
+    clan_status_mode = app._clan_status_mode(raw_question) if workflow == "clanops" else None
+    if workflow == "clanops" and (app._is_status_request(raw_question) or app._is_schedule_request(raw_question) or clan_status_mode):
         route = (
             "clan_status_report" if clan_status_mode == "full"
             else "clan_status_short_report" if clan_status_mode == "short"
@@ -454,12 +452,12 @@ async def route_message(message):
             else "status_report"
         )
         app.log.info(
-            "message_route route=%s channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s raw_question=%r original=%r",
+            "message_route route=%s channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
             route,
             message.channel.id,
             message.author.id,
             mentioned,
-            role,
+            subagent,
             workflow,
             raw_question,
             message.content,
@@ -519,29 +517,11 @@ async def route_message(message):
         )
         return
 
-    proactive = role == "clanops" and not mentioned
-    if proactive and not app._clanops_cooldown_elapsed(message.channel.id):
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "user",
-            message.content.strip(),
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow="clanops",
-            discord_message_id=message.id,
-        )
-        return
-
-    if not mentioned and not proactive:
+    if not mentioned and not allows_open_channel_reply:
         await app.bot.process_commands(message)
         return
 
-    if role == "onboarding":
+    if subagent == "reception" or workflow == "reception":
         async with message.channel.typing():
             try:
                 clan = await asyncio.to_thread(cr_api.get_clan)
@@ -658,13 +638,13 @@ async def route_message(message):
 
     if workflow in {"interactive", "clanops"}:
         app.log.info(
-            "message_route route=channel_llm channel_id=%s author_id=%s mentioned=%s role=%s workflow=%s proactive=%s raw_question=%r original=%r",
+            "message_route route=channel_llm channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s proactive=%s raw_question=%r original=%r",
             message.channel.id,
             message.author.id,
             mentioned,
-            role,
+            subagent,
             workflow,
-            proactive,
+            False,
             raw_question,
             message.content,
         )
@@ -708,7 +688,6 @@ async def route_message(message):
                     war_data=war,
                     conversation_history=conversation_history,
                     memory_context=memory_context,
-                    proactive=proactive,
                 )
                 agent_error = _agent_failure_payload(result)
                 if agent_error:
@@ -724,7 +703,7 @@ async def route_message(message):
                         result_preview=agent_error.get("result_preview"),
                         raw_json=agent_error.get("raw_json") or {"response_text": agent_error.get("response_text")},
                     )
-                    if mentioned:
+                    if mentioned or allows_open_channel_reply:
                         await message.reply(app._fallback_channel_response(raw_question, workflow))
                     return
                 if result is None:
@@ -737,7 +716,7 @@ async def route_message(message):
                         author=message.author,
                         discord_message_id=message.id,
                     )
-                    if mentioned:
+                    if mentioned or allows_open_channel_reply:
                         await message.reply(app._fallback_channel_response(raw_question, workflow))
                     return
                 if not isinstance(result, dict):
@@ -753,7 +732,7 @@ async def route_message(message):
                         detail=type(result).__name__,
                         result_preview=app._preview_text(result),
                     )
-                    if mentioned:
+                    if mentioned or allows_open_channel_reply:
                         await message.reply(app._fallback_channel_response(raw_question, workflow))
                     return
 
@@ -772,7 +751,7 @@ async def route_message(message):
                         result_preview=app._preview_text(result),
                         raw_json=result,
                     )
-                    if mentioned:
+                    if mentioned or allows_open_channel_reply:
                         await message.reply(app._fallback_channel_response(raw_question, workflow))
                     return
                 await app._share_channel_result(result, workflow)

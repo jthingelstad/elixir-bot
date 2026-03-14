@@ -1,9 +1,9 @@
 """db — SQLite storage layer for Elixir bot.
 
-V2 resets the schema around stable member identity, Discord identity, raw API
+The current schema centers on stable member identity, Discord identity, raw API
 payloads, war history, battle facts, and conversational memory.
 
-The module exposes the V2 identity, memory, roster, battle, and war query layer.
+The module exposes Elixir's identity, memory, roster, battle, and war query layer.
 """
 
 from __future__ import annotations
@@ -1420,7 +1420,36 @@ def _migration_15(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15]
+def _migration_16(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS signal_outcomes (
+            outcome_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_signal_key TEXT NOT NULL,
+            source_signal_type TEXT NOT NULL,
+            target_channel_key TEXT NOT NULL,
+            target_channel_id TEXT NOT NULL,
+            intent TEXT NOT NULL,
+            required INTEGER NOT NULL DEFAULT 1,
+            delivery_status TEXT NOT NULL DEFAULT 'planned',
+            payload_json TEXT,
+            error_detail TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_attempt_at TEXT,
+            delivered_at TEXT,
+            UNIQUE(source_signal_key, target_channel_key, intent)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_signal_outcomes_source
+            ON signal_outcomes(source_signal_key, delivery_status, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_signal_outcomes_target
+            ON signal_outcomes(target_channel_key, delivery_status, updated_at DESC);
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
@@ -1478,7 +1507,7 @@ def get_connection(db_path=None):
         conn.close()
         os.replace(path, backup_path)
         log.warning(
-            "Detected incompatible database schema at %s (user_version=%s, tables=%s); moved it to %s and rebuilding V2 schema",
+            "Detected incompatible database schema at %s (user_version=%s, tables=%s); moved it to %s and rebuilding baseline schema",
             path,
             version,
             ", ".join(tables) or "<none>",

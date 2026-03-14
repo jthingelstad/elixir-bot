@@ -18,54 +18,57 @@ def _discord_emoji_guidance(*, allow_in_sensitive: bool = False) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-def _observe_system():
-    announcements = prompts.discord_singleton_channel("announcements")
-    return _build_system_prompt(
-        prompts.purpose(),
+def _subagent_base(channel_name: str, subagent_key: str) -> tuple[str, str, str]:
+    return (
+        prompts.identity_block(),
         prompts.knowledge_block(),
-        prompts.channel_section(announcements["name"]),
+        "\n\n".join(
+            part
+            for part in (
+                prompts.subagent_prompt(subagent_key),
+                prompts.channel_section(channel_name),
+            )
+            if part
+        ),
+    )
+
+
+def _proactive_channel_system(channel_name: str, subagent_key: str, *, leadership: bool = False):
+    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
+    memory_scope = "leadership plus public" if leadership else "public"
+    return _build_system_prompt(
+        purpose,
+        knowledge,
+        channel_context,
         "You have tools available to look up the full roster, member profiles, recent form, deck data, war status, and long-term trend summaries. "
         "Use them if you want more context before writing your post.\n\n"
+        f"You are writing for the `{subagent_key}` channel subagent. "
+        "Stay in that lane. Do not drift into unrelated channel jobs.\n\n"
+        f"You may only use {memory_scope} durable memory context when it is provided. "
+        "Do not invent or imply hidden memory from other channels.\n\n"
         "When a signal depends on momentum over days or weeks, prefer the trend tools instead of guessing from a single snapshot.\n\n"
-        "The roster data includes each member's most-used cards from recent battles. "
-        "Use this to add personality and specificity — mention signature cards, playstyles, "
-        "or deck choices when they're relevant to the signal (e.g. a trophy milestone, war update).\n\n"
-        "Treat player progression celebrations as high-signal when they are discrete and rare. "
-        "In particular, badge unlocks, badge tier-ups, achievement star gains, new champions, major card milestones, "
-        "and Path of Legend promotions are usually worth posting about. "
-        "When those signals appear, write with clear hype and make the achievement feel earned, not routine.\n\n"
-        "Member promotions to Elder are also high-signal clan moments. "
-        "When an `elder_promotion` signal appears, treat it as a meaningful recognition of trust and contribution, "
-        "and celebrate it clearly.\n\n"
-        "For war updates, if the signal shows `needs_lead_recovery: true` or an active battle-day `race_rank` above 1, "
-        "treat that as urgent. Sound concerned, say clearly that we are behind, and directly encourage members to battle and win to restore first place. "
-        "Do not present being out of first as neutral or routine.\n\n"
         "If you mention specific members in your post, include their player tags in `member_tags` and their written names in `member_names` so Discord references can be attached.\n\n"
-        "For Discord observations, default to one Discord message. Each message should carry exactly one coherent topic or story beat. "
+        "Default to one Discord message. Each message should carry exactly one coherent topic or story beat. "
         "If several signals are really facets of the same thought, keep them together in one post instead of splitting them into follow-ups. "
         "Only return content as an array when there are multiple genuinely separate topics that deserve separate emoji reactions and separate conversation threads. "
         "Do not split one update across multiple near-duplicate messages. "
         "Avoid newsletter-style posts, multipart labels like 'Part 1', or separator lines.\n\n"
-        f"{_discord_emoji_guidance()}"
+        f"{_discord_emoji_guidance(allow_in_sensitive=leadership)}"
         "Respond with JSON only (no markdown wrapper):\n"
-        '{"event_type": "clan_observation|arena_milestone|donation_milestone|war_update|member_join|member_leave", '
+        '{"event_type": "channel_update", '
         '"member_tags": [], "member_names": [], "summary": "one sentence", '
         '"content": "full Discord-ready markdown post OR [\"post 1\", \"post 2\"]", "metadata": {}}\n\n'
         "Or respond with exactly: null\n\nif the signals are genuinely not worth posting about.",
     )
 
 
-def _interactive_system(channel_name, proactive=False):
-    proactive_block = (
-        "You are observing an ongoing channel conversation. Only reply if you can add clear value. "
-        "If you do not have something genuinely useful to add, respond with exactly null.\n\n"
-        if proactive
-        else ""
-    )
+def _interactive_system(channel_name):
+    subagent_key = prompts.subagent_key_for_channel(channel_name, "interactive")
+    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
     return _build_system_prompt(
-        prompts.purpose(),
-        prompts.knowledge_block(),
-        prompts.channel_section(channel_name),
+        purpose,
+        knowledge,
+        channel_context,
         "This is an interactive read-only channel. "
         "You may answer questions, explain, analyze, summarize, and help members or leaders interpret clan data. "
         "Do not use write tools. Do not recommend or direct promotions, demotions, or kicks here.\n\n"
@@ -76,9 +79,8 @@ def _interactive_system(channel_name, proactive=False):
         "If someone asks how a member or the clan is trending over time, use the trend tools instead of inferring from a single-day snapshot.\n\n"
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
-        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to the primary announcements channel.\n\n"
+        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
         f"{_discord_emoji_guidance()}"
-        f"{proactive_block}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}\n\n'
@@ -89,17 +91,13 @@ def _interactive_system(channel_name, proactive=False):
     )
 
 
-def _clanops_system(channel_name, proactive=False):
-    proactive_block = (
-        "You are observing a private clan operations discussion. Only interject when you have concrete value to add. "
-        "If you do not have a strong, relevant contribution, respond with exactly null.\n\n"
-        if proactive
-        else ""
-    )
+def _clanops_system(channel_name):
+    subagent_key = prompts.subagent_key_for_channel(channel_name, "clanops")
+    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
     return _build_system_prompt(
-        prompts.purpose(),
-        prompts.knowledge_block(),
-        prompts.channel_section(channel_name),
+        purpose,
+        knowledge,
+        channel_context,
         "This is a private clan operations channel. "
         "This is the right place to discuss promotions, demotions, kicks, roster corrections, and leadership decisions. "
         "You may use both read and write tools here when necessary.\n\n"
@@ -110,9 +108,8 @@ def _clanops_system(channel_name, proactive=False):
         "For performance, momentum, or roster-health questions over time, prefer the long-term trend tools and summaries.\n\n"
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
-        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to the primary announcements channel.\n\n"
+        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
         f"{_discord_emoji_guidance(allow_in_sensitive=True)}"
-        f"{proactive_block}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}\n\n'
@@ -124,10 +121,11 @@ def _clanops_system(channel_name, proactive=False):
 
 
 def _reception_system():
-    onboarding = prompts.discord_singleton_channel("onboarding")
+    reception = prompts.discord_singleton_subagent("reception")
+    purpose, _, channel_context = _subagent_base(reception["name"], reception["subagent_key"])
     return _build_system_prompt(
-        prompts.purpose(),
-        prompts.channel_section(onboarding["name"]),
+        purpose,
+        channel_context,
         "Don't use tools — just answer from the roster provided.\n\n"
         f"{_discord_emoji_guidance()}"
         "Respond with JSON only (no markdown wrapper):\n"
@@ -137,7 +135,7 @@ def _reception_system():
 
 def _home_message_system():
     return _build_system_prompt(
-        prompts.purpose(),
+        prompts.identity_block(),
         prompts.knowledge_block(),
         "Your job: write a short message (2-4 sentences) for the clan's public website home page. "
         "Visible to anyone, including people who aren't in the clan yet.\n\n"
@@ -156,7 +154,7 @@ def _home_message_system():
 
 def _members_message_system():
     return _build_system_prompt(
-        prompts.purpose(),
+        prompts.identity_block(),
         prompts.knowledge_block(),
         "Your job: write a short message (2-5 sentences) for the clan's Members page. "
         "Only current clan members see this page.\n\n"
@@ -174,7 +172,7 @@ def _members_message_system():
 
 def _roster_bios_system():
     return _build_system_prompt(
-        prompts.purpose(),
+        prompts.identity_block(),
         prompts.knowledge_block(),
         "Your job: write a short intro paragraph and per-member bios for the clan roster page.\n"
         "These bios are also shared member profile state that Elixir may reference elsewhere, so they should feel durable and consistent.\n\n"
@@ -202,7 +200,7 @@ def _roster_bios_system():
 
 def _promote_system():
     return _build_system_prompt(
-        prompts.purpose(),
+        prompts.identity_block(),
         prompts.knowledge_block(),
         "Your job: generate promotional messages for 5 channels to recruit new players.\n\n"
         "Output JSON only (no markdown wrapper):\n"
@@ -314,11 +312,12 @@ def _promote_system():
 
 
 def _weekly_digest_system():
-    weekly_digest = prompts.discord_singleton_channel("weekly_digest")
+    announcements = prompts.discord_singleton_subagent("announcements")
+    purpose, knowledge, channel_context = _subagent_base(announcements["name"], announcements["subagent_key"])
     return _build_system_prompt(
-        prompts.purpose(),
-        prompts.knowledge_block(),
-        prompts.channel_section(weekly_digest["name"]),
+        purpose,
+        knowledge,
+        channel_context,
         "Your job: write Elixir's weekly clan recap for Discord.\n\n"
         "This is a must-read weekly digest for current clan members.\n"
         "Write 3-5 paragraphs. Keep it readable and Discord-native, but longer and more reflective than a normal announcement.\n\n"
@@ -344,12 +343,27 @@ def _weekly_digest_system():
 def _event_system():
     """System prompt for generating event-driven messages (welcome, join, leave, etc.)."""
     return _build_system_prompt(
-        prompts.purpose(),
+        prompts.identity_block(),
         prompts.discord(),
         "You are generating a single Discord message in response to an event. "
         "The event details are provided below. Write a message appropriate for the "
         "channel and situation described. Be natural and in character.\n\n"
         "Respond with the message text only — no JSON, no markdown wrapper.",
+    )
+
+
+def _observe_system():
+    return _proactive_channel_system("#clan-events", "clan-events", leadership=False)
+
+
+def _channel_subagent_system(channel_name: str, *, leadership: bool = False):
+    return _proactive_channel_system(
+        channel_name,
+        prompts.subagent_key_for_channel(
+            channel_name,
+            "clanops" if leadership else "interactive",
+        ),
+        leadership=leadership,
     )
 
 
@@ -359,6 +373,7 @@ __all__ = [
     "_interactive_system",
     "_clanops_system",
     "_reception_system",
+    "_channel_subagent_system",
     "_home_message_system",
     "_members_message_system",
     "_roster_bios_system",

@@ -13,6 +13,11 @@ import prompts
 from integrations.poap_kings import site as poap_kings_site
 from storage.contextual_memory import upsert_war_recap_memory, upsert_weekly_summary_memory
 from runtime import app as _app
+from runtime.channel_subagents import (
+    build_subagent_memory_context,
+    maybe_upsert_signal_memory,
+    plan_signal_outcomes,
+)
 from runtime.app import (
     CHICAGO,
     bot,
@@ -43,6 +48,259 @@ def _build_weekly_clan_recap_context(*args, **kwargs):
     return _app._build_weekly_clan_recap_context(*args, **kwargs)
 
 
+def _channel_config_by_key(channel_key: str) -> dict:
+    config = prompts.discord_channels_by_subagent().get(channel_key)
+    if not config:
+        raise RuntimeError(f"channel subagent not configured: {channel_key}")
+    return config
+
+
+def _signal_group_needs_recap_memory(signals):
+    recap_types = {"war_battle_day_complete", "war_week_complete", "war_completed", "war_season_complete"}
+    return any((signal.get("type") in recap_types) for signal in (signals or []))
+
+
+def _build_outcome_context(outcome, signals, clan, war):
+    channel_key = outcome["target_channel_key"]
+    first = (signals or [{}])[0]
+    lines = [
+        f"Target channel subagent: {channel_key}",
+        f"Intent: {outcome['intent']}",
+        "Write the final post for that destination only.",
+        "Do not mention other channels or other internal outcomes from the same signal.",
+        "",
+        "Signals:",
+        json.dumps(signals or [], indent=2, default=str),
+    ]
+    if channel_key == "river-race":
+        lines.extend([
+            "",
+            "Focus on River Race state, momentum, and what the clan should do right now.",
+            "Current war data:",
+            json.dumps(war or {}, indent=2, default=str),
+        ])
+    elif channel_key == "player-progress":
+        lines.extend([
+            "",
+            "Focus on the player's achievement and why it is worth celebrating.",
+        ])
+    elif channel_key == "clan-events":
+        lines.extend([
+            "",
+            "Focus on the communal clan moment and keep the tone welcoming and proud.",
+        ])
+    elif channel_key == "leader-lounge":
+        lines.extend([
+            "",
+            "This is a leadership-facing factual note. Include useful operational context, not public hype.",
+        ])
+        tag = first.get("tag")
+        if tag:
+            try:
+                profile = db.get_member_profile(tag)
+            except Exception:
+                profile = None
+            if profile:
+                lines.extend([
+                    "Member profile context:",
+                    json.dumps(profile, indent=2, default=str),
+                ])
+    elif channel_key == "arena-relay":
+        lines.extend([
+            "",
+            "Write relay-ready Clan Chat copy.",
+            "Keep it immediately usable and under roughly 160 characters when possible.",
+            f"Current clan data: {json.dumps({'name': clan.get('name'), 'tag': clan.get('tag')}, default=str)}",
+        ])
+    else:
+        lines.extend([
+            "",
+            "Current clan data:",
+            json.dumps(clan or {}, indent=2, default=str),
+        ])
+    return "\n".join(lines)
+
+
+async def _mark_signal_group_completed(signals):
+    await asyncio.to_thread(_mark_delivered_signals, signals)
+    for signal in signals or []:
+        if signal.get("signal_key"):
+            await asyncio.to_thread(db.mark_system_signal_announced, signal["signal_key"])
+
+
+async def _deliver_signal_outcome(outcome, signals, clan, war):
+    existing = await asyncio.to_thread(
+        db.get_signal_outcome,
+        outcome["source_signal_key"],
+        outcome["target_channel_key"],
+        outcome["intent"],
+    )
+    if existing and existing.get("delivery_status") == "delivered":
+        return True
+
+    await asyncio.to_thread(
+        db.upsert_signal_outcome,
+        outcome["source_signal_key"],
+        outcome["source_signal_type"],
+        outcome["target_channel_key"],
+        outcome["target_channel_id"],
+        outcome["intent"],
+        required=outcome.get("required", True),
+        delivery_status="planned",
+        payload=outcome.get("payload"),
+    )
+
+    channel_config = _channel_config_by_key(outcome["target_channel_key"])
+    channel = bot.get_channel(channel_config["id"])
+    if not channel:
+        await asyncio.to_thread(
+            db.upsert_signal_outcome,
+            outcome["source_signal_key"],
+            outcome["source_signal_type"],
+            outcome["target_channel_key"],
+            outcome["target_channel_id"],
+            outcome["intent"],
+            required=outcome.get("required", True),
+            delivery_status="failed",
+            payload=outcome.get("payload"),
+            error_detail="channel not found",
+        )
+        return False
+
+    channel_id = channel_config["id"]
+    recent_posts = await asyncio.to_thread(
+        db.list_channel_messages,
+        channel_id,
+        10,
+        "assistant",
+    )
+    memory_context = await asyncio.to_thread(
+        build_subagent_memory_context,
+        channel_config,
+        signals=signals,
+    )
+    context = _build_outcome_context(outcome, signals, clan, war)
+
+    try:
+        channel_name = getattr(channel, "name", None)
+        if not isinstance(channel_name, str):
+            channel_name = None
+        channel_kind = getattr(channel, "type", None)
+        if channel_kind is not None:
+            channel_kind = str(channel_kind)
+        result = await asyncio.to_thread(
+            elixir_agent.generate_channel_update,
+            channel_config["name"],
+            channel_config["subagent_key"],
+            context,
+            recent_posts=recent_posts,
+            memory_context=memory_context,
+            leadership=(channel_config["memory_scope"] == "leadership"),
+        )
+        if result is None:
+            status = "failed" if outcome.get("required", True) else "skipped"
+            await asyncio.to_thread(
+                db.upsert_signal_outcome,
+                outcome["source_signal_key"],
+                outcome["source_signal_type"],
+                outcome["target_channel_key"],
+                outcome["target_channel_id"],
+                outcome["intent"],
+                required=outcome.get("required", True),
+                delivery_status=status,
+                payload=outcome.get("payload"),
+                error_detail="generator returned null",
+                mark_attempt=True,
+            )
+            return status == "skipped"
+
+        result = await _app._apply_member_refs_to_result(result)
+        posts = _app._entry_posts(result)
+        if channel_config["subagent_key"] == "arena-relay":
+            posts = [_with_leader_ping(post) for post in posts]
+            result["content"] = posts if len(posts) > 1 else (posts[0] if posts else "")
+        await _post_to_elixir(channel, result)
+        summary = result.get("summary")
+        event_type = result.get("event_type") or outcome["intent"]
+        for index, post in enumerate(posts):
+            post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
+            post_event_type = event_type if index == 0 else f"{event_type}_part"
+            await asyncio.to_thread(
+                db.save_message,
+                _channel_scope(channel),
+                "assistant",
+                post,
+                summary=post_summary,
+                channel_id=channel_id,
+                channel_name=channel_name,
+                channel_kind=channel_kind,
+                workflow=channel_config["subagent_key"],
+                event_type=post_event_type,
+                raw_json={
+                    "source_signal_key": outcome["source_signal_key"],
+                    "intent": outcome["intent"],
+                    "target_channel_key": outcome["target_channel_key"],
+                    "result": result,
+                },
+            )
+        await asyncio.to_thread(
+            db.upsert_signal_outcome,
+            outcome["source_signal_key"],
+            outcome["source_signal_type"],
+            outcome["target_channel_key"],
+            outcome["target_channel_id"],
+            outcome["intent"],
+            required=outcome.get("required", True),
+            delivery_status="delivered",
+            payload={"result": result, "signals": signals},
+            mark_attempt=True,
+            delivered=True,
+        )
+        body = "\n\n".join(posts)
+        await asyncio.to_thread(
+            maybe_upsert_signal_memory,
+            source_signal_key=outcome["source_signal_key"],
+            signal_type=(signals[0].get("type") or outcome["source_signal_type"]),
+            body=body,
+            outcome=outcome,
+            signals=signals,
+        )
+        if channel_config["subagent_key"] == "river-race" and _signal_group_needs_recap_memory(signals):
+            await asyncio.to_thread(_store_recap_memories_for_signal_batch, signals, posts, channel_id)
+        return True
+    except Exception as exc:
+        await asyncio.to_thread(
+            db.upsert_signal_outcome,
+            outcome["source_signal_key"],
+            outcome["source_signal_type"],
+            outcome["target_channel_key"],
+            outcome["target_channel_id"],
+            outcome["intent"],
+            required=outcome.get("required", True),
+            delivery_status="failed",
+            payload=outcome.get("payload"),
+            error_detail=str(exc),
+            mark_attempt=True,
+        )
+        log.error("Signal outcome delivery failed for %s/%s: %s", outcome["source_signal_key"], outcome["target_channel_key"], exc, exc_info=True)
+        return False
+
+
+async def _deliver_signal_group(signals, clan, war):
+    outcomes = plan_signal_outcomes(signals)
+    if not outcomes:
+        return False
+    results = []
+    for outcome in outcomes:
+        delivered = await _deliver_signal_outcome(outcome, signals, clan, war)
+        results.append(delivered)
+    rows = await asyncio.to_thread(db.list_signal_outcomes, outcomes[0]["source_signal_key"])
+    if rows and all(row.get("delivery_status") in {"delivered", "skipped"} for row in rows):
+        await _mark_signal_group_completed(signals)
+        return True
+    return all(results)
+
+
 def _strip_weekly_recap_header(text: str) -> str:
     body = (text or "").strip()
     if not body:
@@ -62,33 +320,6 @@ def _format_weekly_recap_post(recap_text: str, *, now: datetime | None = None) -
     if not body:
         return title
     return f"{title}\n\n{body}"
-
-
-def _relayworthy_war_signals(signals):
-    relay_signal_types = {
-        "war_battle_day_started",
-        "war_battle_day_live_update",
-        "war_battle_rank_change",
-        "war_battle_day_final_hours",
-        "war_battle_day_complete",
-        "war_final_practice_day",
-        "war_final_battle_day",
-        "war_practice_day_started",
-        "war_practice_day_complete",
-        "war_week_rollover",
-        "war_season_rollover",
-        "war_week_complete",
-        "war_season_complete",
-    }
-    relayworthy = []
-    for signal in signals or []:
-        signal_type = signal.get("type")
-        if signal_type in relay_signal_types:
-            relayworthy.append(signal)
-            continue
-        if signal_type == "war_completed" and (signal.get("won") or signal.get("our_rank") == 1):
-            relayworthy.append(signal)
-    return relayworthy
 
 
 def _observation_signal_batches(signals):
@@ -165,44 +396,8 @@ async def _post_system_signal_updates(signals, clan, war):
     system_signals = _system_signal_updates(signals)
     if not system_signals:
         return
-
-    channel_id = _get_singleton_channel_id("weekly_digest")
-    channel = bot.get_channel(channel_id)
-    if not channel:
-        raise RuntimeError("weekly digest channel not found for system signal updates")
-
-    recent_posts = await asyncio.to_thread(
-        db.list_channel_messages, channel_id, 10, "assistant",
-    )
-
     for signal in system_signals:
-        context = _build_system_signal_context(signal, f"#{getattr(channel, 'name', 'announcements')}")
-        message = await asyncio.to_thread(
-            elixir_agent.generate_message,
-            "system_signal_broadcast",
-            context,
-            recent_posts,
-        )
-        message = (message or "").strip()
-        if not message:
-            continue
-        await _post_to_elixir(channel, {"content": message})
-        await asyncio.to_thread(
-            db.save_message,
-            _channel_scope(channel), "assistant", message,
-            summary=(signal.get("payload") or {}).get("title") or signal.get("title"),
-            channel_id=channel.id,
-            channel_name=getattr(channel, "name", None),
-            channel_kind=str(channel.type),
-            workflow="observation",
-            event_type=signal.get("type") or "system_signal",
-        )
-        if signal.get("signal_key"):
-            await asyncio.to_thread(
-                db.mark_system_signal_announced,
-                signal["signal_key"],
-            )
-        recent_posts = [*recent_posts, {"content": message}][-10:]
+        await _deliver_signal_group([signal], clan, war)
 
 
 async def _publish_pending_system_signal_updates(*, seed_startup_signals: bool = False) -> int:
@@ -213,61 +408,6 @@ async def _publish_pending_system_signal_updates(*, seed_startup_signals: bool =
         return 0
     await _post_system_signal_updates(pending, {}, {})
     return len(pending)
-
-
-async def _maybe_post_arena_relay(signals, clan, war):
-    relayworthy = _relayworthy_war_signals(signals)
-    if not relayworthy:
-        return
-
-    try:
-        arena_relay_channel_id = _get_singleton_channel_id("arena_relay")
-    except Exception as exc:
-        log.warning("Arena relay post skipped: %s", exc)
-        return
-
-    channel = bot.get_channel(arena_relay_channel_id)
-    if not channel:
-        log.warning("Arena relay channel %s not found", arena_relay_channel_id)
-        return
-
-    recent_posts = await asyncio.to_thread(
-        db.list_channel_messages, arena_relay_channel_id, 10, "assistant",
-    )
-    relay_context = (
-        "Write a short relay-ready message for #arena-relay.\n"
-        "A clan leader may copy this into in-game Clan Chat.\n"
-        "Keep it short and punchy: 1-3 short sentences.\n"
-        "Focus on exactly what the clan should know or do right now.\n"
-        "Do not mention Discord, channels, reactions, or private leadership context.\n"
-        "Identify yourself naturally as Elixir.\n\n"
-        f"Relevant signals:\n{json.dumps(relayworthy, indent=2, default=str)}\n\n"
-        f"Current war data:\n{json.dumps(war or {}, indent=2, default=str)}\n\n"
-        f"Current clan data:\n{json.dumps({'name': clan.get('name'), 'tag': clan.get('tag')}, indent=2, default=str)}"
-    )
-
-    message = await asyncio.to_thread(
-        elixir_agent.generate_message,
-        "arena_relay_auto",
-        relay_context,
-        recent_posts,
-    )
-    if not message:
-        return
-
-    relay_post = _with_leader_ping(message)
-    await _post_to_elixir(channel, {"content": relay_post})
-    await asyncio.to_thread(
-        db.save_message,
-        _channel_scope(channel),
-        "assistant",
-        relay_post,
-        channel_id=channel.id,
-        channel_name=getattr(channel, "name", None),
-        channel_kind=str(channel.type),
-        workflow="observation",
-        event_type="arena_relay_auto",
-    )
 
 
 def _promotion_channel_posts(promote):
@@ -333,8 +473,348 @@ def _commit_site_content_or_raise(message: str) -> None:
         raise RuntimeError("site publish failed")
 
 
-def _publish_poap_kings_site_or_raise(payloads: dict[str, object], message: str) -> bool:
+def _publish_poap_kings_site_or_raise(payloads: dict[str, object], message: str) -> dict[str, object]:
     return poap_kings_site.publish_site_content(payloads, message)
+
+
+def _normalize_poap_kings_publish_result(result, payloads: dict[str, object]) -> dict[str, object]:
+    content_types = list((payloads or {}).keys())
+    if isinstance(result, dict):
+        normalized = {
+            "changed": bool(result.get("changed")),
+            "commit_sha": result.get("commit_sha"),
+            "commit_url": result.get("commit_url"),
+            "repo": result.get("repo"),
+            "branch": result.get("branch"),
+            "changed_content_types": list(result.get("changed_content_types") or []),
+            "changed_paths": list(result.get("changed_paths") or []),
+        }
+        if normalized["changed"] and not normalized["changed_content_types"]:
+            normalized["changed_content_types"] = content_types
+        if normalized["changed"] and not normalized["changed_paths"]:
+            normalized["changed_paths"] = [
+                poap_kings_site.target_path(content_type)
+                for content_type in normalized["changed_content_types"]
+            ]
+        return normalized
+    changed = bool(result)
+    return {
+        "changed": changed,
+        "commit_sha": None,
+        "commit_url": None,
+        "repo": None,
+        "branch": None,
+        "changed_content_types": content_types if changed else [],
+        "changed_paths": [poap_kings_site.target_path(content_type) for content_type in content_types] if changed else [],
+    }
+
+
+def _poapkings_publish_context(activity_key: str, *, publish_result=None, error_detail: str | None = None) -> str:
+    result = publish_result or {}
+    status = "failure" if error_detail else "success"
+    changed_content_types = result.get("changed_content_types") or []
+    changed_paths = result.get("changed_paths") or []
+    lines = [
+        "Write one short operational update for #poapkings-com.",
+        "This channel exists only for POAP KINGS website publish visibility.",
+        f"Activity key: {activity_key}",
+        f"Publish status: {status}",
+    ]
+    if error_detail:
+        lines.extend([
+            "This publish failed.",
+            f"Error detail: {error_detail}",
+        ])
+    else:
+        lines.extend([
+            "This publish succeeded and created a real GitHub commit.",
+            f"Repo: {result.get('repo') or 'unknown'}",
+            f"Branch: {result.get('branch') or 'unknown'}",
+            f"Commit SHA: {result.get('commit_sha') or 'unknown'}",
+            f"Commit URL: {result.get('commit_url') or 'unknown'}",
+        ])
+    if changed_content_types:
+        lines.append(f"Changed content types: {', '.join(str(item) for item in changed_content_types)}")
+    if changed_paths:
+        lines.append("Changed paths:")
+        lines.extend(f"- {path}" for path in changed_paths)
+    lines.extend([
+        "",
+        "Required behavior:",
+        "- Be concise and clear.",
+        "- Include the commit SHA and GitHub URL when they are provided.",
+        "- State which publish activity this came from.",
+        "- Do not mention hidden mechanics, JSON, prompts, or internal code.",
+    ])
+    return "\n".join(lines)
+
+
+def _poapkings_publish_fallback(activity_key: str, *, publish_result=None, error_detail: str | None = None) -> str:
+    result = publish_result or {}
+    label = activity_key.replace("-", " ")
+    if error_detail:
+        return f"**POAP KINGS publish failed**\n`{label}` hit an error: {error_detail}"
+    sha = (result.get("commit_sha") or "")[:7] or "unknown"
+    repo = result.get("repo") or "unknown"
+    branch = result.get("branch") or "unknown"
+    url = result.get("commit_url") or ""
+    types = result.get("changed_content_types") or []
+    changed = f" Changed: {', '.join(types)}." if types else ""
+    link = f"\n{url}" if url else ""
+    return f"**POAP KINGS publish succeeded**\n`{label}` pushed `{sha}` to `{repo}@{branch}`.{changed}{link}"
+
+
+async def _notify_poapkings_publish(activity_key: str, *, publish_result=None, error_detail: str | None = None) -> bool:
+    result = publish_result or {}
+    if not error_detail and not result.get("changed"):
+        return False
+    try:
+        channel_config = _channel_config_by_key("poapkings-com")
+    except Exception as exc:
+        log.warning("POAP KINGS publish notification skipped: %s", exc)
+        return False
+
+    channel = bot.get_channel(channel_config["id"])
+    if not channel:
+        log.warning("POAP KINGS publish notification skipped: channel not found")
+        return False
+
+    recent_posts = await asyncio.to_thread(
+        db.list_channel_messages,
+        channel.id,
+        5,
+        "assistant",
+    )
+    memory_context = await asyncio.to_thread(
+        build_subagent_memory_context,
+        channel_config,
+        signals=[],
+    )
+    context = _poapkings_publish_context(activity_key, publish_result=result, error_detail=error_detail)
+
+    try:
+        generated = await asyncio.to_thread(
+            elixir_agent.generate_channel_update,
+            channel_config["name"],
+            channel_config["subagent_key"],
+            context,
+            recent_posts=recent_posts,
+            memory_context=memory_context,
+            leadership=False,
+        )
+    except Exception as exc:
+        log.error("POAP KINGS publish notification generation failed: %s", exc)
+        generated = None
+
+    result_payload = generated if isinstance(generated, dict) and generated.get("content") else {
+        "event_type": "channel_update",
+        "summary": f"POAP KINGS publish {activity_key}",
+        "content": _poapkings_publish_fallback(activity_key, publish_result=result, error_detail=error_detail),
+    }
+
+    try:
+        result_payload = await _app._apply_member_refs_to_result(result_payload)
+        posts = _app._entry_posts(result_payload)
+        await _post_to_elixir(channel, result_payload)
+        event_type = "poapkings_publish_failure" if error_detail else "poapkings_publish_success"
+        channel_name = getattr(channel, "name", None)
+        channel_kind = str(getattr(channel, "type", "text"))
+        for index, post in enumerate(posts):
+            await asyncio.to_thread(
+                db.save_message,
+                _channel_scope(channel),
+                "assistant",
+                post,
+                summary=result_payload.get("summary") if index == 0 else None,
+                channel_id=channel.id,
+                channel_name=channel_name,
+                channel_kind=channel_kind,
+                workflow="poapkings-com",
+                event_type=event_type if index == 0 else f"{event_type}_part",
+                raw_json={
+                    "activity_key": activity_key,
+                    "publish_result": result,
+                    "error_detail": error_detail,
+                    "result": result_payload,
+                },
+            )
+        return True
+    except Exception as exc:
+        log.error("POAP KINGS publish notification send failed: %s", exc, exc_info=True)
+        return False
+
+
+def _query_or_default(label: str, fn, default):
+    try:
+        return fn()
+    except Exception as exc:
+        log.warning("ask-elixir insight data unavailable for %s: %s", label, exc)
+        return default
+
+
+def _summarize_member_rows(rows, *, name_key="name", value_builder=None, limit=5):
+    summary = []
+    for row in (rows or [])[:limit]:
+        name = row.get(name_key) or row.get("current_name") or row.get("member_ref") or row.get("tag")
+        if not name:
+            continue
+        value = value_builder(row) if value_builder else None
+        summary.append(f"{name} ({value})" if value else str(name))
+    return summary
+
+
+def _build_ask_elixir_daily_insight_context(clan, war):
+    roster = _query_or_default("roster_summary", lambda: db.get_clan_roster_summary() or {}, {})
+    clan_trend_summary = _query_or_default(
+        "clan_trend_summary",
+        lambda: db.build_clan_trend_summary_context(days=30, window_days=7) or "",
+        "",
+    )
+    hot_streaks = _query_or_default(
+        "hot_streaks",
+        lambda: db.get_members_on_hot_streak(min_streak=4) or [],
+        [],
+    )
+    trending_war = _query_or_default(
+        "trending_war_contributors",
+        lambda: (db.get_trending_war_contributors(recent_races=2, limit=5) or {}).get("members") or [],
+        [],
+    )
+    longest_tenure = _query_or_default(
+        "longest_tenure",
+        lambda: db.list_longest_tenure_members(limit=5) or [],
+        [],
+    )
+    level_16_leaders = _query_or_default(
+        "level_16_leaders",
+        lambda: db.get_members_with_most_level_16_cards(limit=5) or [],
+        [],
+    )
+    members = _query_or_default("list_members", lambda: db.list_members() or [], [])
+    top_donors = sorted(
+        [member for member in members if (member.get("donations_week") or 0) > 0],
+        key=lambda member: (member.get("donations_week") or 0, -(member.get("clan_rank") or 999)),
+        reverse=True,
+    )[:5]
+    season_summary = _query_or_default(
+        "war_season_summary",
+        lambda: db.get_war_season_summary(top_n=3) or {},
+        {},
+    )
+
+    clan_snapshot = {
+        "name": clan.get("name"),
+        "tag": clan.get("tag"),
+        "member_count": clan.get("members") or roster.get("active_members"),
+        "clan_score": clan.get("clanScore") or roster.get("clan_score"),
+        "clan_war_trophies": clan.get("clanWarTrophies") or roster.get("clan_war_trophies"),
+        "required_trophies": clan.get("requiredTrophies"),
+        "weekly_donations_total": roster.get("donations_week_total"),
+        "avg_member_trophies": roster.get("avg_member_trophies"),
+    }
+    war_snapshot = {
+        "state": (war or {}).get("state"),
+        "section_index": (war or {}).get("sectionIndex"),
+        "period_type": (war or {}).get("periodType"),
+        "clan_rank": ((war or {}).get("clan") or {}).get("rank"),
+        "fame": ((war or {}).get("clan") or {}).get("fame"),
+    }
+    top_fame = ((season_summary or {}).get("top_members") or [])[:3]
+
+    lines = [
+        "Write one short daily hidden fact or fun fact for #ask-elixir.",
+        "Ground it in real clan data from the context below.",
+        "Use a playful opener like 'Did you know?', 'Fun fact', or 'Elixir noticed something...'.",
+        "Choose one non-obvious insight, pattern, or comparison rather than a routine status update.",
+        "Keep it to 1-3 short sentences.",
+        "Do not turn it into a recap, reminder, call to action, leadership note, or war order.",
+        "If today's data does not support a genuinely interesting insight, return null.",
+        "",
+        "=== CLAN SNAPSHOT ===",
+        json.dumps(clan_snapshot, indent=2, default=str),
+        "",
+        "=== WAR SNAPSHOT ===",
+        json.dumps(war_snapshot, indent=2, default=str),
+    ]
+    if clan_trend_summary:
+        lines.extend([
+            "",
+            "=== CLAN TREND SUMMARY ===",
+            clan_trend_summary,
+        ])
+    if top_donors:
+        lines.extend([
+            "",
+            "=== TOP DONORS THIS WEEK ===",
+            "\n".join(
+                f"- {item}"
+                for item in _summarize_member_rows(
+                    top_donors,
+                    value_builder=lambda row: f"{row.get('donations_week') or 0} donations",
+                )
+            ),
+        ])
+    if hot_streaks:
+        lines.extend([
+            "",
+            "=== HOT STREAKS ===",
+            "\n".join(
+                f"- {item}"
+                for item in _summarize_member_rows(
+                    hot_streaks,
+                    value_builder=lambda row: f"{row.get('current_streak') or 0} straight wins",
+                )
+            ),
+        ])
+    if trending_war:
+        lines.extend([
+            "",
+            "=== TRENDING WAR CONTRIBUTORS ===",
+            "\n".join(
+                f"- {item}"
+                for item in _summarize_member_rows(
+                    trending_war,
+                    value_builder=lambda row: f"+{row.get('trend_delta') or row.get('fame_delta') or 0} trend",
+                )
+            ),
+        ])
+    if longest_tenure:
+        lines.extend([
+            "",
+            "=== LONGEST TENURE ===",
+            "\n".join(
+                f"- {item}"
+                for item in _summarize_member_rows(
+                    longest_tenure,
+                    value_builder=lambda row: row.get("joined_date") or "joined long ago",
+                )
+            ),
+        ])
+    if level_16_leaders:
+        lines.extend([
+            "",
+            "=== MOST LEVEL 16 CARDS ===",
+            "\n".join(
+                f"- {item}"
+                for item in _summarize_member_rows(
+                    level_16_leaders,
+                    value_builder=lambda row: f"{row.get('level_16_card_count') or 0} max cards",
+                )
+            ),
+        ])
+    if top_fame:
+        lines.extend([
+            "",
+            "=== WAR SEASON TOP FAME ===",
+            "\n".join(
+                f"- {item}"
+                for item in _summarize_member_rows(
+                    top_fame,
+                    value_builder=lambda row: f"{row.get('total_fame') or 0} fame",
+                )
+            ),
+        ])
+    return "\n".join(lines)
 
 
 def _mark_delivered_signals(signals, *, today: str | None = None):
@@ -404,15 +884,18 @@ async def _promotion_content_cycle():
         return
 
     try:
-        await asyncio.to_thread(
+        publish_result = await asyncio.to_thread(
             _publish_poap_kings_site_or_raise,
             {"promote": promote},
             "Elixir POAP KINGS promotion content update",
         )
     except Exception as exc:
         log.error("Promotion content publish error: %s", exc, exc_info=True)
+        await _notify_poapkings_publish("promotion-content", error_detail=str(exc))
         runtime_status.mark_job_failure("promotion_content_cycle", f"site publish failed: {exc}")
         return
+    publish_result = _normalize_poap_kings_publish_result(publish_result, {"promote": promote})
+    await _notify_poapkings_publish("promotion-content", publish_result=publish_result)
 
     channel_posts = _promotion_channel_posts(promote)
     if not channel_posts:
@@ -434,154 +917,123 @@ async def _promotion_content_cycle():
         )
     runtime_status.mark_job_success("promotion_content_cycle", "website and Discord promotion content published")
 
-async def _heartbeat_tick():
-    """Scheduled heartbeat — fetch data, detect signals, post if interesting."""
-    runtime_status.mark_job_start("heartbeat")
-    # Check active hours
-    now_chicago = datetime.now(CHICAGO)
-    if not (_app.HEARTBEAT_START_HOUR <= now_chicago.hour < _app.HEARTBEAT_END_HOUR):
-        log.info("Heartbeat: outside active hours (%d:%02d), skipping",
-                 now_chicago.hour, now_chicago.minute)
-        runtime_status.mark_job_success("heartbeat", "skipped outside active hours")
+
+async def _ask_elixir_daily_insight():
+    runtime_status.mark_job_start("daily_clan_insight")
+    try:
+        channel_id = _get_singleton_channel_id("ask-elixir")
+    except Exception as exc:
+        runtime_status.mark_job_failure("daily_clan_insight", f"ask-elixir channel config error: {exc}")
         return
+
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        runtime_status.mark_job_failure("daily_clan_insight", "ask-elixir channel not found")
+        return
+
+    try:
+        clan, war = await _load_live_clan_context()
+    except Exception as exc:
+        log.error("Ask Elixir daily insight refresh failed: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("daily_clan_insight", f"refresh failed: {exc}")
+        return
+
+    if not clan.get("memberList"):
+        runtime_status.mark_job_success("daily_clan_insight", "no member data")
+        return
+
+    recent_posts = await asyncio.to_thread(
+        db.list_channel_messages,
+        channel.id,
+        10,
+        "assistant",
+    )
+    channel_config = _channel_config_by_key("ask-elixir")
+    memory_context = await asyncio.to_thread(
+        build_subagent_memory_context,
+        channel_config,
+        signals=[],
+    )
+    context = await asyncio.to_thread(_build_ask_elixir_daily_insight_context, clan, war)
+
+    try:
+        result = await asyncio.to_thread(
+            elixir_agent.generate_channel_update,
+            channel_config["name"],
+            channel_config["subagent_key"],
+            context,
+            recent_posts=recent_posts,
+            memory_context=memory_context,
+            leadership=False,
+        )
+    except Exception as exc:
+        log.error("Ask Elixir daily insight generation failed: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("daily_clan_insight", f"generation failed: {exc}")
+        return
+
+    if result is None:
+        runtime_status.mark_job_success("daily_clan_insight", "no fresh insight")
+        return
+
+    result = await _app._apply_member_refs_to_result(result)
+    posts = _app._entry_posts(result)
+    if not posts:
+        runtime_status.mark_job_success("daily_clan_insight", "no fresh insight")
+        return
+
+    await _post_to_elixir(channel, result)
+    channel_name = getattr(channel, "name", None)
+    channel_kind = str(getattr(channel, "type", "text"))
+    for index, post in enumerate(posts):
+        await asyncio.to_thread(
+            db.save_message,
+            _channel_scope(channel),
+            "assistant",
+            post,
+            summary=result.get("summary") if index == 0 else None,
+            channel_id=channel.id,
+            channel_name=channel_name,
+            channel_kind=channel_kind,
+            workflow="ask-elixir",
+            event_type="daily_clan_insight" if index == 0 else "daily_clan_insight_part",
+            raw_json={"result": result, "context_kind": "daily_clan_insight"},
+        )
+    runtime_status.mark_job_success("daily_clan_insight", "daily insight published")
+
+async def _clan_awareness_tick():
+    """Recurring clan-awareness activity for non-war signals and routed clan-event outcomes."""
+    runtime_status.mark_job_start("clan_awareness")
 
     try:
         await asyncio.to_thread(queue_startup_system_signals)
 
-        # Run the heartbeat tick — fetches data, snapshots, detects signals
+        # Run the clan-awareness tick — fetches data, snapshots, detects signals
         tick_result = heartbeat.tick(include_war=False)
         if tick_result.clan.get("memberList"):
             _app._clear_cr_api_failure_alert_if_recovered()
         else:
-            await _app._maybe_alert_cr_api_failure("heartbeat")
+            await _app._maybe_alert_cr_api_failure("clan awareness")
         signals = tick_result.signals
 
         if not signals:
-            log.info("Heartbeat: no signals, nothing to post")
-            runtime_status.mark_job_success("heartbeat", "no signals")
+            log.info("Clan awareness: no signals, nothing to post")
+            runtime_status.mark_job_success("clan_awareness", "no signals")
             return
 
-        log.info("Heartbeat: %d signals detected, consulting LLM", len(signals))
+        log.info("Clan awareness: %d signals detected, routing outcomes", len(signals))
 
         # Use clan + war data fetched during heartbeat.tick()
         clan = tick_result.clan
         war = tick_result.war
 
-        await _post_system_signal_updates(signals, clan, war)
-        signals = [signal for signal in signals if not signal.get("signal_key")]
+        for signal in signals:
+            await _deliver_signal_group([signal], clan, war)
 
-        if not signals:
-            runtime_status.mark_job_success("heartbeat", "only system signals processed")
-            return
-
-        announcements_channel_id = _get_singleton_channel_id("announcements")
-        channel = bot.get_channel(announcements_channel_id)
-        if not channel:
-            log.error("Announcements channel %s not found", announcements_channel_id)
-            runtime_status.mark_job_failure("heartbeat", "announcements channel not found")
-            return
-
-        # Fetch recent announcements-channel post history to avoid repetition
-        recent_posts = await asyncio.to_thread(
-            db.list_channel_messages, announcements_channel_id, 20, "assistant",
-        )
-        channel_memory = await asyncio.to_thread(
-            db.build_memory_context,
-            channel_id=announcements_channel_id,
-        )
-
-        # Handle join/leave signals via LLM
-        other_signals = []
-        for sig in signals:
-            if sig["type"] == "member_join":
-                msg = await asyncio.to_thread(
-                    elixir_agent.generate_message,
-                    "member_join_broadcast",
-                    f"New member '{sig['name']}' (tag: {sig['tag']}) just joined the clan. "
-                    f"Write a welcome announcement for the broadcast channel.",
-                    recent_posts,
-                )
-                if msg:
-                    await _post_to_elixir(channel, {"content": msg})
-                    await asyncio.to_thread(
-                        db.save_message,
-                        _channel_scope(channel), "assistant", msg,
-                        channel_id=channel.id,
-                        channel_name=getattr(channel, "name", None),
-                        channel_kind=str(channel.type),
-                        workflow="observation",
-                        event_type="member_join_broadcast",
-                    )
-                    await asyncio.to_thread(_mark_delivered_signals, [sig])
-            elif sig["type"] == "member_leave":
-                msg = await asyncio.to_thread(
-                    elixir_agent.generate_message,
-                    "member_leave_broadcast",
-                    f"Member '{sig['name']}' (tag: {sig['tag']}) has left the clan. "
-                    f"Write a brief farewell for the broadcast channel.",
-                    recent_posts,
-                )
-                if msg:
-                    await _post_to_elixir(channel, {"content": msg})
-                    await asyncio.to_thread(
-                        db.save_message,
-                        _channel_scope(channel), "assistant", msg,
-                        channel_id=channel.id,
-                        channel_name=getattr(channel, "name", None),
-                        channel_kind=str(channel.type),
-                        workflow="observation",
-                        event_type="member_leave_broadcast",
-                    )
-                    await asyncio.to_thread(_mark_delivered_signals, [sig])
-            else:
-                other_signals.append(sig)
-
-        # If there are non-join/leave signals, let the LLM craft posts
-        if other_signals:
-            for signal_batch in _observation_signal_batches(other_signals):
-                result = await asyncio.to_thread(
-                    elixir_agent.observe_and_post, clan, war,
-                    signal_batch, recent_posts, channel_memory,
-                )
-                if result is None:
-                    log.info("Heartbeat: LLM decided signal batch not worth posting")
-                    continue
-                result = await _app._apply_member_refs_to_result(result)
-                await _post_to_elixir(channel, result)
-                posts = _app._entry_posts(result)
-                if posts:
-                    summary = result.get("summary")
-                    event_type = result.get("event_type")
-                    for index, post in enumerate(posts):
-                        post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
-                        post_event_type = event_type if index == 0 else f"{event_type}_part" if event_type else None
-                        await asyncio.to_thread(
-                            db.save_message,
-                            _channel_scope(channel), "assistant", post,
-                            summary=post_summary,
-                            channel_id=channel.id,
-                            channel_name=getattr(channel, "name", None),
-                            channel_kind=str(channel.type),
-                            workflow="observation",
-                            event_type=post_event_type,
-                        )
-                    await asyncio.to_thread(_mark_delivered_signals, signal_batch)
-                    await asyncio.to_thread(
-                        _store_recap_memories_for_signal_batch,
-                        signal_batch,
-                        posts,
-                        channel.id,
-                    )
-                    recent_posts = [*recent_posts, *({"content": post} for post in posts)][-20:]
-                log.info("Posted observation: %s", result.get("summary"))
-
-                await _maybe_post_arena_relay(signal_batch, clan, war)
-
-        runtime_status.mark_job_success("heartbeat", f"{len(signals)} signal(s) processed")
+        runtime_status.mark_job_success("clan_awareness", f"{len(signals)} signal(s) processed")
 
     except Exception as e:
-        log.error("Heartbeat error: %s", e, exc_info=True)
-        runtime_status.mark_job_failure("heartbeat", str(e))
+        log.error("Clan awareness error: %s", e, exc_info=True)
+        runtime_status.mark_job_failure("clan_awareness", str(e))
 
 
 async def _war_awareness_tick():
@@ -602,57 +1054,8 @@ async def _war_awareness_tick():
         clan = tick_result.clan
         war = tick_result.war
 
-        announcements_channel_id = _get_singleton_channel_id("announcements")
-        channel = bot.get_channel(announcements_channel_id)
-        if not channel:
-            runtime_status.mark_job_failure("war_awareness", "announcements channel not found")
-            return
-
-        recent_posts = await asyncio.to_thread(
-            db.list_channel_messages, announcements_channel_id, 20, "assistant",
-        )
-        channel_memory = await asyncio.to_thread(
-            db.build_memory_context,
-            channel_id=announcements_channel_id,
-        )
-
         for signal_batch in _observation_signal_batches(signals):
-            result = await asyncio.to_thread(
-                elixir_agent.observe_and_post, clan, war,
-                signal_batch, recent_posts, channel_memory,
-            )
-            if result is None:
-                log.info("War awareness: LLM decided signal batch not worth posting")
-                continue
-            result = await _app._apply_member_refs_to_result(result)
-            await _post_to_elixir(channel, result)
-            posts = _app._entry_posts(result)
-            if posts:
-                summary = result.get("summary")
-                event_type = result.get("event_type")
-                for index, post in enumerate(posts):
-                    post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
-                    post_event_type = event_type if index == 0 else f"{event_type}_part" if event_type else None
-                    await asyncio.to_thread(
-                        db.save_message,
-                        _channel_scope(channel), "assistant", post,
-                        summary=post_summary,
-                        channel_id=channel.id,
-                        channel_name=getattr(channel, "name", None),
-                        channel_kind=str(channel.type),
-                        workflow="observation",
-                        event_type=post_event_type,
-                    )
-                await asyncio.to_thread(_mark_delivered_signals, signal_batch)
-                await asyncio.to_thread(
-                    _store_recap_memories_for_signal_batch,
-                    signal_batch,
-                    posts,
-                    channel.id,
-                )
-                recent_posts = [*recent_posts, *({"content": post} for post in posts)][-20:]
-
-            await _maybe_post_arena_relay(signal_batch, clan, war)
+            await _deliver_signal_group(signal_batch, clan, war)
 
         runtime_status.mark_job_success("war_awareness", f"{len(signals)} war signal(s) processed")
     except Exception as e:
@@ -710,15 +1113,21 @@ async def _site_data_refresh():
 
         roster_data = poap_kings_site.build_roster_data(clan)
         clan_stats = poap_kings_site.build_clan_data(clan)
-        await asyncio.to_thread(
+        publish_result = await asyncio.to_thread(
             _publish_poap_kings_site_or_raise,
             {"roster": roster_data, "clan": clan_stats},
             "Elixir POAP KINGS site data refresh",
         )
+        publish_result = _normalize_poap_kings_publish_result(
+            publish_result,
+            {"roster": roster_data, "clan": clan_stats},
+        )
+        await _notify_poapkings_publish("site-data-refresh", publish_result=publish_result)
         log.info("Site data refresh complete: %d members", len(roster_data.get("members", [])))
         runtime_status.mark_job_success("site_data_refresh", f"{len(roster_data.get('members', []))} members")
     except Exception as e:
         log.error("Site data refresh error: %s", e, exc_info=True)
+        await _notify_poapkings_publish("site-data-refresh", error_detail=str(e))
         runtime_status.mark_job_failure("site_data_refresh", str(e))
 
 
@@ -765,15 +1174,18 @@ async def _site_content_cycle():
             }
 
         if payloads:
-            await asyncio.to_thread(
+            publish_result = await asyncio.to_thread(
                 _publish_poap_kings_site_or_raise,
                 payloads,
                 "Elixir POAP KINGS daily site sync",
             )
+            publish_result = _normalize_poap_kings_publish_result(publish_result, payloads)
+            await _notify_poapkings_publish("site-content", publish_result=publish_result)
         log.info("Site content cycle complete")
         runtime_status.mark_job_success("site_content_cycle", "content updated")
     except Exception as e:
         log.error("Site content cycle error: %s", e, exc_info=True)
+        await _notify_poapkings_publish("site-content", error_detail=str(e))
         runtime_status.mark_job_failure("site_content_cycle", str(e))
 
 
@@ -835,43 +1247,7 @@ async def _player_intel_refresh():
             log.warning("Player intel refresh failed for %s: %s", tag, e)
 
     if progression_signals:
-        announcements_channel_id = _get_singleton_channel_id("announcements")
-        channel = bot.get_channel(announcements_channel_id)
-        if channel:
-            recent_posts = await asyncio.to_thread(
-                db.list_channel_messages, announcements_channel_id, 20, "assistant",
-            )
-            result = await asyncio.to_thread(
-                elixir_agent.observe_and_post,
-                clan,
-                war,
-                progression_signals,
-                recent_posts,
-                await asyncio.to_thread(
-                    db.build_memory_context,
-                    channel_id=announcements_channel_id,
-                ),
-            )
-            if result:
-                result = await _app._apply_member_refs_to_result(result)
-                await _post_to_elixir(channel, result)
-                posts = _app._entry_posts(result)
-                if posts:
-                    summary = result.get("summary")
-                    event_type = result.get("event_type")
-                    for index, post in enumerate(posts):
-                        post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
-                        post_event_type = event_type if index == 0 else f"{event_type}_part" if event_type else None
-                        await asyncio.to_thread(
-                            db.save_message,
-                            _channel_scope(channel), "assistant", post,
-                            summary=post_summary,
-                            channel_id=channel.id,
-                            channel_name=getattr(channel, "name", None),
-                            channel_kind=str(channel.type),
-                            workflow="observation",
-                            event_type=post_event_type,
-                        )
+        await _deliver_signal_group(progression_signals, clan, war)
 
     log.info("Player intel refresh complete: refreshed %d members", refreshed)
     runtime_status.mark_job_success("player_intel_refresh", f"refreshed {refreshed} member(s)")
@@ -879,15 +1255,15 @@ async def _player_intel_refresh():
 
 async def _clanops_weekly_review():
     runtime_status.mark_job_start("clanops_weekly_review")
-    clanops_channels = prompts.discord_channels_by_role("clanops")
+    clanops_channels = prompts.discord_channels_by_workflow("clanops")
     if not clanops_channels:
-        runtime_status.mark_job_failure("clanops_weekly_review", "no clanops channel configured")
+        runtime_status.mark_job_failure("clanops_weekly_review", "no leadership channel configured")
         return
 
     target_config = clanops_channels[0]
     channel = bot.get_channel(target_config["id"])
     if not channel:
-        runtime_status.mark_job_failure("clanops_weekly_review", "clanops channel not found")
+        runtime_status.mark_job_failure("clanops_weekly_review", "leadership channel not found")
         return
 
     clan = {}
@@ -973,7 +1349,7 @@ async def _weekly_clan_recap():
         channel_id=channel.id,
         channel_name=getattr(channel, "name", None),
         channel_kind=str(channel.type),
-        workflow="observation",
+        workflow="announcements",
         event_type="weekly_clan_recap",
     )
     await asyncio.to_thread(
@@ -983,24 +1359,31 @@ async def _weekly_clan_recap():
         body=recap_post,
         scope="public",
         tags=["weekly", "recap", "clan-history"],
-        metadata={"channel_id": channel.id, "workflow": "observation"},
+        metadata={"channel_id": channel.id, "workflow": "announcements"},
     )
     if poap_kings_site.site_enabled():
+        members_payload = {
+            "members": {
+                "title": "Weekly Recap",
+                "message": recap_text,
+                "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "source": "weekly_clan_recap",
+            }
+        }
         try:
-            await asyncio.to_thread(
+            publish_result = await asyncio.to_thread(
                 _publish_poap_kings_site_or_raise,
-                {
-                    "members": {
-                        "title": "Weekly Recap",
-                        "message": recap_text,
-                        "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "source": "weekly_clan_recap",
-                    }
-                },
+                members_payload,
                 "Elixir POAP KINGS weekly recap sync",
             )
+            publish_result = _normalize_poap_kings_publish_result(
+                publish_result,
+                members_payload,
+            )
+            await _notify_poapkings_publish("weekly-recap", publish_result=publish_result)
         except Exception as exc:
             log.error("Weekly recap site sync failed: %s", exc, exc_info=True)
+            await _notify_poapkings_publish("weekly-recap", error_detail=str(exc))
             runtime_status.mark_job_failure("weekly_clan_recap", f"site sync failed: {exc}")
             return
     runtime_status.mark_job_success("weekly_clan_recap", "weekly recap posted")

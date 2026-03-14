@@ -1,4 +1,4 @@
-"""Focused tests for the V2 database baseline."""
+"""Focused tests for the baseline database schema."""
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -762,7 +762,7 @@ def test_get_system_status_summarizes_v2_data_layer():
         status = db.get_system_status(conn=conn)
 
         assert status["schema_version"] == len(db._MIGRATIONS)
-        assert status["schema_display"] == f"V2 baseline (migration v{len(db._MIGRATIONS)})"
+        assert status["schema_display"] == f"baseline schema (migration v{len(db._MIGRATIONS)})"
         assert status["counts"]["members_active"] == 1
         assert status["counts"]["battle_fact_count"] == 1
         assert status["counts"]["message_count"] == 1

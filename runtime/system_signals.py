@@ -5,6 +5,24 @@ import db
 
 STARTUP_SYSTEM_SIGNALS = [
     {
+        "signal_key": "release_three_lane_elixir_v3",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": 'Achievement Unlocked: v3 "Three-Lane Elixir"',
+            "message": (
+                "Elixir has entered a new form: Three-Lane Elixir. "
+                "Instead of one crowded stream trying to cover everything, I now work through focused lanes with clearer purpose, stronger context, and less signal pileup."
+            ),
+            "details": [
+                "River Race coordination, player progression, and clan-event celebrations now have distinct lanes instead of fighting for space in one mixed feed.",
+                "Ask Elixir is now its own open conversation channel, so clanmates can talk directly with Elixir without needing every update mixed into the same room.",
+                "This should make Elixir feel sharper, easier to follow, and more useful across the server while still staying one shared Elixir mind.",
+            ],
+            "audience": "clan",
+            "capability_area": "three_lane_elixir",
+        },
+    },
+    {
         "signal_key": "capability_memory_system_v1",
         "signal_type": "capability_unlock",
         "payload": {

@@ -20,21 +20,20 @@ ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
 
 TOOLSETS_BY_WORKFLOW = {
     "observe": READ_TOOLS,
+    "channel_update": READ_TOOLS,
+    "channel_update_leadership": READ_TOOLS,
     "interactive": READ_TOOLS,
-    "interactive_proactive": READ_TOOLS,
     "clanops": ALL_TOOLS,
-    "clanops_proactive": ALL_TOOLS,
     "reception": [],
     "roster_bios": READ_TOOLS,
 }
 
 RESPONSE_SCHEMAS_BY_WORKFLOW = {
     "observation": {"required": ["event_type", "summary", "content"]},
+    "channel_update": {"required": ["event_type", "summary", "content"]},
+    "channel_update_leadership": {"required": ["event_type", "summary", "content"]},
     "interactive": {"required": ["event_type", "summary", "content"]},
-    "interactive_proactive": {"required": ["event_type", "summary", "content"]},
     "clanops": {"required": ["event_type", "summary", "content"]},
-    "clanops_proactive": {"required": ["event_type", "summary", "content"]},
     "reception": {"required": ["event_type", "content"]},
     "roster_bios": {"required": ["intro", "members"]},
 }
-

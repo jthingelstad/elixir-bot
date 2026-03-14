@@ -7,13 +7,11 @@ import cr_api
 import db
 import elixir_agent
 import prompts
+from runtime.activities import schedule_specs_from_registry
 from runtime import app as _app
 from runtime.app import (
     BOT_ROLE_ID,
     CHICAGO,
-    CLANOPS_PROACTIVE_COOLDOWN_SECONDS,
-    HEARTBEAT_END_HOUR,
-    HEARTBEAT_START_HOUR,
     LEADER_ROLE_ID,
     bot,
     log,
@@ -119,7 +117,7 @@ async def _apply_member_refs_to_result(result: dict | None):
 def _match_clan_member(nickname):
     """Match a Discord nickname to a clan member. Returns (tag, name) or None.
 
-    Uses the V2 member resolver but only accepts high-confidence exact matches.
+    Uses Elixir's member resolver but only accepts high-confidence exact matches.
     """
     normalized = (nickname or "").lower().strip()
     if not normalized:
@@ -543,55 +541,7 @@ def _job_next_runs():
 
 
 def _schedule_specs():
-    site_content_hour = getattr(_app, "SITE_CONTENT_HOUR", 20)
-    player_intel_refresh_minutes = getattr(_app, "PLAYER_INTEL_REFRESH_MINUTES", None)
-    if player_intel_refresh_minutes is None:
-        player_intel_refresh_hours = getattr(_app, "PLAYER_INTEL_REFRESH_HOURS", 6)
-        player_intel_refresh_minutes = int(float(player_intel_refresh_hours) * 60)
-    clanops_weekly_review_day = getattr(_app, "CLANOPS_WEEKLY_REVIEW_DAY", "fri")
-    clanops_weekly_review_hour = getattr(_app, "CLANOPS_WEEKLY_REVIEW_HOUR", 19)
-    weekly_recap_day = getattr(_app, "WEEKLY_RECAP_DAY", "mon")
-    weekly_recap_hour = getattr(_app, "WEEKLY_RECAP_HOUR", 9)
-    promotion_content_day = getattr(_app, "PROMOTION_CONTENT_DAY", "fri")
-    promotion_content_hour = getattr(_app, "PROMOTION_CONTENT_HOUR", 9)
-    heartbeat_interval_minutes = getattr(_app, "HEARTBEAT_INTERVAL_MINUTES", 47)
-    heartbeat_jitter_seconds = getattr(_app, "HEARTBEAT_JITTER_SECONDS", 300)
-    return [
-        {
-            "id": "heartbeat",
-            "label": "heartbeat",
-            "schedule": (
-                f"Every {heartbeat_interval_minutes} minutes with up to {heartbeat_jitter_seconds}s jitter. "
-                f"Posts only during active hours "
-                f"{HEARTBEAT_START_HOUR}:00-{HEARTBEAT_END_HOUR}:00 Chicago."
-            ),
-        },
-        {
-            "id": "poap-kings-site-sync",
-            "label": "poap-kings-site-sync",
-            "schedule": f"Daily at {site_content_hour:02d}:00 CT.",
-        },
-        {
-            "id": "player-intel",
-            "label": "player-intel",
-            "schedule": f"Every {player_intel_refresh_minutes} minutes.",
-        },
-        {
-            "id": "clanops-review",
-            "label": "clanops-review",
-            "schedule": f"Every {clanops_weekly_review_day.title()} at {clanops_weekly_review_hour:02d}:00 CT.",
-        },
-        {
-            "id": "weekly-recap",
-            "label": "weekly-recap",
-            "schedule": f"Every {weekly_recap_day.title()} at {weekly_recap_hour:02d}:00 CT.",
-        },
-        {
-            "id": "promotion",
-            "label": "promotion",
-            "schedule": f"Every {promotion_content_day.title()} at {promotion_content_hour:02d}:00 CT.",
-        },
-    ]
+    return schedule_specs_from_registry(_app)
 
 
 async def _reply_text(message, content):
@@ -689,6 +639,7 @@ def _build_status_report():
     vec_badge = "🟢" if memory.get("sqlite_vec_enabled") else "🟡"
     lines = [
         "**Elixir Status**",
+        f"🏷️ Release: `{elixir_agent.RELEASE_LABEL}`",
         f"🤖 Build: `{elixir_agent.BUILD_HASH}`",
         f"⏱️ Uptime: {_fmt_relative(runtime.get('started_at'))} (since {_fmt_iso_short(runtime.get('started_at'))})",
         f"{scheduler_badge} Scheduler: {'running' if scheduler.running else 'stopped'}",
@@ -727,9 +678,17 @@ def _build_schedule_report():
         "**Elixir Schedule**",
         f"{scheduler_badge} Scheduler: {'running' if scheduler.running else 'stopped'} | timezone America/Chicago",
     ]
+    current_owner = None
     for spec in _schedule_specs():
+        if spec["owner_subagent"] != current_owner:
+            current_owner = spec["owner_subagent"]
+            lines.append(f"")
+            lines.append(f"**{current_owner}**")
+        deliveries = "; ".join(spec["delivery_targets"])
         lines.append(
-            f"- `{spec['label']}`: {spec['schedule']} Next run: {next_runs.get(spec['id'], 'n/a')}"
+            f"- `{spec['activity_key']}` via `{spec['job_function']}`: {spec['schedule']} "
+            f"Next run: {next_runs.get(spec['job_id'], 'n/a')} "
+            f"Deliveries: {deliveries}"
         )
     return "\n".join(lines)
 
@@ -802,20 +761,33 @@ def _build_db_status_report(group: str | None = None):
         return "\n".join(lines)
 
     group_totals = {}
+    grouped_tables = {}
     for table in tables:
         table_group = _db_status_group_for_table(table.get("name") or "")
         bucket = group_totals.setdefault(table_group, {"tables": 0, "rows": 0, "bytes": 0})
         bucket["tables"] += 1
         bucket["rows"] += int(table.get("row_count") or 0)
         bucket["bytes"] += int(table.get("approx_bytes") or 0)
+        grouped_tables.setdefault(table_group, []).append(table)
 
-    lines.append("- Views: `/elixir db-status clan`, `/elixir db-status war`, `/elixir db-status memory`")
+    lines.append("- Use `/elixir db-status` for the full rollup or `/elixir db-status view:<group>` for a focused section.")
     for table_group in ("clan", "war", "memory"):
         bucket = group_totals.get(table_group, {"tables": 0, "rows": 0, "bytes": 0})
         lines.append(
             f"- {_db_status_group_label(table_group)}: {_fmt_num(bucket['tables'])} tables | "
             f"{_fmt_num(bucket['rows'])} rows | {_fmt_bytes(bucket['bytes'])}"
         )
+        tables_for_group = sorted(
+            grouped_tables.get(table_group, []),
+            key=lambda table: (-(int(table.get("approx_bytes") or 0)), table.get("name") or ""),
+        )
+        if not tables_for_group:
+            continue
+        lines.append("  Tables:")
+        for table in tables_for_group:
+            lines.append(
+                f"  - {table.get('name')}: {_fmt_num(table.get('row_count'))} rows | {_fmt_bytes(table.get('approx_bytes'))}"
+            )
     return "\n".join(lines)
 
 
@@ -1435,27 +1407,16 @@ def _get_channel_behavior(channel_id):
     return prompts.discord_channels_by_id().get(channel_id)
 
 
-def _get_singleton_channel(role):
-    return prompts.discord_singleton_channel(role)
+def _get_singleton_channel(subagent):
+    return prompts.discord_singleton_subagent(subagent)
 
 
-def _get_singleton_channel_id(role):
-    return _get_singleton_channel(role)["id"]
+def _get_singleton_channel_id(subagent):
+    return _get_singleton_channel(subagent)["id"]
 
 
 def _channel_reply_target_name(channel_config):
     return channel_config.get("name") or f"channel:{channel_config['id']}"
-
-
-def _clanops_cooldown_elapsed(channel_id):
-    state = db.get_channel_state(channel_id)
-    if not state or not state.get("last_elixir_post_at"):
-        return True
-    try:
-        last_post = datetime.strptime(state["last_elixir_post_at"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return True
-    return (datetime.now(timezone.utc) - last_post).total_seconds() >= CLANOPS_PROACTIVE_COOLDOWN_SECONDS
 
 
 async def _load_live_clan_context():
@@ -1508,7 +1469,7 @@ async def _share_channel_result(result, workflow):
     share_content = result.get("share_content", "")
     if not share_content:
         return
-    target_ref = result.get("share_channel") or "announcements"
+    target_ref = result.get("share_channel") or "#clan-events"
     target = prompts.resolve_channel_reference(target_ref)
     if not target:
         log.warning("Unknown share target channel: %s", target_ref)
@@ -1516,7 +1477,8 @@ async def _share_channel_result(result, workflow):
     target_channel = bot.get_channel(target["id"])
     if not target_channel:
         return
-    if target.get("role") == "arena_relay":
+    target_subagent = (target.get("subagent") or target.get("role") or "").strip().lower()
+    if target_subagent in {"arena-relay", "arena_relay"}:
         share_content = _with_leader_ping(share_content)
     await _post_to_elixir(target_channel, {"content": share_content})
     await asyncio.to_thread(

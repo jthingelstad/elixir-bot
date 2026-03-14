@@ -101,6 +101,66 @@ def test_load_current_unknown_type():
     assert site_content.load_current("unknown") is None
 
 
+def test_publish_site_content_returns_structured_result_when_commit_created(monkeypatch):
+    payloads = {"home": {"message": "Hello from Elixir"}}
+    github_calls = []
+
+    def fake_github_request(method, path, *, payload=None, expected=(200,), token=None):
+        github_calls.append((method, path, payload))
+        responses = {
+            ("POST", "/git/blobs"): {"sha": "blobsha123"},
+            ("GET", "/git/ref/heads/main"): {"object": {"sha": "parentcommit123"}},
+            ("GET", "/git/commits/parentcommit123"): {"tree": {"sha": "basetree123"}},
+            ("POST", "/git/trees"): {"sha": "treesha123"},
+            ("POST", "/git/commits"): {"sha": "commitsha1234567890"},
+            ("PATCH", "/git/refs/heads/main"): None,
+        }
+        return responses[(method, path)]
+
+    monkeypatch.setattr(site_content, "site_enabled", lambda: True)
+    monkeypatch.setattr(site_content, "_site_repo", lambda: "poap/test-site")
+    monkeypatch.setattr(site_content, "_site_branch", lambda: "main")
+    monkeypatch.setattr(site_content, "load_published", lambda content_type, branch=None: None)
+    monkeypatch.setattr(site_content, "_github_request", fake_github_request)
+
+    result = site_content.publish_site_content(payloads, "Test publish")
+
+    assert result == {
+        "changed": True,
+        "commit_sha": "commitsha1234567890",
+        "commit_url": "https://github.com/poap/test-site/commit/commitsha1234567890",
+        "repo": "poap/test-site",
+        "branch": "main",
+        "changed_content_types": ["home"],
+        "changed_paths": ["src/_data/elixirHome.json"],
+    }
+    assert github_calls[0][0:2] == ("POST", "/git/blobs")
+    assert github_calls[-1][0:2] == ("PATCH", "/git/refs/heads/main")
+
+
+def test_publish_site_content_returns_structured_no_change_result(monkeypatch):
+    payloads = {"home": {"message": "Hello from Elixir"}}
+
+    monkeypatch.setattr(site_content, "site_enabled", lambda: True)
+    monkeypatch.setattr(site_content, "_site_repo", lambda: "poap/test-site")
+    monkeypatch.setattr(site_content, "_site_branch", lambda: "main")
+    monkeypatch.setattr(site_content, "load_published", lambda content_type, branch=None: {"message": "Hello from Elixir"})
+
+    with patch("integrations.poap_kings.site._github_request") as mock_github:
+        result = site_content.publish_site_content(payloads, "Test publish")
+
+    assert result == {
+        "changed": False,
+        "commit_sha": None,
+        "commit_url": None,
+        "repo": "poap/test-site",
+        "branch": "main",
+        "changed_content_types": [],
+        "changed_paths": [],
+    }
+    mock_github.assert_not_called()
+
+
 # ── build_clan_data ──────────────────────────────────────────────────────────
 
 def test_build_clan_data():

@@ -413,16 +413,19 @@ def _load_existing_content(content_type: str):
     return load_current(content_type)
 
 
-def publish_site_content(payloads: dict[str, object], message: str = "Elixir POAP KINGS site update") -> bool:
+def publish_site_content(payloads: dict[str, object], message: str = "Elixir POAP KINGS site update") -> dict[str, object]:
     """Publish one coherent POAP KINGS site bundle to GitHub.
 
-    Returns True when a commit was created, False when nothing changed.
+    Returns a structured result with commit metadata when a commit was created,
+    or `changed=False` when nothing changed.
     """
     if not site_enabled():
         raise RuntimeError("POAP KINGS site integration is disabled or missing GitHub configuration")
 
+    repo = _site_repo()
     branch = _site_branch()
     changed_entries = []
+    changed_content_types = []
     for content_type, data in (payloads or {}).items():
         if content_type not in CONTENT_FILES:
             raise ValueError(f"Unknown content type: {content_type}")
@@ -445,10 +448,19 @@ def publish_site_content(payloads: dict[str, object], message: str = "Elixir POA
                 "sha": blob["sha"],
             }
         )
+        changed_content_types.append(content_type)
 
     if not changed_entries:
         log.info("POAP KINGS site publish: no changes")
-        return False
+        return {
+            "changed": False,
+            "commit_sha": None,
+            "commit_url": None,
+            "repo": repo,
+            "branch": branch,
+            "changed_content_types": [],
+            "changed_paths": [],
+        }
 
     ref = _github_request("GET", f"/git/ref/heads/{branch}")
     parent_commit_sha = ((ref or {}).get("object") or {}).get("sha")
@@ -481,8 +493,17 @@ def publish_site_content(payloads: dict[str, object], message: str = "Elixir POA
         payload={"sha": commit["sha"]},
         expected=(200,),
     )
-    log.info("Published POAP KINGS site bundle to %s@%s (%d file(s))", _site_repo(), branch, len(changed_entries))
-    return True
+    commit_sha = commit["sha"]
+    log.info("Published POAP KINGS site bundle to %s@%s (%d file(s))", repo, branch, len(changed_entries))
+    return {
+        "changed": True,
+        "commit_sha": commit_sha,
+        "commit_url": f"https://github.com/{repo}/commit/{commit_sha}",
+        "repo": repo,
+        "branch": branch,
+        "changed_content_types": changed_content_types,
+        "changed_paths": [entry["path"] for entry in changed_entries],
+    }
 
 
 def validate_against_schema(content_type, data):
@@ -795,7 +816,7 @@ def build_card_stats(members):
 
 
 def build_roster_data(clan_data, include_cards=False, conn=None):
-    """Build roster data from CR API + V2 member metadata.
+    """Build roster data from CR API plus Elixir's stored member metadata.
 
     include_cards: if True, fetch battle logs and player profiles to add
         favorite_cards and current_deck per member (~15s extra for API calls).

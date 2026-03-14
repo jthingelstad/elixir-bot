@@ -8,7 +8,15 @@ def test_purpose_loads():
     """PURPOSE.md loads and contains identity info."""
     text = prompts.purpose()
     assert "Elixir" in text
-    assert "chronicler" in text.lower()
+    assert "Mission" in text
+
+
+def test_soul_loads():
+    """SOUL.md loads and contains Elixir's agentic identity."""
+    text = prompts.soul()
+    assert "Elixir" in text
+    assert "agent" in text.lower()
+    assert "not a person" in text.lower()
 
 
 def test_game_loads():
@@ -31,19 +39,20 @@ def test_discord_loads():
     assert "#elixir" in text
     assert "#leader-lounge" in text
     assert "#reception" in text
+    assert "#poapkings-com" in text
 
 
 def test_channel_section_elixir():
     """Extracts #elixir section."""
     section = prompts.channel_section("#elixir")
-    assert "announcements" in section.lower()
+    assert "legacy" in section.lower()
     assert "#elixir" in section
 
 
 def test_channel_section_leader():
     """Extracts #leader-lounge section."""
     section = prompts.channel_section("#leader-lounge")
-    assert "clanops" in section.lower()
+    assert "leader-lounge" in section.lower()
     assert "leader" in section.lower()
 
 
@@ -54,13 +63,20 @@ def test_channel_section_reception():
     assert "nickname" in section.lower()
 
 
+def test_channel_section_poapkings_com():
+    """Extracts #poapkings-com section."""
+    section = prompts.channel_section("#poapkings-com")
+    assert "publish visibility" in section.lower()
+    assert "github-backed site publish" in section.lower()
+
+
 def test_channel_section_nonexistent():
     """Returns empty string for unknown channel."""
     section = prompts.channel_section("#nonexistent")
     assert section == ""
 
 
-def test_discord_channel_configs_parse_roles_and_policies(monkeypatch):
+def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
     monkeypatch.setattr(
         prompts,
         "discord",
@@ -70,33 +86,73 @@ def test_discord_channel_configs_parse_roles_and_policies(monkeypatch):
             "- application_id: 1\n\n"
             "## #member-chat\n\n"
             "ID: 100\n"
-            "Role: interactive\n\n"
+            "Subagent: general\n\n"
+            "Workflow: interactive\n"
+            "ToolPolicy: read_only\n"
+            "ReplyPolicy: mention_only\n"
+            "MemoryScope: public\n"
+            "DurableMemory: true\n\n"
             "Read-only member Q&A.\n\n"
             "## #elixir\n\n"
             "ID: 150\n"
-            "Role: announcements\n\n"
-            "Main stage.\n\n"
-            "## #clan-ops\n\n"
+            "Subagent: legacy\n\n"
+            "Workflow: none\n"
+            "ToolPolicy: none\n"
+            "ReplyPolicy: disabled\n"
+            "MemoryScope: public\n"
+            "DurableMemory: false\n\n"
+            "Legacy room.\n\n"
+            "## #leader-lounge\n\n"
             "ID: 200\n"
-            "Role: clanops\n\n"
-            "Private operations.\n"
+            "Subagent: leader-lounge\n\n"
+            "Workflow: clanops\n"
+            "ToolPolicy: read_write\n"
+            "ReplyPolicy: mention_only\n"
+            "MemoryScope: leadership\n"
+            "DurableMemory: true\n\n"
+            "Private operations.\n\n"
+            "## #poapkings-com\n\n"
+            "ID: 300\n"
+            "Subagent: poapkings-com\n\n"
+            "Workflow: channel_update\n"
+            "ToolPolicy: read_only\n"
+            "ReplyPolicy: disabled\n"
+            "MemoryScope: public\n"
+            "DurableMemory: false\n\n"
+            "Publish visibility.\n"
         ),
     )
     channels = prompts.discord_channels_by_id()
 
     assert channels[100]["workflow"] == "interactive"
-    assert channels[100]["mention_required"] is True
-    assert channels[100]["allow_proactive"] is False
+    assert channels[100]["subagent"] == "general"
+    assert channels[100]["tool_policy"] == "read_only"
+    assert channels[100]["reply_policy"] == "mention_only"
+    assert "interaction_mode" not in channels[100]
+    assert "mention_required" not in channels[100]
+    assert "allow_proactive" not in channels[100]
+    assert "respond_allowed" not in channels[100]
 
     assert channels[150]["workflow"] is None
+    assert channels[150]["tool_policy"] == "none"
+    assert channels[150]["reply_policy"] == "disabled"
     assert channels[150]["singleton"] is True
-    assert channels[150]["respond_allowed"] is False
+    assert channels[150]["subagent_key"] == "legacy"
 
     assert channels[200]["workflow"] == "clanops"
-    assert channels[200]["mention_required"] is False
-    assert channels[200]["allow_proactive"] is True
+    assert channels[200]["tool_policy"] == "read_write"
+    assert channels[200]["reply_policy"] == "mention_only"
+    assert channels[200]["memory_scope"] == "leadership"
+    assert channels[300]["subagent"] == "poapkings-com"
+    assert channels[300]["reply_policy"] == "disabled"
+    assert channels[300]["durable_memory_enabled"] is False
+    assert prompts.discord_singleton_subagent("legacy")["id"] == 150
 
-    assert prompts.discord_singleton_channel("announcements")["id"] == 150
+
+def test_subagent_prompt_poapkings_com_loads():
+    text = prompts.subagent_prompt("poapkings-com")
+    assert "POAP KINGS website publish outcomes" in text
+    assert "commit sha" in text.lower()
 
 
 def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
@@ -108,17 +164,17 @@ def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
             "- application_id: 1\n\n"
             "## #one\n\n"
             "ID: 100\n"
-            "Role: announcements\n\n"
-            "Primary announcements.\n\n"
+            "Subagent: legacy\n\n"
+            "Primary legacy room.\n\n"
             "## #two\n\n"
             "ID: 101\n"
-            "Role: announcements\n\n"
+            "Subagent: legacy\n\n"
             "Duplicate singleton.\n"
         ),
     )
     errors = prompts.validate_discord_channel_config()
 
-    assert any("expected exactly one announcements channel" in error for error in errors)
+    assert any("expected exactly one legacy channel" in error for error in errors)
 
 
 def test_knowledge_block():
@@ -126,6 +182,13 @@ def test_knowledge_block():
     block = prompts.knowledge_block()
     assert "River Race" in block
     assert "POAP KINGS" in block
+
+
+def test_identity_block():
+    """Combined identity includes soul and purpose."""
+    block = prompts.identity_block()
+    assert "Elixir's Soul" in block
+    assert "Elixir's Purpose" in block
 
 
 def test_thresholds():
@@ -156,6 +219,6 @@ def test_observation_prompt_includes_custom_emoji_guidance():
 
     assert "Use at most 1-2 custom emoji in most messages." in system_prompt
     assert ":elixir_hype:" in system_prompt
-    assert "badge unlocks, badge tier-ups, achievement star gains" in system_prompt
-    assert "default to one Discord message" in system_prompt
+    assert "channel subagent" in system_prompt
+    assert "Default to one Discord message" in system_prompt
     assert "Do not split one update across multiple near-duplicate messages." in system_prompt

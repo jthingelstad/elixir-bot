@@ -8,6 +8,7 @@ import discord
 from discord import app_commands
 
 import db
+from runtime.activities import manual_activity_choices
 from runtime.admin import admin_command_requires_leader, dispatch_admin_command, render_admin_help
 
 
@@ -15,7 +16,6 @@ def register_elixir_app_commands(bot) -> None:
     import runtime.app as app
 
     elixir_commands = app_commands.Group(name="elixir", description="Elixir clanops commands")
-    db_status_commands = app_commands.Group(name="db-status", description="Inspect grouped database table status")
     profile_commands = app_commands.Group(name="profile", description="Member profile and metadata commands")
     memory_commands = app_commands.Group(name="memory", description="Inspect Elixir memory")
     job_commands = app_commands.Group(name="jobs", description="Operational job commands")
@@ -117,31 +117,21 @@ def register_elixir_app_commands(bot) -> None:
     async def slash_status(interaction: discord.Interaction):
         await run_admin_interaction(interaction, command_name="status", event_type="status_report")
 
-    @db_status_commands.command(name="clan", description="Show clan, roster, intel, and operational database tables.")
-    async def slash_db_status_clan(interaction: discord.Interaction):
+    @elixir_commands.command(name="db-status", description="Show database storage status and grouped table summaries.")
+    @app_commands.describe(view="Optional focused view.")
+    @app_commands.choices(view=[
+        app_commands.Choice(name="All", value="all"),
+        app_commands.Choice(name="Clan", value="clan"),
+        app_commands.Choice(name="War", value="war"),
+        app_commands.Choice(name="Memory", value="memory"),
+    ])
+    async def slash_db_status(interaction: discord.Interaction, view: str | None = None):
+        group = None if not view or view == "all" else view
         await run_admin_interaction(
             interaction,
             command_name="db-status",
-            args={"group": "clan"},
-            event_type="db_status_clan_report",
-        )
-
-    @db_status_commands.command(name="war", description="Show war-awareness and war-history database tables.")
-    async def slash_db_status_war(interaction: discord.Interaction):
-        await run_admin_interaction(
-            interaction,
-            command_name="db-status",
-            args={"group": "war"},
-            event_type="db_status_war_report",
-        )
-
-    @db_status_commands.command(name="memory", description="Show conversation and contextual memory database tables.")
-    async def slash_db_status_memory(interaction: discord.Interaction):
-        await run_admin_interaction(
-            interaction,
-            command_name="db-status",
-            args={"group": "memory"},
-            event_type="db_status_memory_report",
+            args={} if group is None else {"group": group},
+            event_type="db_status_report" if group is None else f"db_status_{group}_report",
         )
 
     @elixir_commands.command(name="schedule", description="Show scheduled jobs and next runs.")
@@ -359,12 +349,11 @@ def register_elixir_app_commands(bot) -> None:
         )
 
     JOB_CHOICES = [
-        app_commands.Choice(name="heartbeat", value="heartbeat"),
-        app_commands.Choice(name="poap-kings-sync", value="poap-kings-sync"),
-        app_commands.Choice(name="promotion", value="promotion"),
-        app_commands.Choice(name="player-intel", value="player-intel"),
-        app_commands.Choice(name="clanops-review", value="clanops-review"),
-        app_commands.Choice(name="weekly-recap", value="weekly-recap"),
+        app_commands.Choice(name=label, value=value)
+        for label, value in (
+            [("poap-kings-sync", "poap-kings-sync")]
+            + manual_activity_choices()
+        )
     ]
 
     @job_commands.command(name="run", description="Run one operational job now.")
@@ -380,7 +369,6 @@ def register_elixir_app_commands(bot) -> None:
         )
 
     elixir_commands.add_command(profile_commands)
-    elixir_commands.add_command(db_status_commands)
     elixir_commands.add_command(memory_commands)
     elixir_commands.add_command(job_commands)
 
