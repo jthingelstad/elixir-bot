@@ -17,12 +17,16 @@ TOOL_DEFINITIONS_BY_NAME = {
 READ_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "read"]
 WRITE_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "write"]
 ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
+SENSITIVE_READ_TOOL_NAMES = {"get_promotion_candidates", "get_members_at_risk"}
+INTERACTIVE_READ_TOOLS = [
+    tool for tool in READ_TOOLS if tool["function"]["name"] not in SENSITIVE_READ_TOOL_NAMES
+]
 
 TOOLSETS_BY_WORKFLOW = {
-    "observe": READ_TOOLS,
-    "channel_update": READ_TOOLS,
+    "observe": INTERACTIVE_READ_TOOLS,
+    "channel_update": INTERACTIVE_READ_TOOLS,
     "channel_update_leadership": READ_TOOLS,
-    "interactive": READ_TOOLS,
+    "interactive": INTERACTIVE_READ_TOOLS,
     "clanops": ALL_TOOLS,
     "reception": [],
     "roster_bios": READ_TOOLS,

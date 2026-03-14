@@ -1,4 +1,5 @@
 import json
+import re
 
 from agent import app as _app
 
@@ -14,6 +15,68 @@ class _ModuleProxy:
 db = _ModuleProxy(lambda: _app.db)
 cr_api = _app.cr_api
 log = _app.log
+
+
+def _resource_constraints_note() -> dict:
+    return {
+        "gold_known": False,
+        "gold_note": "Current gold is not available in Elixir's stored Clash Royale player data.",
+    }
+
+
+def _enrich_member_profile(result):
+    if not isinstance(result, dict):
+        return result
+
+    enriched = dict(result)
+    role = enriched.get("role")
+    member_name = enriched.get("member_name") or enriched.get("current_name") or "This member"
+    if role:
+        if role == "leader":
+            enriched["current_role_summary"] = f"{member_name} is currently the clan leader."
+        elif role == "coLeader":
+            enriched["current_role_summary"] = f"{member_name} is currently a co-leader."
+        elif role == "elder":
+            enriched["current_role_summary"] = f"{member_name} is currently an Elder."
+        else:
+            enriched["current_role_summary"] = f"{member_name} is currently a member."
+
+    age_years = enriched.get("cr_account_age_years")
+    age_days = enriched.get("cr_account_age_days")
+    if age_years is not None or age_days is not None:
+        age_parts = []
+        if isinstance(age_years, int) and age_years >= 0:
+            age_parts.append(f"{age_years} year{'s' if age_years != 1 else ''}")
+        if isinstance(age_days, int) and age_days >= 0:
+            age_parts.append(f"{age_days:,} day{'s' if age_days != 1 else ''}")
+        if age_parts:
+            enriched["account_age_summary"] = (
+                "Derived Clash Royale account age from Years Played badge data: "
+                + " / ".join(age_parts)
+            )
+
+    games_per_day = enriched.get("cr_games_per_day")
+    window_days = enriched.get("cr_games_per_day_window_days")
+    if isinstance(games_per_day, (int, float)) and window_days:
+        enriched["recent_activity_summary"] = (
+            f"Recent activity: {games_per_day:.2f} games played per day over the last {window_days} days"
+        )
+
+    enriched.update(_resource_constraints_note())
+    return enriched
+
+
+def _enrich_member_card_collection(result):
+    if not isinstance(result, dict):
+        return result
+    enriched = dict(result)
+    enriched.update(_resource_constraints_note())
+    enriched["upgrade_guidance_note"] = (
+        "Use this collection to suggest upgrade priorities or cards closest to max. "
+        "Do not claim a member can afford an upgrade right now unless current gold is explicitly available."
+    )
+    return enriched
+
 
 def _refresh_member_cache(member_tag, include_battles=False):
     """Refresh stored player profile and optionally battle log for a member."""
@@ -33,6 +96,8 @@ def _resolve_member_tag(value):
         raise ValueError("member reference is required")
     if query.startswith("#"):
         return query
+    if re.fullmatch(r"[0289PYLQGRJCUV]{3,15}", query.upper()):
+        return f"#{query.upper()}"
 
     matches = db.resolve_member(query, limit=5)
     if not matches:
@@ -73,11 +138,11 @@ def _execute_tool(name, arguments):
         elif name == "get_member_profile":
             member_tag = _resolve_member_tag(arguments["member_tag"])
             _refresh_member_cache(member_tag, include_battles=True)
-            result = db.get_member_profile(member_tag)
+            result = _enrich_member_profile(db.get_member_profile(member_tag))
         elif name == "get_member_overview":
             member_tag = _resolve_member_tag(arguments["member_tag"])
             _refresh_member_cache(member_tag, include_battles=True)
-            result = db.get_member_overview(member_tag)
+            result = _enrich_member_profile(db.get_member_overview(member_tag))
         elif name == "get_member_recent_form":
             member_tag = _resolve_member_tag(arguments["member_tag"])
             _refresh_member_cache(member_tag, include_battles=True)
@@ -89,6 +154,18 @@ def _execute_tool(name, arguments):
             member_tag = _resolve_member_tag(arguments["member_tag"])
             _refresh_member_cache(member_tag, include_battles=False)
             result = db.get_member_current_deck(member_tag)
+        elif name == "get_member_card_collection":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            _refresh_member_cache(member_tag, include_battles=False)
+            result = _enrich_member_card_collection(
+                db.get_member_card_collection(
+                    member_tag,
+                    limit=arguments.get("limit", 60),
+                    min_level=arguments.get("min_level"),
+                    include_support=arguments.get("include_support", True),
+                    rarity=arguments.get("rarity"),
+                )
+            )
         elif name == "get_member_next_chests":
             member_tag = _resolve_member_tag(arguments["member_tag"])
             result = cr_api.get_player_chests(member_tag)

@@ -34,10 +34,84 @@ def test_execute_tool_get_member_profile_refreshes_member_cache():
 
         result = json.loads(elixir_agent._execute_tool("get_member_profile", {"member_tag": "#ABC123"}))
 
-        assert result == {"player_tag": "#ABC123", "member_name": "King Levy"}
+        assert result["player_tag"] == "#ABC123"
+        assert result["member_name"] == "King Levy"
+        assert result["gold_known"] is False
         mock_db.snapshot_player_profile.assert_called_once()
         mock_db.snapshot_player_battlelog.assert_called_once()
         mock_db.get_member_profile.assert_called_once_with("#ABC123")
+
+
+def test_execute_tool_get_member_profile_includes_account_age_and_activity_summaries():
+    with (
+        patch("elixir_agent.cr_api.get_player", return_value={"tag": "#ABC123", "name": "King Levy"}),
+        patch("elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
+        patch("elixir_agent.db") as mock_db,
+    ):
+        mock_db.get_member_profile.return_value = {
+            "player_tag": "#ABC123",
+            "member_name": "King Levy",
+            "cr_account_age_years": 4,
+            "cr_account_age_days": 1474,
+            "cr_games_per_day": 3.64,
+            "cr_games_per_day_window_days": 14,
+        }
+
+        result = json.loads(elixir_agent._execute_tool("get_member_profile", {"member_tag": "#ABC123"}))
+
+        assert result["account_age_summary"] == (
+            "Derived Clash Royale account age from Years Played badge data: 4 years / 1,474 days"
+        )
+        assert result["recent_activity_summary"] == (
+            "Recent activity: 3.64 games played per day over the last 14 days"
+        )
+
+
+def test_execute_tool_get_member_profile_includes_current_role_summary():
+    with (
+        patch("elixir_agent.cr_api.get_player", return_value={"tag": "#ABC123", "name": "King Thing"}),
+        patch("elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
+        patch("elixir_agent.db") as mock_db,
+    ):
+        mock_db.get_member_profile.return_value = {
+            "player_tag": "#ABC123",
+            "member_name": "King Thing",
+            "role": "leader",
+        }
+
+        result = json.loads(elixir_agent._execute_tool("get_member_profile", {"member_tag": "#ABC123"}))
+
+        assert result["current_role_summary"] == "King Thing is currently the clan leader."
+
+
+def test_execute_tool_get_member_card_collection_uses_db():
+    with (
+        patch("elixir_agent.cr_api.get_player", return_value={"tag": "#ABC123", "name": "King Levy"}),
+        patch("elixir_agent.db") as mock_db,
+    ):
+        mock_db.get_member_card_collection.return_value = {
+            "summary": {"highest_level": 16},
+            "cards": [{"name": "Knight", "level": 16}],
+        }
+
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_member_card_collection",
+                {"member_tag": "#ABC123", "limit": 25, "min_level": 14},
+            )
+        )
+
+        assert result["summary"]["highest_level"] == 16
+        assert result["gold_known"] is False
+        assert "Current gold is not available" in result["gold_note"]
+        mock_db.snapshot_player_profile.assert_called_once()
+        mock_db.get_member_card_collection.assert_called_once_with(
+            "#ABC123",
+            limit=25,
+            min_level=14,
+            include_support=True,
+            rarity=None,
+        )
 
 
 def test_build_tool_result_envelope_strips_card_image_fields_from_context():
@@ -72,6 +146,16 @@ def test_build_tool_result_envelope_strips_card_image_fields_from_context():
     assert "icon_url" not in envelope["data"]["signature_cards"]["cards"][0]
 
 
+def test_interactive_workflow_does_not_expose_sensitive_leadership_read_tools():
+    interactive_names = {
+        tool["function"]["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]
+    }
+
+    assert "get_promotion_candidates" not in interactive_names
+    assert "get_members_at_risk" not in interactive_names
+    assert "get_member_profile" in interactive_names
+
+
 def test_execute_tool_get_member_profile_resolves_handle_before_refresh():
     with (
         patch("elixir_agent.cr_api.get_player", return_value={"tag": "#ABC123", "name": "King Levy"}),
@@ -83,9 +167,61 @@ def test_execute_tool_get_member_profile_resolves_handle_before_refresh():
 
         result = json.loads(elixir_agent._execute_tool("get_member_profile", {"member_tag": "@jamie"}))
 
-        assert result == {"player_tag": "#ABC123", "member_name": "King Levy"}
+        assert result["player_tag"] == "#ABC123"
+        assert result["member_name"] == "King Levy"
+        assert result["gold_known"] is False
         mock_db.resolve_member.assert_called_once_with("@jamie", limit=5)
         mock_db.get_member_profile.assert_called_once_with("#ABC123")
+
+
+def test_execute_tool_get_member_card_collection_accepts_bare_player_tag():
+    with (
+        patch("elixir_agent.cr_api.get_player", return_value={"tag": "#20JJJ2CCRU", "name": "King Thing"}),
+        patch("elixir_agent.db") as mock_db,
+    ):
+        mock_db.get_member_card_collection.return_value = {"summary": {"highest_level": 16}, "cards": []}
+
+        result = json.loads(elixir_agent._execute_tool("get_member_card_collection", {"member_tag": "20JJJ2CCRU"}))
+
+        assert result["summary"]["highest_level"] == 16
+        mock_db.resolve_member.assert_not_called()
+        mock_db.get_member_card_collection.assert_called_once_with(
+            "#20JJJ2CCRU",
+            limit=60,
+            min_level=None,
+            include_support=True,
+            rarity=None,
+        )
+
+
+def test_execute_tool_get_member_card_collection_passes_rarity_filter():
+    with (
+        patch("elixir_agent.cr_api.get_player", return_value={"tag": "#20JJJ2CCRU", "name": "King Thing"}),
+        patch("elixir_agent.db") as mock_db,
+    ):
+        mock_db.get_member_card_collection.return_value = {
+            "summary": {"rarity_counts": {"legendary": 5}},
+            "cards_by_rarity": {"legendary": ["Royal Ghost", "Princess"]},
+            "cards": [],
+            "support_cards": [],
+        }
+
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_member_card_collection",
+                {"member_tag": "20JJJ2CCRU", "rarity": "legendary"},
+            )
+        )
+
+        assert result["summary"]["rarity_counts"]["legendary"] == 5
+        assert "Royal Ghost" in result["cards_by_rarity"]["legendary"]
+        mock_db.get_member_card_collection.assert_called_once_with(
+            "#20JJJ2CCRU",
+            limit=60,
+            min_level=None,
+            include_support=True,
+            rarity="legendary",
+        )
 
 
 def test_execute_tool_get_member_overview_refreshes_member_cache():
@@ -96,7 +232,9 @@ def test_execute_tool_get_member_overview_refreshes_member_cache():
     ):
         mock_db.get_member_overview.return_value = {"player_tag": "#ABC123", "member_name": "King Levy"}
         result = json.loads(elixir_agent._execute_tool("get_member_overview", {"member_tag": "#ABC123"}))
-        assert result == {"player_tag": "#ABC123", "member_name": "King Levy"}
+        assert result["player_tag"] == "#ABC123"
+        assert result["member_name"] == "King Levy"
+        assert result["gold_known"] is False
         mock_db.get_member_overview.assert_called_once_with("#ABC123")
 
 
@@ -303,6 +441,27 @@ def test_respond_in_channel_uses_interactive_read_only_workflow():
         assert mock_chat.call_args.kwargs["workflow"] == "interactive"
         assert mock_chat.call_args.kwargs["allowed_tools"] == elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]
         assert "=== CLAN TREND SUMMARY ===" in mock_chat.call_args.args[1]
+
+
+def test_respond_in_channel_keeps_ask_elixir_lightweight_followups_focused():
+    with patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "Appreciated."}) as mock_chat:
+        result = elixir_agent.respond_in_channel(
+            question="much smarter response",
+            author_name="Jamie",
+            channel_name="#ask-elixir",
+            workflow="interactive",
+            clan_data={"memberList": [{"name": "Alpha"}]},
+            war_data={"season_id": 130},
+            conversation_history=[],
+            memory_context={},
+        )
+
+        assert result["event_type"] == "channel_response"
+        user_msg = mock_chat.call_args.args[1]
+        assert "lightweight conversational follow-up" in user_msg
+        assert "Latest message from 'Jamie' in #ask-elixir: much smarter response" in user_msg
+        assert "=== CLAN TREND SUMMARY ===" not in user_msg
+        assert "POAP KINGS" not in user_msg
 
 
 def test_respond_in_channel_uses_clanops_workflow():

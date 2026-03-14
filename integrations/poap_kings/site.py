@@ -199,6 +199,18 @@ def _apply_current_deck_payload(member: dict, deck: dict | None):
         ]
 
 
+def _apply_card_collection_payload(member: dict, collection: dict | None):
+    collection = collection or {}
+    summary = collection.get("summary") or {}
+    if summary:
+        member["card_collection_summary"] = dict(summary)
+    strongest_cards = (summary.get("strongest_cards") or [])[:8]
+    if strongest_cards:
+        member["collection_highlights"] = [
+            _site_card_payload(card) for card in strongest_cards if card.get("name")
+        ]
+
+
 def _normalize_badge(badge: dict) -> dict:
     name = badge.get("name")
     item = {
@@ -718,6 +730,9 @@ def _hydrate_member_card_data(member, conn, existing_member=None):
     cached_deck = db.get_member_current_deck("#" + tag, conn=conn)
     if cached_deck:
         _apply_current_deck_payload(member, cached_deck)
+    cached_collection = db.get_member_card_collection("#" + tag, limit=8, conn=conn)
+    if cached_collection:
+        _apply_card_collection_payload(member, cached_collection)
 
     existing_member = existing_member or {}
     if existing_member.get("favorite_cards") and not member.get("favorite_cards"):
@@ -739,6 +754,10 @@ def _hydrate_member_card_data(member, conn, existing_member=None):
         member["current_deck"] = existing_member["current_deck"]
     if existing_member.get("current_deck_support_cards") and not member.get("current_deck_support_cards"):
         member["current_deck_support_cards"] = existing_member["current_deck_support_cards"]
+    if existing_member.get("card_collection_summary") and not member.get("card_collection_summary"):
+        member["card_collection_summary"] = existing_member["card_collection_summary"]
+    if existing_member.get("collection_highlights") and not member.get("collection_highlights"):
+        member["collection_highlights"] = existing_member["collection_highlights"]
 
 
 def build_card_stats(members):
@@ -903,6 +922,10 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                                 "cards": player_data.get("currentDeck") or [],
                                 "support_cards": player_data.get("currentDeckSupportCards") or [],
                             },
+                        )
+                        _apply_card_collection_payload(
+                            member,
+                            db.get_member_card_collection("#" + tag, limit=8, conn=conn),
                         )
                         showcase = _profile_showcase_fields(snapshot_payload)
                         member["badge_count"] = showcase.get("badge_count")

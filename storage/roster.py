@@ -419,6 +419,9 @@ def get_member_profile(tag, conn=None):
         cards = get_member_signature_cards(tag, conn=conn)
         if cards:
             result["signature_cards"] = cards
+        collection = get_member_card_collection(tag, limit=12, conn=conn)
+        if collection:
+            result["card_collection_summary"] = collection.get("summary")
         return result
     finally:
         if close:
@@ -550,25 +553,214 @@ def get_member_current_deck(tag, conn=None):
             return None
         cards = []
         for raw_card in json.loads(row["current_deck_json"]):
-            card = dict(raw_card)
-            display_level = _card_level(card)
-            if display_level is not None:
-                card["api_level"] = card.get("level")
-                card["level"] = display_level
-            cards.append(card)
+            if isinstance(raw_card, dict):
+                cards.append(_normalize_collection_card(raw_card))
         support_cards = []
         for raw_card in json.loads(row["current_deck_support_cards_json"] or "[]"):
-            card = dict(raw_card)
-            display_level = _card_level(card)
-            if display_level is not None:
-                card["api_level"] = card.get("level")
-                card["level"] = display_level
-            support_cards.append(card)
+            if isinstance(raw_card, dict):
+                support_cards.append(_normalize_collection_card(raw_card))
         return {
             "fetched_at": row["fetched_at"],
             "cards": cards,
             "support_cards": support_cards,
         }
+    finally:
+        if close:
+            conn.close()
+
+
+def _normalize_collection_card(raw_card: dict) -> dict:
+    card = dict(raw_card or {})
+    if "api_level" not in card:
+        display_level = _card_level(card)
+        if display_level is not None:
+            card["api_level"] = card.get("level")
+            card["level"] = display_level
+    max_level = card.get("maxLevel")
+    api_max_level = card.get("api_max_level")
+    if "api_max_level" not in card and isinstance(max_level, int) and 0 < max_level <= 16:
+        card["api_max_level"] = max_level
+        card["maxLevel"] = 16
+    elif isinstance(api_max_level, int) and isinstance(max_level, int):
+        card["maxLevel"] = max_level
+    if isinstance(card.get("level"), int) and isinstance(card.get("maxLevel"), int):
+        card["levels_to_max"] = max(0, card["maxLevel"] - card["level"])
+        card["is_max_level"] = card["level"] >= card["maxLevel"]
+    return card
+
+
+def _card_sort_key(card: dict) -> tuple:
+    return (
+        -(card.get("level") or 0),
+        -(card.get("evolutionLevel") or 0),
+        (card.get("elixirCost") if isinstance(card.get("elixirCost"), int) else 99),
+        (card.get("name") or "").lower(),
+    )
+
+
+def _normalize_rarity_filter(value: str | None) -> str | None:
+    raw = (value or "").strip().lower().replace("-", "").replace(" ", "")
+    if not raw:
+        return None
+    aliases = {
+        "common": "common",
+        "commons": "common",
+        "rare": "rare",
+        "rares": "rare",
+        "epic": "epic",
+        "epics": "epic",
+        "legendary": "legendary",
+        "legendaries": "legendary",
+        "champion": "champion",
+        "champions": "champion",
+    }
+    return aliases.get(raw, raw)
+
+
+def _card_reference_for_collection(card: dict, *, card_type: str | None = None) -> dict:
+    item = {
+        "name": card.get("name"),
+        "level": card.get("level"),
+        "maxLevel": card.get("maxLevel"),
+        "rarity": card.get("rarity"),
+    }
+    if card.get("levels_to_max") is not None:
+        item["levels_to_max"] = card.get("levels_to_max")
+    if card.get("evolutionLevel") is not None:
+        item["evolution_level"] = card.get("evolutionLevel")
+    if card_type:
+        item["card_type"] = card_type
+    return item
+
+
+def _collection_cards_by_rarity(cards: list[dict], support_cards: list[dict]) -> dict:
+    combined = [
+        (card, "card")
+        for card in (cards or [])
+        if card.get("name")
+    ] + [
+        (card, "support")
+        for card in (support_cards or [])
+        if card.get("name")
+    ]
+    combined.sort(key=lambda item: _card_sort_key(item[0]))
+
+    grouped: dict[str, list[str]] = {}
+    for card, card_type in combined:
+        rarity = _normalize_rarity_filter(card.get("rarity")) or "unknown"
+        name = card.get("name")
+        if not name:
+            continue
+        if card_type == "support":
+            grouped.setdefault(rarity, []).append(f"{name} (support)")
+        else:
+            grouped.setdefault(rarity, []).append(name)
+    return grouped
+
+
+def _collection_summary_from_cards(cards: list[dict], support_cards: list[dict]) -> dict:
+    combined = [card for card in [*(cards or []), *(support_cards or [])] if card.get("name")]
+    level_counts: dict[str, int] = {}
+    rarity_counts: dict[str, int] = {}
+    highest_level = None
+    maxed_cards_count = 0
+    for card in combined:
+        level = card.get("level")
+        max_level = card.get("maxLevel")
+        rarity = _normalize_rarity_filter(card.get("rarity")) or "unknown"
+        rarity_counts[rarity] = rarity_counts.get(rarity, 0) + 1
+        if isinstance(level, int):
+            highest_level = max(level, highest_level or level)
+            level_counts[str(level)] = level_counts.get(str(level), 0) + 1
+            if isinstance(max_level, int) and level >= max_level:
+                maxed_cards_count += 1
+
+    strongest_cards = []
+    sorted_cards = sorted(combined, key=_card_sort_key)
+    for card in sorted_cards[:12]:
+        strongest_cards.append(_card_reference_for_collection(card))
+
+    return {
+        "cards_tracked": len(cards or []),
+        "support_cards_tracked": len(support_cards or []),
+        "combined_cards_tracked": len(combined),
+        "highest_level": highest_level,
+        "maxed_cards_count": maxed_cards_count,
+        "level_counts": level_counts,
+        "rarity_counts": rarity_counts,
+        "strongest_cards": strongest_cards,
+    }
+
+
+def get_member_card_collection(tag, limit=None, min_level=None, include_support=True, rarity=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT ccs.fetched_at, ccs.cards_json, ccs.support_cards_json "
+            "FROM member_card_collection_snapshots ccs "
+            "JOIN members m ON m.member_id = ccs.member_id "
+            "WHERE m.player_tag = ? "
+            "ORDER BY ccs.fetched_at DESC, ccs.snapshot_id DESC LIMIT 1",
+            (_canon_tag(tag),),
+        ).fetchone()
+        if not row:
+            return None
+
+        cards = [
+            _normalize_collection_card(raw_card)
+            for raw_card in json.loads(row["cards_json"] or "[]")
+            if isinstance(raw_card, dict) and raw_card.get("name")
+        ]
+        support_cards = [
+            _normalize_collection_card(raw_card)
+            for raw_card in json.loads(row["support_cards_json"] or "[]")
+            if include_support and isinstance(raw_card, dict) and raw_card.get("name")
+        ]
+
+        if isinstance(min_level, int):
+            cards = [card for card in cards if (card.get("level") or 0) >= min_level]
+            support_cards = [card for card in support_cards if (card.get("level") or 0) >= min_level]
+
+        cards.sort(key=_card_sort_key)
+        support_cards.sort(key=_card_sort_key)
+
+        total_cards = len(cards)
+        total_support_cards = len(support_cards)
+        collection_summary = _collection_summary_from_cards(cards, support_cards)
+        rarity_key = _normalize_rarity_filter(rarity)
+        if rarity_key:
+            cards = [
+                card for card in cards
+                if (_normalize_rarity_filter(card.get("rarity")) or "unknown") == rarity_key
+            ]
+            support_cards = [
+                card for card in support_cards
+                if (_normalize_rarity_filter(card.get("rarity")) or "unknown") == rarity_key
+            ]
+        summary = _collection_summary_from_cards(cards, support_cards)
+        cards_by_rarity = _collection_cards_by_rarity(cards, support_cards)
+        matching_total_cards = summary.get("combined_cards_tracked", 0)
+        if isinstance(limit, int) and limit >= 0:
+            cards = cards[:limit]
+            support_cards = support_cards[:limit]
+
+        result = {
+            "fetched_at": row["fetched_at"],
+            "returned_cards": len(cards),
+            "returned_support_cards": len(support_cards),
+            "total_cards": total_cards,
+            "total_support_cards": total_support_cards,
+            "summary": summary,
+            "cards_by_rarity": cards_by_rarity,
+            "cards": cards,
+            "support_cards": support_cards,
+        }
+        if rarity_key:
+            result["rarity_filter"] = rarity_key
+            result["matching_total_cards"] = matching_total_cards
+            result["collection_summary"] = collection_summary
+        return result
     finally:
         if close:
             conn.close()

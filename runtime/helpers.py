@@ -556,6 +556,7 @@ async def _reply_text(message, content):
         return re.sub(r"!\[([^\]]*)\]\((https?://[^)]+)\)", _replace_image, text)
 
     content = _discord_safe_content(content)
+    content = _app._resolve_custom_emoji(content, getattr(message, "guild", None))
     if len(content) > 2000:
         for chunk in [content[i:i + 1990] for i in range(0, len(content), 1990)]:
             await message.reply(chunk)

@@ -1,4 +1,5 @@
 import json
+import re
 
 import db
 
@@ -36,6 +37,32 @@ def _clan_trend_prompt_context(days=30, window_days=7):
     except Exception as exc:
         log.warning("Clan trend summary context unavailable: %s", exc)
         return ""
+
+
+_LIGHTWEIGHT_ASK_ELIXIR_PATTERNS = (
+    r"\bthanks?\b",
+    r"\bthank you\b",
+    r"\bnice\b",
+    r"\bawesome\b",
+    r"\bgreat\b",
+    r"\bsmart(?:er)?\b",
+    r"\bbetter\b",
+    r"\bhelpful\b",
+    r"\blove that\b",
+    r"\byou sure are\b",
+)
+
+
+def _is_lightweight_ask_elixir_turn(channel_name: str, question: str) -> bool:
+    if (channel_name or "").strip().lower() != "#ask-elixir":
+        return False
+    text = (question or "").strip().lower()
+    if not text:
+        return False
+    words = re.findall(r"[a-z0-9']+", text)
+    if len(words) > 8:
+        return False
+    return any(re.search(pattern, text) for pattern in _LIGHTWEIGHT_ASK_ELIXIR_PATTERNS)
 
 
 def _roster_bio_context(clan_data, roster_data=None):
@@ -291,9 +318,20 @@ def respond_in_channel(question, author_name, channel_name, workflow, clan_data,
     """Channel Q&A for interactive/clanops workflows."""
     if workflow not in {"interactive", "clanops"}:
         raise ValueError(f"unsupported channel workflow: {workflow}")
-    context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
-    trend_context = _clan_trend_prompt_context()
-    user_msg = f"Message from '{author_name}' in {channel_name}: {question}\n\n{context}"
+    lightweight_turn = workflow == "interactive" and _is_lightweight_ask_elixir_turn(channel_name, question)
+    context = "" if lightweight_turn else _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
+    trend_context = "" if lightweight_turn else _clan_trend_prompt_context()
+    if lightweight_turn:
+        user_msg = (
+            f"Latest message from '{author_name}' in {channel_name}: {question}\n\n"
+            "This is a lightweight conversational follow-up in Elixir's direct conversation lane. "
+            "Reply to the latest message itself. Keep it short, natural, and present."
+        )
+    else:
+        user_msg = (
+            f"Latest user message to answer from '{author_name}' in {channel_name}: {question}\n\n"
+            f"{context}"
+        )
     if trend_context:
         user_msg += f"\n\n{trend_context}"
     user_msg += _format_memory_context(memory_context)
