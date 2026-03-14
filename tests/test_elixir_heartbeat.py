@@ -145,6 +145,43 @@ def test_heartbeat_tick_saves_multipart_observation_as_separate_messages():
     assert observation_saves[1].kwargs["event_type"] == "war_update_part"
 
 
+def test_heartbeat_tick_stores_war_recap_memory_for_recap_signal_batch():
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[{"type": "war_battle_day_complete", "season_id": 129, "week": 2, "day_number": 1}],
+        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
+        war={"state": "warDay"},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 123
+    channel.name = "elixir"
+    channel.type = "text"
+
+    with (
+        patch.object(elixir, "HEARTBEAT_START_HOUR", 0),
+        patch.object(elixir, "HEARTBEAT_END_HOUR", 24),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.heartbeat.tick", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={"channel": {"state": None, "episodes": []}}),
+        patch("elixir.db.save_message"),
+        patch("elixir.elixir_agent.observe_and_post", return_value={
+            "event_type": "war_update",
+            "summary": "Battle day recap",
+            "content": "Battle day recap post",
+        }),
+        patch("elixir._post_to_elixir", new=AsyncMock()),
+        patch("runtime.jobs._store_recap_memories_for_signal_batch") as mock_memory,
+    ):
+        asyncio.run(elixir._heartbeat_tick())
+
+    mock_memory.assert_called_once_with(bundle.signals, ["Battle day recap post"], 123)
+
+
 def test_heartbeat_tick_posts_join_messages_through_shared_sender():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[{"type": "member_join", "name": "King Levy", "tag": "#ABC"}],
@@ -578,12 +615,16 @@ def test_clanops_weekly_review_posts_to_clanops_channel():
         patch("elixir._build_weekly_clanops_review", return_value="<@&1474762111287824584>\n**Weekly ClanOps Review**") as mock_build,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
+        patch("runtime.jobs.upsert_weekly_summary_memory") as mock_memory,
     ):
         asyncio.run(elixir._clanops_weekly_review())
 
     mock_build.assert_called_once_with({"name": "POAP KINGS"}, {"state": "warDay"})
     mock_post.assert_awaited_once_with(channel, {"content": "<@&1474762111287824584>\n**Weekly ClanOps Review**"})
     assert mock_save.call_args.kwargs["event_type"] == "weekly_clanops_review"
+    mock_memory.assert_called_once()
+    assert mock_memory.call_args.kwargs["event_type"] == "weekly_clanops_review"
+    assert mock_memory.call_args.kwargs["scope"] == "leadership"
 
 
 def test_weekly_clan_recap_posts_to_weekly_digest_channel():
@@ -605,6 +646,7 @@ def test_weekly_clan_recap_posts_to_weekly_digest_channel():
         patch("elixir.elixir_agent.generate_weekly_digest", return_value="This week POAP KINGS pushed hard.") as mock_generate,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
+        patch("runtime.jobs.upsert_weekly_summary_memory") as mock_memory,
     ):
         asyncio.run(elixir._weekly_clan_recap())
 
@@ -614,6 +656,9 @@ def test_weekly_clan_recap_posts_to_weekly_digest_channel():
     assert post_content.startswith("**Weekly Recap | ")
     assert post_content.endswith("This week POAP KINGS pushed hard.")
     assert mock_save.call_args.kwargs["event_type"] == "weekly_clan_recap"
+    mock_memory.assert_called_once()
+    assert mock_memory.call_args.kwargs["event_type"] == "weekly_clan_recap"
+    assert mock_memory.call_args.kwargs["scope"] == "public"
 
 
 def test_format_weekly_recap_post_adds_subject_line_and_strips_existing_header():

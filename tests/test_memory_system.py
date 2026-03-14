@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import db
 from memory_reasoner import format_memory_for_response, package_prompt_context, summarize_member_memories
 from memory_store import (
@@ -12,6 +14,12 @@ from memory_store import (
     soft_delete_memory,
     update_memory,
     upsert_embedding,
+)
+from storage.contextual_memory import (
+    archive_member_note_memory,
+    upsert_member_note_memory,
+    upsert_war_recap_memory,
+    upsert_weekly_summary_memory,
 )
 from runtime.admin import _build_memory_report
 
@@ -227,6 +235,124 @@ def test_hybrid_search_rrf_and_fts_only_degraded_mode():
         fts_only = search_memories("recognition", embed_query=None, conn=conn)
         assert fts_only
         assert any(r.memory["memory_id"] == b["memory_id"] for r in fts_only)
+    finally:
+        conn.close()
+
+
+def test_upsert_weekly_summary_memory_creates_and_updates_same_week_entry():
+    conn = db.get_connection(":memory:")
+    try:
+        observed_at = datetime(2026, 3, 13, 12, 0, 0, tzinfo=timezone.utc)
+        first = upsert_weekly_summary_memory(
+            event_type="weekly_clanops_review",
+            title="Weekly ClanOps Review",
+            body="Week one leadership summary.",
+            scope="leadership",
+            tags=["weekly", "clanops"],
+            metadata={"workflow": "clanops"},
+            now=observed_at,
+            conn=conn,
+        )
+        rows = list_memories(viewer_scope="leadership", conn=conn)
+        assert len(rows) == 1
+        assert rows[0]["event_type"] == "weekly_clanops_review"
+        assert "weekly" in rows[0]["tags"]
+
+        updated = upsert_weekly_summary_memory(
+            event_type="weekly_clanops_review",
+            title="Weekly ClanOps Review",
+            body="Week one leadership summary, revised.",
+            scope="leadership",
+            tags=["weekly", "clanops"],
+            metadata={"workflow": "clanops"},
+            now=observed_at,
+            conn=conn,
+        )
+
+        rows = list_memories(viewer_scope="leadership", conn=conn)
+        assert len(rows) == 1
+        assert rows[0]["memory_id"] == first["memory_id"] == updated["memory_id"]
+        assert rows[0]["body"] == "Week one leadership summary, revised."
+        versions = conn.execute(
+            "SELECT COUNT(*) AS c FROM clan_memory_versions WHERE memory_id = ?",
+            (rows[0]["memory_id"],),
+        ).fetchone()["c"]
+        assert versions >= 1
+    finally:
+        conn.close()
+
+
+def test_upsert_war_recap_memory_stores_battle_day_week_and_season_recaps():
+    conn = db.get_connection(":memory:")
+    try:
+        battle = upsert_war_recap_memory(
+            signals=[{"type": "war_battle_day_complete", "season_id": 129, "week": 2, "day_number": 3}],
+            body="Battle Day 3 recap text.",
+            channel_id=500,
+            conn=conn,
+        )
+        week = upsert_war_recap_memory(
+            signals=[{"type": "war_week_complete", "season_id": 129, "week": 2}],
+            body="Week 2 recap text.",
+            channel_id=500,
+            conn=conn,
+        )
+        season = upsert_war_recap_memory(
+            signals=[{"type": "war_season_complete", "season_id": 129}],
+            body="Season 129 recap text.",
+            channel_id=500,
+            conn=conn,
+        )
+
+        public_rows = list_memories(viewer_scope="public", conn=conn)
+        event_types = {row["event_type"] for row in public_rows}
+
+        assert battle["event_type"] == "war_battle_day_recap"
+        assert battle["event_id"] == "129:2:3"
+        assert week["event_type"] == "war_week_recap"
+        assert week["war_week_id"] == "129:2"
+        assert season["event_type"] == "war_season_recap"
+        assert season["war_season_id"] == "129"
+        assert {"war_battle_day_recap", "war_week_recap", "war_season_recap"} <= event_types
+    finally:
+        conn.close()
+
+
+def test_member_note_memory_is_upserted_and_archived():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "elder"}],
+            conn=conn,
+        )
+
+        created = upsert_member_note_memory(
+            member_tag="#ABC123",
+            member_label="King Levy",
+            note="Reliable war participant and strong leader presence.",
+            conn=conn,
+        )
+        rows = list_memories(viewer_scope="leadership", conn=conn)
+        assert len(rows) == 1
+        assert rows[0]["event_type"] == "member_note"
+        assert rows[0]["event_id"] == "#ABC123"
+        assert rows[0]["member_tag"] == "#ABC123"
+        assert "leader-note" in rows[0]["tags"]
+
+        updated = upsert_member_note_memory(
+            member_tag="#ABC123",
+            member_label="King Levy",
+            note="Reliable war participant and consistent clan leader.",
+            conn=conn,
+        )
+        rows = list_memories(viewer_scope="leadership", conn=conn)
+        assert len(rows) == 1
+        assert rows[0]["memory_id"] == created["memory_id"] == updated["memory_id"]
+        assert rows[0]["body"] == "Reliable war participant and consistent clan leader."
+
+        archived = archive_member_note_memory(member_tag="#ABC123", conn=conn)
+        assert archived["status"] == "archived"
+        assert list_memories(viewer_scope="leadership", conn=conn) == []
     finally:
         conn.close()
 

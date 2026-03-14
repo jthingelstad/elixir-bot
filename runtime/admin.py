@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 import re
 
+from storage.contextual_memory import archive_member_note_memory, upsert_member_note_memory
+
 
 COMMAND_ALIASES = {
     "site-data": "poap-kings-data-sync",
@@ -962,11 +964,24 @@ async def _run_member_metadata_command(command: str, *, preview: bool, args: dic
         if preview:
             return f"Preview: would set note for {label} to: {args['note']}"
         await asyncio.to_thread(db.set_member_note, member_tag, None, args["note"])
+        await asyncio.to_thread(
+            upsert_member_note_memory,
+            member_tag=member_tag,
+            member_label=label,
+            note=args["note"],
+            created_by="leader:admin-command",
+            metadata={"command": "set-note"},
+        )
         return f"Set note for {label}."
     if command == "clear-note":
         if preview:
             return f"Preview: would clear note for {label}."
         await asyncio.to_thread(db.clear_member_note, member_tag, None)
+        await asyncio.to_thread(
+            archive_member_note_memory,
+            member_tag=member_tag,
+            actor="leader:admin-command",
+        )
         return f"Cleared note for {label}."
     raise ValueError(f"Unknown metadata command: {command}")
 

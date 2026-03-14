@@ -11,6 +11,7 @@ import elixir_agent
 import heartbeat
 import prompts
 from integrations.poap_kings import site as poap_kings_site
+from storage.contextual_memory import upsert_war_recap_memory, upsert_weekly_summary_memory
 from runtime import app as _app
 from runtime.app import (
     CHICAGO,
@@ -119,6 +120,18 @@ def _observation_signal_batches(signals):
 
 def _system_signal_updates(signals):
     return [signal for signal in (signals or []) if signal.get("signal_key")]
+
+
+def _store_recap_memories_for_signal_batch(signal_batch, posts, channel_id):
+    body = "\n\n".join((post or "").strip() for post in (posts or []) if (post or "").strip())
+    if not body:
+        return None
+    return upsert_war_recap_memory(
+        signals=signal_batch,
+        body=body,
+        channel_id=channel_id,
+        workflow="observation",
+    )
 
 
 def _build_system_signal_context(signal, channel_name):
@@ -553,6 +566,12 @@ async def _heartbeat_tick():
                             event_type=post_event_type,
                         )
                     await asyncio.to_thread(_mark_delivered_signals, signal_batch)
+                    await asyncio.to_thread(
+                        _store_recap_memories_for_signal_batch,
+                        signal_batch,
+                        posts,
+                        channel.id,
+                    )
                     recent_posts = [*recent_posts, *({"content": post} for post in posts)][-20:]
                 log.info("Posted observation: %s", result.get("summary"))
 
@@ -625,6 +644,12 @@ async def _war_awareness_tick():
                         event_type=post_event_type,
                     )
                 await asyncio.to_thread(_mark_delivered_signals, signal_batch)
+                await asyncio.to_thread(
+                    _store_recap_memories_for_signal_batch,
+                    signal_batch,
+                    posts,
+                    channel.id,
+                )
                 recent_posts = [*recent_posts, *({"content": post} for post in posts)][-20:]
 
             await _maybe_post_arena_relay(signal_batch, clan, war)
@@ -889,6 +914,15 @@ async def _clanops_weekly_review():
         workflow="clanops",
         event_type="weekly_clanops_review",
     )
+    await asyncio.to_thread(
+        upsert_weekly_summary_memory,
+        event_type="weekly_clanops_review",
+        title="Weekly ClanOps Review",
+        body=review_content,
+        scope="leadership",
+        tags=["weekly", "clanops", "review"],
+        metadata={"channel_id": channel.id, "workflow": "clanops"},
+    )
     runtime_status.mark_job_success("clanops_weekly_review", "weekly review posted")
 
 
@@ -941,6 +975,15 @@ async def _weekly_clan_recap():
         channel_kind=str(channel.type),
         workflow="observation",
         event_type="weekly_clan_recap",
+    )
+    await asyncio.to_thread(
+        upsert_weekly_summary_memory,
+        event_type="weekly_clan_recap",
+        title="Weekly Clan Recap",
+        body=recap_post,
+        scope="public",
+        tags=["weekly", "recap", "clan-history"],
+        metadata={"channel_id": channel.id, "workflow": "observation"},
     )
     if poap_kings_site.site_enabled():
         try:

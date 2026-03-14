@@ -908,6 +908,62 @@ def test_dispatch_admin_command_handles_set_discord_with_resolved_guild_member()
     }
 
 
+def test_dispatch_admin_command_handles_set_note_and_writes_contextual_memory():
+    from runtime import admin as runtime_admin
+
+    with patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None, None])) as mock_to_thread:
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "set-note",
+                preview=False,
+                short=False,
+                args={"member": "King Levy", "note": "Reliable war leader."},
+            )
+        )
+
+    assert result == "Set note for King Levy."
+    assert mock_to_thread.await_args_list[1].args == (
+        elixir.db.set_member_note,
+        "#ABC123",
+        None,
+        "Reliable war leader.",
+    )
+    assert mock_to_thread.await_args_list[2].args == (runtime_admin.upsert_member_note_memory,)
+    assert mock_to_thread.await_args_list[2].kwargs == {
+        "member_tag": "#ABC123",
+        "member_label": "King Levy",
+        "note": "Reliable war leader.",
+        "created_by": "leader:admin-command",
+        "metadata": {"command": "set-note"},
+    }
+
+
+def test_dispatch_admin_command_handles_clear_note_and_archives_contextual_memory():
+    from runtime import admin as runtime_admin
+
+    with patch("runtime.admin.asyncio.to_thread", new=AsyncMock(side_effect=[("#ABC123", "King Levy"), None, None])) as mock_to_thread:
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "clear-note",
+                preview=False,
+                short=False,
+                args={"member": "King Levy"},
+            )
+        )
+
+    assert result == "Cleared note for King Levy."
+    assert mock_to_thread.await_args_list[1].args == (
+        elixir.db.clear_member_note,
+        "#ABC123",
+        None,
+    )
+    assert mock_to_thread.await_args_list[2].args == (runtime_admin.archive_member_note_memory,)
+    assert mock_to_thread.await_args_list[2].kwargs == {
+        "member_tag": "#ABC123",
+        "actor": "leader:admin-command",
+    }
+
+
 def test_resolve_member_tag_accepts_name_with_tag_label():
     from runtime import admin as runtime_admin
 
