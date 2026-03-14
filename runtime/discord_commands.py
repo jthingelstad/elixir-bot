@@ -15,6 +15,7 @@ def register_elixir_app_commands(bot) -> None:
     import runtime.app as app
 
     elixir_commands = app_commands.Group(name="elixir", description="Elixir clanops commands")
+    db_status_commands = app_commands.Group(name="db-status", description="Inspect grouped database table status")
     profile_commands = app_commands.Group(name="profile", description="Member profile and metadata commands")
     memory_commands = app_commands.Group(name="memory", description="Inspect Elixir memory")
     job_commands = app_commands.Group(name="jobs", description="Operational job commands")
@@ -116,9 +117,32 @@ def register_elixir_app_commands(bot) -> None:
     async def slash_status(interaction: discord.Interaction):
         await run_admin_interaction(interaction, command_name="status", event_type="status_report")
 
-    @elixir_commands.command(name="db-status", description="Show database health, table row counts, and table sizes.")
-    async def slash_db_status(interaction: discord.Interaction):
-        await run_admin_interaction(interaction, command_name="db-status", event_type="db_status_report")
+    @db_status_commands.command(name="clan", description="Show clan, roster, intel, and operational database tables.")
+    async def slash_db_status_clan(interaction: discord.Interaction):
+        await run_admin_interaction(
+            interaction,
+            command_name="db-status",
+            args={"group": "clan"},
+            event_type="db_status_clan_report",
+        )
+
+    @db_status_commands.command(name="war", description="Show war-awareness and war-history database tables.")
+    async def slash_db_status_war(interaction: discord.Interaction):
+        await run_admin_interaction(
+            interaction,
+            command_name="db-status",
+            args={"group": "war"},
+            event_type="db_status_war_report",
+        )
+
+    @db_status_commands.command(name="memory", description="Show conversation and contextual memory database tables.")
+    async def slash_db_status_memory(interaction: discord.Interaction):
+        await run_admin_interaction(
+            interaction,
+            command_name="db-status",
+            args={"group": "memory"},
+            event_type="db_status_memory_report",
+        )
 
     @elixir_commands.command(name="schedule", description="Show scheduled jobs and next runs.")
     async def slash_schedule(interaction: discord.Interaction):
@@ -356,6 +380,7 @@ def register_elixir_app_commands(bot) -> None:
         )
 
     elixir_commands.add_command(profile_commands)
+    elixir_commands.add_command(db_status_commands)
     elixir_commands.add_command(memory_commands)
     elixir_commands.add_command(job_commands)
 
