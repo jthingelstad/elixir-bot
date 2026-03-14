@@ -1501,30 +1501,127 @@ def test_detect_war_day_transition_marks_battle_phase_complete_from_api_transiti
         conn.close()
 
 
-def test_detect_war_deck_usage_skips_empty_battle_day_snapshots():
-    conn = db.get_connection(":memory:")
-    try:
-        war = {
-            "state": "full",
-            "sectionIndex": 1,
-            "periodIndex": 10,
-            "periodType": "warDay",
-            "clan": {
-                "tag": "#J2RGCRVG",
-                "name": "POAP KINGS",
-                "participants": [
-                    {"tag": "#ABC123", "name": "King Levy", "fame": 0, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 0, "decksUsedToday": 0},
-                    {"tag": "#DEF456", "name": "Vijay", "fame": 0, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 0, "decksUsedToday": 0},
-                ],
-            },
-        }
-        db.upsert_war_current_state(war, conn=conn)
+def test_detect_war_battle_checkpoints_waits_until_midday():
+    with patch("heartbeat.db.get_current_war_day_state", return_value={
+        "phase": "battle",
+        "war_day_key": "s00130-w01-p010",
+        "season_id": 130,
+        "section_index": 1,
+        "period_index": 10,
+        "week": 1,
+        "phase_display": "Battle Day 1",
+        "day_number": 1,
+        "day_total": 4,
+        "time_left_seconds": 13 * 3600,
+    }):
+        signals = heartbeat.detect_war_battle_checkpoints()
 
-        signals = heartbeat.detect_war_deck_usage(war, conn=conn)
+    assert signals == []
 
-        assert signals == []
-    finally:
-        conn.close()
+
+def test_detect_war_battle_checkpoints_emits_midday_update():
+    with (
+        patch("heartbeat.db.get_current_war_day_state", return_value={
+            "phase": "battle",
+            "war_day_key": "s00130-w01-p010",
+            "season_id": 130,
+            "section_index": 1,
+            "period_index": 10,
+            "week": 1,
+            "phase_display": "Battle Day 1",
+            "day_number": 1,
+            "day_total": 4,
+            "race_rank": 2,
+            "clan_fame": 4200,
+            "clan_score": 180,
+            "period_points": 4000,
+            "time_left_seconds": 12 * 3600,
+            "time_left_text": "12h 0m",
+            "used_all_4": [{"name": "King Levy"}],
+            "used_some": [{"name": "Finn"}],
+            "used_none": [{"name": "Vijay"}],
+            "top_fame_today": [{"name": "King Levy", "fame_today": 800}],
+            "top_fame_total": [{"name": "King Levy", "fame": 1200}],
+            "engaged_count": 2,
+            "finished_count": 1,
+            "untouched_count": 1,
+            "total_participants": 3,
+        }),
+        patch("heartbeat.db.was_signal_sent", return_value=False),
+    ):
+        signals = heartbeat.detect_war_battle_checkpoints()
+
+    assert len(signals) == 1
+    assert signals[0]["type"] == "war_battle_day_live_update"
+    assert signals[0]["signal_log_type"] == "war_battle_day_checkpoint::s00130-w01-p010::h12"
+    assert signals[0]["checkpoint_hour"] == 12
+    assert signals[0]["checkpoint_label"] == "midday check-in"
+    assert signals[0]["checkpoint_hours_remaining"] == 12
+    assert signals[0]["needs_lead_recovery"] is True
+    assert signals[0]["lead_pressure"] == "high"
+    assert "restore first place" in signals[0]["lead_call_to_action"]
+
+
+def test_detect_war_battle_checkpoints_prefers_latest_reached_checkpoint():
+    def was_signal_sent(signal_type, date_str, conn=None):
+        del date_str, conn
+        return signal_type.endswith("::h21")
+
+    with (
+        patch("heartbeat.db.get_current_war_day_state", return_value={
+            "phase": "battle",
+            "war_day_key": "s00130-w01-p010",
+            "season_id": 130,
+            "section_index": 1,
+            "period_index": 10,
+            "week": 1,
+            "phase_display": "Battle Day 1",
+            "day_number": 1,
+            "day_total": 4,
+            "race_rank": 3,
+            "time_left_seconds": 5 * 3600,
+            "time_left_text": "5h 0m",
+        }),
+        patch("heartbeat.db.was_signal_sent", side_effect=was_signal_sent),
+    ):
+        signals = heartbeat.detect_war_battle_checkpoints()
+
+    assert len(signals) == 1
+    assert signals[0]["type"] == "war_battle_day_live_update"
+    assert signals[0]["signal_log_type"] == "war_battle_day_checkpoint::s00130-w01-p010::h18"
+    assert signals[0]["checkpoint_hour"] == 18
+    assert signals[0]["checkpoint_label"] == "late push"
+    assert signals[0]["needs_lead_recovery"] is True
+    assert signals[0]["lead_pressure"] == "high"
+
+
+def test_detect_war_deck_usage_compatibility_wrapper_emits_final_push_checkpoint():
+    with (
+        patch("heartbeat.db.get_current_war_day_state", return_value={
+            "phase": "battle",
+            "war_day_key": "s00130-w01-p010",
+            "season_id": 130,
+            "section_index": 1,
+            "period_index": 10,
+            "week": 1,
+            "phase_display": "Battle Day 1",
+            "day_number": 1,
+            "day_total": 4,
+            "race_rank": 2,
+            "time_left_seconds": 3 * 3600,
+            "time_left_text": "3h 0m",
+        }),
+        patch("heartbeat.db.was_signal_sent", return_value=False),
+    ):
+        signals = heartbeat.detect_war_deck_usage({"state": "full"})
+
+    assert len(signals) == 1
+    assert signals[0]["type"] == "war_battle_day_final_hours"
+    assert signals[0]["signal_log_type"] == "war_battle_day_checkpoint::s00130-w01-p010::h21"
+    assert signals[0]["checkpoint_hour"] == 21
+    assert signals[0]["checkpoint_label"] == "final push"
+    assert signals[0]["needs_lead_recovery"] is True
+    assert signals[0]["lead_pressure"] == "high"
 
 
 def test_detect_war_day_markers_emits_day_start_and_prior_day_recap():
@@ -1557,7 +1654,10 @@ def test_detect_war_day_markers_emits_day_start_and_prior_day_recap():
                             {"tag": "#DEF456", "name": "Vijay", "fame": 100, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 1, "decksUsedToday": 1},
                         ],
                     },
-                    "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 800, "repairPoints": 0, "periodPoints": 800, "clanScore": 151}],
+                        "clans": [
+                            {"tag": "#OTHER1", "name": "Other Clan", "fame": 950, "repairPoints": 0, "periodPoints": 950, "clanScore": 160},
+                            {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 800, "repairPoints": 0, "periodPoints": 800, "clanScore": 151},
+                        ],
                 },
                 conn=conn,
             )
@@ -1581,7 +1681,10 @@ def test_detect_war_day_markers_emits_day_start_and_prior_day_recap():
                             {"tag": "#DEF456", "name": "Vijay", "fame": 100, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 1, "decksUsedToday": 0},
                         ],
                     },
-                    "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 1200, "repairPoints": 0, "periodPoints": 400, "clanScore": 152}],
+                        "clans": [
+                            {"tag": "#OTHER1", "name": "Other Clan", "fame": 1400, "repairPoints": 0, "periodPoints": 500, "clanScore": 165},
+                            {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 1200, "repairPoints": 0, "periodPoints": 400, "clanScore": 152},
+                        ],
                 },
                 conn=conn,
             )
@@ -1593,6 +1696,8 @@ def test_detect_war_day_markers_emits_day_start_and_prior_day_recap():
             "war_battle_day_complete",
         ]
         assert signals[0]["phase_display"] == "Battle Day 2"
+        assert signals[0]["needs_lead_recovery"] is True
+        assert signals[0]["lead_pressure"] == "high"
         assert signals[1]["phase_display"] == "Battle Day 1"
         assert signals[1]["finished_count"] == 1
         assert signals[1]["engaged_count"] == 2
