@@ -150,18 +150,24 @@ def detect_arena_changes(conn=None):
 
 
 def detect_role_changes(conn=None):
-    """Check DB for role promotions/demotions since last snapshot."""
+    """Check DB for leadership-relevant role promotions since last snapshot."""
     changes = db.detect_role_changes(conn=conn)
-    return [
-        {
-            "type": "role_change",
-            "tag": c["tag"],
-            "name": c["name"],
-            "old_role": c["old_role"],
-            "new_role": c["new_role"],
-        }
-        for c in changes
-    ]
+    signals = []
+    for change in changes:
+        old_role = (change.get("old_role") or "").strip()
+        new_role = (change.get("new_role") or "").strip()
+        if old_role != "member" or new_role != "elder":
+            continue
+        signals.append({
+            "type": "elder_promotion",
+            "tag": change["tag"],
+            "name": change["name"],
+            "old_role": old_role,
+            "new_role": new_role,
+            "signal_log_type": change.get("signal_log_type"),
+            "message": f"{change['name']} was promoted to Elder.",
+        })
+    return signals
 
 
 def detect_war_day_transition(now=None, conn=None):

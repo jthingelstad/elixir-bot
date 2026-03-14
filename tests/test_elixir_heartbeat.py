@@ -68,6 +68,69 @@ def test_heartbeat_tick_reseeds_startup_system_signals_before_tick():
     mock_queue.assert_called_once_with()
 
 
+def test_detect_role_changes_emits_elder_promotion_signal():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        conn.execute(
+            "UPDATE member_current_state SET observed_at = ? WHERE member_id = (SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-03-01T10:00:00",),
+        )
+        conn.execute(
+            "UPDATE member_state_snapshots SET observed_at = ? WHERE member_id = (SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-03-01T10:00:00",),
+        )
+        conn.commit()
+
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "elder"}],
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_role_changes(conn=conn)
+
+        assert len(signals) == 1
+        assert signals[0]["type"] == "elder_promotion"
+        assert signals[0]["tag"] == "#ABC123"
+        assert signals[0]["old_role"] == "member"
+        assert signals[0]["new_role"] == "elder"
+        assert signals[0]["signal_log_type"].startswith("role_change:#ABC123:member->elder:")
+    finally:
+        conn.close()
+
+
+def test_detect_role_changes_ignores_demotion_from_elder():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "elder"}],
+            conn=conn,
+        )
+        conn.execute(
+            "UPDATE member_current_state SET observed_at = ? WHERE member_id = (SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-03-01T10:00:00",),
+        )
+        conn.execute(
+            "UPDATE member_state_snapshots SET observed_at = ? WHERE member_id = (SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-03-01T10:00:00",),
+        )
+        conn.commit()
+
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_role_changes(conn=conn)
+
+        assert signals == []
+    finally:
+        conn.close()
+
+
 def test_war_awareness_tick_uses_war_only_bundle():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[{"type": "war_battle_day_live_update", "season_id": 129, "day_number": 1}],
