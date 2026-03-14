@@ -11,6 +11,7 @@ from agent.core import (
 )
 from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_response
 from agent.prompts import (
+    _channel_subagent_system,
     _clanops_system,
     _event_system,
     _home_message_system,
@@ -245,6 +246,23 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memor
     )
 
 
+def generate_channel_update(channel_name, subagent_key, context, *,
+                            recent_posts=None, memory_context=None, leadership=False):
+    """Generate a proactive update for a specific channel-named subagent."""
+    user_msg = context or ""
+    user_msg += _format_recent_posts(recent_posts, channel_label=channel_name)
+    user_msg += _format_memory_context(memory_context)
+    workflow = "channel_update_leadership" if leadership else "channel_update"
+    return _chat_with_tools(
+        _channel_subagent_system(channel_name, leadership=leadership),
+        user_msg,
+        workflow=workflow,
+        allowed_tools=TOOLSETS_BY_WORKFLOW[workflow],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW[workflow],
+        strict_json=True,
+    )
+
+
 def respond_in_reception(question, author_name, clan_data, memory_context=None):
     """Onboarding Q&A in #reception. No tools needed. Returns dict or None."""
     members = clan_data.get("memberList", clan_data.get("members", []))
@@ -269,30 +287,28 @@ def respond_in_reception(question, author_name, clan_data, memory_context=None):
 
 
 def respond_in_channel(question, author_name, channel_name, workflow, clan_data, war_data,
-                       conversation_history=None, memory_context=None, proactive=False):
+                       conversation_history=None, memory_context=None):
     """Channel Q&A for interactive/clanops workflows."""
     if workflow not in {"interactive", "clanops"}:
         raise ValueError(f"unsupported channel workflow: {workflow}")
     context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
     trend_context = _clan_trend_prompt_context()
-    speaker = "Observed message from" if proactive else "Message from"
-    user_msg = f"{speaker} '{author_name}' in {channel_name}: {question}\n\n{context}"
+    user_msg = f"Message from '{author_name}' in {channel_name}: {question}\n\n{context}"
     if trend_context:
         user_msg += f"\n\n{trend_context}"
     user_msg += _format_memory_context(memory_context)
-    workflow_key = f"{workflow}_proactive" if proactive else workflow
     system_prompt = (
-        _interactive_system(channel_name, proactive=proactive)
+        _interactive_system(channel_name)
         if workflow == "interactive"
-        else _clanops_system(channel_name, proactive=proactive)
+        else _clanops_system(channel_name)
     )
     return _chat_with_tools(
         system_prompt,
         user_msg,
         conversation_history=conversation_history,
-        workflow=workflow_key,
-        allowed_tools=TOOLSETS_BY_WORKFLOW[workflow_key],
-        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW[workflow_key],
+        workflow=workflow,
+        allowed_tools=TOOLSETS_BY_WORKFLOW[workflow],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW[workflow],
         strict_json=True,
         return_errors=True,
     )
@@ -480,6 +496,7 @@ def generate_weekly_digest(summary_context, previous_message=""):
 
 __all__ = [
     "observe_and_post",
+    "generate_channel_update",
     "respond_in_reception",
     "respond_in_channel",
     "generate_message",

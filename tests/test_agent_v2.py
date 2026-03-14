@@ -1,4 +1,4 @@
-"""Focused tests for V2 agent tools."""
+"""Focused tests for agent query tools."""
 
 import json
 import os
@@ -298,7 +298,6 @@ def test_respond_in_channel_uses_interactive_read_only_workflow():
             war_data={},
             conversation_history=[],
             memory_context={},
-            proactive=False,
         )
         assert result["event_type"] == "channel_response"
         assert mock_chat.call_args.kwargs["workflow"] == "interactive"
@@ -306,7 +305,7 @@ def test_respond_in_channel_uses_interactive_read_only_workflow():
         assert "=== CLAN TREND SUMMARY ===" in mock_chat.call_args.args[1]
 
 
-def test_respond_in_channel_uses_clanops_proactive_workflow():
+def test_respond_in_channel_uses_clanops_workflow():
     with patch("elixir_agent._chat_with_tools", return_value=None) as mock_chat:
         result = elixir_agent.respond_in_channel(
             question="We should review promotions this week.",
@@ -317,11 +316,10 @@ def test_respond_in_channel_uses_clanops_proactive_workflow():
             war_data={},
             conversation_history=[],
             memory_context={},
-            proactive=True,
         )
         assert result is None
-        assert mock_chat.call_args.kwargs["workflow"] == "clanops_proactive"
-        assert mock_chat.call_args.kwargs["allowed_tools"] == elixir_agent.TOOLSETS_BY_WORKFLOW["clanops_proactive"]
+        assert mock_chat.call_args.kwargs["workflow"] == "clanops"
+        assert mock_chat.call_args.kwargs["allowed_tools"] == elixir_agent.TOOLSETS_BY_WORKFLOW["clanops"]
 
 
 def test_create_chat_completion_records_openai_telemetry():

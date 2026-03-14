@@ -135,6 +135,123 @@ def was_announcement_sent(date_str, announcement_type, target_tag, conn=None):
             conn.close()
 
 
+def upsert_signal_outcome(
+    source_signal_key,
+    source_signal_type,
+    target_channel_key,
+    target_channel_id,
+    intent,
+    *,
+    required=True,
+    delivery_status="planned",
+    payload=None,
+    error_detail=None,
+    mark_attempt=False,
+    delivered=False,
+    conn=None,
+):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        now = _utcnow()
+        last_attempt_at = now if mark_attempt else None
+        delivered_at = now if delivered else None
+        conn.execute(
+            """
+            INSERT INTO signal_outcomes (
+                source_signal_key, source_signal_type, target_channel_key, target_channel_id,
+                intent, required, delivery_status, payload_json, error_detail,
+                created_at, updated_at, last_attempt_at, delivered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_signal_key, target_channel_key, intent) DO UPDATE SET
+                source_signal_type = excluded.source_signal_type,
+                target_channel_id = excluded.target_channel_id,
+                required = excluded.required,
+                delivery_status = excluded.delivery_status,
+                payload_json = excluded.payload_json,
+                error_detail = excluded.error_detail,
+                updated_at = excluded.updated_at,
+                last_attempt_at = COALESCE(excluded.last_attempt_at, signal_outcomes.last_attempt_at),
+                delivered_at = COALESCE(excluded.delivered_at, signal_outcomes.delivered_at)
+            """,
+            (
+                source_signal_key,
+                source_signal_type,
+                target_channel_key,
+                str(target_channel_id),
+                intent,
+                1 if required else 0,
+                delivery_status,
+                _json_or_none(payload),
+                error_detail,
+                now,
+                now,
+                last_attempt_at,
+                delivered_at,
+            ),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def get_signal_outcome(source_signal_key, target_channel_key, intent, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT * FROM signal_outcomes
+            WHERE source_signal_key = ? AND target_channel_key = ? AND intent = ?
+            """,
+            (source_signal_key, target_channel_key, intent),
+        ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["payload_json"] = json.loads(item["payload_json"] or "{}")
+        item["required"] = bool(item.get("required"))
+        return item
+    finally:
+        if close:
+            conn.close()
+
+
+def list_signal_outcomes(source_signal_key=None, *, delivery_status=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        clauses = []
+        args = []
+        if source_signal_key:
+            clauses.append("source_signal_key = ?")
+            args.append(source_signal_key)
+        if delivery_status:
+            clauses.append("delivery_status = ?")
+            args.append(delivery_status)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = conn.execute(
+            f"SELECT * FROM signal_outcomes {where} ORDER BY outcome_id ASC",
+            args,
+        ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["payload_json"] = json.loads(item["payload_json"] or "{}")
+            item["required"] = bool(item.get("required"))
+            items.append(item)
+        return items
+    finally:
+        if close:
+            conn.close()
+
+
+def was_signal_outcome_delivered(source_signal_key, target_channel_key, intent, conn=None):
+    outcome = get_signal_outcome(source_signal_key, target_channel_key, intent, conn=conn)
+    return bool(outcome and outcome.get("delivery_status") == "delivered")
+
+
 # -- Messaging --------------------------------------------------------------
 
 def save_message(scope, author_type, content, summary=None, channel_id=None, channel_name=None,

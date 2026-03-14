@@ -17,6 +17,53 @@ def _format_member_reference(*args, **kwargs):
 
     return format_member_reference(*args, **kwargs)
 
+
+def _war_trend_anchor(conn):
+    latest_state_row = conn.execute(
+        "SELECT MAX(observed_at) AS observed_at FROM war_current_state"
+    ).fetchone()
+    latest_race_row = conn.execute(
+        "SELECT MAX(created_date) AS created_date FROM war_races"
+    ).fetchone()
+
+    anchors = []
+    observed_at = latest_state_row["observed_at"] if latest_state_row else None
+    created_date = latest_race_row["created_date"] if latest_race_row else None
+
+    if observed_at:
+        try:
+            anchors.append(datetime.fromisoformat(observed_at))
+        except ValueError:
+            pass
+    if created_date:
+        parsed = _parse_cr_time(created_date)
+        if parsed:
+            anchors.append(parsed)
+
+    return max(anchors) if anchors else datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _member_activity_anchor(conn):
+    latest_seen_row = conn.execute(
+        "SELECT MAX(last_seen_api) AS last_seen_api FROM member_current_state"
+    ).fetchone()
+    last_seen_api = latest_seen_row["last_seen_api"] if latest_seen_row else None
+    parsed_last_seen = _parse_cr_time(last_seen_api)
+    return parsed_last_seen or datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _member_snapshot_anchor(conn):
+    latest_snapshot_row = conn.execute(
+        "SELECT MAX(observed_at) AS observed_at FROM member_state_snapshots"
+    ).fetchone()
+    observed_at = latest_snapshot_row["observed_at"] if latest_snapshot_row else None
+    if observed_at:
+        try:
+            return datetime.fromisoformat(observed_at)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 def get_members_without_war_participation(season_id=None, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -133,7 +180,7 @@ def get_members_at_risk(inactivity_days=7, min_donations_week=20, require_war_pa
     try:
         if season_id is None:
             season_id = get_current_season_id(conn=conn)
-        today = datetime.now(timezone.utc).date()
+        today = _member_activity_anchor(conn).date()
         rows = conn.execute(
             "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.role, cs.exp_level, cs.trophies, "
             "cs.clan_rank, cs.donations_week, cs.last_seen_api "
@@ -374,7 +421,7 @@ def get_recent_role_changes(days=30, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+        cutoff = (_member_snapshot_anchor(conn) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
         rows = conn.execute(
             "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
             "curr.role AS new_role, prev.role AS old_role, curr.observed_at AS changed_at "
@@ -508,7 +555,8 @@ def get_war_score_trend(days=30, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+        anchor = _war_trend_anchor(conn)
+        cutoff = (anchor - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
         first = conn.execute(
             "SELECT observed_at, clan_score, fame, war_state FROM war_current_state "
             "WHERE observed_at >= ? AND clan_score IS NOT NULL ORDER BY observed_at ASC LIMIT 1",
@@ -519,7 +567,7 @@ def get_war_score_trend(days=30, conn=None):
             "WHERE observed_at >= ? AND clan_score IS NOT NULL ORDER BY observed_at DESC LIMIT 1",
             (cutoff,),
         ).fetchone()
-        race_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
+        race_cutoff = (anchor - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
         race_stats = conn.execute(
             "SELECT COUNT(*) AS races, SUM(COALESCE(trophy_change, 0)) AS trophy_change_total, "
             "AVG(COALESCE(our_rank, 0)) AS avg_rank, AVG(COALESCE(our_fame, 0)) AS avg_fame "
@@ -648,7 +696,7 @@ def get_promotion_candidates(min_donations_week=50, min_tenure_days=14, active_w
         ).fetchall()
         recommended = []
         borderline = []
-        today = datetime.now(timezone.utc).date()
+        today = _member_activity_anchor(conn).date()
 
         for row in rows:
             joined_date = _current_joined_at(conn, row["member_id"])

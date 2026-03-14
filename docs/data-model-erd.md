@@ -1,6 +1,6 @@
-# Data Model V2 ERD
+# Data Model ERD
 
-Reference ERD for Elixir's live V2 SQLite schema in [db/__init__.py](/Users/jamie/Projects/elixir-bot/db/__init__.py).
+Reference ERD for Elixir's live SQLite schema in [db/__init__.py](/Users/jamie/Projects/elixir-bot/db/__init__.py).
 
 Notes:
 - This reflects the current implemented schema, not the earlier design sketch.

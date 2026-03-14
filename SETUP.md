@@ -1,11 +1,20 @@
 # Elixir Bot — Setup & Operations
 
-Operations guide for agents running the bot in production.
+Operations guide for running Elixir locally or in production.
+
+This document focuses on:
+- install and configuration
+- `launchd` process management
+- deploy/update flow
+- logs and health checks
+- safe cleanup and stateful files
+
+For architecture details, use [AGENTS.md](AGENTS.md). For a high-level product overview, use [README.md](README.md).
 
 ## Install
 
 ```bash
-cd elixir-bot
+cd ~/Projects/elixir-bot
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -17,13 +26,13 @@ Verify the install:
 venv/bin/python -m pytest tests/ -v
 ```
 
-All 121 tests use in-memory SQLite and mocked services — no API keys or network needed. If tests pass, the install is good.
+The test suite uses in-memory SQLite and mocked external services, so you do not need API keys to validate the install.
 
 ## Configure
 
 Create a `.env` file in the project root.
 
-**Required** (secrets):
+Required secrets:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token
@@ -31,178 +40,324 @@ OPENAI_API_KEY=your_openai_api_key
 CR_API_KEY=your_clash_royale_api_key
 ```
 
-**Optional** (defaults shown):
+Optional site publishing settings:
 
 ```env
-POAP_KINGS_SITE_ENABLED=1                           # Enable the POAP KINGS site integration
-POAP_KINGS_SITE_REPO=jthingelstad/poapkings.com    # GitHub repo slug for the site
-POAP_KINGS_SITE_BRANCH=main                        # Branch to update
-POAP_KINGS_SITE_TOKEN=github_pat_xxx               # GitHub token with repo contents write access
-HEARTBEAT_START_HOUR=7                              # Start hour (Chicago time)
-HEARTBEAT_END_HOUR=22                               # End hour (Chicago time)
-SITE_CONTENT_HOUR=20                                # Evening content cycle hour (Chicago time)
-ELIXIR_DB_PATH=./elixir.db                          # SQLite database path
+POAP_KINGS_SITE_ENABLED=1
+POAP_KINGS_SITE_REPO=jthingelstad/poapkings.com
+POAP_KINGS_SITE_BRANCH=main
+POAP_KINGS_SITE_TOKEN=github_pat_xxx
 ```
 
-Non-secret config (Discord channel IDs, guild ID, clan tag) lives in prompt files checked into the repo:
+Optional runtime tuning:
 
-- `prompts/DISCORD.md` — Channel behaviors, per-channel routing, singleton channel roles, and Discord IDs
-- `prompts/CLAN.md` — Clan tag, rules, thresholds
+```env
+ELIXIR_DB_PATH=./elixir.db
+HEARTBEAT_INTERVAL_MINUTES=47
+HEARTBEAT_JITTER_SECONDS=300
+WAR_AWARENESS_INTERVAL_MINUTES=15
+PLAYER_INTEL_REFRESH_MINUTES=30
+SITE_CONTENT_HOUR=18
+CLANOPS_WEEKLY_REVIEW_DAY=fri
+CLANOPS_WEEKLY_REVIEW_HOUR=19
+WEEKLY_RECAP_DAY=mon
+WEEKLY_RECAP_HOUR=9
+PROMOTION_CONTENT_DAY=fri
+PROMOTION_CONTENT_HOUR=9
+ASK_ELIXIR_DAILY_INSIGHT_HOUR=13
+ASK_ELIXIR_DAILY_INSIGHT_MINUTE=0
+ASK_ELIXIR_DAILY_INSIGHT_JITTER_SECONDS=3600
+```
 
-## Process Management (launchd)
+Non-secret config lives in prompt files checked into the repo:
+- [prompts/DISCORD.md](prompts/DISCORD.md)
+  Discord IDs, subagents, workflows, reply policy, and memory scope.
+- [prompts/CLAN.md](prompts/CLAN.md)
+  Clan tag, rules, thresholds, and clan-specific identity.
 
-The bot runs as a **launchd** service. The plist at `~/Library/LaunchAgents/com.poapkings.elixir.plist` runs the venv Python binary directly — no shell wrapper scripts involved. launchd is the single owner of the process lifecycle: it starts, stops, and auto-restarts the bot.
+## Local Run
 
-**Do not** use `pkill`, `nohup`, or manual `python elixir.py` to manage the bot. Always go through `launchctl`.
-
-### Starting and stopping
+Start Elixir locally:
 
 ```bash
-# Stop the bot (also prevents launchd from restarting it)
-launchctl unload ~/Library/LaunchAgents/com.poapkings.elixir.plist
+source venv/bin/activate
+venv/bin/python elixir.py
+```
 
-# Start the bot (launchd will auto-restart on crash)
+On startup, Elixir should:
+- connect to Discord
+- register scheduled activities from the activity registry
+- post a startup check-in to the leadership workflow with the running build hash
+- seed startup system signals if needed
+
+## Process Management (`launchd`)
+
+Production uses `launchd`. The plist at `~/Library/LaunchAgents/com.poapkings.elixir.plist` should run the venv Python binary directly.
+
+`launchd` is the process owner. Do not manage production with `nohup`, `pkill`, or a background shell process.
+
+### Start
+
+```bash
 launchctl load ~/Library/LaunchAgents/com.poapkings.elixir.plist
 ```
 
-### Verify it's running
+### Stop
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.poapkings.elixir.plist
+```
+
+### Verify it is running
 
 ```bash
 launchctl list | grep com.poapkings.elixir
 ```
 
-The second column is the exit status — `0` or `-` means healthy, a negative number (e.g. `-15`) means the last run was killed/crashed.
+Typical interpretation:
+- `-` or `0` in the exit-status column usually means healthy
+- a negative value like `-15` means the last run was terminated
 
-## Deployment (Updating)
+### Preferred helper
 
-Use the upgrade script, which stops the service, pulls, updates deps, and restarts:
+There is also a local helper script:
+
+```bash
+bash scripts/admin.sh status
+bash scripts/admin.sh start
+bash scripts/admin.sh stop
+bash scripts/admin.sh restart
+```
+
+Use whichever path your deployment prefers, but `launchd` remains the underlying source of truth.
+
+## Deployment / Updating
+
+If you have the upgrade helper available, use it:
 
 ```bash
 bash scripts/upgrade.sh
 ```
 
-Or do it manually:
+Manual deploy flow:
 
 ```bash
-# 1. Stop
 launchctl unload ~/Library/LaunchAgents/com.poapkings.elixir.plist
-
-# 2. Update
 cd ~/Projects/elixir-bot
 git pull
-
-# 3. Reinstall dependencies (safe to always run; fast if nothing changed)
 source venv/bin/activate
 pip install -r requirements.txt
-
-# 4. Start
 launchctl load ~/Library/LaunchAgents/com.poapkings.elixir.plist
-
-# 5. Verify
 launchctl list | grep com.poapkings.elixir
 ```
 
-Database migrations run automatically on startup — no manual schema changes needed.
+Database migrations run automatically at startup.
+
+## Scheduled Activities
+
+The canonical schedule source is [runtime/activities.py](runtime/activities.py).
+
+Current recurring activity set:
+- `clan-awareness`
+  Every 47 minutes with jitter, 24/7.
+- `war-awareness`
+  Every 15 minutes.
+- `player-progression`
+  Every 30 minutes by default.
+- `daily-clan-insight`
+  Daily with 60 minutes of jitter.
+- `leadership-review`
+  Weekly.
+- `weekly-recap`
+  Weekly.
+- `site-content`
+  Daily.
+- `promotion-content`
+  Weekly.
+
+Use the live admin surface when you want the actual schedule rendered from the registry instead of trusting this file:
+
+```bash
+venv/bin/python scripts/elixir_do.py schedule
+```
+
+Or in Discord:
+- `/elixir schedule`
+- `@Elixir do schedule`
+
+## Health Checks
+
+Useful live checks:
+
+```bash
+venv/bin/python scripts/elixir_do.py status
+venv/bin/python scripts/elixir_do.py schedule
+venv/bin/python scripts/elixir_do.py db-status
+venv/bin/python scripts/elixir_do.py war-status
+venv/bin/python scripts/elixir_do.py clan-status
+```
+
+Useful Discord checks:
+- `/elixir status`
+- `/elixir schedule`
+- `/elixir db-status`
+- `/elixir db-status view:clan`
+- `/elixir db-status view:war`
+- `/elixir db-status view:memory`
+
+Manual non-posting previews are available for many admin jobs:
+
+```bash
+venv/bin/python scripts/elixir_do.py site-content --preview
+venv/bin/python scripts/elixir_do.py weekly-recap --preview
+venv/bin/python scripts/elixir_do.py promotion-content --preview
+```
+
+Preview mode suppresses Discord sends and GitHub site pushes, but still runs the job logic.
 
 ## Logs
 
-The bot logs to **stdout/stderr** only. launchd captures this — check the plist for `StandardOutPath` / `StandardErrorPath` to find the log file location.
+Elixir logs to stdout/stderr. In production, `launchd` captures those logs according to the plist's `StandardOutPath` and `StandardErrorPath`.
 
-### What normal looks like
+### What healthy startup looks like
 
-```
-Elixir online as Elixir#1234
-Scheduler started — heartbeat every 47 minutes with up to 300s jitter ...
-Heartbeat: 3 signals detected, consulting LLM
-Posted observation: ...
-```
+Typical healthy startup lines include:
 
-### What errors look like
-
-```
-Heartbeat error: ...
-Heartbeat: failed to fetch clan data: ...
-leader-lounge error: ...
-prompt_failure id=42 workflow=clanops type=agent_none stage=respond_in_channel ...
+```text
+Elixir online as ...
+Scheduler started — clan-awareness — Every 47 minutes ...
 ```
 
-Prompt failures are intentionally loud in the log now. Each `prompt_failure` line corresponds to a persisted row in SQLite with the prompt text, failure metadata, result preview, and last OpenAI error/model snapshot.
+You should also see:
+- a startup message in the leadership workflow
+- activity registration from the scheduler summary
 
-### Checking heartbeat health
+### What to look for in logs
+
+General errors:
 
 ```bash
-# Did the heartbeat fire recently?
-grep "Heartbeat:" /path/to/log | tail -5
-
-# Was anything posted?
-grep "Posted observation:" /path/to/log | tail -5
-
-# Any errors?
-grep "ERROR" /path/to/log | tail -10
+grep "ERROR" /path/to/elixir.log | tail -20
 ```
 
-### Manual heartbeat test
-
-This runs one heartbeat cycle against the live API (requires `.env` with valid keys):
+Prompt failures:
 
 ```bash
-cd ~/Projects/elixir-bot
-source venv/bin/activate
-python -c "import heartbeat; result = heartbeat.tick(); print(f'{len(result.signals)} signals')"
+grep "prompt_failure" /path/to/elixir.log | tail -20
 ```
 
-This is safe — it reads from the API and writes to the local DB, but does **not** post to Discord.
-
-## Reviewing Prompt Failures
-
-Use this when Elixir says it hit an error, falls back with a weak response, or silently fails to produce a clean answer.
+POAP KINGS website publishes:
 
 ```bash
-cd ~/Projects/elixir-bot
-source venv/bin/activate
+grep "POAP KINGS" /path/to/elixir.log | tail -20
+```
+
+If GitHub-backed publishes are working, Elixir should also post operational visibility into `#poapkings-com`.
+
+### Prompt failure review
+
+When Discord prompt generation fails or falls back:
+
+```bash
 venv/bin/python scripts/review_prompt_failures.py --limit 20
 venv/bin/python scripts/review_prompt_failures.py --workflow clanops --json
 ```
 
-- default output is human-readable triage
-- `--workflow` narrows to `clanops`, `interactive`, or `reception`
-- `--json` is the format to paste into Codex or Claude for review
+The backing data lives in the `prompt_failures` table in `elixir.db`.
 
-The backing data lives in the `prompt_failures` table inside `elixir.db`.
+## Manual Runtime Checks
+
+Safe local heartbeat inspection:
+
+```bash
+source venv/bin/activate
+venv/bin/python -c "import heartbeat; result = heartbeat.tick(); print(f'{len(result.signals)} signals')"
+```
+
+This reads from the Clash Royale API and writes to the local DB, but does not post to Discord.
+
+If you want to run a recurring activity directly through the supported admin surface, use:
+
+```bash
+venv/bin/python scripts/elixir_do.py clan-awareness --preview
+venv/bin/python scripts/elixir_do.py war-awareness --preview
+venv/bin/python scripts/elixir_do.py player-progression --preview
+```
+
+## Member Metadata Operations
+
+Use the admin surface instead of direct database edits:
+
+```bash
+venv/bin/python scripts/elixir_do.py set-join-date "Ditika" 2026-03-07
+venv/bin/python scripts/elixir_do.py clear-join-date "Ditika"
+venv/bin/python scripts/elixir_do.py set-birthday "King Levy" 2 14
+venv/bin/python scripts/elixir_do.py set-profile-url "King Thing" https://example.com
+venv/bin/python scripts/elixir_do.py set-poap-address "King Levy" 0xabc123...
+venv/bin/python scripts/elixir_do.py set-note "King Thing" "Founder and systems builder"
+```
+
+These commands are also exposed in Discord leadership/admin flows.
+
+## Stateful Files and Data
+
+### `elixir.db`
+
+Default path: `./elixir.db`, unless overridden by `ELIXIR_DB_PATH`.
+
+It contains:
+- member identity and metadata
+- Discord links
+- conversation and channel memory
+- prompt failures
+- current clan/member state
+- player analytics and battle facts
+- war state and participation
+- raw ingest and signal logs
+
+It is safe to delete if you want a clean local reset, but you will lose history and memory.
+
+### Log files
+
+Only exist if your `launchd` plist writes stdout/stderr to a file.
+
+It is safe to rotate, truncate, or delete those logs while the service is stopped.
+
+### POAP KINGS website repo
+
+The dynamic site data is published to the configured GitHub repo under:
+- `src/_data/elixirClan.json`
+- `src/_data/elixirRoster.json`
+- `src/_data/elixirHome.json`
+- `src/_data/elixirMembers.json`
+- `src/_data/elixirPromote.json`
+
+The runtime publish path is GitHub API-based. Local sibling-repo writes are legacy/dev-only behavior.
 
 ## Cleanup
 
-Remove transient local cruft:
+Remove transient local files:
 
 ```bash
 venv/bin/python scripts/clean.py
 ```
 
-Remove caches plus local runtime files like `elixir.db` and `elixir.pid`:
+Remove caches plus local runtime state like `elixir.db` and `elixir.pid`:
 
 ```bash
 venv/bin/python scripts/clean.py --db
 ```
 
-## What's Stateful
+## Common Drift To Watch For
 
-### `elixir.db` (SQLite)
+The following are common sources of stale docs or stale assumptions:
+- activity cadence changed in `runtime/activities.py`
+- channel contract changed in `prompts/DISCORD.md`
+- reply policy changed for a channel like `#ask-elixir`
+- a new operational channel like `#poapkings-com` was added
+- startup behavior changed in `runtime/app.py`
 
-Lives at `ELIXIR_DB_PATH` (default: `./elixir.db` in the project root). Contains real clan data in the V2 schema:
-
-- Member identity, metadata, and clan membership history
-- Current member state, daily metrics, and player analytics
-- War state, war participation, and battle facts
-- Conversation memory and channel state
-- Prompt failure review records for failed/fallback LLM requests
-- Raw API payload capture and operational signal tables
-
-**Safe to delete** if you want a clean slate — the bot will recreate it on startup. But you lose all history. The file is gitignored.
-
-### `elixir.log`
-
-Only exists if launchd is configured to write stdout to a file. The bot doesn't rotate it. If it grows large, it's safe to truncate (`> elixir.log`) or delete while the bot is stopped.
-
-### POAP KINGS site repo
-
-Dynamic site content files (`src/_data/elixirClan.json`, `elixirRoster.json`, etc.) live in the configured GitHub site repo. The POAP KINGS integration publishes these files directly via the GitHub API.
+When in doubt, trust code over prose:
+- scheduler truth: [runtime/activities.py](runtime/activities.py)
+- channel truth: [prompts/DISCORD.md](prompts/DISCORD.md)
+- admin command truth: [runtime/admin.py](runtime/admin.py)

@@ -24,6 +24,9 @@ def _get_build_hash():
 
 
 BUILD_HASH = _get_build_hash()
+RELEASE_VERSION = os.getenv("ELIXIR_RELEASE_VERSION", "v3.0")
+RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Three-Lane Elixir")
+RELEASE_LABEL = f'{RELEASE_VERSION} "{RELEASE_CODENAME}"'
 
 _client = None
 
@@ -68,6 +71,7 @@ TOOL_RESULT_MAX_CHARS = 12000
 
 def _build_system_prompt(*sections):
     parts = [s for s in sections if s]
+    parts.append(f"Your release version: {RELEASE_LABEL}")
     parts.append(f"Your build version: {BUILD_HASH}")
     return "\n\n".join(parts)
 

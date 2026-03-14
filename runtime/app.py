@@ -21,6 +21,7 @@ import elixir_agent
 import heartbeat
 import prompts
 from integrations.poap_kings import site as poap_kings_site
+from runtime.activities import format_scheduler_startup_summary, register_scheduled_activities
 from runtime.admin import admin_command_requires_leader, dispatch_admin_command, parse_admin_command
 from runtime.channel_router import route_message
 from runtime.discord_commands import register_elixir_app_commands
@@ -42,14 +43,13 @@ LEADER_ROLE_ID = _dc.get("leader_role", 0)
 BOT_ROLE_ID = _dc.get("bot_role", 0)
 GUILD_ID = int(_dc.get("guild_id", 0) or 0)
 POAPKINGS_REPO = os.path.expanduser(os.getenv("POAPKINGS_REPO_PATH", "../poapkings.com"))
-CLANOPS_PROACTIVE_COOLDOWN_SECONDS = int(os.getenv("CLANOPS_PROACTIVE_COOLDOWN_SECONDS", "900"))
 CHANNEL_CONVERSATION_LIMIT = 20
 
-# Active hours for the heartbeat (Chicago time). Outside this window, heartbeat is skipped.
-HEARTBEAT_START_HOUR = int(os.getenv("HEARTBEAT_START_HOUR", "7"))
-HEARTBEAT_END_HOUR = int(os.getenv("HEARTBEAT_END_HOUR", "22"))
 HEARTBEAT_INTERVAL_MINUTES = int(os.getenv("HEARTBEAT_INTERVAL_MINUTES", "47"))
 HEARTBEAT_JITTER_SECONDS = int(os.getenv("HEARTBEAT_JITTER_SECONDS", "300"))
+ASK_ELIXIR_DAILY_INSIGHT_HOUR = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_HOUR", "13"))
+ASK_ELIXIR_DAILY_INSIGHT_MINUTE = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_MINUTE", "0"))
+ASK_ELIXIR_DAILY_INSIGHT_JITTER_SECONDS = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_JITTER_SECONDS", "3600"))
 PROMOTION_CONTENT_DAY = os.getenv("PROMOTION_CONTENT_DAY", "fri")
 PROMOTION_CONTENT_HOUR = int(os.getenv("PROMOTION_CONTENT_HOUR", "9"))
 
@@ -62,13 +62,6 @@ APP_GUILD = discord.Object(id=GUILD_ID) if GUILD_ID else None
 SLASH_COMMANDS_SYNCED = False
 _CR_API_ALERT_SIGNATURE = None
 _CR_API_OUTAGE_ALERT_SIGNATURE = None
-
-
-def _format_hour_label(hour: int) -> str:
-    suffix = "am" if hour < 12 else "pm"
-    display_hour = hour % 12 or 12
-    return f"{display_hour}{suffix}"
-
 
 def _member_role_grant_status() -> dict:
     status = {
@@ -152,13 +145,13 @@ def _cr_api_outage_signature() -> str | None:
 async def _maybe_alert_cr_api_failure(context: str) -> bool:
     global _CR_API_ALERT_SIGNATURE, _CR_API_OUTAGE_ALERT_SIGNATURE
 
-    channel_configs = prompts.discord_channels_by_role("clanops")
+    channel_configs = prompts.discord_channels_by_workflow("clanops")
     if not channel_configs:
-        log.warning("CR API auth failure alert skipped: no clanops channel configured")
+        log.warning("CR API auth failure alert skipped: no leadership channel configured")
         return False
     channel = bot.get_channel(channel_configs[0]["id"])
     if not channel:
-        log.warning("CR API auth failure alert skipped: clanops channel not found")
+        log.warning("CR API auth failure alert skipped: leadership channel not found")
         return False
 
     api = runtime_status.snapshot().get("api") or {}
@@ -221,6 +214,75 @@ async def _maybe_alert_cr_api_failure(context: str) -> bool:
     return sent
 
 
+async def _post_startup_message() -> bool:
+    channel_configs = prompts.discord_channels_by_workflow("clanops")
+    if not channel_configs:
+        log.warning("Startup message skipped: no leadership channel configured")
+        return False
+
+    channel = bot.get_channel(channel_configs[0]["id"])
+    if not channel:
+        log.warning("Startup message skipped: leadership channel not found")
+        return False
+
+    recent_posts = await asyncio.to_thread(
+        db.list_channel_messages,
+        channel.id,
+        5,
+        "assistant",
+    )
+    startup_context = (
+        "This is a startup check-in for the private clan leadership channel.\n"
+        "Write only the fun Clash Royale-inspired body that follows a fixed startup header.\n"
+        "Keep it to 1-2 short sentences.\n"
+        "Sound alive, sharp, and a little playful, like Elixir just entered the arena and is ready to work.\n"
+        "Do not repeat the build hash or invent version numbers.\n"
+        "Do not repeat the release label or invent alternate codenames.\n"
+        "Do not mention hidden mechanics, JSON, prompts, models, or scheduler internals.\n"
+        "This is not a public announcement. It is a leadership-facing startup signal.\n"
+        "Custom Discord emoji are welcome if they fit naturally.\n\n"
+        f"Running release: {elixir_agent.RELEASE_LABEL}\n"
+        f"Running build hash: {elixir_agent.BUILD_HASH}\n"
+        "Required facts already handled outside your text:\n"
+        "- Elixir is online\n"
+        f"- Release will be shown exactly as `{elixir_agent.RELEASE_LABEL}`\n"
+        f"- Build hash will be shown exactly as `{elixir_agent.BUILD_HASH}`"
+    )
+    try:
+        fun_line = await asyncio.to_thread(
+            elixir_agent.generate_message,
+            "clanops_startup",
+            startup_context,
+            recent_posts=recent_posts,
+        )
+    except Exception as exc:
+        log.error("Startup message generation failed: %s", exc)
+        fun_line = None
+
+    if not fun_line:
+        fun_line = ":elixir_hype: Elixir is in the arena and the decks are shuffled. Leadership view is live."
+
+    content = (
+        "**Elixir Online**\n"
+        f"Release: `{elixir_agent.RELEASE_LABEL}`\n"
+        f"Build: `{elixir_agent.BUILD_HASH}`\n"
+        f"{fun_line.strip()}"
+    )
+    await _post_to_elixir(channel, {"content": content})
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(channel),
+        "assistant",
+        content,
+        channel_id=channel.id,
+        channel_name=getattr(channel, "name", None),
+        channel_kind=str(channel.type),
+        workflow="clanops",
+        event_type="startup_announcement",
+    )
+    return True
+
+
 def _has_leader_role(member) -> bool:
     if not LEADER_ROLE_ID:
         return True
@@ -229,7 +291,7 @@ def _has_leader_role(member) -> bool:
 
 def _is_clanops_channel(channel) -> bool:
     channel_config = _get_channel_behavior(getattr(channel, "id", 0))
-    return bool(channel_config and channel_config.get("role") == "clanops")
+    return bool(channel_config and channel_config.get("workflow") == "clanops")
 
 
 def _chunk_discord_text(text: str, limit: int = 2000) -> list[str]:
@@ -435,85 +497,19 @@ async def on_ready():
     if guild:
         await sync_emoji(guild)
     if not scheduler.running:
-        # Single heartbeat job replaces both the 4x/day observations and hourly member check
-        scheduler.add_job(
-            lambda: bot.loop.call_soon_threadsafe(
-                lambda: bot.loop.create_task(_heartbeat_tick())
-            ),
-            "interval",
-            minutes=HEARTBEAT_INTERVAL_MINUTES,
-            jitter=HEARTBEAT_JITTER_SECONDS,
-            id="heartbeat",
-        )
-        # Daily site publish for poapkings.com: refresh data, generate content, commit/push.
-        scheduler.add_job(
-            lambda: bot.loop.call_soon_threadsafe(
-                lambda: bot.loop.create_task(_site_content_cycle())
-            ),
-            "cron",
-            hour=SITE_CONTENT_HOUR,
-            minute=0,
-            id="poap-kings-site-sync",
-        )
-        scheduler.add_job(
-            lambda: bot.loop.call_soon_threadsafe(
-                lambda: bot.loop.create_task(_player_intel_refresh())
-            ),
-            "interval",
-            minutes=PLAYER_INTEL_REFRESH_MINUTES,
-            id="player-intel",
-            max_instances=1,
-            coalesce=True,
-        )
-        scheduler.add_job(
-            lambda: bot.loop.call_soon_threadsafe(
-                lambda: bot.loop.create_task(_war_awareness_tick())
-            ),
-            "interval",
-            minutes=WAR_AWARENESS_INTERVAL_MINUTES,
-            id="war-awareness",
-            max_instances=1,
-            coalesce=True,
-        )
-        scheduler.add_job(
-            lambda: bot.loop.call_soon_threadsafe(
-                lambda: bot.loop.create_task(_clanops_weekly_review())
-            ),
-            "cron",
-            day_of_week=CLANOPS_WEEKLY_REVIEW_DAY,
-            hour=CLANOPS_WEEKLY_REVIEW_HOUR,
-            minute=0,
-            id="clanops-review",
-        )
-        scheduler.add_job(
-            lambda: bot.loop.call_soon_threadsafe(
-                lambda: bot.loop.create_task(_weekly_clan_recap())
-            ),
-            "cron",
-            day_of_week=WEEKLY_RECAP_DAY,
-            hour=WEEKLY_RECAP_HOUR,
-            minute=0,
-            id="weekly-recap",
-        )
-        scheduler.add_job(
-            lambda: bot.loop.call_soon_threadsafe(
-                lambda: bot.loop.create_task(_promotion_content_cycle())
-            ),
-            "cron",
-            day_of_week=PROMOTION_CONTENT_DAY,
-            hour=PROMOTION_CONTENT_HOUR,
-            minute=0,
-            id="promotion",
+        def _job_runner(job_callable):
+            return lambda: bot.loop.call_soon_threadsafe(
+                lambda: bot.loop.create_task(job_callable())
+            )
+
+        register_scheduled_activities(
+            scheduler=scheduler,
+            runtime_module=sys.modules[__name__],
+            create_task=_job_runner,
         )
         scheduler.start()
-        log.info("Scheduler started — heartbeat every %d minutes with up to %ds jitter (active %dam-%dpm Chicago), "
-                 "war-awareness every %d minutes (24/7), poap-kings-site-sync at %s, player-intel every %d minutes, clanops-review %s at %02d:00, weekly-recap %s at %02d:00, "
-                 "promotion %s at %02d:00",
-                 HEARTBEAT_INTERVAL_MINUTES, HEARTBEAT_JITTER_SECONDS, HEARTBEAT_START_HOUR, HEARTBEAT_END_HOUR,
-                 WAR_AWARENESS_INTERVAL_MINUTES, _format_hour_label(SITE_CONTENT_HOUR), PLAYER_INTEL_REFRESH_MINUTES,
-                 CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR,
-                 WEEKLY_RECAP_DAY, WEEKLY_RECAP_HOUR,
-                 PROMOTION_CONTENT_DAY, PROMOTION_CONTENT_HOUR)
+        await _post_startup_message()
+        log.info("Scheduler started — %s", format_scheduler_startup_summary(sys.modules[__name__]))
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 

@@ -22,6 +22,7 @@ from storage.contextual_memory import (
     upsert_weekly_summary_memory,
 )
 from runtime.admin import _build_memory_report
+from runtime.channel_subagents import maybe_upsert_signal_memory
 
 
 def test_memory_schema_tables_exist_and_separate_from_authoritative_facts():
@@ -278,6 +279,46 @@ def test_upsert_weekly_summary_memory_creates_and_updates_same_week_entry():
             (rows[0]["memory_id"],),
         ).fetchone()["c"]
         assert versions >= 1
+    finally:
+        conn.close()
+
+
+def test_signal_memory_keeps_public_and_leadership_outcomes_separate():
+    conn = db.get_connection(":memory:")
+    try:
+        public_memory = maybe_upsert_signal_memory(
+            source_signal_key="member-join:#ABC123:2026-03-14",
+            signal_type="member_join",
+            body="King Levy just joined POAP KINGS. Give him a warm welcome.",
+            outcome={
+                "target_channel_key": "clan-events",
+                "intent": "member_join_public",
+            },
+            signals=[{"type": "member_join", "tag": "#ABC123", "name": "King Levy"}],
+            conn=conn,
+        )
+        leadership_memory = maybe_upsert_signal_memory(
+            source_signal_key="member-join:#ABC123:2026-03-14",
+            signal_type="member_join",
+            body="New member joined with 9000 trophies and strong recent form.",
+            outcome={
+                "target_channel_key": "leader-lounge",
+                "intent": "member_join_ops",
+            },
+            signals=[{"type": "member_join", "tag": "#ABC123", "name": "King Levy"}],
+            conn=conn,
+        )
+
+        assert public_memory is not None
+        assert leadership_memory is not None
+        assert public_memory["memory_id"] != leadership_memory["memory_id"]
+        assert public_memory["scope"] == "public"
+        assert leadership_memory["scope"] == "leadership"
+        assert public_memory["body"] == "King Levy just joined POAP KINGS. Give him a warm welcome."
+        assert leadership_memory["body"] == "New member joined with 9000 trophies and strong recent form."
+        assert public_memory["metadata_json"]["source_signal_key"] == "member-join:#ABC123:2026-03-14"
+        assert leadership_memory["metadata_json"]["source_signal_key"] == "member-join:#ABC123:2026-03-14"
+        assert public_memory["event_id"] != leadership_memory["event_id"]
     finally:
         conn.close()
 

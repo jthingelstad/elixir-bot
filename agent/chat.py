@@ -90,8 +90,6 @@ def _validate_response(workflow, parsed_obj, response_schema=None):
     if parsed_obj is None:
         if workflow == "observation":
             return True, None
-        if workflow in {"interactive_proactive", "clanops_proactive"}:
-            return True, None
         if schema:
             return False, "null response is not allowed for this workflow"
         return True, None
@@ -122,10 +120,14 @@ def _validate_response(workflow, parsed_obj, response_schema=None):
         et = parsed_obj.get("event_type")
         if et not in allowed:
             return False, f"invalid event_type for observation: {et}"
+    elif workflow in {"channel_update", "channel_update_leadership"}:
+        et = parsed_obj.get("event_type")
+        if not isinstance(et, str) or not et.strip():
+            return False, f"invalid event_type for {workflow}: {et}"
     elif workflow == "reception":
         if parsed_obj.get("event_type") != "reception_response":
             return False, f"invalid event_type for reception: {parsed_obj.get('event_type')}"
-    elif workflow in {"interactive", "interactive_proactive", "clanops", "clanops_proactive"}:
+    elif workflow in {"interactive", "clanops"}:
         et = parsed_obj.get("event_type")
         if et == "channel_response":
             pass
@@ -272,7 +274,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         allowed_tools = TOOLSETS_BY_WORKFLOW.get(workflow, ALL_TOOLS)
     allowed_tool_names = _tool_names(allowed_tools)
 
-    enable_write_tools = workflow in {"clanops", "clanops_proactive"} and CLANOPS_WRITE_TOOLS_ENABLED
+    enable_write_tools = workflow == "clanops" and CLANOPS_WRITE_TOOLS_ENABLED
 
     tools_called = []
     denied_tool_count = 0
@@ -535,6 +537,18 @@ def _format_memory_context(memory_context):
         for episode in channel_episodes[:5]:
             lines.append(f"  episode: {episode.get('summary')}")
         sections.append("=== CHANNEL MEMORY ===\n" + "\n".join(lines))
+
+    durable_memories = memory_context.get("durable_memories") or []
+    if durable_memories:
+        lines = []
+        for memory in durable_memories[:5]:
+            summary = (memory.get("summary") or memory.get("body") or "").strip()
+            if not summary:
+                continue
+            scope = memory.get("scope") or "unknown"
+            lines.append(f"  [{scope}] {summary}")
+        if lines:
+            sections.append("=== DURABLE MEMORY ===\n" + "\n".join(lines))
 
     return ("\n\n" + "\n\n".join(sections)) if sections else ""
 

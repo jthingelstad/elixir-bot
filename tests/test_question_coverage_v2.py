@@ -1,4 +1,4 @@
-"""Representative question coverage tests for the V2 data model."""
+"""Representative question coverage tests for Elixir's data model."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -6,6 +6,7 @@ import db
 
 
 def _seed_core_fixture(conn):
+    fixture_today = datetime(2026, 3, 7, tzinfo=timezone.utc).date()
     db.snapshot_members(
         [
             {
@@ -49,7 +50,7 @@ def _seed_core_fixture(conn):
     )
     db.set_member_join_date("#ABC123", "King Levy", "2024-01-15", conn=conn)
     db.set_member_join_date("#DEF456", "Vijay", "2025-10-01", conn=conn)
-    recent_joined = (datetime.now(timezone.utc).date() - timedelta(days=10)).strftime("%Y-%m-%d")
+    recent_joined = (fixture_today - timedelta(days=10)).strftime("%Y-%m-%d")
     db.set_member_join_date("#GHI789", "Finn", recent_joined, conn=conn)
     db.link_discord_user_to_member("123", "#ABC123", username="jamie", display_name="King Levy", conn=conn)
     db.link_discord_user_to_member("456", "#DEF456", username="vijay", display_name="Vijay", conn=conn)
@@ -80,6 +81,10 @@ def _seed_core_fixture(conn):
             },
         },
         conn=conn,
+    )
+    conn.execute(
+        "UPDATE war_current_state SET observed_at = ?",
+        ("2026-03-07T12:00:00",),
     )
     db.store_war_log(
         {

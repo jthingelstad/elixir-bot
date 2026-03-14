@@ -392,7 +392,7 @@ def get_system_status(conn=None):
         from storage.roster import get_clan_roster_summary
         db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
         schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
-        schema_display = f"V2 baseline (migration v{schema_version})"
+        schema_display = f"baseline schema (migration v{schema_version})"
         counts = conn.execute(
             "SELECT "
             "(SELECT COUNT(*) FROM members) AS members_total, "

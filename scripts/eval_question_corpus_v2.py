@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate representative V2 leader/member questions.
+"""Evaluate representative leader/member questions.
 
 Modes:
 - fixture: seed an in-memory database with deterministic test data
@@ -225,7 +225,7 @@ def _build_cases(member_ref):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate representative V2 question coverage.")
+    parser = argparse.ArgumentParser(description="Evaluate representative question coverage.")
     parser.add_argument("--mode", choices=["fixture", "live"], default="fixture")
     parser.add_argument("--db-path", default=":memory:")
     parser.add_argument("--sample-limit", type=int, default=5)

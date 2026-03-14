@@ -8,58 +8,173 @@ import os
 import re
 
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
+_SUBAGENT_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "subagents")
 
-CHANNEL_ROLE_CONFIG = {
+CHANNEL_SUBAGENT_CONFIG = {
+    "legacy": {
+        "workflow": None,
+        "tool_policy": "none",
+        "reply_policy": "disabled",
+        "singleton": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": False,
+    },
+    "promote-the-clan": {
+        "workflow": "site_promote_content",
+        "tool_policy": "none",
+        "reply_policy": "disabled",
+        "singleton": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": False,
+    },
+    "poapkings-com": {
+        "workflow": "channel_update",
+        "tool_policy": "read_only",
+        "reply_policy": "disabled",
+        "singleton": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": False,
+    },
     "announcements": {
-        "workflow": None,
-        "mention_required": False,
-        "allow_proactive": False,
+        "workflow": "weekly_digest",
+        "tool_policy": "read_only",
+        "reply_policy": "disabled",
         "singleton": True,
-        "respond_allowed": False,
+        "memory_scope": "public",
+        "durable_memory_enabled": True,
     },
-    "promotion": {
-        "workflow": None,
-        "mention_required": False,
-        "allow_proactive": False,
+    "arena-relay": {
+        "workflow": "channel_update",
+        "tool_policy": "read_only",
+        "reply_policy": "disabled",
         "singleton": True,
-        "respond_allowed": False,
+        "memory_scope": "public",
+        "durable_memory_enabled": True,
     },
-    "weekly_digest": {
-        "workflow": None,
-        "mention_required": False,
-        "allow_proactive": False,
+    "river-race": {
+        "workflow": "channel_update",
+        "tool_policy": "read_only",
+        "reply_policy": "disabled",
         "singleton": True,
-        "respond_allowed": False,
+        "memory_scope": "public",
+        "durable_memory_enabled": True,
     },
-    "arena_relay": {
-        "workflow": None,
-        "mention_required": False,
-        "allow_proactive": False,
+    "player-progress": {
+        "workflow": "channel_update",
+        "tool_policy": "read_only",
+        "reply_policy": "disabled",
         "singleton": True,
-        "respond_allowed": False,
+        "memory_scope": "public",
+        "durable_memory_enabled": True,
     },
-    "onboarding": {
-        "workflow": "reception",
-        "mention_required": True,
-        "allow_proactive": False,
+    "clan-events": {
+        "workflow": "channel_update",
+        "tool_policy": "read_only",
+        "reply_policy": "disabled",
         "singleton": True,
-        "respond_allowed": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": True,
     },
-    "interactive": {
+    "ask-elixir": {
         "workflow": "interactive",
-        "mention_required": True,
-        "allow_proactive": False,
-        "singleton": False,
-        "respond_allowed": True,
+        "tool_policy": "read_only",
+        "reply_policy": "open_channel",
+        "singleton": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": True,
     },
-    "clanops": {
+    "reception": {
+        "workflow": "reception",
+        "tool_policy": "none",
+        "reply_policy": "mention_only",
+        "singleton": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": False,
+    },
+    "general": {
+        "workflow": "interactive",
+        "tool_policy": "read_only",
+        "reply_policy": "mention_only",
+        "singleton": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": True,
+    },
+    "war-talk": {
+        "workflow": "interactive",
+        "tool_policy": "read_only",
+        "reply_policy": "mention_only",
+        "singleton": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": True,
+    },
+    "leader-lounge": {
         "workflow": "clanops",
-        "mention_required": False,
-        "allow_proactive": True,
-        "singleton": False,
-        "respond_allowed": True,
+        "tool_policy": "read_write",
+        "reply_policy": "mention_only",
+        "singleton": True,
+        "memory_scope": "leadership",
+        "durable_memory_enabled": True,
     },
 }
+
+SUBAGENT_ALIASES = {
+    "onboarding": "reception",
+    "weekly_digest": "announcements",
+    "promotion": "promote-the-clan",
+    "arena_relay": "arena-relay",
+    "river_race": "river-race",
+    "player_progress": "player-progress",
+    "clan_events": "clan-events",
+    "clanops": "leader-lounge",
+    "ask_elixir": "ask-elixir",
+    "poapkings_com": "poapkings-com",
+}
+
+
+def _normalize_subagent_name(value: str | None) -> str:
+    key = (value or "").strip().lower()
+    return SUBAGENT_ALIASES.get(key, key)
+
+
+VALID_CHANNEL_WORKFLOWS = {
+    None,
+    "reception",
+    "interactive",
+    "clanops",
+    "channel_update",
+    "weekly_digest",
+    "site_promote_content",
+}
+VALID_TOOL_POLICIES = {"none", "read_only", "read_write"}
+VALID_MEMORY_SCOPES = {"public", "leadership"}
+VALID_REPLY_POLICIES = {"disabled", "mention_only", "open_channel"}
+
+
+def _parse_channel_field(section: str, label: str) -> str | None:
+    match = re.search(rf"^{re.escape(label)}:\s*(.+?)\s*$", section, re.MULTILINE)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
+def _parse_bool_field(section: str, label: str) -> bool | None:
+    value = _parse_channel_field(section, label)
+    if value is None:
+        return None
+    value = value.strip().lower()
+    if value in {"true", "yes", "1"}:
+        return True
+    if value in {"false", "no", "0"}:
+        return False
+    raise ValueError(f"invalid boolean for {label}: {value}")
+
+
+def _parse_optional_keyword(section: str, label: str) -> str | None:
+    value = _parse_channel_field(section, label)
+    if value is None:
+        return None
+    value = value.strip().lower()
+    return None if value in {"", "none", "null"} else value
 
 
 def validate_discord_channel_config():
@@ -70,9 +185,21 @@ def validate_discord_channel_config():
     seen_ids = {}
     seen_names = {}
     for channel in channels:
-        role = channel["role"]
-        if role not in CHANNEL_ROLE_CONFIG:
-            errors.append(f"unknown channel role '{role}' for {channel['name']}")
+        subagent = channel["subagent"]
+        if subagent not in CHANNEL_SUBAGENT_CONFIG:
+            errors.append(f"unknown channel subagent '{subagent}' for {channel['name']}")
+        workflow = channel.get("workflow")
+        if workflow not in VALID_CHANNEL_WORKFLOWS:
+            errors.append(f"invalid workflow '{workflow}' for {channel['name']}")
+        tool_policy = channel.get("tool_policy")
+        if tool_policy not in VALID_TOOL_POLICIES:
+            errors.append(f"invalid tool policy '{tool_policy}' for {channel['name']}")
+        reply_policy = channel.get("reply_policy")
+        if reply_policy not in VALID_REPLY_POLICIES:
+            errors.append(f"invalid reply policy '{reply_policy}' for {channel['name']}")
+        memory_scope = channel.get("memory_scope")
+        if memory_scope not in VALID_MEMORY_SCOPES:
+            errors.append(f"invalid memory scope '{memory_scope}' for {channel['name']}")
         if channel["id"] in seen_ids:
             errors.append(
                 f"duplicate channel id {channel['id']} for {seen_ids[channel['id']]} and {channel['name']}"
@@ -84,12 +211,12 @@ def validate_discord_channel_config():
         else:
             seen_names[channel["name"].lower()] = channel["id"]
 
-    for role, config in CHANNEL_ROLE_CONFIG.items():
+    for subagent, config in CHANNEL_SUBAGENT_CONFIG.items():
         if not config.get("singleton"):
             continue
-        matching = [channel for channel in channels if channel["role"] == role]
+        matching = [channel for channel in channels if channel["subagent"] == subagent]
         if len(matching) != 1:
-            errors.append(f"expected exactly one {role} channel, found {len(matching)}")
+            errors.append(f"expected exactly one {subagent} channel, found {len(matching)}")
 
     return errors
 
@@ -108,9 +235,20 @@ def _load(filename):
         return f.read().strip()
 
 
+def _load_subagent_prompt(filename):
+    path = os.path.join(_SUBAGENT_PROMPTS_DIR, filename)
+    with open(path) as f:
+        return f.read().strip()
+
+
 def purpose():
     """Elixir's identity, voice, personality."""
     return _load("PURPOSE.md")
+
+
+def soul():
+    """Elixir's inner orientation and agentic identity."""
+    return _load("SOUL.md")
 
 
 def game():
@@ -140,6 +278,39 @@ def channel_section(channel_name):
     return ""
 
 
+def _channel_subagent_key(channel_name: str) -> str:
+    key = (channel_name or "").strip().lower()
+    if key.startswith("#"):
+        key = key[1:]
+    return re.sub(r"[^a-z0-9-]+", "-", key).strip("-")
+
+
+def subagent_key_for_channel(channel_name: str, workflow: str | None = None) -> str:
+    """Resolve the best subagent key for a channel/workflow pair.
+
+    Configured channels use their explicit subagent key. Unknown channels fall
+    back to the generic subagent for their workflow so ad hoc interactive or
+    leadership channels do not require dedicated prompt files.
+    """
+    query = (channel_name or "").strip().lower()
+    if query:
+        for channel in discord_channel_configs():
+            if channel["name"].lower() == query:
+                return channel["subagent_key"]
+
+    workflow_key = (workflow or "").strip().lower()
+    if workflow_key.startswith("interactive"):
+        return "general"
+    if workflow_key.startswith("clanops"):
+        return "leader-lounge"
+    if workflow_key == "reception":
+        return "reception"
+    if workflow_key in {"weekly_digest", "announcements"}:
+        return "announcements"
+
+    return _channel_subagent_key(channel_name)
+
+
 def discord_channel_configs():
     """Parse DISCORD.md channel sections into structured channel config."""
     text = discord()
@@ -155,24 +326,44 @@ def discord_channel_configs():
         section = text[start:end].strip()
 
         id_match = re.search(r"^ID:\s*(\d+)\s*$", section, re.MULTILINE)
-        role_match = re.search(r"^Role:\s*([A-Za-z0-9_-]+)\s*$", section, re.MULTILINE)
-        if not id_match or not role_match:
+        subagent_match = re.search(r"^Subagent:\s*([A-Za-z0-9_-]+)\s*$", section, re.MULTILINE)
+        if not subagent_match:
+            subagent_match = re.search(r"^Role:\s*([A-Za-z0-9_-]+)\s*$", section, re.MULTILINE)
+        if not id_match or not subagent_match:
             continue
 
-        role = role_match.group(1).strip().lower()
+        subagent = _normalize_subagent_name(subagent_match.group(1))
         channel_id = int(id_match.group(1))
-        role_config = CHANNEL_ROLE_CONFIG.get(role, {})
+        subagent_config = CHANNEL_SUBAGENT_CONFIG.get(subagent, {})
+        workflow = _parse_optional_keyword(section, "Workflow")
+        if workflow is None:
+            workflow = subagent_config.get("workflow")
+        tool_policy = _parse_optional_keyword(section, "ToolPolicy")
+        if tool_policy is None:
+            tool_policy = subagent_config.get("tool_policy", "none")
+        reply_policy = _parse_optional_keyword(section, "ReplyPolicy")
+        if reply_policy is None:
+            reply_policy = subagent_config.get("reply_policy", "disabled")
+        memory_scope = _parse_optional_keyword(section, "MemoryScope")
+        if memory_scope is None:
+            memory_scope = subagent_config.get("memory_scope", "public")
+        durable_memory_enabled = _parse_bool_field(section, "DurableMemory")
+        if durable_memory_enabled is None:
+            durable_memory_enabled = subagent_config.get("durable_memory_enabled", False)
 
         channels.append(
             {
                 "name": heading,
                 "id": channel_id,
-                "role": role,
-                "workflow": role_config.get("workflow"),
-                "mention_required": role_config.get("mention_required", True),
-                "allow_proactive": role_config.get("allow_proactive", False),
-                "singleton": role_config.get("singleton", False),
-                "respond_allowed": role_config.get("respond_allowed", True),
+                "subagent": subagent,
+                "role": subagent,
+                "subagent_key": subagent,
+                "workflow": workflow,
+                "tool_policy": tool_policy,
+                "reply_policy": reply_policy,
+                "singleton": subagent_config.get("singleton", False),
+                "memory_scope": memory_scope,
+                "durable_memory_enabled": durable_memory_enabled,
                 "section": section,
             }
         )
@@ -184,38 +375,74 @@ def discord_channels_by_id():
     return {channel["id"]: channel for channel in discord_channel_configs()}
 
 
-def discord_channels_by_role(role):
-    """Return parsed Discord channel configs for a role."""
-    role = (role or "").strip().lower()
-    return [channel for channel in discord_channel_configs() if channel["role"] == role]
+def discord_channels_for_subagent(subagent):
+    """Return parsed Discord channel configs for a subagent."""
+    subagent = _normalize_subagent_name(subagent)
+    return [channel for channel in discord_channel_configs() if channel["subagent"] == subagent]
 
 
-def discord_singleton_channel(role):
-    """Return the unique configured channel for a singleton role."""
-    role = (role or "").strip().lower()
-    role_config = CHANNEL_ROLE_CONFIG.get(role, {})
-    if not role_config.get("singleton"):
-        raise ValueError(f"role is not singleton: {role}")
-    channels = discord_channels_by_role(role)
+def discord_channels_by_workflow(workflow):
+    """Return parsed Discord channel configs for a workflow family."""
+    workflow = (workflow or "").strip().lower()
+    return [channel for channel in discord_channel_configs() if (channel.get("workflow") or "").lower() == workflow]
+
+
+def discord_channels_by_subagent():
+    """Return parsed Discord channel configs keyed by subagent key."""
+    return {channel["subagent_key"]: channel for channel in discord_channel_configs()}
+
+
+def discord_singleton_subagent(subagent):
+    """Return the unique configured channel for a singleton subagent."""
+    subagent = _normalize_subagent_name(subagent)
+    subagent_config = CHANNEL_SUBAGENT_CONFIG.get(subagent, {})
+    if not subagent_config.get("singleton"):
+        raise ValueError(f"subagent is not singleton: {subagent}")
+    channels = discord_channels_for_subagent(subagent)
     if len(channels) != 1:
-        raise ValueError(f"expected exactly one {role} channel, found {len(channels)}")
+        raise ValueError(f"expected exactly one {subagent} channel, found {len(channels)}")
     return channels[0]
 
 
+def discord_channels_by_role(role):
+    """Backward-compatible alias for discord_channels_for_subagent()."""
+    return discord_channels_for_subagent(role)
+
+
+def discord_singleton_channel(role):
+    """Backward-compatible alias for discord_singleton_subagent()."""
+    return discord_singleton_subagent(role)
+
+
 def resolve_channel_reference(value):
-    """Resolve a channel by exact heading name or singleton role."""
+    """Resolve a channel by exact heading name or singleton subagent."""
     query = (value or "").strip().lower()
     if not query:
         return None
     for channel in discord_channel_configs():
         if channel["name"].lower() == query:
             return channel
-    role_config = CHANNEL_ROLE_CONFIG.get(query)
-    if role_config and role_config.get("singleton"):
-        channels = discord_channels_by_role(query)
+    query = _normalize_subagent_name(query)
+    subagent_config = CHANNEL_SUBAGENT_CONFIG.get(query)
+    if subagent_config and subagent_config.get("singleton"):
+        channels = discord_channels_for_subagent(query)
         if len(channels) == 1:
             return channels[0]
     return None
+
+
+def subagent_prompt(subagent_key: str) -> str:
+    """Load a subagent prompt file from prompts/subagents."""
+    key = (subagent_key or "").strip().lower()
+    if not key:
+        return ""
+    filename = f"{key}.md"
+    return _load_subagent_prompt(filename)
+
+
+def identity_block():
+    """Combined identity stack for Elixir's stable sense of self."""
+    return f"{soul()}\n\n{purpose()}"
 
 
 def knowledge_block():
