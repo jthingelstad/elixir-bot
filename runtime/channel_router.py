@@ -307,60 +307,9 @@ async def route_message(message):
         )
         return
 
-    profile_target = await asyncio.to_thread(app._extract_profile_target, raw_question) if workflow == "clanops" else None
-    if workflow == "clanops" and (app._is_clan_list_request(raw_question) or profile_target):
-        route = "clan_list_report" if app._is_clan_list_request(raw_question) else "member_profile_report"
-        app.log.info(
-            "message_route route=%s channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
-            route,
-            message.channel.id,
-            message.author.id,
-            mentioned,
-            subagent,
-            workflow,
-            raw_question,
-            message.content,
-        )
-        admin_content = await app.dispatch_admin_command(
-            "clan-list" if app._is_clan_list_request(raw_question) else "profile",
-            preview=False,
-            short=False,
-            args={} if app._is_clan_list_request(raw_question) else {"member": profile_target},
-        )
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "user",
-            raw_question,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow="clanops",
-            discord_message_id=message.id,
-        )
-        await app._reply_text(message, admin_content)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "assistant",
-            admin_content,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow="clanops",
-            event_type=route,
-        )
-        return
-
     admin_command = app.parse_admin_command(raw_question, require_prefix=True) if workflow == "clanops" and mentioned else None
     if admin_command:
-        if app.admin_command_requires_leader(admin_command["command"]) and not app._has_leader_role(message.author):
+        if admin_command.get("kind") == "command" and app.admin_command_requires_leader(admin_command) and not app._has_leader_role(message.author):
             denial = "Leader role required for this command."
             await asyncio.to_thread(
                 db.save_message,
@@ -392,7 +341,8 @@ async def route_message(message):
                 event_type="clanops_admin_denied",
             )
             return
-        route = f"clanops_admin_{admin_command['command'].replace('-', '_')}"
+        route_key = (admin_command.get("key") or admin_command.get("command") or "admin").replace(".", "_").replace("-", "_")
+        route = f"clanops_admin_{route_key}"
         if admin_command.get("preview"):
             route += "_preview"
         app.log.info(
@@ -407,10 +357,7 @@ async def route_message(message):
             message.content,
         )
         admin_content = await app.dispatch_admin_command(
-            admin_command["command"],
-            preview=admin_command.get("preview", False),
-            short=admin_command.get("short", False),
-            args=admin_command.get("args", {}),
+            admin_command,
         )
         await asyncio.to_thread(
             db.save_message,

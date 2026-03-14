@@ -803,7 +803,10 @@ def _build_db_status_report(group: str | None = None):
         bucket["bytes"] += int(table.get("approx_bytes") or 0)
         grouped_tables.setdefault(table_group, []).append(table)
 
-    lines.append("- Use `/elixir db-status` for the full rollup or `/elixir db-status view:<group>` for a focused section.")
+    lines.append(
+        "- Use `/elixir system storage` for the full rollup or "
+        "`/elixir system storage view:<all|clan|war|memory>` for a focused section."
+    )
     for table_group in ("clan", "war", "memory"):
         bucket = group_totals.get(table_group, {"tables": 0, "rows": 0, "bytes": 0})
         lines.append(
@@ -1107,9 +1110,13 @@ def _build_help_report(role: str) -> str:
                 "**Elixir Help — ClanOps**",
                 "- Use `/elixir ...` for private operator commands in this channel.",
                 "- Use `@Elixir do ...` when you want the command and result to stay public in the room.",
-                "- Member workflow: `/elixir clan-list` or `/elixir clan-list full:true` to inspect the roster, `/elixir profile show` to inspect one stored record, then `/elixir profile set-discord`, `/elixir profile set-join-date`, `/elixir profile set-birthday`, `/elixir profile set-profile-url`, `/elixir profile set-poap-address`, `/elixir profile set-note` or the matching `clear-*` commands to edit metadata.",
-                "- Public examples: `@Elixir do clan-status`, `@Elixir do profile \"weird name\"`, `@Elixir do poap-kings-sync --preview`.",
-                "- Job examples: `/elixir jobs clan-awareness`, `/elixir jobs site-content`, `/elixir jobs promotion-content`.",
+                "- System workflow: `/elixir system status`, `/elixir system storage`, and `/elixir system schedule`.",
+                "- Clan workflow: `/elixir clan status`, `/elixir clan war`, `/elixir clan members`.",
+                "- Member workflow: `/elixir member show`, `/elixir member verify-discord`, `/elixir member set`, and `/elixir member clear`.",
+                "- Signal workflow: `/elixir signal show` and `/elixir signal publish-pending`.",
+                "- Activity workflow: `/elixir activity list`, `/elixir activity show`, `/elixir activity run`.",
+                "- Integration workflow: `/elixir integration list`, `/elixir integration poap-kings status`, `/elixir integration poap-kings publish`.",
+                "- Public examples: `@Elixir do clan status`, `@Elixir do member show \"weird name\"`, `@Elixir do integration poap-kings publish data --preview`.",
                 "- I can help with roster reviews, war participation, promotions, demotions, kicks, recent form, decks, donations, and member lookups.",
                 "- I can resolve members by in-game name, tag, alias, or Discord handle.",
             ]

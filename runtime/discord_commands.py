@@ -9,16 +9,21 @@ from discord import app_commands
 
 import db
 from runtime.activities import manual_activity_choices
-from runtime.admin import admin_command_requires_leader, dispatch_admin_command, render_admin_help
+from runtime.admin import COMMAND_SPECS, admin_command_requires_leader, dispatch_admin_command, render_admin_help
 
 
 def register_elixir_app_commands(bot) -> None:
     import runtime.app as app
 
     elixir_commands = app_commands.Group(name="elixir", description="Elixir clanops commands")
-    profile_commands = app_commands.Group(name="profile", description="Member profile and metadata commands")
+    system_commands = app_commands.Group(name="system", description="Runtime health, storage, and schedule commands")
+    clan_commands = app_commands.Group(name="clan", description="Clan-wide status and roster commands")
+    member_commands = app_commands.Group(name="member", description="Single-member inspection and metadata commands")
     memory_commands = app_commands.Group(name="memory", description="Inspect Elixir memory")
-    job_commands = app_commands.Group(name="jobs", description="Operational job commands")
+    signal_commands = app_commands.Group(name="signal", description="Signal routing and system-signal commands")
+    activity_commands = app_commands.Group(name="activity", description="Recurring activity inspection and manual run commands")
+    integration_commands = app_commands.Group(name="integration", description="Integration modules and external publishing")
+    poap_kings_commands = app_commands.Group(name="poap-kings", description="POAP KINGS website integration commands")
 
     async def send_interaction_text(interaction: discord.Interaction, content: str, *, ephemeral: bool = True, use_followup: bool = False):
         chunks = app._chunk_discord_text(content)
@@ -113,75 +118,74 @@ def register_elixir_app_commands(bot) -> None:
         content = render_admin_help()
         await send_interaction_text(interaction, content, ephemeral=True)
 
-    @elixir_commands.command(name="status", description="Show Elixir runtime health and telemetry.")
-    async def slash_status(interaction: discord.Interaction):
-        await run_admin_interaction(interaction, command_name="status", event_type="status_report")
+    @system_commands.command(name="status", description=COMMAND_SPECS["system.status"].description)
+    async def slash_system_status(interaction: discord.Interaction):
+        await run_admin_interaction(interaction, command_name="system.status", event_type=COMMAND_SPECS["system.status"].event_type)
 
-    @elixir_commands.command(name="db-status", description="Show database storage status and grouped table summaries.")
-    @app_commands.describe(view="Optional focused view.")
+    @system_commands.command(name="storage", description=COMMAND_SPECS["system.storage"].description)
+    @app_commands.describe(view="Optional focused storage view.")
     @app_commands.choices(view=[
         app_commands.Choice(name="All", value="all"),
         app_commands.Choice(name="Clan", value="clan"),
         app_commands.Choice(name="War", value="war"),
         app_commands.Choice(name="Memory", value="memory"),
     ])
-    async def slash_db_status(interaction: discord.Interaction, view: str | None = None):
-        group = None if not view or view == "all" else view
+    async def slash_system_storage(interaction: discord.Interaction, view: str | None = None):
         await run_admin_interaction(
             interaction,
-            command_name="db-status",
-            args={} if group is None else {"group": group},
-            event_type="db_status_report" if group is None else f"db_status_{group}_report",
+            command_name="system.storage",
+            args={"view": view or "all"},
+            event_type=COMMAND_SPECS["system.storage"].event_type,
         )
 
-    @elixir_commands.command(name="schedule", description="Show scheduled jobs and next runs.")
-    async def slash_schedule(interaction: discord.Interaction):
-        await run_admin_interaction(interaction, command_name="schedule", event_type="schedule_report")
+    @system_commands.command(name="schedule", description=COMMAND_SPECS["system.schedule"].description)
+    async def slash_system_schedule(interaction: discord.Interaction):
+        await run_admin_interaction(interaction, command_name="system.schedule", event_type=COMMAND_SPECS["system.schedule"].event_type)
 
-    @elixir_commands.command(name="signals", description="Show signal routing and recent routed signals.")
-    async def slash_signals(interaction: discord.Interaction):
-        await run_admin_interaction(interaction, command_name="signals", event_type="signals_report")
-
-    @elixir_commands.command(name="clan-status", description="Show the operational clan status report.")
+    @clan_commands.command(name="status", description=COMMAND_SPECS["clan.status"].description)
     @app_commands.describe(short="Return the compact clan status variant.")
     async def slash_clan_status(interaction: discord.Interaction, short: bool = False):
         await run_admin_interaction(
             interaction,
-            command_name="clan-status",
+            command_name="clan.status",
             short=short,
-            event_type="clan_status_short_report" if short else "clan_status_report",
+            event_type=COMMAND_SPECS["clan.status"].event_type,
         )
 
-    @elixir_commands.command(name="war-status", description="Show the live war-awareness status report.")
+    @clan_commands.command(name="war", description=COMMAND_SPECS["clan.war"].description)
     async def slash_war_status(interaction: discord.Interaction):
         await run_admin_interaction(
             interaction,
-            command_name="war-status",
-            event_type="war_status_report",
+            command_name="clan.war",
+            event_type=COMMAND_SPECS["clan.war"].event_type,
         )
 
-    @elixir_commands.command(name="clan-list", description="List active clan members.")
-    @app_commands.describe(full="Return the expanded metadata variant.")
-    async def slash_clan_list(interaction: discord.Interaction, full: bool = False):
+    @clan_commands.command(name="members", description=COMMAND_SPECS["clan.members"].description)
+    @app_commands.describe(detail="Choose summary or full member detail.")
+    @app_commands.choices(detail=[
+        app_commands.Choice(name="Summary", value="summary"),
+        app_commands.Choice(name="Full", value="full"),
+    ])
+    async def slash_clan_members(interaction: discord.Interaction, detail: str = "summary"):
         await run_admin_interaction(
             interaction,
-            command_name="clan-list",
-            args={"full": "true" if full else "false"},
-            event_type="clan_list_full_report" if full else "clan_list_report",
+            command_name="clan.members",
+            args={"detail": detail},
+            event_type=COMMAND_SPECS["clan.members"].event_type,
         )
 
-    @profile_commands.command(name="show", description="Show the stored member profile and metadata.")
+    @member_commands.command(name="show", description=COMMAND_SPECS["member.show"].description)
     @app_commands.describe(member="Member name or tag.")
     @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_profile_show(interaction: discord.Interaction, member: str):
+    async def slash_member_show(interaction: discord.Interaction, member: str):
         await run_admin_interaction(
             interaction,
-            command_name="profile",
+            command_name="member.show",
             args={"member": member},
-            event_type="member_profile_report",
+            event_type=COMMAND_SPECS["member.show"].event_type,
         )
 
-    @memory_commands.command(name="show", description="Inspect stored conversation and contextual memory.")
+    @memory_commands.command(name="show", description=COMMAND_SPECS["memory.show"].description)
     @app_commands.describe(
         member="Optional member name or tag filter.",
         query="Optional contextual-memory search text.",
@@ -198,183 +202,176 @@ def register_elixir_app_commands(bot) -> None:
     ):
         await run_admin_interaction(
             interaction,
-            command_name="memory",
+            command_name="memory.show",
             args={
                 "member": member,
                 "query": query,
                 "limit": str(limit),
                 "include_system_internal": "true" if system_internal else "false",
             },
-            event_type="memory_report",
+            event_type=COMMAND_SPECS["memory.show"].event_type,
         )
 
-    @profile_commands.command(name="verify-discord", description="Verify a member's Discord link and Member role.")
+    @member_commands.command(name="verify-discord", description=COMMAND_SPECS["member.verify-discord"].description)
     @app_commands.describe(member="Member name or tag.")
     @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_verify_discord(interaction: discord.Interaction, member: str):
+    async def slash_member_verify_discord(interaction: discord.Interaction, member: str):
         await run_admin_interaction(
             interaction,
-            command_name="verify-discord",
+            command_name="member.verify-discord",
             args={"member": member},
-            event_type="clanops_admin_verify_discord",
+            event_type=COMMAND_SPECS["member.verify-discord"].event_type,
             write=True,
         )
 
-    @profile_commands.command(name="set-discord", description="Manually assign a Discord identity to a member.")
-    @app_commands.describe(member="Member name or tag.", discord_name="Discord username or display name.")
+    @member_commands.command(name="set", description=COMMAND_SPECS["member.set"].description)
+    @app_commands.describe(member="Member name or tag.", field="Field to set.", value="Field value.")
+    @app_commands.choices(field=[
+        app_commands.Choice(name="Discord", value="discord"),
+        app_commands.Choice(name="Join Date", value="join-date"),
+        app_commands.Choice(name="Birthday", value="birthday"),
+        app_commands.Choice(name="Profile URL", value="profile-url"),
+        app_commands.Choice(name="POAP Address", value="poap-address"),
+        app_commands.Choice(name="Note", value="note"),
+    ])
     @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_set_discord(interaction: discord.Interaction, member: str, discord_name: str):
+    async def slash_member_set(interaction: discord.Interaction, member: str, field: str, value: str):
         await run_admin_interaction(
             interaction,
-            command_name="set-discord",
-            args={"member": member, "discord_name": discord_name},
-            event_type="clanops_admin_set_discord",
+            command_name="member.set",
+            args={"member": member, "field": field, "value": value},
+            event_type=COMMAND_SPECS["member.set"].event_type,
             write=True,
         )
 
-    @profile_commands.command(name="set-join-date", description="Set a member join date.")
-    @app_commands.describe(member="Member name or tag.", date="Join date in YYYY-MM-DD format.")
+    @member_commands.command(name="clear", description=COMMAND_SPECS["member.clear"].description)
+    @app_commands.describe(member="Member name or tag.", field="Field to clear.")
+    @app_commands.choices(field=[
+        app_commands.Choice(name="Discord", value="discord"),
+        app_commands.Choice(name="Join Date", value="join-date"),
+        app_commands.Choice(name="Birthday", value="birthday"),
+        app_commands.Choice(name="Profile URL", value="profile-url"),
+        app_commands.Choice(name="POAP Address", value="poap-address"),
+        app_commands.Choice(name="Note", value="note"),
+    ])
     @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_set_join_date(interaction: discord.Interaction, member: str, date: str):
+    async def slash_member_clear(interaction: discord.Interaction, member: str, field: str):
         await run_admin_interaction(
             interaction,
-            command_name="set-join-date",
-            args={"member": member, "date": date},
-            event_type="clanops_admin_set_join_date",
+            command_name="member.clear",
+            args={"member": member, "field": field},
+            event_type=COMMAND_SPECS["member.clear"].event_type,
             write=True,
         )
 
-    @profile_commands.command(name="clear-join-date", description="Clear a member join date.")
-    @app_commands.describe(member="Member name or tag.")
-    @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_clear_join_date(interaction: discord.Interaction, member: str):
+    @signal_commands.command(name="show", description=COMMAND_SPECS["signal.show"].description)
+    @app_commands.describe(view="Choose which signal slice to inspect.", limit="Maximum recent signals to show.")
+    @app_commands.choices(view=[
+        app_commands.Choice(name="All", value="all"),
+        app_commands.Choice(name="Routes", value="routes"),
+        app_commands.Choice(name="Recent", value="recent"),
+        app_commands.Choice(name="Pending", value="pending"),
+    ])
+    async def slash_signal_show(interaction: discord.Interaction, view: str = "all", limit: app_commands.Range[int, 1, 20] = 10):
         await run_admin_interaction(
             interaction,
-            command_name="clear-join-date",
-            args={"member": member},
-            event_type="clanops_admin_clear_join_date",
-            write=True,
+            command_name="signal.show",
+            args={"view": view, "limit": str(limit)},
+            event_type=COMMAND_SPECS["signal.show"].event_type,
         )
 
-    @profile_commands.command(name="set-birthday", description="Set a member birthday.")
-    @app_commands.describe(member="Member name or tag.", month="Birthday month.", day="Birthday day.")
-    @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_set_birthday(interaction: discord.Interaction, member: str, month: int, day: int):
+    @signal_commands.command(name="publish-pending", description=COMMAND_SPECS["signal.publish-pending"].description)
+    @app_commands.describe(preview="Suppress Discord sends when supported.")
+    async def slash_signal_publish_pending(interaction: discord.Interaction, preview: bool = False):
         await run_admin_interaction(
             interaction,
-            command_name="set-birthday",
-            args={"member": member, "month": str(month), "day": str(day)},
-            event_type="clanops_admin_set_birthday",
+            command_name="signal.publish-pending",
+            preview=preview,
+            event_type=COMMAND_SPECS["signal.publish-pending"].event_type,
             write=True,
         )
 
-    @profile_commands.command(name="clear-birthday", description="Clear a member birthday.")
-    @app_commands.describe(member="Member name or tag.")
-    @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_clear_birthday(interaction: discord.Interaction, member: str):
-        await run_admin_interaction(
-            interaction,
-            command_name="clear-birthday",
-            args={"member": member},
-            event_type="clanops_admin_clear_birthday",
-            write=True,
-        )
-
-    @profile_commands.command(name="set-profile-url", description="Set a member profile URL.")
-    @app_commands.describe(member="Member name or tag.", url="Profile URL.")
-    @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_set_profile_url(interaction: discord.Interaction, member: str, url: str):
-        await run_admin_interaction(
-            interaction,
-            command_name="set-profile-url",
-            args={"member": member, "url": url},
-            event_type="clanops_admin_set_profile_url",
-            write=True,
-        )
-
-    @profile_commands.command(name="clear-profile-url", description="Clear a member profile URL.")
-    @app_commands.describe(member="Member name or tag.")
-    @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_clear_profile_url(interaction: discord.Interaction, member: str):
-        await run_admin_interaction(
-            interaction,
-            command_name="clear-profile-url",
-            args={"member": member},
-            event_type="clanops_admin_clear_profile_url",
-            write=True,
-        )
-
-    @profile_commands.command(name="set-poap-address", description="Set a member POAP address.")
-    @app_commands.describe(member="Member name or tag.", poap_address="Wallet or POAP address.")
-    @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_set_poap_address(interaction: discord.Interaction, member: str, poap_address: str):
-        await run_admin_interaction(
-            interaction,
-            command_name="set-poap-address",
-            args={"member": member, "poap_address": poap_address},
-            event_type="clanops_admin_set_poap_address",
-            write=True,
-        )
-
-    @profile_commands.command(name="clear-poap-address", description="Clear a member POAP address.")
-    @app_commands.describe(member="Member name or tag.")
-    @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_clear_poap_address(interaction: discord.Interaction, member: str):
-        await run_admin_interaction(
-            interaction,
-            command_name="clear-poap-address",
-            args={"member": member},
-            event_type="clanops_admin_clear_poap_address",
-            write=True,
-        )
-
-    @profile_commands.command(name="set-note", description="Set a member note.")
-    @app_commands.describe(member="Member name or tag.", note="Leader note text.")
-    @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_set_note(interaction: discord.Interaction, member: str, note: str):
-        await run_admin_interaction(
-            interaction,
-            command_name="set-note",
-            args={"member": member, "note": note},
-            event_type="clanops_admin_set_note",
-            write=True,
-        )
-
-    @profile_commands.command(name="clear-note", description="Clear a member note.")
-    @app_commands.describe(member="Member name or tag.")
-    @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_clear_note(interaction: discord.Interaction, member: str):
-        await run_admin_interaction(
-            interaction,
-            command_name="clear-note",
-            args={"member": member},
-            event_type="clanops_admin_clear_note",
-            write=True,
-        )
-
-    JOB_CHOICES = [
+    ACTIVITY_CHOICES = [
         app_commands.Choice(name=label, value=value)
-        for label, value in (
-            [("poap-kings-sync", "poap-kings-sync")]
-            + manual_activity_choices()
-        )
+        for label, value in manual_activity_choices()
     ]
 
-    @job_commands.command(name="run", description="Run one operational job now.")
-    @app_commands.describe(job="Job to run.", preview="Suppress Discord sends and site pushes when supported.")
-    @app_commands.choices(job=JOB_CHOICES)
-    async def slash_run_job(interaction: discord.Interaction, job: str, preview: bool = False):
+    @activity_commands.command(name="list", description=COMMAND_SPECS["activity.list"].description)
+    async def slash_activity_list(interaction: discord.Interaction):
         await run_admin_interaction(
             interaction,
-            command_name=job,
+            command_name="activity.list",
+            event_type=COMMAND_SPECS["activity.list"].event_type,
+        )
+
+    @activity_commands.command(name="show", description=COMMAND_SPECS["activity.show"].description)
+    @app_commands.describe(activity="Activity to inspect.")
+    @app_commands.choices(activity=ACTIVITY_CHOICES)
+    async def slash_activity_show(interaction: discord.Interaction, activity: str):
+        await run_admin_interaction(
+            interaction,
+            command_name="activity.show",
+            args={"activity": activity},
+            event_type=COMMAND_SPECS["activity.show"].event_type,
+        )
+
+    @activity_commands.command(name="run", description=COMMAND_SPECS["activity.run"].description)
+    @app_commands.describe(activity="Activity to run.", preview="Suppress Discord sends and site pushes when supported.")
+    @app_commands.choices(activity=ACTIVITY_CHOICES)
+    async def slash_activity_run(interaction: discord.Interaction, activity: str, preview: bool = False):
+        await run_admin_interaction(
+            interaction,
+            command_name="activity.run",
+            args={"activity": activity},
             preview=preview,
-            event_type=f"clanops_admin_{job.replace('-', '_')}_preview" if preview else f"clanops_admin_{job.replace('-', '_')}",
+            event_type=COMMAND_SPECS["activity.run"].event_type,
             write=True,
         )
 
-    elixir_commands.add_command(profile_commands)
+    @integration_commands.command(name="list", description=COMMAND_SPECS["integration.list"].description)
+    async def slash_integration_list(interaction: discord.Interaction):
+        await run_admin_interaction(
+            interaction,
+            command_name="integration.list",
+            event_type=COMMAND_SPECS["integration.list"].event_type,
+        )
+
+    @poap_kings_commands.command(name="status", description=COMMAND_SPECS["integration.poap-kings.status"].description)
+    async def slash_poap_kings_status(interaction: discord.Interaction):
+        await run_admin_interaction(
+            interaction,
+            command_name="integration.poap-kings.status",
+            event_type=COMMAND_SPECS["integration.poap-kings.status"].event_type,
+        )
+
+    @poap_kings_commands.command(name="publish", description=COMMAND_SPECS["integration.poap-kings.publish"].description)
+    @app_commands.describe(target="POAP KINGS publish target.", preview="Suppress Discord sends and site pushes when supported.")
+    @app_commands.choices(target=[
+        app_commands.Choice(name="All", value="all"),
+        app_commands.Choice(name="Data", value="data"),
+        app_commands.Choice(name="Home", value="home"),
+        app_commands.Choice(name="Members", value="members"),
+        app_commands.Choice(name="Roster Bios", value="roster-bios"),
+        app_commands.Choice(name="Promote", value="promote"),
+    ])
+    async def slash_poap_kings_publish(interaction: discord.Interaction, target: str, preview: bool = False):
+        await run_admin_interaction(
+            interaction,
+            command_name="integration.poap-kings.publish",
+            args={"target": target},
+            preview=preview,
+            event_type=COMMAND_SPECS["integration.poap-kings.publish"].event_type,
+            write=True,
+        )
+
+    integration_commands.add_command(poap_kings_commands)
+    elixir_commands.add_command(system_commands)
+    elixir_commands.add_command(clan_commands)
+    elixir_commands.add_command(member_commands)
     elixir_commands.add_command(memory_commands)
-    elixir_commands.add_command(job_commands)
+    elixir_commands.add_command(signal_commands)
+    elixir_commands.add_command(activity_commands)
+    elixir_commands.add_command(integration_commands)
 
     try:
         if app.APP_GUILD is not None:

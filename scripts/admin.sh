@@ -29,6 +29,11 @@ start_bot() {
     status
 }
 
+restart_bot() {
+    stop_bot
+    start_bot
+}
+
 upgrade_bot() {
     stop_bot
 
@@ -45,10 +50,11 @@ upgrade_bot() {
 case "${1:-}" in
     stop)     stop_bot ;;
     start)    start_bot ;;
+    restart)  restart_bot ;;
     upgrade)  upgrade_bot ;;
     status)   status ;;
     *)
-        echo "Usage: $0 {start|stop|upgrade|status}"
+        echo "Usage: $0 {start|stop|restart|upgrade|status}"
         exit 1
         ;;
 esac

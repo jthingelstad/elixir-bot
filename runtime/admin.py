@@ -3,170 +3,158 @@ from __future__ import annotations
 import asyncio
 import json
 import shlex
+from dataclasses import dataclass
 from contextlib import ExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import patch
 import re
 
-from runtime.activities import normalize_activity_key, resolve_activity
+from runtime.activities import (
+    list_registered_activities,
+    normalize_activity_key,
+    resolve_activity,
+    schedule_specs_from_registry,
+)
 from storage.contextual_memory import archive_member_note_memory, upsert_member_note_memory
 
+@dataclass(frozen=True)
+class AdminCommandSpec:
+    key: str
+    path: tuple[str, ...]
+    description: str
+    leader_only: bool = False
+    write: bool = False
+    event_type: str | None = None
 
-COMMAND_ALIASES = {
-    "site-data": "poap-kings-data-sync",
-    "site-content": "site-content",
-    "site-publish": "poap-kings-sync",
-    "home-message": "poap-kings-home-sync",
-    "members-message": "poap-kings-members-sync",
-    "roster-bios": "poap-kings-roster-bios-sync",
-    "promote-content": "poap-kings-promotion-sync",
-    "heartbeat": "clan-awareness",
-    "player-intel": "player-progression",
-    "clanops-review": "leadership-review",
-    "poap-kings-site-sync": "site-content",
-    "promotion": "promotion-content",
+
+DB_STATUS_GROUPS = {"all", "clan", "war", "memory"}
+SIGNAL_SHOW_VIEWS = {"all", "routes", "recent", "pending"}
+MEMBER_SET_FIELDS = {"discord", "join-date", "birthday", "profile-url", "poap-address", "note"}
+MEMBER_CLEAR_FIELDS = {"discord", "join-date", "birthday", "profile-url", "poap-address", "note"}
+INTEGRATION_PUBLISH_TARGETS = {"all", "data", "home", "members", "roster-bios", "promote"}
+
+COMMAND_SPECS = {
+    "help": AdminCommandSpec("help", ("help",), "Show the Elixir operator help page.", event_type="help"),
+    "system.status": AdminCommandSpec("system.status", ("system", "status"), "Show Elixir runtime health and telemetry.", event_type="status_report"),
+    "system.storage": AdminCommandSpec("system.storage", ("system", "storage"), "Show grouped database storage status.", event_type="storage_report"),
+    "system.schedule": AdminCommandSpec("system.schedule", ("system", "schedule"), "Show scheduled activities and next runs.", event_type="schedule_report"),
+    "clan.status": AdminCommandSpec("clan.status", ("clan", "status"), "Show the operational clan status report.", event_type="clan_status_report"),
+    "clan.war": AdminCommandSpec("clan.war", ("clan", "war"), "Show the live war-awareness report.", event_type="war_status_report"),
+    "clan.members": AdminCommandSpec("clan.members", ("clan", "members"), "List active clan members.", event_type="clan_members_report"),
+    "member.show": AdminCommandSpec("member.show", ("member", "show"), "Show the stored member profile and metadata for one member.", event_type="member_profile_report"),
+    "member.verify-discord": AdminCommandSpec("member.verify-discord", ("member", "verify-discord"), "Verify a member's Discord link and Member role.", leader_only=True, write=True, event_type="member_verify_discord"),
+    "member.set": AdminCommandSpec("member.set", ("member", "set"), "Set one member field.", leader_only=True, write=True, event_type="member_set"),
+    "member.clear": AdminCommandSpec("member.clear", ("member", "clear"), "Clear one member field.", leader_only=True, write=True, event_type="member_clear"),
+    "memory.show": AdminCommandSpec("memory.show", ("memory", "show"), "Inspect stored conversation and contextual memory.", leader_only=True, event_type="memory_report"),
+    "signal.show": AdminCommandSpec("signal.show", ("signal", "show"), "Show signal routing, recent routed signals, and pending system signals.", event_type="signals_report"),
+    "signal.publish-pending": AdminCommandSpec("signal.publish-pending", ("signal", "publish-pending"), "Queue missing startup signals and publish pending system announcements.", leader_only=True, write=True, event_type="signal_publish_pending"),
+    "activity.list": AdminCommandSpec("activity.list", ("activity", "list"), "List registered recurring activities.", event_type="activity_list"),
+    "activity.show": AdminCommandSpec("activity.show", ("activity", "show"), "Show one recurring activity in detail.", event_type="activity_show"),
+    "activity.run": AdminCommandSpec("activity.run", ("activity", "run"), "Run one registered activity now.", leader_only=True, write=True, event_type="activity_run"),
+    "integration.list": AdminCommandSpec("integration.list", ("integration", "list"), "List configured integration modules.", event_type="integration_list"),
+    "integration.poap-kings.status": AdminCommandSpec("integration.poap-kings.status", ("integration", "poap-kings", "status"), "Show POAP KINGS integration status.", event_type="integration_poap_kings_status"),
+    "integration.poap-kings.publish": AdminCommandSpec("integration.poap-kings.publish", ("integration", "poap-kings", "publish"), "Publish one POAP KINGS integration target.", leader_only=True, write=True, event_type="integration_poap_kings_publish"),
 }
 
-COMMAND_HELP = {
-    "help": "Show the Elixir operator help page.",
-    "status": "Show Elixir runtime health, last jobs, and current telemetry.",
-    "db-status": "Show a grouped SQLite database status view. Use `db-status clan`, `db-status war`, or `db-status memory`.",
-    "schedule": "Show the configured job cadence and next scheduler runs.",
-    "signals": "Show signal routing rules, recent routed signals, and pending system signals.",
-    "clan-status": "Fetch live clan/war data and print the operational clan status report.",
-    "war-status": "Fetch live clan/war data and print Elixir's current war-awareness report.",
-    "clan-list": "List active clan members. Default shows name, tag, and Discord name; `full` adds join/birthday/profile/POAP status.",
-    "profile": "Show the stored member profile and metadata for one member.",
-    "memory": "Inspect Elixir's stored conversation and contextual memory.",
-    "verify-discord": "Verify a member's Discord link and ensure the Member role is assigned.",
-    "set-discord": "Manually assign a Discord identity to a clan member.",
-    "set-join-date": "Set a member join date in YYYY-MM-DD format.",
-    "clear-join-date": "Clear a member join date.",
-    "set-birthday": "Set a member birthday as month and day.",
-    "clear-birthday": "Clear a member birthday.",
-    "set-profile-url": "Set a member profile URL.",
-    "clear-profile-url": "Clear a member profile URL.",
-    "set-poap-address": "Set a member POAP address.",
-    "clear-poap-address": "Clear a member POAP address.",
-    "set-note": "Set a member note.",
-    "clear-note": "Clear a member note.",
-    "clan-awareness": "Force the recurring clan-awareness activity now. This processes non-war clan signals and routed clan-event outcomes.",
-    "war-awareness": "Force the recurring war-awareness activity now. This is Elixir's single scheduled owner for River Race coordination.",
-    "player-progression": "Force the recurring player-progression activity now.",
-    "leadership-review": "Force the weekly leadership-review activity now.",
-    "system-signals": "Queue any missing startup system signals and publish pending system announcements now.",
-    "poap-kings-sync": "Publish the full POAP KINGS website bundle now. This refreshes daily site data plus the members-page weekly recap payload.",
-    "poap-kings-data-sync": "Publish only the POAP KINGS structured site data now (clan + roster).",
-    "site-content": "Force the recurring site-content activity now. This publishes the POAP KINGS daily clan, roster, and home payloads.",
-    "poap-kings-home-sync": "Regenerate and publish only the POAP KINGS website home message.",
-    "poap-kings-members-sync": "Regenerate and publish only the POAP KINGS members-page weekly recap payload.",
-    "poap-kings-roster-bios-sync": "Regenerate and publish only the POAP KINGS roster intro and member bios.",
-    "poap-kings-promotion-sync": "Regenerate and publish only the POAP KINGS website promotion payload.",
-    "promotion-content": "Force the recurring promotion-content activity now. This updates the website and #promote-the-clan together.",
-    "weekly-recap": "Force the weekly public clan recap post now.",
-}
-
-LEADER_ONLY_COMMANDS = {
+COMMAND_GROUP_ORDER = [
+    "system",
+    "clan",
+    "member",
     "memory",
-    "verify-discord",
-    "set-discord",
-    "set-join-date",
-    "clear-join-date",
-    "set-birthday",
-    "clear-birthday",
-    "set-profile-url",
-    "clear-profile-url",
-    "set-poap-address",
-    "clear-poap-address",
-    "set-note",
-    "clear-note",
-    "clan-awareness",
-    "war-awareness",
-    "player-progression",
-    "leadership-review",
-    "system-signals",
-    "poap-kings-sync",
-    "poap-kings-data-sync",
-    "site-content",
-    "poap-kings-home-sync",
-    "poap-kings-members-sync",
-    "poap-kings-roster-bios-sync",
-    "poap-kings-promotion-sync",
-    "promotion-content",
-    "weekly-recap",
-}
-
-COMMAND_ORDER = [
-    "help",
-    "status",
-    "db-status",
-    "schedule",
-    "signals",
-    "clan-status",
-    "war-status",
-    "clan-list",
-    "profile",
-    "memory",
-    "verify-discord",
-    "set-discord",
-    "set-join-date",
-    "clear-join-date",
-    "set-birthday",
-    "clear-birthday",
-    "set-profile-url",
-    "clear-profile-url",
-    "set-poap-address",
-    "clear-poap-address",
-    "set-note",
-    "clear-note",
-    "clan-awareness",
-    "war-awareness",
-    "player-progression",
-    "leadership-review",
-    "system-signals",
-    "poap-kings-sync",
-    "poap-kings-data-sync",
-    "site-content",
-    "poap-kings-home-sync",
-    "poap-kings-members-sync",
-    "poap-kings-roster-bios-sync",
-    "poap-kings-promotion-sync",
-    "promotion-content",
-    "weekly-recap",
+    "signal",
+    "activity",
+    "integration",
 ]
 
-ZERO_ARG_COMMANDS = {
-    "help",
-    "status",
-    "schedule",
-    "signals",
-    "clan-status",
-    "war-status",
-    "clan-awareness",
-    "war-awareness",
-    "player-progression",
-    "leadership-review",
-    "system-signals",
-    "poap-kings-sync",
-    "poap-kings-data-sync",
-    "site-content",
-    "poap-kings-home-sync",
-    "poap-kings-members-sync",
-    "poap-kings-roster-bios-sync",
-    "poap-kings-promotion-sync",
-    "promotion-content",
-    "weekly-recap",
+LEGACY_COMMAND_HINTS = {
+    "status": "Use `@Elixir do system status` or `/elixir system status`.",
+    "db-status": "Use `@Elixir do system storage <all|clan|war|memory>` or `/elixir system storage`.",
+    "schedule": "Use `@Elixir do system schedule` or `/elixir system schedule`.",
+    "signals": "Use `@Elixir do signal show` or `/elixir signal show`.",
+    "clan-status": "Use `@Elixir do clan status` or `/elixir clan status`.",
+    "war-status": "Use `@Elixir do clan war` or `/elixir clan war`.",
+    "clan-list": "Use `@Elixir do clan members` or `/elixir clan members`.",
+    "profile": "Use `@Elixir do member show <member>` or `/elixir member show`.",
+    "verify-discord": "Use `@Elixir do member verify-discord <member>` or `/elixir member verify-discord`.",
+    "set-discord": "Use `@Elixir do member set <member> discord <value>` or `/elixir member set`.",
+    "set-join-date": "Use `@Elixir do member set <member> join-date <YYYY-MM-DD>` or `/elixir member set`.",
+    "clear-join-date": "Use `@Elixir do member clear <member> join-date` or `/elixir member clear`.",
+    "set-birthday": "Use `@Elixir do member set <member> birthday <MM-DD>` or `/elixir member set`.",
+    "clear-birthday": "Use `@Elixir do member clear <member> birthday` or `/elixir member clear`.",
+    "set-profile-url": "Use `@Elixir do member set <member> profile-url <url>` or `/elixir member set`.",
+    "clear-profile-url": "Use `@Elixir do member clear <member> profile-url` or `/elixir member clear`.",
+    "set-poap-address": "Use `@Elixir do member set <member> poap-address <value>` or `/elixir member set`.",
+    "clear-poap-address": "Use `@Elixir do member clear <member> poap-address` or `/elixir member clear`.",
+    "set-note": "Use `@Elixir do member set <member> note <text>` or `/elixir member set`.",
+    "clear-note": "Use `@Elixir do member clear <member> note` or `/elixir member clear`.",
+    "memory": "Use `@Elixir do memory show ...` or `/elixir memory show`.",
+    "system-signals": "Use `@Elixir do signal publish-pending` or `/elixir signal publish-pending`.",
+    "jobs": "Use `@Elixir do activity run <activity>` or `/elixir activity run`.",
+    "clan-awareness": "Use `@Elixir do activity run clan-awareness` or `/elixir activity run activity:clan-awareness`.",
+    "war-awareness": "Use `@Elixir do activity run war-awareness` or `/elixir activity run activity:war-awareness`.",
+    "player-progression": "Use `@Elixir do activity run player-progression` or `/elixir activity run activity:player-progression`.",
+    "leadership-review": "Use `@Elixir do activity run leadership-review` or `/elixir activity run activity:leadership-review`.",
+    "weekly-recap": "Use `@Elixir do activity run weekly-recap` or `/elixir activity run activity:weekly-recap`.",
+    "site-content": "Use `@Elixir do activity run site-content` or `/elixir activity run activity:site-content`.",
+    "promotion-content": "Use `@Elixir do activity run promotion-content` or `/elixir activity run activity:promotion-content`.",
+    "poap-kings-sync": "Use `@Elixir do integration poap-kings publish all` or `/elixir integration poap-kings publish target:all`.",
+    "poap-kings-data-sync": "Use `@Elixir do integration poap-kings publish data` or `/elixir integration poap-kings publish target:data`.",
+    "poap-kings-home-sync": "Use `@Elixir do integration poap-kings publish home` or `/elixir integration poap-kings publish target:home`.",
+    "poap-kings-members-sync": "Use `@Elixir do integration poap-kings publish members` or `/elixir integration poap-kings publish target:members`.",
+    "poap-kings-roster-bios-sync": "Use `@Elixir do integration poap-kings publish roster-bios` or `/elixir integration poap-kings publish target:roster-bios`.",
+    "poap-kings-promotion-sync": "Use `@Elixir do integration poap-kings publish promote` or `/elixir integration poap-kings publish target:promote`.",
+    "heartbeat": "Use `@Elixir do activity run clan-awareness` or `/elixir activity run activity:clan-awareness`.",
+    "player-intel": "Use `@Elixir do activity run player-progression` or `/elixir activity run activity:player-progression`.",
+    "clanops-review": "Use `@Elixir do activity run leadership-review` or `/elixir activity run activity:leadership-review`.",
+    "site-data": "Use `@Elixir do integration poap-kings publish data` or `/elixir integration poap-kings publish target:data`.",
+    "site-publish": "Use `@Elixir do integration poap-kings publish all` or `/elixir integration poap-kings publish target:all`.",
+    "home-message": "Use `@Elixir do integration poap-kings publish home` or `/elixir integration poap-kings publish target:home`.",
+    "members-message": "Use `@Elixir do integration poap-kings publish members` or `/elixir integration poap-kings publish target:members`.",
+    "roster-bios": "Use `@Elixir do integration poap-kings publish roster-bios` or `/elixir integration poap-kings publish target:roster-bios`.",
+    "promote-content": "Use `@Elixir do integration poap-kings publish promote` or `/elixir integration poap-kings publish target:promote`.",
+    "poap-kings-site-sync": "Use `@Elixir do activity run site-content` or `/elixir activity run activity:site-content`.",
+    "promotion": "Use `@Elixir do activity run promotion-content` or `/elixir activity run activity:promotion-content`.",
 }
 
-DB_STATUS_GROUPS = {"clan", "war", "memory"}
+COMMAND_HELP = {key: spec.description for key, spec in COMMAND_SPECS.items()}
+LEADER_ONLY_COMMANDS = {key for key, spec in COMMAND_SPECS.items() if spec.leader_only}
+COMMAND_ORDER = list(COMMAND_SPECS)
 
 
-def admin_command_requires_leader(command: str) -> bool:
-    return COMMAND_ALIASES.get(command, command) in LEADER_ONLY_COMMANDS
+def _command_request(
+    key: str,
+    *,
+    args: dict | None = None,
+    preview: bool = False,
+    short: bool = False,
+    kind: str = "command",
+    hint: str | None = None,
+    legacy_input: str | None = None,
+) -> dict:
+    spec = COMMAND_SPECS.get(key)
+    path = spec.path if spec else tuple()
+    return {
+        "kind": kind,
+        "key": key,
+        "command": key,
+        "resource": path[0] if path else None,
+        "action": path[-1] if path else None,
+        "path": path,
+        "args": args or {},
+        "preview": preview,
+        "short": short,
+        "hint": hint,
+        "legacy_input": legacy_input,
+    }
+
+
+def admin_command_requires_leader(command: str | dict) -> bool:
+    key = command.get("key") if isinstance(command, dict) else str(command or "")
+    return key in LEADER_ONLY_COMMANDS
 
 
 def normalize_admin_command(command: str) -> str:
-    return COMMAND_ALIASES.get((command or "").lower(), (command or "").lower())
+    return str(command or "").strip().lower()
 
 
 def _utcnow() -> str:
@@ -177,41 +165,116 @@ def render_admin_help(
     *,
     mention_prefix: str = "@Elixir do",
     slash_prefix: str = "/elixir",
-    cli_prefix: str = "venv/bin/python scripts/elixir_do.py",
 ) -> str:
+    grouped = {group: [] for group in COMMAND_GROUP_ORDER}
+    for spec in COMMAND_SPECS.values():
+        if spec.key == "help":
+            continue
+        grouped.setdefault(spec.path[0], []).append(spec)
+
     lines = [
         "**Elixir Admin Commands**",
-        f"Use grouped slash commands under `{slash_prefix} ...` for private replies, `{mention_prefix} <command>` in `#clanops` for public room replies, or flat `{cli_prefix} <command>` commands in the terminal.",
+        f"Use grouped slash commands under `{slash_prefix} ...` for private replies and `{mention_prefix} ...` in `#clanops` for public room replies.",
         "",
-        "Commands:",
     ]
-    for name in COMMAND_ORDER:
-        lines.append(f"- `{name}`: {COMMAND_HELP[name]}")
+    for group in COMMAND_GROUP_ORDER:
+        specs = grouped.get(group) or []
+        if not specs:
+            continue
+        lines.append(f"**{group.title()}**")
+        for spec in specs:
+            path_label = " ".join(spec.path)
+            lines.append(f"- `{path_label}`: {spec.description}")
+        lines.append("")
     lines.extend(
         [
-            "",
             "Preview mode:",
-            f"- Add `--preview`, or use `{mention_prefix} <command> preview`, to suppress Discord sends and site pushes.",
-            "- Preview mode still runs the job logic and shows would-be Discord posts.",
+            f"- Add `preview:true` in slash or `--preview` after `{mention_prefix} ...` to suppress Discord sends and site pushes when supported.",
+            "- Preview mode still runs the logic and shows would-be Discord posts.",
             "",
             "Examples:",
-            f"- `{slash_prefix} clan-list`",
-            f"- `{slash_prefix} clan-list full:true`",
-            f"- `{slash_prefix} profile show member:Ditika`",
-            f"- `{slash_prefix} memory show member:Ditika`",
-            f"- `{slash_prefix} profile verify-discord member:King Thing`",
-            f"- `{slash_prefix} profile set-join-date member:Ditika date:2026-03-07`",
-            f"- `{slash_prefix} jobs run job:clan-awareness preview:true`",
-            f"- `{mention_prefix} poap-kings-sync --preview`",
-            f"- `{mention_prefix} memory member \"Ditika\" search \"war consistency\" --limit 5`",
-            f"- `{mention_prefix} verify-discord \"King Thing\"`",
-            f"- `{mention_prefix} set-discord \"King Thing\" @kingthing`",
-            f"- `{mention_prefix} set-join-date \"Ditika\" 2026-03-07`",
-            f"- `{mention_prefix} set-poap-address \"King Levy\" 0xabc123...`",
-            f"- `{mention_prefix} set-note \"King Thing\" \"Founder and systems builder\"`",
+            f"- `{slash_prefix} system status`",
+            f"- `{slash_prefix} clan members detail:full`",
+            f"- `{slash_prefix} member show member:Ditika`",
+            f"- `{slash_prefix} member set member:Ditika field:join-date value:2026-03-07`",
+            f"- `{slash_prefix} signal show view:recent`",
+            f"- `{slash_prefix} activity run activity:clan-awareness preview:true`",
+            f"- `{slash_prefix} integration poap-kings publish target:promote preview:true`",
+            f"- `{mention_prefix} member show \"Ditika\"`",
+            f"- `{mention_prefix} member set \"King Thing\" note \"Founder and systems builder\"`",
+            f"- `{mention_prefix} activity run clan-awareness --preview`",
+            f"- `{mention_prefix} integration poap-kings publish data --preview`",
         ]
     )
     return "\n".join(lines)
+
+
+def _legacy_hint_request(tokens: list[str], preview: bool, short: bool) -> dict | None:
+    if not tokens:
+        return None
+    legacy_key = normalize_admin_command(tokens[0])
+    if legacy_key == "jobs" and len(tokens) >= 2 and normalize_admin_command(tokens[1]) == "run":
+        return _command_request(
+            "jobs",
+            kind="legacy_hint",
+            preview=preview,
+            short=short,
+            hint=LEGACY_COMMAND_HINTS["jobs"],
+            legacy_input=" ".join(tokens),
+        )
+    hint = LEGACY_COMMAND_HINTS.get(legacy_key)
+    if not hint:
+        return None
+    return _command_request(
+        legacy_key,
+        kind="legacy_hint",
+        preview=preview,
+        short=short,
+        hint=hint,
+        legacy_input=" ".join(tokens),
+    )
+
+
+def _parse_memory_args(tokens: list[str]) -> dict | None:
+    args = {"limit": "5"}
+    i = 0
+    free_tokens = []
+    while i < len(tokens):
+        token = tokens[i]
+        lower = token.lower()
+        if lower in {"member", "--member"} and i + 1 < len(tokens):
+            args["member"] = tokens[i + 1]
+            i += 2
+            continue
+        if lower in {"query", "search", "--query", "--search"} and i + 1 < len(tokens):
+            args["query"] = tokens[i + 1]
+            i += 2
+            continue
+        if lower in {"limit", "--limit"} and i + 1 < len(tokens):
+            args["limit"] = tokens[i + 1]
+            i += 2
+            continue
+        if lower in {"system-internal", "--system-internal", "internal", "--internal"}:
+            args["include_system_internal"] = "true"
+            i += 1
+            continue
+        free_tokens.append(token)
+        i += 1
+    if free_tokens:
+        if len(free_tokens) == 1 and "member" not in args and "query" not in args:
+            args["member"] = free_tokens[0]
+        elif "query" not in args:
+            args["query"] = " ".join(free_tokens)
+        else:
+            return None
+    return args
+
+
+def _parse_birthday_value(value: str) -> tuple[str, str] | None:
+    match = re.fullmatch(r"(\d{1,2})-(\d{1,2})", str(value or "").strip())
+    if not match:
+        return None
+    return match.group(1), match.group(2)
 
 
 def parse_admin_command(text: str, *, require_prefix: bool = False):
@@ -255,87 +318,105 @@ def parse_admin_command(text: str, *, require_prefix: bool = False):
 
     if not filtered:
         return None
+    head = normalize_admin_command(filtered[0])
+    tail = filtered[1:]
+    if head == "help" and not tail:
+        return _command_request("help", preview=preview, short=short)
 
-    command = normalize_admin_command(filtered[0])
-    extra = filtered[1:]
+    if head == "system" and tail:
+        action = normalize_admin_command(tail[0])
+        if action == "status" and len(tail) == 1:
+            return _command_request("system.status", preview=preview)
+        if action == "storage":
+            view = "all"
+            if len(tail) == 2:
+                view = normalize_admin_command(tail[1])
+            if len(tail) in {1, 2} and view in DB_STATUS_GROUPS:
+                return _command_request("system.storage", args={"view": view}, preview=preview)
+        if action == "schedule" and len(tail) == 1:
+            return _command_request("system.schedule", preview=preview)
 
-    if command == "memory":
-        args = {"limit": "5"}
-        i = 0
-        free_tokens = []
-        while i < len(extra):
-            token = extra[i]
-            lower = token.lower()
-            if lower in {"member", "--member"} and i + 1 < len(extra):
-                args["member"] = extra[i + 1]
-                i += 2
-                continue
-            if lower in {"search", "query", "--search", "--query"} and i + 1 < len(extra):
-                args["query"] = extra[i + 1]
-                i += 2
-                continue
-            if lower in {"--limit", "limit"} and i + 1 < len(extra):
-                args["limit"] = extra[i + 1]
-                i += 2
-                continue
-            if lower in {"--system-internal", "system-internal", "--internal", "internal"}:
-                args["include_system_internal"] = "true"
-                i += 1
-                continue
-            free_tokens.append(token)
-            i += 1
+    if head == "clan" and tail:
+        action = normalize_admin_command(tail[0])
+        if action == "status" and len(tail) == 1:
+            return _command_request("clan.status", args={"short": "true" if short else "false"}, preview=preview, short=short)
+        if action == "war" and len(tail) == 1:
+            return _command_request("clan.war", preview=preview)
+        if action == "members":
+            detail = "summary"
+            if len(tail) == 2:
+                detail = "full" if normalize_admin_command(tail[1]) in {"full", "detail:full"} else normalize_admin_command(tail[1])
+            if len(tail) in {1, 2} and detail in {"summary", "full"}:
+                return _command_request("clan.members", args={"detail": detail}, preview=preview)
 
-        if free_tokens:
-            if len(free_tokens) == 1 and "member" not in args and "query" not in args:
-                args["member"] = free_tokens[0]
-            elif "query" not in args:
-                args["query"] = " ".join(free_tokens)
-            else:
+    if head == "member" and tail:
+        action = normalize_admin_command(tail[0])
+        if action == "show" and len(tail) >= 2:
+            return _command_request("member.show", args={"member": " ".join(tail[1:])}, preview=preview)
+        if action == "verify-discord" and len(tail) >= 2:
+            return _command_request("member.verify-discord", args={"member": " ".join(tail[1:])}, preview=preview)
+        if action == "set" and len(tail) >= 4:
+            member = tail[1]
+            field = normalize_admin_command(tail[2])
+            value = " ".join(tail[3:])
+            if field in MEMBER_SET_FIELDS and value:
+                return _command_request("member.set", args={"member": member, "field": field, "value": value}, preview=preview)
+        if action == "clear" and len(tail) == 3:
+            member = tail[1]
+            field = normalize_admin_command(tail[2])
+            if field in MEMBER_CLEAR_FIELDS:
+                return _command_request("member.clear", args={"member": member, "field": field}, preview=preview)
+
+    if head == "memory" and tail and normalize_admin_command(tail[0]) == "show":
+        args = _parse_memory_args(tail[1:])
+        if args is not None:
+            return _command_request("memory.show", args=args, preview=preview)
+
+    if head == "signal" and tail:
+        action = normalize_admin_command(tail[0])
+        if action == "show":
+            view = "all"
+            limit = "10"
+            i = 1
+            while i < len(tail):
+                token = normalize_admin_command(tail[i])
+                if token in SIGNAL_SHOW_VIEWS:
+                    view = token
+                    i += 1
+                    continue
+                if token in {"limit", "--limit"} and i + 1 < len(tail):
+                    limit = tail[i + 1]
+                    i += 2
+                    continue
                 return None
-        return {"command": "memory", "preview": preview, "short": False, "args": args}
+            return _command_request("signal.show", args={"view": view, "limit": limit}, preview=preview)
+        if action == "publish-pending" and len(tail) == 1:
+            return _command_request("signal.publish-pending", preview=preview)
 
-    if command == "help" and not extra:
-        return {"command": "help", "preview": preview, "short": False, "args": {}}
-    if command in {"status", "schedule", "signals", "war-status"} and not extra:
-        return {"command": command, "preview": preview, "short": False, "args": {}}
-    if command == "db-status" and not extra:
-        return {"command": command, "preview": preview, "short": False, "args": {}}
-    if command == "db-status" and len(extra) == 1 and extra[0].lower() in DB_STATUS_GROUPS:
-        return {"command": command, "preview": preview, "short": False, "args": {"group": extra[0].lower()}}
-    if command == "clan-status" and not extra:
-        return {"command": command, "preview": preview, "short": short, "args": {}}
-    if command == "clan-list" and not extra:
-        return {"command": command, "preview": preview, "short": False, "args": {}}
-    if command == "clan-list" and len(extra) == 1 and extra[0].lower() in {"full", "--full"}:
-        return {"command": command, "preview": preview, "short": False, "args": {"full": "true"}}
-    if command == "profile" and len(extra) >= 1:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": " ".join(extra)}}
-    if command == "verify-discord" and len(extra) >= 1:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": " ".join(extra)}}
-    if command == "set-discord" and len(extra) >= 2:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "discord_name": " ".join(extra[1:])}}
-    if command == "set-join-date" and len(extra) == 2:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "date": extra[1]}}
-    if command == "clear-join-date" and len(extra) == 1:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0]}}
-    if command == "set-birthday" and len(extra) == 3:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "month": extra[1], "day": extra[2]}}
-    if command == "clear-birthday" and len(extra) == 1:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0]}}
-    if command == "set-profile-url" and len(extra) == 2:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "url": extra[1]}}
-    if command == "clear-profile-url" and len(extra) == 1:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0]}}
-    if command == "set-poap-address" and len(extra) == 2:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "poap_address": extra[1]}}
-    if command == "clear-poap-address" and len(extra) == 1:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0]}}
-    if command == "set-note" and len(extra) >= 2:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0], "note": " ".join(extra[1:])}}
-    if command == "clear-note" and len(extra) == 1:
-        return {"command": command, "preview": preview, "short": False, "args": {"member": extra[0]}}
-    if command in ZERO_ARG_COMMANDS and not extra:
-        return {"command": command, "preview": preview, "short": False, "args": {}}
+    if head == "activity" and tail:
+        action = normalize_admin_command(tail[0])
+        if action == "list" and len(tail) == 1:
+            return _command_request("activity.list", preview=preview)
+        if action == "show" and len(tail) == 2 and normalize_activity_key(tail[1]):
+            return _command_request("activity.show", args={"activity": normalize_activity_key(tail[1])}, preview=preview)
+        if action == "run" and len(tail) == 2 and normalize_activity_key(tail[1]):
+            return _command_request("activity.run", args={"activity": normalize_activity_key(tail[1])}, preview=preview)
+
+    if head == "integration" and tail:
+        action = normalize_admin_command(tail[0])
+        if action == "list" and len(tail) == 1:
+            return _command_request("integration.list", preview=preview)
+        if action == "poap-kings" and len(tail) >= 2:
+            subaction = normalize_admin_command(tail[1])
+            if subaction == "status" and len(tail) == 2:
+                return _command_request("integration.poap-kings.status", preview=preview)
+            if subaction == "publish" and len(tail) == 3:
+                target = normalize_admin_command(tail[2])
+                if target in INTEGRATION_PUBLISH_TARGETS:
+                    return _command_request("integration.poap-kings.publish", args={"target": target}, preview=preview)
+    legacy = _legacy_hint_request(filtered, preview, short)
+    if legacy:
+        return legacy
     return None
 
 
@@ -473,13 +554,16 @@ def _truncate_for_report(text, limit=160):
     return value[: limit - 3].rstrip() + "..."
 
 
-def _build_signals_report(*, recent_limit: int = 10, conn=None) -> str:
+def _build_signals_report(*, view: str = "all", recent_limit: int = 10, conn=None) -> str:
     import db
     from runtime.channel_subagents import signal_routing_summary
 
     close = conn is None
     conn = conn or db.get_connection()
     try:
+        view = normalize_admin_command(view) or "all"
+        if view not in SIGNAL_SHOW_VIEWS:
+            raise ValueError(f"invalid signal view: {view}")
         recent_limit = max(1, min(int(recent_limit or 10), 20))
         routing = signal_routing_summary()
         pending_system = db.list_pending_system_signals(conn=conn)
@@ -508,50 +592,118 @@ def _build_signals_report(*, recent_limit: int = 10, conn=None) -> str:
             reverse=True,
         )[:recent_limit]
 
-        lines = ["**Elixir Signals**", "", "Routing:"]
-        for item in routing:
-            lines.append(f"- `{item['family']}`: {item['match']}")
-            for target in item["targets"]:
-                requirement = "required" if target.get("required") else "optional"
-                condition = f" - {target['condition']}" if target.get("condition") else ""
-                lines.append(
-                    f"  -> `{target['subagent']}` `{target['intent']}` ({requirement}){condition}"
-                )
-
-        lines.extend(["", f"Recent routed signals ({len(recent_groups)}):"])
-        if not recent_groups:
-            lines.append("_No routed signals recorded yet._")
-        else:
-            for group in recent_groups:
-                timestamp = group.get("updated_at") or "n/a"
-                lines.append(
-                    f"- `{group['source_signal_type']}` at {timestamp} - `{group['source_signal_key']}`"
-                )
-                for outcome in sorted(
-                    group["outcomes"],
-                    key=lambda item: ((item.get("target_channel_key") or ""), (item.get("intent") or "")),
-                ):
-                    requirement = "required" if outcome.get("required") else "optional"
-                    error_detail = outcome.get("error_detail")
-                    error_text = f" - {_truncate_for_report(error_detail, 90)}" if error_detail else ""
+        lines = ["**Elixir Signals**"]
+        if view in {"all", "routes"}:
+            lines.extend(["", "Routing:"])
+            for item in routing:
+                lines.append(f"- `{item['family']}`: {item['match']}")
+                for target in item["targets"]:
+                    requirement = "required" if target.get("required") else "optional"
+                    condition = f" - {target['condition']}" if target.get("condition") else ""
                     lines.append(
-                        f"  -> `{outcome.get('target_channel_key')}` `{outcome.get('intent')}` "
-                        f"{outcome.get('delivery_status') or 'unknown'} ({requirement}){error_text}"
+                        f"  -> `{target['subagent']}` `{target['intent']}` ({requirement}){condition}"
                     )
 
-        lines.extend(["", f"Pending system signals ({len(pending_system)}):"])
-        if not pending_system:
-            lines.append("_No pending system signals._")
-        else:
-            for signal in pending_system[:5]:
-                lines.append(
-                    f"- `{signal.get('type') or signal.get('signal_type') or 'unknown'}` "
-                    f"`{signal.get('signal_key')}` created {signal.get('created_at') or 'n/a'}"
-                )
+        if view in {"all", "recent"}:
+            lines.extend(["", f"Recent routed signals ({len(recent_groups)}):"])
+            if not recent_groups:
+                lines.append("_No routed signals recorded yet._")
+            else:
+                for group in recent_groups:
+                    timestamp = group.get("updated_at") or "n/a"
+                    lines.append(
+                        f"- `{group['source_signal_type']}` at {timestamp} - `{group['source_signal_key']}`"
+                    )
+                    for outcome in sorted(
+                        group["outcomes"],
+                        key=lambda item: ((item.get("target_channel_key") or ""), (item.get("intent") or "")),
+                    ):
+                        requirement = "required" if outcome.get("required") else "optional"
+                        error_detail = outcome.get("error_detail")
+                        error_text = f" - {_truncate_for_report(error_detail, 90)}" if error_detail else ""
+                        lines.append(
+                            f"  -> `{outcome.get('target_channel_key')}` `{outcome.get('intent')}` "
+                            f"{outcome.get('delivery_status') or 'unknown'} ({requirement}){error_text}"
+                        )
+
+        if view in {"all", "pending"}:
+            lines.extend(["", f"Pending system signals ({len(pending_system)}):"])
+            if not pending_system:
+                lines.append("_No pending system signals._")
+            else:
+                for signal in pending_system[:5]:
+                    lines.append(
+                        f"- `{signal.get('type') or signal.get('signal_type') or 'unknown'}` "
+                        f"`{signal.get('signal_key')}` created {signal.get('created_at') or 'n/a'}"
+                    )
         return "\n".join(lines)
     finally:
         if close:
             conn.close()
+
+
+def _build_activity_list_report() -> str:
+    import elixir
+
+    specs = schedule_specs_from_registry(elixir)
+    lines = [f"**Elixir Activities ({len(specs)})**"]
+    for spec in specs:
+        lines.append(
+            f"- `{spec['activity_key']}` — {spec['owner_subagent']} — {spec['schedule']}"
+        )
+        lines.append(
+            f"  {spec['purpose']}"
+        )
+    return "\n".join(lines)
+
+
+def _build_activity_show_report(activity_key: str) -> str:
+    import elixir
+
+    resolved = resolve_activity(activity_key, elixir)
+    lines = [f"**Activity: {resolved['activity_key']}**"]
+    lines.append(f"- Owner: `{resolved['owner_subagent']}`")
+    lines.append(f"- Purpose: {resolved['purpose']}")
+    lines.append(f"- Job: `{resolved['job_function']}`")
+    lines.append(f"- Schedule: {next(spec['schedule'] for spec in schedule_specs_from_registry(elixir) if spec['activity_key'] == resolved['activity_key'])}")
+    lines.append(f"- Manual trigger: {'yes' if resolved['manual_trigger_allowed'] else 'no'}")
+    lines.append("- Delivery targets:")
+    for target in resolved["delivery_targets"]:
+        lines.append(f"  - {target}")
+    return "\n".join(lines)
+
+
+def _build_integration_list_report() -> str:
+    lines = ["**Elixir Integrations**"]
+    lines.append("- `poap-kings` — Website publishing and content sync for poapkings.com.")
+    lines.append("  Commands: `integration poap-kings status`, `integration poap-kings publish <target>`")
+    return "\n".join(lines)
+
+
+def _build_poap_kings_status_report() -> str:
+    import runtime.jobs as runtime_jobs
+    from integrations.poap_kings import site as poap_kings_site
+
+    repo = poap_kings_site._site_repo()
+    branch = poap_kings_site._site_branch()
+    enabled = poap_kings_site.site_enabled()
+    lines = ["**Integration: poap-kings**"]
+    lines.append(f"- Enabled: {'yes' if enabled else 'no'}")
+    lines.append(f"- Repo: `{repo}`")
+    lines.append(f"- Branch: `{branch}`")
+    lines.append(f"- Visibility channel: `#poapkings-com`")
+    lines.append("- Targets:")
+    for target in ("all", "data", "home", "members", "roster-bios", "promote"):
+        lines.append(f"  - `{target}`")
+    status_snapshot = runtime_jobs.runtime_status.snapshot() if hasattr(runtime_jobs, "runtime_status") else {}
+    jobs = status_snapshot.get("jobs") or {}
+    for job_name in ("site_content_cycle", "site_data_refresh", "promotion_content_cycle", "weekly_clan_recap"):
+        if job_name in jobs:
+            entry = jobs[job_name]
+            lines.append(
+                f"- Job `{job_name}`: {entry.get('status') or 'n/a'} | {_truncate_for_report(entry.get('detail') or '', 100)}"
+            )
+    return "\n".join(lines)
 
 
 def _format_contextual_memory_item(memory: dict) -> str:
@@ -820,15 +972,15 @@ async def _run_system_signals(preview: bool) -> str:
             try:
                 count = await elixir._publish_pending_system_signal_updates(seed_startup_signals=True)
             except Exception as exc:
-                return f"`system-signals` failed in preview mode: {exc}"
-            summary = f"Ran `system-signals` in preview mode for {count} pending signal(s)."
+                return f"`signal.publish-pending` failed in preview mode: {exc}"
+            summary = f"Published {count} pending system signal(s) in preview mode."
             return f"{summary}\n\n{_format_preview_posts(captured_posts)}"
 
     try:
         count = await elixir._publish_pending_system_signal_updates(seed_startup_signals=True)
     except Exception as exc:
-        return f"`system-signals` failed: {exc}"
-    return f"Ran `system-signals` for {count} pending signal(s)."
+        return f"`signal.publish-pending` failed: {exc}"
+    return f"Published {count} pending system signal(s)."
 
 
 async def _run_poap_kings_sync(preview: bool) -> str:
@@ -840,15 +992,19 @@ async def _run_poap_kings_sync(preview: bool) -> str:
                 await elixir._site_content_cycle()
                 members_text = await _run_members_message(preview=True)
             except Exception as exc:
-                return f"`poap-kings-sync` failed in preview mode: {exc}"
-            sections = ["Ran `poap-kings-sync` in preview mode.", "", _format_preview_posts(captured_posts)]
+                return f"`integration.poap-kings.publish all` failed in preview mode: {exc}"
+            sections = [
+                "Published `integration.poap-kings` target `all` in preview mode.",
+                "",
+                _format_preview_posts(captured_posts),
+            ]
             if members_text:
                 sections.extend(["", "**Members Page Weekly Recap Preview**", members_text])
             return "\n".join(section for section in sections if section is not None)
 
     await elixir._site_content_cycle()
     await _run_members_message(preview=False)
-    return "Ran `poap-kings-sync`."
+    return "Published `integration.poap-kings` target `all`."
 
 
 async def _run_home_message(preview: bool) -> str:
@@ -1029,6 +1185,11 @@ async def _run_member_metadata_command(command: str, *, preview: bool, args: dic
             return f"Preview: would clear join date for {label}."
         await asyncio.to_thread(db.clear_member_join_date, member_tag, None)
         return f"Cleared join date for {label}."
+    if command == "clear-discord":
+        if preview:
+            return f"Preview: would clear the Discord link for {label}."
+        await asyncio.to_thread(db.clear_member_discord_link, member_tag)
+        return f"Cleared the Discord link for {label}."
     if command == "set-birthday":
         month = int(args["month"])
         day = int(args["day"])
@@ -1096,37 +1257,112 @@ async def _run_verify_discord(*, preview: bool, args: dict) -> str:
     return await onboarding.verify_discord_membership(member_tag)
 
 
-async def dispatch_admin_command(command: str, *, preview: bool = False, short: bool = False, args: dict | None = None) -> str:
-    import elixir
-    args = args or {}
-    command = normalize_admin_command(command)
+def _translate_member_field_command(action: str, field: str, value: str | None = None) -> tuple[str, dict]:
+    field = normalize_admin_command(field)
+    if action == "set":
+        if field == "discord":
+            return "set-discord", {"discord_name": value}
+        if field == "join-date":
+            return "set-join-date", {"date": value}
+        if field == "birthday":
+            parsed = _parse_birthday_value(value or "")
+            if not parsed:
+                raise ValueError("birthday value must be in MM-DD format")
+            month, day = parsed
+            return "set-birthday", {"month": month, "day": day}
+        if field == "profile-url":
+            return "set-profile-url", {"url": value}
+        if field == "poap-address":
+            return "set-poap-address", {"poap_address": value}
+        if field == "note":
+            return "set-note", {"note": value}
+    if action == "clear":
+        return f"clear-{field}", {}
+    raise ValueError(f"Unsupported member field action: {action} {field}")
 
-    if command == "help":
+
+async def _run_member_field_command(action: str, *, preview: bool, args: dict) -> str:
+    member_args = {"member": args["member"]}
+    command, extra_args = _translate_member_field_command(action, args["field"], args.get("value"))
+    member_args.update(extra_args)
+    return await _run_member_metadata_command(command, preview=preview, args=member_args)
+
+
+async def _run_integration_publish(target: str, *, preview: bool) -> str:
+    target = normalize_admin_command(target)
+    if target == "all":
+        return await _run_poap_kings_sync(preview=preview)
+    if target == "data":
+        return await _run_runtime_job("poap-kings-data-sync", preview=preview)
+    if target == "home":
+        return await _run_home_message(preview=preview)
+    if target == "members":
+        return await _run_members_message(preview=preview)
+    if target == "roster-bios":
+        return await _run_roster_bios(preview=preview)
+    if target == "promote":
+        return await _run_promote_content(preview=preview)
+    raise ValueError(f"Unknown integration publish target: {target}")
+
+
+async def dispatch_admin_command(command: str | dict, *, preview: bool = False, short: bool = False, args: dict | None = None) -> str:
+    import elixir
+
+    if isinstance(command, dict):
+        request = dict(command)
+    else:
+        command_key = normalize_admin_command(str(command))
+        if command_key in LEGACY_COMMAND_HINTS:
+            request = _command_request(
+                command_key,
+                kind="legacy_hint",
+                hint=LEGACY_COMMAND_HINTS[command_key],
+                legacy_input=command_key,
+                preview=preview,
+                short=short,
+            )
+        else:
+            request = _command_request(command_key, args=args or {}, preview=preview, short=short)
+
+    args = request.get("args") or {}
+    preview = bool(request.get("preview", False))
+    short = bool(request.get("short", False))
+    key = normalize_admin_command(request.get("key") or request.get("command"))
+
+    if request.get("kind") == "legacy_hint":
+        return request.get("hint") or "That command was renamed."
+
+    if key == "help":
         return render_admin_help()
-    if command == "status":
+    if key == "system.status":
         return elixir._build_status_report()
-    if command == "db-status":
-        return elixir._build_db_status_report(group=args.get("group"))
-    if command == "schedule":
+    if key == "system.storage":
+        group = args.get("view")
+        return elixir._build_db_status_report(group=None if group in {None, "", "all"} else group)
+    if key == "system.schedule":
         return elixir._build_schedule_report()
-    if command == "signals":
-        return await asyncio.to_thread(_build_signals_report)
-    if command == "clan-status":
+    if key == "signal.show":
+        return await asyncio.to_thread(
+            _build_signals_report,
+            view=args.get("view", "all"),
+            recent_limit=args.get("limit", 10),
+        )
+    if key == "clan.status":
         clan, war = await elixir._load_live_clan_context()
         if short:
             return elixir._build_clan_status_short_report(clan, war)
         return elixir._build_clan_status_report(clan, war)
-    if command == "war-status":
+    if key == "clan.war":
         clan, war = await elixir._load_live_clan_context()
         return elixir._build_war_status_report(clan, war)
-    if command == "clan-list":
+    if key == "clan.members":
         return await asyncio.to_thread(
             _build_clan_list_report,
-            full=str(args.get("full", "")).lower() in {"1", "true", "yes", "on", "full"},
+            full=normalize_admin_command(args.get("detail")) == "full",
         )
-    if command == "profile":
+    if key == "member.show":
         return await asyncio.to_thread(_build_member_profile_report, args["member"])
-    if command == "memory":
+    if key == "memory.show":
         return await asyncio.to_thread(
             _build_memory_report,
             member_query=args.get("member"),
@@ -1134,35 +1370,27 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
             limit=args.get("limit", 5),
             include_system_internal=str(args.get("include_system_internal", "")).lower() in {"1", "true", "yes", "on"},
         )
-    if command == "verify-discord":
+    if key == "member.verify-discord":
         return await _run_verify_discord(preview=preview, args=args)
-    if command in {
-        "set-discord",
-        "set-join-date",
-        "clear-join-date",
-        "set-birthday",
-        "clear-birthday",
-        "set-profile-url",
-        "clear-profile-url",
-        "set-poap-address",
-        "clear-poap-address",
-        "set-note",
-        "clear-note",
-    }:
-        return await _run_member_metadata_command(command, preview=preview, args=args)
-    if command == "system-signals":
+    if key == "member.set":
+        return await _run_member_field_command("set", preview=preview, args=args)
+    if key == "member.clear":
+        return await _run_member_field_command("clear", preview=preview, args=args)
+    if key == "signal.publish-pending":
         return await _run_system_signals(preview=preview)
-    if command == "poap-kings-sync":
-        return await _run_poap_kings_sync(preview=preview)
-    if command == "poap-kings-home-sync":
-        return await _run_home_message(preview=preview)
-    if command == "poap-kings-members-sync":
-        return await _run_members_message(preview=preview)
-    if command == "poap-kings-roster-bios-sync":
-        return await _run_roster_bios(preview=preview)
-    if command == "poap-kings-promotion-sync":
-        return await _run_promote_content(preview=preview)
-    return await _run_runtime_job(command, preview=preview)
+    if key == "activity.list":
+        return await asyncio.to_thread(_build_activity_list_report)
+    if key == "activity.show":
+        return await asyncio.to_thread(_build_activity_show_report, args["activity"])
+    if key == "activity.run":
+        return await _run_runtime_job(args["activity"], preview=preview)
+    if key == "integration.list":
+        return await asyncio.to_thread(_build_integration_list_report)
+    if key == "integration.poap-kings.status":
+        return await asyncio.to_thread(_build_poap_kings_status_report)
+    if key == "integration.poap-kings.publish":
+        return await _run_integration_publish(args["target"], preview=preview)
+    raise ValueError(f"Unknown admin command: {key}")
 
 
 __all__ = [
@@ -1171,6 +1399,7 @@ __all__ = [
     "_build_signals_report",
     "COMMAND_HELP",
     "COMMAND_ORDER",
+    "COMMAND_SPECS",
     "dispatch_admin_command",
     "normalize_admin_command",
     "parse_admin_command",
