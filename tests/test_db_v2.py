@@ -2926,6 +2926,52 @@ def test_current_war_day_state_tracks_engagement_points_and_time_left():
         conn.close()
 
 
+def test_current_war_day_state_uses_fixed_utc_reset_when_first_seen_late():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#ABC123", "name": "King Levy", "role": "leader", "expLevel": 66, "trophies": 11429, "clanRank": 1},
+            ],
+            conn=conn,
+        )
+
+        late_payload = {
+            "seasonId": 129,
+            "sectionIndex": 1,
+            "periodIndex": 10,
+            "periodType": "warDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 800,
+                "repairPoints": 0,
+                "periodPoints": 800,
+                "clanScore": 151,
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 400, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 2, "decksUsedToday": 2},
+                ],
+            },
+            "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 800, "repairPoints": 0, "periodPoints": 800, "clanScore": 151}],
+        }
+
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-14T18:00:00"):
+            db.upsert_war_current_state(late_payload, conn=conn)
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-14T19:00:00"):
+            db.upsert_war_current_state(late_payload, conn=conn)
+
+        state = db.get_current_war_day_state(conn=conn)
+
+        assert state["period_started_at"] == "2026-03-14T10:00:00"
+        assert state["period_ends_at"] == "2026-03-15T10:00:00"
+        assert state["time_left_seconds"] == 15 * 3600
+        assert state["time_left_text"] == "15h 0m"
+        assert state["first_observed_at"] == "2026-03-14T18:00:00"
+    finally:
+        conn.close()
+
+
 def test_war_analytics_ignore_historical_only_participants():
     conn = db.get_connection(":memory:")
     try:

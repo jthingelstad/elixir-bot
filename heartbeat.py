@@ -12,6 +12,7 @@ import cr_api
 import cr_knowledge
 import db
 import prompts
+from storage.war_calendar import war_signal_date
 
 log = logging.getLogger("elixir_heartbeat")
 
@@ -59,6 +60,25 @@ def _war_period_signal_log_type(base_type, war_state):
     if season_token is None:
         season_token = "live"
     return f"{base_type}::s{season_token}:w{section_index}:p{period_index}"
+
+
+def _war_signal_date_for_values(*values):
+    for value in values:
+        signal_date = war_signal_date(value)
+        if signal_date:
+            return signal_date
+    return db.chicago_today()
+
+
+def _war_signal_date_for_state(war_state, *fallbacks):
+    war_state = war_state or {}
+    return _war_signal_date_for_values(
+        war_state.get("observed_at"),
+        war_state.get("period_started_at"),
+        war_state.get("first_observed_at"),
+        war_state.get("last_observed_at"),
+        *fallbacks,
+    )
 
 
 def _battle_lead_payload(race_rank, previous_rank=None):
@@ -173,7 +193,6 @@ def detect_role_changes(conn=None):
 def detect_war_day_transition(now=None, conn=None):
     """Detect API-native war phase transitions and notable phase states."""
     now = now or datetime.now()
-    today = now.strftime("%Y-%m-%d")
     states = db.get_recent_live_war_states(limit=2, conn=conn)
     if not states:
         return []
@@ -182,15 +201,18 @@ def detect_war_day_transition(now=None, conn=None):
     previous = states[1] if len(states) > 1 else None
     signals = []
     latest_clan_defense_status = db.get_latest_clan_boat_defense_status(conn=conn)
+    current_signal_date = _war_signal_date_for_state(current, now)
+    previous_signal_date = _war_signal_date_for_state(previous, now) if previous else current_signal_date
 
     if current.get("battle_phase_active") and (
         previous is None or not previous.get("battle_phase_active")
     ):
         signal_log_type = _war_period_signal_log_type("war_battle_phase_active", current)
-        if not db.was_signal_sent(signal_log_type, today, conn=conn):
+        if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
             signals.append({
                 "type": "war_battle_phase_active",
                 "signal_log_type": signal_log_type,
+                "signal_date": current_signal_date,
                 "season_id": current.get("season_id"),
                 "week": current.get("week"),
                 "section_index": current.get("section_index"),
@@ -202,10 +224,11 @@ def detect_war_day_transition(now=None, conn=None):
         previous is None or not previous.get("practice_phase_active")
     ):
         signal_log_type = _war_period_signal_log_type("war_practice_phase_active", current)
-        if not db.was_signal_sent(signal_log_type, today, conn=conn):
+        if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
             signals.append({
                 "type": "war_practice_phase_active",
                 "signal_log_type": signal_log_type,
+                "signal_date": current_signal_date,
                 "season_id": current.get("season_id"),
                 "week": current.get("week"),
                 "section_index": current.get("section_index"),
@@ -226,10 +249,11 @@ def detect_war_day_transition(now=None, conn=None):
             })
     if current.get("final_practice_day_active"):
         signal_log_type = _war_period_signal_log_type("war_final_practice_day", current)
-        if not db.was_signal_sent(signal_log_type, today, conn=conn):
+        if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
             signals.append({
                 "type": "war_final_practice_day",
                 "signal_log_type": signal_log_type,
+                "signal_date": current_signal_date,
                 "season_id": current.get("season_id"),
                 "week": current.get("week"),
                 "section_index": current.get("section_index"),
@@ -250,10 +274,11 @@ def detect_war_day_transition(now=None, conn=None):
             })
     if current.get("final_battle_day_active"):
         signal_log_type = _war_period_signal_log_type("war_final_battle_day", current)
-        if not db.was_signal_sent(signal_log_type, today, conn=conn):
+        if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
             signals.append({
                 "type": "war_final_battle_day",
                 "signal_log_type": signal_log_type,
+                "signal_date": current_signal_date,
                 "season_id": current.get("season_id"),
                 "week": current.get("week"),
                 "section_index": current.get("section_index"),
@@ -267,10 +292,11 @@ def detect_war_day_transition(now=None, conn=None):
         and not current.get("battle_phase_active")
     ):
         signal_log_type = _war_period_signal_log_type("war_battle_days_complete", previous)
-        if not db.was_signal_sent(signal_log_type, today, conn=conn):
+        if not db.was_signal_sent(signal_log_type, previous_signal_date, conn=conn):
             signals.append({
                 "type": "war_battle_days_complete",
                 "signal_log_type": signal_log_type,
+                "signal_date": previous_signal_date,
                 "previous_season_id": previous.get("season_id"),
                 "season_id": current.get("season_id"),
                 "previous_week": previous.get("week"),
@@ -368,15 +394,17 @@ def detect_war_day_markers(conn=None):
     if current_key and current_key != previous_key:
         current_day = db.get_current_war_day_state(conn=conn)
         if current_day:
+            current_signal_date = _war_signal_date_for_state(current_day, current)
             if current.get("phase") == "practice":
                 if (current_day.get("day_number") or 0) <= 1:
                     signal_log_type = None
                 else:
                     signal_log_type = _war_period_signal_log_type("war_practice_day_started", current)
-                if signal_log_type and not db.was_signal_sent(signal_log_type, db.chicago_today(), conn=conn):
+                if signal_log_type and not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
                     signals.append({
                         "type": "war_practice_day_started",
                         "signal_log_type": signal_log_type,
+                        "signal_date": current_signal_date,
                         "season_id": current_day.get("season_id"),
                         "week": current_day.get("week"),
                         "phase": current_day.get("phase"),
@@ -391,10 +419,11 @@ def detect_war_day_markers(conn=None):
                     signal_log_type = None
                 else:
                     signal_log_type = _war_period_signal_log_type("war_battle_day_started", current)
-                if signal_log_type and not db.was_signal_sent(signal_log_type, db.chicago_today(), conn=conn):
+                if signal_log_type and not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
                     signals.append({
                         "type": "war_battle_day_started",
                         "signal_log_type": signal_log_type,
+                        "signal_date": current_signal_date,
                         "season_id": current_day.get("season_id"),
                         "week": current_day.get("week"),
                         "phase": current_day.get("phase"),
@@ -414,12 +443,14 @@ def detect_war_day_markers(conn=None):
         previous_day = db.get_war_day_state(previous_key, conn=conn)
         if previous_day:
             completed_at = current.get("observed_at")
+            previous_signal_date = _war_signal_date_for_state(previous_day, previous, completed_at)
             if previous.get("phase") == "practice":
                 signal_log_type = _war_period_signal_log_type("war_practice_day_complete", previous)
-                if not db.was_signal_sent(signal_log_type, db.chicago_today(), conn=conn):
+                if not db.was_signal_sent(signal_log_type, previous_signal_date, conn=conn):
                     signals.append({
                         "type": "war_practice_day_complete",
                         "signal_log_type": signal_log_type,
+                        "signal_date": previous_signal_date,
                         "season_id": previous_day.get("season_id"),
                         "week": previous_day.get("week"),
                         "phase_display": previous_day.get("phase_display"),
@@ -430,10 +461,11 @@ def detect_war_day_markers(conn=None):
                     })
             elif previous.get("phase") == "battle":
                 signal_log_type = _war_period_signal_log_type("war_battle_day_complete", previous)
-                if not db.was_signal_sent(signal_log_type, db.chicago_today(), conn=conn):
+                if not db.was_signal_sent(signal_log_type, previous_signal_date, conn=conn):
                     signals.append({
                         "type": "war_battle_day_complete",
                         "signal_log_type": signal_log_type,
+                        "signal_date": previous_signal_date,
                         "season_id": previous_day.get("season_id"),
                         "week": previous_day.get("week"),
                         "phase_display": previous_day.get("phase_display"),
@@ -464,11 +496,13 @@ def detect_war_battle_final_hours(conn=None, threshold_hours=6):
     if time_left_seconds is None or time_left_seconds <= 0 or time_left_seconds > int(threshold_hours * 3600):
         return []
     signal_log_type = _war_period_signal_log_type("war_battle_day_final_hours", current)
-    if db.was_signal_sent(signal_log_type, db.chicago_today(), conn=conn):
+    signal_date = _war_signal_date_for_state(current)
+    if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
         return []
     return [{
         "type": "war_battle_day_final_hours",
         "signal_log_type": signal_log_type,
+        "signal_date": signal_date,
         "season_id": current.get("season_id"),
         "week": current.get("week"),
         "phase_display": current.get("phase_display"),
@@ -500,11 +534,13 @@ def detect_war_rank_changes(conn=None):
         return []
     current_day = db.get_current_war_day_state(conn=conn)
     signal_log_type = f"{_war_period_signal_log_type('war_battle_rank_change', current)}::rank{current_rank}"
-    if db.was_signal_sent(signal_log_type, db.chicago_today(), conn=conn):
+    signal_date = _war_signal_date_for_state(current_day, current)
+    if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
         return []
     return [{
         "type": "war_battle_rank_change",
         "signal_log_type": signal_log_type,
+        "signal_date": signal_date,
         "season_id": current.get("season_id"),
         "week": current.get("week"),
         "phase_display": current.get("phase_display"),
@@ -597,7 +633,7 @@ def detect_war_battle_checkpoints(conn=None):
         return []
 
     elapsed_seconds = max(0, BATTLE_DAY_SECONDS - time_left_seconds)
-    today = datetime.now().strftime("%Y-%m-%d")
+    signal_date = _war_signal_date_for_state(day_state)
     war_state = {
         "war_day_key": day_state.get("war_day_key"),
         "season_id": day_state.get("season_id"),
@@ -613,7 +649,7 @@ def detect_war_battle_checkpoints(conn=None):
             f"{_war_period_signal_log_type(checkpoint['signal_key'], war_state)}"
             f"::h{checkpoint['hour']}"
         )
-        if db.was_signal_sent(signal_log_type, today, conn=conn):
+        if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
             continue
         chosen_checkpoint = (checkpoint, signal_log_type)
         break
@@ -625,6 +661,7 @@ def detect_war_battle_checkpoints(conn=None):
     return [{
         "type": checkpoint["signal_type"],
         "signal_log_type": signal_log_type,
+        "signal_date": signal_date,
         "season_id": day_state.get("season_id"),
         "week": day_state.get("week"),
         "phase_display": day_state.get("phase_display"),
@@ -684,6 +721,7 @@ def detect_war_week_complete(completion_signals, conn=None):
         signals.append({
             "type": "war_week_complete",
             "signal_log_type": signal_log_type,
+            "signal_date": signal.get("signal_date") or _war_signal_date_for_values(signal.get("finish_time"), signal.get("created_date")),
             "season_id": signal.get("season_id"),
             "section_index": signal.get("section_index"),
             "week": (signal.get("section_index") + 1) if signal.get("section_index") is not None else None,
@@ -709,11 +747,13 @@ def detect_war_season_completion(conn=None):
     if not season_story:
         return []
     signal_log_type = f"war_season_complete::{previous_season}"
-    if db.was_signal_sent(signal_log_type, db.chicago_today(), conn=conn):
+    signal_date = _war_signal_date_for_state(previous, current)
+    if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
         return []
     return [{
         "type": "war_season_complete",
         "signal_log_type": signal_log_type,
+        "signal_date": signal_date,
         "season_id": previous_season,
         "next_season_id": current_season,
         "season_story": season_story,
@@ -744,6 +784,7 @@ def detect_war_completion(clan_tag, conn=None):
             signals.append({
                 "type": "war_completed",
                 "signal_log_type": signal_log_type,
+                "signal_date": _war_signal_date_for_values(row.get("finish_time"), row.get("created_date")),
                 "season_id": row.get("season_id"),
                 "section_index": row.get("section_index"),
                 "our_rank": row.get("our_rank"),
@@ -784,6 +825,7 @@ def detect_war_champ_update(completion_signals=None, conn=None):
         signals.append({
             "type": "war_champ_standings",
             "signal_log_type": signal_log_type,
+            "signal_date": signal.get("signal_date") or _war_signal_date_for_values(signal.get("finish_time"), signal.get("created_date")),
             "season_id": season_id,
             "section_index": section_index,
             "week": section_index + 1 if section_index is not None else None,

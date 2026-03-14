@@ -7,10 +7,13 @@ from db import (
     _utcnow,
     get_connection,
 )
-
-PERIODS_PER_WEEK = 7
-PRACTICE_PERIOD_TYPES = {"training", "trainingday", "practice"}
-BATTLE_PERIOD_TYPES = {"warday", "battle", "battleday"}
+from storage.war_calendar import (
+    PERIODS_PER_WEEK,
+    phase_day_number,
+    period_offset,
+    resolve_phase,
+    war_day_key,
+)
 
 
 def _get_latest_logged_race(conn):
@@ -37,47 +40,25 @@ def _infer_current_season_id_from_live_state(payload, latest_logged_race):
 
 
 def _period_offset(period_index):
-    if period_index is None:
-        return None
-    return period_index % PERIODS_PER_WEEK
+    return period_offset(period_index)
 
 
 def _normalize_period_type(period_type):
-    if period_type is None:
-        return None
-    return str(period_type).strip().lower()
+    from storage.war_calendar import normalize_period_type
+
+    return normalize_period_type(period_type)
 
 
 def _resolve_phase(period_type, period_index):
-    normalized = _normalize_period_type(period_type)
-    if normalized in BATTLE_PERIOD_TYPES:
-        return "battle"
-    if normalized in PRACTICE_PERIOD_TYPES:
-        return "practice"
-    if normalized:
-        return "practice"
-    offset = _period_offset(period_index)
-    if offset is None:
-        return None
-    if 3 <= offset <= 6:
-        return "battle"
-    return "practice"
+    return resolve_phase(period_type, period_index)
 
 
 def _phase_day_number(phase, period_index):
-    offset = _period_offset(period_index)
-    if offset is None or phase not in {"battle", "practice"}:
-        return None
-    if phase == "battle":
-        return offset - 3 + 1
-    return offset + 1
+    return phase_day_number(phase, period_index)
 
 
 def _war_day_key(season_id, section_index, period_index, observed_at=None):
-    if section_index is None or period_index is None:
-        return observed_at[:10] if observed_at else None
-    season_token = f"s{season_id:05d}" if season_id is not None else "slive"
-    return f"{season_token}-w{section_index:02d}-p{period_index:03d}"
+    return war_day_key(season_id, section_index, period_index, observed_at)
 
 
 def _infer_period_section_index(period_index, current_section_index, current_period_index):
