@@ -52,6 +52,10 @@ async def route_message(message):
     conversation_scope = app._channel_conversation_scope(message.channel, message.author.id)
     raw_question = app._strip_bot_mentions(message.content).strip() if mentioned else message.content.strip()
 
+    if not mentioned:
+        await app.bot.process_commands(message)
+        return
+
     if role == "clanops" and app._is_legacy_clanops_command_text(raw_question):
         if not mentioned or not app.parse_admin_command(raw_question, require_prefix=True):
             hint_content = app._build_clanops_command_hint()
