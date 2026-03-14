@@ -1281,30 +1281,32 @@ def test_detect_war_rollovers_emits_week_and_season_rollover_for_section_wrap():
 def test_detect_war_day_transition_emits_battle_phase_active_from_api_state():
     conn = db.get_connection(":memory:")
     try:
-        db.upsert_war_current_state(
-            {
-                "state": "full",
-                "sectionIndex": 0,
-                "periodIndex": 3,
-                "periodType": "warDay",
-                "clan": {
-                    "tag": "#J2RGCRVG",
-                    "name": "POAP KINGS",
-                    "fame": 0,
-                    "repairPoints": 0,
-                    "periodPoints": 0,
-                    "clanScore": 140,
-                    "participants": [],
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-14T10:30:00"):
+            db.upsert_war_current_state(
+                {
+                    "state": "full",
+                    "sectionIndex": 0,
+                    "periodIndex": 3,
+                    "periodType": "warDay",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 0,
+                        "repairPoints": 0,
+                        "periodPoints": 0,
+                        "clanScore": 140,
+                        "participants": [],
+                    },
                 },
-            },
-            conn=conn,
-        )
+                conn=conn,
+            )
 
         signals = heartbeat.detect_war_day_transition(conn=conn)
 
         assert signals == [{
             "type": "war_battle_phase_active",
             "signal_log_type": "war_battle_phase_active::slive-w00-p003",
+            "signal_date": "2026-03-14",
             "season_id": None,
             "week": 1,
             "section_index": 0,
@@ -1319,30 +1321,32 @@ def test_detect_war_day_transition_emits_battle_phase_active_from_api_state():
 def test_detect_war_day_transition_emits_practice_phase_active_from_api_state():
     conn = db.get_connection(":memory:")
     try:
-        db.upsert_war_current_state(
-            {
-                "state": "full",
-                "sectionIndex": 1,
-                "periodIndex": 1,
-                "periodType": "trainingDay",
-                "clan": {
-                    "tag": "#J2RGCRVG",
-                    "name": "POAP KINGS",
-                    "fame": 0,
-                    "repairPoints": 0,
-                    "periodPoints": 0,
-                    "clanScore": 140,
-                    "participants": [],
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-14T10:30:00"):
+            db.upsert_war_current_state(
+                {
+                    "state": "full",
+                    "sectionIndex": 1,
+                    "periodIndex": 1,
+                    "periodType": "trainingDay",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 0,
+                        "repairPoints": 0,
+                        "periodPoints": 0,
+                        "clanScore": 140,
+                        "participants": [],
+                    },
                 },
-            },
-            conn=conn,
-        )
+                conn=conn,
+            )
 
         signals = heartbeat.detect_war_day_transition(conn=conn)
 
         assert signals == [{
             "type": "war_practice_phase_active",
             "signal_log_type": "war_practice_phase_active::slive-w01-p001",
+            "signal_date": "2026-03-14",
             "season_id": None,
             "week": 2,
             "section_index": 1,
@@ -1549,42 +1553,44 @@ def test_detect_war_day_transition_marks_final_practice_day_from_api_period_inde
 def test_detect_war_day_transition_marks_battle_phase_complete_from_api_transition():
     conn = db.get_connection(":memory:")
     try:
-        db.upsert_war_current_state(
-            {
-                "state": "full",
-                "sectionIndex": 0,
-                "periodIndex": 6,
-                "periodType": "warDay",
-                "clan": {
-                    "tag": "#J2RGCRVG",
-                    "name": "POAP KINGS",
-                    "fame": 6400,
-                    "repairPoints": 0,
-                    "periodPoints": 3200,
-                    "clanScore": 140,
-                    "participants": [],
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-14T09:30:00"):
+            db.upsert_war_current_state(
+                {
+                    "state": "full",
+                    "sectionIndex": 0,
+                    "periodIndex": 6,
+                    "periodType": "warDay",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 6400,
+                        "repairPoints": 0,
+                        "periodPoints": 3200,
+                        "clanScore": 140,
+                        "participants": [],
+                    },
                 },
-            },
-            conn=conn,
-        )
-        db.upsert_war_current_state(
-            {
-                "state": "full",
-                "sectionIndex": 1,
-                "periodIndex": 0,
-                "periodType": "trainingDay",
-                "clan": {
-                    "tag": "#J2RGCRVG",
-                    "name": "POAP KINGS",
-                    "fame": 0,
-                    "repairPoints": 0,
-                    "periodPoints": 0,
-                    "clanScore": 141,
-                    "participants": [],
+                conn=conn,
+            )
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-14T10:05:00"):
+            db.upsert_war_current_state(
+                {
+                    "state": "full",
+                    "sectionIndex": 1,
+                    "periodIndex": 0,
+                    "periodType": "trainingDay",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 0,
+                        "repairPoints": 0,
+                        "periodPoints": 0,
+                        "clanScore": 141,
+                        "participants": [],
+                    },
                 },
-            },
-            conn=conn,
-        )
+                conn=conn,
+            )
 
         signals = heartbeat.detect_war_day_transition(conn=conn)
 
@@ -1597,6 +1603,7 @@ def test_detect_war_day_transition_marks_battle_phase_complete_from_api_transiti
         assert signals[1] == {
             "type": "war_battle_days_complete",
             "signal_log_type": "war_battle_days_complete::slive-w00-p006",
+            "signal_date": "2026-03-13",
             "previous_season_id": None,
             "season_id": None,
             "previous_week": 1,
@@ -1730,6 +1737,37 @@ def test_detect_war_deck_usage_compatibility_wrapper_emits_final_push_checkpoint
     assert signals[0]["checkpoint_label"] == "final push"
     assert signals[0]["needs_lead_recovery"] is True
     assert signals[0]["lead_pressure"] == "high"
+
+
+def test_detect_war_battle_checkpoints_respects_war_reset_date_before_utc_reset():
+    conn = db.get_connection(":memory:")
+    try:
+        for signal_type in (
+            "war_battle_day_checkpoint::s00130-w01-p010::h21",
+            "war_battle_day_checkpoint::s00130-w01-p010::h18",
+            "war_battle_day_checkpoint::s00130-w01-p010::h12",
+        ):
+            db.mark_signal_sent(signal_type, "2026-03-13", conn=conn)
+
+        with patch("heartbeat.db.get_current_war_day_state", return_value={
+            "phase": "battle",
+            "war_day_key": "s00130-w01-p010",
+            "season_id": 130,
+            "section_index": 1,
+            "period_index": 10,
+            "week": 1,
+            "phase_display": "Battle Day 1",
+            "day_number": 1,
+            "day_total": 4,
+            "observed_at": "2026-03-14T08:30:00",
+            "time_left_seconds": 90 * 60,
+            "time_left_text": "1h 30m",
+        }):
+            signals = heartbeat.detect_war_battle_checkpoints(conn=conn)
+
+        assert signals == []
+    finally:
+        conn.close()
 
 
 def test_detect_war_day_markers_emits_day_start_and_prior_day_recap():

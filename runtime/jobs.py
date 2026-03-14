@@ -338,10 +338,10 @@ def _publish_poap_kings_site_or_raise(payloads: dict[str, object], message: str)
 
 
 def _mark_delivered_signals(signals, *, today: str | None = None):
-    signal_date = today or db.chicago_today()
     for signal in signals or []:
         if signal.get("signal_key"):
             continue
+        signal_date = signal.get("signal_date") or today or db.chicago_today()
         signal_type = signal.get("signal_log_type") or signal.get("type")
         if signal_type:
             db.mark_signal_sent(signal_type, signal_date)

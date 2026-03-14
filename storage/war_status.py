@@ -13,20 +13,18 @@ from db import (
     _rowdicts,
     get_connection,
 )
-
-PERIODS_PER_WEEK = 7
-FIRST_BATTLE_PERIOD_OFFSET = 3
-FINAL_BATTLE_PERIOD_OFFSET = 6
-FINAL_PRACTICE_PERIOD_OFFSET = FIRST_BATTLE_PERIOD_OFFSET - 1
-PRACTICE_PERIOD_TYPES = {"training", "trainingday", "practice"}
-BATTLE_PERIOD_TYPES = {"warday", "battle", "battleday"}
-
-
-def _war_day_key(season_id: Optional[int], section_index: Optional[int], period_index: Optional[int], observed_at: Optional[str] = None) -> Optional[str]:
-    if section_index is None or period_index is None:
-        return observed_at[:10] if observed_at else None
-    season_token = f"s{season_id:05d}" if season_id is not None else "slive"
-    return f"{season_token}-w{section_index:02d}-p{period_index:03d}"
+from storage.war_calendar import (
+    FINAL_BATTLE_PERIOD_OFFSET,
+    FINAL_PRACTICE_PERIOD_OFFSET,
+    FIRST_BATTLE_PERIOD_OFFSET,
+    coerce_utc_datetime,
+    format_utc_iso,
+    phase_day_number,
+    period_offset,
+    resolve_phase,
+    war_day_key,
+    war_reset_window_utc,
+)
 
 def _format_member_reference(*args, **kwargs):
     from storage.identity import format_member_reference
@@ -77,42 +75,21 @@ def _infer_current_season_id_from_live_state(payload: dict, latest_logged_race) 
 
 
 def _normalize_period_type(period_type: Optional[str]) -> Optional[str]:
-    if period_type is None:
-        return None
-    return str(period_type).strip().lower()
+    from storage.war_calendar import normalize_period_type
+
+    return normalize_period_type(period_type)
 
 
 def _period_offset(period_index: Optional[int]) -> Optional[int]:
-    if period_index is None:
-        return None
-    return period_index % PERIODS_PER_WEEK
+    return period_offset(period_index)
 
 
 def _resolve_phase(period_type: Optional[str], period_index: Optional[int]) -> Optional[str]:
-    normalized = _normalize_period_type(period_type)
-    if normalized in BATTLE_PERIOD_TYPES:
-        return "battle"
-    if normalized in PRACTICE_PERIOD_TYPES:
-        return "practice"
-    if normalized:
-        return "practice"
-    if period_index is None:
-        return None
-    offset = _period_offset(period_index)
-    if offset is None:
-        return None
-    if FIRST_BATTLE_PERIOD_OFFSET <= offset <= FINAL_BATTLE_PERIOD_OFFSET:
-        return "battle"
-    return "practice"
+    return resolve_phase(period_type, period_index)
 
 
 def _phase_day_number(phase: Optional[str], period_index: Optional[int]) -> Optional[int]:
-    offset = _period_offset(period_index)
-    if offset is None or phase not in {"battle", "practice"}:
-        return None
-    if phase == "battle":
-        return offset - FIRST_BATTLE_PERIOD_OFFSET + 1
-    return offset + 1
+    return phase_day_number(phase, period_index)
 
 
 def _resolve_live_race_rank(payload: dict, clan_tag: Optional[str]) -> Optional[int]:
@@ -192,7 +169,7 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
     )
     result["race_rank"] = _resolve_live_race_rank(payload, result.get("clan_tag")) or result.get("race_rank")
     result["period_logs_count"] = len(payload.get("periodLogs") or [])
-    result["war_day_key"] = _war_day_key(
+    result["war_day_key"] = war_day_key(
         result.get("season_id"),
         result.get("section_index"),
         result.get("period_index"),
@@ -225,15 +202,6 @@ def get_recent_live_war_states(limit=2, conn=None):
 def get_current_war_status(conn=None):
     states = get_recent_live_war_states(limit=1, conn=conn)
     return states[0] if states else None
-
-
-def _parse_utc_iso(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
-        return None
 
 
 def _format_duration_short(total_seconds: Optional[int]) -> Optional[str]:
@@ -369,9 +337,14 @@ def get_war_day_state(war_day_key: Optional[str] = None, conn=None):
             key=lambda item: (-(item.get("fame") or 0), -(item.get("decks_used_total") or 0), (item.get("name") or "").lower())
         )
 
-        started_at = _parse_utc_iso(first_observed_at)
-        observed_at = _parse_utc_iso((current_state or {}).get("observed_at") or last_observed_at)
-        ends_at = started_at + timedelta(days=1) if started_at else None
+        reset_anchor = (
+            (current_state or {}).get("observed_at")
+            or (first_state or {}).get("observed_at")
+            or first_observed_at
+            or last_observed_at
+        )
+        started_at, ends_at = war_reset_window_utc(reset_anchor)
+        observed_at = coerce_utc_datetime((current_state or {}).get("observed_at") or last_observed_at)
         time_left_seconds = int((ends_at - observed_at).total_seconds()) if ends_at and observed_at else None
         if time_left_seconds is not None:
             time_left_seconds = max(0, time_left_seconds)
@@ -403,8 +376,8 @@ def get_war_day_state(war_day_key: Optional[str] = None, conn=None):
             "observed_at": (current_state or first_state or {}).get("observed_at") or last_observed_at,
             "first_observed_at": first_observed_at,
             "last_observed_at": last_observed_at,
-            "period_started_at": first_observed_at,
-            "period_ends_at": ends_at.strftime("%Y-%m-%dT%H:%M:%S") if ends_at else None,
+            "period_started_at": format_utc_iso(started_at),
+            "period_ends_at": format_utc_iso(ends_at),
             "time_left_seconds": time_left_seconds,
             "time_left_text": _format_duration_short(time_left_seconds),
             "total_participants": len(eligible_rows),
