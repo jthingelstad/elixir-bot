@@ -163,6 +163,25 @@ def test_subagent_prompt_ask_elixir_mentions_conversational_followups():
     assert "correct yourself" in text.lower()
 
 
+def test_subagent_prompt_river_race_prioritizes_observation_over_activation():
+    text = prompts.subagent_prompt("river-race")
+    lowered = text.lower()
+
+    assert "sharp-eyed war observer" in lowered
+    assert "contributor spotlight" in lowered
+    assert "avoid generic activation copy" in lowered
+    assert "do not flood the channel with repetitive reminders about who has not started" in lowered
+
+
+def test_subagent_prompt_arena_relay_stays_sparse():
+    text = prompts.subagent_prompt("arena-relay")
+    lowered = text.lower()
+
+    assert "scarce lane" in lowered
+    assert "only produce a relay when the update is genuinely worth carrying" in lowered
+    assert "do not sound like you need leadership attention" in lowered
+
+
 def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
     monkeypatch.setattr(
         prompts,
@@ -225,8 +244,11 @@ def test_clan_tag():
 def test_observation_prompt_includes_custom_emoji_guidance():
     system_prompt = agent_prompts._observe_system()
 
-    assert "Use at most 1-2 custom emoji in most messages." in system_prompt
-    assert ":elixir_hype:" in system_prompt
+    assert "Use readable Discord-native formatting." in system_prompt
+    assert "Keep most messages compact unless the task genuinely calls for more structure." in system_prompt
+    assert "Use occasional **bold** emphasis" in system_prompt
+    assert "Elixir has custom server emoji available in Discord-ready messages." in system_prompt
+    assert "If you use one, use the literal :emoji_name: shortcode syntax so it renders in Discord." in system_prompt
     assert "channel subagent" in system_prompt
     assert "Default to one Discord message" in system_prompt
     assert "Do not split one update across multiple near-duplicate messages." in system_prompt

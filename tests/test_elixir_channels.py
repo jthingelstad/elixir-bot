@@ -1755,12 +1755,13 @@ def test_build_schedule_report_shows_30_minute_player_intel_refresh():
     with (
         patch("elixir.scheduler", scheduler),
         patch.object(elixir, "PLAYER_INTEL_REFRESH_MINUTES", 30),
+        patch.object(elixir, "PLAYER_INTEL_REFRESH_JITTER_SECONDS", 900),
     ):
         report = elixir._build_schedule_report()
 
     assert "player-progress" in report
     assert "player-progression" in report
-    assert "Every 30 minutes." in report
+    assert "Every 30 minutes with up to 900s jitter." in report
 
 
 def test_build_schedule_report_includes_war_awareness_activity():
@@ -1771,13 +1772,14 @@ def test_build_schedule_report_includes_war_awareness_activity():
 
     with (
         patch("elixir.scheduler", scheduler),
-        patch.object(elixir, "WAR_AWARENESS_INTERVAL_MINUTES", 15),
+        patch.object(elixir, "WAR_AWARENESS_INTERVAL_MINUTES", 30),
+        patch.object(elixir, "WAR_AWARENESS_JITTER_SECONDS", 900),
     ):
         report = elixir._build_schedule_report()
 
     assert "river-race" in report
     assert "war-awareness" in report
-    assert "Every 15 minutes." in report
+    assert "Every 30 minutes with up to 900s jitter." in report
     assert "Discord routed outcomes: #river-race, #arena-relay, optional #leader-lounge" in report
 
 
@@ -1803,8 +1805,8 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert "daily-clan-insight" in specs
     assert specs["daily-clan-insight"]["owner_subagent"] == "ask-elixir"
     assert "Discord: #ask-elixir" in specs["daily-clan-insight"]["delivery_targets"]
-    assert "Daily at" in specs["daily-clan-insight"]["schedule"]
-    assert "60 minutes jitter" in specs["daily-clan-insight"]["schedule"]
+    assert "Daily at 12:00 CT." in specs["daily-clan-insight"]["schedule"]
+    assert "30 minutes jitter" in specs["daily-clan-insight"]["schedule"]
     assert "promotion-content" in specs
     assert "Discord: #promote-the-clan" in specs["promotion-content"]["delivery_targets"]
     assert "POAP KINGS: promotion payloads" in specs["promotion-content"]["delivery_targets"]
@@ -2736,7 +2738,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
     assert "recent joins this week: Newbie" in report
 
 
-def test_share_channel_result_tags_leader_role_for_arena_relay():
+def test_share_channel_result_posts_arena_relay_without_leader_ping():
     channel = AsyncMock()
     channel.id = 300
     channel.name = "arena-relay"
@@ -2755,7 +2757,7 @@ def test_share_channel_result_tags_leader_role_for_arena_relay():
             )
         )
 
-    mock_post.assert_awaited_once_with(channel, {"content": f"<@&{elixir.LEADER_ROLE_ID}>\nRelay this to clan chat."})
+    mock_post.assert_awaited_once_with(channel, {"content": "Relay this to clan chat."})
 
 
 def test_share_channel_result_rewrites_member_refs_before_posting():

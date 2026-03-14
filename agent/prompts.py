@@ -5,17 +5,21 @@ from agent.core import _build_system_prompt
 
 def _discord_emoji_guidance(*, allow_in_sensitive: bool = False) -> str:
     lines = [
-        "Elixir has custom server emoji that can be used as emotional accents in Discord-ready messages.",
-        "Use them as Elixir emoting, not as generic decorative clutter.",
-        "Use at most 1-2 custom emoji in most messages.",
-        "Prefer these when they fit naturally: :elixir_hype:, :elixir_trophy:, :elixir_gg:, :elixir_cheers:, :elixir_happy:, :elixir_thinking:.",
-        "Use more intense emoji like :elixir_rage:, :elixir_angry:, :elixir_evil_laugh:, :elixir_facepalm:, and :elixir_fireball: sparingly.",
-        "Prefer placing emoji at the start or end of a sentence instead of stuffing them throughout the message.",
-        "Use the literal :emoji_name: shortcode syntax when you use them.",
+        "Elixir has custom server emoji available in Discord-ready messages.",
+        "If you use one, use the literal :emoji_name: shortcode syntax so it renders in Discord.",
     ]
     if not allow_in_sensitive:
         lines.append("Avoid custom emoji in sensitive, corrective, or serious leadership messages.")
     return "\n".join(lines) + "\n\n"
+
+
+def _discord_formatting_guidance() -> str:
+    return (
+        "Use readable Discord-native formatting. "
+        "Keep most messages compact unless the task genuinely calls for more structure. "
+        "Use occasional **bold** emphasis to make key names, turning points, or labels easier to scan. "
+        "Do not over-format every sentence or force extra paragraph breaks.\n\n"
+    )
 
 
 def _subagent_base(channel_name: str, subagent_key: str) -> tuple[str, str, str]:
@@ -53,6 +57,7 @@ def _proactive_channel_system(channel_name: str, subagent_key: str, *, leadershi
         "Only return content as an array when there are multiple genuinely separate topics that deserve separate emoji reactions and separate conversation threads. "
         "Do not split one update across multiple near-duplicate messages. "
         "Avoid newsletter-style posts, multipart labels like 'Part 1', or separator lines.\n\n"
+        f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance(allow_in_sensitive=leadership)}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_update", '
@@ -95,6 +100,7 @@ def _interactive_system(channel_name):
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
         "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
+        f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance()}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
@@ -133,6 +139,7 @@ def _clanops_system(channel_name):
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
         "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
+        f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance(allow_in_sensitive=True)}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
@@ -151,6 +158,7 @@ def _reception_system():
         purpose,
         channel_context,
         "Don't use tools — just answer from the roster provided.\n\n"
+        f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance()}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "reception_response", "content": "your Discord-ready response"}',

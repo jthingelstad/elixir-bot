@@ -232,6 +232,8 @@ def snapshot_player_profile(player_data, conn=None):
         _store_raw_payload(conn, "player", _tag_key(tag), player_data)
         _upsert_member_metadata(conn, member_id, **_years_played_metadata_fields(player_data, fetched_at=fetched_at))
         conn.commit()
+        if previous is None:
+            return []
         signals = []
         old_level = previous["exp_level"] if previous else None
         new_level = player_data.get("expLevel")

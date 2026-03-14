@@ -136,13 +136,13 @@ Each activity declares:
 - whether manual triggering is allowed
 
 Current recurring activities:
-- **Every 47 minutes with up to 300s jitter, 24/7** — `clan-awareness` via `_clan_awareness_tick()`
+- **Every 30 minutes with up to 900s jitter, 24/7** — `clan-awareness` via `_clan_awareness_tick()`
   Processes non-war clan signals and routes outcomes into channels like `#clan-events`, `#leader-lounge`, and sometimes `#arena-relay`.
-- **Every 15 minutes** — `war-awareness` via `_war_awareness_tick()`
+- **Every 30 minutes with up to 900s jitter** — `war-awareness` via `_war_awareness_tick()`
   Processes war-only signals and owns scheduled River Race coordination across `#river-race`, `#arena-relay`, and optional leadership notes.
-- **Every 30 minutes by default** — `player-progression` via `_player_intel_refresh()`
+- **Every 30 minutes with up to 900s jitter** — `player-progression` via `_player_intel_refresh()`
   Refreshes stored player profile and battle intelligence, then emits progression signals to `#player-progress`.
-- **Daily at 1:00 PM Chicago with up to 60 minutes jitter** — `daily-clan-insight` via `_ask_elixir_daily_insight()`
+- **Daily at 12:00 PM Chicago with up to 30 minutes jitter** — `daily-clan-insight` via `_ask_elixir_daily_insight()`
   Posts one short data-driven hidden fact in `#ask-elixir` when the data supports a genuinely interesting insight.
 - **Friday 7:00 PM Chicago** — `leadership-review` via `_clanops_weekly_review()`
   Posts the weekly leadership review in `#leader-lounge`.

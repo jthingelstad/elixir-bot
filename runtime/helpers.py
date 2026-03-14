@@ -1517,9 +1517,6 @@ async def _share_channel_result(result, workflow):
     target_channel = _bot().get_channel(target["id"])
     if not target_channel:
         return
-    target_subagent = (target.get("subagent") or target.get("role") or "").strip().lower()
-    if target_subagent in {"arena-relay", "arena_relay"}:
-        share_content = _with_leader_ping(share_content)
     await _post_to_elixir(target_channel, {"content": share_content})
     await asyncio.to_thread(
         db.save_message,

@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import discord
 import cr_api
@@ -23,13 +23,15 @@ from runtime.app import (
     bot,
     log,
 )
-from runtime.helpers import _channel_scope, _get_singleton_channel_id, _with_leader_ping
+from runtime.helpers import _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
 from runtime.system_signals import queue_startup_system_signals
 
 _WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
 _PROMOTION_DISCORD_REQUIRED_TEXT = "Required Trophies: [2000]"
 _PROMOTION_REDDIT_REQUIRED_TOKEN = "[2000]"
+ARENA_RELAY_MAX_POSTS_PER_LOOKBACK = int(os.getenv("ARENA_RELAY_MAX_POSTS_PER_LOOKBACK", "4"))
+ARENA_RELAY_LOOKBACK_DAYS = int(os.getenv("ARENA_RELAY_LOOKBACK_DAYS", "7"))
 
 
 async def _post_to_elixir(*args, **kwargs):
@@ -58,6 +60,31 @@ def _channel_config_by_key(channel_key: str) -> dict:
 def _signal_group_needs_recap_memory(signals):
     recap_types = {"war_battle_day_complete", "war_week_complete", "war_completed", "war_season_complete"}
     return any((signal.get("type") in recap_types) for signal in (signals or []))
+
+
+def _parse_recorded_at(value: str | None) -> datetime | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _arena_relay_cap_reached(recent_posts, *, now=None) -> bool:
+    if ARENA_RELAY_MAX_POSTS_PER_LOOKBACK <= 0 or ARENA_RELAY_LOOKBACK_DAYS <= 0:
+        return False
+    current = now or datetime.now(timezone.utc)
+    cutoff = current - timedelta(days=ARENA_RELAY_LOOKBACK_DAYS)
+    recent_count = 0
+    for post in recent_posts or []:
+        recorded_at = _parse_recorded_at(post.get("recorded_at"))
+        if recorded_at is None:
+            continue
+        if recorded_at >= cutoff:
+            recent_count += 1
+    return recent_count >= ARENA_RELAY_MAX_POSTS_PER_LOOKBACK
 
 
 def _build_outcome_context(outcome, signals, clan, war):
@@ -174,6 +201,25 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         10,
         "assistant",
     )
+    if channel_config["subagent_key"] == "arena-relay" and not outcome.get("required", True):
+        if _arena_relay_cap_reached(recent_posts):
+            await asyncio.to_thread(
+                db.upsert_signal_outcome,
+                outcome["source_signal_key"],
+                outcome["source_signal_type"],
+                outcome["target_channel_key"],
+                outcome["target_channel_id"],
+                outcome["intent"],
+                required=False,
+                delivery_status="skipped",
+                payload=outcome.get("payload"),
+                error_detail=(
+                    f"arena-relay cap reached: {ARENA_RELAY_MAX_POSTS_PER_LOOKBACK} posts "
+                    f"in the last {ARENA_RELAY_LOOKBACK_DAYS} days"
+                ),
+                mark_attempt=True,
+            )
+            return True
     memory_context = await asyncio.to_thread(
         build_subagent_memory_context,
         channel_config,
@@ -216,9 +262,6 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
 
         result = await _app._apply_member_refs_to_result(result)
         posts = _app._entry_posts(result)
-        if channel_config["subagent_key"] == "arena-relay":
-            posts = [_with_leader_ping(post) for post in posts]
-            result["content"] = posts if len(posts) > 1 else (posts[0] if posts else "")
         await _post_to_elixir(channel, result)
         summary = result.get("summary")
         event_type = result.get("event_type") or outcome["intent"]
@@ -1081,10 +1124,12 @@ def _player_intel_refresh_minutes() -> int:
 
 PLAYER_INTEL_REFRESH_MINUTES = _player_intel_refresh_minutes()
 PLAYER_INTEL_REFRESH_HOURS = PLAYER_INTEL_REFRESH_MINUTES / 60
-WAR_AWARENESS_INTERVAL_MINUTES = int(os.getenv("WAR_AWARENESS_INTERVAL_MINUTES", "15"))
+WAR_AWARENESS_INTERVAL_MINUTES = int(os.getenv("WAR_AWARENESS_INTERVAL_MINUTES", "30"))
+WAR_AWARENESS_JITTER_SECONDS = int(os.getenv("WAR_AWARENESS_JITTER_SECONDS", "900"))
 PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "5"))
 PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "1"))
 PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))
+PLAYER_INTEL_REFRESH_JITTER_SECONDS = int(os.getenv("PLAYER_INTEL_REFRESH_JITTER_SECONDS", "900"))
 CLANOPS_WEEKLY_REVIEW_DAY = os.getenv("CLANOPS_WEEKLY_REVIEW_DAY", "fri")
 CLANOPS_WEEKLY_REVIEW_HOUR = int(os.getenv("CLANOPS_WEEKLY_REVIEW_HOUR", "19"))
 WEEKLY_RECAP_DAY = os.getenv("WEEKLY_RECAP_DAY", "mon")
