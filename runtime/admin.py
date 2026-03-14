@@ -22,6 +22,7 @@ COMMAND_ALIASES = {
 COMMAND_HELP = {
     "help": "Show the Elixir operator help page.",
     "status": "Show Elixir runtime health, last jobs, and current telemetry.",
+    "db-status": "Show the SQLite database status, including table row counts and approximate sizes.",
     "schedule": "Show the configured job cadence and next scheduler runs.",
     "clan-status": "Fetch live clan/war data and print the operational clan status report.",
     "war-status": "Fetch live clan/war data and print Elixir's current war-awareness report.",
@@ -87,6 +88,7 @@ LEADER_ONLY_COMMANDS = {
 COMMAND_ORDER = [
     "help",
     "status",
+    "db-status",
     "schedule",
     "clan-status",
     "war-status",
@@ -123,6 +125,7 @@ COMMAND_ORDER = [
 ZERO_ARG_COMMANDS = {
     "help",
     "status",
+    "db-status",
     "schedule",
     "clan-status",
     "war-status",
@@ -277,7 +280,7 @@ def parse_admin_command(text: str, *, require_prefix: bool = False):
 
     if command == "help" and not extra:
         return {"command": "help", "preview": preview, "short": False, "args": {}}
-    if command in {"status", "schedule", "war-status"} and not extra:
+    if command in {"status", "db-status", "schedule", "war-status"} and not extra:
         return {"command": command, "preview": preview, "short": False, "args": {}}
     if command == "clan-status" and not extra:
         return {"command": command, "preview": preview, "short": short, "args": {}}
@@ -986,6 +989,8 @@ async def dispatch_admin_command(command: str, *, preview: bool = False, short: 
         return render_admin_help()
     if command == "status":
         return elixir._build_status_report()
+    if command == "db-status":
+        return elixir._build_db_status_report()
     if command == "schedule":
         return elixir._build_schedule_report()
     if command == "clan-status":

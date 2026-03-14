@@ -951,6 +951,21 @@ def test_dispatch_admin_command_handles_memory():
     )
 
 
+def test_dispatch_admin_command_handles_db_status():
+    with patch("elixir._build_db_status_report", return_value="**Elixir DB Status**\n- Tables:") as mock_report:
+        result = asyncio.run(
+            elixir.dispatch_admin_command(
+                "db-status",
+                preview=False,
+                short=False,
+                args={},
+            )
+        )
+
+    assert result == "**Elixir DB Status**\n- Tables:"
+    mock_report.assert_called_once_with()
+
+
 def test_dispatch_admin_command_handles_war_status():
     with (
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS"}, {"clans": [{}, {}]}))) as mock_load,
@@ -1000,6 +1015,39 @@ def test_slash_clan_list_full_passes_flag_to_admin_dispatch():
     )
     response.defer.assert_awaited_once_with(ephemeral=True)
     interaction.edit_original_response.assert_awaited_once_with(content="full list")
+    followup.send.assert_not_awaited()
+
+
+def test_slash_db_status_dispatches_to_admin():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+    db_status_command = root.get_command("db-status")
+
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    followup = SimpleNamespace(send=AsyncMock())
+    interaction = SimpleNamespace(
+        channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
+        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[]),
+        response=response,
+        followup=followup,
+        edit_original_response=AsyncMock(),
+    )
+
+    with (
+        patch("runtime.app._is_clanops_channel", return_value=True),
+        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="db report")) as mock_dispatch,
+    ):
+        asyncio.run(db_status_command.callback(interaction))
+
+    mock_dispatch.assert_awaited_once_with(
+        "db-status",
+        preview=False,
+        short=False,
+        args={},
+    )
+    response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.edit_original_response.assert_awaited_once_with(content="db report")
     followup.send.assert_not_awaited()
 
 
@@ -1441,6 +1489,39 @@ def test_on_message_hints_for_bare_clanops_clan_status_command():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_hints_for_bare_clanops_db_status_command():
+    message = _make_message(200, "clan-ops", "db status")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 200,
+            "name": "#clan-ops",
+            "role": "clanops",
+            "workflow": "clanops",
+            "mention_required": False,
+            "allow_proactive": True,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.dispatch_admin_command", new=AsyncMock()) as mock_admin,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    message.reply.assert_awaited_once()
+    assert "Use `/elixir ...`" in message.reply.await_args.args[0]
+    assert mock_save.call_args_list[1].kwargs["event_type"] == "clanops_command_hint"
+    mock_admin.assert_not_awaited()
+    mock_respond.assert_not_called()
+    mock_process.assert_not_awaited()
+
+
 def test_on_message_hints_for_bare_clanops_war_status_command():
     message = _make_message(200, "clan-ops", "war status")
 
@@ -1781,6 +1862,33 @@ def test_build_war_status_report_summarizes_current_war_awareness():
     assert "Waiting on: Vijay, Ditika" in report
     assert "This season: 2 race(s) | total fame 30,100 | fame/member 1,204.00 | top King Levy 6,200, Finn 5,800" in report
     assert "Live feed: 5 clan(s) in the current river race" in report
+
+
+def test_build_db_status_report_lists_table_counts_and_sizes():
+    with patch("elixir.db.get_database_status", return_value={
+        "db_path": "/tmp/elixir.db",
+        "schema_version": 15,
+        "db_size_bytes": 40960,
+        "wal_size_bytes": 8192,
+        "shm_size_bytes": 32768,
+        "page_size": 4096,
+        "page_count": 10,
+        "freelist_count": 2,
+        "journal_mode": "wal",
+        "table_count": 3,
+        "tables": [
+            {"name": "messages", "row_count": 1200, "approx_bytes": 24576},
+            {"name": "war_participant_snapshots", "row_count": 320, "approx_bytes": 12288},
+            {"name": "members", "row_count": 50, "approx_bytes": 4096},
+        ],
+    }):
+        report = elixir._build_db_status_report()
+
+    assert report.startswith("**Elixir DB Status**")
+    assert "File: `elixir.db` | schema v15 | size 40.0 KB | WAL 8.0 KB | SHM 32.0 KB" in report
+    assert "Storage: page size 4,096 B | pages 10 | free pages 2 | journal wal | tables 3" in report
+    assert "messages: 1,200 rows | 24.0 KB" in report
+    assert "war_participant_snapshots: 320 rows | 12.0 KB" in report
 
 
 def test_build_clan_status_report_uses_non_war_risk_watchlist():
