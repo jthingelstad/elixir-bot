@@ -29,6 +29,7 @@ from runtime.admin import admin_command_requires_leader, dispatch_admin_command,
 from runtime.channel_router import route_message
 from runtime.discord_commands import register_elixir_app_commands
 from runtime import onboarding
+from runtime import prompt_feedback
 from runtime import status as runtime_status
 from runtime.emoji import sync_emoji
 from runtime.system_signals import queue_startup_system_signals
@@ -633,6 +634,16 @@ def _build_clanops_command_hint() -> str:
 @bot.event
 async def on_message(message):
     await route_message(message)
+
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    await prompt_feedback.handle_raw_reaction_add(payload)
+
+
+@bot.event
+async def on_raw_reaction_remove(payload):
+    await prompt_feedback.handle_raw_reaction_remove(payload)
 
 
 PID_FILE = os.path.join(os.path.dirname(__file__), "elixir.pid")

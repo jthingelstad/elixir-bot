@@ -266,8 +266,8 @@ If GitHub-backed publishes are working, Elixir should also post operational visi
 When Discord prompt generation fails or falls back:
 
 ```bash
-venv/bin/python scripts/review_prompt_failures.py --limit 20
-venv/bin/python scripts/review_prompt_failures.py --workflow clanops --json
+venv/bin/python scripts/review_agent_feedback.py --limit 20
+venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
 ```
 
 The backing data lives in the `prompt_failures` table in `elixir.db`.
