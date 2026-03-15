@@ -143,6 +143,41 @@ def test_on_message_routes_ask_elixir_without_mention():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_routes_reception_without_mention():
+    message = _make_message(1476456514121109514, "reception", "how do I get verified?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1476456514121109514,
+            "name": "#reception",
+            "subagent": "reception",
+            "workflow": "reception",
+            "reply_policy": "open_channel",
+            "memory_scope": "public",
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.build_memory_context", return_value={}),
+        patch("elixir.db.save_message"),
+        patch("runtime.channel_router.cr_api.get_clan", return_value={"memberList": [{"tag": "#ABC123", "name": "King Levy"}]}),
+        patch(
+            "runtime.channel_router.elixir_agent.respond_in_reception",
+            return_value={"event_type": "reception_response", "content": "Set your server nickname to your Clash name and I can help verify you."},
+        ) as mock_respond,
+        patch("elixir._reply_text", new=AsyncMock()) as mock_reply,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    assert mock_respond.call_args.kwargs["question"] == "how do I get verified?"
+    mock_reply.assert_awaited_once_with(message, "Set your server nickname to your Clash name and I can help verify you.")
+    mock_process.assert_not_awaited()
+
+
 def test_on_message_does_not_save_unsent_interactive_reply():
     message = _make_message(100, "member-chat", "<@999> how am I doing?")
 

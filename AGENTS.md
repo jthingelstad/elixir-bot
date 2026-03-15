@@ -122,8 +122,6 @@ Current primary subagents:
 - `promote-the-clan` — recruiting copy for Discord and the website
 - `poapkings-com` — website publish visibility only
 
-`#elixir` is legacy. Leave it present in Discord if needed, but do not route new automated Elixir posts there.
-
 ## Recurring Activities
 
 The canonical source of truth for scheduled automated work is `runtime/activities.py`, not scattered scheduler calls or prose docs.
