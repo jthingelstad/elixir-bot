@@ -1051,7 +1051,7 @@ async def _clan_awareness_tick():
         await asyncio.to_thread(queue_startup_system_signals)
 
         # Run the clan-awareness tick — fetches data, snapshots, detects signals
-        tick_result = heartbeat.tick(include_war=False)
+        tick_result = await asyncio.to_thread(heartbeat.tick, include_war=False)
         if tick_result.clan.get("memberList"):
             _app._clear_cr_api_failure_alert_if_recovered()
         else:
@@ -1083,7 +1083,11 @@ async def _war_awareness_tick():
     """Dedicated 24/7 war observer so day rollovers and recaps are not tied to Chicago daytime."""
     runtime_status.mark_job_start("war_awareness")
     try:
-        tick_result = heartbeat.tick(include_nonwar=False, include_war=True)
+        tick_result = await asyncio.to_thread(
+            heartbeat.tick,
+            include_nonwar=False,
+            include_war=True,
+        )
         if tick_result.clan.get("memberList"):
             _app._clear_cr_api_failure_alert_if_recovered()
         else:
@@ -1144,7 +1148,7 @@ async def _site_data_refresh():
         return
     try:
         try:
-            clan = cr_api.get_clan()
+            clan = await asyncio.to_thread(cr_api.get_clan)
             _app._clear_cr_api_failure_alert_if_recovered()
         except Exception:
             log.error("Site data refresh: CR API failed")
@@ -1156,8 +1160,8 @@ async def _site_data_refresh():
             runtime_status.mark_job_success("site_data_refresh", "no member data")
             return
 
-        roster_data = poap_kings_site.build_roster_data(clan)
-        clan_stats = poap_kings_site.build_clan_data(clan)
+        roster_data = await asyncio.to_thread(poap_kings_site.build_roster_data, clan)
+        clan_stats = await asyncio.to_thread(poap_kings_site.build_clan_data, clan)
         publish_result = await asyncio.to_thread(
             _publish_poap_kings_site_or_raise,
             {"roster": roster_data, "clan": clan_stats},
@@ -1184,13 +1188,13 @@ async def _site_content_cycle():
         return
     try:
         try:
-            clan = cr_api.get_clan()
+            clan = await asyncio.to_thread(cr_api.get_clan)
             _app._clear_cr_api_failure_alert_if_recovered()
         except Exception:
             await _app._maybe_alert_cr_api_failure("site content cycle")
             clan = {}
         try:
-            war = cr_api.get_current_war()
+            war = await asyncio.to_thread(cr_api.get_current_war)
         except Exception:
             await _app._maybe_alert_cr_api_failure("site content war refresh")
             war = {}
@@ -1199,16 +1203,28 @@ async def _site_content_cycle():
         roster_data = None
         payloads = {}
         if clan.get("memberList"):
-            roster_data = poap_kings_site.build_roster_data(clan, include_cards=True)
-            clan_stats = poap_kings_site.build_clan_data(clan)
+            roster_data = await asyncio.to_thread(
+                poap_kings_site.build_roster_data,
+                clan,
+                include_cards=True,
+            )
+            clan_stats = await asyncio.to_thread(poap_kings_site.build_clan_data, clan)
             payloads["roster"] = roster_data
             payloads["clan"] = clan_stats
 
         # Generate home message
         try:
-            prev_home = poap_kings_site.load_published("home") or poap_kings_site.load_current("home")
+            prev_home = await asyncio.to_thread(poap_kings_site.load_published, "home")
+            if prev_home is None:
+                prev_home = await asyncio.to_thread(poap_kings_site.load_current, "home")
             prev_msg = prev_home.get("message", "") if prev_home else ""
-            home_text = elixir_agent.generate_home_message(clan, war, prev_msg, roster_data=roster_data)
+            home_text = await asyncio.to_thread(
+                elixir_agent.generate_home_message,
+                clan,
+                war,
+                prev_msg,
+                roster_data=roster_data,
+            )
         except Exception as e:
             log.error("Home message error: %s", e)
             home_text = None
@@ -1273,29 +1289,73 @@ async def _player_intel_refresh():
 
     refreshed = 0
     progression_signals = []
+    profile_failures = 0
+    battle_log_failures = 0
+    failed_targets = 0
+    processing_failures = 0
     for target in targets:
         tag = target["tag"]
         try:
+            profile_ok = False
+            battle_log_ok = False
             profile = await asyncio.to_thread(cr_api.get_player, tag)
+            if profile is not None:
+                profile_ok = True
+            else:
+                profile_failures += 1
             if profile:
                 profile_signals = await asyncio.to_thread(db.snapshot_player_profile, profile)
                 if isinstance(profile_signals, list) and profile_signals:
                     progression_signals.extend(profile_signals)
             battle_log = await asyncio.to_thread(cr_api.get_player_battle_log, tag)
+            if battle_log is not None:
+                battle_log_ok = True
+            else:
+                battle_log_failures += 1
             if battle_log:
                 battle_signals = await asyncio.to_thread(db.snapshot_player_battlelog, tag, battle_log)
                 if isinstance(battle_signals, list) and battle_signals:
                     progression_signals.extend(battle_signals)
-            refreshed += 1
+            if profile_ok or battle_log_ok:
+                refreshed += 1
+            else:
+                failed_targets += 1
             await asyncio.sleep(PLAYER_INTEL_REQUEST_SPACING_SECONDS)
         except Exception as e:
+            processing_failures += 1
+            failed_targets += 1
             log.warning("Player intel refresh failed for %s: %s", tag, e)
 
     if progression_signals:
         await _deliver_signal_group(progression_signals, clan, war)
 
-    log.info("Player intel refresh complete: refreshed %d members", refreshed)
-    runtime_status.mark_job_success("player_intel_refresh", f"refreshed {refreshed} member(s)")
+    if profile_failures or battle_log_failures:
+        await _app._maybe_alert_cr_api_failure("player intel refresh")
+
+    total_targets = len(targets)
+    failure_summary = []
+    if profile_failures:
+        failure_summary.append(f"profile failures {profile_failures}")
+    if battle_log_failures:
+        failure_summary.append(f"battle log failures {battle_log_failures}")
+    if failed_targets:
+        failure_summary.append(f"full target failures {failed_targets}")
+    if processing_failures:
+        failure_summary.append(f"processing failures {processing_failures}")
+
+    if refreshed == 0 and failure_summary:
+        detail = f"refreshed 0 of {total_targets} member(s); " + "; ".join(failure_summary)
+        log.error("Player intel refresh failed: %s", detail)
+        runtime_status.mark_job_failure("player_intel_refresh", detail)
+        return
+
+    summary = f"refreshed {refreshed} of {total_targets} member(s)"
+    if failure_summary:
+        summary = f"{summary}; " + "; ".join(failure_summary)
+        log.warning("Player intel refresh completed with partial failures: %s", summary)
+    else:
+        log.info("Player intel refresh complete: %s", summary)
+    runtime_status.mark_job_success("player_intel_refresh", summary)
 
 
 async def _clanops_weekly_review():

@@ -7,7 +7,9 @@ import os
 import re
 import signal
 import logging
+import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 
 import discord
@@ -636,18 +638,105 @@ async def on_message(message):
 PID_FILE = os.path.join(os.path.dirname(__file__), "elixir.pid")
 
 
+def _read_pid_file() -> int | None:
+    try:
+        with open(PID_FILE) as f:
+            raw = f.read().strip()
+    except FileNotFoundError:
+        return None
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        payload = raw
+    if isinstance(payload, dict):
+        pid = payload.get("pid")
+    else:
+        pid = payload
+    try:
+        return int(pid)
+    except (TypeError, ValueError):
+        return None
+
+
+def _write_pid_file() -> None:
+    payload = {
+        "pid": os.getpid(),
+        "written_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "cwd": os.getcwd(),
+        "entrypoint": "elixir.py",
+    }
+    with open(PID_FILE, "w") as f:
+        json.dump(payload, f)
+
+
+def _process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _process_command(pid: int) -> str:
+    try:
+        return subprocess.check_output(
+            ["ps", "-p", str(pid), "-o", "command="],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return ""
+
+
+def _pid_looks_like_elixir(pid: int) -> bool:
+    command = _process_command(pid).lower()
+    if not command:
+        return False
+    markers = {
+        "elixir.py",
+        "runtime.app",
+        os.path.basename(os.path.dirname(__file__)).lower(),
+    }
+    return any(marker and marker in command for marker in markers)
+
+
+def _wait_for_process_exit(pid: int, timeout_seconds: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if not _process_exists(pid):
+            return True
+        time.sleep(0.1)
+    return not _process_exists(pid)
+
+
 def _acquire_pid_file():
     """Write current PID to file, killing any stale process first."""
     if os.path.exists(PID_FILE):
-        try:
-            with open(PID_FILE) as f:
-                old_pid = int(f.read().strip())
-            os.kill(old_pid, signal.SIGTERM)
-            log.info("Killed stale process %d", old_pid)
-        except (ValueError, ProcessLookupError, PermissionError):
-            pass  # PID invalid, process gone, or not ours
-    with open(PID_FILE, "w") as f:
-        f.write(str(os.getpid()))
+        old_pid = _read_pid_file()
+        if old_pid and old_pid != os.getpid() and _process_exists(old_pid):
+            if _pid_looks_like_elixir(old_pid):
+                try:
+                    os.kill(old_pid, signal.SIGTERM)
+                except PermissionError as exc:
+                    raise RuntimeError(
+                        f"Existing Elixir process {old_pid} could not be terminated."
+                    ) from exc
+                if not _wait_for_process_exit(old_pid):
+                    raise RuntimeError(
+                        f"Existing Elixir process {old_pid} did not exit after SIGTERM."
+                    )
+                log.info("Stopped prior Elixir process %d", old_pid)
+            else:
+                log.warning(
+                    "Ignoring stale pid file %s pointing to non-Elixir process %d",
+                    PID_FILE,
+                    old_pid,
+                )
+    _write_pid_file()
 
 
 def _cleanup_pid_file():

@@ -558,17 +558,20 @@ async def route_message(message):
                     await message.reply("Having a hiccup. Try again in a sec.")
                     return
                 await app._reply_text(message, content)
-                await asyncio.to_thread(
-                    db.save_message,
-                    scope,
-                    "assistant",
-                    content,
-                    channel_id=message.channel.id,
-                    channel_name=getattr(message.channel, "name", None),
-                    channel_kind=str(message.channel.type),
-                    workflow="reception",
-                    event_type=result.get("event_type"),
-                )
+                try:
+                    await asyncio.to_thread(
+                        db.save_message,
+                        scope,
+                        "assistant",
+                        content,
+                        channel_id=message.channel.id,
+                        channel_name=getattr(message.channel, "name", None),
+                        channel_kind=str(message.channel.type),
+                        workflow="reception",
+                        event_type=result.get("event_type"),
+                    )
+                except Exception as exc:
+                    app.log.error("reception reply save error: %s", exc, exc_info=True)
             except Exception as e:
                 app.log.error("reception error: %s", e)
                 app._log_prompt_failure(
@@ -703,24 +706,28 @@ async def route_message(message):
                     if mentioned or allows_open_channel_reply:
                         await message.reply(app._fallback_channel_response(raw_question, workflow))
                     return
-                await app._share_channel_result(result, workflow)
-
-                await asyncio.to_thread(
-                    db.save_message,
-                    conversation_scope,
-                    "assistant",
-                    content,
-                    channel_id=message.channel.id,
-                    channel_name=getattr(message.channel, "name", None),
-                    channel_kind=str(message.channel.type),
-                    discord_user_id=message.author.id,
-                    username=message.author.name,
-                    display_name=message.author.display_name,
-                    workflow=workflow,
-                    event_type=result.get("event_type"),
-                )
-
                 await app._reply_text(message, content)
+                try:
+                    await app._share_channel_result(result, workflow)
+                except Exception as exc:
+                    app.log.error("%s channel share error: %s", workflow, exc, exc_info=True)
+                try:
+                    await asyncio.to_thread(
+                        db.save_message,
+                        conversation_scope,
+                        "assistant",
+                        content,
+                        channel_id=message.channel.id,
+                        channel_name=getattr(message.channel, "name", None),
+                        channel_kind=str(message.channel.type),
+                        discord_user_id=message.author.id,
+                        username=message.author.name,
+                        display_name=message.author.display_name,
+                        workflow=workflow,
+                        event_type=result.get("event_type"),
+                    )
+                except Exception as exc:
+                    app.log.error("%s channel reply save error: %s", workflow, exc, exc_info=True)
             except Exception as e:
                 app.log.error("%s channel error: %s", workflow, e)
                 app._log_prompt_failure(
