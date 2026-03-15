@@ -242,7 +242,11 @@ def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
         "summary": "faster deck",
         "created_at": "2026-03-15T12:00:00",
     }
-    channel = SimpleNamespace(fetch_message=AsyncMock(return_value=SimpleNamespace(reply=AsyncMock(return_value=SimpleNamespace(id=654)))))
+    reacted_message = SimpleNamespace(
+        add_reaction=AsyncMock(),
+        reply=AsyncMock(return_value=SimpleNamespace(id=654)),
+    )
+    channel = SimpleNamespace(fetch_message=AsyncMock(return_value=reacted_message))
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -259,8 +263,53 @@ def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
 
     mock_upsert.assert_called_once()
     channel.fetch_message.assert_awaited_once_with(987)
-    channel.fetch_message.return_value.reply.assert_awaited_once()
+    reacted_message.add_reaction.assert_awaited_once_with("✅")
+    reacted_message.reply.assert_awaited_once()
     mock_mark.assert_called_once_with(44, retry_message_id=654)
+
+
+def test_on_raw_reaction_add_records_positive_feedback_and_acknowledges_receipt():
+    payload = SimpleNamespace(
+        channel_id=1482368505058955467,
+        message_id=987,
+        user_id=123,
+        emoji="👍",
+        member=SimpleNamespace(bot=False),
+    )
+    assistant_row = {
+        "message_id": 77,
+        "discord_message_id": "987",
+        "thread_id": 5,
+        "channel_id": "1482368505058955467",
+        "discord_user_id": "123",
+        "author_type": "assistant",
+        "workflow": "interactive",
+        "event_type": "channel_response",
+        "content": "Try a faster cycle deck.",
+        "summary": "faster deck",
+        "created_at": "2026-03-15T12:00:00",
+    }
+    reacted_message = SimpleNamespace(add_reaction=AsyncMock(), reply=AsyncMock())
+    channel = SimpleNamespace(fetch_message=AsyncMock(return_value=reacted_message))
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
+        patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 45, "became_active_down": False}) as mock_upsert,
+        patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
+        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: channel)),
+    ):
+        asyncio.run(elixir.on_raw_reaction_add(payload))
+
+    mock_upsert.assert_called_once()
+    channel.fetch_message.assert_awaited_once_with(987)
+    reacted_message.add_reaction.assert_awaited_once_with("✅")
+    reacted_message.reply.assert_not_awaited()
+    mock_mark.assert_not_called()
 
 
 def test_on_raw_reaction_add_ignores_non_owner_feedback():
