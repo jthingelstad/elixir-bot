@@ -80,6 +80,7 @@ Current migrations:
 - `_migration_2` — generated roster profile fields in `member_metadata`
 - `_migration_3` — promote trusted join dates into metadata
 - `_migration_4` — rename `member_metadata.joined_at_override` to `joined_at`
+- `_migration_17` — signal detector cursors for forward-only war processing
 
 ## Site Content System
 
@@ -117,7 +118,7 @@ Current primary subagents:
 - `player-progress` — milestone and progression celebrations
 - `clan-events` — joins, promotions, anniversaries, and clan recognitions
 - `arena-relay` — 160-character Clan Chat relay copy
-- `announcements` — weekly recap only
+- `announcements` — weekly recap and clan-wide Elixir system updates
 - `promote-the-clan` — recruiting copy for Discord and the website
 - `poapkings-com` — website publish visibility only
 
@@ -138,8 +139,10 @@ Each activity declares:
 Current recurring activities:
 - **Every 30 minutes with up to 900s jitter, 24/7** — `clan-awareness` via `_clan_awareness_tick()`
   Processes non-war clan signals and routes outcomes into channels like `#clan-events`, `#leader-lounge`, and sometimes `#arena-relay`.
-- **Every 30 minutes with up to 900s jitter** — `war-awareness` via `_war_awareness_tick()`
-  Processes war-only signals and owns scheduled River Race coordination across `#river-race`, `#arena-relay`, and optional leadership notes.
+- **Every hour at :00 Chicago, no jitter** — `war-poll` via `_war_poll_tick()`
+  Polls live River Race state and stores the hourly war snapshot pipeline.
+- **Every hour at :05 Chicago, no jitter** — `war-awareness` via `_war_awareness_tick()`
+  Reads stored war data, processes war-only signals, and owns scheduled River Race coordination across `#river-race`, `#arena-relay`, and optional leadership notes.
 - **Every 30 minutes with up to 900s jitter** — `player-progression` via `_player_intel_refresh()`
   Refreshes stored player profile and battle intelligence, then emits progression signals to `#player-progress`.
 - **Daily at 12:00 PM Chicago with up to 30 minutes jitter** — `daily-clan-insight` via `_ask_elixir_daily_insight()`
@@ -264,9 +267,11 @@ Elixir’s core member/leader questions should be answered from structured query
 - war intelligence: `get_current_war_status`, `get_war_deck_status_today`, `get_member_war_status`, `get_war_season_summary`, `get_members_without_war_participation`, `compare_member_war_to_clan_average`
 - trend/support signals: `get_trophy_drops`, `get_members_on_losing_streak`, `get_trending_war_contributors`, `get_members_at_risk`
 
-### No templates — all LLM
+### Mostly LLM
 
-Every message Elixir sends is LLM-generated. No hardcoded message templates. Events, scheduled activities, startup announcements, website publish notices, and channel replies pass context to the LLM, which crafts the message using Elixir's identity from `SOUL.md` + `PURPOSE.md`, channel contract from `DISCORD.md`, and lane behavior from `subagents/*.md`.
+Almost every message Elixir sends is LLM-generated. Events, scheduled activities, website publish notices, and channel replies pass context to the LLM, which crafts the message using Elixir's identity from `SOUL.md` + `PURPOSE.md`, channel contract from `DISCORD.md`, and lane behavior from `subagents/*.md`.
+
+Exception: preauthored system-signal announcements may be written directly in code and delivered without LLM rewriting when deterministic wording matters.
 
 ### Portability
 

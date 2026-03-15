@@ -29,7 +29,7 @@ Elixir currently handles four main kinds of work:
    - a short relay-ready welcome in `#arena-relay`
 
 3. Scheduled recurring activities
-   Elixir runs recurring activities like `clan-awareness`, `war-awareness`, `player-progression`, `weekly-recap`, `promotion-content`, and the daily `#ask-elixir` hidden-fact post.
+   Elixir runs recurring activities like `clan-awareness`, `war-poll`, `war-awareness`, `player-progression`, `weekly-recap`, `promotion-content`, and the daily `#ask-elixir` hidden-fact post.
 
 4. POAP KINGS website publishing
    Elixir generates and publishes structured data for poapkings.com, pushes it to GitHub, and reports publish outcomes in `#poapkings-com`.
@@ -42,7 +42,7 @@ Primary public/proactive lanes:
 - `#river-race` for River Race coordination and battle-day urgency
 - `#player-progress` for player milestones and progression
 - `#clan-events` for joins, promotions, anniversaries, and clan recognitions
-- `#announcements` for the weekly recap only
+- `#announcements` for the weekly recap and important clan-wide Elixir updates
 - `#arena-relay` for 160-character Clan Chat relay copy
 - `#promote-the-clan` for recruiting copy members can reuse
 - `#poapkings-com` for website publish visibility
@@ -66,8 +66,10 @@ Recurring automated work is defined in [runtime/activities.py](runtime/activitie
 Current activities:
 - `clan-awareness`
   Every 30 minutes with up to 15 minutes of jitter, 24/7. Processes non-war clan signals and routes outcomes to subagents like `clan-events` and `leader-lounge`.
+- `war-poll`
+  Every hour at `:00` CT with no jitter. Owns scheduled live war ingest and persists the River Race snapshot pipeline.
 - `war-awareness`
-  Every 30 minutes with up to 15 minutes of jitter. Owns scheduled River Race coordination and war-only signal handling.
+  Every hour at `:05` CT with no jitter. Reads stored war data, then owns scheduled River Race coordination and war-only signal handling.
 - `player-progression`
   Every 30 minutes with up to 15 minutes of jitter. Refreshes player profiles and battle logs, then emits progression milestones.
 - `daily-clan-insight`

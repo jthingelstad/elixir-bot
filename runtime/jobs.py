@@ -16,6 +16,7 @@ from runtime import app as _app
 from runtime.channel_subagents import (
     build_subagent_memory_context,
     maybe_upsert_signal_memory,
+    OPTIONAL_PROGRESSION_SIGNAL_TYPES,
     plan_signal_outcomes,
 )
 from runtime.app import (
@@ -226,6 +227,9 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         signals=signals,
     )
     context = _build_outcome_context(outcome, signals, clan, war)
+    preauthored_result = None
+    if len(signals) == 1 and signals[0].get("signal_key"):
+        preauthored_result = _preauthored_system_signal_result(signals[0])
 
     try:
         channel_name = getattr(channel, "name", None)
@@ -234,15 +238,18 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         channel_kind = getattr(channel, "type", None)
         if channel_kind is not None:
             channel_kind = str(channel_kind)
-        result = await asyncio.to_thread(
-            elixir_agent.generate_channel_update,
-            channel_config["name"],
-            channel_config["subagent_key"],
-            context,
-            recent_posts=recent_posts,
-            memory_context=memory_context,
-            leadership=(channel_config["memory_scope"] == "leadership"),
-        )
+        if preauthored_result is not None:
+            result = preauthored_result
+        else:
+            result = await asyncio.to_thread(
+                elixir_agent.generate_channel_update,
+                channel_config["name"],
+                channel_config["subagent_key"],
+                context,
+                recent_posts=recent_posts,
+                memory_context=memory_context,
+                leadership=(channel_config["memory_scope"] == "leadership"),
+            )
         if result is None:
             status = "failed" if outcome.get("required", True) else "skipped"
             await asyncio.to_thread(
@@ -392,6 +399,27 @@ def _observation_signal_batches(signals):
     return batches
 
 
+def _progression_signal_batches(signals):
+    if not signals:
+        return []
+
+    required_signals = [
+        signal for signal in signals
+        if signal.get("type") not in OPTIONAL_PROGRESSION_SIGNAL_TYPES
+    ]
+    optional_signals = [
+        signal for signal in signals
+        if signal.get("type") in OPTIONAL_PROGRESSION_SIGNAL_TYPES
+    ]
+
+    batches = []
+    if required_signals:
+        batches.append(required_signals)
+    if optional_signals:
+        batches.append(optional_signals)
+    return batches
+
+
 def _system_signal_updates(signals):
     return [signal for signal in (signals or []) if signal.get("signal_key")]
 
@@ -416,9 +444,9 @@ def _build_system_signal_context(signal, channel_name):
         f"Post it for {channel_name}.",
         "Write exactly one Discord message. Do not split it into parts or a series.",
         "Write the full final Discord message yourself, including the subject line.",
-        "The first line MUST be a bolded subject line.",
-        "Include an Elixir custom emoji in that subject line using :emoji_name: shortcode syntax.",
-        "Do not restate the subject line or title again immediately after the first line.",
+        "For system updates, prefer starting with a bolded subject line as the first line.",
+        "If you use a subject line, include an Elixir custom emoji in it using :emoji_name: shortcode syntax.",
+        "If you use a subject line, do not restate that title again immediately after the first line.",
         "Do not mention hidden system mechanics or call it a system signal.",
         "Make it feel like a self-contained clan update from Elixir.",
         "",
@@ -433,6 +461,29 @@ def _build_system_signal_context(signal, channel_name):
         lines.append("details:")
         lines.extend(f"- {detail}" for detail in details)
     return "\n".join(lines)
+
+
+def _preauthored_system_signal_result(signal):
+    payload = (signal or {}).get("payload") or {}
+    content = (
+        payload.get("discord_content")
+        or payload.get("preauthored_discord_content")
+        or signal.get("discord_content")
+    )
+    content = (content or "").strip()
+    if not content:
+        return None
+    summary = (
+        payload.get("title")
+        or signal.get("title")
+        or signal.get("signal_key")
+        or "System update"
+    )
+    return {
+        "event_type": "channel_update",
+        "summary": summary,
+        "content": content,
+    }
 
 
 async def _post_system_signal_updates(signals, clan, war):
@@ -882,6 +933,17 @@ def _mark_delivered_signals(signals, *, today: str | None = None):
                     db.mark_announcement_sent(signal_date, "birthday", tag)
 
 
+def _persist_signal_detector_cursors(cursor_updates):
+    for update in cursor_updates or []:
+        db.upsert_signal_detector_cursor(
+            update.get("detector_key") or "",
+            update.get("scope_key") or "",
+            cursor_text=update.get("cursor_text"),
+            cursor_int=update.get("cursor_int"),
+            metadata=update.get("metadata"),
+        )
+
+
 async def _promotion_content_cycle():
     runtime_status.mark_job_start("promotion_content_cycle")
     if not poap_kings_site.site_enabled():
@@ -1079,30 +1141,58 @@ async def _clan_awareness_tick():
         runtime_status.mark_job_failure("clan_awareness", str(e))
 
 
-async def _war_awareness_tick():
-    """Dedicated 24/7 war observer so day rollovers and recaps are not tied to Chicago daytime."""
-    runtime_status.mark_job_start("war_awareness")
+async def _war_poll_tick():
+    """Predictable hourly war ingest for live state and race-log storage."""
+    runtime_status.mark_job_start("war_poll")
     try:
-        tick_result = await asyncio.to_thread(
-            heartbeat.tick,
-            include_nonwar=False,
-            include_war=True,
+        ingest_result = await asyncio.to_thread(
+            heartbeat.ingest_live_war_state,
+            refresh_race_log=True,
         )
-        if tick_result.clan.get("memberList"):
+        war = (ingest_result or {}).get("war") or {}
+        if war:
             _app._clear_cr_api_failure_alert_if_recovered()
         else:
-            await _app._maybe_alert_cr_api_failure("war awareness")
-        signals = tick_result.signals
+            log.info("War poll: no live war data returned")
+        detail = "war snapshot stored" if war else "no live war data"
+        if ingest_result.get("race_log_refreshed"):
+            detail = f"{detail}; river race log refreshed ({ingest_result.get('race_log_items', 0)} row(s) stored)"
+        runtime_status.mark_job_success("war_poll", detail)
+    except Exception as e:
+        log.error("War poll error: %s", e, exc_info=True)
+        await _app._maybe_alert_cr_api_failure("war poll")
+        runtime_status.mark_job_failure("war_poll", str(e))
+
+
+async def _war_awareness_tick():
+    """Stored-war observer that routes River Race signals on a fixed cadence."""
+    runtime_status.mark_job_start("war_awareness")
+    try:
+        detection_result = await asyncio.to_thread(
+            heartbeat.detect_war_signals_from_storage,
+        )
+        signals = detection_result.signals
 
         if not signals:
+            if detection_result.cursor_updates:
+                await asyncio.to_thread(_persist_signal_detector_cursors, detection_result.cursor_updates)
             runtime_status.mark_job_success("war_awareness", "no war signals")
             return
 
-        clan = tick_result.clan
-        war = tick_result.war
+        clan = detection_result.clan
+        war = detection_result.war
 
+        delivered_ok = True
         for signal_batch in _observation_signal_batches(signals):
-            await _deliver_signal_group(signal_batch, clan, war)
+            batch_ok = await _deliver_signal_group(signal_batch, clan, war)
+            delivered_ok = delivered_ok and batch_ok
+
+        if not delivered_ok:
+            runtime_status.mark_job_failure("war_awareness", "one or more war signal batches failed")
+            return
+
+        if detection_result.cursor_updates:
+            await asyncio.to_thread(_persist_signal_detector_cursors, detection_result.cursor_updates)
 
         runtime_status.mark_job_success("war_awareness", f"{len(signals)} war signal(s) processed")
     except Exception as e:
@@ -1128,8 +1218,8 @@ def _player_intel_refresh_minutes() -> int:
 
 PLAYER_INTEL_REFRESH_MINUTES = _player_intel_refresh_minutes()
 PLAYER_INTEL_REFRESH_HOURS = PLAYER_INTEL_REFRESH_MINUTES / 60
-WAR_AWARENESS_INTERVAL_MINUTES = int(os.getenv("WAR_AWARENESS_INTERVAL_MINUTES", "30"))
-WAR_AWARENESS_JITTER_SECONDS = int(os.getenv("WAR_AWARENESS_JITTER_SECONDS", "900"))
+WAR_POLL_MINUTE = int(os.getenv("WAR_POLL_MINUTE", "0"))
+WAR_AWARENESS_MINUTE = int(os.getenv("WAR_AWARENESS_MINUTE", "5"))
 PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "5"))
 PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "1"))
 PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))
@@ -1269,13 +1359,7 @@ async def _player_intel_refresh():
         return
 
     await asyncio.to_thread(db.snapshot_members, members)
-    try:
-        war = await asyncio.to_thread(cr_api.get_current_war)
-        if war:
-            await asyncio.to_thread(db.upsert_war_current_state, war)
-    except Exception:
-        await _app._maybe_alert_cr_api_failure("player intel war refresh")
-        war = {}
+    war = await asyncio.to_thread(db.get_current_war_status) or {}
 
     targets = await asyncio.to_thread(
         db.get_player_intel_refresh_targets,
@@ -1326,8 +1410,8 @@ async def _player_intel_refresh():
             failed_targets += 1
             log.warning("Player intel refresh failed for %s: %s", tag, e)
 
-    if progression_signals:
-        await _deliver_signal_group(progression_signals, clan, war)
+    for signal_batch in _progression_signal_batches(progression_signals):
+        await _deliver_signal_group(signal_batch, clan, war)
 
     if profile_failures or battle_log_failures:
         await _app._maybe_alert_cr_api_failure("player intel refresh")

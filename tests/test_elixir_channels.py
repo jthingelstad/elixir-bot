@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, PropertyMock, patch
 import elixir
 from runtime.activities import (
     list_registered_activities,
+    manual_activity_choices,
     register_scheduled_activities,
     schedule_specs_from_registry,
 )
@@ -673,8 +674,8 @@ def test_on_message_handles_explicit_member_deck_request_without_llm():
         patch("elixir.db.get_member_current_deck", return_value={
             "fetched_at": "2026-03-07T12:00:00",
             "cards": [
-                {"name": "Knight", "level": 16},
-                {"name": "Fireball", "level": 16},
+                {"name": "Knight", "level": 16, "supports_evo": True, "supports_hero": True, "mode_status_label": "Evo + Hero unlocked"},
+                {"name": "Fireball", "level": 16, "supports_evo": False, "supports_hero": False, "mode_status_label": None},
             ],
         }),
         patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
@@ -684,8 +685,9 @@ def test_on_message_handles_explicit_member_deck_request_without_llm():
     mock_resolve.assert_called_once_with("@Vijay", limit=3)
     message.reply.assert_awaited_once_with(
         "**Current Deck for Vijay (<@456>)**\n"
-        "- Knight — Level 16\n"
+        "- Knight — Level 16 (Evo + Hero unlocked)\n"
         "- Fireball — Level 16\n"
+        "_Activation depends on deck slot; these labels show what the card supports or has unlocked._\n"
         "_Snapshot: 2026-03-07 06:00 AM CT_"
     )
     assert mock_save.call_count == 2
@@ -1675,6 +1677,12 @@ def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
     assert queued["capability_war_awareness_v1"]["capability_area"] == "war_awareness"
     assert "live game-driven phases" in queued["capability_war_awareness_v1"]["message"]
     assert "day-by-day battle recaps" in " ".join(queued["capability_war_awareness_v1"]["details"])
+    assert queued["capability_card_modes_and_war_completion_v1"]["title"] == "Achievement Unlocked: Sharper Card And War Intel"
+    assert queued["capability_card_modes_and_war_completion_v1"]["capability_area"] == "war_and_card_intel"
+    assert "Hero + Evo" in queued["capability_card_modes_and_war_completion_v1"]["message"]
+    assert queued["capability_card_modes_and_war_completion_v1"]["discord_content"].startswith("**Achievement Unlocked: Sharper Card And War Intel**")
+    assert "clock-based" in " ".join(queued["capability_card_modes_and_war_completion_v1"]["details"])
+    assert "finished the race" in " ".join(queued["capability_card_modes_and_war_completion_v1"]["details"])
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
@@ -1696,6 +1704,7 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
         "capability_roster_showcase_depth_v1",
         "capability_poap_kings_integration_v2",
         "capability_war_awareness_v1",
+        "capability_card_modes_and_war_completion_v1",
         "feature_custom_emoji_v1",
     }
 
@@ -1844,7 +1853,7 @@ def test_build_schedule_report_shows_30_minute_player_intel_refresh():
     assert "Every 30 minutes with up to 900s jitter." in report
 
 
-def test_build_schedule_report_includes_war_awareness_activity():
+def test_build_schedule_report_includes_clock_aligned_war_pipeline():
     scheduler = SimpleNamespace(
         running=True,
         get_jobs=lambda: [],
@@ -1852,14 +1861,16 @@ def test_build_schedule_report_includes_war_awareness_activity():
 
     with (
         patch("elixir.scheduler", scheduler),
-        patch.object(elixir, "WAR_AWARENESS_INTERVAL_MINUTES", 30),
-        patch.object(elixir, "WAR_AWARENESS_JITTER_SECONDS", 900),
+        patch.object(elixir, "WAR_POLL_MINUTE", 0),
+        patch.object(elixir, "WAR_AWARENESS_MINUTE", 5),
     ):
         report = elixir._build_schedule_report()
 
     assert "river-race" in report
+    assert "war-poll" in report
+    assert "Every hour at :00 CT." in report
     assert "war-awareness" in report
-    assert "Every 30 minutes with up to 900s jitter." in report
+    assert "Every hour at :05 CT." in report
     assert "Discord routed outcomes: #river-race, #arena-relay, optional #leader-lounge" in report
 
 
@@ -1879,8 +1890,12 @@ def test_activity_registry_has_unique_keys_and_required_fields():
 def test_activity_registry_exposes_war_and_promotion_visibility():
     specs = {spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)}
 
+    assert "war-poll" in specs
+    assert specs["war-poll"]["owner_subagent"] == "river-race"
+    assert specs["war-poll"]["schedule"] == "Every hour at :00 CT."
     assert "war-awareness" in specs
     assert specs["war-awareness"]["owner_subagent"] == "river-race"
+    assert specs["war-awareness"]["schedule"] == "Every hour at :05 CT."
     assert "#river-race" in " ".join(specs["war-awareness"]["delivery_targets"])
     assert "daily-clan-insight" in specs
     assert specs["daily-clan-insight"]["owner_subagent"] == "ask-elixir"
@@ -1908,6 +1923,7 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
     job_ids = {item["id"] for item in added}
     assert {item["activity_key"] for item in registered} == {
         "clan-awareness",
+        "war-poll",
         "war-awareness",
         "player-progression",
         "daily-clan-insight",
@@ -1916,9 +1932,18 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
         "site-content",
         "promotion-content",
     }
+    assert "war-poll" in job_ids
     assert "war-awareness" in job_ids
     assert "daily-clan-insight" in job_ids
     assert "promotion-content" in job_ids
+
+
+def test_manual_activity_choices_exclude_internal_war_poll():
+    choices = manual_activity_choices()
+    values = {value for _, value in choices}
+
+    assert "war-awareness" in values
+    assert "war-poll" not in values
 
 
 def test_build_status_report_omits_job_schedule_section():
@@ -2437,6 +2462,41 @@ def test_build_war_status_report_summarizes_current_war_awareness():
     assert "Waiting on: Vijay, Ditika" in report
     assert "This season: 2 race(s) | total fame 30,100 | fame/member 1,204.00 | top King Levy 6,200, Finn 5,800" in report
     assert "Live feed: 5 clan(s) in the current river race" in report
+
+
+def test_build_war_status_report_includes_live_finish_and_known_stakes():
+    with (
+        patch("elixir.db.get_current_war_status", return_value={
+            "clan_name": "POAP KINGS",
+            "war_state": "full",
+            "season_id": 130,
+            "week": 2,
+            "phase_display": "Battle Day 3",
+            "race_rank": 1,
+            "fame": 10146,
+            "clan_score": 160,
+            "period_points": 10146,
+            "race_completed": True,
+            "finish_time": "20260315T095605.000Z",
+            "race_completed_early": True,
+            "trophy_stakes_known": True,
+            "trophy_stakes_text": "100 trophies on the line",
+        }),
+        patch("elixir.db.get_current_war_day_state", return_value={}),
+        patch("elixir.db.get_war_week_summary", return_value=None),
+        patch("elixir.db.get_war_season_summary", return_value=None),
+        patch("elixir.db.list_recent_war_day_summaries", return_value=[]),
+        patch("elixir.db.get_latest_clan_boat_defense_status", return_value=None),
+    ):
+        report = elixir._build_war_status_report(
+            {"name": "POAP KINGS"},
+            {"clans": [{}, {}, {}, {}, {}]},
+        )
+
+    assert "finished yes" in report
+    assert "finish 20260315T095605.000Z" in report
+    assert "completed early" in report
+    assert "stakes 100 trophies on the line" in report
 
 
 def test_build_db_status_report_lists_group_summaries():

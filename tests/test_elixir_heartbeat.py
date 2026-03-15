@@ -133,25 +133,88 @@ def test_detect_role_changes_ignores_demotion_from_elder():
         conn.close()
 
 
-def test_war_awareness_tick_uses_war_only_bundle():
-    bundle = heartbeat.HeartbeatTickResult(
+def test_war_awareness_tick_uses_stored_war_detection_bundle():
+    bundle = heartbeat.WarAwarenessResult(
         signals=[{"type": "war_battle_day_live_update", "season_id": 129, "day_number": 1}],
-        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
+        clan={"name": "POAP KINGS", "tag": "#J2RGCRVG"},
         war={"state": "warDay"},
+        cursor_updates=[{"detector_key": "war_live_state_pipeline", "scope_key": "", "cursor_int": 12, "cursor_text": None, "metadata": {}}],
     )
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
     with (
-        patch("elixir.heartbeat.tick", return_value=bundle) as mock_tick,
+        patch("elixir.heartbeat.detect_war_signals_from_storage", return_value=bundle) as mock_detect,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._deliver_signal_group", new=AsyncMock(return_value=True)) as mock_deliver,
+        patch("runtime.jobs._persist_signal_detector_cursors") as mock_persist,
     ):
         asyncio.run(elixir._war_awareness_tick())
 
-    mock_tick.assert_called_once_with(include_nonwar=False, include_war=True)
+    mock_detect.assert_called_once_with()
     mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war)
+    mock_persist.assert_called_once_with(bundle.cursor_updates)
+
+
+def test_war_poll_tick_uses_war_ingest_entrypoint():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.heartbeat.ingest_live_war_state", return_value={
+            "war": {"state": "warDay"},
+            "race_log_refreshed": True,
+            "race_log_items": 1,
+        }) as mock_ingest,
+        patch("elixir._clear_cr_api_failure_alert_if_recovered") as mock_clear,
+        patch("elixir.runtime_status.mark_job_success") as mock_success,
+    ):
+        asyncio.run(elixir._war_poll_tick())
+
+    mock_ingest.assert_called_once_with(refresh_race_log=True)
+    mock_clear.assert_called_once_with()
+    assert mock_success.call_args.args[0] == "war_poll"
+    assert "war snapshot stored" in mock_success.call_args.args[1]
+
+
+def test_war_awareness_tick_does_not_advance_cursors_when_delivery_fails():
+    bundle = heartbeat.WarAwarenessResult(
+        signals=[{"type": "war_battle_day_live_update", "season_id": 129, "day_number": 1}],
+        clan={"name": "POAP KINGS", "tag": "#J2RGCRVG"},
+        war={"state": "warDay"},
+        cursor_updates=[{"detector_key": "war_live_state_pipeline", "scope_key": "", "cursor_int": 12, "cursor_text": None, "metadata": {}}],
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.heartbeat.detect_war_signals_from_storage", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._deliver_signal_group", new=AsyncMock(return_value=False)),
+        patch("runtime.jobs._persist_signal_detector_cursors") as mock_persist,
+        patch("elixir.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(elixir._war_awareness_tick())
+
+    mock_persist.assert_not_called()
+    assert mock_failure.call_args.args[0] == "war_awareness"
+
+
+def test_heartbeat_tick_include_war_false_skips_live_war_fetch():
+    conn = db.get_connection(":memory:")
+    try:
+        with (
+            patch("heartbeat.cr_api.get_clan", return_value={"memberList": [{"tag": "#ABC", "name": "King Levy"}]}),
+            patch("heartbeat.cr_api.get_current_war") as mock_get_war,
+        ):
+            heartbeat.tick(conn=conn, include_nonwar=False, include_war=False)
+
+        mock_get_war.assert_not_called()
+    finally:
+        conn.close()
 
 
 def test_deliver_signal_group_saves_multipart_channel_update_as_separate_messages():
@@ -204,6 +267,64 @@ def test_deliver_signal_group_saves_multipart_channel_update_as_separate_message
     assert observation_saves[1].args[2] == "Second post"
     assert observation_saves[0].kwargs["event_type"] == "channel_update"
     assert observation_saves[1].kwargs["event_type"] == "channel_update_part"
+
+
+def test_deliver_signal_group_posts_preauthored_system_signal_without_llm():
+    signals = [{
+        "type": "capability_unlock",
+        "signal_key": "capability_card_modes_and_war_completion_v1",
+        "payload": {
+            "audience": "clan",
+            "title": "Achievement Unlocked: Sharper Card And War Intel",
+            "discord_content": "**Subject**\n\nPreauthored body.",
+        },
+    }]
+    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
+    war = {"state": "training"}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.name = "announcements"
+    channel.type = "text"
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs.plan_signal_outcomes", return_value=[{
+            "source_signal_key": "capability_card_modes_and_war_completion_v1",
+            "source_signal_type": "capability_unlock",
+            "target_channel_key": "announcements",
+            "target_channel_id": "1474760975851982959",
+            "intent": "system_update",
+            "required": True,
+            "payload": {"signals": signals},
+            "delivery_status": "planned",
+        }]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.db.get_signal_outcome", return_value=None),
+        patch("elixir.db.upsert_signal_outcome"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "delivered"}]),
+        patch("elixir.db.mark_signal_sent"),
+        patch("elixir.db.mark_system_signal_announced"),
+        patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("runtime.jobs.maybe_upsert_signal_memory"),
+    ):
+        asyncio.run(elixir._deliver_signal_group(signals, clan, war))
+
+    mock_generate.assert_not_called()
+    mock_post.assert_awaited_once_with(
+        channel,
+        {
+            "event_type": "channel_update",
+            "summary": "Achievement Unlocked: Sharper Card And War Intel",
+            "content": "**Subject**\n\nPreauthored body.",
+        },
+    )
+    assert mock_save.call_args.args[2] == "**Subject**\n\nPreauthored body."
 
 
 def test_deliver_signal_group_stores_war_recap_memory_for_river_race_batch():
@@ -385,7 +506,7 @@ def test_clan_awareness_tick_does_not_mark_non_system_signal_sent_when_post_fail
     assert not all(row.get("delivery_status") in {"delivered", "skipped"} for row in outcome_rows)
 
 
-def test_plan_signal_outcomes_routes_clan_audience_system_signal_to_clan_events():
+def test_plan_signal_outcomes_routes_clan_audience_system_signal_to_announcements():
     outcomes = plan_signal_outcomes([{
         "type": "capability_unlock",
         "signal_key": "capability_boat_defense_intelligence_v1",
@@ -396,7 +517,7 @@ def test_plan_signal_outcomes_routes_clan_audience_system_signal_to_clan_events(
     }])
 
     assert len(outcomes) == 1
-    assert outcomes[0]["target_channel_key"] == "clan-events"
+    assert outcomes[0]["target_channel_key"] == "announcements"
 
 
 def test_plan_signal_outcomes_routes_leadership_audience_system_signal_to_leader_lounge():
@@ -411,6 +532,34 @@ def test_plan_signal_outcomes_routes_leadership_audience_system_signal_to_leader
 
     assert len(outcomes) == 1
     assert outcomes[0]["target_channel_key"] == "leader-lounge"
+
+
+def test_plan_signal_outcomes_makes_badge_level_only_batches_optional():
+    outcomes = plan_signal_outcomes([{
+        "type": "badge_level_milestone",
+        "tag": "#ABC",
+        "name": "King Levy",
+        "badge_name": "MasteryKnight",
+    }])
+
+    assert len(outcomes) == 1
+    assert outcomes[0]["target_channel_key"] == "player-progress"
+    assert outcomes[0]["required"] is False
+
+
+def test_plan_signal_outcomes_routes_live_finish_signal_to_war_channels():
+    outcomes = plan_signal_outcomes([{
+        "type": "war_race_finished_live",
+        "season_id": 129,
+        "section_index": 1,
+        "week": 2,
+    }])
+
+    assert [(item["target_channel_key"], item["required"]) for item in outcomes] == [
+        ("river-race", True),
+        ("arena-relay", False),
+        ("leader-lounge", False),
+    ]
 
 
 def test_clan_awareness_tick_does_not_mark_system_signal_sent_before_success():
@@ -545,9 +694,11 @@ def test_player_intel_refresh_uses_refresh_targets_without_llm():
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.cr_api.get_clan", return_value=clan),
+        patch("elixir.cr_api.get_current_war") as mock_get_war,
         patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
         patch("elixir.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
         patch("elixir.db.snapshot_members") as mock_snapshot_members,
+        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets) as mock_targets,
         patch("elixir.db.snapshot_player_profile") as mock_snapshot_profile,
         patch("elixir.db.snapshot_player_battlelog") as mock_snapshot_battlelog,
@@ -556,6 +707,7 @@ def test_player_intel_refresh_uses_refresh_targets_without_llm():
         asyncio.run(elixir._player_intel_refresh())
 
     mock_snapshot_members.assert_called_once_with(clan["memberList"])
+    mock_get_war.assert_not_called()
     mock_targets.assert_called_once_with(elixir.PLAYER_INTEL_BATCH_SIZE, elixir.PLAYER_INTEL_STALE_HOURS)
     mock_snapshot_profile.assert_called_once()
     mock_snapshot_battlelog.assert_called_once_with("#ABC", [{"type": "PvP"}])
@@ -574,14 +726,13 @@ def test_player_intel_refresh_posts_progression_signals():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.asyncio.sleep", new=AsyncMock()),
         patch("elixir.cr_api.get_clan", return_value=clan),
-        patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
         patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
         patch("elixir.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
         patch("elixir.db.snapshot_members"),
+        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[{"type": "player_level_up", "tag": "#ABC", "name": "King Levy", "old_level": 65, "new_level": 66}]),
         patch("elixir.db.snapshot_player_battlelog"),
-        patch("elixir.db.upsert_war_current_state"),
         patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
@@ -590,6 +741,38 @@ def test_player_intel_refresh_posts_progression_signals():
     args = mock_deliver.await_args.args
     assert args[0][0]["type"] == "player_level_up"
     assert args[1] == clan
+
+
+def test_player_intel_refresh_splits_optional_badge_level_batches():
+    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
+    targets = [{"tag": "#ABC", "name": "King Levy"}]
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.sleep", new=AsyncMock()),
+        patch("elixir.cr_api.get_clan", return_value=clan),
+        patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
+        patch("elixir.cr_api.get_player_battle_log", return_value=[]),
+        patch("elixir.db.snapshot_members"),
+        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
+        patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
+        patch("elixir.db.snapshot_player_profile", return_value=[
+            {"type": "player_level_up", "tag": "#ABC", "name": "King Levy", "old_level": 65, "new_level": 66},
+            {"type": "badge_level_milestone", "tag": "#ABC", "name": "King Levy", "badge_name": "MasteryKnight"},
+        ]),
+        patch("elixir.db.snapshot_player_battlelog", return_value=[]),
+        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+    ):
+        asyncio.run(elixir._player_intel_refresh())
+
+    assert mock_deliver.await_count == 2
+    first_batch = mock_deliver.await_args_list[0].args[0]
+    second_batch = mock_deliver.await_args_list[1].args[0]
+    assert [signal["type"] for signal in first_batch] == ["player_level_up"]
+    assert [signal["type"] for signal in second_batch] == ["badge_level_milestone"]
 
 
 def test_player_intel_refresh_posts_battle_pulse_signals():
@@ -603,17 +786,16 @@ def test_player_intel_refresh_posts_battle_pulse_signals():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.asyncio.sleep", new=AsyncMock()),
         patch("elixir.cr_api.get_clan", return_value=clan),
-        patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
         patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
         patch("elixir.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
         patch("elixir.db.snapshot_members"),
+        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[]),
         patch("elixir.db.snapshot_player_battlelog", return_value=[
             {"type": "battle_hot_streak", "tag": "#ABC", "name": "King Levy", "streak": 4},
             {"type": "battle_trophy_push", "tag": "#ABC", "name": "King Levy", "trophy_delta": 111},
         ]),
-        patch("elixir.db.upsert_war_current_state"),
         patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
@@ -647,14 +829,13 @@ def test_player_intel_refresh_does_not_post_baseline_profile_discovery():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.asyncio.sleep", new=AsyncMock()),
         patch("elixir.cr_api.get_clan", return_value=clan),
-        patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
         patch("elixir.cr_api.get_player", return_value=first_profile),
         patch("elixir.cr_api.get_player_battle_log", return_value=[]),
         patch("elixir.db.snapshot_members"),
+        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[]),
         patch("elixir.db.snapshot_player_battlelog", return_value=[]),
-        patch("elixir.db.upsert_war_current_state"),
         patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
@@ -673,12 +854,11 @@ def test_player_intel_refresh_marks_failure_when_all_player_endpoints_fail():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.asyncio.sleep", new=AsyncMock()),
         patch("elixir.cr_api.get_clan", return_value=clan),
-        patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
         patch("elixir.cr_api.get_player", return_value=None),
         patch("elixir.cr_api.get_player_battle_log", return_value=None),
         patch("elixir.db.snapshot_members"),
+        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
-        patch("elixir.db.upsert_war_current_state"),
         patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
         patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
@@ -707,13 +887,12 @@ def test_player_intel_refresh_reports_partial_endpoint_failures_without_hiding_s
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.asyncio.sleep", new=AsyncMock()),
         patch("elixir.cr_api.get_clan", return_value=clan),
-        patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
         patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
         patch("elixir.cr_api.get_player_battle_log", return_value=None),
         patch("elixir.db.snapshot_members"),
+        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[]),
-        patch("elixir.db.upsert_war_current_state"),
         patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
         patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
@@ -2024,6 +2203,504 @@ def test_detect_war_member_used_all_decks_ignores_members_already_finished():
         conn.close()
 
     assert signals == []
+
+
+def test_get_current_war_status_marks_live_finish_and_keeps_trophy_stakes_conservative():
+    conn = db.get_connection(":memory:")
+    try:
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-15T11:19:07"):
+            db.upsert_war_current_state(
+                {
+                    "seasonId": 130,
+                    "sectionIndex": 1,
+                    "periodIndex": 13,
+                    "periodType": "warDay",
+                    "state": "full",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 10146,
+                        "repairPoints": 0,
+                        "periodPoints": 10146,
+                        "clanScore": 160,
+                        "finishTime": "20260315T095605.000Z",
+                        "participants": [],
+                    },
+                    "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 10146, "repairPoints": 0, "periodPoints": 10146, "clanScore": 160}],
+                },
+                conn=conn,
+            )
+
+        status = db.get_current_war_status(conn=conn)
+    finally:
+        conn.close()
+
+    assert status["finish_time"] == "20260315T095605.000Z"
+    assert status["race_completed"] is True
+    assert status["race_completed_at"] == "2026-03-15T09:56:05"
+    assert status["race_completed_early"] is True
+    assert status["trophy_change"] is None
+    assert status["trophy_stakes_known"] is False
+    assert status["trophy_stakes_text"] is None
+
+
+def test_get_current_war_status_ignores_sentinel_finish_time():
+    conn = db.get_connection(":memory:")
+    try:
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-15T11:19:07"):
+            db.upsert_war_current_state(
+                {
+                    "seasonId": 130,
+                    "sectionIndex": 3,
+                    "periodIndex": 13,
+                    "periodType": "warDay",
+                    "state": "full",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 5100,
+                        "repairPoints": 0,
+                        "periodPoints": 5100,
+                        "clanScore": 160,
+                        "finishTime": "19691231T235959.000Z",
+                        "participants": [],
+                    },
+                    "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 5100, "repairPoints": 0, "periodPoints": 5100, "clanScore": 160}],
+                },
+                conn=conn,
+            )
+
+        status = db.get_current_war_status(conn=conn)
+    finally:
+        conn.close()
+
+    assert status["finish_time"] is None
+    assert status["race_completed"] is False
+    assert status["race_completed_at"] is None
+
+
+def test_get_current_war_status_surfaces_same_week_trophy_stakes_when_known():
+    conn = db.get_connection(":memory:")
+    try:
+        db.store_war_log(
+            {
+                "items": [{
+                    "seasonId": 130,
+                    "sectionIndex": 1,
+                    "createdDate": "20260315T095606.000Z",
+                    "standings": [{
+                        "rank": 1,
+                        "trophyChange": 100,
+                        "clan": {
+                            "tag": "#J2RGCRVG",
+                            "name": "POAP KINGS",
+                            "fame": 10146,
+                            "repairPoints": 0,
+                            "finishTime": "20260315T095605.000Z",
+                            "participants": [],
+                        },
+                    }],
+                }],
+            },
+            "#J2RGCRVG",
+            conn=conn,
+        )
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-15T11:19:07"):
+            db.upsert_war_current_state(
+                {
+                    "seasonId": 130,
+                    "sectionIndex": 1,
+                    "periodIndex": 13,
+                    "periodType": "warDay",
+                    "state": "full",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 10146,
+                        "repairPoints": 0,
+                        "periodPoints": 10146,
+                        "clanScore": 160,
+                        "finishTime": "20260315T095605.000Z",
+                        "participants": [],
+                    },
+                    "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 10146, "repairPoints": 0, "periodPoints": 10146, "clanScore": 160}],
+                },
+                conn=conn,
+            )
+
+        status = db.get_current_war_status(conn=conn)
+    finally:
+        conn.close()
+
+    assert status["trophy_change"] == 100
+    assert status["trophy_stakes_known"] is True
+    assert status["trophy_stakes_text"] == "100 trophies on the line"
+
+
+def test_detect_war_signals_from_storage_seeds_forward_without_backfill():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "leader"}],
+            conn=conn,
+        )
+
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T10:00:00"):
+            db.upsert_war_current_state(
+                {
+                    "seasonId": 129,
+                    "sectionIndex": 1,
+                    "periodIndex": 10,
+                    "periodType": "warDay",
+                    "state": "full",
+                    "clan": {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 500,
+                        "repairPoints": 0,
+                        "periodPoints": 500,
+                        "clanScore": 150,
+                        "participants": [
+                            {"tag": "#ABC123", "name": "King Levy", "fame": 300, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 3, "decksUsedToday": 3},
+                        ],
+                    },
+                    "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 500, "repairPoints": 0, "periodPoints": 500, "clanScore": 150}],
+                },
+                conn=conn,
+            )
+
+        result = heartbeat.detect_war_signals_from_storage(conn=conn)
+    finally:
+        conn.close()
+
+    assert result.signals == []
+    assert {update["detector_key"] for update in result.cursor_updates} == {
+        heartbeat.WAR_LIVE_STATE_CURSOR_KEY,
+        heartbeat.WAR_PARTICIPANT_CURSOR_KEY,
+    }
+
+
+def test_detect_war_signals_from_storage_replays_multiple_new_finishers_once():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#ABC123", "name": "King Levy", "role": "leader"},
+                {"tag": "#DEF456", "name": "Vijay", "role": "member"},
+            ],
+            conn=conn,
+        )
+
+        first_payload = {
+            "seasonId": 129,
+            "sectionIndex": 1,
+            "periodIndex": 10,
+            "periodType": "warDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 500,
+                "repairPoints": 0,
+                "periodPoints": 500,
+                "clanScore": 150,
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 300, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 3, "decksUsedToday": 3},
+                    {"tag": "#DEF456", "name": "Vijay", "fame": 200, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 1, "decksUsedToday": 1},
+                ],
+            },
+            "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 500, "repairPoints": 0, "periodPoints": 500, "clanScore": 150}],
+        }
+        second_payload = {
+            "seasonId": 129,
+            "sectionIndex": 1,
+            "periodIndex": 10,
+            "periodType": "warDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 900,
+                "repairPoints": 0,
+                "periodPoints": 900,
+                "clanScore": 155,
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 600, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 4},
+                    {"tag": "#DEF456", "name": "Vijay", "fame": 300, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 1, "decksUsedToday": 1},
+                ],
+            },
+            "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 900, "repairPoints": 0, "periodPoints": 900, "clanScore": 155}],
+        }
+        third_payload = {
+            "seasonId": 129,
+            "sectionIndex": 1,
+            "periodIndex": 10,
+            "periodType": "warDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 1300,
+                "repairPoints": 0,
+                "periodPoints": 1300,
+                "clanScore": 160,
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 600, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 4},
+                    {"tag": "#DEF456", "name": "Vijay", "fame": 700, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 4},
+                ],
+            },
+            "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 1300, "repairPoints": 0, "periodPoints": 1300, "clanScore": 160}],
+        }
+
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T10:00:00"):
+            db.upsert_war_current_state(first_payload, conn=conn)
+
+        seed_result = heartbeat.detect_war_signals_from_storage(conn=conn)
+        for update in seed_result.cursor_updates:
+            db.upsert_signal_detector_cursor(
+                update["detector_key"],
+                update["scope_key"],
+                cursor_text=update["cursor_text"],
+                cursor_int=update["cursor_int"],
+                metadata=update["metadata"],
+                conn=conn,
+            )
+
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T11:00:00"):
+            db.upsert_war_current_state(second_payload, conn=conn)
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T12:00:00"):
+            db.upsert_war_current_state(third_payload, conn=conn)
+
+        result = heartbeat.detect_war_signals_from_storage(conn=conn)
+        for update in result.cursor_updates:
+            db.upsert_signal_detector_cursor(
+                update["detector_key"],
+                update["scope_key"],
+                cursor_text=update["cursor_text"],
+                cursor_int=update["cursor_int"],
+                metadata=update["metadata"],
+                conn=conn,
+            )
+        rerun = heartbeat.detect_war_signals_from_storage(conn=conn)
+    finally:
+        conn.close()
+
+    all_deck_signals = [signal for signal in result.signals if signal["type"] == "war_member_used_all_decks"]
+    assert len(all_deck_signals) == 2
+    assert all_deck_signals[0]["members"][0]["tag"] == "#ABC123"
+    assert all_deck_signals[1]["members"][0]["tag"] == "#DEF456"
+    assert rerun.signals == []
+
+
+def test_detect_war_signals_from_storage_emits_live_finish_and_suppresses_pressure_signals():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "leader"}],
+            conn=conn,
+        )
+
+        seed_payload = {
+            "seasonId": 130,
+            "sectionIndex": 1,
+            "periodIndex": 13,
+            "periodType": "warDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 8400,
+                "repairPoints": 0,
+                "periodPoints": 8400,
+                "clanScore": 158,
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 400, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 2, "decksUsedToday": 2},
+                ],
+            },
+            "clans": [
+                {"tag": "#RIVAL1", "name": "Rivals", "fame": 8700, "repairPoints": 0, "periodPoints": 8700, "clanScore": 160},
+                {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 8400, "repairPoints": 0, "periodPoints": 8400, "clanScore": 158},
+            ],
+        }
+        finish_payload = {
+            "seasonId": 130,
+            "sectionIndex": 1,
+            "periodIndex": 13,
+            "periodType": "warDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 10146,
+                "repairPoints": 0,
+                "periodPoints": 10146,
+                "clanScore": 160,
+                "finishTime": "20260315T095605.000Z",
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 700, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 3, "decksUsedToday": 3},
+                ],
+            },
+            "clans": [
+                {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 10146, "repairPoints": 0, "periodPoints": 10146, "clanScore": 160},
+                {"tag": "#RIVAL1", "name": "Rivals", "fame": 9900, "repairPoints": 0, "periodPoints": 9900, "clanScore": 159},
+            ],
+        }
+
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-15T20:00:00"):
+            db.upsert_war_current_state(seed_payload, conn=conn)
+
+        seed_result = heartbeat.detect_war_signals_from_storage(conn=conn)
+        for update in seed_result.cursor_updates:
+            db.upsert_signal_detector_cursor(
+                update["detector_key"],
+                update["scope_key"],
+                cursor_text=update["cursor_text"],
+                cursor_int=update["cursor_int"],
+                metadata=update["metadata"],
+                conn=conn,
+            )
+
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-15T23:00:00"):
+            db.upsert_war_current_state(finish_payload, conn=conn)
+
+        result = heartbeat.detect_war_signals_from_storage(conn=conn)
+    finally:
+        conn.close()
+
+    signal_types = {signal["type"] for signal in result.signals}
+    assert "war_race_finished_live" in signal_types
+    assert "war_battle_day_live_update" not in signal_types
+    assert "war_battle_day_final_hours" not in signal_types
+    assert "war_battle_rank_change" not in signal_types
+
+    finish_signal = next(signal for signal in result.signals if signal["type"] == "war_race_finished_live")
+    assert finish_signal["finish_time"] == "20260315T095605.000Z"
+    assert finish_signal["race_completed_early"] is True
+
+
+def test_battle_lead_payload_becomes_completion_aware_after_live_finish():
+    payload = heartbeat._battle_lead_payload(
+        2,
+        war_state={
+            "race_completed": True,
+            "race_completed_at": "2026-03-15T09:56:05",
+            "race_completed_early": True,
+            "trophy_stakes_known": True,
+            "trophy_stakes_text": "100 trophies on the line",
+        },
+    )
+
+    assert payload["lead_pressure"] == "complete"
+    assert payload["needs_lead_recovery"] is False
+    assert "already finished" in payload["lead_story"]
+    assert "clean closure" in payload["lead_call_to_action"]
+
+
+def test_detect_war_signals_from_storage_replays_multiple_live_state_rows_once():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "leader"}],
+            conn=conn,
+        )
+
+        seed_payload = {
+            "seasonId": 129,
+            "sectionIndex": 0,
+            "periodIndex": 2,
+            "periodType": "trainingDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 0,
+                "repairPoints": 0,
+                "periodPoints": 0,
+                "clanScore": 140,
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 0, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 0, "decksUsedToday": 0},
+                ],
+            },
+            "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 0, "repairPoints": 0, "periodPoints": 0, "clanScore": 140}],
+        }
+        battle_payload = {
+            "seasonId": 129,
+            "sectionIndex": 0,
+            "periodIndex": 3,
+            "periodType": "warDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 400,
+                "repairPoints": 0,
+                "periodPoints": 400,
+                "clanScore": 141,
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 400, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 1, "decksUsedToday": 1},
+                ],
+            },
+            "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 400, "repairPoints": 0, "periodPoints": 400, "clanScore": 141}],
+        }
+        rollover_payload = {
+            "seasonId": 129,
+            "sectionIndex": 1,
+            "periodIndex": 0,
+            "periodType": "trainingDay",
+            "state": "full",
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 0,
+                "repairPoints": 0,
+                "periodPoints": 0,
+                "clanScore": 142,
+                "participants": [
+                    {"tag": "#ABC123", "name": "King Levy", "fame": 400, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 1, "decksUsedToday": 0},
+                ],
+            },
+            "clans": [{"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 0, "repairPoints": 0, "periodPoints": 0, "clanScore": 142}],
+        }
+
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T09:00:00"):
+            db.upsert_war_current_state(seed_payload, conn=conn)
+
+        seed_result = heartbeat.detect_war_signals_from_storage(conn=conn)
+        for update in seed_result.cursor_updates:
+            db.upsert_signal_detector_cursor(
+                update["detector_key"],
+                update["scope_key"],
+                cursor_text=update["cursor_text"],
+                cursor_int=update["cursor_int"],
+                metadata=update["metadata"],
+                conn=conn,
+            )
+
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-13T10:05:00"):
+            db.upsert_war_current_state(battle_payload, conn=conn)
+        with patch("storage.war_ingest._utcnow", return_value="2026-03-14T10:05:00"):
+            db.upsert_war_current_state(rollover_payload, conn=conn)
+
+        result = heartbeat.detect_war_signals_from_storage(conn=conn)
+        for update in result.cursor_updates:
+            db.upsert_signal_detector_cursor(
+                update["detector_key"],
+                update["scope_key"],
+                cursor_text=update["cursor_text"],
+                cursor_int=update["cursor_int"],
+                metadata=update["metadata"],
+                conn=conn,
+            )
+        rerun = heartbeat.detect_war_signals_from_storage(conn=conn)
+    finally:
+        conn.close()
+
+    signal_types = [signal["type"] for signal in result.signals]
+    assert "war_battle_phase_active" in signal_types
+    assert "war_practice_phase_active" in signal_types
+    assert "war_battle_days_complete" in signal_types
+    assert "war_week_rollover" in signal_types
+    assert rerun.signals == []
 
 
 def test_detect_war_battle_checkpoints_respects_war_reset_date_before_utc_reset():

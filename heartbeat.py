@@ -7,6 +7,7 @@ history store.  Only calls the LLM when real signals are found.
 import logging
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Optional
 
 import cr_api
 import cr_knowledge
@@ -40,6 +41,9 @@ _BATTLE_DAY_CHECKPOINTS = (
         "hours_remaining": 12,
     },
 )
+
+WAR_LIVE_STATE_CURSOR_KEY = "war_live_state_pipeline"
+WAR_PARTICIPANT_CURSOR_KEY = "war_participant_pipeline"
 
 
 # ── Signal detectors ─────────────────────────────────────────────────────────
@@ -81,13 +85,32 @@ def _war_signal_date_for_state(war_state, *fallbacks):
     )
 
 
-def _battle_lead_payload(race_rank, previous_rank=None):
+def _battle_lead_payload(race_rank, previous_rank=None, *, war_state=None):
+    war_state = war_state or {}
+    race_completed = bool(war_state.get("race_completed"))
     payload = {
         "race_rank": race_rank,
         "in_first_place": race_rank == 1 if race_rank is not None else None,
-        "needs_lead_recovery": bool(race_rank and race_rank > 1),
+        "needs_lead_recovery": bool(race_rank and race_rank > 1 and not race_completed),
+        "race_completed": race_completed,
+        "race_completed_at": war_state.get("race_completed_at"),
+        "race_completed_early": bool(war_state.get("race_completed_early")),
+        "trophy_change": war_state.get("trophy_change"),
+        "trophy_stakes_known": bool(war_state.get("trophy_stakes_known")),
+        "trophy_stakes_text": war_state.get("trophy_stakes_text"),
     }
-    if race_rank and race_rank > 1:
+    if race_completed:
+        story = "POAP KINGS has already finished this week's race."
+        if war_state.get("trophy_stakes_text"):
+            story = f"{story} This week carried {war_state.get('trophy_stakes_text')}."
+        payload.update({
+            "lead_pressure": "complete",
+            "lead_story": story,
+            "lead_call_to_action": (
+                "Shift the message to completion, recognition, and clean closure instead of urgency."
+            ),
+        })
+    elif race_rank and race_rank > 1:
         payload.update({
             "lead_pressure": "high",
             "lead_story": f"POAP KINGS is currently in place {race_rank} and needs battle wins to restore first place.",
@@ -106,6 +129,58 @@ def _battle_lead_payload(race_rank, previous_rank=None):
     return payload
 
 
+def _detect_war_race_finished_live_for_pair(current, previous=None, conn=None):
+    if not current or not current.get("race_completed"):
+        return []
+    if (
+        previous
+        and previous.get("season_id") == current.get("season_id")
+        and previous.get("section_index") == current.get("section_index")
+        and previous.get("race_completed")
+    ):
+        return []
+
+    season_id = current.get("season_id")
+    section_index = current.get("section_index")
+    signal_log_type = (
+        f"war_race_finished_live::{season_id}:{section_index}"
+        if season_id is not None and section_index is not None
+        else "war_race_finished_live"
+    )
+    signal_date = _war_signal_date_for_values(
+        current.get("finish_time"),
+        current.get("race_completed_at"),
+        current.get("observed_at"),
+    )
+    if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
+        return []
+
+    return [{
+        "type": "war_race_finished_live",
+        "signal_log_type": signal_log_type,
+        "signal_date": signal_date,
+        "season_id": current.get("season_id"),
+        "section_index": current.get("section_index"),
+        "week": current.get("week"),
+        "phase": current.get("phase"),
+        "phase_display": current.get("phase_display"),
+        "day_number": current.get("battle_day_number") or current.get("practice_day_number"),
+        "day_total": current.get("battle_day_total") or current.get("practice_day_total"),
+        "race_rank": current.get("race_rank"),
+        "clan_fame": current.get("fame"),
+        "clan_score": current.get("clan_score"),
+        "period_points": current.get("period_points"),
+        "finish_time": current.get("finish_time"),
+        "race_completed_at": current.get("race_completed_at"),
+        "race_completed": True,
+        "race_completed_early": bool(current.get("race_completed_early")),
+        "trophy_change": current.get("trophy_change"),
+        "trophy_stakes_known": bool(current.get("trophy_stakes_known")),
+        "trophy_stakes_text": current.get("trophy_stakes_text"),
+        "message": "POAP KINGS has already finished this week's river race.",
+    }]
+
+
 def _completed_war_races(conn=None):
     close = conn is None
     conn = conn or db.get_connection()
@@ -121,6 +196,16 @@ def _completed_war_races(conn=None):
     finally:
         if close:
             conn.close()
+
+
+def _cursor_update(detector_key, scope_key="", *, cursor_text=None, cursor_int=None, metadata=None):
+    return {
+        "detector_key": detector_key,
+        "scope_key": scope_key or "",
+        "cursor_text": cursor_text,
+        "cursor_int": cursor_int,
+        "metadata": metadata or {},
+    }
 
 
 def detect_joins_leaves(current_members, known_snapshot):
@@ -190,15 +275,11 @@ def detect_role_changes(conn=None):
     return signals
 
 
-def detect_war_day_transition(now=None, conn=None):
+def _detect_war_day_transition_for_pair(current, previous=None, *, now=None, conn=None):
     """Detect API-native war phase transitions and notable phase states."""
-    now = now or datetime.now()
-    states = db.get_recent_live_war_states(limit=2, conn=conn)
-    if not states:
+    if not current:
         return []
-
-    current = states[0]
-    previous = states[1] if len(states) > 1 else None
+    now = now or datetime.now()
     signals = []
     latest_clan_defense_status = db.get_latest_clan_boat_defense_status(conn=conn)
     current_signal_date = _war_signal_date_for_state(current, now)
@@ -309,13 +390,26 @@ def detect_war_day_transition(now=None, conn=None):
     return signals
 
 
+def detect_war_day_transition(now=None, conn=None):
+    states = db.get_recent_live_war_states(limit=2, conn=conn)
+    if not states:
+        return []
+    current = states[0]
+    previous = states[1] if len(states) > 1 else None
+    return _detect_war_day_transition_for_pair(current, previous, now=now, conn=conn)
+
+
 def detect_war_rollovers(conn=None):
-    """Detect live war week and season rollovers from consecutive snapshots."""
     states = db.get_recent_live_war_states(limit=2, conn=conn)
     if len(states) < 2:
         return []
+    return _detect_war_rollovers_for_pair(states[0], states[1], conn=conn)
 
-    current, previous = states[0], states[1]
+
+def _detect_war_rollovers_for_pair(current, previous, conn=None):
+    """Detect live war week and season rollovers from consecutive snapshots."""
+    if not current or not previous:
+        return []
     if current["war_state"] in (None, "notInWar") or previous["war_state"] in (None, "notInWar"):
         return []
 
@@ -384,15 +478,20 @@ def detect_war_day_markers(conn=None):
     states = db.get_recent_live_war_states(limit=2, conn=conn)
     if not states:
         return []
-
     current = states[0]
     previous = states[1] if len(states) > 1 else None
+    return _detect_war_day_markers_for_pair(current, previous, conn=conn)
+
+
+def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
+    if not current:
+        return []
     signals = []
 
     current_key = current.get("war_day_key")
     previous_key = previous.get("war_day_key") if previous else None
     if current_key and current_key != previous_key:
-        current_day = db.get_current_war_day_state(conn=conn)
+        current_day = db.get_war_day_state(current_key, observed_at=current.get("observed_at"), conn=conn)
         if current_day:
             current_signal_date = _war_signal_date_for_state(current_day, current)
             if current.get("phase") == "practice":
@@ -436,11 +535,11 @@ def detect_war_day_markers(conn=None):
                         "time_left_seconds": current_day.get("time_left_seconds"),
                         "time_left_text": current_day.get("time_left_text"),
                         "top_fame_total": current_day.get("top_fame_total") or [],
-                        **_battle_lead_payload(current_day.get("race_rank")),
+                        **_battle_lead_payload(current_day.get("race_rank"), war_state=current_day),
                     })
 
     if previous and previous_key and current_key != previous_key:
-        previous_day = db.get_war_day_state(previous_key, conn=conn)
+        previous_day = db.get_war_day_state(previous_key, observed_at=previous.get("observed_at"), conn=conn)
         if previous_day:
             completed_at = current.get("observed_at")
             previous_signal_date = _war_signal_date_for_state(previous_day, previous, completed_at)
@@ -483,7 +582,7 @@ def detect_war_day_markers(conn=None):
                         "used_none": previous_day.get("used_none") or [],
                         "top_fame_today": previous_day.get("top_fame_today") or [],
                         "top_fame_total": previous_day.get("top_fame_total") or [],
-                        **_battle_lead_payload(previous_day.get("race_rank")),
+                        **_battle_lead_payload(previous_day.get("race_rank"), war_state=previous_day),
                     })
     return signals
 
@@ -491,6 +590,8 @@ def detect_war_day_markers(conn=None):
 def detect_war_battle_final_hours(conn=None, threshold_hours=6):
     current = db.get_current_war_day_state(conn=conn)
     if not current or current.get("phase") != "battle":
+        return []
+    if current.get("race_completed"):
         return []
     time_left_seconds = current.get("time_left_seconds")
     if time_left_seconds is None or time_left_seconds <= 0 or time_left_seconds > int(threshold_hours * 3600):
@@ -515,7 +616,7 @@ def detect_war_battle_final_hours(conn=None, threshold_hours=6):
         "used_some": current.get("used_some") or [],
         "used_none": current.get("used_none") or [],
         "top_fame_today": current.get("top_fame_today") or [],
-        **_battle_lead_payload(current.get("race_rank")),
+        **_battle_lead_payload(current.get("race_rank"), war_state=current),
     }]
 
 
@@ -523,8 +624,15 @@ def detect_war_rank_changes(conn=None):
     states = db.get_recent_live_war_states(limit=2, conn=conn)
     if len(states) < 2:
         return []
-    current, previous = states[0], states[1]
+    return _detect_war_rank_changes_for_pair(states[0], states[1], conn=conn)
+
+
+def _detect_war_rank_changes_for_pair(current, previous, conn=None):
+    if not current or not previous:
+        return []
     if current.get("phase") != "battle" or previous.get("phase") != "battle":
+        return []
+    if current.get("race_completed"):
         return []
     if current.get("war_day_key") != previous.get("war_day_key"):
         return []
@@ -532,7 +640,7 @@ def detect_war_rank_changes(conn=None):
     current_rank = current.get("race_rank")
     if previous_rank is None or current_rank is None or previous_rank == current_rank:
         return []
-    current_day = db.get_current_war_day_state(conn=conn)
+    current_day = db.get_war_day_state(current.get("war_day_key"), observed_at=current.get("observed_at"), conn=conn)
     signal_log_type = f"{_war_period_signal_log_type('war_battle_rank_change', current)}::rank{current_rank}"
     signal_date = _war_signal_date_for_state(current_day, current)
     if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
@@ -551,7 +659,7 @@ def detect_war_rank_changes(conn=None):
         "time_left_seconds": (current_day or {}).get("time_left_seconds"),
         "time_left_text": (current_day or {}).get("time_left_text"),
         "top_fame_today": (current_day or {}).get("top_fame_today") or [],
-        **_battle_lead_payload(current_rank, previous_rank=previous_rank),
+        **_battle_lead_payload(current_rank, previous_rank=previous_rank, war_state=current_day or current),
     }]
 
 
@@ -627,6 +735,8 @@ def detect_war_battle_checkpoints(conn=None):
     day_state = db.get_current_war_day_state(conn=conn) or {}
     if day_state.get("phase") != "battle":
         return []
+    if day_state.get("race_completed"):
+        return []
 
     time_left_seconds = day_state.get("time_left_seconds")
     if time_left_seconds is None:
@@ -687,22 +797,94 @@ def detect_war_battle_checkpoints(conn=None):
         "checkpoint_hours_remaining": checkpoint["hours_remaining"],
         "hours_elapsed": elapsed_seconds // 3600,
         "hours_remaining": max(0, time_left_seconds) // 3600,
-        **_battle_lead_payload(day_state.get("race_rank")),
+        **_battle_lead_payload(day_state.get("race_rank"), war_state=day_state),
+    }]
+
+
+def _detect_war_member_used_all_decks_between(
+    war_day_key: Optional[str],
+    previous_observed_at: Optional[str],
+    current_observed_at: Optional[str],
+    *,
+    conn=None,
+):
+    if not war_day_key or not previous_observed_at or not current_observed_at:
+        return []
+    day_state = db.get_war_day_state(war_day_key, observed_at=current_observed_at, conn=conn) or {}
+    if day_state.get("phase") != "battle":
+        return []
+
+    previous_finished_tags = {
+        str(row.get("player_tag") or "").strip()
+        for row in db.get_war_participant_snapshot_group(war_day_key, previous_observed_at, conn=conn)
+        if row.get("player_tag") and int(row.get("decks_used_today") or 0) >= 4
+    }
+
+    newly_finished = []
+    for member in day_state.get("used_all_4") or []:
+        tag = str(member.get("tag") or "").strip()
+        if not tag or tag in previous_finished_tags:
+            continue
+        newly_finished.append(member)
+
+    if not newly_finished:
+        return []
+
+    tag_suffix = ",".join(
+        sorted(
+            tag.lstrip("#")
+            for tag in (member.get("tag") or "" for member in newly_finished)
+            if tag
+        )
+    )
+    signal_log_type = (
+        f"{_war_period_signal_log_type('war_member_used_all_decks', day_state)}"
+        f"::{tag_suffix}"
+    )
+    signal_date = _war_signal_date_for_state(day_state)
+    if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
+        return []
+
+    return [{
+        "type": "war_member_used_all_decks",
+        "signal_log_type": signal_log_type,
+        "signal_date": signal_date,
+        "season_id": day_state.get("season_id"),
+        "week": day_state.get("week"),
+        "phase_display": day_state.get("phase_display"),
+        "day_number": day_state.get("day_number"),
+        "day_total": day_state.get("day_total"),
+        "race_rank": day_state.get("race_rank"),
+        "clan_fame": day_state.get("clan_fame"),
+        "clan_score": day_state.get("clan_score"),
+        "period_points": day_state.get("period_points"),
+        "time_left_seconds": day_state.get("time_left_seconds"),
+        "time_left_text": day_state.get("time_left_text"),
+        "members": newly_finished,
+        "member_count": len(newly_finished),
+        "used_all_4": day_state.get("used_all_4") or [],
+        "used_some": day_state.get("used_some") or [],
+        "used_none": day_state.get("used_none") or [],
+        "top_fame_today": day_state.get("top_fame_today") or [],
+        "top_fame_total": day_state.get("top_fame_total") or [],
+        "engaged_count": day_state.get("engaged_count") or 0,
+        "finished_count": day_state.get("finished_count") or 0,
+        "untouched_count": day_state.get("untouched_count") or 0,
+        "total_participants": day_state.get("total_participants") or 0,
+        **_battle_lead_payload(day_state.get("race_rank"), war_state=day_state),
     }]
 
 
 def detect_war_member_used_all_decks(conn=None):
-    day_state = db.get_current_war_day_state(conn=conn) or {}
-    if day_state.get("phase") != "battle":
-        return []
-
-    war_day_key = day_state.get("war_day_key")
-    if not war_day_key:
-        return []
-
     close = conn is None
     conn = conn or db.get_connection()
     try:
+        current_day = db.get_current_war_day_state(conn=conn) or {}
+        if current_day.get("phase") != "battle":
+            return []
+        war_day_key = current_day.get("war_day_key")
+        if not war_day_key:
+            return []
         observed_rows = conn.execute(
             "SELECT DISTINCT observed_at FROM war_participant_snapshots "
             "WHERE war_day_key = ? ORDER BY observed_at DESC LIMIT 2",
@@ -710,66 +892,12 @@ def detect_war_member_used_all_decks(conn=None):
         ).fetchall()
         if len(observed_rows) < 2:
             return []
-
-        current_observed_at = observed_rows[0]["observed_at"]
-        previous_observed_at = observed_rows[1]["observed_at"]
-        previous_finished_tags = {
-            str(row["player_tag"])
-            for row in conn.execute(
-                "SELECT player_tag FROM war_participant_snapshots "
-                "WHERE war_day_key = ? AND observed_at = ? AND COALESCE(decks_used_today, 0) >= 4",
-                (war_day_key, previous_observed_at),
-            ).fetchall()
-            if row["player_tag"]
-        }
-
-        newly_finished = []
-        for member in day_state.get("used_all_4") or []:
-            tag = str(member.get("tag") or "").strip()
-            if not tag or tag in previous_finished_tags:
-                continue
-            newly_finished.append(member)
-
-        if not newly_finished:
-            return []
-
-        tag_suffix = ",".join(sorted(tag.lstrip("#") for tag in (member.get("tag") or "" for member in newly_finished) if tag))
-        signal_log_type = (
-            f"{_war_period_signal_log_type('war_member_used_all_decks', day_state)}"
-            f"::{tag_suffix}"
+        return _detect_war_member_used_all_decks_between(
+            war_day_key,
+            observed_rows[1]["observed_at"],
+            observed_rows[0]["observed_at"],
+            conn=conn,
         )
-        signal_date = _war_signal_date_for_state(day_state)
-        if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
-            return []
-
-        return [{
-            "type": "war_member_used_all_decks",
-            "signal_log_type": signal_log_type,
-            "signal_date": signal_date,
-            "season_id": day_state.get("season_id"),
-            "week": day_state.get("week"),
-            "phase_display": day_state.get("phase_display"),
-            "day_number": day_state.get("day_number"),
-            "day_total": day_state.get("day_total"),
-            "race_rank": day_state.get("race_rank"),
-            "clan_fame": day_state.get("clan_fame"),
-            "clan_score": day_state.get("clan_score"),
-            "period_points": day_state.get("period_points"),
-            "time_left_seconds": day_state.get("time_left_seconds"),
-            "time_left_text": day_state.get("time_left_text"),
-            "members": newly_finished,
-            "member_count": len(newly_finished),
-            "used_all_4": day_state.get("used_all_4") or [],
-            "used_some": day_state.get("used_some") or [],
-            "used_none": day_state.get("used_none") or [],
-            "top_fame_today": day_state.get("top_fame_today") or [],
-            "top_fame_total": day_state.get("top_fame_total") or [],
-            "engaged_count": day_state.get("engaged_count") or 0,
-            "finished_count": day_state.get("finished_count") or 0,
-            "untouched_count": day_state.get("untouched_count") or 0,
-            "total_participants": day_state.get("total_participants") or 0,
-            **_battle_lead_payload(day_state.get("race_rank")),
-        }]
     finally:
         if close:
             conn.close()
@@ -822,7 +950,12 @@ def detect_war_season_completion(conn=None):
     states = db.get_recent_live_war_states(limit=2, conn=conn)
     if len(states) < 2:
         return []
-    current, previous = states[0], states[1]
+    return _detect_war_season_completion_for_pair(states[0], states[1], conn=conn)
+
+
+def _detect_war_season_completion_for_pair(current, previous, conn=None):
+    if not current or not previous:
+        return []
     current_season = current.get("season_id")
     previous_season = previous.get("season_id")
     if previous_season is None or current_season is None or previous_season == current_season:
@@ -844,21 +977,20 @@ def detect_war_season_completion(conn=None):
     }]
 
 
-def detect_war_completion(clan_tag, conn=None):
-    """Fetch river race log, store results, and emit any unannounced completed wars."""
-    try:
-        race_log = cr_api.get_river_race_log()
-    except Exception as e:
-        log.warning("Failed to fetch river race log: %s", e)
-        return []
-
-    if not race_log:
-        return []
-
+def detect_war_completion(clan_tag=None, conn=None, *, refresh_log=True):
+    """Emit any unannounced completed wars, optionally refreshing the race log first."""
     close = conn is None
     conn = conn or db.get_connection()
     try:
-        db.store_war_log(race_log, clan_tag, conn=conn)
+        if refresh_log:
+            try:
+                race_log = cr_api.get_river_race_log()
+            except Exception as e:
+                log.warning("Failed to fetch river race log: %s", e)
+                return []
+            if not race_log:
+                return []
+            db.store_war_log(race_log, clan_tag or cr_api.CLAN_TAG, conn=conn)
 
         signals = []
         for row in _completed_war_races(conn=conn):
@@ -992,6 +1124,200 @@ class HeartbeatTickResult:
     clan: dict
     war: dict
 
+
+@dataclass
+class WarAwarenessResult:
+    """Stored-war detection bundle plus deferred cursor updates."""
+    signals: list
+    clan: dict
+    war: dict
+    cursor_updates: list[dict]
+
+
+def _build_stored_clan_context(war_state) -> dict:
+    war_state = war_state or {}
+    return {
+        "name": war_state.get("clan_name"),
+        "tag": war_state.get("clan_tag"),
+    }
+
+
+def _scan_war_live_state_cursor(conn=None):
+    cursor = db.get_signal_detector_cursor(WAR_LIVE_STATE_CURSOR_KEY, conn=conn)
+    latest_war_id = db.get_latest_live_war_state_id(conn=conn)
+    if latest_war_id is None:
+        return [], []
+    if not cursor or cursor.get("cursor_int") is None:
+        return [], [
+            _cursor_update(
+                WAR_LIVE_STATE_CURSOR_KEY,
+                cursor_int=latest_war_id,
+                metadata={"mode": "seed"},
+            )
+        ]
+
+    after_war_id = int(cursor.get("cursor_int") or 0)
+    states = db.list_live_war_states_after(after_war_id, conn=conn)
+    if not states:
+        return [], []
+
+    previous = db.get_live_war_state_by_id(after_war_id, conn=conn)
+    start_index = 0
+    if previous is None:
+        previous = db.get_previous_live_war_state_before(states[0]["war_id"], conn=conn)
+    if previous is None:
+        previous = states[0]
+        start_index = 1
+
+    signals = []
+    for current in states[start_index:]:
+        signals.extend(_detect_war_race_finished_live_for_pair(current, previous, conn=conn))
+        signals.extend(_detect_war_day_transition_for_pair(current, previous, conn=conn))
+        signals.extend(_detect_war_day_markers_for_pair(current, previous, conn=conn))
+        signals.extend(_detect_war_rollovers_for_pair(current, previous, conn=conn))
+        signals.extend(_detect_war_rank_changes_for_pair(current, previous, conn=conn))
+        signals.extend(_detect_war_season_completion_for_pair(current, previous, conn=conn))
+        previous = current
+
+    return signals, [
+        _cursor_update(
+            WAR_LIVE_STATE_CURSOR_KEY,
+            cursor_int=states[-1]["war_id"],
+            metadata={"mode": "advance"},
+        )
+    ]
+
+
+def _scan_war_participant_cursors(conn=None):
+    signals = []
+    updates = []
+    for war_day_key in db.list_war_day_keys(conn=conn):
+        latest_observed_at = db.get_latest_war_participant_snapshot_observed_at(
+            war_day_key,
+            conn=conn,
+        )
+        if not latest_observed_at:
+            continue
+        cursor = db.get_signal_detector_cursor(WAR_PARTICIPANT_CURSOR_KEY, war_day_key, conn=conn)
+        if not cursor or not cursor.get("cursor_text"):
+            updates.append(
+                _cursor_update(
+                    WAR_PARTICIPANT_CURSOR_KEY,
+                    war_day_key,
+                    cursor_text=latest_observed_at,
+                    metadata={"mode": "seed", "war_day_key": war_day_key},
+                )
+            )
+            continue
+
+        observed_times = db.list_war_participant_snapshot_times_after(
+            war_day_key,
+            cursor.get("cursor_text"),
+            conn=conn,
+        )
+        if not observed_times:
+            continue
+
+        previous_observed_at = cursor.get("cursor_text")
+        if not db.get_war_participant_snapshot_group(war_day_key, previous_observed_at, conn=conn):
+            previous_observed_at = db.get_previous_war_participant_snapshot_observed_at(
+                war_day_key,
+                observed_times[0],
+                conn=conn,
+            )
+
+        start_index = 0
+        if not previous_observed_at:
+            previous_observed_at = observed_times[0]
+            start_index = 1
+
+        for current_observed_at in observed_times[start_index:]:
+            signals.extend(
+                _detect_war_member_used_all_decks_between(
+                    war_day_key,
+                    previous_observed_at,
+                    current_observed_at,
+                    conn=conn,
+                )
+            )
+            previous_observed_at = current_observed_at
+
+        updates.append(
+            _cursor_update(
+                WAR_PARTICIPANT_CURSOR_KEY,
+                war_day_key,
+                cursor_text=previous_observed_at,
+                metadata={"mode": "advance", "war_day_key": war_day_key},
+            )
+        )
+    return signals, updates
+
+
+def ingest_live_war_state(conn=None, *, refresh_race_log=True):
+    """Fetch and persist live war data without generating signals."""
+    war = cr_api.get_current_war()
+    close = conn is None
+    conn = conn or db.get_connection()
+    try:
+        if war:
+            db.upsert_war_current_state(war, conn=conn)
+        race_log_items = 0
+        race_log_refreshed = False
+        if refresh_race_log:
+            try:
+                race_log = cr_api.get_river_race_log()
+            except Exception as exc:
+                log.warning("War ingest: failed to refresh river race log: %s", exc)
+                race_log = None
+            if race_log:
+                race_log_items = db.store_war_log(race_log, cr_api.CLAN_TAG, conn=conn)
+                race_log_refreshed = True
+        return {
+            "war": war or {},
+            "race_log_refreshed": race_log_refreshed,
+            "race_log_items": race_log_items,
+        }
+    finally:
+        if close:
+            conn.close()
+
+
+def detect_war_signals_from_storage(conn=None):
+    """Run storage-backed war detection and return deferred cursor updates."""
+    close = conn is None
+    conn = conn or db.get_connection()
+    try:
+        signals = []
+        cursor_updates = []
+
+        live_state_signals, live_state_updates = _scan_war_live_state_cursor(conn=conn)
+        signals.extend(live_state_signals)
+        cursor_updates.extend(live_state_updates)
+
+        participant_signals, participant_updates = _scan_war_participant_cursors(conn=conn)
+        signals.extend(participant_signals)
+        cursor_updates.extend(participant_updates)
+
+        signals.extend(detect_war_battle_checkpoints(conn=conn))
+
+        war_signals = detect_war_completion(conn=conn, refresh_log=False)
+        signals.extend(war_signals)
+        signals.extend(detect_war_week_complete(war_signals, conn=conn))
+        if war_signals:
+            signals.extend(detect_war_champ_update(war_signals, conn=conn))
+
+        war = db.get_current_war_status(conn=conn) or {}
+        clan = _build_stored_clan_context(war)
+        return WarAwarenessResult(
+            signals=signals,
+            clan=clan,
+            war=war,
+            cursor_updates=cursor_updates,
+        )
+    finally:
+        if close:
+            conn.close()
+
 def tick(conn=None, *, include_nonwar=True, include_war=True):
     """Run one heartbeat cycle and return signals + fetched clan/war data.
 
@@ -1013,10 +1339,12 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         log.warning("Heartbeat: empty member list from API")
         return HeartbeatTickResult(signals=[], clan=clan, war={})
 
-    try:
-        war = cr_api.get_current_war()
-    except Exception:
-        war = {}
+    war = {}
+    if include_war:
+        try:
+            war = cr_api.get_current_war()
+        except Exception:
+            war = {}
 
     close = conn is None
     conn = conn or db.get_connection()
@@ -1026,7 +1354,7 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
 
         # 2. Snapshot current state
         db.snapshot_members(members, conn=conn)
-        if war:
+        if include_war and war:
             db.upsert_war_current_state(war, conn=conn)
 
         # 3. Purge old data
@@ -1090,7 +1418,7 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
 
             # War completion + week/season summaries
             clan_tag = cr_api.CLAN_TAG
-            war_signals = detect_war_completion(clan_tag, conn=conn)
+            war_signals = detect_war_completion(clan_tag, conn=conn, refresh_log=True)
             signals.extend(war_signals)
             signals.extend(detect_war_week_complete(war_signals, conn=conn))
             signals.extend(detect_war_season_completion(conn=conn))

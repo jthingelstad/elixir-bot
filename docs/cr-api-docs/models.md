@@ -53,6 +53,17 @@ In tournament contexts, `name` may be absent (only `id`). This list is non-exhau
 | `PlayerItemLevel` | currentDeck, cards, supportCards | name, id, level, starLevel?, evolutionLevel?, maxLevel, maxEvolutionLevel?, rarity, count, elixirCost?, iconUrls |
 | `Item` | currentFavouriteCard, card catalog | name, id, maxLevel, maxEvolutionLevel?, elixirCost?, iconUrls, rarity |
 
+**Observed mode-field interpretation:**
+- `starLevel` is separate from `evolutionLevel`
+- `evolutionLevel` has been observed in both `currentDeck` and `cards`
+- `maxEvolutionLevel=1` aligns with Evo-capable cards
+- `maxEvolutionLevel=2` aligns with Hero-capable cards
+- `maxEvolutionLevel=3` aligns with cards that support both Evo and Hero modes
+- `evolutionLevel=1` maps to `Evo unlocked`
+- `evolutionLevel=2` maps to `Hero unlocked`
+- `evolutionLevel=3` maps to `Evo + Hero unlocked`
+- This is an observed interpretation from live payloads and local stored data, suitable for Elixir UX but not proof of slot-based activation behavior
+
 **Card level interpretation:**
 - `level` and `maxLevel` use the API's rarity-relative scale, not a universal cross-rarity scale
 - `common`: API `1-16` = normalized `1-16`
@@ -210,7 +221,7 @@ Note: `badgeUrls` is NOT present in responses — only `badgeId` (integer).
 | Model | Used By | Verified Fields |
 |-------|---------|-----------------|
 | `CurrentRiverRace` | `GET /clans/{clanTag}/currentriverrace` | state, sectionIndex, periodIndex, periodType, clan, clans (array of 5), periodLogs |
-| `RiverRaceClan` | nested in CurrentRiverRace | tag, name, badgeId, fame, repairPoints, participants, periodPoints, clanScore |
+| `RiverRaceClan` | nested in CurrentRiverRace | tag, name, badgeId, fame, repairPoints, participants, periodPoints, clanScore, finishTime (observed live after completion) |
 | `RiverRaceParticipant` | nested in RiverRaceClan | tag, name, fame, repairPoints, boatAttacks, decksUsed, decksUsedToday |
 | `PeriodLog` | periodLogs array | periodIndex, items (array of PeriodLogEntry) |
 | `PeriodLogEntry` | nested in PeriodLog | clan: {tag}, pointsEarned, progressStartOfDay, progressEndOfDay, endOfDayRank, progressEarned, numOfDefensesRemaining, progressEarnedFromDefenses |
@@ -223,9 +234,10 @@ Note: `badgeUrls` is NOT present in responses — only `badgeId` (integer).
 
 **Season/section structure:**
 - `seasonId` is a sequential integer (e.g. 127, 128, 129, 130)
-- `sectionIndex` 0-2 = regular weeks (trophyChange ±20)
-- `sectionIndex` 3-4 = final/colosseum week (trophyChange ±100)
+- exact live trophy stakes should not be inferred from `sectionIndex` alone
+- `trophyChange` is verified on `/riverracelog` standings, not on the live `currentriverrace` payload
 - `finishTime` = `19691231T235959.000Z` (epoch 0 sentinel) for colosseum weeks
+- observed repo behavior: a non-sentinel live `clan.finishTime` means the race is already finished, even if battle time remains
 - Races always have 5 clans
 
 ---

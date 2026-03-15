@@ -168,6 +168,12 @@ def _site_card_payload(card: dict) -> dict:
         ("rarity", "rarity"),
         ("elixirCost", "elixir_cost"),
         ("elixir_cost", "elixir_cost"),
+        ("supports_evo", "supports_evo"),
+        ("supports_hero", "supports_hero"),
+        ("evo_unlocked", "evo_unlocked"),
+        ("hero_unlocked", "hero_unlocked"),
+        ("mode_label", "mode_label"),
+        ("mode_status_label", "mode_status_label"),
     ):
         value = card.get(source_key)
         if value is not None:
@@ -188,6 +194,10 @@ def _apply_current_deck_payload(member: dict, deck: dict | None):
         current_deck_cards = [_site_card_payload(card) for card in cards if card.get("name")]
         member["current_deck"] = [card["name"] for card in current_deck_cards if card.get("name")]
         member["current_deck_cards"] = current_deck_cards
+        if any(card.get("supports_evo") or card.get("supports_hero") for card in current_deck_cards):
+            member["current_deck_mode_note"] = (
+                "Activation depends on deck slot; these labels show what the card supports or has unlocked."
+            )
         member["_current_deck_icons"] = {
             card["name"]: card["icon_url"]
             for card in current_deck_cards

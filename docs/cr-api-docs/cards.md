@@ -75,8 +75,19 @@ Equivalent conversion from API `level` to normalized level:
 
 **iconUrls variants:**
 - `medium` — always present on all cards
-- `heroMedium` — present on some cards (hero/star skins)
-- `evolutionMedium` — present on some evolvable cards (39 of 121 observed)
+- `heroMedium` — present on Hero-capable cards in live March 2026 sampling
+- `evolutionMedium` — present on Evo-capable cards in live March 2026 sampling
+
+**Observed interpretation for Elixir UX:**
+- `maxEvolutionLevel=1` has only been observed on cards with `evolutionMedium` and no `heroMedium`
+- `maxEvolutionLevel=2` has only been observed on cards with `heroMedium` and no `evolutionMedium`
+- `maxEvolutionLevel=3` has only been observed on cards with both `heroMedium` and `evolutionMedium`
+- This strongly suggests:
+  - `1` => Evo-capable
+  - `2` => Hero-capable
+  - `3` => Evo + Hero capable
+- This mapping is inferred from live API payloads and local stored data. It is suitable for Elixir's player-facing interpretation layer, but it does not prove slot-based activation behavior in decks.
+- Player-facing output should prefer `Evo`, `Hero`, and `Evo + Hero` instead of raw numeric `evolutionLevel` wording.
 
 **ID ranges (observed):**
 - `26000xxx` — troops
@@ -107,4 +118,5 @@ Observed error bodies are usually `{ reason, message? }`. This endpoint ignored 
 - Pagination parameters appear to be ignored — `/cards?limit=1`, `/cards?after=...`, and `/cards?before=...` still returned the full catalog in March 2026 testing
 - `maxLevel` is the rarity-relative API cap, not a normalized universal cap. Example: champions report `maxLevel: 6`, which corresponds to normalized level 16 at full upgrade.
 - `maxEvolutionLevel` is optional — only 46/121 standard cards have evolutions (values observed: 1, 2, or 3)
+- Observed icon correlation: `evolutionMedium` aligns with Evo capability, `heroMedium` aligns with Hero capability, and cards with both assets appear to support both
 - No `paging` object is present in responses

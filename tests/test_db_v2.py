@@ -819,9 +819,9 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
             "currentFavouriteCard": {"id": 26000011, "name": "Valkyrie"},
             "currentDeck": [
                 {"name": "Valkyrie", "level": 14, "maxLevel": 14, "rarity": "rare", "iconUrls": {"medium": "icon://valk"}},
-                {"name": "Goblin Barrel", "level": 10, "maxLevel": 11, "rarity": "epic", "iconUrls": {"medium": "icon://gb"}},
+                {"name": "Goblin Barrel", "level": 10, "maxLevel": 11, "rarity": "epic", "iconUrls": {"medium": "icon://gb"}, "evolutionLevel": 2, "maxEvolutionLevel": 2},
                 {"name": "Princess", "level": 6, "maxLevel": 8, "rarity": "legendary", "iconUrls": {"medium": "icon://princess"}},
-                {"name": "Knight", "level": 16, "maxLevel": 16, "rarity": "common", "iconUrls": {"medium": "icon://knight"}},
+                {"name": "Knight", "level": 16, "maxLevel": 16, "rarity": "common", "iconUrls": {"medium": "icon://knight"}, "evolutionLevel": 3, "maxEvolutionLevel": 3},
                 {"name": "Rocket", "level": 14, "maxLevel": 14, "rarity": "rare", "iconUrls": {"medium": "icon://rocket"}},
                 {"name": "Ice Spirit", "level": 16, "maxLevel": 16, "rarity": "common", "iconUrls": {"medium": "icon://ice"}},
                 {"name": "Inferno Tower", "level": 10, "maxLevel": 11, "rarity": "epic", "iconUrls": {"medium": "icon://inferno"}},
@@ -903,6 +903,12 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         assert deck["cards"][1]["api_level"] == 10
         assert deck["cards"][1]["maxLevel"] == 16
         assert deck["cards"][1]["api_max_level"] == 11
+        assert deck["cards"][1]["supports_hero"] is True
+        assert deck["cards"][1]["mode_label"] == "Hero"
+        assert deck["cards"][1]["mode_status_label"] == "Hero unlocked"
+        assert deck["cards"][3]["supports_evo"] is True
+        assert deck["cards"][3]["supports_hero"] is True
+        assert deck["cards"][3]["mode_label"] == "Evo + Hero"
         assert deck["support_cards"][0]["name"] == "Dagger Duchess"
         assert deck["support_cards"][0]["level"] == 16
         assert deck["support_cards"][0]["api_level"] == 4
@@ -953,9 +959,9 @@ def test_get_member_card_collection_returns_collection_summary_and_levels():
                 "tag": "#ABC123",
                 "name": "King Levy",
                 "cards": [
-                    {"name": "Knight", "level": 16, "maxLevel": 16, "rarity": "common"},
+                    {"name": "Knight", "level": 16, "maxLevel": 16, "rarity": "common", "evolutionLevel": 3, "maxEvolutionLevel": 3},
                     {"name": "Hog Rider", "level": 14, "maxLevel": 14, "rarity": "rare"},
-                    {"name": "Fireball", "level": 10, "maxLevel": 11, "rarity": "epic"},
+                    {"name": "Fireball", "level": 10, "maxLevel": 11, "rarity": "epic", "maxEvolutionLevel": 1},
                 ],
                 "supportCards": [
                     {"name": "Dagger Duchess", "level": 4, "maxLevel": 4, "rarity": "legendary"},
@@ -970,9 +976,15 @@ def test_get_member_card_collection_returns_collection_summary_and_levels():
         assert {card["name"] for card in collection["cards"][:2]} == {"Knight", "Hog Rider"}
         assert collection["cards"][0]["level"] == 16
         assert collection["cards"][0]["maxLevel"] == 16
+        assert collection["cards"][0]["supports_evo"] is True
+        assert collection["cards"][0]["supports_hero"] is True
+        assert collection["cards"][0]["mode_label"] == "Evo + Hero"
+        assert collection["cards"][0]["mode_status_label"] == "Evo + Hero unlocked"
         assert collection["support_cards"][0]["name"] == "Dagger Duchess"
         assert collection["support_cards"][0]["maxLevel"] == 16
         assert collection["support_cards"][0]["levels_to_max"] == 0
+        assert collection["cards"][2]["supports_evo"] is True
+        assert collection["cards"][2]["mode_label"] is None
         assert collection["summary"]["cards_tracked"] == 3
         assert collection["summary"]["support_cards_tracked"] == 1
         assert collection["summary"]["highest_level"] == 16
@@ -981,8 +993,34 @@ def test_get_member_card_collection_returns_collection_summary_and_levels():
         assert "Knight" in {
             card["name"] for card in profile["card_collection_summary"]["strongest_cards"][:3]
         }
+        assert profile["card_collection_summary"]["strongest_cards"][0]["mode_label"] == "Evo + Hero"
     finally:
         conn.close()
+
+
+def test_card_mode_fields_interpret_observed_evo_and_hero_mapping():
+    from storage import roster
+
+    cases = [
+        ({}, (False, False, False, False, None, None)),
+        ({"maxEvolutionLevel": 1}, (True, False, False, False, None, None)),
+        ({"maxEvolutionLevel": 1, "evolutionLevel": 1}, (True, False, True, False, "Evo", "Evo unlocked")),
+        ({"maxEvolutionLevel": 2, "evolutionLevel": 2}, (False, True, False, True, "Hero", "Hero unlocked")),
+        ({"maxEvolutionLevel": 3, "evolutionLevel": 1}, (True, True, True, False, "Evo", "Evo unlocked")),
+        ({"maxEvolutionLevel": 3, "evolutionLevel": 2}, (True, True, False, True, "Hero", "Hero unlocked")),
+        ({"maxEvolutionLevel": 3, "evolutionLevel": 3}, (True, True, True, True, "Evo + Hero", "Evo + Hero unlocked")),
+    ]
+
+    for card, expected in cases:
+        interpreted = roster._card_mode_fields(card)
+        assert (
+            interpreted["supports_evo"],
+            interpreted["supports_hero"],
+            interpreted["evo_unlocked"],
+            interpreted["hero_unlocked"],
+            interpreted["mode_label"],
+            interpreted["mode_status_label"],
+        ) == expected
 
 
 def test_get_member_card_collection_can_filter_by_rarity_for_full_collection_questions():
