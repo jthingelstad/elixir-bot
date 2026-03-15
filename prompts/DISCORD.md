@@ -14,6 +14,7 @@ ID: 1476456514121109514
 Subagent: reception
 Workflow: reception
 ToolPolicy: none
+ReplyPolicy: open_channel
 MemoryScope: public
 DurableMemory: false
 
@@ -27,20 +28,6 @@ Elixir's onboarding and verification channel.
 - This is also a recruiting/help lane for interested people who are not in the clan yet.
 - If someone is not in the clan roster yet, tell them plainly that they need to join the clan first.
 - Useful references: https://poapkings.com/ and https://poapkings.com/faq/
-
-## #elixir
-
-ID: 1477043729503359198
-Subagent: legacy
-Workflow: none
-ToolPolicy: none
-MemoryScope: public
-DurableMemory: false
-
-Legacy mixed-feed channel.
-
-- Leave this channel in Discord for now, but do not route new automated Elixir posts here.
-- Treat it as retired from the active subagent architecture.
 
 ## #announcements
 

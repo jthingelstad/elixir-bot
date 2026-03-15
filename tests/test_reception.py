@@ -1,7 +1,7 @@
 """Tests for #reception onboarding — name matching and event handlers."""
 
 import asyncio
-import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -82,3 +82,87 @@ def test_send_onboarding_message_uses_shared_sender():
         )
 
     mock_post.assert_awaited_once_with(channel, {"content": "Welcome :elixir_happy:"})
+
+
+def test_handle_member_join_refreshes_roster_before_welcome():
+    member = SimpleNamespace(
+        id=42,
+        name="jamie",
+        display_name="Jamie",
+        global_name=None,
+        mention="<@42>",
+    )
+
+    with (
+        patch("runtime.onboarding.db.upsert_discord_user"),
+        patch("runtime.onboarding.refresh_clan_roster_from_api", new=AsyncMock(return_value=True)) as mock_refresh,
+        patch("runtime.onboarding._send_onboarding_message", new=AsyncMock()) as mock_send,
+    ):
+        asyncio.run(onboarding.handle_member_join(member))
+
+    mock_refresh.assert_awaited_once_with(reason="discord_member_join")
+    mock_send.assert_awaited_once()
+
+
+def test_handle_member_update_refreshes_roster_only_after_initial_no_match():
+    member_role = SimpleNamespace(id=777)
+    guild = SimpleNamespace(get_role=lambda role_id: member_role if role_id == 777 else None)
+    before = SimpleNamespace(nick="Old Name")
+    after = SimpleNamespace(
+        id=42,
+        name="jamie",
+        display_name="Jamie",
+        global_name=None,
+        mention="<@42>",
+        nick="King Levy",
+        guild=guild,
+        roles=[],
+    )
+
+    with (
+        patch("runtime.onboarding.db.upsert_discord_user"),
+        patch("runtime.onboarding.db.link_discord_user_to_member"),
+        patch("runtime.onboarding.refresh_clan_roster_from_api", new=AsyncMock(return_value=True)) as mock_refresh,
+        patch("runtime.onboarding._ensure_member_role", new=AsyncMock(return_value=(True, "Granted"))) as mock_grant,
+        patch("runtime.onboarding._send_onboarding_message", new=AsyncMock()) as mock_send,
+        patch("runtime.app.MEMBER_ROLE_ID", 777),
+        patch("runtime.app._match_clan_member", side_effect=[None, ("#ABC123", "King Levy")]) as mock_match,
+    ):
+        asyncio.run(onboarding.handle_member_update(before, after))
+
+    mock_refresh.assert_awaited_once_with(reason="nickname_update_no_match")
+    assert mock_match.call_count == 2
+    mock_grant.assert_awaited_once()
+    mock_send.assert_awaited_once()
+
+
+def test_handle_member_update_skips_refresh_when_initial_match_succeeds():
+    member_role = SimpleNamespace(id=777)
+    guild = SimpleNamespace(get_role=lambda role_id: member_role if role_id == 777 else None)
+    before = SimpleNamespace(nick="Old Name")
+    after = SimpleNamespace(
+        id=42,
+        name="jamie",
+        display_name="Jamie",
+        global_name=None,
+        mention="<@42>",
+        nick="King Levy",
+        guild=guild,
+        roles=[],
+    )
+
+    with (
+        patch("runtime.onboarding.db.upsert_discord_user"),
+        patch("runtime.onboarding.db.link_discord_user_to_member"),
+        patch("runtime.onboarding.refresh_clan_roster_from_api", new=AsyncMock(return_value=True)) as mock_refresh,
+        patch("runtime.onboarding._ensure_member_role", new=AsyncMock(return_value=(True, "Granted"))) as mock_grant,
+        patch("runtime.onboarding._send_onboarding_message", new=AsyncMock()) as mock_send,
+        patch("runtime.app.MEMBER_ROLE_ID", 777),
+        patch("runtime.app._match_clan_member", return_value=("#ABC123", "King Levy")) as mock_match,
+    ):
+        asyncio.run(onboarding.handle_member_update(before, after))
+
+    mock_refresh.assert_not_awaited()
+    mock_match.assert_called_once_with("King Levy")
+    mock_grant.assert_awaited_once()
+    mock_send.assert_awaited_once()

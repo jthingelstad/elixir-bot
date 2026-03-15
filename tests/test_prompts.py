@@ -36,17 +36,9 @@ def test_clan_loads():
 def test_discord_loads():
     """DISCORD.md loads and contains channel definitions."""
     text = prompts.discord()
-    assert "#elixir" in text
     assert "#leader-lounge" in text
     assert "#reception" in text
     assert "#poapkings-com" in text
-
-
-def test_channel_section_elixir():
-    """Extracts #elixir section."""
-    section = prompts.channel_section("#elixir")
-    assert "legacy" in section.lower()
-    assert "#elixir" in section
 
 
 def test_channel_section_leader():
@@ -61,6 +53,11 @@ def test_channel_section_reception():
     section = prompts.channel_section("#reception")
     assert "onboarding" in section.lower()
     assert "nickname" in section.lower()
+
+
+def test_reception_channel_is_open_channel():
+    channel = prompts.discord_singleton_subagent("reception")
+    assert channel["reply_policy"] == "open_channel"
 
 
 def test_channel_section_poapkings_com():
@@ -93,15 +90,6 @@ def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
             "MemoryScope: public\n"
             "DurableMemory: true\n\n"
             "Read-only member Q&A.\n\n"
-            "## #elixir\n\n"
-            "ID: 150\n"
-            "Subagent: legacy\n\n"
-            "Workflow: none\n"
-            "ToolPolicy: none\n"
-            "ReplyPolicy: disabled\n"
-            "MemoryScope: public\n"
-            "DurableMemory: false\n\n"
-            "Legacy room.\n\n"
             "## #leader-lounge\n\n"
             "ID: 200\n"
             "Subagent: leader-lounge\n\n"
@@ -134,12 +122,6 @@ def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
     assert "allow_proactive" not in channels[100]
     assert "respond_allowed" not in channels[100]
 
-    assert channels[150]["workflow"] is None
-    assert channels[150]["tool_policy"] == "none"
-    assert channels[150]["reply_policy"] == "disabled"
-    assert channels[150]["singleton"] is True
-    assert channels[150]["subagent_key"] == "legacy"
-
     assert channels[200]["workflow"] == "clanops"
     assert channels[200]["tool_policy"] == "read_write"
     assert channels[200]["reply_policy"] == "mention_only"
@@ -147,7 +129,7 @@ def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
     assert channels[300]["subagent"] == "poapkings-com"
     assert channels[300]["reply_policy"] == "disabled"
     assert channels[300]["durable_memory_enabled"] is False
-    assert prompts.discord_singleton_subagent("legacy")["id"] == 150
+    assert prompts.discord_singleton_subagent("leader-lounge")["id"] == 200
 
 
 def test_subagent_prompt_poapkings_com_loads():
@@ -191,17 +173,17 @@ def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
             "- application_id: 1\n\n"
             "## #one\n\n"
             "ID: 100\n"
-            "Subagent: legacy\n\n"
-            "Primary legacy room.\n\n"
+            "Subagent: leader-lounge\n\n"
+            "Primary leadership room.\n\n"
             "## #two\n\n"
             "ID: 101\n"
-            "Subagent: legacy\n\n"
+            "Subagent: leader-lounge\n\n"
             "Duplicate singleton.\n"
         ),
     )
     errors = prompts.validate_discord_channel_config()
 
-    assert any("expected exactly one legacy channel" in error for error in errors)
+    assert any("expected exactly one leader-lounge channel" in error for error in errors)
 
 
 def test_knowledge_block():

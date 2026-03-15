@@ -11,14 +11,6 @@ _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 _SUBAGENT_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "subagents")
 
 CHANNEL_SUBAGENT_CONFIG = {
-    "legacy": {
-        "workflow": None,
-        "tool_policy": "none",
-        "reply_policy": "disabled",
-        "singleton": True,
-        "memory_scope": "public",
-        "durable_memory_enabled": False,
-    },
     "promote-the-clan": {
         "workflow": "site_promote_content",
         "tool_policy": "none",
@@ -86,7 +78,7 @@ CHANNEL_SUBAGENT_CONFIG = {
     "reception": {
         "workflow": "reception",
         "tool_policy": "none",
-        "reply_policy": "mention_only",
+        "reply_policy": "open_channel",
         "singleton": True,
         "memory_scope": "public",
         "durable_memory_enabled": False,
@@ -269,7 +261,7 @@ def discord():
 def channel_section(channel_name):
     """Extract a single channel's section from DISCORD.md.
 
-    channel_name: e.g. "#elixir", "#leader-lounge", "#reception"
+    channel_name: e.g. "#ask-elixir", "#leader-lounge", "#reception"
     Returns the text from that channel's heading to the next ## heading (or EOF).
     """
     for channel in discord_channel_configs():

@@ -55,7 +55,6 @@ Primary interactive lanes:
 - `#leader-lounge` for leadership and clan operations
 
 Legacy:
-- `#elixir` remains in Discord for now, but it is retired from automated posting.
 
 The live channel contract lives in [prompts/DISCORD.md](prompts/DISCORD.md).
 

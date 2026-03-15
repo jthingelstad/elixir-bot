@@ -7,6 +7,7 @@ import re
 
 import discord
 
+import cr_api
 import db
 import elixir_agent
 
@@ -109,6 +110,31 @@ async def _send_onboarding_message(event_type: str, prompt_text: str, fallback: 
     await app._post_to_elixir(channel, {"content": msg or fallback})
 
 
+async def refresh_clan_roster_from_clan_data(clan_data: dict | None, *, reason: str = "") -> bool:
+    member_list = (clan_data or {}).get("memberList") or []
+    if not member_list:
+        return False
+    try:
+        await asyncio.to_thread(db.snapshot_members, member_list)
+        return True
+    except Exception as exc:
+        import runtime.app as app
+
+        app.log.warning("Onboarding roster refresh failed during %s: %s", reason or "unknown", exc)
+        return False
+
+
+async def refresh_clan_roster_from_api(*, reason: str = "") -> bool:
+    import runtime.app as app
+
+    try:
+        clan = await asyncio.to_thread(cr_api.get_clan)
+    except Exception as exc:
+        app.log.warning("Onboarding clan fetch failed during %s: %s", reason or "unknown", exc)
+        return False
+    return await refresh_clan_roster_from_clan_data(clan, reason=reason)
+
+
 async def _ensure_member_role(discord_member: discord.Member, member_tag: str, cr_name: str) -> tuple[bool, str]:
     import runtime.app as app
 
@@ -141,6 +167,7 @@ async def handle_member_join(member: discord.Member):
         global_name=getattr(member, "global_name", None),
         display_name=member.display_name,
     )
+    await refresh_clan_roster_from_api(reason="discord_member_join")
     await _send_onboarding_message(
         "discord_member_join",
         (
@@ -176,6 +203,9 @@ async def handle_member_update(before: discord.Member, after: discord.Member):
         return
 
     match = await asyncio.to_thread(app._match_clan_member, after.nick)
+    if not match:
+        await refresh_clan_roster_from_api(reason="nickname_update_no_match")
+        match = await asyncio.to_thread(app._match_clan_member, after.nick)
     if not match:
         await _send_onboarding_message(
             "nickname_no_match",
@@ -294,6 +324,8 @@ async def verify_discord_membership(member_tag: str) -> str:
 __all__ = [
     "handle_member_join",
     "handle_member_update",
+    "refresh_clan_roster_from_api",
+    "refresh_clan_roster_from_clan_data",
     "resolve_discord_member_input",
     "verify_discord_membership",
 ]
