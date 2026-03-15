@@ -1718,6 +1718,12 @@ def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
     assert queued["capability_card_modes_and_war_completion_v1"]["discord_content"].startswith("**Achievement Unlocked: Sharper Card And War Intel**")
     assert "clock-based" in " ".join(queued["capability_card_modes_and_war_completion_v1"]["details"])
     assert "finished the race" in " ".join(queued["capability_card_modes_and_war_completion_v1"]["details"])
+    assert queued["capability_subagent_behavior_upgrade_v1"]["title"] == "Achievement Unlocked: Sharper Channel Instincts"
+    assert queued["capability_subagent_behavior_upgrade_v1"]["capability_area"] == "subagent_behavior"
+    assert "channel to channel" in queued["capability_subagent_behavior_upgrade_v1"]["message"]
+    assert queued["capability_subagent_behavior_upgrade_v1"]["discord_content"].startswith("**Achievement Unlocked: Sharper Channel Instincts**")
+    assert "#reception" in queued["capability_subagent_behavior_upgrade_v1"]["discord_content"]
+    assert "leader" in " ".join(queued["capability_subagent_behavior_upgrade_v1"]["details"]).lower()
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
@@ -1740,6 +1746,7 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
         "capability_poap_kings_integration_v2",
         "capability_war_awareness_v1",
         "capability_card_modes_and_war_completion_v1",
+        "capability_subagent_behavior_upgrade_v1",
         "feature_custom_emoji_v1",
     }
 
