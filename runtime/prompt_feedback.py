@@ -7,6 +7,7 @@ import db
 
 THUMBS_UP = "\N{THUMBS UP SIGN}"
 THUMBS_DOWN = "\N{THUMBS DOWN SIGN}"
+WHITE_CHECK_MARK = "\N{WHITE HEAVY CHECK MARK}"
 
 
 def feedback_value_for_emoji(emoji) -> str | None:
@@ -46,9 +47,23 @@ async def _fetch_channel_and_message(payload):
     return channel, message
 
 
-async def _post_retry_invitation(payload, *, prompt_feedback_id: int | None) -> None:
-    channel, message = await _fetch_channel_and_message(payload)
-    if channel is None or message is None:
+async def _acknowledge_feedback(payload):
+    _channel, message = await _fetch_channel_and_message(payload)
+    if message is None:
+        return None
+    try:
+        await message.add_reaction(WHITE_CHECK_MARK)
+    except Exception:
+        import runtime.app as app
+
+        app.log.warning("Failed to add ask-elixir feedback acknowledgement reaction", exc_info=True)
+    return message
+
+
+async def _post_retry_invitation(payload, *, prompt_feedback_id: int | None, message=None) -> None:
+    if message is None:
+        _channel, message = await _fetch_channel_and_message(payload)
+    if message is None:
         return
     content = (
         f"<@{payload.user_id}> if that missed, ask me again or tell me what felt off "
@@ -101,8 +116,13 @@ async def handle_raw_reaction_add(payload) -> None:
         channel_name=channel_config.get("name"),
         feedback_value=feedback_value,
     )
+    message = await _acknowledge_feedback(payload)
     if feedback_value == "down" and feedback.get("became_active_down"):
-        await _post_retry_invitation(payload, prompt_feedback_id=feedback.get("prompt_feedback_id"))
+        await _post_retry_invitation(
+            payload,
+            prompt_feedback_id=feedback.get("prompt_feedback_id"),
+            message=message,
+        )
 
 
 async def handle_raw_reaction_remove(payload) -> None:
@@ -137,6 +157,7 @@ async def handle_raw_reaction_remove(payload) -> None:
 __all__ = [
     "THUMBS_DOWN",
     "THUMBS_UP",
+    "WHITE_CHECK_MARK",
     "feedback_value_for_emoji",
     "handle_raw_reaction_add",
     "handle_raw_reaction_remove",
