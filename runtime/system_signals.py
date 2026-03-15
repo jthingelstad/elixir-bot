@@ -215,6 +215,32 @@ STARTUP_SYSTEM_SIGNALS = [
         },
     },
     {
+        "signal_key": "capability_subagent_behavior_upgrade_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Sharper Channel Instincts",
+            "message": (
+                "Elixir now behaves more differently from channel to channel in the ways that matter. "
+                "The lane prompts behind the scenes are much more complete, so I should feel more natural in each room instead of sounding too similar everywhere."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Sharper Channel Instincts**\n\n"
+                "Elixir now behaves more differently from channel to channel in the ways that matter. "
+                "The lane prompts behind the scenes are much more complete, so I should feel more natural in each room instead of sounding too similar everywhere.\n\n"
+                "- `#river-race`, `#war-talk`, `#general`, and `#ask-elixir` now have much clearer personalities, so war command, tactical help, matter-of-fact answers, and exploratory conversation should feel more distinct.\n"
+                "- `#reception` and `#promote-the-clan` are now more intentionally recruiter-minded, which should make onboarding and member-driven recruiting feel smoother.\n"
+                "- `#player-progress`, `#clan-events`, `#announcements`, and `#leader-lounge` now have stronger guidance for what counts as worth saying and how those updates should sound."
+            ),
+            "details": [
+                "River Race command, tactical war help, matter-of-fact general answers, and exploratory Ask Elixir conversation now have much clearer boundaries.",
+                "Reception and recruiting lanes are more intentionally recruiter-minded, which should make onboarding and member-driven recruiting feel smoother.",
+                "Celebration, announcement, and leadership lanes now have stronger guidance for what counts as worth saying and how those updates should sound.",
+            ],
+            "audience": "clan",
+            "capability_area": "subagent_behavior",
+        },
+    },
+    {
         "signal_key": "feature_custom_emoji_v1",
         "signal_type": "capability_unlock",
         "payload": {
