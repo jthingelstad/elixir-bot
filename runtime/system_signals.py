@@ -253,12 +253,12 @@ STARTUP_SYSTEM_SIGNALS = [
                 "**Achievement Unlocked: Ask Elixir Feedback Reactions**\n\n"
                 "Ask Elixir now has a faster feedback loop built right into the channel. "
                 "If an answer helps, you can drop a thumbs-up. If it misses, you can drop a thumbs-down and Elixir will know it needs another shot.\n\n"
-                "- In `#ask-elixir`, substantial Elixir answers can now carry `👍` and `👎` reactions so feedback is one tap away.\n"
+                "- In `#ask-elixir`, you can now react to substantial Elixir answers with `👍` and `👎` so feedback is one tap away.\n"
                 "- A `👎` does not auto-reanswer, but it does tell Elixir the answer missed and prompts a quick invitation to try again or clarify what felt off.\n"
                 "- That feedback now feeds into Elixir's review loop behind the scenes, so Ask Elixir can keep getting sharper over time."
             ),
             "details": [
-                "In #ask-elixir, substantial Elixir answers can now carry thumbs-up and thumbs-down reactions so feedback is one tap away.",
+                "In #ask-elixir, members can now react to substantial Elixir answers with thumbs-up and thumbs-down so feedback is one tap away.",
                 "A thumbs-down does not auto-reanswer, but it does tell Elixir the answer missed and prompts a quick invitation to try again or clarify what felt off.",
                 "That feedback now feeds into Elixir's review loop behind the scenes, so Ask Elixir can keep getting sharper over time.",
             ],

@@ -7,7 +7,6 @@ import asyncio
 import cr_api
 import db
 import elixir_agent
-from runtime import prompt_feedback
 
 
 def _agent_failure_payload(result):
@@ -724,16 +723,6 @@ async def route_message(message):
                         await message.reply(app._fallback_channel_response(raw_question, workflow))
                     return
                 sent_messages = await app._reply_text(message, content)
-                try:
-                    await prompt_feedback.add_feedback_reactions(
-                        sent_messages,
-                        channel_name=app._channel_reply_target_name(channel_config),
-                        workflow=workflow,
-                        question=question,
-                        content=content,
-                    )
-                except Exception as exc:
-                    app.log.error("%s prompt feedback reaction error: %s", workflow, exc, exc_info=True)
                 try:
                     await app._share_channel_result(result, workflow)
                 except Exception as exc:
