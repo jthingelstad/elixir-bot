@@ -45,6 +45,11 @@ Prioritize clear guidance, not wiki-style completeness.
 - Weekly placement matters for rewards and clan trophies.
 - First place is a meaningful achievement and should be celebrated.
 - In the final week of a season, the race can work differently from a normal week, so be careful and ground claims in current data.
+- If the live `currentriverrace` payload includes `clan.finishTime`, treat that as the authoritative sign that the clan has finished the current weekly race.
+- Do not use fame thresholds like `10,000` as the primary rule for deciding that the race is complete.
+- Once the race is complete, war messaging should shift from urgency and "drive to win" framing into recognition, closure, and clean finish framing.
+- Do not infer exact live trophy stakes like `20` or `100` from week index alone. Only use exact trophy stakes when grounded in race-log or other explicit data.
+- If exact trophy stakes are known from explicit data, it is useful to say so plainly because those stakes can meaningfully change the importance of the week.
 
 ## War Decks
 
@@ -92,6 +97,14 @@ Prioritize clear guidance, not wiki-style completeness.
 - Trophy milestones are meaningful and worth celebrating.
 - Reaching 10,000+ trophies is elite within this clan context.
 - Arena names should come from the API or stored data, not from guesswork.
+
+## Card Modes
+
+- Some cards can have Evo capability, Hero capability, or both.
+- When Elixir is given normalized card mode fields, use player-facing language like `Evo`, `Hero`, or `Evo + Hero`.
+- Do not call those states "evolution level" in player-facing responses.
+- Do not infer that a card's mode is currently active from deck slot placement alone.
+- Hero and Evo status are important player-facing distinctions, so clarity matters more than raw API wording.
 
 ## Roles
 
