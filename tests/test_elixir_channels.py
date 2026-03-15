@@ -1,6 +1,8 @@
 """Tests for channel-role routing in elixir.py."""
 
 import asyncio
+import json
+import signal
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, PropertyMock, patch
@@ -140,6 +142,45 @@ def test_on_message_routes_ask_elixir_without_mention():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_does_not_save_unsent_interactive_reply():
+    message = _make_message(100, "member-chat", "<@999> how am I doing?")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 100,
+            "name": "#member-chat",
+            "role": "interactive",
+            "workflow": "interactive",
+            "mention_required": True,
+            "allow_proactive": False,
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={}),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir.elixir_agent.respond_in_channel",
+            return_value={"event_type": "channel_response", "content": "You look solid.", "summary": "solid"},
+        ),
+        patch("elixir._reply_text", new=AsyncMock(side_effect=RuntimeError("send failed"))),
+        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    assistant_saves = [call for call in mock_save.call_args_list if call.args[1] == "assistant"]
+    assert assistant_saves == []
+    mock_share.assert_not_awaited()
+    message.reply.assert_awaited_once_with("Hit an error. Try again in a moment.")
+    mock_process.assert_not_awaited()
+
+
 def test_is_bot_mentioned_requires_leading_mention():
     bot_user = SimpleNamespace(id=999)
     direct_message = _make_message(100, "member-chat", "<@999> how am I doing?")
@@ -274,6 +315,45 @@ def test_post_startup_message_fetches_channel_when_not_cached():
     mock_generate.assert_called_once()
     mock_post.assert_awaited_once()
     assert mock_save.call_args.kwargs["event_type"] == "startup_announcement"
+
+
+def test_acquire_pid_file_ignores_non_elixir_reused_pid(tmp_path):
+    pid_file = tmp_path / "elixir.pid"
+    pid_file.write_text("999")
+
+    with (
+        patch("elixir.PID_FILE", str(pid_file)),
+        patch("elixir.os.getpid", return_value=1234),
+        patch("elixir._process_exists", return_value=True),
+        patch("elixir._pid_looks_like_elixir", return_value=False),
+        patch("elixir.os.kill") as mock_kill,
+        patch("elixir.log.warning") as mock_warning,
+    ):
+        elixir._acquire_pid_file()
+
+    payload = json.loads(pid_file.read_text())
+    assert payload["pid"] == 1234
+    mock_kill.assert_not_called()
+    mock_warning.assert_called_once()
+
+
+def test_acquire_pid_file_stops_prior_elixir_process(tmp_path):
+    pid_file = tmp_path / "elixir.pid"
+    pid_file.write_text(json.dumps({"pid": 999}))
+
+    with (
+        patch("elixir.PID_FILE", str(pid_file)),
+        patch("elixir.os.getpid", return_value=1234),
+        patch("elixir._process_exists", return_value=True),
+        patch("elixir._pid_looks_like_elixir", return_value=True),
+        patch("elixir._wait_for_process_exit", return_value=True),
+        patch("elixir.os.kill") as mock_kill,
+    ):
+        elixir._acquire_pid_file()
+
+    payload = json.loads(pid_file.read_text())
+    assert payload["pid"] == 1234
+    mock_kill.assert_called_once_with(999, signal.SIGTERM)
 
 
 def test_startup_channel_audit_reports_missing_or_unwritable_channels():

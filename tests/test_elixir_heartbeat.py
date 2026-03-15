@@ -662,6 +662,73 @@ def test_player_intel_refresh_does_not_post_baseline_profile_discovery():
     mock_deliver.assert_not_awaited()
 
 
+def test_player_intel_refresh_marks_failure_when_all_player_endpoints_fail():
+    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
+    targets = [{"tag": "#ABC", "name": "King Levy"}]
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.sleep", new=AsyncMock()),
+        patch("elixir.cr_api.get_clan", return_value=clan),
+        patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
+        patch("elixir.cr_api.get_player", return_value=None),
+        patch("elixir.cr_api.get_player_battle_log", return_value=None),
+        patch("elixir.db.snapshot_members"),
+        patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
+        patch("elixir.db.upsert_war_current_state"),
+        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
+        patch("elixir.runtime_status.mark_job_success") as mock_success,
+        patch("elixir.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(elixir._player_intel_refresh())
+
+    mock_deliver.assert_not_awaited()
+    mock_alert.assert_awaited_once_with("player intel refresh")
+    mock_success.assert_not_called()
+    assert mock_failure.call_args.args[0] == "player_intel_refresh"
+    assert "refreshed 0 of 1 member(s)" in mock_failure.call_args.args[1]
+    assert "profile failures 1" in mock_failure.call_args.args[1]
+    assert "battle log failures 1" in mock_failure.call_args.args[1]
+    assert "full target failures 1" in mock_failure.call_args.args[1]
+
+
+def test_player_intel_refresh_reports_partial_endpoint_failures_without_hiding_success():
+    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
+    targets = [{"tag": "#ABC", "name": "King Levy"}]
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.sleep", new=AsyncMock()),
+        patch("elixir.cr_api.get_clan", return_value=clan),
+        patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
+        patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
+        patch("elixir.cr_api.get_player_battle_log", return_value=None),
+        patch("elixir.db.snapshot_members"),
+        patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
+        patch("elixir.db.snapshot_player_profile", return_value=[]),
+        patch("elixir.db.upsert_war_current_state"),
+        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
+        patch("elixir.runtime_status.mark_job_success") as mock_success,
+        patch("elixir.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(elixir._player_intel_refresh())
+
+    mock_deliver.assert_not_awaited()
+    mock_alert.assert_awaited_once_with("player intel refresh")
+    mock_failure.assert_not_called()
+    assert mock_success.call_args.args[0] == "player_intel_refresh"
+    assert "refreshed 1 of 1 member(s)" in mock_success.call_args.args[1]
+    assert "battle log failures 1" in mock_success.call_args.args[1]
+
+
 def test_clanops_weekly_review_posts_to_clanops_channel():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
