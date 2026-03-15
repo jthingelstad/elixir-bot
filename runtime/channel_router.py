@@ -7,6 +7,7 @@ import asyncio
 import cr_api
 import db
 import elixir_agent
+from runtime import prompt_feedback
 
 
 def _agent_failure_payload(result):
@@ -25,6 +26,21 @@ def _agent_failure_detail(error: dict) -> str | None:
     if phase:
         return phase
     return detail or None
+
+
+def _primary_discord_message_id(sent_messages) -> str | None:
+    for item in sent_messages or []:
+        message_id = getattr(item, "id", None)
+        if isinstance(message_id, (int, str)):
+            return str(message_id)
+    return None
+
+
+def _stored_assistant_content(content) -> str:
+    if isinstance(content, list):
+        parts = [str(item).strip() for item in content if str(item).strip()]
+        return "\n\n".join(parts)
+    return (content or "").strip()
 
 
 async def route_message(message):
@@ -557,18 +573,19 @@ async def route_message(message):
                     )
                     await message.reply("Having a hiccup. Try again in a sec.")
                     return
-                await app._reply_text(message, content)
+                sent_messages = await app._reply_text(message, content)
                 try:
                     await asyncio.to_thread(
                         db.save_message,
                         scope,
                         "assistant",
-                        content,
+                        _stored_assistant_content(content),
                         channel_id=message.channel.id,
                         channel_name=getattr(message.channel, "name", None),
                         channel_kind=str(message.channel.type),
                         workflow="reception",
                         event_type=result.get("event_type"),
+                        discord_message_id=_primary_discord_message_id(sent_messages),
                     )
                 except Exception as exc:
                     app.log.error("reception reply save error: %s", exc, exc_info=True)
@@ -706,7 +723,17 @@ async def route_message(message):
                     if mentioned or allows_open_channel_reply:
                         await message.reply(app._fallback_channel_response(raw_question, workflow))
                     return
-                await app._reply_text(message, content)
+                sent_messages = await app._reply_text(message, content)
+                try:
+                    await prompt_feedback.add_feedback_reactions(
+                        sent_messages,
+                        channel_name=app._channel_reply_target_name(channel_config),
+                        workflow=workflow,
+                        question=question,
+                        content=content,
+                    )
+                except Exception as exc:
+                    app.log.error("%s prompt feedback reaction error: %s", workflow, exc, exc_info=True)
                 try:
                     await app._share_channel_result(result, workflow)
                 except Exception as exc:
@@ -716,7 +743,7 @@ async def route_message(message):
                         db.save_message,
                         conversation_scope,
                         "assistant",
-                        content,
+                        _stored_assistant_content(content),
                         channel_id=message.channel.id,
                         channel_name=getattr(message.channel, "name", None),
                         channel_kind=str(message.channel.type),
@@ -725,6 +752,7 @@ async def route_message(message):
                         display_name=message.author.display_name,
                         workflow=workflow,
                         event_type=result.get("event_type"),
+                        discord_message_id=_primary_discord_message_id(sent_messages),
                     )
                 except Exception as exc:
                     app.log.error("%s channel reply save error: %s", workflow, exc, exc_info=True)

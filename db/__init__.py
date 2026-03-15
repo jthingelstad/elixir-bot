@@ -1468,7 +1468,39 @@ def _migration_17(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17]
+def _migration_18(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS prompt_feedback (
+            prompt_feedback_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assistant_message_id INTEGER REFERENCES messages(message_id) ON DELETE SET NULL,
+            assistant_discord_message_id TEXT NOT NULL,
+            workflow TEXT,
+            channel_id TEXT,
+            channel_name TEXT,
+            discord_user_id TEXT NOT NULL,
+            original_asker_discord_user_id TEXT,
+            feedback_value TEXT NOT NULL,
+            question TEXT,
+            response_preview TEXT,
+            recorded_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            removed_at TEXT,
+            retry_invited_at TEXT,
+            retry_invite_message_id TEXT,
+            UNIQUE(assistant_discord_message_id, discord_user_id),
+            CHECK(feedback_value IN ('up', 'down'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_prompt_feedback_updated
+            ON prompt_feedback(updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_prompt_feedback_workflow_active
+            ON prompt_feedback(workflow, removed_at, updated_at DESC);
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

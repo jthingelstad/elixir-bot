@@ -594,13 +594,26 @@ async def _reply_text(message, content):
 
         return re.sub(r"!\[([^\]]*)\]\((https?://[^)]+)\)", _replace_image, text)
 
-    content = _discord_safe_content(content)
-    content = _runtime_app()._resolve_custom_emoji(content, getattr(message, "guild", None))
-    if len(content) > 2000:
-        for chunk in [content[i:i + 1990] for i in range(0, len(content), 1990)]:
-            await message.reply(chunk)
+    posts = []
+    if isinstance(content, list):
+        posts = [item for item in content if isinstance(item, str) and item.strip()]
     else:
-        await message.reply(content)
+        posts = [content]
+
+    sent_messages = []
+    for post in posts:
+        safe_post = _discord_safe_content(post)
+        safe_post = _runtime_app()._resolve_custom_emoji(safe_post, getattr(message, "guild", None))
+        if len(safe_post) > 2000:
+            for chunk in [safe_post[i:i + 1990] for i in range(0, len(safe_post), 1990)]:
+                sent = await message.reply(chunk)
+                if sent is not None:
+                    sent_messages.append(sent)
+        else:
+            sent = await message.reply(safe_post)
+            if sent is not None:
+                sent_messages.append(sent)
+    return sent_messages
 
 
 def _build_roster_join_dates_report():

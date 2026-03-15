@@ -107,6 +107,8 @@ def test_on_message_routes_interactive_channel_when_mentioned():
 
 def test_on_message_routes_ask_elixir_without_mention():
     message = _make_message(1482368505058955467, "ask-elixir", "what deck should I learn next?")
+    sent_message = SimpleNamespace(id=987, add_reaction=AsyncMock())
+    message.reply = AsyncMock(return_value=sent_message)
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -125,7 +127,7 @@ def test_on_message_routes_ask_elixir_without_mention():
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.list_thread_messages", return_value=[]) as mock_history,
         patch("elixir.db.build_memory_context", return_value={}),
-        patch("elixir.db.save_message"),
+        patch("elixir.db.save_message") as mock_save,
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
         patch(
             "elixir.elixir_agent.respond_in_channel",
@@ -139,6 +141,10 @@ def test_on_message_routes_ask_elixir_without_mention():
     assert mock_respond.call_args.kwargs["channel_name"] == "#ask-elixir"
     mock_history.assert_called_once_with("channel_user:1482368505058955467:123", elixir.CHANNEL_CONVERSATION_LIMIT)
     message.reply.assert_awaited_once_with("Try a deck with faster cycles so you can learn matchups quicker.")
+    assert sent_message.add_reaction.await_args_list[0].args == ("👍",)
+    assert sent_message.add_reaction.await_args_list[1].args == ("👎",)
+    assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
+    assert assistant_save.kwargs["discord_message_id"] == "987"
     mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()
 
@@ -214,6 +220,212 @@ def test_on_message_does_not_save_unsent_interactive_reply():
     assert assistant_saves == []
     mock_share.assert_not_awaited()
     message.reply.assert_awaited_once_with("Hit an error. Try again in a moment.")
+    mock_process.assert_not_awaited()
+
+
+def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
+    payload = SimpleNamespace(
+        channel_id=1482368505058955467,
+        message_id=987,
+        user_id=123,
+        emoji="👎",
+        member=SimpleNamespace(bot=False),
+    )
+    assistant_row = {
+        "message_id": 77,
+        "discord_message_id": "987",
+        "thread_id": 5,
+        "channel_id": "1482368505058955467",
+        "discord_user_id": "123",
+        "author_type": "assistant",
+        "workflow": "interactive",
+        "event_type": "channel_response",
+        "content": "Try a faster cycle deck.",
+        "summary": "faster deck",
+        "created_at": "2026-03-15T12:00:00",
+    }
+    channel = SimpleNamespace(fetch_message=AsyncMock(return_value=SimpleNamespace(reply=AsyncMock(return_value=SimpleNamespace(id=654)))))
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
+        patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 44, "became_active_down": True}) as mock_upsert,
+        patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
+        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: channel)),
+    ):
+        asyncio.run(elixir.on_raw_reaction_add(payload))
+
+    mock_upsert.assert_called_once()
+    channel.fetch_message.assert_awaited_once_with(987)
+    channel.fetch_message.return_value.reply.assert_awaited_once()
+    mock_mark.assert_called_once_with(44, retry_message_id=654)
+
+
+def test_on_raw_reaction_add_ignores_non_owner_feedback():
+    payload = SimpleNamespace(
+        channel_id=1482368505058955467,
+        message_id=987,
+        user_id=9999,
+        emoji="👎",
+        member=SimpleNamespace(bot=False),
+    )
+    assistant_row = {
+        "message_id": 77,
+        "discord_message_id": "987",
+        "thread_id": 5,
+        "channel_id": "1482368505058955467",
+        "discord_user_id": "123",
+        "author_type": "assistant",
+        "workflow": "interactive",
+        "event_type": "channel_response",
+        "content": "Try a faster cycle deck.",
+        "summary": "faster deck",
+        "created_at": "2026-03-15T12:00:00",
+    }
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
+        patch("runtime.prompt_feedback.db.upsert_prompt_feedback") as mock_upsert,
+        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=111), get_channel=lambda _channel_id: None)),
+    ):
+        asyncio.run(elixir.on_raw_reaction_add(payload))
+
+    mock_upsert.assert_not_called()
+
+
+def test_on_raw_reaction_add_does_not_repeat_retry_invitation_for_active_down_feedback():
+    payload = SimpleNamespace(
+        channel_id=1482368505058955467,
+        message_id=987,
+        user_id=123,
+        emoji="👎",
+        member=SimpleNamespace(bot=False),
+    )
+    assistant_row = {
+        "message_id": 77,
+        "discord_message_id": "987",
+        "thread_id": 5,
+        "channel_id": "1482368505058955467",
+        "discord_user_id": "123",
+        "author_type": "assistant",
+        "workflow": "interactive",
+        "event_type": "channel_response",
+        "content": "Try a faster cycle deck.",
+        "summary": "faster deck",
+        "created_at": "2026-03-15T12:00:00",
+    }
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
+        patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 44, "became_active_down": False}) as mock_upsert,
+        patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
+        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None)),
+    ):
+        asyncio.run(elixir.on_raw_reaction_add(payload))
+
+    mock_upsert.assert_called_once()
+    mock_mark.assert_not_called()
+
+
+def test_on_raw_reaction_remove_clears_matching_feedback():
+    payload = SimpleNamespace(
+        channel_id=1482368505058955467,
+        message_id=987,
+        user_id=123,
+        emoji="👍",
+    )
+    assistant_row = {
+        "message_id": 77,
+        "discord_message_id": "987",
+        "thread_id": 5,
+        "channel_id": "1482368505058955467",
+        "discord_user_id": "123",
+        "author_type": "assistant",
+        "workflow": "interactive",
+        "event_type": "channel_response",
+        "content": "Try a faster cycle deck.",
+        "summary": "faster deck",
+        "created_at": "2026-03-15T12:00:00",
+    }
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
+        patch("runtime.prompt_feedback.db.clear_prompt_feedback") as mock_clear,
+        patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None)),
+    ):
+        asyncio.run(elixir.on_raw_reaction_remove(payload))
+
+    mock_clear.assert_called_once_with(
+        assistant_discord_message_id=987,
+        discord_user_id=123,
+        feedback_value="up",
+    )
+
+
+def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_reply():
+    message = _make_message(1482368505058955467, "ask-elixir", "give me a deeper explanation")
+    sent_messages = [
+        SimpleNamespace(id=2001, add_reaction=AsyncMock()),
+        SimpleNamespace(id=2002, add_reaction=AsyncMock()),
+    ]
+    message.reply = AsyncMock(side_effect=sent_messages)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1482368505058955467,
+            "name": "#ask-elixir",
+            "subagent": "ask-elixir",
+            "workflow": "interactive",
+            "reply_policy": "open_channel",
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={}),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir.elixir_agent.respond_in_channel",
+            return_value={
+                "event_type": "channel_response",
+                "content": ["Part one.", "Part two."],
+                "summary": "two-part answer",
+            },
+        ),
+        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    assert sent_messages[0].add_reaction.await_count == 0
+    assert sent_messages[1].add_reaction.await_count == 0
+    assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
+    assert assistant_save.kwargs["discord_message_id"] == "2001"
+    assert assistant_save.args[2] == "Part one.\n\nPart two."
+    mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()
 
 
@@ -1724,6 +1936,12 @@ def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
     assert queued["capability_subagent_behavior_upgrade_v1"]["discord_content"].startswith("**Achievement Unlocked: Sharper Channel Instincts**")
     assert "#reception" in queued["capability_subagent_behavior_upgrade_v1"]["discord_content"]
     assert "leader" in " ".join(queued["capability_subagent_behavior_upgrade_v1"]["details"]).lower()
+    assert queued["capability_ask_elixir_reaction_feedback_v1"]["title"] == "Achievement Unlocked: Ask Elixir Feedback Reactions"
+    assert queued["capability_ask_elixir_reaction_feedback_v1"]["capability_area"] == "ask_elixir_feedback"
+    assert "thumbs-up" in queued["capability_ask_elixir_reaction_feedback_v1"]["message"]
+    assert queued["capability_ask_elixir_reaction_feedback_v1"]["discord_content"].startswith("**Achievement Unlocked: Ask Elixir Feedback Reactions**")
+    assert "#ask-elixir" in queued["capability_ask_elixir_reaction_feedback_v1"]["discord_content"]
+    assert "review loop" in " ".join(queued["capability_ask_elixir_reaction_feedback_v1"]["details"])
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
@@ -1747,6 +1965,7 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
         "capability_war_awareness_v1",
         "capability_card_modes_and_war_completion_v1",
         "capability_subagent_behavior_upgrade_v1",
+        "capability_ask_elixir_reaction_feedback_v1",
         "feature_custom_emoji_v1",
     }
 

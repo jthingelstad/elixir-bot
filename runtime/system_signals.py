@@ -241,6 +241,32 @@ STARTUP_SYSTEM_SIGNALS = [
         },
     },
     {
+        "signal_key": "capability_ask_elixir_reaction_feedback_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Ask Elixir Feedback Reactions",
+            "message": (
+                "Ask Elixir now has a faster feedback loop built right into the channel. "
+                "If an answer helps, you can drop a thumbs-up. If it misses, you can drop a thumbs-down and Elixir will know it needs another shot."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Ask Elixir Feedback Reactions**\n\n"
+                "Ask Elixir now has a faster feedback loop built right into the channel. "
+                "If an answer helps, you can drop a thumbs-up. If it misses, you can drop a thumbs-down and Elixir will know it needs another shot.\n\n"
+                "- In `#ask-elixir`, substantial Elixir answers can now carry `👍` and `👎` reactions so feedback is one tap away.\n"
+                "- A `👎` does not auto-reanswer, but it does tell Elixir the answer missed and prompts a quick invitation to try again or clarify what felt off.\n"
+                "- That feedback now feeds into Elixir's review loop behind the scenes, so Ask Elixir can keep getting sharper over time."
+            ),
+            "details": [
+                "In #ask-elixir, substantial Elixir answers can now carry thumbs-up and thumbs-down reactions so feedback is one tap away.",
+                "A thumbs-down does not auto-reanswer, but it does tell Elixir the answer missed and prompts a quick invitation to try again or clarify what felt off.",
+                "That feedback now feeds into Elixir's review loop behind the scenes, so Ask Elixir can keep getting sharper over time.",
+            ],
+            "audience": "clan",
+            "capability_area": "ask_elixir_feedback",
+        },
+    },
+    {
         "signal_key": "feature_custom_emoji_v1",
         "signal_type": "capability_unlock",
         "payload": {

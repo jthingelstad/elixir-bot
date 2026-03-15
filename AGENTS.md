@@ -18,7 +18,7 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
 - `prompts/subagents/` — Channel-named subagent prompt files
 - `integrations/poap_kings/` — POAP KINGS-specific site integration and GitHub publishing
-- `scripts/review_prompt_failures.py` — Review recent LLM/channel failures from SQLite for debugging and prompt/tool routing analysis
+- `scripts/review_agent_feedback.py` — Review recent LLM/channel failures and `#ask-elixir` feedback from SQLite for debugging and prompt/tool routing analysis
 - `runtime/activities.py` — Canonical registry for recurring automated activities
 - `runtime/channel_subagents.py` — Signal outcome planning, channel-targeted delivery, and subagent memory context
 - `runtime/channel_router.py` — Discord message routing for interactive channels
@@ -211,13 +211,13 @@ Important rules:
   - `open_channel` for `#ask-elixir`
   - `disabled` for notification-only channels like `#poapkings-com`, `#river-race`, and `#announcements`
 
-### Prompt Failure Review
+### Agent Feedback Review
 
-Use the stored prompt-failure log when a Discord request fails, falls back, or returns unusable output:
+Use the stored prompt-failure log and `#ask-elixir` feedback records when a Discord request fails, falls back, returns unusable output, or gets a thumbs-down:
 
 ```bash
-venv/bin/python scripts/review_prompt_failures.py --limit 20
-venv/bin/python scripts/review_prompt_failures.py --workflow clanops --json
+venv/bin/python scripts/review_agent_feedback.py --limit 20
+venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
 ```
 
 - text mode is for quick local triage

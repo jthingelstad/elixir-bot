@@ -143,6 +143,8 @@ def test_subagent_prompt_ask_elixir_mentions_conversational_followups():
     assert "short follow-ups" in text.lower()
     assert "repeating the previous factual answer" in text.lower()
     assert "correct yourself" in text.lower()
+    assert "👍" in text
+    assert "👎" in text
 
 
 def test_subagent_prompt_river_race_prioritizes_observation_over_activation():

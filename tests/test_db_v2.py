@@ -26,6 +26,7 @@ def test_v2_schema_initializes_core_tables():
             "discord_users",
             "discord_links",
             "messages",
+            "prompt_feedback",
             "memory_facts",
             "member_current_state",
             "member_state_snapshots",
@@ -691,6 +692,138 @@ def test_prompt_failures_are_recorded_and_listed_for_review():
         assert failures[0]["channel_name"] == "clan-ops"
         assert failures[0]["openai_last_model"] == "gpt-4.1-mini"
         assert json.loads(failures[0]["raw_json"]) == {"event_type": "channel_response", "content": None}
+    finally:
+        conn.close()
+
+
+def test_prompt_feedback_is_recorded_cleared_and_listed_for_review():
+    conn = db.get_connection(":memory:")
+    try:
+        db.save_message(
+            "channel_user:1482368505058955467:123",
+            "user",
+            "What deck should I learn next?",
+            channel_id=1482368505058955467,
+            channel_name="ask-elixir",
+            channel_kind="text",
+            discord_user_id=123,
+            username="jamie",
+            display_name="Jamie",
+            workflow="interactive",
+            discord_message_id=555,
+            conn=conn,
+        )
+        db.save_message(
+            "channel_user:1482368505058955467:123",
+            "assistant",
+            "Try a faster cycle deck first so you can learn matchups quickly.",
+            channel_id=1482368505058955467,
+            channel_name="ask-elixir",
+            channel_kind="text",
+            discord_user_id=123,
+            username="jamie",
+            display_name="Jamie",
+            workflow="interactive",
+            event_type="channel_response",
+            discord_message_id=777,
+            conn=conn,
+        )
+
+        up = db.upsert_prompt_feedback(
+            assistant_discord_message_id=777,
+            discord_user_id=123,
+            original_asker_discord_user_id=123,
+            workflow="interactive",
+            channel_id=1482368505058955467,
+            channel_name="#ask-elixir",
+            feedback_value="up",
+            conn=conn,
+        )
+        assert up["feedback_value"] == "up"
+        assert up["became_active_down"] is False
+
+        down = db.upsert_prompt_feedback(
+            assistant_discord_message_id=777,
+            discord_user_id=123,
+            original_asker_discord_user_id=123,
+            workflow="interactive",
+            channel_id=1482368505058955467,
+            channel_name="#ask-elixir",
+            feedback_value="down",
+            conn=conn,
+        )
+        assert down["feedback_value"] == "down"
+        assert down["became_active_down"] is True
+
+        review_items = db.list_prompt_review_items(conn=conn)
+        assert len(review_items) == 1
+        assert review_items[0]["kind"] == "feedback"
+        assert review_items[0]["feedback_value"] == "down"
+        assert review_items[0]["question"] == "What deck should I learn next?"
+        assert "faster cycle deck" in review_items[0]["result_preview"]
+
+        positives = db.list_prompt_review_items(include_positive=True, conn=conn)
+        assert positives[0]["feedback_value"] == "down"
+
+        cleared = db.clear_prompt_feedback(
+            assistant_discord_message_id=777,
+            discord_user_id=123,
+            feedback_value="down",
+            conn=conn,
+        )
+        assert cleared == 1
+        assert db.list_prompt_review_items(conn=conn) == []
+    finally:
+        conn.close()
+
+
+def test_prompt_review_items_hide_positive_feedback_by_default():
+    conn = db.get_connection(":memory:")
+    try:
+        db.save_message(
+            "channel_user:1482368505058955467:123",
+            "user",
+            "Was that answer right?",
+            channel_id=1482368505058955467,
+            channel_name="ask-elixir",
+            channel_kind="text",
+            discord_user_id=123,
+            username="jamie",
+            display_name="Jamie",
+            workflow="interactive",
+            discord_message_id=901,
+            conn=conn,
+        )
+        db.save_message(
+            "channel_user:1482368505058955467:123",
+            "assistant",
+            "Yes, and here is why.",
+            channel_id=1482368505058955467,
+            channel_name="ask-elixir",
+            channel_kind="text",
+            discord_user_id=123,
+            username="jamie",
+            display_name="Jamie",
+            workflow="interactive",
+            event_type="channel_response",
+            discord_message_id=902,
+            conn=conn,
+        )
+        db.upsert_prompt_feedback(
+            assistant_discord_message_id=902,
+            discord_user_id=123,
+            workflow="interactive",
+            channel_id=1482368505058955467,
+            channel_name="#ask-elixir",
+            feedback_value="up",
+            conn=conn,
+        )
+
+        assert db.list_prompt_review_items(conn=conn) == []
+        review_items = db.list_prompt_review_items(include_positive=True, conn=conn)
+        assert len(review_items) == 1
+        assert review_items[0]["feedback_value"] == "up"
+        assert review_items[0]["failure_type"] == "user_feedback_up"
     finally:
         conn.close()
 

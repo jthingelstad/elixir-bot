@@ -484,6 +484,250 @@ def save_message(scope, author_type, content, summary=None, channel_id=None, cha
             conn.close()
 
 
+def get_message_by_discord_message_id(discord_message_id, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT message_id, discord_message_id, thread_id, channel_id, discord_user_id, member_id, "
+            "author_type, workflow, event_type, content, summary, created_at "
+            "FROM messages WHERE discord_message_id = ?",
+            (str(discord_message_id),),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        if close:
+            conn.close()
+
+
+def _previous_user_message_for_assistant(conn, assistant_row):
+    if not assistant_row:
+        return None
+    thread_id = assistant_row.get("thread_id")
+    message_id = assistant_row.get("message_id")
+    discord_user_id = assistant_row.get("discord_user_id")
+    if not thread_id or not message_id:
+        return None
+    if discord_user_id is not None:
+        row = conn.execute(
+            "SELECT message_id, content, summary, discord_user_id "
+            "FROM messages WHERE thread_id = ? AND author_type = 'user' AND discord_user_id = ? AND message_id < ? "
+            "ORDER BY message_id DESC LIMIT 1",
+            (thread_id, str(discord_user_id), int(message_id)),
+        ).fetchone()
+        if row:
+            return dict(row)
+    row = conn.execute(
+        "SELECT message_id, content, summary, discord_user_id "
+        "FROM messages WHERE thread_id = ? AND author_type = 'user' AND message_id < ? "
+        "ORDER BY message_id DESC LIMIT 1",
+        (thread_id, int(message_id)),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _response_preview(content) -> str:
+    text = (content or "").strip()
+    return text[:280] if text else ""
+
+
+def upsert_prompt_feedback(*, assistant_discord_message_id, discord_user_id, original_asker_discord_user_id=None,
+                           workflow=None, channel_id=None, channel_name=None, feedback_value=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        feedback_value = (feedback_value or "").strip().lower()
+        if feedback_value not in {"up", "down"}:
+            raise ValueError(f"invalid feedback value: {feedback_value}")
+        assistant = get_message_by_discord_message_id(assistant_discord_message_id, conn=conn)
+        if not assistant:
+            raise ValueError(f"assistant message not found for discord id {assistant_discord_message_id}")
+        previous_question = _previous_user_message_for_assistant(conn, assistant)
+        question = (
+            previous_question.get("content")
+            if previous_question
+            else ""
+        ) or ""
+        existing = conn.execute(
+            "SELECT prompt_feedback_id, feedback_value, removed_at FROM prompt_feedback "
+            "WHERE assistant_discord_message_id = ? AND discord_user_id = ?",
+            (str(assistant_discord_message_id), str(discord_user_id)),
+        ).fetchone()
+        now = _utcnow()
+        if existing:
+            conn.execute(
+                "UPDATE prompt_feedback SET assistant_message_id = ?, workflow = ?, channel_id = ?, channel_name = ?, "
+                "original_asker_discord_user_id = ?, feedback_value = ?, question = ?, response_preview = ?, "
+                "updated_at = ?, removed_at = NULL "
+                "WHERE prompt_feedback_id = ?",
+                (
+                    assistant.get("message_id"),
+                    workflow or assistant.get("workflow"),
+                    str(channel_id) if channel_id is not None else assistant.get("channel_id"),
+                    channel_name,
+                    str(original_asker_discord_user_id) if original_asker_discord_user_id is not None else assistant.get("discord_user_id"),
+                    feedback_value,
+                    question,
+                    _response_preview(assistant.get("content") or ""),
+                    now,
+                    existing["prompt_feedback_id"],
+                ),
+            )
+            prompt_feedback_id = existing["prompt_feedback_id"]
+            previous_value = (existing["feedback_value"] or "").strip().lower()
+            was_removed = bool(existing["removed_at"])
+        else:
+            cur = conn.execute(
+                "INSERT INTO prompt_feedback (assistant_message_id, assistant_discord_message_id, workflow, channel_id, channel_name, "
+                "discord_user_id, original_asker_discord_user_id, feedback_value, question, response_preview, recorded_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    assistant.get("message_id"),
+                    str(assistant_discord_message_id),
+                    workflow or assistant.get("workflow"),
+                    str(channel_id) if channel_id is not None else assistant.get("channel_id"),
+                    channel_name,
+                    str(discord_user_id),
+                    str(original_asker_discord_user_id) if original_asker_discord_user_id is not None else assistant.get("discord_user_id"),
+                    feedback_value,
+                    question,
+                    _response_preview(assistant.get("content") or ""),
+                    now,
+                    now,
+                ),
+            )
+            prompt_feedback_id = cur.lastrowid
+            previous_value = None
+            was_removed = False
+        conn.commit()
+        became_active_down = feedback_value == "down" and (previous_value != "down" or was_removed)
+        return {
+            "prompt_feedback_id": prompt_feedback_id,
+            "feedback_value": feedback_value,
+            "became_active_down": became_active_down,
+            "changed": previous_value != feedback_value or was_removed,
+        }
+    finally:
+        if close:
+            conn.close()
+
+
+def clear_prompt_feedback(*, assistant_discord_message_id, discord_user_id, feedback_value=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        now = _utcnow()
+        params = [now, now, str(assistant_discord_message_id), str(discord_user_id)]
+        sql = (
+            "UPDATE prompt_feedback SET removed_at = ?, updated_at = ? "
+            "WHERE assistant_discord_message_id = ? AND discord_user_id = ? AND removed_at IS NULL"
+        )
+        if feedback_value:
+            sql += " AND feedback_value = ?"
+            params.append((feedback_value or "").strip().lower())
+        cur = conn.execute(sql, tuple(params))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        if close:
+            conn.close()
+
+
+def mark_prompt_feedback_retry_invited(prompt_feedback_id, *, retry_message_id=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "UPDATE prompt_feedback SET retry_invited_at = ?, retry_invite_message_id = ? WHERE prompt_feedback_id = ?",
+            (_utcnow(), str(retry_message_id) if retry_message_id is not None else None, int(prompt_feedback_id)),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def list_prompt_feedback(limit=20, workflow=None, *, include_positive=False, active_only=True, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        where = []
+        params = []
+        if workflow:
+            where.append("workflow = ?")
+            params.append(workflow)
+        if active_only:
+            where.append("removed_at IS NULL")
+        if not include_positive:
+            where.append("feedback_value = 'down'")
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        rows = conn.execute(
+            "SELECT prompt_feedback_id, assistant_message_id, assistant_discord_message_id, workflow, channel_id, channel_name, "
+            "discord_user_id, original_asker_discord_user_id, feedback_value, question, response_preview, recorded_at, "
+            "updated_at, removed_at, retry_invited_at, retry_invite_message_id "
+            f"FROM prompt_feedback {clause} "
+            "ORDER BY updated_at DESC, prompt_feedback_id DESC LIMIT ?",
+            (*params, max(1, int(limit or 20))),
+        ).fetchall()
+        return _rowdicts(rows)
+    finally:
+        if close:
+            conn.close()
+
+
+def list_prompt_review_items(limit=20, workflow=None, *, include_positive=False, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        failures = list_prompt_failures(limit=max(1, int(limit or 20)), workflow=workflow, conn=conn)
+        feedback = list_prompt_feedback(
+            limit=max(1, int(limit or 20)),
+            workflow=workflow,
+            include_positive=include_positive,
+            active_only=True,
+            conn=conn,
+        )
+        items = []
+        for row in failures:
+            item = dict(row)
+            item["kind"] = "failure"
+            item["sort_at"] = item.get("recorded_at")
+            items.append(item)
+        for row in feedback:
+            item = {
+                "kind": "feedback",
+                "feedback_id": row["prompt_feedback_id"],
+                "recorded_at": row["updated_at"] or row["recorded_at"],
+                "workflow": row.get("workflow"),
+                "failure_type": f"user_feedback_{row.get('feedback_value')}",
+                "failure_stage": "discord_reaction",
+                "channel_id": row.get("channel_id"),
+                "channel_name": row.get("channel_name"),
+                "discord_user_id": row.get("discord_user_id"),
+                "discord_message_id": row.get("assistant_discord_message_id"),
+                "question": row.get("question") or "",
+                "detail": "Original asker reacted with thumbs down." if row.get("feedback_value") == "down" else "Original asker reacted with thumbs up.",
+                "result_preview": row.get("response_preview"),
+                "feedback_value": row.get("feedback_value"),
+                "original_asker_discord_user_id": row.get("original_asker_discord_user_id"),
+                "retry_invited_at": row.get("retry_invited_at"),
+                "raw_json": None,
+                "sort_at": row.get("updated_at") or row.get("recorded_at"),
+            }
+            items.append(item)
+        items.sort(
+            key=lambda item: (
+                item.get("sort_at") or "",
+                item.get("failure_id") or item.get("feedback_id") or 0,
+            ),
+            reverse=True,
+        )
+        return items[:max(1, int(limit or 20))]
+    finally:
+        if close:
+            conn.close()
+
+
 def list_thread_messages(scope, limit=10, conn=None):
     close = conn is None
     conn = conn or get_connection()

@@ -264,8 +264,8 @@ Elixir stores failed or unusable Discord prompt attempts in the local `prompt_fa
 Review the latest failures with:
 
 ```bash
-venv/bin/python scripts/review_prompt_failures.py --limit 20
-venv/bin/python scripts/review_prompt_failures.py --workflow clanops --json
+venv/bin/python scripts/review_agent_feedback.py --limit 20
+venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
 ```
 
 Use `--json` when you want to hand the failure set to another model for diagnosis.
