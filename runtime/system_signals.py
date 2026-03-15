@@ -187,6 +187,34 @@ STARTUP_SYSTEM_SIGNALS = [
         },
     },
     {
+        "signal_key": "capability_card_modes_and_war_completion_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Sharper Card And War Intel",
+            "message": (
+                "Elixir now reads some of the most important Clash Royale edge cases much more cleanly. "
+                "I understand Heroes, Evo cards, and combo Hero + Evo cards without the old 'Evolution Level' confusion, "
+                "war signals are now tracked through a stronger clock-aligned pipeline, and I know when POAP KINGS has already completed the week's race so I stop asking for extra drive after the job is done."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Sharper Card And War Intel**\n\n"
+                "Elixir now reads some of the most important Clash Royale edge cases much more cleanly. "
+                "I understand Heroes, Evo cards, and combo Hero + Evo cards without the old 'Evolution Level' confusion, "
+                "war signals are now tracked through a stronger clock-aligned pipeline, and I know when POAP KINGS has already completed the week's race so I stop asking for extra drive after the job is done.\n\n"
+                "- Deck and profile card language now uses player-facing card modes like Hero, Evo, and Hero + Evo instead of raw evolution-level wording.\n"
+                "- River Race detection is now more reliable and more clock-based, so important war updates should not get lost between snapshot checks.\n"
+                "- When the live war API shows that POAP KINGS has already finished the race, Elixir will shift into completion and recognition mode instead of pushing for more win-drive messaging."
+            ),
+            "details": [
+                "Deck and profile card language now uses player-facing card modes like Hero, Evo, and Hero + Evo instead of raw evolution-level wording.",
+                "River Race detection is now more reliable and more clock-based, so important war updates should not get lost between snapshot checks.",
+                "When the live war API shows that POAP KINGS has already finished the race, Elixir will shift into completion and recognition mode instead of pushing for more win-drive messaging.",
+            ],
+            "audience": "clan",
+            "capability_area": "war_and_card_intel",
+        },
+    },
+    {
         "signal_key": "feature_custom_emoji_v1",
         "signal_type": "capability_unlock",
         "payload": {

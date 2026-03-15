@@ -80,8 +80,20 @@ Get full player profile.
 Player cards include additional fields beyond the catalog:
 - `level` (integer) — current card level
 - `starLevel` (integer, optional) — cosmetic star level
-- `evolutionLevel` (integer, optional) — current evolution level (only in `currentDeck`)
+- `evolutionLevel` (integer, optional) — observed in both `currentDeck` and `cards` in live March 2026 payloads
 - `count` (integer) — cards owned (0 for maxed / equipped cards)
+
+**Observed interpretation for Elixir UX:**
+- `starLevel` and `evolutionLevel` are distinct fields
+- `maxEvolutionLevel=1` has only been observed on Evo-capable cards
+- `maxEvolutionLevel=2` has only been observed on Hero-capable cards
+- `maxEvolutionLevel=3` has only been observed on cards that support both Evo and Hero modes
+- `evolutionLevel=1` maps cleanly to `Evo unlocked` in stored player data
+- `evolutionLevel=2` maps cleanly to `Hero unlocked` in stored player data
+- `evolutionLevel=3` maps cleanly to `Evo + Hero unlocked` in stored player data
+- Missing `evolutionLevel` appears to mean no mode unlocked yet
+- This is an observed interpretation from live payloads plus local stored data; it does not prove slot-based activation behavior in decks
+- Player-facing output should prefer `Evo`, `Hero`, and `Evo + Hero` over raw `evolutionLevel` numbers
 
 **progress shape:**
 ```json
@@ -277,7 +289,7 @@ Observed error bodies are usually `{ reason, message? }`. `message` may be absen
 
 ## Agent Notes
 - **Optional fields:** `clan`, `role`, and `leagueStatistics` are completely absent (not null) when the player has no clan / no league history. Always check for key existence.
-- `currentDeck` (8 cards) vs `cards` (full collection): `currentDeck` cards may include `evolutionLevel`; `cards` includes `count` of owned copies
+- `currentDeck` (8 cards) vs `cards` (full collection): both have been observed with `evolutionLevel`; `cards` also includes `count` of owned copies
 - `role` values: `member`, `elder`, `coLeader`, `leader`
 - Path of Legend `rank` field is null when the player hasn't achieved a rank yet
 - Battlelog returns a bare array (like `/events`), not a paginated response — no `paging` object. Returns up to ~48 battles.
@@ -288,6 +300,7 @@ Observed error bodies are usually `{ reason, message? }`. `message` may be absen
 - **2v2 battles:** `team` and `opponent` each contain 2 entries instead of 1
 - **Battle winner detection:** Apply the explicit precedence above: `boatBattleWon` -> `trophyChange` -> crowns -> unresolved
 - Additional battle variants observed in March 2026 sampling: `riverRaceDuelColosseum` and an occasional `unknown` type on friendlies
+- For player-facing text, avoid raw `Evolution Level N` wording; Elixir should translate to `Evo`, `Hero`, or `Evo + Hero`
 - Additional `deckSelection` values observed in March 2026 sampling: `pick`, `draftCompetitive`, `predefined`
 - **Badges:** Two categories — progress badges (with `level`/`maxLevel`/`progress`/`target`) and one-time badges (level=null, just `progress` and `iconUrls`). Mastery badges are per-card (e.g. `MasteryKnight`).
 - **Achievements:** Fixed set of 12 achievements. `stars` (0-3) indicates completion tier. `completionInfo` is typically null.

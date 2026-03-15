@@ -48,15 +48,31 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         legacy_commands=("heartbeat",),
     ),
     ActivityDefinition(
+        activity_key="war-poll",
+        owner_subagent="river-race",
+        purpose="Poll live war state and persist the hourly River Race snapshot pipeline.",
+        job_id="war-poll",
+        job_function="_war_poll_tick",
+        schedule_kind="cron",
+        schedule_config={
+            "minute": _attr("WAR_POLL_MINUTE", 0),
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Storage: live war snapshots and river race log",
+        ),
+        manual_trigger_allowed=False,
+    ),
+    ActivityDefinition(
         activity_key="war-awareness",
         owner_subagent="river-race",
         purpose="Process war-only signals and coordinate River Race messaging.",
         job_id="war-awareness",
         job_function="_war_awareness_tick",
-        schedule_kind="interval",
+        schedule_kind="cron",
         schedule_config={
-            "minutes": _attr("WAR_AWARENESS_INTERVAL_MINUTES", 30),
-            "jitter": _attr("WAR_AWARENESS_JITTER_SECONDS", 900),
+            "minute": _attr("WAR_AWARENESS_MINUTE", 5),
             "max_instances": 1,
             "coalesce": True,
         },
@@ -277,11 +293,14 @@ def _format_schedule_description(resolved: dict[str, Any]) -> str:
         return " ".join(part for part in parts if part)
 
     day_of_week = schedule_config.get("day_of_week")
-    hour = schedule_config.get("hour", 0)
     minute = int(schedule_config.get("minute", 0))
     if day_of_week:
+        hour = schedule_config.get("hour", 0)
         return f"Every {_format_day(day_of_week)} at {hour:02d}:{minute:02d} CT.{_format_human_jitter(schedule_config.get('jitter'))}"
-    return f"Daily at {hour:02d}:{minute:02d} CT.{_format_human_jitter(schedule_config.get('jitter'))}"
+    if "hour" in schedule_config:
+        hour = schedule_config.get("hour", 0)
+        return f"Daily at {hour:02d}:{minute:02d} CT.{_format_human_jitter(schedule_config.get('jitter'))}"
+    return f"Every hour at :{minute:02d} CT.{_format_human_jitter(schedule_config.get('jitter'))}"
 
 
 def schedule_specs_from_registry(runtime_module: Any) -> list[dict[str, Any]]:

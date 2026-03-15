@@ -1449,7 +1449,26 @@ def _migration_16(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16]
+def _migration_17(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS signal_detector_cursors (
+            detector_key TEXT NOT NULL,
+            scope_key TEXT NOT NULL DEFAULT '',
+            cursor_text TEXT,
+            cursor_int INTEGER,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT,
+            PRIMARY KEY(detector_key, scope_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_signal_detector_cursors_updated
+            ON signal_detector_cursors(updated_at DESC);
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

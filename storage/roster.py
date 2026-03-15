@@ -15,6 +15,42 @@ from db import (
     chicago_today,
     get_connection,
 )
+
+
+def _card_mode_value(card: dict, camel_key: str, snake_key: str) -> int | None:
+    value = card.get(camel_key)
+    if value is None:
+        value = card.get(snake_key)
+    return value if isinstance(value, int) and value >= 0 else None
+
+
+def _card_mode_fields(card: dict) -> dict:
+    max_evolution_level = _card_mode_value(card, "maxEvolutionLevel", "max_evolution_level")
+    evolution_level = _card_mode_value(card, "evolutionLevel", "evolution_level")
+
+    supports_evo = max_evolution_level in {1, 3}
+    supports_hero = max_evolution_level in {2, 3}
+    evo_unlocked = evolution_level in {1, 3}
+    hero_unlocked = evolution_level in {2, 3}
+
+    mode_label = None
+    if evo_unlocked and hero_unlocked:
+        mode_label = "Evo + Hero"
+    elif evo_unlocked:
+        mode_label = "Evo"
+    elif hero_unlocked:
+        mode_label = "Hero"
+
+    return {
+        "supports_evo": supports_evo,
+        "supports_hero": supports_hero,
+        "evo_unlocked": evo_unlocked,
+        "hero_unlocked": hero_unlocked,
+        "mode_label": mode_label,
+        "mode_status_label": f"{mode_label} unlocked" if mode_label else None,
+    }
+
+
 def snapshot_members(member_list, conn=None):
     close = conn is None
     conn = conn or get_connection()
@@ -586,13 +622,14 @@ def _normalize_collection_card(raw_card: dict) -> dict:
     if isinstance(card.get("level"), int) and isinstance(card.get("maxLevel"), int):
         card["levels_to_max"] = max(0, card["maxLevel"] - card["level"])
         card["is_max_level"] = card["level"] >= card["maxLevel"]
+    card.update(_card_mode_fields(card))
     return card
 
 
 def _card_sort_key(card: dict) -> tuple:
     return (
         -(card.get("level") or 0),
-        -(card.get("evolutionLevel") or 0),
+        -(_card_mode_value(card, "evolutionLevel", "evolution_level") or 0),
         (card.get("elixirCost") if isinstance(card.get("elixirCost"), int) else 99),
         (card.get("name") or "").lower(),
     )
@@ -623,11 +660,23 @@ def _card_reference_for_collection(card: dict, *, card_type: str | None = None) 
         "level": card.get("level"),
         "maxLevel": card.get("maxLevel"),
         "rarity": card.get("rarity"),
+        "supports_evo": bool(card.get("supports_evo")),
+        "supports_hero": bool(card.get("supports_hero")),
+        "evo_unlocked": bool(card.get("evo_unlocked")),
+        "hero_unlocked": bool(card.get("hero_unlocked")),
     }
     if card.get("levels_to_max") is not None:
         item["levels_to_max"] = card.get("levels_to_max")
-    if card.get("evolutionLevel") is not None:
-        item["evolution_level"] = card.get("evolutionLevel")
+    evolution_level = _card_mode_value(card, "evolutionLevel", "evolution_level")
+    if evolution_level is not None:
+        item["evolution_level"] = evolution_level
+    max_evolution_level = _card_mode_value(card, "maxEvolutionLevel", "max_evolution_level")
+    if max_evolution_level is not None:
+        item["max_evolution_level"] = max_evolution_level
+    if card.get("mode_label"):
+        item["mode_label"] = card.get("mode_label")
+    if card.get("mode_status_label"):
+        item["mode_status_label"] = card.get("mode_status_label")
     if card_type:
         item["card_type"] = card_type
     return item

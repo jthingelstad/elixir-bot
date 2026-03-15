@@ -102,6 +102,11 @@ Note: `collectionEndTime` and `warEndTime` may not always be present (not observ
 }
 ```
 
+Observed in live payloads after a clan finishes:
+- `clan.finishTime` can appear on `GET /clans/{clanTag}/currentriverrace` and is usable as a live "race already finished" signal
+- the sentinel value `19691231T235959.000Z` should not be treated as a usable live completion timestamp
+- `trophyChange` is **not** present in the live `currentriverrace` payload; it appears in `/riverracelog` standings
+
 **RiverRaceParticipant shape:**
 ```json
 { "tag": "#RCCY80VG2", "name": "Ram", "fame": 0, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 0, "decksUsedToday": 0 }
@@ -165,6 +170,7 @@ Historical river race results (paginated).
 - `standings` contains all 5 clans ranked by finish position
 - `trophyChange`: regular weeks = ±20, final week (colosseum) = ±100
 - `finishTime`: normal value for clans that finished; sentinel value `19691231T235959.000Z` (epoch 0) for the final week/colosseum
+- Elixir should prefer `finishTime` over fame thresholds when telling players the race is finished
 
 ---
 

@@ -483,11 +483,15 @@ def test_build_roster_data_with_cards(conn):
     ]
     mock_player = {
         "currentDeck": [
-            {"name": "Hog Rider", "iconUrls": {"medium": "https://cdn/hog-medium.png"}, "level": 14, "maxLevel": 14, "rarity": "rare"},
-            {"name": "Zap", "iconUrls": {"medium": "https://cdn/zap-medium.png"}, "level": 11, "maxLevel": 11, "rarity": "epic"},
+            {"name": "Knight", "iconUrls": {"medium": "https://cdn/knight-medium.png"}, "level": 16, "maxLevel": 16, "rarity": "common", "evolutionLevel": 3, "maxEvolutionLevel": 3},
+            {"name": "Zap", "iconUrls": {"medium": "https://cdn/zap-medium.png"}, "level": 11, "maxLevel": 11, "rarity": "epic", "maxEvolutionLevel": 1},
         ],
         "currentDeckSupportCards": [
             {"name": "Dagger Duchess", "iconUrls": {"medium": "https://cdn/duchess-medium.png"}, "level": 4, "maxLevel": 4, "rarity": "legendary"},
+        ],
+        "cards": [
+            {"name": "Knight", "iconUrls": {"medium": "https://cdn/knight-medium.png"}, "level": 16, "maxLevel": 16, "rarity": "common", "evolutionLevel": 3, "maxEvolutionLevel": 3},
+            {"name": "Zap", "iconUrls": {"medium": "https://cdn/zap-medium.png"}, "level": 11, "maxLevel": 11, "rarity": "epic", "maxEvolutionLevel": 1},
         ],
         "badges": [
             {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825, "iconUrls": {"large": "https://cdn/years.png"}},
@@ -512,10 +516,16 @@ def test_build_roster_data_with_cards(conn):
     m = result["members"][0]
     assert len(m["favorite_cards"]) == 8
     assert m["favorite_cards"][0]["name"] == "Hog Rider"
-    assert "Hog Rider" in m["current_deck"]
+    assert "Knight" in m["current_deck"]
     assert "Zap" in m["current_deck"]
-    assert m["current_deck_cards"][0]["icon_url"] == "https://cdn/hog-medium.png"
+    assert m["current_deck_cards"][0]["icon_url"] == "https://cdn/knight-medium.png"
+    assert m["current_deck_cards"][0]["mode_label"] == "Evo + Hero"
+    assert m["current_deck_cards"][0]["mode_status_label"] == "Evo + Hero unlocked"
+    assert m["current_deck_cards"][1]["supports_evo"] is True
+    assert "mode_label" not in m["current_deck_cards"][1]
+    assert m["current_deck_mode_note"] == "Activation depends on deck slot; these labels show what the card supports or has unlocked."
     assert m["current_deck_support_cards"][0]["icon_url"] == "https://cdn/duchess-medium.png"
+    assert m["collection_highlights"][0]["mode_label"] == "Evo + Hero"
     assert m["badge_highlights"][0]["name"] == "YearsPlayed"
     assert m["badge_highlights"][0]["icon_url"] == "https://cdn/years.png"
     assert m["mastery_highlights"][0]["card_name"] == "Hog Rider"

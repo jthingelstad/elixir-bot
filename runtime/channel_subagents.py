@@ -23,6 +23,10 @@ PROGRESSION_SIGNAL_TYPES = {
     "battle_trophy_push",
 }
 
+OPTIONAL_PROGRESSION_SIGNAL_TYPES = {
+    "badge_level_milestone",
+}
+
 CLAN_EVENT_SIGNAL_TYPES = {
     "member_join",
     "member_leave",
@@ -38,6 +42,7 @@ LEADERSHIP_ONLY_SIGNAL_TYPES = {
 }
 
 RELAYABLE_WAR_SIGNAL_TYPES = {
+    "war_race_finished_live",
     "war_battle_day_started",
     "war_battle_day_live_update",
     "war_battle_rank_change",
@@ -79,8 +84,15 @@ def signal_routing_summary() -> list[dict]:
             ],
         },
         {
+            "family": "badge_level_milestone",
+            "match": "all signals in the batch are badge level milestones",
+            "targets": [
+                {"subagent": "player-progress", "intent": "player_progress", "required": False},
+            ],
+        },
+        {
             "family": "progression",
-            "match": "all signals in the batch are progression signals",
+            "match": "all signals in the batch are non-optional progression signals",
             "targets": [
                 {"subagent": "player-progress", "intent": "player_progress", "required": True},
             ],
@@ -98,7 +110,7 @@ def signal_routing_summary() -> list[dict]:
             "family": "public_system_update",
             "match": "capability_unlock with clan audience",
             "targets": [
-                {"subagent": "clan-events", "intent": "system_update", "required": True},
+                {"subagent": "announcements", "intent": "system_update", "required": True},
             ],
         },
         {
@@ -258,12 +270,16 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
         if any((signal.get("type") in RELAYABLE_WAR_SIGNAL_TYPES) or (signal.get("type") == "war_completed" and (signal.get("won") or signal.get("our_rank") == 1)) for signal in signals):
             add("arena-relay", "war_relay", required=False)
         if any(
-            signal.get("type") in {"war_battle_rank_change", "war_week_complete", "war_completed"}
+            signal.get("type") in {"war_battle_rank_change", "war_week_complete", "war_completed", "war_race_finished_live"}
             or signal.get("needs_lead_recovery")
             or (signal.get("race_rank") and signal.get("race_rank", 1) > 1)
             for signal in signals
         ):
             add("leader-lounge", "war_ops_note", required=False)
+        return outcomes
+
+    if all((signal.get("type") in OPTIONAL_PROGRESSION_SIGNAL_TYPES) for signal in signals):
+        add("player-progress", "player_progress", required=False)
         return outcomes
 
     if all(is_progression_signal(signal) for signal in signals):
@@ -277,7 +293,7 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
         return outcomes
 
     if any(is_public_system_signal(signal) for signal in signals):
-        add("clan-events", "system_update", required=True)
+        add("announcements", "system_update", required=True)
         return outcomes
 
     if any(is_leadership_only_signal(signal) for signal in signals):

@@ -408,13 +408,22 @@ def _build_member_deck_report(member_query: str):
     if not deck or not deck.get("cards"):
         return f"I don't have a stored current deck yet for {label}."
     lines = [f"**Current Deck for {label}**"]
+    has_mode_data = False
     for card in deck.get("cards") or []:
         card_name = card.get("name") or "Unknown Card"
         card_level = card.get("level")
+        mode_status_label = card.get("mode_status_label")
+        if card.get("supports_evo") or card.get("supports_hero"):
+            has_mode_data = True
+        suffix = f" ({mode_status_label})" if mode_status_label else ""
         if card_level is None:
-            lines.append(f"- {card_name}")
+            lines.append(f"- {card_name}{suffix}")
         else:
-            lines.append(f"- {card_name} — Level {card_level}")
+            lines.append(f"- {card_name} — Level {card_level}{suffix}")
+    if has_mode_data:
+        lines.append(
+            "_Activation depends on deck slot; these labels show what the card supports or has unlocked._"
+        )
     if deck.get("fetched_at"):
         lines.append(f"_Snapshot: {_fmt_iso_short(deck['fetched_at'])}_")
     return "\n".join(lines)
@@ -979,6 +988,10 @@ def _build_war_status_report(clan=None, war=None):
             f"fame {_fmt_num(war_status.get('fame'))}",
             f"score {_fmt_num(war_status.get('clan_score'))}",
             f"period {_fmt_num(war_status.get('period_points'))}" if war_status.get("period_points") is not None else None,
+            "finished yes" if war_status.get("race_completed") else None,
+            f"finish {war_status.get('finish_time')}" if war_status.get("finish_time") else None,
+            "completed early" if war_status.get("race_completed_early") else None,
+            f"stakes {war_status.get('trophy_stakes_text')}" if war_status.get("trophy_stakes_known") and war_status.get("trophy_stakes_text") else None,
         ]
         lines.append(f"- Live: {' | '.join(bit for bit in live_bits if bit)}")
     else:
@@ -1087,6 +1100,7 @@ def _build_clan_status_short_report(clan=None, war=None):
             f"| week {war_status.get('week') if war_status.get('week') is not None else 'n/a'} "
             f"| rank {war_status.get('race_rank') if war_status.get('race_rank') is not None else 'n/a'} "
             f"| fame {_fmt_num(war_status.get('fame'))}"
+            f"{' | finished' if war_status.get('race_completed') else ''}"
         )
     if season_summary:
         top_contributors = _join_member_bits(

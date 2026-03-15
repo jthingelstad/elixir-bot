@@ -50,7 +50,7 @@ DurableMemory: true
 
 Elixir's long-form weekly recap channel.
 
-- Use this channel for the weekly clan recap only.
+- Use this channel for the weekly clan recap and important clan-wide Elixir system updates.
 - One strong story-driven post is the goal.
 - Keep the recap readable, reflective, and within Discord's 2,000-character limit.
 - This is not a routine update feed.

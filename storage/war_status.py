@@ -26,6 +26,8 @@ from storage.war_calendar import (
     war_reset_window_utc,
 )
 
+LIVE_FINISH_TIME_SENTINEL = "19691231T235959.000Z"
+
 def _format_member_reference(*args, **kwargs):
     from storage.identity import format_member_reference
 
@@ -113,6 +115,43 @@ def _resolve_live_race_rank(payload: dict, clan_tag: Optional[str]) -> Optional[
     return None
 
 
+def _usable_live_finish_time(value: Optional[str]) -> Optional[str]:
+    finish_time = (value or "").strip()
+    if not finish_time or finish_time == LIVE_FINISH_TIME_SENTINEL:
+        return None
+    return finish_time
+
+
+def _finish_time_fields(finish_time: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    finish_time = _usable_live_finish_time(finish_time)
+    if not finish_time:
+        return None, None
+    finish_dt = coerce_utc_datetime(finish_time)
+    return finish_time, format_utc_iso(finish_dt) if finish_dt else None
+
+
+def _same_week_trophy_change(latest_logged_race, season_id: Optional[int], section_index: Optional[int]):
+    if (
+        not latest_logged_race
+        or season_id is None
+        or section_index is None
+        or latest_logged_race["season_id"] != season_id
+        or latest_logged_race["section_index"] != section_index
+    ):
+        return None
+    return latest_logged_race["trophy_change"]
+
+
+def _trophy_stakes_fields(trophy_change) -> tuple[Optional[int], bool, Optional[str]]:
+    if not isinstance(trophy_change, (int, float)):
+        return None, False, None
+    normalized = int(trophy_change)
+    stakes = abs(normalized)
+    if stakes <= 0:
+        return normalized, True, None
+    return normalized, True, f"{stakes} trophies on the line"
+
+
 def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
     if not row:
         return None
@@ -126,12 +165,15 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
     period_type = payload.get("periodType")
     phase = _resolve_phase(period_type, period_index)
     period_offset = _period_offset(period_index)
+    clan_payload = payload.get("clan") or {}
+    finish_time, race_completed_at = _finish_time_fields(clan_payload.get("finishTime"))
 
     if season_id is not None:
         result["season_id"] = season_id
     if section_index is not None:
         result["section_index"] = section_index
         result["week"] = section_index + 1
+        result["trophy_change"] = _same_week_trophy_change(latest_logged_race, season_id, section_index)
     elif latest_logged_race and season_id == latest_logged_race["season_id"]:
         result["section_index"] = latest_logged_race["section_index"]
         result["week"] = (
@@ -175,7 +217,33 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
         result.get("period_index"),
         row["observed_at"],
     )
+    observed_at = coerce_utc_datetime(row["observed_at"])
+    finish_dt = coerce_utc_datetime(finish_time)
+    _, period_ends_at = war_reset_window_utc(observed_at or finish_dt or row["observed_at"])
+    trophy_change, trophy_stakes_known, trophy_stakes_text = _trophy_stakes_fields(
+        result.get("trophy_change")
+    )
+    result["finish_time"] = finish_time
+    result["race_completed"] = bool(finish_time)
+    result["race_completed_at"] = race_completed_at
+    result["race_completed_early"] = bool(
+        finish_dt and period_ends_at and finish_dt < period_ends_at
+    )
+    result["trophy_change"] = trophy_change
+    result["trophy_stakes_known"] = trophy_stakes_known
+    result["trophy_stakes_text"] = trophy_stakes_text
     return result
+
+
+def _load_live_war_state_rows(rows, *, latest_logged_race) -> list[dict]:
+    return [
+        state
+        for state in (
+            _build_live_war_state(row, latest_logged_race)
+            for row in rows
+        )
+        if state
+    ]
 
 
 def get_recent_live_war_states(limit=2, conn=None):
@@ -188,16 +256,74 @@ def get_recent_live_war_states(limit=2, conn=None):
             "FROM war_current_state ORDER BY war_id DESC LIMIT ?",
             (limit,),
         ).fetchall()
-        return [
-            state for state in (
-                _build_live_war_state(row, latest_logged_race)
-                for row in rows
-            )
-            if state
-        ]
+        return _load_live_war_state_rows(rows, latest_logged_race=latest_logged_race)
     finally:
         if close:
             conn.close()
+
+
+def get_live_war_state_by_id(war_id, conn=None):
+    if war_id is None:
+        return None
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        latest_logged_race = _get_latest_logged_race(conn)
+        row = conn.execute(
+            "SELECT war_id, observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json "
+            "FROM war_current_state WHERE war_id = ?",
+            (int(war_id),),
+        ).fetchone()
+        return _build_live_war_state(row, latest_logged_race)
+    finally:
+        if close:
+            conn.close()
+
+
+def get_latest_live_war_state_id(conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute("SELECT MAX(war_id) AS war_id FROM war_current_state").fetchone()
+        return row["war_id"] if row else None
+    finally:
+        if close:
+            conn.close()
+
+
+def get_previous_live_war_state_before(before_war_id, conn=None):
+    if before_war_id is None:
+        return None
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        latest_logged_race = _get_latest_logged_race(conn)
+        row = conn.execute(
+            "SELECT war_id, observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json "
+            "FROM war_current_state WHERE war_id < ? ORDER BY war_id DESC LIMIT 1",
+            (int(before_war_id),),
+        ).fetchone()
+        return _build_live_war_state(row, latest_logged_race)
+    finally:
+        if close:
+            conn.close()
+
+
+def list_live_war_states_after(after_war_id, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        latest_logged_race = _get_latest_logged_race(conn)
+        rows = conn.execute(
+            "SELECT war_id, observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json "
+            "FROM war_current_state WHERE war_id > ? ORDER BY war_id ASC",
+            (int(after_war_id or 0),),
+        ).fetchall()
+        return _load_live_war_state_rows(rows, latest_logged_race=latest_logged_race)
+    finally:
+        if close:
+            conn.close()
+
 
 def get_current_war_status(conn=None):
     states = get_recent_live_war_states(limit=1, conn=conn)
@@ -235,7 +361,13 @@ def _decorate_participant(conn, row: dict, *, fame_today: Optional[int] = None) 
     return item
 
 
-def _get_live_state_for_war_day(war_day_key: Optional[str], *, newest: bool = True, conn=None) -> Optional[dict]:
+def _get_live_state_for_war_day(
+    war_day_key: Optional[str],
+    *,
+    newest: bool = True,
+    observed_at: Optional[str] = None,
+    conn=None,
+) -> Optional[dict]:
     if not war_day_key:
         return None
     close = conn is None
@@ -243,9 +375,16 @@ def _get_live_state_for_war_day(war_day_key: Optional[str], *, newest: bool = Tr
     try:
         latest_logged_race = _get_latest_logged_race(conn)
         order = "DESC" if newest else "ASC"
+        params = []
+        where = []
+        if observed_at:
+            where.append("observed_at <= ?")
+            params.append(observed_at)
         rows = conn.execute(
             "SELECT war_id, observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json "
-            f"FROM war_current_state ORDER BY war_id {order} LIMIT 500"
+            f"FROM war_current_state {'WHERE ' + ' AND '.join(where) if where else ''} "
+            f"ORDER BY war_id {order} LIMIT 500",
+            tuple(params),
         ).fetchall()
         for row in rows:
             state = _build_live_war_state(row, latest_logged_race)
@@ -257,7 +396,7 @@ def _get_live_state_for_war_day(war_day_key: Optional[str], *, newest: bool = Tr
             conn.close()
 
 
-def get_war_day_state(war_day_key: Optional[str] = None, conn=None):
+def get_war_day_state(war_day_key: Optional[str] = None, observed_at: Optional[str] = None, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
@@ -269,13 +408,18 @@ def get_war_day_state(war_day_key: Optional[str] = None, conn=None):
             return None
 
         if current_state is None or current_state.get("war_day_key") != war_day_key:
-            current_state = _get_live_state_for_war_day(war_day_key, conn=conn)
-        first_state = _get_live_state_for_war_day(war_day_key, newest=False, conn=conn)
+            current_state = _get_live_state_for_war_day(war_day_key, observed_at=observed_at, conn=conn)
+        first_state = _get_live_state_for_war_day(war_day_key, newest=False, observed_at=observed_at, conn=conn)
 
+        bounds_where = ["war_day_key = ?"]
+        bounds_params = [war_day_key]
+        if observed_at:
+            bounds_where.append("observed_at <= ?")
+            bounds_params.append(observed_at)
         bounds = conn.execute(
             "SELECT MIN(observed_at) AS first_observed_at, MAX(observed_at) AS last_observed_at "
-            "FROM war_participant_snapshots WHERE war_day_key = ?",
-            (war_day_key,),
+            f"FROM war_participant_snapshots WHERE {' AND '.join(bounds_where)}",
+            tuple(bounds_params),
         ).fetchone()
         if not bounds or not bounds["last_observed_at"]:
             return None
@@ -373,6 +517,13 @@ def get_war_day_state(war_day_key: Optional[str] = None, conn=None):
             "clan_fame": (current_state or first_state or {}).get("fame"),
             "clan_score": (current_state or first_state or {}).get("clan_score"),
             "period_points": (current_state or first_state or {}).get("period_points"),
+            "finish_time": (current_state or first_state or {}).get("finish_time"),
+            "race_completed": (current_state or first_state or {}).get("race_completed"),
+            "race_completed_at": (current_state or first_state or {}).get("race_completed_at"),
+            "race_completed_early": (current_state or first_state or {}).get("race_completed_early"),
+            "trophy_change": (current_state or first_state or {}).get("trophy_change"),
+            "trophy_stakes_known": (current_state or first_state or {}).get("trophy_stakes_known"),
+            "trophy_stakes_text": (current_state or first_state or {}).get("trophy_stakes_text"),
             "observed_at": (current_state or first_state or {}).get("observed_at") or last_observed_at,
             "first_observed_at": first_observed_at,
             "last_observed_at": last_observed_at,
@@ -398,6 +549,83 @@ def get_war_day_state(war_day_key: Optional[str] = None, conn=None):
 
 def get_current_war_day_state(conn=None):
     return get_war_day_state(None, conn=conn)
+
+
+def list_war_day_keys(conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT war_day_key FROM war_participant_snapshots ORDER BY war_day_key ASC"
+        ).fetchall()
+        return [row["war_day_key"] for row in rows if row["war_day_key"]]
+    finally:
+        if close:
+            conn.close()
+
+
+def get_latest_war_participant_snapshot_observed_at(war_day_key, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT MAX(observed_at) AS observed_at FROM war_participant_snapshots WHERE war_day_key = ?",
+            (war_day_key,),
+        ).fetchone()
+        return row["observed_at"] if row else None
+    finally:
+        if close:
+            conn.close()
+
+
+def get_previous_war_participant_snapshot_observed_at(war_day_key, before_observed_at, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT observed_at FROM war_participant_snapshots "
+            "WHERE war_day_key = ? AND observed_at < ? "
+            "ORDER BY observed_at DESC LIMIT 1",
+            (war_day_key, before_observed_at),
+        ).fetchone()
+        return row["observed_at"] if row else None
+    finally:
+        if close:
+            conn.close()
+
+
+def list_war_participant_snapshot_times_after(war_day_key, after_observed_at, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT observed_at FROM war_participant_snapshots "
+            "WHERE war_day_key = ? AND observed_at > ? "
+            "ORDER BY observed_at ASC",
+            (war_day_key, after_observed_at),
+        ).fetchall()
+        return [row["observed_at"] for row in rows if row["observed_at"]]
+    finally:
+        if close:
+            conn.close()
+
+
+def get_war_participant_snapshot_group(war_day_key, observed_at, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT member_id, player_tag, player_name, fame, repair_points, boat_attacks, "
+            "decks_used_total, decks_used_today, phase, phase_day_number "
+            "FROM war_participant_snapshots "
+            "WHERE war_day_key = ? AND observed_at = ? "
+            "ORDER BY player_name COLLATE NOCASE, player_tag ASC",
+            (war_day_key, observed_at),
+        ).fetchall()
+        return _rowdicts(rows)
+    finally:
+        if close:
+            conn.close()
 
 
 def list_recent_war_day_summaries(limit=7, phase=None, conn=None):

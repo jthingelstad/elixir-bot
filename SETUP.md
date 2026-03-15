@@ -55,8 +55,8 @@ Optional runtime tuning:
 ELIXIR_DB_PATH=./elixir.db
 HEARTBEAT_INTERVAL_MINUTES=30
 HEARTBEAT_JITTER_SECONDS=900
-WAR_AWARENESS_INTERVAL_MINUTES=30
-WAR_AWARENESS_JITTER_SECONDS=900
+WAR_POLL_MINUTE=0
+WAR_AWARENESS_MINUTE=5
 PLAYER_INTEL_REFRESH_MINUTES=30
 PLAYER_INTEL_REFRESH_JITTER_SECONDS=900
 SITE_CONTENT_HOUR=18
@@ -162,8 +162,10 @@ The canonical schedule source is [runtime/activities.py](runtime/activities.py).
 Current recurring activity set:
 - `clan-awareness`
   Every 30 minutes with up to 15 minutes of jitter, 24/7.
+- `war-poll`
+  Every hour at `:00` CT with no jitter.
 - `war-awareness`
-  Every 30 minutes with up to 15 minutes of jitter.
+  Every hour at `:05` CT with no jitter.
 - `player-progression`
   Every 30 minutes with up to 15 minutes of jitter.
 - `daily-clan-insight`
@@ -230,7 +232,7 @@ Typical healthy startup lines include:
 
 ```text
 Elixir online as ...
-Scheduler started — clan-awareness — Every 30 minutes with up to 900s jitter. ...
+Scheduler started — clan-awareness — Every 30 minutes with up to 900s jitter., war-poll — Every hour at :00 CT., war-awareness — Every hour at :05 CT. ...
 ```
 
 You should also see:

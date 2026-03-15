@@ -49,6 +49,94 @@ def mark_signal_sent(signal_type, date_str, conn=None):
             conn.close()
 
 
+def get_signal_detector_cursor(detector_key, scope_key="", conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            """
+            SELECT detector_key, scope_key, cursor_text, cursor_int, updated_at, metadata_json
+            FROM signal_detector_cursors
+            WHERE detector_key = ? AND scope_key = ?
+            """,
+            ((detector_key or "").strip(), (scope_key or "").strip()),
+        ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["metadata_json"] = json.loads(item["metadata_json"] or "{}")
+        return item
+    finally:
+        if close:
+            conn.close()
+
+
+def upsert_signal_detector_cursor(
+    detector_key,
+    scope_key="",
+    *,
+    cursor_text=None,
+    cursor_int=None,
+    metadata=None,
+    conn=None,
+):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        now = _utcnow()
+        conn.execute(
+            """
+            INSERT INTO signal_detector_cursors (
+                detector_key, scope_key, cursor_text, cursor_int, updated_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(detector_key, scope_key) DO UPDATE SET
+                cursor_text = excluded.cursor_text,
+                cursor_int = excluded.cursor_int,
+                updated_at = excluded.updated_at,
+                metadata_json = excluded.metadata_json
+            """,
+            (
+                (detector_key or "").strip(),
+                (scope_key or "").strip(),
+                cursor_text,
+                cursor_int,
+                now,
+                _json_or_none(metadata),
+            ),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def list_signal_detector_cursors(detector_key=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        where = []
+        params = []
+        if detector_key:
+            where.append("detector_key = ?")
+            params.append((detector_key or "").strip())
+        rows = conn.execute(
+            "SELECT detector_key, scope_key, cursor_text, cursor_int, updated_at, metadata_json "
+            f"FROM signal_detector_cursors {'WHERE ' + ' AND '.join(where) if where else ''} "
+            "ORDER BY detector_key ASC, scope_key ASC"
+            ,
+            tuple(params),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["metadata_json"] = json.loads(item["metadata_json"] or "{}")
+            result.append(item)
+        return result
+    finally:
+        if close:
+            conn.close()
+
+
 def queue_system_signal(signal_key, signal_type, payload, conn=None):
     close = conn is None
     conn = conn or get_connection()
