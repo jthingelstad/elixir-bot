@@ -107,7 +107,7 @@ def test_on_message_routes_interactive_channel_when_mentioned():
 
 def test_on_message_routes_ask_elixir_without_mention():
     message = _make_message(1482368505058955467, "ask-elixir", "what deck should I learn next?")
-    sent_message = SimpleNamespace(id=987, add_reaction=AsyncMock())
+    sent_message = SimpleNamespace(id=987)
     message.reply = AsyncMock(return_value=sent_message)
 
     async def fake_to_thread(fn, *args, **kwargs):
@@ -141,8 +141,6 @@ def test_on_message_routes_ask_elixir_without_mention():
     assert mock_respond.call_args.kwargs["channel_name"] == "#ask-elixir"
     mock_history.assert_called_once_with("channel_user:1482368505058955467:123", elixir.CHANNEL_CONVERSATION_LIMIT)
     message.reply.assert_awaited_once_with("Try a deck with faster cycles so you can learn matchups quicker.")
-    assert sent_message.add_reaction.await_args_list[0].args == ("👍",)
-    assert sent_message.add_reaction.await_args_list[1].args == ("👎",)
     assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
     assert assistant_save.kwargs["discord_message_id"] == "987"
     mock_share.assert_awaited_once()
@@ -384,8 +382,8 @@ def test_on_raw_reaction_remove_clears_matching_feedback():
 def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_reply():
     message = _make_message(1482368505058955467, "ask-elixir", "give me a deeper explanation")
     sent_messages = [
-        SimpleNamespace(id=2001, add_reaction=AsyncMock()),
-        SimpleNamespace(id=2002, add_reaction=AsyncMock()),
+        SimpleNamespace(id=2001),
+        SimpleNamespace(id=2002),
     ]
     message.reply = AsyncMock(side_effect=sent_messages)
 
@@ -420,8 +418,6 @@ def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_re
     ):
         asyncio.run(elixir.on_message(message))
 
-    assert sent_messages[0].add_reaction.await_count == 0
-    assert sent_messages[1].add_reaction.await_count == 0
     assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
     assert assistant_save.kwargs["discord_message_id"] == "2001"
     assert assistant_save.args[2] == "Part one.\n\nPart two."

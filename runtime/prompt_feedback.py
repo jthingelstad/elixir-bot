@@ -9,15 +9,6 @@ THUMBS_UP = "\N{THUMBS UP SIGN}"
 THUMBS_DOWN = "\N{THUMBS DOWN SIGN}"
 
 
-def _feedback_content_text(content) -> str:
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, (list, tuple)):
-        parts = [str(item).strip() for item in content if str(item).strip()]
-        return "\n\n".join(parts)
-    return str(content or "").strip()
-
-
 def feedback_value_for_emoji(emoji) -> str | None:
     value = str(emoji or "").strip()
     if value == THUMBS_UP:
@@ -25,35 +16,6 @@ def feedback_value_for_emoji(emoji) -> str | None:
     if value == THUMBS_DOWN:
         return "down"
     return None
-
-
-def should_collect_ask_elixir_feedback(channel_name: str, workflow: str, question: str, content) -> bool:
-    from agent.workflows import _is_lightweight_ask_elixir_turn
-
-    if (workflow or "").strip().lower() != "interactive":
-        return False
-    if (channel_name or "").strip().lower() != "#ask-elixir":
-        return False
-    if _is_lightweight_ask_elixir_turn(channel_name, question):
-        return False
-    return bool(_feedback_content_text(content))
-
-
-async def add_feedback_reactions(sent_messages, *, channel_name: str, workflow: str, question: str, content) -> None:
-    if not should_collect_ask_elixir_feedback(channel_name, workflow, question, content):
-        return
-    if len(sent_messages or []) != 1:
-        return
-    message = sent_messages[0]
-    if not message:
-        return
-    try:
-        await message.add_reaction(THUMBS_UP)
-        await message.add_reaction(THUMBS_DOWN)
-    except Exception:
-        import runtime.app as app
-
-        app.log.warning("Failed to pre-seed prompt feedback reactions for ask-elixir message", exc_info=True)
 
 
 def _assistant_message_lookup(payload) -> tuple[dict | None, dict | None]:
@@ -175,10 +137,7 @@ async def handle_raw_reaction_remove(payload) -> None:
 __all__ = [
     "THUMBS_DOWN",
     "THUMBS_UP",
-    "_feedback_content_text",
-    "add_feedback_reactions",
     "feedback_value_for_emoji",
     "handle_raw_reaction_add",
     "handle_raw_reaction_remove",
-    "should_collect_ask_elixir_feedback",
 ]
