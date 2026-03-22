@@ -743,34 +743,16 @@ def test_ask_elixir_daily_insight_posts_fun_fact():
     assert mock_save.call_args.kwargs["event_type"] == "daily_clan_insight"
 
 
-def test_apply_member_refs_to_result_rewrites_content_and_share_content():
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    def fake_format_member_reference(tag, style="plain_name", conn=None):
-        del conn
-        if tag != "#ABC123":
-            return tag
-        if style == "name_with_mention":
-            return "King Levy (<@456>)"
-        return "King Levy"
-
-    with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.db.format_member_reference", side_effect=fake_format_member_reference),
-    ):
-        result = asyncio.run(
-            elixir._apply_member_refs_to_result(
-                {
-                    "content": "King Levy is heating up.",
-                    "share_content": "Tell King Levy to keep going.",
-                    "member_tags": ["#ABC123"],
-                }
-            )
-        )
-
-    assert result["content"] == "King Levy (<@456>) is heating up."
-    assert result["share_content"] == "Tell King Levy (<@456>) to keep going."
+def test_apply_member_refs_to_result_is_noop():
+    """Mention injection is disabled — result passes through unchanged."""
+    input_result = {
+        "content": "King Levy is heating up.",
+        "share_content": "Tell King Levy to keep going.",
+        "member_tags": ["#ABC123"],
+    }
+    result = asyncio.run(elixir._apply_member_refs_to_result(input_result))
+    assert result["content"] == "King Levy is heating up."
+    assert result["share_content"] == "Tell King Levy to keep going."
 
 
 def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
@@ -1335,8 +1317,8 @@ def test_on_message_rewrites_member_refs_before_reply_and_save():
     ):
         asyncio.run(elixir.on_message(message))
 
-    message.reply.assert_awaited_once_with("King Levy (<@456>) is trending up.")
-    assert mock_save.call_args_list[1].args[2] == "King Levy (<@456>) is trending up."
+    message.reply.assert_awaited_once_with("King Levy is trending up.")
+    assert mock_save.call_args_list[1].args[2] == "King Levy is trending up."
     mock_respond.assert_called_once()
     mock_share.assert_awaited_once()
     mock_process.assert_not_awaited()
@@ -3243,5 +3225,5 @@ def test_share_channel_result_rewrites_member_refs_before_posting():
             )
         )
 
-    mock_post.assert_awaited_once_with(channel, {"content": "King Levy (<@456>) had a great week."})
-    assert mock_save.call_args.args[2] == "King Levy (<@456>) had a great week."
+    mock_post.assert_awaited_once_with(channel, {"content": "King Levy had a great week."})
+    assert mock_save.call_args.args[2] == "King Levy had a great week."

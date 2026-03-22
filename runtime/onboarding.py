@@ -259,7 +259,7 @@ async def verify_discord_membership(member_tag: str) -> str:
     if not identity:
         raise ValueError(f"No clan member found for {member_tag}.")
 
-    label = await asyncio.to_thread(db.format_member_reference, member_tag, "name_with_mention")
+    label = await asyncio.to_thread(db.format_member_reference, member_tag, "plain_name")
     guild = app.bot.get_guild(app.GUILD_ID) if app.GUILD_ID else None
     if guild is None:
         return "Guild is not cached in the running bot right now."
@@ -315,7 +315,7 @@ async def verify_discord_membership(member_tag: str) -> str:
         member_tag,
         identity.get("member_name") or member_tag,
     )
-    linked_label = await asyncio.to_thread(db.format_member_reference, member_tag, "name_with_mention")
+    linked_label = await asyncio.to_thread(db.format_member_reference, member_tag, "plain_name")
     if not granted:
         return f"Verified Discord identity for {linked_label}, but {role_message}"
     return f"Verified Discord identity for {linked_label}. {role_message}"
