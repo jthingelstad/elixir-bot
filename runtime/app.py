@@ -162,10 +162,10 @@ async def _maybe_alert_cr_api_failure(context: str) -> bool:
     king_thing_ref = await asyncio.to_thread(
         db.format_member_reference,
         "#20JJJ2CCRU",
-        "name_with_mention",
+        "plain_name",
     )
     if not king_thing_ref or king_thing_ref == "#20JJJ2CCRU":
-        king_thing_ref = "@King Thing"
+        king_thing_ref = "King Thing"
     sent = False
 
     auth_signature = _cr_api_failure_signature()

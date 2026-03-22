@@ -82,64 +82,10 @@ def _rewrite_member_refs_in_text(text: str, replacements: list[tuple[str, str]])
 
 
 async def _apply_member_refs_to_result(result: dict | None):
-    if not isinstance(result, dict):
-        return result
-
-    tags_by_alias: dict[str, set[str]] = {}
-
-    for raw_tag in result.get("member_tags") or []:
-        tag = (raw_tag or "").strip()
-        if not tag:
-            continue
-        tags_by_alias.setdefault(tag, set())
-
-    for raw_name in result.get("member_names") or []:
-        name = (raw_name or "").strip()
-        if not name:
-            continue
-        matches = await asyncio.to_thread(db.resolve_member, name, "active", 3)
-        resolved = _pick_resolved_member(matches)
-        if not resolved:
-            continue
-        tag = resolved.get("player_tag")
-        if not tag:
-            continue
-        tags_by_alias.setdefault(tag, set()).add(name)
-
-    replacements: list[tuple[str, str]] = []
-    for tag, aliases in tags_by_alias.items():
-        plain_name = await asyncio.to_thread(db.format_member_reference, tag, "plain_name")
-        mention_name = await asyncio.to_thread(db.format_member_reference, tag, "name_with_mention")
-        if not mention_name or mention_name in {plain_name, tag}:
-            continue
-        aliases.add((plain_name or "").strip())
-        for alias in aliases:
-            alias_text = (alias or "").strip()
-            if alias_text:
-                replacements.append((alias_text, mention_name))
-
-    if not replacements:
-        return result
-
-    updated = dict(result)
-    content = updated.get("content")
-    if isinstance(content, str):
-        updated["content"] = _rewrite_member_refs_in_text(content, replacements)
-    elif isinstance(content, list):
-        updated["content"] = [
-            _rewrite_member_refs_in_text(item, replacements) if isinstance(item, str) else item
-            for item in content
-        ]
-
-    share_content = updated.get("share_content")
-    if isinstance(share_content, str):
-        updated["share_content"] = _rewrite_member_refs_in_text(share_content, replacements)
-    elif isinstance(share_content, list):
-        updated["share_content"] = [
-            _rewrite_member_refs_in_text(item, replacements) if isinstance(item, str) else item
-            for item in share_content
-        ]
-    return updated
+    # Mention injection disabled — return result unchanged.
+    # Data (discord links, identities) is preserved; we just no longer
+    # rewrite player names into Discord <@id> pings in bot output.
+    return result
 
 def _match_clan_member(nickname):
     """Match a Discord nickname to a clan member. Returns (tag, name) or None.
