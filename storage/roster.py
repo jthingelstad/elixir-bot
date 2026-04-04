@@ -972,6 +972,172 @@ def get_members_with_most_level_16_cards(limit=10, conn=None):
             conn.close()
 
 
+def get_clan_favourite_card_counts(limit=10, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT pps.current_favourite_card_name AS card_name, COUNT(*) AS member_count "
+            "FROM members m "
+            "JOIN player_profile_snapshots pps ON pps.snapshot_id = ("
+            "  SELECT p2.snapshot_id FROM player_profile_snapshots p2 "
+            "  WHERE p2.member_id = m.member_id "
+            "  ORDER BY p2.fetched_at DESC, p2.snapshot_id DESC LIMIT 1"
+            ") "
+            "WHERE m.status = 'active' AND pps.current_favourite_card_name IS NOT NULL "
+            "AND pps.current_favourite_card_name != '' "
+            "GROUP BY pps.current_favourite_card_name "
+            "ORDER BY member_count DESC, pps.current_favourite_card_name COLLATE NOCASE "
+            "LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        if close:
+            conn.close()
+
+
+def get_clan_most_common_maxed_cards(limit=10, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT ccs.cards_json, ccs.support_cards_json "
+            "FROM members m "
+            "JOIN member_card_collection_snapshots ccs ON ccs.snapshot_id = ("
+            "  SELECT c2.snapshot_id FROM member_card_collection_snapshots c2 "
+            "  WHERE c2.member_id = m.member_id "
+            "  ORDER BY c2.fetched_at DESC, c2.snapshot_id DESC LIMIT 1"
+            ") "
+            "WHERE m.status = 'active'"
+        ).fetchall()
+        card_counts: dict[str, int] = {}
+        for row in rows:
+            for raw in [*json.loads(row["cards_json"] or "[]"), *json.loads(row["support_cards_json"] or "[]")]:
+                if not isinstance(raw, dict) or not raw.get("name"):
+                    continue
+                if _card_level(raw) == 16:
+                    name = raw["name"]
+                    card_counts[name] = card_counts.get(name, 0) + 1
+        ranked = sorted(card_counts.items(), key=lambda item: (-item[1], item[0].lower()))
+        return [{"card_name": name, "member_count": count} for name, count in ranked[:limit]]
+    finally:
+        if close:
+            conn.close()
+
+
+def get_clan_recently_played_cards(days=14, limit=20, conn=None):
+    """Cards that appeared most often in clan members' recent battle decks."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime(
+            "%Y%m%dT%H%M%S.000Z"
+        )
+        rows = conn.execute(
+            "SELECT bf.deck_json "
+            "FROM member_battle_facts bf "
+            "JOIN members m ON m.member_id = bf.member_id "
+            "WHERE m.status = 'active' AND bf.battle_time >= ?",
+            (cutoff,),
+        ).fetchall()
+        counts: dict[str, int] = {}
+        for row in rows:
+            for card in json.loads(row["deck_json"] or "[]"):
+                if isinstance(card, dict) and card.get("name"):
+                    counts[card["name"]] = counts.get(card["name"], 0) + 1
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
+        return [{"card_name": name, "battles": count} for name, count in ranked[:limit]]
+    finally:
+        if close:
+            conn.close()
+
+
+def get_clan_rare_maxed_cards(max_owners=2, limit=10, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT ccs.cards_json, ccs.support_cards_json "
+            "FROM members m "
+            "JOIN member_card_collection_snapshots ccs ON ccs.snapshot_id = ("
+            "  SELECT c2.snapshot_id FROM member_card_collection_snapshots c2 "
+            "  WHERE c2.member_id = m.member_id "
+            "  ORDER BY c2.fetched_at DESC, c2.snapshot_id DESC LIMIT 1"
+            ") "
+            "WHERE m.status = 'active'"
+        ).fetchall()
+        card_counts: dict[str, int] = {}
+        for row in rows:
+            for raw in [*json.loads(row["cards_json"] or "[]"), *json.loads(row["support_cards_json"] or "[]")]:
+                if not isinstance(raw, dict) or not raw.get("name"):
+                    continue
+                if _card_level(raw) == 16:
+                    name = raw["name"]
+                    card_counts[name] = card_counts.get(name, 0) + 1
+        rare = [(name, count) for name, count in card_counts.items() if count <= max_owners]
+        rare.sort(key=lambda item: (item[1], item[0].lower()))
+        return [{"card_name": name, "member_count": count} for name, count in rare[:limit]]
+    finally:
+        if close:
+            conn.close()
+
+
+def get_clan_overlooked_cards(min_owners=3, min_level=14, battle_days=14, limit=10, conn=None):
+    """Cards that many members have leveled up but almost nobody actually plays."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        # Step 1: cards owned at min_level+ across the clan, with owner counts
+        coll_rows = conn.execute(
+            "SELECT m.member_id, ccs.cards_json, ccs.support_cards_json "
+            "FROM members m "
+            "JOIN member_card_collection_snapshots ccs ON ccs.snapshot_id = ("
+            "  SELECT c2.snapshot_id FROM member_card_collection_snapshots c2 "
+            "  WHERE c2.member_id = m.member_id "
+            "  ORDER BY c2.fetched_at DESC, c2.snapshot_id DESC LIMIT 1"
+            ") "
+            "WHERE m.status = 'active'"
+        ).fetchall()
+        owned: dict[str, int] = {}
+        for row in coll_rows:
+            for raw in [*json.loads(row["cards_json"] or "[]"), *json.loads(row["support_cards_json"] or "[]")]:
+                if not isinstance(raw, dict) or not raw.get("name"):
+                    continue
+                level = _card_level(raw)
+                if level is not None and level >= min_level:
+                    owned[raw["name"]] = owned.get(raw["name"], 0) + 1
+
+        # Step 2: cards actually played in recent battles
+        cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=battle_days)).strftime(
+            "%Y%m%dT%H%M%S.000Z"
+        )
+        battle_rows = conn.execute(
+            "SELECT bf.deck_json "
+            "FROM member_battle_facts bf "
+            "JOIN members m ON m.member_id = bf.member_id "
+            "WHERE m.status = 'active' AND bf.battle_time >= ?",
+            (cutoff,),
+        ).fetchall()
+        played: set[str] = set()
+        for row in battle_rows:
+            for card in json.loads(row["deck_json"] or "[]"):
+                if isinstance(card, dict) and card.get("name"):
+                    played.add(card["name"])
+
+        # Step 3: high-level cards owned by many but played by nobody (or very few)
+        overlooked = [
+            (name, count)
+            for name, count in owned.items()
+            if count >= min_owners and name not in played
+        ]
+        overlooked.sort(key=lambda item: (-item[1], item[0].lower()))
+        return [{"card_name": name, "owners_at_level": count} for name, count in overlooked[:limit]]
+    finally:
+        if close:
+            conn.close()
+
+
 def get_weekly_digest_summary(days=7, conn=None):
     close = conn is None
     conn = conn or get_connection()

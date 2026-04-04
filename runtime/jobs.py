@@ -719,153 +719,67 @@ def _summarize_member_rows(rows, *, name_key="name", value_builder=None, limit=5
 
 
 def _build_ask_elixir_daily_insight_context(clan, war):
-    roster = _query_or_default("roster_summary", lambda: db.get_clan_roster_summary() or {}, {})
-    clan_trend_summary = _query_or_default(
-        "clan_trend_summary",
-        lambda: db.build_clan_trend_summary_context(days=30, window_days=7) or "",
-        "",
-    )
     hot_streaks = _query_or_default(
         "hot_streaks",
         lambda: db.get_members_on_hot_streak(min_streak=4) or [],
         [],
     )
-    trending_war = _query_or_default(
-        "trending_war_contributors",
-        lambda: (db.get_trending_war_contributors(recent_races=2, limit=5) or {}).get("members") or [],
+    favourite_cards = _query_or_default(
+        "favourite_cards",
+        lambda: db.get_clan_favourite_card_counts(limit=10) or [],
         [],
     )
-    longest_tenure = _query_or_default(
-        "longest_tenure",
-        lambda: db.list_longest_tenure_members(limit=5) or [],
+    overlooked = _query_or_default(
+        "overlooked_cards",
+        lambda: db.get_clan_overlooked_cards(min_owners=3, min_level=14, battle_days=14, limit=10) or [],
         [],
     )
-    level_16_leaders = _query_or_default(
-        "level_16_leaders",
-        lambda: db.get_members_with_most_level_16_cards(limit=5) or [],
+    played_cards = _query_or_default(
+        "played_cards",
+        lambda: db.get_clan_recently_played_cards(days=14, limit=20) or [],
         [],
     )
-    members = _query_or_default("list_members", lambda: db.list_members() or [], [])
-    top_donors = sorted(
-        [member for member in members if (member.get("donations_week") or 0) > 0],
-        key=lambda member: (member.get("donations_week") or 0, -(member.get("clan_rank") or 999)),
-        reverse=True,
-    )[:5]
-    season_summary = _query_or_default(
-        "war_season_summary",
-        lambda: db.get_war_season_summary(top_n=3) or {},
-        {},
-    )
-
-    clan_snapshot = {
-        "name": clan.get("name"),
-        "tag": clan.get("tag"),
-        "member_count": clan.get("members") or roster.get("active_members"),
-        "clan_score": clan.get("clanScore") or roster.get("clan_score"),
-        "clan_war_trophies": clan.get("clanWarTrophies") or roster.get("clan_war_trophies"),
-        "required_trophies": clan.get("requiredTrophies"),
-        "weekly_donations_total": roster.get("donations_week_total"),
-        "avg_member_trophies": roster.get("avg_member_trophies"),
-    }
-    war_snapshot = {
-        "state": (war or {}).get("state"),
-        "section_index": (war or {}).get("sectionIndex"),
-        "period_type": (war or {}).get("periodType"),
-        "clan_rank": ((war or {}).get("clan") or {}).get("rank"),
-        "fame": ((war or {}).get("clan") or {}).get("fame"),
-    }
-    top_fame = ((season_summary or {}).get("top_members") or [])[:3]
 
     lines = [
-        "Write one short daily hidden fact or fun fact for #ask-elixir.",
-        "Ground it in real clan data from the context below.",
+        "Write one short daily fun fact for #ask-elixir that teaches members something about a Clash Royale card.",
+        "Pick a card from the lists below and teach something useful: a matchup, an elixir trade, a counter, a synergy, a mechanic, or a hidden interaction.",
+        "The card lists are just hooks to pick from — do not mention levels, collections, or who owns what.",
+        "Focus on gameplay: what the card does well, what beats it, what combos with it, or a non-obvious trick.",
+        "Vary your picks — sometimes from popular clan cards, sometimes from overlooked ones, sometimes from cards the clan plays a lot.",
         "Use a playful opener like 'Did you know?', 'Fun fact', or 'Elixir noticed something...'.",
-        "Choose one non-obvious insight, pattern, or comparison rather than a routine status update.",
+        "Do NOT write about clan wars, River Race, fame, or war participation.",
+        "Do NOT mention card levels, who has a card maxed, or collection stats.",
         "Keep it to 1-3 short sentences.",
         "Do not turn it into a recap, reminder, call to action, leadership note, or war order.",
         "If today's data does not support a genuinely interesting insight, return null.",
-        "",
-        "=== CLAN SNAPSHOT ===",
-        json.dumps(clan_snapshot, indent=2, default=str),
-        "",
-        "=== WAR SNAPSHOT ===",
-        json.dumps(war_snapshot, indent=2, default=str),
     ]
-    if clan_trend_summary:
+    if played_cards:
         lines.extend([
             "",
-            "=== CLAN TREND SUMMARY ===",
-            clan_trend_summary,
+            "=== CARDS THE CLAN IS PLAYING RIGHT NOW ===",
+            ", ".join(row["card_name"] for row in played_cards),
         ])
-    if top_donors:
+    if favourite_cards:
         lines.extend([
             "",
-            "=== TOP DONORS THIS WEEK ===",
-            "\n".join(
-                f"- {item}"
-                for item in _summarize_member_rows(
-                    top_donors,
-                    value_builder=lambda row: f"{row.get('donations_week') or 0} donations",
-                )
-            ),
+            "=== CARDS CLAN MEMBERS LOVE (FAVOURITES) ===",
+            ", ".join(row["card_name"] for row in favourite_cards),
+        ])
+    if overlooked:
+        lines.extend([
+            "",
+            "=== CARDS NOBODY IN THE CLAN IS PLAYING ===",
+            ", ".join(row["card_name"] for row in overlooked),
         ])
     if hot_streaks:
         lines.extend([
             "",
-            "=== HOT STREAKS ===",
+            "=== MEMBERS ON HOT STREAKS ===",
             "\n".join(
                 f"- {item}"
                 for item in _summarize_member_rows(
                     hot_streaks,
                     value_builder=lambda row: f"{row.get('current_streak') or 0} straight wins",
-                )
-            ),
-        ])
-    if trending_war:
-        lines.extend([
-            "",
-            "=== TRENDING WAR CONTRIBUTORS ===",
-            "\n".join(
-                f"- {item}"
-                for item in _summarize_member_rows(
-                    trending_war,
-                    value_builder=lambda row: f"+{row.get('trend_delta') or row.get('fame_delta') or 0} trend",
-                )
-            ),
-        ])
-    if longest_tenure:
-        lines.extend([
-            "",
-            "=== LONGEST TENURE ===",
-            "\n".join(
-                f"- {item}"
-                for item in _summarize_member_rows(
-                    longest_tenure,
-                    value_builder=lambda row: row.get("joined_date") or "joined long ago",
-                )
-            ),
-        ])
-    if level_16_leaders:
-        lines.extend([
-            "",
-            "=== MOST LEVEL 16 CARDS ===",
-            "\n".join(
-                f"- {item}"
-                for item in _summarize_member_rows(
-                    level_16_leaders,
-                    value_builder=lambda row: f"{row.get('level_16_card_count') or 0} max cards",
-                )
-            ),
-        ])
-    if top_fame:
-        lines.extend([
-            "",
-            "=== WAR SEASON TOP FAME ===",
-            "\n".join(
-                f"- {item}"
-                for item in _summarize_member_rows(
-                    top_fame,
-                    value_builder=lambda row: f"{row.get('total_fame') or 0} fame",
                 )
             ),
         ])
