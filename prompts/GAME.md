@@ -76,7 +76,18 @@ Prioritize clear guidance, not wiki-style completeness.
 - `Duel`: best-of-3 using up to 3 war decks; often a strong value play.
 - `Rotating Game Mode`: special limited-time battle mode for war.
 - `Boat Battle`: attack enemy boat defenses to slow another clan.
-- `Colosseum`: special final-week mode; be careful and rely on live context before describing it in detail.
+- `Colosseum`: the battle mode used during the final week of a 5-week season. There are no boat battles and no boat defenses during Colosseum week. Only Colosseum duels and 1v1s are available for war attacks.
+
+## Colosseum Week
+
+- The last week of every River Race season is Colosseum week, whether the season is 4 or 5 weeks long.
+- Colosseum week is the most important week of the season — the finale.
+- Regular river race weeks have 20 trophies on the line. Colosseum week has 100 trophies — more than all other weeks combined. This is why it matters so much.
+- There are NO boat defenses to set during Colosseum week. Do not mention boat defenses at all during this week.
+- There are no boat battles during Colosseum week.
+- Practice days during Colosseum week should focus on deck preparation only.
+- The API sends `periodType: "colosseum"` on battle days; practice days still show `"training"`.
+- The live war state includes a `colosseum_week` flag when battle days are active.
 
 ## Rewards and Recognition
 
@@ -89,7 +100,7 @@ Prioritize clear guidance, not wiki-style completeness.
 
 - Consistent war participation matters, but real life comes first.
 - Using all 4 decks on battle days is a strong sign of reliability.
-- Setting boat defenses during practice also shows good clan support.
+- Setting boat defenses during practice also shows good clan support (except Colosseum week, which has none).
 - When discussing member effort, be fair, specific, and grounded in actual tracked behavior.
 
 ## Ladder and General Progress

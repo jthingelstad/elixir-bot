@@ -9,7 +9,7 @@ FINAL_BATTLE_PERIOD_OFFSET = 6
 FINAL_PRACTICE_PERIOD_OFFSET = FIRST_BATTLE_PERIOD_OFFSET - 1
 WAR_RESET_HOUR_UTC = 10
 PRACTICE_PERIOD_TYPES = {"training", "trainingday", "practice"}
-BATTLE_PERIOD_TYPES = {"warday", "battle", "battleday"}
+BATTLE_PERIOD_TYPES = {"warday", "battle", "battleday", "colosseum"}
 
 
 def _parse_utc_iso(value: Optional[str]) -> Optional[datetime]:
@@ -70,8 +70,6 @@ def resolve_phase(period_type: Optional[str], period_index: Optional[int]) -> Op
         return "battle"
     if normalized in PRACTICE_PERIOD_TYPES:
         return "practice"
-    if normalized:
-        return "practice"
     offset = period_offset(period_index)
     if offset is None:
         return None
@@ -87,6 +85,17 @@ def phase_day_number(phase: Optional[str], period_index: Optional[int]) -> Optio
     if phase == "battle":
         return offset - FIRST_BATTLE_PERIOD_OFFSET + 1
     return offset + 1
+
+
+def is_colosseum_week(period_type: Optional[str] = None) -> bool:
+    """True when the current war week is the colosseum (final) week.
+
+    The last week of every River Race season is colosseum week, regardless of
+    whether the season is 4 or 5 weeks. The API sends periodType "colosseum"
+    on battle days; practice days still show "training", so this can only be
+    detected once battle days begin.
+    """
+    return normalize_period_type(period_type) == "colosseum"
 
 
 def war_day_key(

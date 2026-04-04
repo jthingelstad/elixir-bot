@@ -301,12 +301,13 @@ def _detect_war_day_transition_for_pair(current, previous=None, *, now=None, con
                 "period_type": current.get("period_type"),
                 "message": "Battle phase is live. Time to use those war decks.",
             })
+    colosseum_week = current.get("colosseum_week", False)
     if current.get("practice_phase_active") and (
         previous is None or not previous.get("practice_phase_active")
     ):
         signal_log_type = _war_period_signal_log_type("war_practice_phase_active", current)
         if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
-            signals.append({
+            practice_signal = {
                 "type": "war_practice_phase_active",
                 "signal_log_type": signal_log_type,
                 "signal_date": current_signal_date,
@@ -315,23 +316,33 @@ def _detect_war_day_transition_for_pair(current, previous=None, *, now=None, con
                 "section_index": current.get("section_index"),
                 "period_index": current.get("period_index"),
                 "period_type": current.get("period_type"),
-                "boat_defense_setup_scope": "one_time_per_practice_week",
-                "boat_defense_tracking_available": False,
-                "latest_clan_defense_status": latest_clan_defense_status,
-                "boat_defense_tracking_note": (
-                    "The live River Race API does not expose which members have placed "
-                    "boat defenses. It only exposes clan-level defense performance in "
-                    "period logs after days are logged."
-                ),
-                "message": (
-                    "Practice phase is live. Boat defenses are a one-time setup during "
-                    "practice days, so get them in early before battle days."
-                ),
-            })
+                "colosseum_week": colosseum_week,
+            }
+            if colosseum_week:
+                practice_signal["message"] = (
+                    "Practice phase is live for Colosseum week — the final week of the season. "
+                    "There are no boat defenses this week. Focus on preparing decks for battle."
+                )
+            else:
+                practice_signal.update({
+                    "boat_defense_setup_scope": "one_time_per_practice_week",
+                    "boat_defense_tracking_available": False,
+                    "latest_clan_defense_status": latest_clan_defense_status,
+                    "boat_defense_tracking_note": (
+                        "The live River Race API does not expose which members have placed "
+                        "boat defenses. It only exposes clan-level defense performance in "
+                        "period logs after days are logged."
+                    ),
+                    "message": (
+                        "Practice phase is live. Boat defenses are a one-time setup during "
+                        "practice days, so get them in early before battle days."
+                    ),
+                })
+            signals.append(practice_signal)
     if current.get("final_practice_day_active"):
         signal_log_type = _war_period_signal_log_type("war_final_practice_day", current)
         if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
-            signals.append({
+            final_practice_signal = {
                 "type": "war_final_practice_day",
                 "signal_log_type": signal_log_type,
                 "signal_date": current_signal_date,
@@ -340,19 +351,29 @@ def _detect_war_day_transition_for_pair(current, previous=None, *, now=None, con
                 "section_index": current.get("section_index"),
                 "period_index": current.get("period_index"),
                 "period_type": current.get("period_type"),
-                "boat_defense_setup_scope": "one_time_per_practice_week",
-                "boat_defense_tracking_available": False,
-                "latest_clan_defense_status": latest_clan_defense_status,
-                "boat_defense_tracking_note": (
-                    "The live River Race API does not expose which members have placed "
-                    "boat defenses. It only exposes clan-level defense performance in "
-                    "period logs after days are logged."
-                ),
-                "message": (
-                    "Last day of practice this week. Boat defenses are a one-time setup, "
-                    "so make sure they are set before battle days start."
-                ),
-            })
+                "colosseum_week": colosseum_week,
+            }
+            if colosseum_week:
+                final_practice_signal["message"] = (
+                    "Last day of practice for Colosseum week. No boat defenses to set — "
+                    "get decks ready for the final battles of the season."
+                )
+            else:
+                final_practice_signal.update({
+                    "boat_defense_setup_scope": "one_time_per_practice_week",
+                    "boat_defense_tracking_available": False,
+                    "latest_clan_defense_status": latest_clan_defense_status,
+                    "boat_defense_tracking_note": (
+                        "The live River Race API does not expose which members have placed "
+                        "boat defenses. It only exposes clan-level defense performance in "
+                        "period logs after days are logged."
+                    ),
+                    "message": (
+                        "Last day of practice this week. Boat defenses are a one-time setup, "
+                        "so make sure they are set before battle days start."
+                    ),
+                })
+            signals.append(final_practice_signal)
     if current.get("final_battle_day_active"):
         signal_log_type = _war_period_signal_log_type("war_final_battle_day", current)
         if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):

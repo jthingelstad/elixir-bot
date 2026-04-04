@@ -19,6 +19,7 @@ from storage.war_calendar import (
     FIRST_BATTLE_PERIOD_OFFSET,
     coerce_utc_datetime,
     format_utc_iso,
+    is_colosseum_week,
     phase_day_number,
     period_offset,
     resolve_phase,
@@ -183,10 +184,12 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
         )
         result["trophy_change"] = latest_logged_race["trophy_change"]
 
+    colosseum = is_colosseum_week(period_type)
     result["period_index"] = period_index
     result["period_offset"] = period_offset
     result["period_type"] = period_type
     result["phase"] = phase
+    result["colosseum_week"] = colosseum
     result["battle_phase_active"] = phase == "battle"
     result["practice_phase_active"] = phase == "practice"
     result["final_practice_day_active"] = (

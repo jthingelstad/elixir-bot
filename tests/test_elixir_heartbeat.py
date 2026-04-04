@@ -1690,6 +1690,7 @@ def test_detect_war_day_transition_emits_practice_phase_active_from_api_state():
             "section_index": 1,
             "period_index": 1,
             "period_type": "trainingDay",
+            "colosseum_week": False,
             "boat_defense_setup_scope": "one_time_per_practice_week",
             "boat_defense_tracking_available": False,
             "latest_clan_defense_status": None,
