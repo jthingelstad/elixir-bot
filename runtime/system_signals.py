@@ -295,6 +295,46 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "custom_emoji",
         },
     },
+    {
+        "signal_key": "capability_signal_quality_and_colosseum_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Smarter Signals & Colosseum Awareness",
+            "message": (
+                "Elixir just got a lot sharper about what is worth saying out loud and when to stay quiet. "
+                "Player progress updates are now filtered to meaningful milestones instead of flooding the channel with every small step. "
+                "And Elixir now fully understands Colosseum week — the final, highest-stakes week of every River Race season."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Smarter Signals & Colosseum Awareness**\n\n"
+                "Elixir just got a lot sharper about what is worth saying out loud and when to stay quiet. "
+                "Player progress updates are now filtered to meaningful milestones instead of flooding the channel with every small step. "
+                "And Elixir now fully understands Colosseum week.\n\n"
+                "**Signal quality:**\n"
+                "- Card mastery celebrations now start at level 5 instead of level 1 — the early grind is quiet, the real milestones get the spotlight.\n"
+                "- New card unlocks only fire for Epic, Legendary, and Champion cards. Common and Rare unlocks stay quiet.\n"
+                "- Player level-ups now celebrate every 5th level instead of every single one.\n"
+                "- Card upgrades now start at level 15 instead of 14.\n\n"
+                "**Colosseum week:**\n"
+                "- Elixir now recognizes the final week of every River Race season as Colosseum week.\n"
+                "- 100 trophies are on the line in Colosseum — more than all other weeks combined.\n"
+                "- No boat defenses, no boat battles. Elixir knows this and will not ask about them during Colosseum week.\n\n"
+                "**Behind the scenes:**\n"
+                "- Weekly database maintenance now runs Sunday at 2:00 AM CT with a cleanup report posted to leadership.\n"
+                "- Member departures now distinguish likely kicks from voluntary leaves — no more warm farewells for inactive members who were removed."
+            ),
+            "details": [
+                "Card mastery celebrations now start at level 5 instead of level 1 — the early grind is quiet, the real milestones get the spotlight.",
+                "New card unlocks only fire for Epic, Legendary, and Champion cards. Common and Rare unlocks stay quiet.",
+                "Player level-ups now celebrate every 5th level instead of every single one.",
+                "Elixir now recognizes the final week of every River Race season as Colosseum week — 100 trophies on the line, no boat defenses, no boat battles.",
+                "Weekly database maintenance now runs Sunday at 2:00 AM CT with a report posted to leadership.",
+                "Member departures now distinguish likely kicks from voluntary leaves.",
+            ],
+            "audience": "clan",
+            "capability_area": "signal_quality",
+        },
+    },
 ]
 
 
