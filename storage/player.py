@@ -23,7 +23,7 @@ from db import (
     get_connection,
 )
 
-CARD_UPGRADE_SIGNAL_MIN_LEVEL = 14
+CARD_UPGRADE_SIGNAL_MIN_LEVEL = 15
 MASTERY_BADGE_SIGNAL_MIN_LEVEL = 5
 CARD_UNLOCK_SIGNAL_RARITIES = {"epic", "legendary", "champion"}
 GAMES_PER_DAY_WINDOW_DAYS = 14
@@ -240,13 +240,14 @@ def snapshot_player_profile(player_data, conn=None):
         old_level = previous["exp_level"] if previous else None
         new_level = player_data.get("expLevel")
         if isinstance(old_level, int) and isinstance(new_level, int) and new_level > old_level:
-            signals.append({
-                "type": "player_level_up",
-                "tag": tag,
-                "name": player_data.get("name"),
-                "old_level": old_level,
-                "new_level": new_level,
-            })
+            if new_level % 5 == 0 or (old_level // 5) < (new_level // 5):
+                signals.append({
+                    "type": "player_level_up",
+                    "tag": tag,
+                    "name": player_data.get("name"),
+                    "old_level": old_level,
+                    "new_level": new_level,
+                })
 
         old_wins = previous["wins"] if previous else None
         new_wins = player_data.get("wins")

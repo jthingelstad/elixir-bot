@@ -1868,12 +1868,12 @@ def test_snapshot_player_profile_detects_level_wins_new_cards_and_card_upgrades(
             {
                 "tag": "#ABC123",
                 "name": "King Levy",
-                "expLevel": 65,
+                "expLevel": 64,
                 "wins": 480,
                 "currentDeck": [],
                 "cards": [
                     {"name": "Fireball", "level": 10, "maxLevel": 11, "rarity": "epic"},
-                    {"name": "Knight", "level": 13, "maxLevel": 16, "rarity": "common"},
+                    {"name": "Knight", "level": 14, "maxLevel": 16, "rarity": "common"},
                 ],
             },
             conn=conn,
@@ -1882,12 +1882,12 @@ def test_snapshot_player_profile_detects_level_wins_new_cards_and_card_upgrades(
             {
                 "tag": "#ABC123",
                 "name": "King Levy",
-                "expLevel": 66,
+                "expLevel": 65,
                 "wins": 1005,
                 "currentDeck": [],
                 "cards": [
                     {"name": "Fireball", "level": 11, "maxLevel": 11, "rarity": "epic"},
-                    {"name": "Knight", "level": 14, "maxLevel": 16, "rarity": "common"},
+                    {"name": "Knight", "level": 15, "maxLevel": 16, "rarity": "common"},
                     {"name": "Archers", "level": 12, "maxLevel": 16, "rarity": "common"},
                     {"name": "Goblin Barrel", "level": 6, "maxLevel": 11, "rarity": "epic"},
                     {"name": "Little Prince", "level": 1, "maxLevel": 6, "rarity": "champion"},
@@ -1896,7 +1896,7 @@ def test_snapshot_player_profile_detects_level_wins_new_cards_and_card_upgrades(
             conn=conn,
         )
 
-        assert any(sig["type"] == "player_level_up" and sig["new_level"] == 66 for sig in signals)
+        assert any(sig["type"] == "player_level_up" and sig["new_level"] == 65 for sig in signals)
         assert any(sig["type"] == "career_wins_milestone" and sig["milestone"] == 500 for sig in signals)
         assert any(sig["type"] == "career_wins_milestone" and sig["milestone"] == 1000 for sig in signals)
         assert not any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Archers" for sig in signals), "common unlocks should be suppressed"
@@ -1905,7 +1905,7 @@ def test_snapshot_player_profile_detects_level_wins_new_cards_and_card_upgrades(
         assert any(sig["type"] == "new_champion_unlocked" and sig["card_name"] == "Little Prince" for sig in signals)
         assert any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Little Prince" and sig["is_champion"] is True for sig in signals)
         assert any(sig["type"] == "card_level_milestone" and sig["card_name"] == "Fireball" and sig["milestone"] == 16 for sig in signals)
-        assert any(sig["type"] == "card_level_milestone" and sig["card_name"] == "Knight" and sig["milestone"] == 14 for sig in signals)
+        assert any(sig["type"] == "card_level_milestone" and sig["card_name"] == "Knight" and sig["milestone"] == 15 for sig in signals)
     finally:
         conn.close()
 

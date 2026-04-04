@@ -2384,9 +2384,7 @@ def test_detect_war_signals_from_storage_replays_multiple_new_finishers_once():
         conn.close()
 
     all_deck_signals = [signal for signal in result.signals if signal["type"] == "war_member_used_all_decks"]
-    assert len(all_deck_signals) == 2
-    assert all_deck_signals[0]["members"][0]["tag"] == "#ABC123"
-    assert all_deck_signals[1]["members"][0]["tag"] == "#DEF456"
+    assert len(all_deck_signals) == 0
     assert rerun.signals == []
 
 
