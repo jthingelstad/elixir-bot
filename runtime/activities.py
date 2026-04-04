@@ -184,6 +184,22 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         ),
         legacy_commands=("promotion",),
     ),
+    ActivityDefinition(
+        activity_key="db-maintenance",
+        owner_subagent="leader-lounge",
+        purpose="Purge expired data, VACUUM the database, and report space reclaimed.",
+        job_id="db-maintenance",
+        job_function="_db_maintenance_cycle",
+        schedule_kind="cron",
+        schedule_config={
+            "day_of_week": _attr("DB_MAINTENANCE_DAY", "sun"),
+            "hour": _attr("DB_MAINTENANCE_HOUR", 2),
+            "minute": 0,
+        },
+        delivery_targets=(
+            "Discord: #leader-lounge",
+        ),
+    ),
 )
 
 

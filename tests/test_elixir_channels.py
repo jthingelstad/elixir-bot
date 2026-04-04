@@ -2219,6 +2219,7 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
         "weekly-recap",
         "site-content",
         "promotion-content",
+        "db-maintenance",
     }
     assert "war-poll" in job_ids
     assert "war-awareness" in job_ids

@@ -1,8 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
 from db import (
+    CARD_COLLECTION_RETENTION_DAYS,
     CONVERSATION_RETENTION_DAYS,
+    PLAYER_PROFILE_RETENTION_DAYS,
     RAW_PAYLOAD_RETENTION_DAYS,
+    SIGNAL_OUTCOME_RETENTION_DAYS,
     SNAPSHOT_RETENTION_DAYS,
     WAR_RETENTION_DAYS,
     _canon_tag,
@@ -422,31 +425,54 @@ def get_birthdays_today(today_str, conn=None):
             conn.close()
 # -- Purge ------------------------------------------------------------------
 
+def _utc_cutoff(days):
+    return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _date_cutoff(days):
+    return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+# Ordered list of (table, column, retention_days) for all purge targets.
+_PURGE_TARGETS = [
+    ("member_state_snapshots", "observed_at", SNAPSHOT_RETENTION_DAYS),
+    ("player_profile_snapshots", "fetched_at", PLAYER_PROFILE_RETENTION_DAYS),
+    ("member_card_collection_snapshots", "fetched_at", CARD_COLLECTION_RETENTION_DAYS),
+    ("member_deck_snapshots", "fetched_at", SNAPSHOT_RETENTION_DAYS),
+    ("member_card_usage_snapshots", "fetched_at", SNAPSHOT_RETENTION_DAYS),
+    ("member_battle_facts", "battle_time", SNAPSHOT_RETENTION_DAYS),
+    ("war_races", "COALESCE(created_date, '')", WAR_RETENTION_DAYS),
+    ("war_current_state", "observed_at", WAR_RETENTION_DAYS),
+    ("war_day_status", "observed_at", WAR_RETENTION_DAYS),
+    ("war_period_clan_status", "observed_at", WAR_RETENTION_DAYS),
+    ("war_participant_snapshots", "observed_at", WAR_RETENTION_DAYS),
+    ("raw_api_payloads", "fetched_at", RAW_PAYLOAD_RETENTION_DAYS),
+    ("messages", "created_at", CONVERSATION_RETENTION_DAYS),
+    ("signal_outcomes", "created_at", SIGNAL_OUTCOME_RETENTION_DAYS),
+]
+
+_PURGE_DATE_TARGETS = [
+    ("cake_day_announcements", "announcement_date", 7),
+    ("signal_log", "signal_date", SNAPSHOT_RETENTION_DAYS),
+]
+
+
 def purge_old_data(conn=None):
+    """Delete expired rows and return per-table deletion counts."""
     close = conn is None
     conn = conn or get_connection()
+    stats = {}
     try:
-        snapshot_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=SNAPSHOT_RETENTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
-        war_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=WAR_RETENTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
-        raw_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=RAW_PAYLOAD_RETENTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
-        conv_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=CONVERSATION_RETENTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
-        conn.execute("DELETE FROM member_state_snapshots WHERE observed_at < ?", (snapshot_cutoff,))
-        conn.execute("DELETE FROM player_profile_snapshots WHERE fetched_at < ?", (snapshot_cutoff,))
-        conn.execute("DELETE FROM member_card_collection_snapshots WHERE fetched_at < ?", (snapshot_cutoff,))
-        conn.execute("DELETE FROM member_deck_snapshots WHERE fetched_at < ?", (snapshot_cutoff,))
-        conn.execute("DELETE FROM member_card_usage_snapshots WHERE fetched_at < ?", (snapshot_cutoff,))
-        conn.execute("DELETE FROM member_battle_facts WHERE battle_time < ?", (snapshot_cutoff,))
-        conn.execute("DELETE FROM war_races WHERE COALESCE(created_date, '') < ?", (war_cutoff,))
-        conn.execute("DELETE FROM war_current_state WHERE observed_at < ?", (war_cutoff,))
-        conn.execute("DELETE FROM war_day_status WHERE observed_at < ?", (war_cutoff,))
-        conn.execute("DELETE FROM war_period_clan_status WHERE observed_at < ?", (war_cutoff,))
-        conn.execute("DELETE FROM raw_api_payloads WHERE fetched_at < ?", (raw_cutoff,))
-        conn.execute("DELETE FROM messages WHERE created_at < ?", (conv_cutoff,))
-        cake_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)).strftime("%Y-%m-%d")
-        signal_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=SNAPSHOT_RETENTION_DAYS)).strftime("%Y-%m-%d")
-        conn.execute("DELETE FROM cake_day_announcements WHERE announcement_date < ?", (cake_cutoff,))
-        conn.execute("DELETE FROM signal_log WHERE signal_date < ?", (signal_cutoff,))
+        for table, column, days in _PURGE_TARGETS:
+            cutoff = _utc_cutoff(days)
+            cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
+            stats[table] = cursor.rowcount
+        for table, column, days in _PURGE_DATE_TARGETS:
+            cutoff = _date_cutoff(days)
+            cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
+            stats[table] = cursor.rowcount
         conn.commit()
     finally:
         if close:
             conn.close()
+    return stats
