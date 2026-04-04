@@ -24,6 +24,7 @@ from db import (
 )
 
 CARD_UPGRADE_SIGNAL_MIN_LEVEL = 14
+MASTERY_BADGE_SIGNAL_MIN_LEVEL = 5
 GAMES_PER_DAY_WINDOW_DAYS = 14
 BADGE_NAME_OVERRIDES = {
     "Classic12Wins": "Classic Challenge 12 Wins",
@@ -341,6 +342,8 @@ def snapshot_player_profile(player_data, conn=None):
             old_level = previous_badge.get("level")
             new_level = badge.get("level")
             if isinstance(old_level, int) and isinstance(new_level, int) and new_level > old_level:
+                if _badge_category(badge_name) == "mastery" and new_level < MASTERY_BADGE_SIGNAL_MIN_LEVEL:
+                    continue
                 signals.append({
                     "type": "badge_level_milestone",
                     "tag": tag,

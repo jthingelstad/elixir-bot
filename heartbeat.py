@@ -208,7 +208,39 @@ def _cursor_update(detector_key, scope_key="", *, cursor_text=None, cursor_int=N
     }
 
 
-def detect_joins_leaves(current_members, known_snapshot):
+LIKELY_KICKED_INACTIVITY_DAYS = 7
+
+
+def _enrich_leave_signal(tag, name, conn):
+    """Add last-known activity context to a leave signal."""
+    signal = {"type": "member_leave", "tag": tag, "name": name}
+    if conn is None:
+        return signal
+    row = conn.execute(
+        "SELECT cs.role, cs.last_seen_api, cs.trophies, cs.donations_week, mm.cr_games_per_day "
+        "FROM members m "
+        "JOIN member_current_state cs ON cs.member_id = m.member_id "
+        "LEFT JOIN member_metadata mm ON mm.member_id = m.member_id "
+        "WHERE m.player_tag = ?",
+        (tag.lstrip("#"),),
+    ).fetchone()
+    if not row:
+        return signal
+    signal["last_role"] = row["role"]
+    signal["last_trophies"] = row["trophies"]
+    signal["last_donations_week"] = row["donations_week"]
+    signal["games_per_day"] = row["cr_games_per_day"]
+    last_seen_dt = db._parse_cr_time(row["last_seen_api"])
+    if last_seen_dt is not None:
+        days_inactive = (datetime.now(timezone.utc).replace(tzinfo=None) - last_seen_dt).days
+        signal["days_inactive"] = days_inactive
+        signal["likely_kicked"] = days_inactive >= LIKELY_KICKED_INACTIVITY_DAYS
+    else:
+        signal["likely_kicked"] = False
+    return signal
+
+
+def detect_joins_leaves(current_members, known_snapshot, conn=None):
     """Compare current roster to known snapshot for joins/departures.
 
     current_members: list of member dicts from CR API memberList.
@@ -229,11 +261,7 @@ def detect_joins_leaves(current_members, known_snapshot):
 
     for tag, name in known_snapshot.items():
         if tag not in current:
-            signals.append({
-                "type": "member_leave",
-                "tag": tag,
-                "name": name,
-            })
+            signals.append(_enrich_leave_signal(tag, name, conn))
 
     return signals, current
 
@@ -1388,7 +1416,7 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
 
         if include_nonwar:
             # Join/leave detection
-            join_leave_signals, _ = detect_joins_leaves(members, known)
+            join_leave_signals, _ = detect_joins_leaves(members, known, conn=conn)
             signals.extend(join_leave_signals)
 
             # Record join dates for newly detected members; reset tenure for leavers
