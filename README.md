@@ -26,7 +26,6 @@ Elixir currently handles four main kinds of work:
    Elixir detects roster, war, and progression signals, then fans one source event into one or more destination-specific outcomes. A new member join can become:
    - a public welcome in `#clan-events`
    - a factual leadership note in `#leader-lounge`
-   - a short relay-ready welcome in `#arena-relay`
 
 3. Scheduled recurring activities
    Elixir runs recurring activities like `clan-awareness`, `war-poll`, `war-awareness`, `player-progression`, `weekly-recap`, `promotion-content`, and the daily `#ask-elixir` hidden-fact post.
@@ -43,7 +42,6 @@ Primary public/proactive lanes:
 - `#player-progress` for player milestones and progression
 - `#clan-events` for joins, promotions, anniversaries, and clan recognitions
 - `#announcements` for the weekly recap and important clan-wide Elixir updates
-- `#arena-relay` for 160-character Clan Chat relay copy
 - `#promote-the-clan` for recruiting copy members can reuse
 - `#poapkings-com` for website publish visibility
 

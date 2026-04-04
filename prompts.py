@@ -35,14 +35,6 @@ CHANNEL_SUBAGENT_CONFIG = {
         "memory_scope": "public",
         "durable_memory_enabled": True,
     },
-    "arena-relay": {
-        "workflow": "channel_update",
-        "tool_policy": "read_only",
-        "reply_policy": "disabled",
-        "singleton": True,
-        "memory_scope": "public",
-        "durable_memory_enabled": True,
-    },
     "river-race": {
         "workflow": "channel_update",
         "tool_policy": "read_only",
@@ -113,7 +105,6 @@ SUBAGENT_ALIASES = {
     "onboarding": "reception",
     "weekly_digest": "announcements",
     "promotion": "promote-the-clan",
-    "arena_relay": "arena-relay",
     "river_race": "river-race",
     "player_progress": "player-progress",
     "clan_events": "clan-events",

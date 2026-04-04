@@ -31,10 +31,6 @@ from runtime.system_signals import queue_startup_system_signals
 _WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
 _PROMOTION_DISCORD_REQUIRED_TEXT = "Required Trophies: [2000]"
 _PROMOTION_REDDIT_REQUIRED_TOKEN = "[2000]"
-ARENA_RELAY_MAX_POSTS_PER_LOOKBACK = int(os.getenv("ARENA_RELAY_MAX_POSTS_PER_LOOKBACK", "4"))
-ARENA_RELAY_LOOKBACK_DAYS = int(os.getenv("ARENA_RELAY_LOOKBACK_DAYS", "7"))
-
-
 async def _post_to_elixir(*args, **kwargs):
     return await _app._post_to_elixir(*args, **kwargs)
 
@@ -62,30 +58,6 @@ def _signal_group_needs_recap_memory(signals):
     recap_types = {"war_battle_day_complete", "war_week_complete", "war_completed", "war_season_complete"}
     return any((signal.get("type") in recap_types) for signal in (signals or []))
 
-
-def _parse_recorded_at(value: str | None) -> datetime | None:
-    text = (value or "").strip()
-    if not text:
-        return None
-    try:
-        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
-
-
-def _arena_relay_cap_reached(recent_posts, *, now=None) -> bool:
-    if ARENA_RELAY_MAX_POSTS_PER_LOOKBACK <= 0 or ARENA_RELAY_LOOKBACK_DAYS <= 0:
-        return False
-    current = now or datetime.now(timezone.utc)
-    cutoff = current - timedelta(days=ARENA_RELAY_LOOKBACK_DAYS)
-    recent_count = 0
-    for post in recent_posts or []:
-        recorded_at = _parse_recorded_at(post.get("recorded_at"))
-        if recorded_at is None:
-            continue
-        if recorded_at >= cutoff:
-            recent_count += 1
-    return recent_count >= ARENA_RELAY_MAX_POSTS_PER_LOOKBACK
 
 
 def _build_outcome_context(outcome, signals, clan, war):
@@ -142,13 +114,6 @@ def _build_outcome_context(outcome, signals, clan, war):
                     "Member profile context:",
                     json.dumps(profile, indent=2, default=str),
                 ])
-    elif channel_key == "arena-relay":
-        lines.extend([
-            "",
-            "Write relay-ready Clan Chat copy.",
-            "Keep it immediately usable and under roughly 160 characters when possible.",
-            f"Current clan data: {json.dumps({'name': clan.get('name'), 'tag': clan.get('tag')}, default=str)}",
-        ])
     else:
         lines.extend([
             "",
@@ -211,25 +176,6 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         10,
         "assistant",
     )
-    if channel_config["subagent_key"] == "arena-relay" and not outcome.get("required", True):
-        if _arena_relay_cap_reached(recent_posts):
-            await asyncio.to_thread(
-                db.upsert_signal_outcome,
-                outcome["source_signal_key"],
-                outcome["source_signal_type"],
-                outcome["target_channel_key"],
-                outcome["target_channel_id"],
-                outcome["intent"],
-                required=False,
-                delivery_status="skipped",
-                payload=outcome.get("payload"),
-                error_detail=(
-                    f"arena-relay cap reached: {ARENA_RELAY_MAX_POSTS_PER_LOOKBACK} posts "
-                    f"in the last {ARENA_RELAY_LOOKBACK_DAYS} days"
-                ),
-                mark_attempt=True,
-            )
-            return True
     memory_context = await asyncio.to_thread(
         build_subagent_memory_context,
         channel_config,

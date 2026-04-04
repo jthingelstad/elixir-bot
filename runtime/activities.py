@@ -43,7 +43,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "jitter": _attr("HEARTBEAT_JITTER_SECONDS", 900),
         },
         delivery_targets=(
-            "Discord routed outcomes: #clan-events, #leader-lounge, optional #arena-relay",
+            "Discord routed outcomes: #clan-events, #leader-lounge",
         ),
         legacy_commands=("heartbeat",),
     ),
@@ -77,7 +77,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord routed outcomes: #river-race, #arena-relay, optional #leader-lounge",
+            "Discord routed outcomes: #river-race, optional #leader-lounge",
         ),
     ),
     ActivityDefinition(
