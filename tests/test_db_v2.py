@@ -187,7 +187,8 @@ def test_snapshot_clan_daily_metrics_tracks_churn_and_updates_same_day():
             conn=conn,
         )
 
-        rows = db.list_clan_daily_metrics(days=10, conn=conn)
+        with patch("storage.roster.chicago_today", return_value="2026-03-11"):
+            rows = db.list_clan_daily_metrics(days=10, conn=conn)
         assert len(rows) == 1
         assert rows[0]["metric_date"] == "2026-03-11"
         assert rows[0]["member_count"] == 2
