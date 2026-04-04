@@ -1281,14 +1281,6 @@ def _scan_war_participant_cursors(conn=None):
             start_index = 1
 
         for current_observed_at in observed_times[start_index:]:
-            signals.extend(
-                _detect_war_member_used_all_decks_between(
-                    war_day_key,
-                    previous_observed_at,
-                    current_observed_at,
-                    conn=conn,
-                )
-            )
             previous_observed_at = current_observed_at
 
         updates.append(
@@ -1457,7 +1449,6 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
 
             # Battle-day rank swings
             signals.extend(detect_war_rank_changes(conn=conn))
-            signals.extend(detect_war_member_used_all_decks(conn=conn))
 
             # Battle-day checkpoint updates
             signals.extend(detect_war_battle_checkpoints(conn=conn))
