@@ -372,108 +372,6 @@ def test_deliver_signal_group_stores_war_recap_memory_for_river_race_batch():
     mock_memory.assert_called_once_with(signals, ["Battle day recap post"], 1482352067573059675)
 
 
-def test_deliver_signal_group_posts_arena_relay_without_leader_ping():
-    signals = [{"type": "war_battle_day_started", "season_id": 130, "week": 1, "day_number": 2}]
-    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
-    war = {"state": "warDay"}
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    channel = AsyncMock()
-    channel.name = "arena-relay"
-    channel.type = "text"
-
-    with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.plan_signal_outcomes", return_value=[{
-            "source_signal_key": "war-day-2",
-            "source_signal_type": "war_battle_day_started",
-            "target_channel_key": "arena-relay",
-            "target_channel_id": "1478752385680801822",
-            "intent": "war_relay",
-            "required": False,
-            "payload": {"signals": signals},
-            "delivery_status": "planned",
-        }]),
-        patch.object(elixir.bot, "get_channel", return_value=channel),
-        patch("elixir.db.list_channel_messages", return_value=[]),
-        patch("elixir.db.get_signal_outcome", return_value=None),
-        patch("elixir.db.upsert_signal_outcome"),
-        patch("elixir.db.save_message"),
-        patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "delivered"}]),
-        patch("elixir.db.mark_signal_sent"),
-        patch("elixir.elixir_agent.generate_channel_update", return_value={
-            "event_type": "channel_update",
-            "summary": "War relay",
-            "content": "Relay this to clan chat.",
-        }),
-        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
-        patch("runtime.jobs.maybe_upsert_signal_memory"),
-    ):
-        asyncio.run(elixir._deliver_signal_group(signals, clan, war))
-
-    mock_post.assert_awaited_once_with(
-        channel,
-        {"event_type": "channel_update", "summary": "War relay", "content": "Relay this to clan chat."},
-    )
-
-
-def test_deliver_signal_group_skips_optional_arena_relay_when_weekly_cap_reached():
-    signals = [{"type": "war_battle_day_started", "season_id": 130, "week": 1, "day_number": 2}]
-    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
-    war = {"state": "warDay"}
-    now = datetime.now(timezone.utc)
-    recent_posts = [
-        {
-            "role": "assistant",
-            "content": f"relay {index}",
-            "recorded_at": (now - timedelta(days=index + 1)).strftime("%Y-%m-%dT%H:%M:%S"),
-        }
-        for index in range(4)
-    ]
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    channel = AsyncMock()
-    channel.name = "arena-relay"
-    channel.type = "text"
-
-    with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.plan_signal_outcomes", return_value=[{
-            "source_signal_key": "war-day-2",
-            "source_signal_type": "war_battle_day_started",
-            "target_channel_key": "arena-relay",
-            "target_channel_id": "1478752385680801822",
-            "intent": "war_relay",
-            "required": False,
-            "payload": {"signals": signals},
-            "delivery_status": "planned",
-        }]),
-        patch.object(elixir.bot, "get_channel", return_value=channel),
-        patch("elixir.db.list_channel_messages", return_value=recent_posts),
-        patch("elixir.db.get_signal_outcome", return_value=None),
-        patch("elixir.db.upsert_signal_outcome") as mock_upsert,
-        patch("elixir.db.save_message"),
-        patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "skipped"}]),
-        patch("elixir.db.mark_signal_sent"),
-        patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
-        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
-        patch("runtime.jobs.maybe_upsert_signal_memory"),
-    ):
-        asyncio.run(elixir._deliver_signal_group(signals, clan, war))
-
-    mock_generate.assert_not_called()
-    mock_post.assert_not_awaited()
-    assert any(
-        call.kwargs.get("delivery_status") == "skipped"
-        and "arena-relay cap reached" in (call.kwargs.get("error_detail") or "")
-        for call in mock_upsert.call_args_list
-    )
-
-
 def test_clan_awareness_tick_posts_join_messages_through_shared_sender():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[{"type": "member_join", "name": "King Levy", "tag": "#ABC"}],
@@ -557,7 +455,6 @@ def test_plan_signal_outcomes_routes_live_finish_signal_to_war_channels():
 
     assert [(item["target_channel_key"], item["required"]) for item in outcomes] == [
         ("river-race", True),
-        ("arena-relay", False),
         ("leader-lounge", False),
     ]
 

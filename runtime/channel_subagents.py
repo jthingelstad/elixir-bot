@@ -41,24 +41,6 @@ LEADERSHIP_ONLY_SIGNAL_TYPES = {
     "inactive_members",
 }
 
-RELAYABLE_WAR_SIGNAL_TYPES = {
-    "war_race_finished_live",
-    "war_battle_day_started",
-    "war_battle_day_live_update",
-    "war_battle_rank_change",
-    "war_battle_day_final_hours",
-    "war_battle_day_complete",
-    "war_final_practice_day",
-    "war_final_battle_day",
-    "war_practice_day_started",
-    "war_practice_day_complete",
-    "war_week_rollover",
-    "war_season_rollover",
-    "war_week_complete",
-    "war_season_complete",
-    "war_completed",
-}
-
 DURABLE_EVENT_SIGNAL_TYPES = {
     "member_join",
     "member_leave",
@@ -79,7 +61,6 @@ def signal_routing_summary() -> list[dict]:
             "match": "all signals in the batch are war signals",
             "targets": [
                 {"subagent": "river-race", "intent": "war_update", "required": True},
-                {"subagent": "arena-relay", "intent": "war_relay", "required": False, "condition": "relay-worthy war update"},
                 {"subagent": "leader-lounge", "intent": "war_ops_note", "required": False, "condition": "important rank swing, recovery need, or ops-relevant war state"},
             ],
         },
@@ -103,7 +84,6 @@ def signal_routing_summary() -> list[dict]:
             "targets": [
                 {"subagent": "clan-events", "intent": "member_join_public", "required": True},
                 {"subagent": "leader-lounge", "intent": "member_join_ops", "required": True},
-                {"subagent": "arena-relay", "intent": "member_join_relay", "required": False},
             ],
         },
         {
@@ -267,8 +247,6 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
 
     if all(is_war_signal(signal) for signal in signals):
         add("river-race", "war_update", required=True)
-        if any((signal.get("type") in RELAYABLE_WAR_SIGNAL_TYPES) or (signal.get("type") == "war_completed" and (signal.get("won") or signal.get("our_rank") == 1)) for signal in signals):
-            add("arena-relay", "war_relay", required=False)
         if any(
             signal.get("type") in {"war_battle_rank_change", "war_week_complete", "war_completed", "war_race_finished_live"}
             or signal.get("needs_lead_recovery")
@@ -289,7 +267,6 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
     if any((signal.get("type") == "member_join") for signal in signals):
         add("clan-events", "member_join_public", required=True)
         add("leader-lounge", "member_join_ops", required=True)
-        add("arena-relay", "member_join_relay", required=False)
         return outcomes
 
     if any(is_public_system_signal(signal) for signal in signals):

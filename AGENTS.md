@@ -117,7 +117,6 @@ Current primary subagents:
 - `river-race` — war coordination and battle-day urgency
 - `player-progress` — milestone and progression celebrations
 - `clan-events` — joins, promotions, anniversaries, and clan recognitions
-- `arena-relay` — 160-character Clan Chat relay copy
 - `announcements` — weekly recap and clan-wide Elixir system updates
 - `promote-the-clan` — recruiting copy for Discord and the website
 - `poapkings-com` — website publish visibility only
@@ -136,11 +135,11 @@ Each activity declares:
 
 Current recurring activities:
 - **Every 30 minutes with up to 900s jitter, 24/7** — `clan-awareness` via `_clan_awareness_tick()`
-  Processes non-war clan signals and routes outcomes into channels like `#clan-events`, `#leader-lounge`, and sometimes `#arena-relay`.
+  Processes non-war clan signals and routes outcomes into channels like `#clan-events` and `#leader-lounge`.
 - **Every hour at :00 Chicago, no jitter** — `war-poll` via `_war_poll_tick()`
   Polls live River Race state and stores the hourly war snapshot pipeline.
 - **Every hour at :05 Chicago, no jitter** — `war-awareness` via `_war_awareness_tick()`
-  Reads stored war data, processes war-only signals, and owns scheduled River Race coordination across `#river-race`, `#arena-relay`, and optional leadership notes.
+  Reads stored war data, processes war-only signals, and owns scheduled River Race coordination across `#river-race` and optional leadership notes.
 - **Every 30 minutes with up to 900s jitter** — `player-progression` via `_player_intel_refresh()`
   Refreshes stored player profile and battle intelligence, then emits progression signals to `#player-progress`.
 - **Daily at 12:00 PM Chicago with up to 30 minutes jitter** — `daily-clan-insight` via `_ask_elixir_daily_insight()`

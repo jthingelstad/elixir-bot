@@ -157,15 +157,6 @@ def test_subagent_prompt_river_race_prioritizes_observation_over_activation():
     assert "do not flood the channel with repetitive reminders about who has not started" in lowered
 
 
-def test_subagent_prompt_arena_relay_stays_sparse():
-    text = prompts.subagent_prompt("arena-relay")
-    lowered = text.lower()
-
-    assert "scarce lane" in lowered
-    assert "only produce a relay when the update is genuinely worth carrying" in lowered
-    assert "do not sound like you need leadership attention" in lowered
-
-
 def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
     monkeypatch.setattr(
         prompts,

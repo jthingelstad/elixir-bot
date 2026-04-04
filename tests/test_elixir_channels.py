@@ -2159,7 +2159,7 @@ def test_build_schedule_report_includes_clock_aligned_war_pipeline():
     assert "Every hour at :00 CT." in report
     assert "war-awareness" in report
     assert "Every hour at :05 CT." in report
-    assert "Discord routed outcomes: #river-race, #arena-relay, optional #leader-lounge" in report
+    assert "Discord routed outcomes: #river-race, optional #leader-lounge" in report
 
 
 def test_activity_registry_has_unique_keys_and_required_fields():
@@ -3165,28 +3165,6 @@ def test_build_weekly_clan_recap_context_summarizes_week():
     assert "=== CLAN TREND SUMMARY ===" in report
     assert "battle pulse heaters: Finn won 5 straight" in report
     assert "recent joins this week: Newbie" in report
-
-
-def test_share_channel_result_posts_arena_relay_without_leader_ping():
-    channel = AsyncMock()
-    channel.id = 300
-    channel.name = "arena-relay"
-    channel.type = "text"
-
-    with (
-        patch("elixir.prompts.resolve_channel_reference", return_value={"id": 300, "role": "arena_relay", "name": "#arena-relay"}),
-        patch.object(elixir.bot, "get_channel", return_value=channel),
-        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
-        patch("elixir.db.save_message"),
-    ):
-        asyncio.run(
-            elixir._share_channel_result(
-                {"event_type": "channel_share", "share_content": "Relay this to clan chat.", "share_channel": "#arena-relay"},
-                "clanops",
-            )
-        )
-
-    mock_post.assert_awaited_once_with(channel, {"content": "Relay this to clan chat."})
 
 
 def test_share_channel_result_rewrites_member_refs_before_posting():

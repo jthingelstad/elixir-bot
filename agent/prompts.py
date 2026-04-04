@@ -102,7 +102,7 @@ def _interactive_system(channel_name):
         "If someone asks how a member or the clan is trending over time, use the trend tools instead of inferring from a single-day snapshot.\n\n"
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
-        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
+        "If they specify a target channel, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
         f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance()}"
         "Respond with JSON only (no markdown wrapper):\n"
@@ -111,7 +111,7 @@ def _interactive_system(channel_name):
         "Or, when sharing to the clan:\n"
         '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "reply in the current channel", '
-        '"share_content": "the clan-facing post for the target channel", "share_channel": "#arena-relay", "metadata": {}}',
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#clan-events", "metadata": {}}',
     )
 
 
@@ -144,7 +144,7 @@ def _clanops_system(channel_name):
         "For performance, momentum, or roster-health questions over time, prefer the long-term trend tools and summaries.\n\n"
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
-        "If they specify a target like #arena-relay, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
+        "If they specify a target channel, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
         f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance(allow_in_sensitive=True)}"
         "Respond with JSON only (no markdown wrapper):\n"
@@ -153,7 +153,7 @@ def _clanops_system(channel_name):
         "Or, when sharing to the clan:\n"
         '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "reply in the current channel", '
-        '"share_content": "the clan-facing post for the target channel", "share_channel": "#arena-relay", "metadata": {}}',
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#clan-events", "metadata": {}}',
     )
 
 
