@@ -26,8 +26,11 @@ DB_PATH = os.getenv("ELIXIR_DB_PATH", os.path.join(PROJECT_ROOT, "elixir.db"))
 CHICAGO_TZ = ZoneInfo("America/Chicago")
 
 SNAPSHOT_RETENTION_DAYS = 90
+PLAYER_PROFILE_RETENTION_DAYS = 45
+CARD_COLLECTION_RETENTION_DAYS = 30
 WAR_RETENTION_DAYS = 180
-RAW_PAYLOAD_RETENTION_DAYS = 90
+RAW_PAYLOAD_RETENTION_DAYS = 30
+SIGNAL_OUTCOME_RETENTION_DAYS = 90
 CONVERSATION_RETENTION_DAYS = 30
 CONVERSATION_MAX_PER_SCOPE = 20
 
@@ -1500,7 +1503,13 @@ def _migration_18(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18]
+def _migration_19(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "player_profile_snapshots")
+    if "raw_json" in columns:
+        conn.execute("ALTER TABLE player_profile_snapshots DROP COLUMN raw_json")
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

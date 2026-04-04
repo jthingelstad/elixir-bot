@@ -1357,10 +1357,7 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         if include_war and war:
             db.upsert_war_current_state(war, conn=conn)
 
-        # 3. Purge old data
-        db.purge_old_data(conn=conn)
-
-        # 4. Collect signals from all detectors
+        # 3. Collect signals from all detectors
         signals = []
 
         db.snapshot_clan_daily_metrics(clan, conn=conn)
