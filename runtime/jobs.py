@@ -113,10 +113,19 @@ def _build_outcome_context(outcome, signals, clan, war):
             "Focus on the player's achievement and why it is worth celebrating.",
         ])
     elif channel_key == "clan-events":
-        lines.extend([
-            "",
-            "Focus on the communal clan moment and keep the tone welcoming and proud.",
-        ])
+        has_likely_kick = any(s.get("likely_kicked") for s in (signals or []))
+        if has_likely_kick:
+            lines.extend([
+                "",
+                "This member was likely removed from the clan due to inactivity.",
+                "Keep the message brief and neutral. Do not write a warm farewell or thank them for contributions.",
+                "A simple factual note that the member is no longer with the clan is enough.",
+            ])
+        else:
+            lines.extend([
+                "",
+                "Focus on the communal clan moment and keep the tone welcoming and proud.",
+            ])
     elif channel_key == "leader-lounge":
         lines.extend([
             "",

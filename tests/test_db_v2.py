@@ -1964,7 +1964,7 @@ def test_snapshot_player_profile_detects_badge_and_achievement_milestones():
                 "currentDeck": [],
                 "cards": [],
                 "badges": [
-                    {"name": "MasteryKnight", "level": 1, "maxLevel": 10, "progress": 10, "target": 25},
+                    {"name": "MasteryKnight", "level": 4, "maxLevel": 10, "progress": 10, "target": 25},
                     {"name": "CrlSpectator2022", "progress": 1},
                 ],
                 "achievements": [
@@ -1981,7 +1981,7 @@ def test_snapshot_player_profile_detects_badge_and_achievement_milestones():
                 "currentDeck": [],
                 "cards": [],
                 "badges": [
-                    {"name": "MasteryKnight", "level": 2, "maxLevel": 10, "progress": 30, "target": 50},
+                    {"name": "MasteryKnight", "level": 5, "maxLevel": 10, "progress": 30, "target": 50},
                     {"name": "CrlSpectator2022", "progress": 1},
                     {"name": "Classic12Wins", "level": 1, "maxLevel": 8, "progress": 1, "target": 10},
                 ],
@@ -1997,8 +1997,8 @@ def test_snapshot_player_profile_detects_badge_and_achievement_milestones():
             sig["type"] == "badge_level_milestone"
             and sig["badge_name"] == "MasteryKnight"
             and sig["badge_card_name"] == "Knight"
-            and sig["old_level"] == 1
-            and sig["new_level"] == 2
+            and sig["old_level"] == 4
+            and sig["new_level"] == 5
             for sig in signals
         )
         assert any(
