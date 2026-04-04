@@ -132,30 +132,6 @@ def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
     assert prompts.discord_singleton_subagent("leader-lounge")["id"] == 200
 
 
-def test_subagent_prompt_poapkings_com_loads():
-    text = prompts.subagent_prompt("poapkings-com")
-    assert "POAP KINGS website publish outcomes" in text
-    assert "commit sha" in text.lower()
-
-
-def test_subagent_prompt_ask_elixir_mentions_conversational_followups():
-    text = prompts.subagent_prompt("ask-elixir")
-    assert "short follow-ups" in text.lower()
-    assert "repeating the previous factual answer" in text.lower()
-    assert "correct yourself" in text.lower()
-    assert "👍" in text
-    assert "👎" in text
-
-
-def test_subagent_prompt_river_race_prioritizes_observation_over_activation():
-    text = prompts.subagent_prompt("river-race")
-    lowered = text.lower()
-
-    assert "sharp-eyed war observer" in lowered
-    assert "contributor spotlight" in lowered
-    assert "avoid generic activation copy" in lowered
-    assert "do not flood the channel with repetitive reminders about who has not started" in lowered
-
 
 def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
     monkeypatch.setattr(

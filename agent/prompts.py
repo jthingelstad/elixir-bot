@@ -236,7 +236,7 @@ def _roster_bios_system():
     )
 
 
-def _promote_system():
+def _promote_system(required_trophies=2000):
     return _build_system_prompt(
         prompts.identity_block(),
         prompts.knowledge_block(),
@@ -260,7 +260,7 @@ def _promote_system():
         "- Avoid overstated bot persona language in recruit copy. The message should still sound natural coming from a real clan member posting it.\n"
         "- The copy should make it obvious that POAP KINGS is organized, tracked, intentional, and unusual.\n\n"
         "Hard requirements:\n"
-        "- `reddit.title` MUST include the exact token `[2000]` for automod.\n"
+        f"- `reddit.title` MUST include the exact token `[{required_trophies}]` for automod.\n"
         "- `reddit.title` should also include the clan name and clan tag.\n"
         "- `reddit.body` must be suitable for r/RoyaleRecruit and must NOT include a clan invite link.\n"
         "- `discord.body` should be copy-ready for an external Discord server and should not rely on embeds or markdown links. Use the raw URL `https://poapkings.com`.\n\n"
@@ -303,7 +303,7 @@ def _promote_system():
         "- Target length: about 120-220 words. Err on the side of tighter, not longer.\n"
         "- Start with a strong first line that identifies POAP KINGS and gives a reason to care.\n"
         "- The first/title line of the Discord post must be bolded and act like the subject/header.\n"
-        "- The bolded first/title line MUST end with the exact text `Required Trophies: [2000]`.\n"
+        f"- The bolded first/title line MUST end with the exact text `Required Trophies: [{required_trophies}]`.\n"
         "- Do not paraphrase that phrase, change its capitalization, or replace it with only `[2000]`.\n"
         "- Include the clan tag and required trophies clearly in the body.\n"
         "- Use readable Discord-native formatting: short sections, flat bullet lines, and occasional **bold** labels are good.\n"
@@ -321,7 +321,7 @@ def _promote_system():
         "- Make the Discord copy feel distinctive enough that someone could paste it directly into a recruiting server without additional editing.\n"
         "- End with a clear invitation and the raw URL `https://poapkings.com`.\n\n"
         "Reddit guidance:\n"
-        "- `reddit.title` must include the exact token `[2000]` somewhere in the title.\n"
+        f"- `reddit.title` must include the exact token `[{required_trophies}]` somewhere in the title.\n"
         "- `reddit.body` should be concise and information-rich, not bloated.\n"
         "- Target length: about 180-320 words.\n"
         "- Use simple markdown that Reddit handles well: short labels, short bullet lists, and clear sections.\n"

@@ -29,8 +29,11 @@ from runtime import status as runtime_status
 from runtime.system_signals import queue_startup_system_signals
 
 _WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
-_PROMOTION_DISCORD_REQUIRED_TEXT = "Required Trophies: [2000]"
-_PROMOTION_REDDIT_REQUIRED_TOKEN = "[2000]"
+def _promotion_discord_required_text(trophies):
+    return f"Required Trophies: [{trophies}]"
+
+def _promotion_reddit_required_token(trophies):
+    return f"[{trophies}]"
 async def _post_to_elixir(*args, **kwargs):
     return await _app._post_to_elixir(*args, **kwargs)
 
@@ -488,27 +491,30 @@ def _unwrap_outer_bold(text: str) -> str:
     return stripped
 
 
-def _validate_promote_content_or_raise(promote) -> None:
+def _validate_promote_content_or_raise(promote, required_trophies=2000) -> None:
+    discord_text = _promotion_discord_required_text(required_trophies)
+    reddit_token = _promotion_reddit_required_token(required_trophies)
+
     discord = (promote or {}).get("discord") or {}
     discord_body = (discord.get("body") or "").strip()
     if discord_body:
         first_line = next((line.strip() for line in discord_body.splitlines() if line.strip()), "")
         first_line = _unwrap_outer_bold(first_line)
-        if _PROMOTION_DISCORD_REQUIRED_TEXT not in first_line:
+        if discord_text not in first_line:
             raise ValueError(
-                f"discord.body first line must include exact text `{_PROMOTION_DISCORD_REQUIRED_TEXT}`"
+                f"discord.body first line must include exact text `{discord_text}`"
             )
-        if not first_line.endswith(_PROMOTION_DISCORD_REQUIRED_TEXT):
+        if not first_line.endswith(discord_text):
             raise ValueError(
-                f"discord.body first line must end with exact text `{_PROMOTION_DISCORD_REQUIRED_TEXT}`"
+                f"discord.body first line must end with exact text `{discord_text}`"
             )
 
     reddit = (promote or {}).get("reddit") or {}
     reddit_title = (reddit.get("title") or "").strip()
     reddit_body = (reddit.get("body") or "").strip()
-    if (reddit_title or reddit_body) and _PROMOTION_REDDIT_REQUIRED_TOKEN not in reddit_title:
+    if (reddit_title or reddit_body) and reddit_token not in reddit_title:
         raise ValueError(
-            f"reddit.title must include exact token `{_PROMOTION_REDDIT_REQUIRED_TOKEN}`"
+            f"reddit.title must include exact token `{reddit_token}`"
         )
 
 
@@ -937,7 +943,7 @@ async def _promotion_content_cycle():
         runtime_status.mark_job_success("promotion_content_cycle", "no promotion content")
         return
     try:
-        _validate_promote_content_or_raise(promote)
+        _validate_promote_content_or_raise(promote, required_trophies=clan.get("requiredTrophies", 2000))
     except Exception as exc:
         log.error("Promotion content validation failed: %s", exc, exc_info=True)
         runtime_status.mark_job_failure("promotion_content_cycle", f"invalid promotion content: {exc}")

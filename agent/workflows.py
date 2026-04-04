@@ -484,6 +484,7 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
         max_members=MAX_CONTEXT_MEMBERS_FULL,
     )
     promotion_context = _promotion_context(clan_data, war_data or {}, roster_data=roster_data)
+    required_trophies = clan_data.get("requiredTrophies", 2000)
     user_msg = (
         f"{context}\n\n"
         f"{promotion_context}\n\n"
@@ -491,7 +492,7 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
     )
 
     messages = [
-        {"role": "system", "content": _promote_system()},
+        {"role": "system", "content": _promote_system(required_trophies=required_trophies)},
         {"role": "user", "content": user_msg},
     ]
     try:
