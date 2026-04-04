@@ -25,6 +25,7 @@ from db import (
 
 CARD_UPGRADE_SIGNAL_MIN_LEVEL = 14
 MASTERY_BADGE_SIGNAL_MIN_LEVEL = 5
+CARD_UNLOCK_SIGNAL_RARITIES = {"epic", "legendary", "champion"}
 GAMES_PER_DAY_WINDOW_DAYS = 14
 BADGE_NAME_OVERRIDES = {
     "Classic12Wins": "Classic Challenge 12 Wins",
@@ -292,15 +293,16 @@ def snapshot_player_profile(player_data, conn=None):
             rarity = str(card.get("rarity") or "").strip().lower() or None
             is_champion = _is_champion_card(card)
             if old_card_level is None:
-                signals.append({
-                    "type": "new_card_unlocked",
-                    "tag": tag,
-                    "name": player_data.get("name"),
-                    "card_name": name,
-                    "rarity": rarity,
-                    "is_champion": is_champion,
-                    "new_level": new_card_level,
-                })
+                if rarity in CARD_UNLOCK_SIGNAL_RARITIES or is_champion:
+                    signals.append({
+                        "type": "new_card_unlocked",
+                        "tag": tag,
+                        "name": player_data.get("name"),
+                        "card_name": name,
+                        "rarity": rarity,
+                        "is_champion": is_champion,
+                        "new_level": new_card_level,
+                    })
                 if is_champion:
                     signals.append({
                         "type": "new_champion_unlocked",
@@ -332,12 +334,13 @@ def snapshot_player_profile(player_data, conn=None):
         for badge_name, badge in current_badges.items():
             previous_badge = previous_badges.get(badge_name)
             if previous_badge is None:
-                signals.append({
-                    "type": "badge_earned",
-                    "tag": tag,
-                    "name": player_data.get("name"),
-                    **_badge_signal_fields(badge),
-                })
+                if _badge_category(badge_name) != "mastery":
+                    signals.append({
+                        "type": "badge_earned",
+                        "tag": tag,
+                        "name": player_data.get("name"),
+                        **_badge_signal_fields(badge),
+                    })
                 continue
             old_level = previous_badge.get("level")
             new_level = badge.get("level")
