@@ -82,3 +82,19 @@ Notable changes:
 - added a central recurring activity registry
 - formalized memory boundaries for public, leadership, and notification-only lanes
 - gave Elixir a first-class release identity: `v3.0 "Three-Lane Elixir"`
+
+## v3.1 — Tournament Arc
+
+**Date:** 2026-04-05  
+**Representative commit:** `bf91c82` — `Add tournament tracking, battle capture, and LLM recap generation`
+
+This is the first feature built specifically for POAP KINGS clan events. Elixir gained the ability to watch private tournaments end-to-end — capturing standings, battles, card drafts, and generating narrative recaps.
+
+Notable changes:
+- added on-demand tournament tracking via `/elixir tournament watch <tag>`
+- captures every battle with full card decks for both players during the tournament
+- posts light live updates to #clan-events (started, lead changes, ended)
+- generates LLM-powered narrative recaps with card draft analysis, player tendencies, and head-to-head records
+- tournament results feed into the weekly clan recap
+- startup recovery resumes tournament watch after bot restarts
+- updated CR API docs with confirmed tournament endpoint behavior
