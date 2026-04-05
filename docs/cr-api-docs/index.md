@@ -2,7 +2,7 @@
 
 This is a reference documentation set for the Clash Royale API (`https://api.clashroyale.com/v1`). Each file covers a domain of endpoints, their parameters, response types, and implementation notes.
 
-Verified against live API: March 2026.
+Verified against live API: March–April 2026.
 
 ---
 
@@ -86,13 +86,17 @@ The API frequently omits optional fields entirely instead of returning `null`.
 
 - Treat missing keys and nullable values as different cases
 - Check key existence before reading optional fields
-- Observed nullable fields are less common than absent fields
+- Most optional fields are absent rather than null, but there are notable exceptions
 
-Examples:
+Examples of absent-when-not-applicable:
 - Player `clan`, `role`, `leagueStatistics`
 - Tournament `description`, `startedTime`, `endedTime`
 - Ranking entry `clan`
-- Event `description` can be `null`
+
+Examples of null-when-not-applicable (always present):
+- Player `currentPathOfLegendSeasonResult`, `lastPathOfLegendSeasonResult`, `bestPathOfLegendSeasonResult` — null for players without Path of Legend history
+- Player `legacyTrophyRoadHighScore` — null for players without pre-rework trophy history
+- Event `description` — can be null
 
 ### Rate Limiting
 
@@ -141,7 +145,7 @@ Player profiles, battle logs, and upcoming chests.
 | Endpoint | Description |
 |----------|-------------|
 | `GET /players/{playerTag}` | Full player profile |
-| `GET /players/{playerTag}/battlelog` | Recent battle history (bare array, ~48 battles) |
+| `GET /players/{playerTag}/battlelog` | Recent battle history (bare array, ~30-40 battles) |
 | `GET /players/{playerTag}/upcomingchests` | Upcoming chest sequence |
 
 ### Clans — [clans.md](clans.md)
