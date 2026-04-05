@@ -1979,24 +1979,12 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
     finally:
         conn.close()
 
-    assert {item["signal_key"] for item in pending} == {
-        "release_three_lane_elixir_v3",
-        "capability_memory_system_v1",
-        "capability_battle_pulse_v1",
-        "capability_badge_and_achievement_celebrations_v1",
-        "capability_player_profile_depth_v1",
-        "capability_weekly_clan_recap_v2",
-        "capability_long_term_trends_v1",
-        "capability_roster_showcase_depth_v1",
-        "capability_poap_kings_integration_v2",
-        "capability_war_awareness_v1",
-        "capability_card_modes_and_war_completion_v1",
-        "capability_subagent_behavior_upgrade_v1",
-        "capability_ask_elixir_reaction_feedback_v1",
-        "feature_custom_emoji_v1",
-        "capability_signal_quality_and_colosseum_v1",
-        "capability_tournament_tracking_v1",
-    }
+    from runtime.system_signals import STARTUP_SYSTEM_SIGNALS
+
+    expected_keys = {s["signal_key"] for s in STARTUP_SYSTEM_SIGNALS}
+    actual_keys = {item["signal_key"] for item in pending}
+    assert actual_keys == expected_keys
+    assert len(pending) == len(STARTUP_SYSTEM_SIGNALS)
 
 
 def test_cr_api_auth_failure_alert_posts_once_per_signature():
