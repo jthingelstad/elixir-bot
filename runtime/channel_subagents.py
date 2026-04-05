@@ -37,6 +37,12 @@ CLAN_EVENT_SIGNAL_TYPES = {
     "donation_leaders",
 }
 
+TOURNAMENT_SIGNAL_TYPES = {
+    "tournament_started",
+    "tournament_lead_change",
+    "tournament_ended",
+}
+
 LEADERSHIP_ONLY_SIGNAL_TYPES = {
     "inactive_members",
 }
@@ -101,6 +107,13 @@ def signal_routing_summary() -> list[dict]:
             ],
         },
         {
+            "family": "tournament",
+            "match": "any tournament signal",
+            "targets": [
+                {"subagent": "clan-events", "intent": "tournament_live_update", "required": True},
+            ],
+        },
+        {
             "family": "clan_event",
             "match": "any clan event signal not matched earlier",
             "targets": [
@@ -153,6 +166,10 @@ def is_war_signal(signal: dict) -> bool:
 
 def is_progression_signal(signal: dict) -> bool:
     return (signal or {}).get("type") in PROGRESSION_SIGNAL_TYPES
+
+
+def is_tournament_signal(signal: dict) -> bool:
+    return (signal or {}).get("type") in TOURNAMENT_SIGNAL_TYPES
 
 
 def is_clan_event_signal(signal: dict) -> bool:
@@ -275,6 +292,10 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
 
     if any(is_leadership_only_signal(signal) for signal in signals):
         add("leader-lounge", "leadership_note", required=True)
+        return outcomes
+
+    if any(is_tournament_signal(signal) for signal in signals):
+        add("clan-events", "tournament_live_update", required=True)
         return outcomes
 
     if any(is_clan_event_signal(signal) for signal in signals):

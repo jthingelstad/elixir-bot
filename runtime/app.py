@@ -594,6 +594,19 @@ async def on_ready():
         if not startup_posted:
             log.warning("Startup announcement was not posted to leadership")
         log.info("Scheduler started — %s", format_scheduler_startup_summary(sys.modules[__name__]))
+        # Resume tournament watch if one was active before restart
+        try:
+            active_tournament = await asyncio.to_thread(db.get_active_tournament)
+            if active_tournament:
+                from runtime.jobs import start_tournament_watch
+                start_tournament_watch()
+                log.info(
+                    "Resumed tournament watch for %s (%s)",
+                    active_tournament.get("name", "?"),
+                    active_tournament["tournament_tag"],
+                )
+        except Exception as exc:
+            log.warning("Tournament watch resume check failed: %s", exc)
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 

@@ -877,7 +877,7 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
             arena = battle.get("arena") or {}
             classified = _classify_battle(battle)
             conn.execute(
-                "INSERT OR IGNORE INTO member_battle_facts (member_id, battle_time, battle_type, game_mode_name, game_mode_id, deck_selection, arena_id, arena_name, crowns_for, crowns_against, outcome, trophy_change, starting_trophies, is_competitive, is_ladder, is_ranked, is_war, is_special_event, deck_json, support_cards_json, opponent_name, opponent_tag, opponent_clan_tag, event_tag, league_number, is_hosted_match, modifiers_json, team_rounds_json, opponent_rounds_json, boat_battle_side, boat_battle_won, new_towers_destroyed, prev_towers_destroyed, remaining_towers, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO member_battle_facts (member_id, battle_time, battle_type, game_mode_name, game_mode_id, deck_selection, arena_id, arena_name, crowns_for, crowns_against, outcome, trophy_change, starting_trophies, is_competitive, is_ladder, is_ranked, is_war, is_special_event, deck_json, support_cards_json, opponent_name, opponent_tag, opponent_clan_tag, event_tag, league_number, is_hosted_match, modifiers_json, team_rounds_json, opponent_rounds_json, boat_battle_side, boat_battle_won, new_towers_destroyed, prev_towers_destroyed, remaining_towers, tournament_tag, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     member_id,
                     battle.get("battleTime"),
@@ -913,6 +913,7 @@ def snapshot_player_battlelog(player_tag, battle_log, conn=None):
                     battle.get("newTowersDestroyed"),
                     battle.get("prevTowersDestroyed"),
                     battle.get("remainingTowers"),
+                    battle.get("tournamentTag"),
                     _json_or_none(battle),
                 ),
             )

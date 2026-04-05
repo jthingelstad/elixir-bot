@@ -85,14 +85,15 @@ Get full tournament details.
 **Status enum (observed):**
 - `inPreparation` — tournament created, waiting for start
 - `inProgress` — tournament is active
+- `ended` — tournament has finished (confirmed April 2026 via direct tag fetch; `startedTime` and `endedTime` are both present)
 
-Note: `ended` status was not observed in search results (search may only return active tournaments). Tournaments in preparation may become unfindable by tag after they start.
+Note: Search may only return active tournaments (not ended ones). Tournaments in preparation may become unfindable by tag after they start. Ended tournaments *are* accessible via direct tag fetch.
 
 **Type enum (observed):**
 - `open` — anyone can join
-- `passwordProtected` — requires password to join
+- `passwordProtected` — requires password to join (this is what the in-game UI calls a "private" tournament)
 
-Note: A third type `private` may exist but was not observed.
+Note: No separate `private` type was observed — in-game "private" tournaments map to `passwordProtected` in the API.
 
 ---
 
@@ -116,10 +117,13 @@ Observed error bodies are usually `{ reason, message? }`. `GET /tournaments` wit
 - `GET /tournaments` requires at least one filter, but the older "3+ chars required" assumption for `name` was not reproduced in March 2026 testing
 - `description` field is optional and may not be present on tournaments without one
 - `gameMode` in tournament context typically only has `id` (no `name`) — unlike battle log where both are present
-- Search only seems to return active tournaments (`inPreparation` or `inProgress`) — not ended ones
+- Search only seems to return active tournaments (`inPreparation` or `inProgress`) — not ended ones. However, ended tournaments are accessible via direct tag fetch.
+- Members can join during both `inPreparation` and `inProgress` phases
 - No ordering guarantee on search results
 - Treat search as discovery, not archival lookup. If search returns a tag you care about, fetch `/tournaments/{tag}` immediately.
 - Do not assume search is complete, stable, or ordered by recency
 - `levelCap` sets the max card level allowed — all observed tournaments had `levelCap: 11`
 - `firstPlaceCardPrize` was always 0 in observations — may be a legacy field
 - `preparationDuration` and `duration` are in seconds (e.g. 3600 = 1 hour, 14400 = 4 hours)
+- `gameMode.id` values observed: 72000013, 72000194 — meaning varies; `name` field is absent in tournament context
+- For ended tournaments, `startedTime` and `endedTime` are both reliably present alongside full `membersList` with final scores/ranks

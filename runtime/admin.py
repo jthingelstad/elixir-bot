@@ -54,6 +54,11 @@ COMMAND_SPECS = {
     "integration.list": AdminCommandSpec("integration.list", ("integration", "list"), "List configured integration modules.", event_type="integration_list"),
     "integration.poap-kings.status": AdminCommandSpec("integration.poap-kings.status", ("integration", "poap-kings", "status"), "Show POAP KINGS integration status.", event_type="integration_poap_kings_status"),
     "integration.poap-kings.publish": AdminCommandSpec("integration.poap-kings.publish", ("integration", "poap-kings", "publish"), "Publish one POAP KINGS integration target.", leader_only=True, write=True, event_type="integration_poap_kings_publish"),
+    "tournament.watch": AdminCommandSpec("tournament.watch", ("tournament", "watch"), "Start watching a tournament by tag.", leader_only=True, write=True, event_type="tournament_watch"),
+    "tournament.status": AdminCommandSpec("tournament.status", ("tournament", "status"), "Show active tournament tracking status.", event_type="tournament_status"),
+    "tournament.stop": AdminCommandSpec("tournament.stop", ("tournament", "stop"), "Stop watching the active tournament.", leader_only=True, write=True, event_type="tournament_stop"),
+    "tournament.recap": AdminCommandSpec("tournament.recap", ("tournament", "recap"), "Generate or regenerate a tournament recap.", leader_only=True, write=True, event_type="tournament_recap"),
+    "tournament.history": AdminCommandSpec("tournament.history", ("tournament", "history"), "List past tournaments.", event_type="tournament_history"),
 }
 
 COMMAND_GROUP_ORDER = [
