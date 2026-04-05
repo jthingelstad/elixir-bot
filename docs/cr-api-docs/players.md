@@ -49,10 +49,10 @@ Get full player profile.
 | `currentFavouriteCard` | Item | Full card object for favourite card |
 | `badges` | array | See below |
 | `achievements` | array | See below |
-| `currentPathOfLegendSeasonResult` | object | `{ leagueNumber, trophies, rank }` — `rank` can be null |
-| `lastPathOfLegendSeasonResult` | object | Same shape |
-| `bestPathOfLegendSeasonResult` | object | Same shape |
-| `legacyTrophyRoadHighScore` | integer | Pre-rework trophy high |
+| `currentPathOfLegendSeasonResult` | object\|null | `{ leagueNumber, trophies, rank }` — null if no PoL history; `rank` can also be null within the object |
+| `lastPathOfLegendSeasonResult` | object\|null | Same shape — null if no PoL history |
+| `bestPathOfLegendSeasonResult` | object\|null | Same shape — null if no PoL history |
+| `legacyTrophyRoadHighScore` | integer\|null | Pre-rework trophy high — null for players without pre-rework history |
 | `progress` | object | Merge Tactics / side-mode progress — see below |
 
 **leagueStatistics shape:**
@@ -113,7 +113,7 @@ Get recent battle history.
 
 **Returns:** bare JSON array of `Battle` objects (not paginated, not wrapped in `{ items: [...] }`)
 
-Observed: returns up to ~48 battles.
+Observed: returns ~30-40 battles (most commonly 30).
 
 **Battle object fields:**
 
@@ -290,11 +290,11 @@ Observed error bodies are usually `{ reason, message? }`. `message` may be absen
 ---
 
 ## Agent Notes
-- **Optional fields:** `clan`, `role`, and `leagueStatistics` are completely absent (not null) when the player has no clan / no league history. Always check for key existence.
+- **Optional fields:** `clan`, `role`, and `leagueStatistics` are completely absent (not null) when the player has no clan / no league history. Always check for key existence. However, `currentPathOfLegendSeasonResult`, `lastPathOfLegendSeasonResult`, `bestPathOfLegendSeasonResult`, and `legacyTrophyRoadHighScore` are always present but use `null` when not applicable — check for both key existence and null.
 - `currentDeck` (8 cards) vs `cards` (full collection): both have been observed with `evolutionLevel`; `cards` also includes `count` of owned copies
 - `role` values: `member`, `elder`, `coLeader`, `leader`
 - Path of Legend `rank` field is null when the player hasn't achieved a rank yet
-- Battlelog returns a bare array (like `/events`), not a paginated response — no `paging` object. Returns up to ~48 battles.
+- Battlelog returns a bare array (like `/events`), not a paginated response — no `paging` object. Returns ~30-40 battles (most commonly 30).
 - `progress` is a map of side-mode season results (Merge Tactics / AutoChess) — keys are mode season identifiers. Empty string key `""` = legacy/default season.
 - `progress` keys should be treated as opaque identifiers, not a stable enum. Parse the nested values, not the key naming pattern.
 - `battleTime` format is `YYYYMMDDTHHmmss.sssZ` — parse carefully, no dashes or colons
@@ -306,6 +306,6 @@ Observed error bodies are usually `{ reason, message? }`. `message` may be absen
 - Additional `deckSelection` values observed in March 2026 sampling: `pick`, `draftCompetitive`, `predefined`
 - **Tournament battles:** `type=tournament` battles include a `tournamentTag` field that links back to `/tournaments/{tag}`. This allows matching battles to specific tournaments. The `gameMode` distinguishes tournament format: `72000009`/`Tournament` for bring-your-own-deck, `72000194`/`Draft_Competitive` for Triple Draft. In draft tournaments, each battle has different cards (drafted per match); in standard tournaments, players use their `collection` deck.
 - **Tournament battle dedup:** Both players in a match see the same `battleTime`. Dedup key: `battleTime` + sorted pair of `(team[0].tag, opponent[0].tag)`. For tournament winner detection, use crowns comparison (no `trophyChange` field on tournament battles). The `startingTrophies` field on tournament battles reflects tournament score, not ladder trophies.
-- **Tournament battle log retention:** Battle logs are not permanent (~48 battles). Tournament battles will rotate out as players play more games. To capture tournament battle data reliably, poll player battle logs shortly after the tournament ends. Battles from a 13-player tournament were partially lost within ~24h due to active players' logs rotating.
+- **Tournament battle log retention:** Battle logs are not permanent (~30-40 battles). Tournament battles will rotate out as players play more games. To capture tournament battle data reliably, poll player battle logs shortly after the tournament ends. Battles from a 13-player tournament were partially lost within ~24h due to active players' logs rotating.
 - **Badges:** Two categories — progress badges (with `level`/`maxLevel`/`progress`/`target`) and one-time badges (level=null, just `progress` and `iconUrls`). Mastery badges are per-card (e.g. `MasteryKnight`).
 - **Achievements:** Fixed set of 12 achievements. `stars` (0-3) indicates completion tier. `completionInfo` is typically null.

@@ -1,6 +1,6 @@
 # Clash Royale API – Model Reference
 
-Field shapes verified against live API responses (March 2026).
+Field shapes verified against live API responses (March–April 2026).
 
 ---
 
@@ -42,9 +42,13 @@ In tournament contexts, `name` may be absent (only `id`). This list is non-exhau
 |-------|---------|-----------------|
 | `Player` | `GET /players/{playerTag}` | tag, name, expLevel, expPoints, totalExpPoints, starPoints, trophies, bestTrophies, arena, role?, wins, losses, battleCount, threeCrownWins, donations, donationsReceived, totalDonations, challengeCardsWon, challengeMaxWins, tournamentCardsWon, tournamentBattleCount, warDayWins, clanCardsCollected, clan?, leagueStatistics?, currentDeck, currentDeckSupportCards, cards, supportCards, currentFavouriteCard, badges, achievements, currentPathOfLegendSeasonResult, lastPathOfLegendSeasonResult, bestPathOfLegendSeasonResult, legacyTrophyRoadHighScore, progress |
 
-**Optional Player fields** (absent, not null, when not applicable):
+**Optional Player fields** (absent when not applicable):
 - `clan`, `role` — absent if player is not in a clan
 - `leagueStatistics` — absent for some players (not all have league history)
+
+**Nullable Player fields** (always present, null when not applicable):
+- `currentPathOfLegendSeasonResult`, `lastPathOfLegendSeasonResult`, `bestPathOfLegendSeasonResult` — null for players without Path of Legend history
+- `legacyTrophyRoadHighScore` — null for players without pre-rework trophy history
 
 | Model | Used By | Verified Fields |
 |-------|---------|-----------------|
@@ -234,7 +238,8 @@ Note: `badgeUrls` is NOT present in responses — only `badgeId` (integer).
 
 **Season/section structure:**
 - `seasonId` is a sequential integer (e.g. 127, 128, 129, 130)
-- exact live trophy stakes should not be inferred from `sectionIndex` alone
+- Most seasons are 4 weeks (sections 0-3) but some are 5 weeks (sections 0-4). Supercell varies the war season length to stay roughly aligned with Pass Royale seasons. Colosseum is always the last section.
+- Do not infer colosseum from `sectionIndex` alone — use `trophyChange` (±100 = colosseum) or `periodType` from currentriverrace
 - `trophyChange` is verified on `/riverracelog` standings, not on the live `currentriverrace` payload
 - `finishTime` = `19691231T235959.000Z` (epoch 0 sentinel) for colosseum weeks
 - observed repo behavior: a non-sentinel live `clan.finishTime` means the race is already finished, even if battle time remains
@@ -340,7 +345,7 @@ Multiple leaderboards can share the same name (different seasons/variants of the
 ---
 
 ## Agent Notes
-- **Optional vs absent:** Many fields are absent (key not present) rather than null when not applicable. Always check for key existence, not just null. Examples: `clan`, `role`, `leagueStatistics` on Player; `clan` on TournamentMember; `startedTime`, `endedTime`, `description` on Tournament.
+- **Optional vs absent:** Many fields are absent (key not present) rather than null when not applicable. Always check for key existence, not just null. Examples: `clan`, `role`, `leagueStatistics` on Player; `clan` on TournamentMember; `startedTime`, `endedTime`, `description` on Tournament. **Exception:** Player fields `currentPathOfLegendSeasonResult`, `lastPathOfLegendSeasonResult`, `bestPathOfLegendSeasonResult`, and `legacyTrophyRoadHighScore` are always present but use `null` — check for both.
 - `List` suffix types (e.g. `ClanMemberList`) are always arrays of their singular counterpart
 - Classic war models are deprecated — `currentwar` permanently removed, `warlog` disabled
 - `challenges` endpoint currently returning notFound

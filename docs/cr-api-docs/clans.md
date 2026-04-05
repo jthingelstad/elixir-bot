@@ -166,9 +166,9 @@ Historical river race results (paginated).
 ```
 
 - `seasonId` is a sequential integer (e.g. 127, 128, 129, 130) — NOT the YYYY-MM format used for league seasons
-- `sectionIndex` = week within the season (0-3 typically, with 3 or 4 being the final week)
+- `sectionIndex` = week within the season. Most seasons are 4 weeks (sections 0-3) but some are 5 weeks (sections 0-4). Supercell varies the war season length to keep it roughly aligned with Pass Royale seasons.
 - `standings` contains all 5 clans ranked by finish position
-- `trophyChange`: regular weeks = ±20, final week (colosseum) = ±100
+- `trophyChange`: regular weeks = ±20, final week (colosseum) = ±100. Colosseum is always the last section of a season — section 3 in a 4-week season, section 4 in a 5-week season.
 - `finishTime`: normal value for clans that finished; sentinel value `19691231T235959.000Z` (epoch 0) for the final week/colosseum
 - Elixir should prefer `finishTime` over fame thresholds when telling players the race is finished
 
@@ -250,7 +250,7 @@ Observed error bodies are usually `{ reason, message? }`. `type`/`detail` were n
 - The full clan response (`/clans/{tag}`) includes `memberList` with all members; the `/members` endpoint offers the same data with pagination
 - `badgeUrls` is **not** present in responses — only `badgeId` (integer). Badge images must be resolved via the badge ID.
 - **Clan search:** `name` is not required — you can filter by `locationId`, `minScore`, `minMembers`, `maxMembers` alone. Search is case-insensitive.
-- **River race structure:** A season contains multiple sections (weeks). Each section has multiple periods (days). `sectionIndex` 3 or 4 = final colosseum week with higher trophy stakes (±100 vs ±20).
+- **River race structure:** A season is mostly 4 weeks but sometimes 5 weeks (Supercell adjusts to align with Pass Royale seasons). Each section has multiple periods (days). The final section is always colosseum week with higher trophy stakes (±100 vs ±20). Do not hardcode which `sectionIndex` is colosseum — use `trophyChange` from the log or `periodType` from `currentriverrace` to identify it.
 - **River race default limit:** `/riverracelog` returns 10 entries by default.
 - **Member roles observed:** `member`, `elder`, `coLeader`, `leader`
 - **Participant counts:** River race participants can exceed the current member count (includes players who left the clan during the race)
