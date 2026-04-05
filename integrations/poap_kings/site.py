@@ -629,6 +629,7 @@ def build_clan_data(clan_data):
         "minTrophies": clan_data.get("requiredTrophies", 0),
         "clanLeague": _league_name(clan_data.get("warLeague", {})),
         "clanStatus": _type_name(clan_data.get("type", "open")),
+        "clanRegion": _location_name(clan_data.get("location", {})),
     }
 
 
@@ -639,6 +640,15 @@ def _league_name(war_league):
     if isinstance(war_league, dict):
         return war_league.get("name", "Unranked")
     return str(war_league)
+
+
+def _location_name(location):
+    """Extract region/location name from location object."""
+    if not location:
+        return "Not Set"
+    if isinstance(location, dict):
+        return location.get("name", "Not Set")
+    return str(location)
 
 
 def _type_name(clan_type):

@@ -173,6 +173,7 @@ def test_build_clan_data():
         "requiredTrophies": 2000,
         "type": "open",
         "warLeague": {"name": "Bronze"},
+        "location": {"id": 57000000, "name": "International", "isCountry": False},
         "memberList": [
             {"trophies": 10000, "expLevel": 50},
             {"trophies": 8000, "expLevel": 40},
@@ -184,6 +185,7 @@ def test_build_clan_data():
     assert result["avgLevel"] == 45.0
     assert result["clanLeague"] == "Bronze"
     assert result["clanStatus"] == "Open"
+    assert result["clanRegion"] == "International"
 
 
 def test_build_clan_data_empty():
@@ -191,6 +193,7 @@ def test_build_clan_data_empty():
     result = site_content.build_clan_data({"memberList": []})
     assert result["memberCount"] == 0
     assert result["avgLevel"] == 0
+    assert result["clanRegion"] == "Not Set"
 
 
 # ── build_roster_data ────────────────────────────────────────────────────────
