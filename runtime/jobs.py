@@ -1466,7 +1466,7 @@ def _format_size(size_bytes):
     return f"{size_bytes} B"
 
 
-def _build_maintenance_report(size_before, size_after, purge_stats):
+def _build_maintenance_report(size_before, size_after, purge_stats, backup_result=None, pruned_count=0):
     freed = size_before - size_after
     pct = (freed / size_before * 100) if size_before > 0 else 0
     rows_purged = sum(purge_stats.values())
@@ -1474,6 +1474,21 @@ def _build_maintenance_report(size_before, size_after, purge_stats):
     lines = [
         "**Weekly Database Maintenance**",
         "",
+    ]
+
+    # Backup section.
+    if backup_result is not None:
+        if backup_result["ok"]:
+            compressed_mb = backup_result["size_compressed"] / 1_048_576
+            original_mb = backup_result["size_original"] / 1_048_576
+            lines.append(f"**Backup:** {original_mb:.1f} MB -> {compressed_mb:.1f} MB compressed")
+            if pruned_count > 0:
+                lines.append(f"  Pruned {pruned_count} old backup(s)")
+        else:
+            lines.append(f"**Backup: FAILED** — {backup_result.get('error', 'unknown error')}")
+        lines.append("")
+
+    lines += [
         f"**Before:** {_format_size(size_before)}",
         f"**After:** {_format_size(size_after)}",
         f"**Freed:** {_format_size(freed)} ({pct:.0f}%)",
@@ -1492,6 +1507,8 @@ def _build_maintenance_report(size_before, size_after, purge_stats):
 
 
 async def _db_maintenance_cycle():
+    from scripts.backup_db import create_backup, prune_backups
+
     runtime_status.mark_job_start("db_maintenance")
 
     try:
@@ -1509,9 +1526,16 @@ async def _db_maintenance_cycle():
         db_path = db.DB_PATH
         size_before = os.path.getsize(db_path)
 
+        # 1. Backup before any destructive operations.
+        backup_result = await asyncio.to_thread(create_backup)
+        pruned = await asyncio.to_thread(prune_backups) if backup_result["ok"] else []
+        if not backup_result["ok"]:
+            log.error("DB backup failed: %s", backup_result["error"])
+
+        # 2. Purge expired rows.
         purge_stats = await asyncio.to_thread(db.purge_old_data)
 
-        # VACUUM reclaims disk space; must run outside any transaction.
+        # 3. VACUUM reclaims disk space; must run outside any transaction.
         def _vacuum():
             conn = db.get_connection()
             try:
@@ -1522,7 +1546,11 @@ async def _db_maintenance_cycle():
         await asyncio.to_thread(_vacuum)
 
         size_after = os.path.getsize(db_path)
-        report = _build_maintenance_report(size_before, size_after, purge_stats)
+        report = _build_maintenance_report(
+            size_before, size_after, purge_stats,
+            backup_result=backup_result,
+            pruned_count=len(pruned),
+        )
 
         await _post_to_elixir(channel, {"content": report})
         await asyncio.to_thread(

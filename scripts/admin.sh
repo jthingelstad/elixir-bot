@@ -47,14 +47,21 @@ upgrade_bot() {
     start_bot
 }
 
+backup_db() {
+    echo "==> Backing up elixir.db..."
+    source "$PROJECT_DIR/venv/bin/activate"
+    python "$PROJECT_DIR/scripts/backup_db.py"
+}
+
 case "${1:-}" in
     stop)     stop_bot ;;
     start)    start_bot ;;
     restart)  restart_bot ;;
     upgrade)  upgrade_bot ;;
     status)   status ;;
+    backup)   backup_db ;;
     *)
-        echo "Usage: $0 {start|stop|restart|upgrade|status}"
+        echo "Usage: $0 {start|stop|restart|upgrade|status|backup}"
         exit 1
         ;;
 esac
