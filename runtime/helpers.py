@@ -1369,6 +1369,25 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             )
         )
 
+    # Tournament results from the past week
+    try:
+        recent_tournaments = db.get_recent_tournaments_for_recap(days=7)
+        if recent_tournaments:
+            lines.append("")
+            lines.append("=== CLAN TOURNAMENTS THIS WEEK ===")
+            for t in recent_tournaments:
+                t_lines = [
+                    f"- {t['name']} ({t['deck_selection'] or 'unknown format'}) | "
+                    f"{t['participant_count']} participants | {t['battles_captured']} battles"
+                ]
+                if t.get("winner_name"):
+                    t_lines[0] += f" | Winner: {t['winner_name']} ({t['winner_score']} wins)"
+                if t.get("top_cards"):
+                    t_lines.append(f"  top cards: {t['top_cards']}")
+                lines.extend(t_lines)
+    except Exception as exc:
+        _log().debug("Weekly recap tournament section unavailable: %s", exc)
+
     if war:
         clan_war = (war.get("clan") or {})
         if clan_war:

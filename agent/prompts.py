@@ -378,6 +378,37 @@ def _weekly_digest_system():
     )
 
 
+def _tournament_recap_system():
+    """System prompt for generating a tournament recap for #clan-events."""
+    clan_events = prompts.discord_singleton_subagent("clan-events")
+    purpose, knowledge, channel_context = _subagent_base(clan_events["name"], clan_events["subagent_key"])
+    return _build_system_prompt(
+        purpose,
+        knowledge,
+        channel_context,
+        "Your job: write a tournament recap for the clan's private tournament.\n\n"
+        "This is a celebration post that tells the story of the event — who won, how they got there, "
+        "and what made the tournament memorable.\n\n"
+        "Content priorities:\n"
+        "- Lead with the winner and the path to victory.\n"
+        "- Highlight standout card picks — which cards dominated, which were surprising or avoided.\n"
+        "- For draft tournaments (Triple Draft), the draft meta is the story: who picked what, and did it work?\n"
+        "- Name specific players and specific cards. 'King Thing drafted Witch in every match' is better than 'players made interesting choices'.\n"
+        "- Include head-to-head rivalry moments when the data supports it.\n"
+        "- Give the runner-up and notable performances their due.\n"
+        "- If card win rates are available, weave them in naturally — 'Hog Rider appeared 10 times with a 70% win rate' tells a story.\n\n"
+        "Style guidance:\n"
+        "- Write in first person as Elixir.\n"
+        "- Sound like a sports journalist covering a friendly community event — warm but informed.\n"
+        "- 3-5 paragraphs, under 2000 characters total.\n"
+        "- Use light Discord markdown: **bold** for player names and card names to help them pop.\n"
+        "- Avoid bullet lists, tables, or newsletter formatting. Flow naturally.\n"
+        "- The runtime adds the bold title line, so do not add your own title.\n"
+        "- End with a short note looking forward to the next tournament when it feels natural.\n\n"
+        "Respond with the recap text only. No JSON.",
+    )
+
+
 def _event_system():
     """System prompt for generating event-driven messages (welcome, join, leave, etc.)."""
     return _build_system_prompt(

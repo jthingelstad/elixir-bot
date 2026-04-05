@@ -385,6 +385,232 @@ def register_elixir_app_commands(bot) -> None:
             write=True,
         )
 
+    tournament_commands = app_commands.Group(name="tournament", description="Clan tournament tracking commands")
+
+    @tournament_commands.command(name="watch", description="Start watching a tournament by tag.")
+    @app_commands.describe(tag="Tournament tag (e.g. #2QJJRJPR)")
+    async def slash_tournament_watch(interaction: discord.Interaction, tag: str):
+        if not await validate_admin_interaction(interaction, command_name="tournament.watch", write=True):
+            return
+        await interaction.response.defer(ephemeral=True)
+        import cr_api
+        from runtime import jobs
+
+        # Clean tag
+        clean_tag = tag.strip().lstrip("#").upper()
+        if not clean_tag:
+            await send_interaction_text(interaction, "Invalid tag.", use_followup=True)
+            return
+
+        # Check for existing active tournament
+        active = await asyncio.to_thread(db.get_active_tournament)
+        if active:
+            await send_interaction_text(
+                interaction,
+                f"Already watching **{active.get('name', active['tournament_tag'])}** (`{active['tournament_tag']}`). Use `/elixir tournament stop` first.",
+                use_followup=True,
+            )
+            return
+
+        # Validate tag against API
+        api_data = await asyncio.to_thread(cr_api.get_tournament, clean_tag)
+        if api_data is None:
+            await send_interaction_text(interaction, f"Tournament `#{clean_tag}` not found.", use_followup=True)
+            return
+
+        api_status = api_data.get("status") or ""
+        if api_status == "ended":
+            await send_interaction_text(interaction, f"Tournament **{api_data.get('name')}** has already ended.", use_followup=True)
+            return
+
+        # Register and start watching
+        tournament_id = await asyncio.to_thread(db.register_tournament, clean_tag, api_data)
+        jobs.start_tournament_watch()
+
+        members = api_data.get("membersList") or []
+        game_mode = api_data.get("gameMode") or {}
+        status_label = {"inPreparation": "In Preparation", "inProgress": "In Progress"}.get(api_status, api_status)
+        lines = [
+            f"Watching **{api_data.get('name')}** (`#{clean_tag}`)",
+            f"Status: {status_label}",
+            f"Participants: {len(members)}",
+            f"Game Mode: {game_mode.get('name') or game_mode.get('id', 'Unknown')}",
+            f"Polling every {jobs.TOURNAMENT_POLL_MINUTES} minutes.",
+        ]
+        await send_interaction_text(interaction, "\n".join(lines), use_followup=True)
+
+    @tournament_commands.command(name="status", description="Show active tournament tracking status.")
+    async def slash_tournament_status(interaction: discord.Interaction):
+        if not await validate_admin_interaction(interaction, command_name="tournament.status", write=False):
+            return
+        tournament = await asyncio.to_thread(db.get_active_tournament)
+        if not tournament:
+            # Show most recent ended tournament
+            from db import get_connection
+            def _latest():
+                conn = get_connection()
+                try:
+                    row = conn.execute(
+                        "SELECT * FROM tournaments ORDER BY tournament_id DESC LIMIT 1"
+                    ).fetchone()
+                    return dict(row) if row else None
+                finally:
+                    conn.close()
+            latest = await asyncio.to_thread(_latest)
+            if latest:
+                await send_interaction_text(
+                    interaction,
+                    f"No active tournament. Last tracked: **{latest.get('name')}** (`{latest['tournament_tag']}`) — {latest['status']}, {latest.get('battles_captured', 0)} battles captured.",
+                    ephemeral=True,
+                )
+            else:
+                await send_interaction_text(interaction, "No tournaments tracked yet.", ephemeral=True)
+            return
+
+        lines = [
+            f"**{tournament.get('name', tournament['tournament_tag'])}** (`{tournament['tournament_tag']}`)",
+            f"Status: {tournament['status']}",
+            f"Polls: {tournament.get('poll_count', 0)}",
+            f"Battles captured: {tournament.get('battles_captured', 0)}",
+            f"Last poll: {tournament.get('last_poll_at') or 'never'}",
+            f"Watching since: {tournament.get('watching_started_at')}",
+        ]
+        await send_interaction_text(interaction, "\n".join(lines), ephemeral=True)
+
+    @tournament_commands.command(name="stop", description="Stop watching the active tournament.")
+    async def slash_tournament_stop(interaction: discord.Interaction):
+        if not await validate_admin_interaction(interaction, command_name="tournament.stop", write=True):
+            return
+        from runtime import jobs
+        from db import get_connection, _utcnow
+
+        tournament = await asyncio.to_thread(db.get_active_tournament)
+        if not tournament:
+            await send_interaction_text(interaction, "No active tournament to stop.", ephemeral=True)
+            return
+
+        jobs.stop_tournament_watch()
+
+        def _cancel():
+            conn = get_connection()
+            try:
+                conn.execute(
+                    "UPDATE tournaments SET status = 'cancelled', watching_ended_at = ? WHERE tournament_id = ?",
+                    (_utcnow(), tournament["tournament_id"]),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        await asyncio.to_thread(_cancel)
+
+        name = tournament.get("name") or tournament["tournament_tag"]
+        await send_interaction_text(
+            interaction,
+            f"Stopped watching **{name}**. {tournament.get('battles_captured', 0)} battles captured.",
+            ephemeral=True,
+        )
+
+    @tournament_commands.command(name="recap", description="Generate or regenerate a tournament recap.")
+    @app_commands.describe(tag="Tournament tag (defaults to most recent)")
+    async def slash_tournament_recap(interaction: discord.Interaction, tag: str | None = None):
+        if not await validate_admin_interaction(interaction, command_name="tournament.recap", write=True):
+            return
+        await interaction.response.defer(ephemeral=True)
+        from runtime.jobs import _tournament_recap
+
+        # Find the tournament
+        if tag:
+            clean_tag = tag.strip().lstrip("#").upper()
+            tournament = await asyncio.to_thread(db.get_tournament_by_tag, clean_tag)
+        else:
+            from db import get_connection
+            def _latest_with_battles():
+                conn = get_connection()
+                try:
+                    row = conn.execute(
+                        "SELECT * FROM tournaments WHERE battles_captured > 0 ORDER BY tournament_id DESC LIMIT 1"
+                    ).fetchone()
+                    return dict(row) if row else None
+                finally:
+                    conn.close()
+            tournament = await asyncio.to_thread(_latest_with_battles)
+
+        if not tournament:
+            await send_interaction_text(interaction, "No tournament found.", use_followup=True)
+            return
+
+        if tournament.get("battles_captured", 0) == 0:
+            await send_interaction_text(
+                interaction,
+                f"**{tournament.get('name')}** has no captured battles — recap needs battle data.",
+                use_followup=True,
+            )
+            return
+
+        name = tournament.get("name") or tournament["tournament_tag"]
+        await send_interaction_text(
+            interaction,
+            f"Generating recap for **{name}**...",
+            use_followup=True,
+        )
+
+        try:
+            await _tournament_recap(tournament["tournament_tag"])
+            await interaction.followup.send(f"Recap posted for **{name}**.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"Recap generation failed: {e}", ephemeral=True)
+
+    @tournament_commands.command(name="history", description="List past tournaments.")
+    async def slash_tournament_history(interaction: discord.Interaction):
+        if not await validate_admin_interaction(interaction, command_name="tournament.history", write=False):
+            return
+
+        from db import get_connection
+        def _list_tournaments():
+            conn = get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM tournaments ORDER BY tournament_id DESC LIMIT 10"
+                ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+        tournaments = await asyncio.to_thread(_list_tournaments)
+        if not tournaments:
+            await send_interaction_text(interaction, "No tournaments tracked yet.", ephemeral=True)
+            return
+
+        lines = ["**Tournament History**\n"]
+        for t in tournaments:
+            status_icon = {"ended": "done", "in_progress": "live", "in_preparation": "prep", "cancelled": "cancelled", "watching": "watching"}.get(t["status"], t["status"])
+            winner = ""
+            if t["status"] == "ended":
+                from db import get_connection as _gc
+                def _get_winner(tid):
+                    conn = _gc()
+                    try:
+                        row = conn.execute(
+                            "SELECT player_name FROM tournament_participants WHERE tournament_id = ? AND final_rank = 1",
+                            (tid,),
+                        ).fetchone()
+                        return row["player_name"] if row else None
+                    finally:
+                        conn.close()
+                w = await asyncio.to_thread(_get_winner, t["tournament_id"])
+                if w:
+                    winner = f" — Winner: **{w}**"
+
+            date = (t.get("created_time") or "")[:10]
+            battles = t.get("battles_captured", 0)
+            lines.append(
+                f"`{t['tournament_tag']}` **{t.get('name', '?')}** [{status_icon}]\n"
+                f"  {date} · {battles} battles{winner}"
+            )
+
+        await send_interaction_text(interaction, "\n".join(lines), ephemeral=True)
+
+    elixir_commands.add_command(tournament_commands)
     elixir_commands.add_command(system_commands)
     elixir_commands.add_command(clan_commands)
     elixir_commands.add_command(member_commands)

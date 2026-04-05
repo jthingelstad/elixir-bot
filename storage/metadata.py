@@ -7,6 +7,7 @@ from db import (
     RAW_PAYLOAD_RETENTION_DAYS,
     SIGNAL_OUTCOME_RETENTION_DAYS,
     SNAPSHOT_RETENTION_DAYS,
+    TOURNAMENT_RETENTION_DAYS,
     WAR_RETENTION_DAYS,
     _canon_tag,
     _trusted_current_joined_at,
@@ -449,6 +450,7 @@ _PURGE_TARGETS = [
     ("raw_api_payloads", "fetched_at", RAW_PAYLOAD_RETENTION_DAYS),
     ("messages", "created_at", CONVERSATION_RETENTION_DAYS),
     ("signal_outcomes", "created_at", SIGNAL_OUTCOME_RETENTION_DAYS),
+    ("tournaments", "watching_started_at", TOURNAMENT_RETENTION_DAYS),
 ]
 
 _PURGE_DATE_TARGETS = [

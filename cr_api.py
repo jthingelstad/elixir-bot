@@ -107,6 +107,23 @@ def get_player_battle_log(tag):
         return None
 
 
+def get_tournament(tag):
+    """Fetch tournament details by tag.
+
+    tag: tournament tag with or without '#' prefix.
+    Returns tournament dict or None on error.
+    """
+    clean_tag = tag.lstrip("#")
+    try:
+        return _request_json(
+            f"/tournaments/%23{clean_tag}",
+            endpoint_name="tournament",
+            entity_key=clean_tag.upper(),
+        )
+    except Exception:
+        return None
+
+
 def get_player_chests(tag):
     """Fetch a player's upcoming chest cycle.
 

@@ -22,6 +22,7 @@ from agent.prompts import (
     _promote_system,
     _reception_system,
     _roster_bios_system,
+    _tournament_recap_system,
     _weekly_digest_system,
 )
 from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
@@ -533,6 +534,30 @@ def generate_weekly_digest(summary_context, previous_message=""):
         log.error("Weekly digest API error: %s", e)
         return None
 
+def generate_tournament_recap(recap_context):
+    """Generate a narrative tournament recap for Discord. Returns text or None."""
+    user_msg = f"{recap_context}\n\nWrite this tournament's recap."
+    messages = [
+        {"role": "system", "content": _tournament_recap_system()},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        resp = _create_chat_completion(
+            workflow="weekly_digest",
+            messages=messages,
+            temperature=0.8,
+            max_tokens=1200,
+            timeout=60,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if not text or text.lower() == "null":
+            return None
+        return text
+    except Exception as e:
+        log.error("Tournament recap API error: %s", e)
+        return None
+
+
 __all__ = [
     "observe_and_post",
     "generate_channel_update",
@@ -543,5 +568,6 @@ __all__ = [
     "generate_members_message",
     "generate_roster_bios",
     "generate_promote_content",
+    "generate_tournament_recap",
     "generate_weekly_digest",
 ]

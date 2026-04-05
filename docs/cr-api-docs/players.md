@@ -122,6 +122,7 @@ Observed: returns up to ~48 battles.
 | `type` | string | See battle types below |
 | `battleTime` | string | Format: `20260309T135844.000Z` |
 | `isLadderTournament` | boolean | |
+| `tournamentTag` | string | Optional — present on `type=tournament` battles; links to the tournament via `/tournaments/{tag}` |
 | `eventTag` | string | Optional — links to event from `/events` |
 | `arena` | Arena | `{ id, name, rawName }` |
 | `gameMode` | object | `{ id, name }` — see game modes below |
@@ -150,6 +151,7 @@ Observed: returns up to ~48 battles.
 | `riverRacePvP` | River race 1v1 battle | `CW_Battle_1v1` |
 | `riverRaceDuel` | River race duel (best-of-3) | `CW_Duel_1v1` |
 | `riverRaceDuelColosseum` | Colosseum duel variant | `CW_Duel_1v1` |
+| `tournament` | Player-created tournament battle | `Tournament` (72000009, bring-your-own-deck), `Draft_Competitive` (72000194, Triple Draft) |
 | `boatBattle` | River race boat attack/defense | `ClanWar_BoatBattle` |
 | `unknown` | Rare fallback value seen on some friendlies | `Friendly` |
 
@@ -162,7 +164,7 @@ Observed: returns up to ~48 battles.
 | `draft` | clanMate2v2 (draft modes) |
 | `warDeckPick` | riverRaceDuel |
 | `pick` | pick-mode friendlies |
-| `draftCompetitive` | competitive draft friendlies |
+| `draftCompetitive` | competitive draft friendlies, Triple Draft tournaments |
 | `predefined` | preset-deck friendlies (e.g. Mirror Deck) |
 
 **Known game mode IDs:**
@@ -302,5 +304,8 @@ Observed error bodies are usually `{ reason, message? }`. `message` may be absen
 - Additional battle variants observed in March 2026 sampling: `riverRaceDuelColosseum` and an occasional `unknown` type on friendlies
 - For player-facing text, avoid raw `Evolution Level N` wording; Elixir should translate to `Evo`, `Hero`, or `Evo + Hero`
 - Additional `deckSelection` values observed in March 2026 sampling: `pick`, `draftCompetitive`, `predefined`
+- **Tournament battles:** `type=tournament` battles include a `tournamentTag` field that links back to `/tournaments/{tag}`. This allows matching battles to specific tournaments. The `gameMode` distinguishes tournament format: `72000009`/`Tournament` for bring-your-own-deck, `72000194`/`Draft_Competitive` for Triple Draft. In draft tournaments, each battle has different cards (drafted per match); in standard tournaments, players use their `collection` deck.
+- **Tournament battle dedup:** Both players in a match see the same `battleTime`. Dedup key: `battleTime` + sorted pair of `(team[0].tag, opponent[0].tag)`. For tournament winner detection, use crowns comparison (no `trophyChange` field on tournament battles). The `startingTrophies` field on tournament battles reflects tournament score, not ladder trophies.
+- **Tournament battle log retention:** Battle logs are not permanent (~48 battles). Tournament battles will rotate out as players play more games. To capture tournament battle data reliably, poll player battle logs shortly after the tournament ends. Battles from a 13-player tournament were partially lost within ~24h due to active players' logs rotating.
 - **Badges:** Two categories — progress badges (with `level`/`maxLevel`/`progress`/`target`) and one-time badges (level=null, just `progress` and `iconUrls`). Mastery badges are per-card (e.g. `MasteryKnight`).
 - **Achievements:** Fixed set of 12 achievements. `stars` (0-3) indicates completion tier. `completionInfo` is typically null.

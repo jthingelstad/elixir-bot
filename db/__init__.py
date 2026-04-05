@@ -32,6 +32,7 @@ WAR_RETENTION_DAYS = 180
 RAW_PAYLOAD_RETENTION_DAYS = 30
 SIGNAL_OUTCOME_RETENTION_DAYS = 90
 CONVERSATION_RETENTION_DAYS = 30
+TOURNAMENT_RETENTION_DAYS = 365
 CONVERSATION_MAX_PER_SCOPE = 20
 
 _V2_SCHEMA_CORE = {
@@ -1509,7 +1510,85 @@ def _migration_19(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE player_profile_snapshots DROP COLUMN raw_json")
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19]
+def _migration_20(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS tournaments (
+            tournament_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_tag TEXT NOT NULL UNIQUE,
+            name TEXT,
+            description TEXT,
+            type TEXT,
+            status TEXT NOT NULL,
+            creator_tag TEXT,
+            creator_name TEXT,
+            game_mode_id INTEGER,
+            game_mode_name TEXT,
+            deck_selection TEXT,
+            level_cap INTEGER,
+            max_capacity INTEGER,
+            duration_seconds INTEGER,
+            preparation_duration_seconds INTEGER,
+            created_time TEXT,
+            started_time TEXT,
+            ended_time TEXT,
+            watching_started_at TEXT,
+            watching_ended_at TEXT,
+            poll_count INTEGER NOT NULL DEFAULT 0,
+            last_poll_at TEXT,
+            battles_captured INTEGER NOT NULL DEFAULT 0,
+            recap_posted_at TEXT,
+            raw_final_json TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS tournament_participants (
+            participant_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_id INTEGER NOT NULL REFERENCES tournaments(tournament_id) ON DELETE CASCADE,
+            player_tag TEXT NOT NULL,
+            player_name TEXT,
+            member_id INTEGER REFERENCES members(member_id),
+            clan_tag TEXT,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            final_score INTEGER,
+            final_rank INTEGER,
+            UNIQUE(tournament_id, player_tag)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tournament_participants_tournament
+            ON tournament_participants(tournament_id);
+
+        CREATE TABLE IF NOT EXISTS tournament_battles (
+            tournament_battle_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_id INTEGER NOT NULL REFERENCES tournaments(tournament_id) ON DELETE CASCADE,
+            battle_time TEXT NOT NULL,
+            player1_tag TEXT NOT NULL,
+            player1_name TEXT,
+            player1_member_id INTEGER REFERENCES members(member_id),
+            player1_crowns INTEGER,
+            player1_deck_json TEXT,
+            player2_tag TEXT NOT NULL,
+            player2_name TEXT,
+            player2_member_id INTEGER REFERENCES members(member_id),
+            player2_crowns INTEGER,
+            player2_deck_json TEXT,
+            winner_tag TEXT,
+            deck_selection TEXT,
+            game_mode_id INTEGER,
+            arena_name TEXT,
+            raw_json TEXT,
+            UNIQUE(tournament_id, battle_time, player1_tag, player2_tag)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tournament_battles_tournament
+            ON tournament_battles(tournament_id);
+        """
+    )
+
+    battle_columns = _table_columns(conn, "member_battle_facts")
+    if "tournament_tag" not in battle_columns:
+        conn.execute("ALTER TABLE member_battle_facts ADD COLUMN tournament_tag TEXT")
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
@@ -1599,6 +1678,7 @@ from storage import player as _player_module
 from storage import trends as _trends_module
 from storage import messages as _messages_module
 from storage import metadata as _metadata_module
+from storage import tournament as _tournament_module
 
 __all__ = [name for name in globals() if not name.startswith("__")]
 for _module in (
@@ -1609,6 +1689,7 @@ for _module in (
     _trends_module,
     _messages_module,
     _metadata_module,
+    _tournament_module,
 ):
     __export_public(_module)
 
