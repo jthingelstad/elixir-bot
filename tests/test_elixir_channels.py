@@ -1995,6 +1995,7 @@ def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
         "capability_ask_elixir_reaction_feedback_v1",
         "feature_custom_emoji_v1",
         "capability_signal_quality_and_colosseum_v1",
+        "capability_tournament_tracking_v1",
     }
 
 
