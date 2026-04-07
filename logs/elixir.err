@@ -1,0 +1,32 @@
+2026-04-06 19:31:17,346 [WARNING] discord.client: PyNaCl is not installed, voice will NOT be supported
+2026-04-06 19:31:17,346 [WARNING] discord.client: davey is not installed, voice will NOT be supported
+[2026-04-06 19:31:17] [INFO    ] discord.client: logging in using static token
+2026-04-06 19:31:17,349 [INFO] discord.client: logging in using static token
+[2026-04-06 19:31:18] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: 7a79555c23a6f7f27805347e722961c6).
+2026-04-06 19:31:18,353 [INFO] discord.gateway: Shard ID None has connected to Gateway (Session ID: 7a79555c23a6f7f27805347e722961c6).
+2026-04-06 19:31:20,365 [INFO] elixir: Elixir online as Elixir#6018
+2026-04-06 19:31:20,700 [INFO] elixir: Synced /elixir commands to guild 1474760692992180429 and cleared stale global commands
+2026-04-06 19:31:20,703 [INFO] runtime.emoji: Emoji sync complete: 0 uploaded, 19 already existed
+2026-04-06 19:31:20,706 [INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-06 19:31:20,714 [INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-06 19:31:20,714 [INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-06 19:31:20,714 [INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-06 19:31:20,715 [INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-06 19:31:20,715 [INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-06 19:31:20,715 [INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-06 19:31:20,716 [INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-06 19:31:20,716 [INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-06 19:31:20,716 [INFO] apscheduler.scheduler: Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-04-06 19:31:20,718 [INFO] apscheduler.scheduler: Added job "on_ready.<locals>._job_runner.<locals>.<lambda>" to job store "default"
+2026-04-06 19:31:20,718 [INFO] apscheduler.scheduler: Added job "on_ready.<locals>._job_runner.<locals>.<lambda>" to job store "default"
+2026-04-06 19:31:20,718 [INFO] apscheduler.scheduler: Added job "on_ready.<locals>._job_runner.<locals>.<lambda>" to job store "default"
+2026-04-06 19:31:20,718 [INFO] apscheduler.scheduler: Added job "on_ready.<locals>._job_runner.<locals>.<lambda>" to job store "default"
+2026-04-06 19:31:20,718 [INFO] apscheduler.scheduler: Added job "on_ready.<locals>._job_runner.<locals>.<lambda>" to job store "default"
+2026-04-06 19:31:20,719 [INFO] apscheduler.scheduler: Added job "on_ready.<locals>._job_runner.<locals>.<lambda>" to job store "default"
+2026-04-06 19:31:20,719 [INFO] apscheduler.scheduler: Added job "on_ready.<locals>._job_runner.<locals>.<lambda>" to job store "default"
+2026-04-06 19:31:20,719 [INFO] apscheduler.scheduler: Added job "on_ready.<locals>._job_runner.<locals>.<lambda>" to job store "default"
+2026-04-06 19:31:20,719 [INFO] apscheduler.scheduler: Added job "on_ready.<locals>._job_runner.<locals>.<lambda>" to job store "default"
+2026-04-06 19:31:20,719 [INFO] apscheduler.scheduler: Added job "on_ready.<locals>._job_runner.<locals>.<lambda>" to job store "default"
+2026-04-06 19:31:20,720 [INFO] apscheduler.scheduler: Scheduler started
+2026-04-06 19:31:22,832 [INFO] httpx: HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-04-06 19:31:23,146 [INFO] elixir: Scheduler started — clan-awareness — Every 30 minutes with up to 900s jitter., war-poll — Every hour at :00 CT., war-awareness — Every hour at :05 CT., player-progression — Every 30 minutes with up to 900s jitter., daily-clan-insight — Daily at 12:00 CT. with up to 30 minutes jitter., leadership-review — Every Fri at 19:00 CT., weekly-recap — Every Mon at 09:00 CT., site-content — Daily at 18:00 CT., promotion-content — Every Fri at 09:00 CT., db-maintenance — Every Sun at 02:00 CT.

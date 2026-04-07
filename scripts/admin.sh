@@ -17,14 +17,19 @@ status() {
 
 stop_bot() {
     echo "==> Stopping elixir-bot..."
-    launchctl unload "$PLIST" 2>/dev/null || true
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     sleep 1
     status
 }
 
 start_bot() {
+    if [ ! -f "$PLIST" ]; then
+        echo "Error: plist not found at $PLIST"
+        echo "Run '$0 install' first."
+        exit 1
+    fi
     echo "==> Starting elixir-bot..."
-    launchctl load -w "$PLIST"
+    launchctl bootstrap "gui/$(id -u)" "$PLIST"
     sleep 3
     status
 }
@@ -32,6 +37,38 @@ start_bot() {
 restart_bot() {
     stop_bot
     start_bot
+}
+
+install_bot() {
+    echo "==> Installing launchd plist..."
+    mkdir -p "$(dirname "$PLIST")"
+    cat > "$PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$PROJECT_DIR/venv/bin/python</string>
+        <string>$PROJECT_DIR/elixir.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$PROJECT_DIR</string>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$PROJECT_DIR/logs/elixir.log</string>
+    <key>StandardErrorPath</key>
+    <string>$PROJECT_DIR/logs/elixir.err</string>
+</dict>
+</plist>
+PLIST
+    echo "Installed $PLIST"
 }
 
 upgrade_bot() {
@@ -58,10 +95,11 @@ case "${1:-}" in
     start)    start_bot ;;
     restart)  restart_bot ;;
     upgrade)  upgrade_bot ;;
+    install)  install_bot ;;
     status)   status ;;
     backup)   backup_db ;;
     *)
-        echo "Usage: $0 {start|stop|restart|upgrade|status|backup}"
+        echo "Usage: $0 {start|stop|restart|upgrade|install|status|backup}"
         exit 1
         ;;
 esac
