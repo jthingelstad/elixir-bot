@@ -1599,7 +1599,32 @@ def _migration_21(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE prompt_failures RENAME COLUMN openai_last_call_at TO llm_last_call_at")
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21]
+def _migration_22(conn: sqlite3.Connection) -> None:
+    """Create llm_calls table for persistent token usage tracking."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS llm_calls (
+            call_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recorded_at TEXT NOT NULL,
+            workflow TEXT NOT NULL,
+            model TEXT NOT NULL,
+            ok INTEGER NOT NULL DEFAULT 1,
+            error TEXT,
+            duration_ms REAL,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            total_tokens INTEGER,
+            cache_creation_tokens INTEGER,
+            cache_read_tokens INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_llm_calls_recorded_at ON llm_calls(recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_llm_calls_workflow ON llm_calls(workflow, recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_llm_calls_model ON llm_calls(model, recorded_at DESC);
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
