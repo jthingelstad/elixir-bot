@@ -19,7 +19,8 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
 - `prompts/subagents/` — Channel-named subagent prompt files
-- `integrations/poap_kings/` — POAP KINGS-specific site integration and GitHub publishing
+- `modules/poap_kings/` — POAP KINGS-specific site integration and GitHub publishing
+- `modules/card_training/` — Elixir University card training quiz: question generation, Discord views, and quiz storage
 - `scripts/review_agent_feedback.py` — Review recent LLM/channel failures and `#ask-elixir` feedback from SQLite for debugging and prompt/tool routing analysis
 - `runtime/activities.py` — Canonical registry for recurring automated activities
 - `runtime/channel_subagents.py` — Signal outcome planning, channel-targeted delivery, and subagent memory context

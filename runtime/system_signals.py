@@ -410,6 +410,44 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "intelligence_migration",
         },
     },
+    {
+        "signal_key": "feature_card_quiz_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Card Quiz",
+            "message": (
+                "Elixir now has a card training quiz in #card-quiz. "
+                "Members can test their Clash Royale card knowledge with interactive quizzes and a daily question with streak tracking."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Card Quiz** :elixir_hype:\n\n"
+                "POAP KINGS just got a new training ground. **#card-quiz** is live — "
+                "a dedicated channel where you can sharpen your Clash Royale card knowledge with real quizzes.\n\n"
+                "**What's in there:**\n"
+                "- `/elixir quiz start` — take a quick quiz (1-10 questions). "
+                "Elixir will test you on elixir costs, rarities, card types, Evo/Hero modes, and Champions — "
+                "all with card images pulled straight from the game.\n"
+                "- **Daily question** — a new question drops every morning. "
+                "Answer it to start building a streak. Come back tomorrow to keep it alive.\n"
+                "- `/elixir quiz stats` — check your accuracy and streak.\n"
+                "- `/elixir quiz leaderboard` — see who's running the longest daily streak in the clan.\n\n"
+                "**Why it matters:**\n"
+                "Knowing your cards is knowing your matchups. "
+                "Whether it's the elixir cost of a counter or which cards have Evo, "
+                "the quiz is built to make that knowledge stick.\n\n"
+                "Head to **#card-quiz** and see what you know. :elixir_trophy:"
+            ),
+            "details": [
+                "New #card-quiz channel with interactive quizzes and a daily question.",
+                "Six question types covering elixir cost, rarity, card type, Evo/Hero capability, and Champion identification.",
+                "All questions generated from a synced Clash Royale card catalog with card images.",
+                "Daily streak tracking for consecutive correct answers on the daily question.",
+                "Elixir now has a lookup_cards tool for accurate card data in #ask-elixir conversations.",
+            ],
+            "audience": "clan",
+            "capability_area": "card_quiz",
+        },
+    },
 ]
 
 

@@ -210,6 +210,45 @@ TOOLS = [
         },
     },
     {
+        "name": "lookup_cards",
+        "description": "Look up Clash Royale cards from the card catalog. Use this for accurate card data including elixir cost, rarity, type, and evolution/hero capability. Always prefer this over relying on memory when discussing card stats or comparisons.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Card name or partial name to search for (e.g. 'Knight', 'Valk').",
+                },
+                "rarity": {
+                    "type": "string",
+                    "description": "Filter by rarity: common, rare, epic, legendary, champion.",
+                },
+                "min_cost": {
+                    "type": "integer",
+                    "description": "Minimum elixir cost filter.",
+                },
+                "max_cost": {
+                    "type": "integer",
+                    "description": "Maximum elixir cost filter.",
+                },
+                "card_type": {
+                    "type": "string",
+                    "description": "Filter by type: troop, building, spell, tower_troop.",
+                },
+                "has_evolution": {
+                    "type": "boolean",
+                    "description": "Filter to cards with (true) or without (false) evolution capability.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of cards to return. Default 25.",
+                    "default": 25,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "get_member_history",
         "description": "Get a clan member's trophy and donation history over time from the stored state snapshots.",
         "input_schema": {

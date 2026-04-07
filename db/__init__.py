@@ -1624,7 +1624,69 @@ def _migration_22(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22]
+def _migration_23(conn: sqlite3.Connection) -> None:
+    """Create card_catalog and quiz tables."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS card_catalog (
+            card_id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            elixir_cost INTEGER,
+            rarity TEXT,
+            max_level INTEGER,
+            max_evolution_level INTEGER,
+            card_type TEXT NOT NULL,
+            icon_url TEXT,
+            hero_icon_url TEXT,
+            evolution_icon_url TEXT,
+            synced_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_card_catalog_name ON card_catalog(name);
+        CREATE INDEX IF NOT EXISTS idx_card_catalog_rarity ON card_catalog(rarity);
+        CREATE INDEX IF NOT EXISTS idx_card_catalog_type ON card_catalog(card_type);
+
+        CREATE TABLE IF NOT EXISTS quiz_sessions (
+            session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            discord_user_id TEXT NOT NULL,
+            member_id INTEGER,
+            session_type TEXT NOT NULL,
+            question_count INTEGER NOT NULL,
+            correct_count INTEGER NOT NULL DEFAULT 0,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            channel_id TEXT,
+            message_id TEXT,
+            question_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_quiz_sessions_user ON quiz_sessions(discord_user_id, started_at DESC);
+
+        CREATE TABLE IF NOT EXISTS quiz_responses (
+            response_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL REFERENCES quiz_sessions(session_id),
+            question_index INTEGER NOT NULL,
+            question_type TEXT NOT NULL,
+            question_text TEXT NOT NULL,
+            correct_answer TEXT NOT NULL,
+            user_answer TEXT,
+            is_correct INTEGER,
+            answered_at TEXT,
+            card_ids_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_quiz_responses_session ON quiz_responses(session_id);
+
+        CREATE TABLE IF NOT EXISTS quiz_daily_streaks (
+            discord_user_id TEXT PRIMARY KEY,
+            current_streak INTEGER NOT NULL DEFAULT 0,
+            longest_streak INTEGER NOT NULL DEFAULT 0,
+            last_correct_date TEXT,
+            total_daily_correct INTEGER NOT NULL DEFAULT 0,
+            total_daily_answered INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
@@ -1715,6 +1777,7 @@ from storage import trends as _trends_module
 from storage import messages as _messages_module
 from storage import metadata as _metadata_module
 from storage import tournament as _tournament_module
+from storage import card_catalog as _card_catalog_module
 
 __all__ = [name for name in globals() if not name.startswith("__")]
 for _module in (
@@ -1726,6 +1789,7 @@ for _module in (
     _messages_module,
     _metadata_module,
     _tournament_module,
+    _card_catalog_module,
 ):
     __export_public(_module)
 

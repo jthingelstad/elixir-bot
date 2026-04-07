@@ -140,3 +140,15 @@ def get_player_chests(tag):
         return payload.get("items", [])
     except Exception:
         return None
+
+
+def get_cards():
+    """Fetch the full card catalog from the Clash Royale API.
+
+    Returns dict with 'items' (121 standard cards) and 'supportItems'
+    (4 Tower Troops), or None on error.
+    """
+    try:
+        return _request_json("/cards", endpoint_name="cards")
+    except Exception:
+        return None
