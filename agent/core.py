@@ -27,8 +27,8 @@ def _get_build_hash():
 
 
 BUILD_HASH = _get_build_hash()
-RELEASE_VERSION = os.getenv("ELIXIR_RELEASE_VERSION", "v4.0")
-RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "New Brain")
+RELEASE_VERSION = os.getenv("ELIXIR_RELEASE_VERSION", "v4.1")
+RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Card Quiz")
 RELEASE_LABEL = f'{RELEASE_VERSION} "{RELEASE_CODENAME}"'
 
 _client = None
