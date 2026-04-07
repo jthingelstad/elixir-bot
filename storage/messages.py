@@ -847,6 +847,60 @@ def list_prompt_failures(limit=20, workflow=None, conn=None):
             conn.close()
 
 
+def record_llm_call(workflow, model, *, ok=True, error=None, duration_ms=None,
+                    prompt_tokens=None, completion_tokens=None, total_tokens=None,
+                    cache_creation_tokens=None, cache_read_tokens=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO llm_calls (recorded_at, workflow, model, ok, error, duration_ms, "
+            "prompt_tokens, completion_tokens, total_tokens, cache_creation_tokens, cache_read_tokens) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                _utcnow(),
+                workflow,
+                model,
+                1 if ok else 0,
+                str(error) if error else None,
+                duration_ms,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+            ),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def list_llm_calls(limit=100, workflow=None, model=None, conn=None):
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        clauses = []
+        params = []
+        if workflow:
+            clauses.append("workflow = ?")
+            params.append(workflow)
+        if model:
+            clauses.append("model = ?")
+            params.append(model)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        rows = conn.execute(
+            f"SELECT * FROM llm_calls{where} ORDER BY recorded_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return _rowdicts(rows)
+    finally:
+        if close:
+            conn.close()
+
+
 def purge_old_conversations(conn=None):
     close = conn is None
     conn = conn or get_connection()

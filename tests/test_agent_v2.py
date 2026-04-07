@@ -514,7 +514,7 @@ def test_create_chat_completion_records_llm_telemetry():
     assert mock_record.call_args.args[0] == "interactive"
     assert mock_record.call_args.kwargs["ok"] is True
     assert mock_record.call_args.kwargs["total_tokens"] == 30
-    assert create.call_args.kwargs["model"] == "claude-sonnet-4-6"
+    assert create.call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
 
 
 def test_create_chat_completion_uses_content_model_for_site_workflows():

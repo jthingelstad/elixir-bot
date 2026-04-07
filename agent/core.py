@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 from anthropic import Anthropic
 
+import db
 from runtime import status as runtime_status
 
 log = logging.getLogger("elixir_agent")
@@ -56,6 +57,10 @@ def _observation_model_name():
     return os.getenv("ELIXIR_OBSERVATION_MODEL", "claude-haiku-4-5-20251001")
 
 
+def _interactive_model_name():
+    return os.getenv("ELIXIR_INTERACTIVE_MODEL", "claude-haiku-4-5-20251001")
+
+
 def _model_for_workflow(workflow, model=None):
     if model:
         return model
@@ -66,6 +71,8 @@ def _model_for_workflow(workflow, model=None):
         return _content_model_name()
     if workflow == "observation":
         return _observation_model_name()
+    if workflow in {"interactive", "reception"}:
+        return _interactive_model_name()
     return _chat_model_name()
 
 
@@ -287,26 +294,50 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
         resp = _get_client().messages.create(**kwargs)
         wrapped = _wrap_anthropic_response(resp)
         usage = wrapped.usage
+        duration = round((time.perf_counter() - started) * 1000, 2)
         runtime_status.record_llm_call(
             workflow,
             ok=True,
             model=selected_model,
-            duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            duration_ms=duration,
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
             total_tokens=usage.total_tokens,
             cache_creation_tokens=wrapped.cache_stats.creation_tokens,
             cache_read_tokens=wrapped.cache_stats.read_tokens,
         )
+        try:
+            db.record_llm_call(
+                workflow, selected_model,
+                ok=True,
+                duration_ms=duration,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+                cache_creation_tokens=wrapped.cache_stats.creation_tokens,
+                cache_read_tokens=wrapped.cache_stats.read_tokens,
+            )
+        except Exception:
+            log.debug("failed to persist llm_call record", exc_info=True)
         return wrapped
     except Exception as exc:
+        duration = round((time.perf_counter() - started) * 1000, 2)
         runtime_status.record_llm_call(
             workflow,
             ok=False,
             model=selected_model,
             error=exc,
-            duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            duration_ms=duration,
         )
+        try:
+            db.record_llm_call(
+                workflow, selected_model,
+                ok=False,
+                error=exc,
+                duration_ms=duration,
+            )
+        except Exception:
+            log.debug("failed to persist llm_call record", exc_info=True)
         raise
 
 

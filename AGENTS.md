@@ -4,6 +4,7 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 - chat workflows default to `claude-sonnet-4-6`
 - site/content workflows default to `claude-sonnet-4-6`
 - promotion workflows default to `claude-sonnet-4-6`
+- interactive/reception workflows default to `claude-haiku-4-5-20251001`
 - observation workflows default to `claude-haiku-4-5-20251001`
 
 `AGENTS.md` is the single source of truth for repository-specific instructions and architecture notes.

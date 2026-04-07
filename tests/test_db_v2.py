@@ -2866,6 +2866,8 @@ def test_current_joined_at_prefers_trusted_clan_api_snapshot_over_backfill():
 def test_recent_joins_excludes_initial_snapshot_cluster_but_keeps_later_real_additions():
     conn = db.get_connection(":memory:")
     try:
+        recent_date = (datetime.now(timezone.utc).date() - timedelta(days=5)).isoformat()
+        recent_ts = f"{recent_date}T12:00:00"
         baseline_members = [
             {"tag": f"#TAG{i}", "name": f"Member {i}", "role": "member", "clanRank": i}
             for i in range(1, 6)
@@ -2878,19 +2880,20 @@ def test_recent_joins_excludes_initial_snapshot_cluster_but_keeps_later_real_add
         ).fetchone()
         assert newcomer_id is None
         conn.execute(
-            "INSERT INTO members (player_tag, current_name, status, first_seen_at, last_seen_at) VALUES ('#NEW1', 'Ditika', 'active', '2026-03-08T12:00:00', '2026-03-08T12:00:00')"
+            "INSERT INTO members (player_tag, current_name, status, first_seen_at, last_seen_at) VALUES ('#NEW1', 'Ditika', 'active', ?, ?)",
+            (recent_ts, recent_ts),
         )
         newcomer_id = conn.execute(
             "SELECT member_id FROM members WHERE player_tag = '#NEW1'"
         ).fetchone()["member_id"]
         conn.execute(
             "INSERT INTO member_current_state (member_id, observed_at, role, exp_level, trophies, best_trophies, clan_rank, previous_clan_rank, donations_week, donations_received_week, arena_id, arena_name, arena_raw_name, last_seen_api, source, raw_json) "
-            "VALUES (?, '2026-03-08T12:00:00', 'member', 50, 6000, 6000, 6, NULL, 0, 0, NULL, NULL, NULL, NULL, 'clan_api', NULL)",
-            (newcomer_id,),
+            "VALUES (?, ?, 'member', 50, 6000, 6000, 6, NULL, 0, 0, NULL, NULL, NULL, NULL, 'clan_api', NULL)",
+            (newcomer_id, recent_ts),
         )
         conn.execute(
-            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-03-08', NULL, 'clan_api_snapshot', NULL)",
-            (newcomer_id,),
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, 'clan_api_snapshot', NULL)",
+            (newcomer_id, recent_date),
         )
         conn.commit()
         db.backfill_join_dates(conn=conn)
@@ -2898,7 +2901,7 @@ def test_recent_joins_excludes_initial_snapshot_cluster_but_keeps_later_real_add
         recent = db.list_recent_joins(days=30, conn=conn)
 
         assert [item["tag"] for item in recent] == ["#NEW1"]
-        assert recent[0]["joined_date"] == "2026-03-08"
+        assert recent[0]["joined_date"] == recent_date
     finally:
         conn.close()
 
@@ -2906,6 +2909,7 @@ def test_recent_joins_excludes_initial_snapshot_cluster_but_keeps_later_real_add
 def test_recent_joins_excludes_bootstrap_and_backfill_rows_but_keeps_clan_api_snapshot_same_day():
     conn = db.get_connection(":memory:")
     try:
+        recent_date = (datetime.now(timezone.utc).date() - timedelta(days=5)).isoformat()
         db.snapshot_members(
             [
                 {"tag": "#OLD1", "name": "Vijay", "role": "member", "clanRank": 1},
@@ -2916,16 +2920,16 @@ def test_recent_joins_excludes_bootstrap_and_backfill_rows_but_keeps_clan_api_sn
         old_id = conn.execute("SELECT member_id FROM members WHERE player_tag = '#OLD1'").fetchone()["member_id"]
         new_id = conn.execute("SELECT member_id FROM members WHERE player_tag = '#NEW1'").fetchone()["member_id"]
         conn.execute(
-            "UPDATE clan_memberships SET join_source = 'bootstrap_seed', joined_at = '2026-03-07' WHERE member_id IN (?, ?) AND left_at IS NULL",
-            (old_id, new_id),
+            "UPDATE clan_memberships SET join_source = 'bootstrap_seed', joined_at = ? WHERE member_id IN (?, ?) AND left_at IS NULL",
+            (recent_date, old_id, new_id),
         )
         conn.execute(
-            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-03-07', NULL, 'backfill', NULL)",
-            (old_id,),
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, 'backfill', NULL)",
+            (old_id, recent_date),
         )
         conn.execute(
-            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-03-07', NULL, 'clan_api_snapshot', NULL)",
-            (new_id,),
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, 'clan_api_snapshot', NULL)",
+            (new_id, recent_date),
         )
         conn.commit()
         db.backfill_join_dates(conn=conn)
@@ -2933,7 +2937,7 @@ def test_recent_joins_excludes_bootstrap_and_backfill_rows_but_keeps_clan_api_sn
         recent = db.list_recent_joins(days=30, conn=conn)
 
         assert [item["tag"] for item in recent] == ["#NEW1"]
-        assert recent[0]["joined_date"] == "2026-03-07"
+        assert recent[0]["joined_date"] == recent_date
     finally:
         conn.close()
 
