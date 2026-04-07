@@ -158,9 +158,11 @@ Persistence and intelligence:
 - [agent/](agent/)
   LLM prompt composition, workflow contracts, tool policy, and chat loop.
 
-Integrations:
-- [integrations/poap_kings/](integrations/poap_kings/)
+Modules:
+- [modules/poap_kings/](modules/poap_kings/)
   POAP KINGS website integration and GitHub publishing.
+- [modules/card_training/](modules/card_training/)
+  Elixir University card training quiz — interactive and daily quizzes in #card-quiz.
 
 ## Prompt Model
 
@@ -211,7 +213,7 @@ Elixir owns the dynamic site data written to poapkings.com:
 - `elixirMembers.json`
 - `elixirPromote.json`
 
-GitHub-backed site publishing lives in [integrations/poap_kings/site.py](integrations/poap_kings/site.py).
+GitHub-backed site publishing lives in [modules/poap_kings/site.py](modules/poap_kings/site.py).
 
 When a real publish happens, Elixir reports it in `#poapkings-com` with:
 - success or failure

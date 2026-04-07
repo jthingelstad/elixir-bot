@@ -185,6 +185,36 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         legacy_commands=("promotion",),
     ),
     ActivityDefinition(
+        activity_key="daily-quiz",
+        owner_subagent="ask-elixir",
+        purpose="Post the daily Elixir University quiz question in #card-quiz.",
+        job_id="daily-quiz",
+        job_function="_daily_quiz_post",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": _attr("DAILY_QUIZ_HOUR", 10),
+            "minute": 0,
+        },
+        delivery_targets=(
+            "Discord: #card-quiz",
+        ),
+    ),
+    ActivityDefinition(
+        activity_key="card-catalog-sync",
+        owner_subagent="leader-lounge",
+        purpose="Sync the Clash Royale card catalog from the API.",
+        job_id="card-catalog-sync",
+        job_function="_card_catalog_sync",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": _attr("CARD_CATALOG_SYNC_HOUR", 4),
+            "minute": 0,
+        },
+        delivery_targets=(
+            "Storage: card_catalog table",
+        ),
+    ),
+    ActivityDefinition(
         activity_key="db-maintenance",
         owner_subagent="leader-lounge",
         purpose="Purge expired data, VACUUM the database, and report space reclaimed.",

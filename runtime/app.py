@@ -23,7 +23,7 @@ import db
 import elixir_agent
 import heartbeat
 import prompts
-from integrations.poap_kings import site as poap_kings_site
+from modules.poap_kings import site as poap_kings_site
 from runtime.activities import format_scheduler_startup_summary, register_scheduled_activities
 from runtime.admin import admin_command_requires_leader, dispatch_admin_command, parse_admin_command
 from runtime.channel_router import route_message
@@ -607,6 +607,18 @@ async def on_ready():
                 )
         except Exception as exc:
             log.warning("Tournament watch resume check failed: %s", exc)
+        # Best-effort startup card catalog sync
+        try:
+            from runtime.jobs import _card_catalog_sync
+            bot.loop.create_task(_card_catalog_sync())
+        except Exception as exc:
+            log.warning("Startup card catalog sync failed: %s", exc)
+        # Re-register persistent daily quiz view
+        try:
+            from modules.card_training.views import restore_daily_view
+            await restore_daily_view(bot)
+        except Exception as exc:
+            log.warning("Daily quiz view restore failed: %s", exc)
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 

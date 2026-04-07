@@ -687,7 +687,7 @@ def _build_integration_list_report() -> str:
 
 def _build_poap_kings_status_report() -> str:
     import runtime.jobs as runtime_jobs
-    from integrations.poap_kings import site as poap_kings_site
+    from modules.poap_kings import site as poap_kings_site
 
     repo = poap_kings_site._site_repo()
     branch = poap_kings_site._site_branch()
@@ -930,8 +930,8 @@ async def _preview_job_runtime():
 
 async def _load_site_context():
     import elixir
-    from integrations.poap_kings import site as site_content
-    from integrations.poap_kings import site as poap_kings_site
+    from modules.poap_kings import site as site_content
+    from modules.poap_kings import site as poap_kings_site
 
     clan, war = await elixir._load_live_clan_context()
     roster = await asyncio.to_thread(poap_kings_site.load_published, "roster")
@@ -1014,7 +1014,7 @@ async def _run_poap_kings_sync(preview: bool) -> str:
 
 async def _run_home_message(preview: bool) -> str:
     import elixir
-    from integrations.poap_kings import site as poap_kings_site
+    from modules.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
     previous = await asyncio.to_thread(poap_kings_site.load_published, "home")
@@ -1040,7 +1040,7 @@ async def _run_home_message(preview: bool) -> str:
 
 async def _run_members_message(preview: bool) -> str:
     import elixir
-    from integrations.poap_kings import site as poap_kings_site
+    from modules.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
     recap_context = await asyncio.to_thread(elixir._build_weekly_clan_recap_context, clan, war)
@@ -1071,7 +1071,7 @@ async def _run_members_message(preview: bool) -> str:
 async def _run_roster_bios(preview: bool) -> str:
     import db
     import elixir
-    from integrations.poap_kings import site as poap_kings_site
+    from modules.poap_kings import site as poap_kings_site
 
     clan, war, roster = await _load_site_context()
     result = await asyncio.to_thread(
@@ -1105,7 +1105,7 @@ async def _run_roster_bios(preview: bool) -> str:
 
 async def _run_promote_content(preview: bool) -> str:
     import elixir
-    from integrations.poap_kings import site as poap_kings_site
+    from modules.poap_kings import site as poap_kings_site
     from runtime import jobs as runtime_jobs
 
     clan, war, roster = await _load_site_context()

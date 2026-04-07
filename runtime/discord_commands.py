@@ -610,6 +610,99 @@ def register_elixir_app_commands(bot) -> None:
 
         await send_interaction_text(interaction, "\n".join(lines), ephemeral=True)
 
+    # -- Quiz commands (member-facing, restricted to #card-quiz) -------------
+
+    quiz_commands = app_commands.Group(name="quiz", description="Card quiz commands")
+
+    from modules.card_training.views import CARD_TRAINING_CHANNEL_ID
+
+    def _is_card_training_channel(interaction: discord.Interaction) -> bool:
+        return CARD_TRAINING_CHANNEL_ID != 0 and interaction.channel_id == CARD_TRAINING_CHANNEL_ID
+
+    @quiz_commands.command(name="start", description="Start a card knowledge quiz.")
+    @app_commands.describe(questions="Number of questions (1-10, default 5)")
+    async def slash_quiz_start(interaction: discord.Interaction, questions: app_commands.Range[int, 1, 10] = 5):
+        if not _is_card_training_channel(interaction):
+            await interaction.response.send_message(
+                f"Use this command in <#{CARD_TRAINING_CHANNEL_ID}>." if CARD_TRAINING_CHANNEL_ID else
+                "The #card-quiz channel is not configured yet.",
+                ephemeral=True,
+            )
+            return
+        from modules.card_training.views import start_interactive_quiz
+        await start_interactive_quiz(interaction, questions)
+
+    @quiz_commands.command(name="stats", description="View your quiz stats and streak.")
+    async def slash_quiz_stats(interaction: discord.Interaction):
+        if not _is_card_training_channel(interaction):
+            await interaction.response.send_message(
+                f"Use this command in <#{CARD_TRAINING_CHANNEL_ID}>." if CARD_TRAINING_CHANNEL_ID else
+                "The #card-quiz channel is not configured yet.",
+                ephemeral=True,
+            )
+            return
+        from modules.card_training import storage as quiz_storage
+        stats = await asyncio.to_thread(quiz_storage.get_member_quiz_stats, str(interaction.user.id))
+
+        lines = []
+        total_q = stats["total_questions"]
+        total_c = stats["total_correct"]
+        pct = round(100 * total_c / total_q) if total_q > 0 else 0
+        lines.append(f"**Sessions completed:** {stats['total_sessions']}")
+        lines.append(f"**Overall accuracy:** {total_c}/{total_q} ({pct}%)")
+
+        streak = stats.get("daily_streak")
+        if streak:
+            lines.append(f"**Current daily streak:** {streak['current_streak']}")
+            lines.append(f"**Longest daily streak:** {streak['longest_streak']}")
+            daily_total = streak["total_daily_answered"]
+            daily_correct = streak["total_daily_correct"]
+            daily_pct = round(100 * daily_correct / daily_total) if daily_total > 0 else 0
+            lines.append(f"**Daily accuracy:** {daily_correct}/{daily_total} ({daily_pct}%)")
+        else:
+            lines.append("No daily quiz activity yet.")
+
+        embed = discord.Embed(
+            title="Your Quiz Stats",
+            description="\n".join(lines),
+            color=discord.Color.purple(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @quiz_commands.command(name="leaderboard", description="View the daily quiz streak leaderboard.")
+    async def slash_quiz_leaderboard(interaction: discord.Interaction):
+        if not _is_card_training_channel(interaction):
+            await interaction.response.send_message(
+                f"Use this command in <#{CARD_TRAINING_CHANNEL_ID}>." if CARD_TRAINING_CHANNEL_ID else
+                "The #card-quiz channel is not configured yet.",
+                ephemeral=True,
+            )
+            return
+        from modules.card_training import storage as quiz_storage
+        board = await asyncio.to_thread(quiz_storage.get_quiz_leaderboard, 10)
+
+        if not board:
+            await interaction.response.send_message(
+                "No one has answered a daily question yet. Be the first!",
+                ephemeral=True,
+            )
+            return
+
+        lines = []
+        for i, entry in enumerate(board, 1):
+            user_id = entry["discord_user_id"]
+            streak = entry["current_streak"]
+            longest = entry["longest_streak"]
+            lines.append(f"**{i}.** <@{user_id}> — {streak} day streak (best: {longest})")
+
+        embed = discord.Embed(
+            title="Daily Quiz Leaderboard",
+            description="\n".join(lines),
+            color=discord.Color.gold(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    elixir_commands.add_command(quiz_commands)
     elixir_commands.add_command(tournament_commands)
     elixir_commands.add_command(system_commands)
     elixir_commands.add_command(clan_commands)

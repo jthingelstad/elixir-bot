@@ -180,6 +180,16 @@ def _execute_tool(name, arguments):
             result = db.get_members_with_most_level_16_cards(
                 limit=arguments.get("limit", 10),
             )
+        elif name == "lookup_cards":
+            result = db.lookup_cards(
+                name=arguments.get("name"),
+                rarity=arguments.get("rarity"),
+                min_cost=arguments.get("min_cost"),
+                max_cost=arguments.get("max_cost"),
+                card_type=arguments.get("card_type"),
+                has_evolution=arguments.get("has_evolution"),
+                limit=arguments.get("limit", 25),
+            )
         elif name == "get_member_history":
             member_tag = _resolve_member_tag(arguments["member_tag"])
             result = db.get_member_history(

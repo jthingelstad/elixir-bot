@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 import db
-from integrations.poap_kings import site as site_content
+from modules.poap_kings import site as site_content
 
 
 @pytest.fixture
@@ -146,7 +146,7 @@ def test_publish_site_content_returns_structured_no_change_result(monkeypatch):
     monkeypatch.setattr(site_content, "_site_branch", lambda: "main")
     monkeypatch.setattr(site_content, "load_published", lambda content_type, branch=None: {"message": "Hello from Elixir"})
 
-    with patch("integrations.poap_kings.site._github_request") as mock_github:
+    with patch("modules.poap_kings.site._github_request") as mock_github:
         result = site_content.publish_site_content(payloads, "Test publish")
 
     assert result == {
@@ -511,9 +511,9 @@ def test_build_roster_data_with_cards(conn):
         ],
     }
 
-    with patch("integrations.poap_kings.site.cr_api.get_player_battle_log", return_value=mock_battle_log), \
-         patch("integrations.poap_kings.site.cr_api.get_player", return_value=mock_player), \
-         patch("integrations.poap_kings.site.time.sleep"):
+    with patch("modules.poap_kings.site.cr_api.get_player_battle_log", return_value=mock_battle_log), \
+         patch("modules.poap_kings.site.cr_api.get_player", return_value=mock_player), \
+         patch("modules.poap_kings.site.time.sleep"):
         result = site_content.build_roster_data(clan_data, include_cards=True, conn=conn)
 
     m = result["members"][0]
@@ -607,9 +607,9 @@ def test_build_roster_data_includes_card_stats(conn):
             {"tag": "#ABC123", "name": "TestPlayer", "role": "member", "arena": {}},
         ],
     }
-    with patch("integrations.poap_kings.site.cr_api.get_player_battle_log", return_value=mock_battle_log), \
-         patch("integrations.poap_kings.site.cr_api.get_player", return_value=mock_player), \
-         patch("integrations.poap_kings.site.time.sleep"):
+    with patch("modules.poap_kings.site.cr_api.get_player_battle_log", return_value=mock_battle_log), \
+         patch("modules.poap_kings.site.cr_api.get_player", return_value=mock_player), \
+         patch("modules.poap_kings.site.time.sleep"):
         result = site_content.build_roster_data(clan_data, include_cards=True, conn=conn)
     assert "card_stats" in result
     assert len(result["card_stats"]) >= 1
@@ -687,7 +687,7 @@ def test_build_roster_data_without_cards_uses_cached_card_data(conn):
         ],
     }
 
-    with patch("integrations.poap_kings.site.load_current", return_value=None):
+    with patch("modules.poap_kings.site.load_current", return_value=None):
         result = site_content.build_roster_data(clan_data, conn=conn)
 
     m = result["members"][0]

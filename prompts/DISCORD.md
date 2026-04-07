@@ -196,6 +196,20 @@ Elixir's interactive war discussion channel.
 - Confident tactical opinions are welcome here.
 - Keep the pressure constructive. Push for winning, but do not guilt-trip members.
 
+## #card-quiz
+
+ID: 1490929895034064966
+
+Elixir University's card quiz channel.
+
+- This channel is managed entirely through Discord interactions (slash commands and buttons), not through the LLM subagent system.
+- `/elixir quiz start` — start an interactive card quiz (ephemeral, private to the member).
+- `/elixir quiz stats` — view personal quiz stats and daily streak.
+- `/elixir quiz leaderboard` — view the daily quiz streak leaderboard.
+- A daily quiz question is posted here automatically each morning. Members answer via buttons and receive ephemeral feedback.
+- Daily streaks are tracked for consecutive correct answers on the daily question.
+- All quiz questions are generated from the Clash Royale card catalog data.
+
 ## #leader-lounge
 
 ID: 1475139718525227089
