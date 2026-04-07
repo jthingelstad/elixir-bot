@@ -33,6 +33,11 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _escape_like(value: str) -> str:
+    """Escape LIKE wildcard characters so they match literally."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 # ---------------------------------------------------------------------------
 # Sync
 # ---------------------------------------------------------------------------
@@ -139,8 +144,8 @@ def lookup_cards(
         params = []
 
         if name:
-            clauses.append("name LIKE ?")
-            params.append(f"%{name}%")
+            clauses.append("name LIKE ? ESCAPE '\\'")
+            params.append(f"%{_escape_like(name)}%")
         if rarity:
             clauses.append("rarity = ?")
             params.append(rarity.lower())
@@ -182,8 +187,8 @@ def get_card_by_name(name: str, conn=None) -> dict | None:
             return _row_to_dict(row)
         # Fall back to substring
         row = conn.execute(
-            "SELECT * FROM card_catalog WHERE name LIKE ? ORDER BY LENGTH(name) LIMIT 1",
-            (f"%{name}%",),
+            "SELECT * FROM card_catalog WHERE name LIKE ? ESCAPE '\\' ORDER BY LENGTH(name) LIMIT 1",
+            (f"%{_escape_like(name)}%",),
         ).fetchone()
         return _row_to_dict(row) if row else None
     finally:

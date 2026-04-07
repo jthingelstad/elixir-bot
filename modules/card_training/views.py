@@ -15,7 +15,7 @@ from modules.card_training import questions, storage
 
 log = logging.getLogger("elixir.card_training")
 
-CARD_TRAINING_CHANNEL_ID = int(os.getenv("CARD_TRAINING_CHANNEL_ID", "1490929895034064966"))
+CARD_TRAINING_CHANNEL_ID = int(os.getenv("CARD_TRAINING_CHANNEL_ID", "0"))
 CHICAGO = pytz.timezone("America/Chicago")
 
 CHOICE_LABELS = ["A", "B", "C", "D"]
@@ -132,17 +132,20 @@ class QuizChoiceButton(discord.ui.Button):
         is_correct = self.choice_index == question["correct_index"]
 
         # Record the response
-        await asyncio.to_thread(
-            storage.record_response,
-            view.session.session_id,
-            view.session.current_index,
-            question["question_type"],
-            question["question_text"],
-            question["choices"][question["correct_index"]],
-            question["choices"][self.choice_index],
-            is_correct,
-            card_ids=question.get("card_ids"),
-        )
+        try:
+            await asyncio.to_thread(
+                storage.record_response,
+                view.session.session_id,
+                view.session.current_index,
+                question["question_type"],
+                question["question_text"],
+                question["choices"][question["correct_index"]],
+                question["choices"][self.choice_index],
+                is_correct,
+                card_ids=question.get("card_ids"),
+            )
+        except Exception:
+            log.exception("Failed to record quiz response for session %s", view.session.session_id)
 
         if is_correct:
             view.session.correct_count += 1
@@ -165,11 +168,15 @@ class QuizChoiceButton(discord.ui.Button):
             await interaction.followup.send(embed=next_embed, view=next_view, ephemeral=True)
         else:
             # Quiz complete
-            await asyncio.to_thread(
-                storage.complete_session,
-                view.session.session_id,
-                view.session.correct_count,
-            )
+            try:
+                await asyncio.to_thread(
+                    storage.complete_session,
+                    view.session.session_id,
+                    view.session.correct_count,
+                )
+            except Exception:
+                log.exception("Failed to complete quiz session %s", view.session.session_id)
+
             score = view.session.correct_count
             total = len(view.session.questions)
             pct = round(100 * score / total) if total > 0 else 0
@@ -249,45 +256,35 @@ class DailyChoiceButton(discord.ui.Button):
         user_id = str(interaction.user.id)
         today = _today_chicago()
 
-        # Check if already answered today
-        already_answered = await asyncio.to_thread(
-            storage.has_answered_daily_today, user_id, today,
-        )
-        if already_answered:
+        try:
+            result = await asyncio.to_thread(
+                storage.record_daily_response_atomic,
+                view.daily_session_id,
+                user_id,
+                question,
+                self.choice_index,
+                today,
+            )
+        except Exception:
+            log.exception("Daily quiz response failed for user %s", user_id)
+            await interaction.response.send_message(
+                "Something went wrong recording your answer. Please try again.",
+                ephemeral=True,
+            )
+            return
+
+        if result["already_answered"]:
             await interaction.response.send_message(
                 "You've already answered today's question. Come back tomorrow!",
                 ephemeral=True,
             )
             return
 
-        is_correct = self.choice_index == question["correct_index"]
-
-        # Record the response
-        await asyncio.to_thread(
-            storage.record_response,
-            view.daily_session_id,
-            0,  # daily questions are always index 0
-            question["question_type"],
-            question["question_text"],
-            question["choices"][question["correct_index"]],
-            question["choices"][self.choice_index],
-            is_correct,
-            card_ids=question.get("card_ids"),
-        )
-
-        # Update streak
-        await asyncio.to_thread(
-            storage.update_daily_streak, user_id, is_correct, today,
-        )
-
-        # Get updated streak info
-        streak_info = await asyncio.to_thread(
-            storage.get_daily_streak, user_id,
-        )
-
+        is_correct = result["is_correct"]
         result_embed = _build_result_embed(question, self.choice_index, is_correct)
 
         # Add streak info to the result
+        streak_info = result["streak_info"]
         if streak_info:
             streak = streak_info["current_streak"]
             if is_correct and streak > 1:
@@ -327,6 +324,12 @@ async def start_interactive_quiz(
         )
         return
 
+    if len(quiz_questions) < question_count:
+        log.warning(
+            "Quiz for user %s: requested %d questions, got %d",
+            interaction.user.id, question_count, len(quiz_questions),
+        )
+
     session_id = await asyncio.to_thread(
         storage.create_session,
         str(interaction.user.id),
@@ -364,7 +367,11 @@ async def post_daily_question(channel: discord.TextChannel):
     embed = _build_question_embed(question, daily=True)
     view = DailyQuestionView(question, session_id)
 
-    message = await channel.send(embed=embed, view=view)
+    try:
+        message = await channel.send(embed=embed, view=view)
+    except discord.HTTPException:
+        log.exception("Failed to send daily quiz to channel %s", channel.id)
+        return None
 
     # Store message_id so the view can be re-registered after restart
     await asyncio.to_thread(

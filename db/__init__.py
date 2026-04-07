@@ -1686,7 +1686,21 @@ def _migration_23(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23]
+def _migration_24(conn: sqlite3.Connection) -> None:
+    """Add discord_user_id to quiz_responses for per-user daily dedup."""
+    columns = _table_columns(conn, "quiz_responses")
+    if "discord_user_id" not in columns:
+        conn.execute("ALTER TABLE quiz_responses ADD COLUMN discord_user_id TEXT")
+    conn.executescript(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_quiz_responses_daily_user
+            ON quiz_responses(session_id, discord_user_id)
+            WHERE discord_user_id IS NOT NULL;
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

@@ -12,9 +12,12 @@ All question types produce a standard dict:
 }
 """
 
+import logging
 import random
 
 from storage.card_catalog import get_random_cards, lookup_cards
+
+log = logging.getLogger("elixir.card_training.questions")
 
 # Tower troops are not playable battle cards — exclude from all quiz questions.
 _PLAYABLE_TYPES = ("troop", "building", "spell")
@@ -79,7 +82,10 @@ def generate_elixir_cost_question(conn=None) -> dict | None:
     distractors = possible[:3]
     # Pad if needed
     while len(distractors) < 3:
-        distractors.append(str(random.choice([c for c in range(1, 11) if str(c) != correct and str(c) not in distractors])))
+        available = [str(c) for c in range(1, 11) if str(c) != correct and str(c) not in distractors]
+        if not available:
+            break
+        distractors.append(random.choice(available))
 
     choices, correct_index = _shuffle_choices(correct, distractors)
 
@@ -321,4 +327,6 @@ def generate_quiz_set(count: int, conn=None) -> list[dict]:
                     used_card_ids.add(cid)
                 break
 
+    if len(questions) < count:
+        log.warning("Quiz generation: requested %d questions but only generated %d", count, len(questions))
     return questions
