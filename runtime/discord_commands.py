@@ -619,27 +619,29 @@ def register_elixir_app_commands(bot) -> None:
     def _is_card_training_channel(interaction: discord.Interaction) -> bool:
         return CARD_TRAINING_CHANNEL_ID != 0 and interaction.channel_id == CARD_TRAINING_CHANNEL_ID
 
+    async def _require_quiz_channel(interaction: discord.Interaction) -> bool:
+        """Check that the interaction is in the card-quiz channel. Sends an error and returns False if not."""
+        if _is_card_training_channel(interaction):
+            return True
+        msg = (
+            f"Use this command in <#{CARD_TRAINING_CHANNEL_ID}>."
+            if CARD_TRAINING_CHANNEL_ID
+            else "The #card-quiz channel is not configured yet."
+        )
+        await interaction.response.send_message(msg, ephemeral=True)
+        return False
+
     @quiz_commands.command(name="start", description="Start a card knowledge quiz.")
     @app_commands.describe(questions="Number of questions (1-10, default 5)")
     async def slash_quiz_start(interaction: discord.Interaction, questions: app_commands.Range[int, 1, 10] = 5):
-        if not _is_card_training_channel(interaction):
-            await interaction.response.send_message(
-                f"Use this command in <#{CARD_TRAINING_CHANNEL_ID}>." if CARD_TRAINING_CHANNEL_ID else
-                "The #card-quiz channel is not configured yet.",
-                ephemeral=True,
-            )
+        if not await _require_quiz_channel(interaction):
             return
         from modules.card_training.views import start_interactive_quiz
         await start_interactive_quiz(interaction, questions)
 
     @quiz_commands.command(name="stats", description="View your quiz stats and streak.")
     async def slash_quiz_stats(interaction: discord.Interaction):
-        if not _is_card_training_channel(interaction):
-            await interaction.response.send_message(
-                f"Use this command in <#{CARD_TRAINING_CHANNEL_ID}>." if CARD_TRAINING_CHANNEL_ID else
-                "The #card-quiz channel is not configured yet.",
-                ephemeral=True,
-            )
+        if not await _require_quiz_channel(interaction):
             return
         from modules.card_training import storage as quiz_storage
         stats = await asyncio.to_thread(quiz_storage.get_member_quiz_stats, str(interaction.user.id))
@@ -671,12 +673,7 @@ def register_elixir_app_commands(bot) -> None:
 
     @quiz_commands.command(name="leaderboard", description="View the daily quiz streak leaderboard.")
     async def slash_quiz_leaderboard(interaction: discord.Interaction):
-        if not _is_card_training_channel(interaction):
-            await interaction.response.send_message(
-                f"Use this command in <#{CARD_TRAINING_CHANNEL_ID}>." if CARD_TRAINING_CHANNEL_ID else
-                "The #card-quiz channel is not configured yet.",
-                ephemeral=True,
-            )
+        if not await _require_quiz_channel(interaction):
             return
         from modules.card_training import storage as quiz_storage
         board = await asyncio.to_thread(quiz_storage.get_quiz_leaderboard, 10)

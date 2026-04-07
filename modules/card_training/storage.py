@@ -1,9 +1,12 @@
 """Quiz session, response, and streak persistence."""
 
 import json
+import logging
 from datetime import datetime, timezone
 
 from db import get_connection
+
+log = logging.getLogger("elixir.card_training.storage")
 
 
 def _utcnow() -> str:
@@ -38,6 +41,7 @@ def create_session(
              _utcnow(), channel_id, message_id, question_json),
         )
         conn.commit()
+        log.debug("Created %s session %s for user %s", session_type, cur.lastrowid, discord_user_id)
         return cur.lastrowid
     finally:
         if close:
@@ -84,6 +88,7 @@ def record_response(
     user_answer: str | None,
     is_correct: bool | None,
     card_ids: list[int] | None = None,
+    discord_user_id: str | None = None,
     conn=None,
 ):
     """Record a single quiz response."""
@@ -93,14 +98,16 @@ def record_response(
         conn.execute(
             """INSERT INTO quiz_responses
                    (session_id, question_index, question_type, question_text,
-                    correct_answer, user_answer, is_correct, answered_at, card_ids_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    correct_answer, user_answer, is_correct, answered_at,
+                    card_ids_json, discord_user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, question_index, question_type, question_text,
                 correct_answer, user_answer,
                 1 if is_correct else (0 if is_correct is not None else None),
                 _utcnow() if user_answer is not None else None,
                 json.dumps(card_ids) if card_ids else None,
+                discord_user_id,
             ),
         )
         conn.commit()
@@ -175,9 +182,8 @@ def update_daily_streak(discord_user_id: str, is_correct: bool, date_str: str, c
                 total_correct += 1
                 last_date = date_str
             else:
-                if last_date != date_str:
-                    # Wrong answer on a new day — streak breaks
-                    current_streak = 0
+                # Wrong answer always breaks the streak
+                current_streak = 0
 
             total_answered += 1
 
@@ -232,12 +238,83 @@ def has_answered_daily_today(discord_user_id: str, date_str: str, conn=None) -> 
         row = conn.execute(
             """SELECT 1 FROM quiz_sessions s
                JOIN quiz_responses r ON r.session_id = s.session_id
-               WHERE s.discord_user_id = ? AND s.session_type = 'daily'
+               WHERE s.session_type = 'daily'
+                 AND r.discord_user_id = ?
                  AND r.answered_at LIKE ?
                LIMIT 1""",
             (discord_user_id, f"{date_str}%"),
         ).fetchone()
         return row is not None
+    finally:
+        if close:
+            conn.close()
+
+
+def record_daily_response_atomic(
+    session_id: int,
+    discord_user_id: str,
+    question: dict,
+    user_choice_index: int,
+    date_str: str,
+    conn=None,
+) -> dict:
+    """Atomically check, record, and update streak for a daily quiz response.
+
+    Returns a dict with keys: already_answered, is_correct, streak_info.
+    All operations share one connection and transaction to prevent races.
+    """
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        # Check if already answered today (inside the same transaction)
+        row = conn.execute(
+            """SELECT 1 FROM quiz_sessions s
+               JOIN quiz_responses r ON r.session_id = s.session_id
+               WHERE s.session_type = 'daily'
+                 AND r.discord_user_id = ?
+                 AND r.answered_at LIKE ?
+               LIMIT 1""",
+            (discord_user_id, f"{date_str}%"),
+        ).fetchone()
+        if row is not None:
+            return {"already_answered": True, "is_correct": False, "streak_info": None}
+
+        is_correct = user_choice_index == question["correct_index"]
+
+        # Record the response with discord_user_id for dedup
+        conn.execute(
+            """INSERT INTO quiz_responses
+                   (session_id, question_index, question_type, question_text,
+                    correct_answer, user_answer, is_correct, answered_at,
+                    card_ids_json, discord_user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session_id, 0, question["question_type"], question["question_text"],
+                question["choices"][question["correct_index"]],
+                question["choices"][user_choice_index],
+                1 if is_correct else 0,
+                _utcnow(),
+                json.dumps(question.get("card_ids")) if question.get("card_ids") else None,
+                discord_user_id,
+            ),
+        )
+
+        # Update streak (inline to stay in same transaction)
+        update_daily_streak(discord_user_id, is_correct, date_str, conn=conn)
+
+        conn.commit()
+        log.debug("Recorded daily response for user %s: correct=%s", discord_user_id, is_correct)
+
+        # Read back streak info
+        streak_info = get_daily_streak(discord_user_id, conn=conn)
+        return {"already_answered": False, "is_correct": is_correct, "streak_info": streak_info}
+    except Exception as exc:
+        conn.rollback()
+        # UNIQUE constraint = another request won the race — treat as duplicate
+        if "UNIQUE constraint" in str(exc):
+            log.debug("Daily response dedup via constraint for user %s", discord_user_id)
+            return {"already_answered": True, "is_correct": False, "streak_info": None}
+        raise
     finally:
         if close:
             conn.close()
