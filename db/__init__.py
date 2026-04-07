@@ -888,9 +888,9 @@ def _migration_1(conn: sqlite3.Connection) -> None:
             question TEXT NOT NULL,
             detail TEXT,
             result_preview TEXT,
-            openai_last_error TEXT,
-            openai_last_model TEXT,
-            openai_last_call_at TEXT,
+            llm_last_error TEXT,
+            llm_last_model TEXT,
+            llm_last_call_at TEXT,
             raw_json TEXT
         );
 
@@ -1588,7 +1588,18 @@ def _migration_20(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE member_battle_facts ADD COLUMN tournament_tag TEXT")
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20]
+def _migration_21(conn: sqlite3.Connection) -> None:
+    """Rename openai_* columns to llm_* in prompt_failures for provider-neutral naming."""
+    columns = _table_columns(conn, "prompt_failures")
+    if "openai_last_error" in columns:
+        conn.execute("ALTER TABLE prompt_failures RENAME COLUMN openai_last_error TO llm_last_error")
+    if "openai_last_model" in columns:
+        conn.execute("ALTER TABLE prompt_failures RENAME COLUMN openai_last_model TO llm_last_model")
+    if "openai_last_call_at" in columns:
+        conn.execute("ALTER TABLE prompt_failures RENAME COLUMN openai_last_call_at TO llm_last_call_at")
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

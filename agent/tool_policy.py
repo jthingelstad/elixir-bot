@@ -2,7 +2,7 @@ from agent.tool_defs import TOOLS
 
 TOOL_DEFINITIONS = []
 for _tool in TOOLS:
-    _name = _tool["function"]["name"]
+    _name = _tool["name"]
     _side_effect = "write" if _name.startswith("set_member_") else "read"
     TOOL_DEFINITIONS.append({
         "tool": _tool,
@@ -19,7 +19,7 @@ WRITE_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "write
 ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
 SENSITIVE_READ_TOOL_NAMES = {"get_promotion_candidates", "get_members_at_risk"}
 INTERACTIVE_READ_TOOLS = [
-    tool for tool in READ_TOOLS if tool["function"]["name"] not in SENSITIVE_READ_TOOL_NAMES
+    tool for tool in READ_TOOLS if tool["name"] not in SENSITIVE_READ_TOOL_NAMES
 ]
 
 TOOLSETS_BY_WORKFLOW = {

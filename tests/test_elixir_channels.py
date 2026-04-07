@@ -782,9 +782,9 @@ def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
         patch("elixir.elixir_agent.respond_in_channel", return_value=None),
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
         patch("elixir.runtime_status.snapshot", return_value={
-            "openai": {
+            "llm": {
                 "last_error": "Error code: 429 rate_limit_exceeded",
-                "last_model": "gpt-4.1-mini",
+                "last_model": "claude-sonnet-4-6",
                 "last_call_at": "2026-03-07T19:12:00",
             }
         }),
@@ -805,9 +805,9 @@ def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
         discord_message_id=555,
         detail=None,
         result_preview=None,
-        openai_last_error="Error code: 429 rate_limit_exceeded",
-        openai_last_model="gpt-4.1-mini",
-        openai_last_call_at="2026-03-07T19:12:00",
+        llm_last_error="Error code: 429 rate_limit_exceeded",
+        llm_last_model="claude-sonnet-4-6",
+        llm_last_call_at="2026-03-07T19:12:00",
         raw_json=None,
     )
     mock_share.assert_not_awaited()
@@ -849,9 +849,9 @@ def test_on_message_logs_agent_failure_payload_details():
         }),
         patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
         patch("elixir.runtime_status.snapshot", return_value={
-            "openai": {
+            "llm": {
                 "last_error": None,
-                "last_model": "gpt-4.1-mini",
+                "last_model": "claude-sonnet-4-6",
                 "last_call_at": "2026-03-11T07:00:00",
             }
         }),
@@ -872,9 +872,9 @@ def test_on_message_logs_agent_failure_payload_details():
         discord_message_id=555,
         detail="repair_response: missing required field: content",
         result_preview='{"event_type":"channel_response"}',
-        openai_last_error=None,
-        openai_last_model="gpt-4.1-mini",
-        openai_last_call_at="2026-03-11T07:00:00",
+        llm_last_error=None,
+        llm_last_model="claude-sonnet-4-6",
+        llm_last_call_at="2026-03-11T07:00:00",
         raw_json={"event_type": "channel_response"},
     )
     mock_share.assert_not_awaited()
@@ -2239,7 +2239,7 @@ def test_build_status_report_omits_job_schedule_section():
             "started_at": "2026-03-08T10:00:00",
             "env": {
                 "has_discord_token": True,
-                "has_openai_api_key": True,
+                "has_claude_api_key": True,
                 "has_cr_api_key": True,
             },
             "api": {
@@ -2252,10 +2252,10 @@ def test_build_status_report_omits_job_schedule_section():
                 "call_count": 10,
                 "error_count": 0,
             },
-            "openai": {
+            "llm": {
                 "last_ok": True,
                 "last_workflow": "observation",
-                "last_model": "gpt-4o",
+                "last_model": "claude-sonnet-4-6",
                 "last_call_at": "2026-03-08T10:29:00",
                 "last_duration_ms": 500,
                 "last_prompt_tokens": 100,

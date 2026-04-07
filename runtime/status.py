@@ -30,7 +30,7 @@ _API_STATUS = {
     "last_duration_ms": None,
     "by_endpoint": {},
 }
-_OPENAI_STATUS = {
+_LLM_STATUS = {
     "call_count": 0,
     "success_count": 0,
     "error_count": 0,
@@ -43,6 +43,8 @@ _OPENAI_STATUS = {
     "last_prompt_tokens": None,
     "last_completion_tokens": None,
     "last_total_tokens": None,
+    "last_cache_creation_tokens": None,
+    "last_cache_read_tokens": None,
     "by_workflow": {},
 }
 
@@ -135,25 +137,27 @@ def record_api_call(endpoint: str, entity_key: str | None = None, *, ok: bool, s
         per_endpoint["last_duration_ms"] = duration_ms
 
 
-def record_openai_call(workflow: str, *, ok: bool, model=None, error=None, duration_ms=None, prompt_tokens=None, completion_tokens=None, total_tokens=None) -> None:
+def record_llm_call(workflow: str, *, ok: bool, model=None, error=None, duration_ms=None, prompt_tokens=None, completion_tokens=None, total_tokens=None, cache_creation_tokens=None, cache_read_tokens=None) -> None:
     with _LOCK:
         now = _utcnow()
-        _OPENAI_STATUS["call_count"] += 1
+        _LLM_STATUS["call_count"] += 1
         if ok:
-            _OPENAI_STATUS["success_count"] += 1
+            _LLM_STATUS["success_count"] += 1
         else:
-            _OPENAI_STATUS["error_count"] += 1
-        _OPENAI_STATUS["last_call_at"] = now
-        _OPENAI_STATUS["last_workflow"] = workflow
-        _OPENAI_STATUS["last_model"] = model
-        _OPENAI_STATUS["last_ok"] = bool(ok)
-        _OPENAI_STATUS["last_error"] = str(error) if error else None
-        _OPENAI_STATUS["last_duration_ms"] = duration_ms
-        _OPENAI_STATUS["last_prompt_tokens"] = prompt_tokens
-        _OPENAI_STATUS["last_completion_tokens"] = completion_tokens
-        _OPENAI_STATUS["last_total_tokens"] = total_tokens
+            _LLM_STATUS["error_count"] += 1
+        _LLM_STATUS["last_call_at"] = now
+        _LLM_STATUS["last_workflow"] = workflow
+        _LLM_STATUS["last_model"] = model
+        _LLM_STATUS["last_ok"] = bool(ok)
+        _LLM_STATUS["last_error"] = str(error) if error else None
+        _LLM_STATUS["last_duration_ms"] = duration_ms
+        _LLM_STATUS["last_prompt_tokens"] = prompt_tokens
+        _LLM_STATUS["last_completion_tokens"] = completion_tokens
+        _LLM_STATUS["last_total_tokens"] = total_tokens
+        _LLM_STATUS["last_cache_creation_tokens"] = cache_creation_tokens
+        _LLM_STATUS["last_cache_read_tokens"] = cache_read_tokens
 
-        per_workflow = _OPENAI_STATUS["by_workflow"].setdefault(
+        per_workflow = _LLM_STATUS["by_workflow"].setdefault(
             workflow,
             {
                 "call_count": 0,
@@ -190,10 +194,10 @@ def snapshot() -> dict:
             "started_at": STARTED_AT,
             "env": {
                 "has_discord_token": bool(os.getenv("DISCORD_TOKEN")),
-                "has_openai_api_key": bool(os.getenv("OPENAI_API_KEY")),
+                "has_claude_api_key": bool(os.getenv("CLAUDE_API_KEY")),
                 "has_cr_api_key": bool(os.getenv("CR_API_KEY")),
             },
             "jobs": copy.deepcopy(_JOB_STATUS),
             "api": copy.deepcopy(_API_STATUS),
-            "openai": copy.deepcopy(_OPENAI_STATUS),
+            "llm": copy.deepcopy(_LLM_STATUS),
         }

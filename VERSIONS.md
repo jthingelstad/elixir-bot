@@ -98,3 +98,21 @@ Notable changes:
 - tournament results feed into the weekly clan recap
 - startup recovery resumes tournament watch after bot restarts
 - updated CR API docs with confirmed tournament endpoint behavior
+
+## v4.0 — New Brain
+
+**Date:** 2026-04-06  
+**Representative anchor:** current working release on top of git history dated 2026-04-06
+
+This is the intelligence migration release. Elixir's entire LLM backbone was replaced — moving from OpenAI GPT models to Anthropic Claude. This is a major architectural shift that changes how Elixir thinks, not just what it knows.
+
+Notable changes:
+- migrated fully from OpenAI to Anthropic Claude (Sonnet for chat/content, Haiku for signal detection)
+- added native prompt caching on system prompts and tool definitions for lower latency and cost
+- observation workflows now use Claude Haiku for fast, efficient signal classification
+- all chat, content, and promotion workflows use Claude Sonnet for stronger persona consistency and instruction following
+- tool definitions converted to Anthropic native format
+- tool result handling rewritten for Anthropic's content-block message model
+- telemetry system generalized from OpenAI-specific to provider-neutral naming
+- database migration renames provider-specific columns to generic LLM columns
+- response wrapper layer preserves internal API compatibility across the agent package
