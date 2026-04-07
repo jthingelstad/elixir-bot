@@ -372,6 +372,44 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "tournament_tracking",
         },
     },
+    {
+        "signal_key": "capability_anthropic_claude_migration_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: New Brain",
+            "message": (
+                "Elixir has migrated from OpenAI GPT to Anthropic Claude. "
+                "This is a full intelligence upgrade — new models, native prompt caching, and a faster signal pipeline."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: New Brain** :elixir:\n\n"
+                "Elixir just got a brain transplant. Starting today, every conversation, every signal, "
+                "and every piece of content Elixir produces is powered by **Anthropic Claude** instead of OpenAI GPT.\n\n"
+                "**What changed:**\n"
+                "- Chat, content, and promotion workflows now run on **Claude Sonnet** — "
+                "stronger at staying in character, following instructions, and writing within guardrails.\n"
+                "- Signal detection (the heartbeat that watches the clan 24/7) now runs on **Claude Haiku** — "
+                "faster and more efficient for high-volume classification.\n"
+                "- Native **prompt caching** means Elixir's large system prompts and 47 tool definitions "
+                "are cached across calls, cutting latency and cost on every request.\n\n"
+                "**What you'll notice:**\n"
+                "- Elixir's voice may feel slightly different as the new models settle in. Same soul, new neurons.\n"
+                "- Responses should be more consistent with Elixir's personality across channels.\n"
+                "- Structured answers (war status, member lookups, roster data) should have fewer formatting hiccups.\n\n"
+                "This is **Elixir v4.0 \"New Brain\"** — same Elixir, sharper mind."
+            ),
+            "details": [
+                "Full migration from OpenAI GPT to Anthropic Claude models.",
+                "Claude Sonnet powers chat, content, and promotion workflows.",
+                "Claude Haiku powers observation and signal detection for speed and efficiency.",
+                "Native prompt caching on system prompts and tool definitions reduces latency and cost.",
+                "Tool definitions and message handling rewritten for Anthropic's native API format.",
+                "Telemetry system generalized to provider-neutral naming.",
+            ],
+            "audience": "clan",
+            "capability_area": "intelligence_migration",
+        },
+    },
 ]
 
 

@@ -622,7 +622,7 @@ def _build_status_report():
     runtime = runtime_status.snapshot()
     data = db.get_system_status()
     api = runtime["api"]
-    openai = runtime["openai"]
+    llm = runtime["llm"]
     roster = data.get("roster_summary") or {}
     freshness = data.get("freshness") or {}
     endpoint_bits = []
@@ -632,7 +632,7 @@ def _build_status_report():
     scheduler = _scheduler()
     scheduler_badge = "🟢" if scheduler.running else "🔴"
     discord_badge = "🟢" if runtime["env"]["has_discord_token"] else "🔴"
-    openai_env_badge = "🟢" if runtime["env"]["has_openai_api_key"] else "🔴"
+    claude_env_badge = "🟢" if runtime["env"]["has_claude_api_key"] else "🔴"
     cr_env_badge = "🟢" if runtime["env"]["has_cr_api_key"] else "🔴"
     schema_display = data.get("schema_display") or f"v{data.get('schema_version')}"
     memory = data.get("contextual_memory") or {}
@@ -650,8 +650,8 @@ def _build_status_report():
         f"🎯 Player intel backlog: {data.get('stale_player_intel_targets', 0)} stale target(s)",
         f"🧠 Context memory: {memory.get('total', 0)} total ({memory.get('leader_notes', 0)} leader / {memory.get('inferences', 0)} inference / {memory.get('system_notes', 0)} system) | latest {_fmt_relative(memory.get('latest_memory_at'))} | vec {vec_badge}",
         f"{_status_badge(api.get('last_ok'))} CR API: last {(api.get('last_endpoint') or 'n/a')} ({api.get('last_entity_key') or '-'}) {_fmt_relative(api.get('last_call_at'))}; status {api.get('last_status_code') or 'n/a'}; {'ok' if api.get('last_ok') else 'error' if api.get('last_ok') is not None else 'n/a'}; {api.get('last_duration_ms') or 'n/a'}ms; total {api.get('call_count', 0)} calls / {api.get('error_count', 0)} errors / {api.get('consecutive_error_count', 0)} consecutive failures",
-        f"{_status_badge(openai.get('last_ok'))} OpenAI: last {(openai.get('last_workflow') or 'n/a')} via {(openai.get('last_model') or 'n/a')} {_fmt_relative(openai.get('last_call_at'))}; {'ok' if openai.get('last_ok') else 'error' if openai.get('last_ok') is not None else 'n/a'}; {openai.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {openai.get('last_prompt_tokens') or 'n/a'}/{openai.get('last_completion_tokens') or 'n/a'}/{openai.get('last_total_tokens') or 'n/a'}; total {openai.get('call_count', 0)} calls / {openai.get('error_count', 0)} errors",
-        f"🔐 Env: Discord {discord_badge}, OpenAI {openai_env_badge}, CR {cr_env_badge}",
+        f"{_status_badge(llm.get('last_ok'))} Claude: last {(llm.get('last_workflow') or 'n/a')} via {(llm.get('last_model') or 'n/a')} {_fmt_relative(llm.get('last_call_at'))}; {'ok' if llm.get('last_ok') else 'error' if llm.get('last_ok') is not None else 'n/a'}; {llm.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {llm.get('last_prompt_tokens') or 'n/a'}/{llm.get('last_completion_tokens') or 'n/a'}/{llm.get('last_total_tokens') or 'n/a'}; cache w/r {llm.get('last_cache_creation_tokens') or 'n/a'}/{llm.get('last_cache_read_tokens') or 'n/a'}; total {llm.get('call_count', 0)} calls / {llm.get('error_count', 0)} errors",
+        f"🔐 Env: Discord {discord_badge}, Claude {claude_env_badge}, CR {cr_env_badge}",
     ]
     role_status = _runtime_app()._member_role_grant_status()
     if role_status["configured"]:

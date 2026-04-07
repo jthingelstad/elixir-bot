@@ -791,14 +791,14 @@ def list_channel_messages(channel_id, limit=10, author_type=None, conn=None):
 
 def record_prompt_failure(question, failure_type, failure_stage, *, workflow=None, channel_id=None,
                           channel_name=None, discord_user_id=None, discord_message_id=None,
-                          detail=None, result_preview=None, openai_last_error=None,
-                          openai_last_model=None, openai_last_call_at=None, raw_json=None,
+                          detail=None, result_preview=None, llm_last_error=None,
+                          llm_last_model=None, llm_last_call_at=None, raw_json=None,
                           conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
         cur = conn.execute(
-            "INSERT INTO prompt_failures (recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, openai_last_error, openai_last_model, openai_last_call_at, raw_json) "
+            "INSERT INTO prompt_failures (recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, llm_last_error, llm_last_model, llm_last_call_at, raw_json) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 _utcnow(),
@@ -812,9 +812,9 @@ def record_prompt_failure(question, failure_type, failure_stage, *, workflow=Non
                 question or "",
                 detail,
                 result_preview,
-                openai_last_error,
-                openai_last_model,
-                openai_last_call_at,
+                llm_last_error,
+                llm_last_model,
+                llm_last_call_at,
                 _json_or_none(raw_json),
             ),
         )
@@ -831,13 +831,13 @@ def list_prompt_failures(limit=20, workflow=None, conn=None):
     try:
         if workflow:
             rows = conn.execute(
-                "SELECT failure_id, recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, openai_last_error, openai_last_model, openai_last_call_at, raw_json "
+                "SELECT failure_id, recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, llm_last_error, llm_last_model, llm_last_call_at, raw_json "
                 "FROM prompt_failures WHERE workflow = ? ORDER BY recorded_at DESC, failure_id DESC LIMIT ?",
                 (workflow, limit),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT failure_id, recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, openai_last_error, openai_last_model, openai_last_call_at, raw_json "
+                "SELECT failure_id, recorded_at, workflow, failure_type, failure_stage, channel_id, channel_name, discord_user_id, discord_message_id, question, detail, result_preview, llm_last_error, llm_last_model, llm_last_call_at, raw_json "
                 "FROM prompt_failures ORDER BY recorded_at DESC, failure_id DESC LIMIT ?",
                 (limit,),
             ).fetchall()

@@ -1,9 +1,10 @@
 # Elixir Bot
 
-Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py plus OpenAI model routing:
-- chat workflows default to `gpt-4.1-mini`
-- site/content workflows default to `gpt-5.2`
-- promotion workflows default to `gpt-5.2`
+Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py plus Anthropic Claude model routing:
+- chat workflows default to `claude-sonnet-4-6`
+- site/content workflows default to `claude-sonnet-4-6`
+- promotion workflows default to `claude-sonnet-4-6`
+- observation workflows default to `claude-haiku-4-5-20251001`
 
 `AGENTS.md` is the single source of truth for repository-specific instructions and architecture notes.
 
@@ -27,7 +28,7 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 ## Environment
 
 - Python with venv (`source venv/bin/activate`)
-- Requires `.env` with: DISCORD_TOKEN, OPENAI_API_KEY, CR_API_KEY
+- Requires `.env` with: DISCORD_TOKEN, CLAUDE_API_KEY, CR_API_KEY
 - Non-secret config (channel IDs, clan tag) lives in `prompts/DISCORD.md` and `prompts/CLAN.md`
 - Local start: `venv/bin/python elixir.py`
 - Production process management uses `launchd`; see `SETUP.md`
@@ -204,7 +205,7 @@ Important rules:
   - `reception`: requires `event_type=reception_response` and `content`
   - `roster_bios`: requires `intro` and `members` map
 - Loop telemetry is logged per request: workflow, tool rounds, tools called, denied tools, validation failures, prompt/completion size estimates, and completion latencies.
-- Channel/reception failures are also persisted in `prompt_failures` with the cleaned question text, workflow, failure type/stage, Discord metadata, result preview/raw JSON, and the last OpenAI error/model snapshot.
+- Channel/reception failures are also persisted in `prompt_failures` with the cleaned question text, workflow, failure type/stage, Discord metadata, result preview/raw JSON, and the last LLM error/model snapshot.
 - Reply behavior is enforced in code from channel config:
   - `mention_only` for channels like `#general`, `#war-talk`, and `#leader-lounge`
   - `open_channel` for `#ask-elixir`

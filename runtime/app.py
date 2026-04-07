@@ -487,7 +487,7 @@ def _normalize_prompt_failure_question(question):
 
 def _log_prompt_failure(*, question, workflow, failure_type, failure_stage, channel, author,
                         discord_message_id=None, detail=None, result_preview=None, raw_json=None):
-    openai = runtime_status.snapshot().get("openai") or {}
+    llm = runtime_status.snapshot().get("llm") or {}
     clean_question = _normalize_prompt_failure_question(question)
     try:
         failure_id = db.record_prompt_failure(
@@ -501,13 +501,13 @@ def _log_prompt_failure(*, question, workflow, failure_type, failure_stage, chan
             discord_message_id=discord_message_id,
             detail=detail,
             result_preview=result_preview,
-            openai_last_error=openai.get("last_error"),
-            openai_last_model=openai.get("last_model"),
-            openai_last_call_at=openai.get("last_call_at"),
+            llm_last_error=llm.get("last_error"),
+            llm_last_model=llm.get("last_model"),
+            llm_last_call_at=llm.get("last_call_at"),
             raw_json=raw_json,
         )
         log.warning(
-            "prompt_failure id=%s workflow=%s type=%s stage=%s channel_id=%s author_id=%s question=%r detail=%r openai_model=%s openai_error=%r",
+            "prompt_failure id=%s workflow=%s type=%s stage=%s channel_id=%s author_id=%s question=%r detail=%r llm_model=%s llm_error=%r",
             failure_id,
             workflow,
             failure_type,
@@ -516,8 +516,8 @@ def _log_prompt_failure(*, question, workflow, failure_type, failure_stage, chan
             getattr(author, "id", None),
             _preview_text(clean_question, limit=180),
             _preview_text(detail, limit=240),
-            openai.get("last_model"),
-            _preview_text(openai.get("last_error"), limit=240),
+            llm.get("last_model"),
+            _preview_text(llm.get("last_error"), limit=240),
         )
     except Exception as exc:
         log.error("prompt failure logging error: %s", exc)

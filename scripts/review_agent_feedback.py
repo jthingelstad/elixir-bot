@@ -32,11 +32,11 @@ def _print_review_item(row: dict, *, include_raw: bool) -> None:
         print(f"feedback: {row['feedback_value']}")
     if row.get("detail"):
         print(f"detail: {row['detail']}")
-    if row.get("openai_last_model") or row.get("openai_last_error"):
+    if row.get("llm_last_model") or row.get("llm_last_error"):
         print(
-            f"openai: model={row.get('openai_last_model') or '-'} "
-            f"at={row.get('openai_last_call_at') or '-'} "
-            f"error={row.get('openai_last_error') or '-'}"
+            f"llm: model={row.get('llm_last_model') or '-'} "
+            f"at={row.get('llm_last_call_at') or '-'} "
+            f"error={row.get('llm_last_error') or '-'}"
         )
     if row.get("result_preview"):
         print(f"preview: {row['result_preview']}")

@@ -677,9 +677,9 @@ def test_prompt_failures_are_recorded_and_listed_for_review():
             discord_message_id=555,
             detail="model returned null after tool call",
             result_preview='{"event_type":"channel_response","content":null}',
-            openai_last_error="Error code: 429 rate_limit_exceeded",
-            openai_last_model="gpt-4.1-mini",
-            openai_last_call_at="2026-03-07T19:12:00",
+            llm_last_error="Error code: 429 rate_limit_exceeded",
+            llm_last_model="claude-sonnet-4-6",
+            llm_last_call_at="2026-03-07T19:12:00",
             raw_json={"event_type": "channel_response", "content": None},
             conn=conn,
         )
@@ -691,7 +691,7 @@ def test_prompt_failures_are_recorded_and_listed_for_review():
         assert failures[0]["workflow"] == "clanops"
         assert failures[0]["failure_type"] == "agent_none"
         assert failures[0]["channel_name"] == "clan-ops"
-        assert failures[0]["openai_last_model"] == "gpt-4.1-mini"
+        assert failures[0]["llm_last_model"] == "claude-sonnet-4-6"
         assert json.loads(failures[0]["raw_json"]) == {"event_type": "channel_response", "content": None}
     finally:
         conn.close()

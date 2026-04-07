@@ -36,7 +36,7 @@ Required secrets:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token
-OPENAI_API_KEY=your_openai_api_key
+CLAUDE_API_KEY=your_anthropic_api_key
 CR_API_KEY=your_clash_royale_api_key
 ```
 

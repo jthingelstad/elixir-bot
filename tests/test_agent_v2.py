@@ -148,7 +148,7 @@ def test_build_tool_result_envelope_strips_card_image_fields_from_context():
 
 def test_interactive_workflow_does_not_expose_sensitive_leadership_read_tools():
     interactive_names = {
-        tool["function"]["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]
+        tool["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]
     }
 
     assert "get_promotion_candidates" not in interactive_names
@@ -481,81 +481,82 @@ def test_respond_in_channel_uses_clanops_workflow():
         assert mock_chat.call_args.kwargs["allowed_tools"] == elixir_agent.TOOLSETS_BY_WORKFLOW["clanops"]
 
 
-def test_create_chat_completion_records_openai_telemetry():
-    response = SimpleNamespace(
-        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+def _mock_anthropic_response(text="ok", input_tokens=10, output_tokens=20):
+    """Build a mock Anthropic Messages response."""
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=text)],
+        usage=SimpleNamespace(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=0,
+        ),
     )
+
+
+def test_create_chat_completion_records_llm_telemetry():
+    response = _mock_anthropic_response()
     create = Mock(return_value=response)
     mock_client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=create)
-        )
+        messages=SimpleNamespace(create=create)
     )
     with (
-        patch("elixir_agent._get_client", return_value=mock_client),
-        patch("elixir_agent.runtime_status.record_openai_call") as mock_record,
+        patch("agent.core._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_llm_call") as mock_record,
     ):
         result = elixir_agent._create_chat_completion(
             workflow="interactive",
             messages=[{"role": "user", "content": "status"}],
         )
 
-    assert result is response
+    assert result.choices[0].message.content == "ok"
     mock_record.assert_called_once()
     assert mock_record.call_args.args[0] == "interactive"
     assert mock_record.call_args.kwargs["ok"] is True
     assert mock_record.call_args.kwargs["total_tokens"] == 30
-    assert create.call_args.kwargs["model"] == "gpt-4.1-mini"
+    assert create.call_args.kwargs["model"] == "claude-sonnet-4-6"
 
 
 def test_create_chat_completion_uses_content_model_for_site_workflows():
-    response = SimpleNamespace(
-        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30),
-    )
+    response = _mock_anthropic_response()
     create = Mock(return_value=response)
     mock_client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=create)
-        )
+        messages=SimpleNamespace(create=create)
     )
     with (
-        patch("elixir_agent._get_client", return_value=mock_client),
-        patch("elixir_agent.runtime_status.record_openai_call"),
+        patch("agent.core._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_llm_call"),
     ):
         elixir_agent._create_chat_completion(
             workflow="site_home_message",
             messages=[{"role": "user", "content": "status"}],
         )
 
-    assert create.call_args.kwargs["model"] == "gpt-5.2"
+    assert create.call_args.kwargs["model"] == "claude-sonnet-4-6"
 
 
 def test_create_chat_completion_respects_model_env_overrides():
-    response = SimpleNamespace(
-        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30),
-    )
+    response = _mock_anthropic_response()
     create = Mock(return_value=response)
     mock_client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=create)
-        )
+        messages=SimpleNamespace(create=create)
     )
     with (
-        patch("elixir_agent._get_client", return_value=mock_client),
-        patch("elixir_agent.runtime_status.record_openai_call"),
-        patch.dict(os.environ, {"ELIXIR_CHAT_MODEL": "gpt-4.1-mini-test", "ELIXIR_CONTENT_MODEL": "gpt-5.2-test"}),
+        patch("agent.core._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_llm_call"),
+        patch.dict(os.environ, {"ELIXIR_CHAT_MODEL": "claude-test-chat", "ELIXIR_CONTENT_MODEL": "claude-test-content"}),
     ):
         elixir_agent._create_chat_completion(
             workflow="clanops",
             messages=[{"role": "user", "content": "status"}],
         )
-        assert create.call_args.kwargs["model"] == "gpt-4.1-mini-test"
+        assert create.call_args.kwargs["model"] == "claude-test-chat"
 
         elixir_agent._create_chat_completion(
             workflow="site_members_message",
             messages=[{"role": "user", "content": "status"}],
         )
-        assert create.call_args.kwargs["model"] == "gpt-5.2-test"
+        assert create.call_args.kwargs["model"] == "claude-test-content"
 
 
 def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
@@ -574,7 +575,7 @@ def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
                 "content": "We are in war day.",
             }
         ),
-        tool_calls=[],
+        tool_calls=None,
     )
     responses = [
         SimpleNamespace(choices=[SimpleNamespace(message=first_message)]),
@@ -602,8 +603,8 @@ def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
 
 
 def test_chat_with_tools_returns_error_payload_for_invalid_final_json():
-    bad_message = SimpleNamespace(role="assistant", content='{"event_type":"channel_response"', tool_calls=[])
-    repair_message = SimpleNamespace(role="assistant", content='{"event_type":"channel_response"', tool_calls=[])
+    bad_message = SimpleNamespace(role="assistant", content='{"event_type":"channel_response"', tool_calls=None)
+    repair_message = SimpleNamespace(role="assistant", content='{"event_type":"channel_response"', tool_calls=None)
     responses = [
         SimpleNamespace(choices=[SimpleNamespace(message=bad_message)]),
         SimpleNamespace(choices=[SimpleNamespace(message=repair_message)]),

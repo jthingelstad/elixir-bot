@@ -144,41 +144,43 @@ def _validate_response(workflow, parsed_obj, response_schema=None):
 
 
 def _tool_names(tool_defs):
-    return {t["function"]["name"] for t in (tool_defs or [])}
+    return {t["name"] for t in (tool_defs or [])}
 
 
 def _normalize_message(message):
+    """Normalize an LLM response message into a dict for the messages array.
+
+    Produces Anthropic-native format:
+    - Plain text assistant: {"role": "assistant", "content": "text"}
+    - Tool-calling assistant: {"role": "assistant", "content": [blocks...]}
+    """
     if isinstance(message, dict):
         return message
-    if hasattr(message, "model_dump"):
-        dumped = message.model_dump(exclude_none=True)
-        if isinstance(dumped, dict):
-            return dumped
 
-    normalized = {
-        "role": getattr(message, "role", None),
-        "content": getattr(message, "content", None),
-    }
+    role = getattr(message, "role", "assistant")
+    content = getattr(message, "content", None)
     tool_calls = getattr(message, "tool_calls", None)
+
     if tool_calls:
-        normalized_calls = []
-        for tool_call in tool_calls:
-            if hasattr(tool_call, "model_dump"):
-                normalized_calls.append(tool_call.model_dump(exclude_none=True))
-                continue
-            fn = getattr(tool_call, "function", None)
-            normalized_calls.append(
-                {
-                    "id": getattr(tool_call, "id", None),
-                    "type": getattr(tool_call, "type", "function"),
-                    "function": {
-                        "name": getattr(fn, "name", None),
-                        "arguments": getattr(fn, "arguments", None),
-                    },
-                }
-            )
-        normalized["tool_calls"] = normalized_calls
-    return {key: value for key, value in normalized.items() if value is not None}
+        blocks = []
+        if content:
+            blocks.append({"type": "text", "text": content})
+        for tc in tool_calls:
+            fn = getattr(tc, "function", None)
+            args_str = getattr(fn, "arguments", "{}") if fn else "{}"
+            try:
+                args = json.loads(args_str) if isinstance(args_str, str) else args_str
+            except Exception:
+                args = {}
+            blocks.append({
+                "type": "tool_use",
+                "id": getattr(tc, "id", ""),
+                "name": getattr(fn, "name", "") if fn else "",
+                "input": args,
+            })
+        return {"role": role, "content": blocks}
+
+    return {"role": role, "content": content or ""}
 
 
 def _estimate_message_chars(messages):
@@ -324,9 +326,9 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         try:
             resp = _create_completion(messages)
         except Exception as e:
-            log.error("OpenAI API error: %s", e)
+            log.error("LLM API error: %s", e)
             if return_errors:
-                return _failure_payload("openai_api_error", e, phase="initial_completion")
+                return _failure_payload("llm_api_error", e, phase="initial_completion")
             return None
 
         choice = resp.choices[0]
@@ -338,7 +340,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             if isinstance(parsed, tuple) and parsed[0] == "__REPAIR__":
                 messages.append({"role": "assistant", "content": choice.message.content or ""})
                 messages.append({
-                    "role": "system",
+                    "role": "user",
                     "content": (
                         "Your previous response was invalid for this workflow. "
                         f"{parsed[1]} Return JSON only that satisfies the required schema."
@@ -347,9 +349,9 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                 try:
                     repair_resp = _create_completion(messages)
                 except Exception as e:
-                    log.error("OpenAI API repair error: %s", e)
+                    log.error("LLM API repair error: %s", e)
                     if return_errors:
-                        return _failure_payload("openai_api_error", e, phase="repair_completion")
+                        return _failure_payload("llm_api_error", e, phase="repair_completion")
                     return None
 
                 repaired = repair_resp.choices[0].message.content or "null"
@@ -367,6 +369,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
 
         # Process tool calls
         messages.append(_normalize_message(choice.message))
+        tool_result_blocks = []
         for tool_call in choice.message.tool_calls:
             fn_name = tool_call.function.name
             try:
@@ -406,11 +409,12 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                         fn_name,
                         _execute_tool(fn_name, fn_args),
                     )
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
+            tool_result_blocks.append({
+                "type": "tool_result",
+                "tool_use_id": tool_call.id,
                 "content": result,
             })
+        messages.append({"role": "user", "content": tool_result_blocks})
 
     # If we hit max rounds, try to get a final answer without tools
     log.warning("Hit max tool rounds (%d), requesting final answer", MAX_TOOL_ROUNDS)
@@ -429,7 +433,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     except Exception as e:
         log.error("Final answer error: %s", e)
         if return_errors:
-            return _failure_payload("openai_api_error", e, phase="final_completion")
+            return _failure_payload("llm_api_error", e, phase="final_completion")
         return None
 
 

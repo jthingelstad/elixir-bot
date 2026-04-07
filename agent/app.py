@@ -1,8 +1,5 @@
 """agent.app — LLM-powered observation and response engine for Elixir."""
 
-import json
-import time
-
 import cr_api
 import db
 import prompts
@@ -18,49 +15,12 @@ from agent.core import (
     TOOL_RESULT_MAX_CHARS,
     TOOL_RESULT_MAX_ITEMS,
     _build_system_prompt,
+    _create_chat_completion,
     _get_client,
     _model_for_workflow,
     log,
     runtime_status,
 )
-
-
-def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, max_tokens=800, timeout=60, tools=None, tool_choice=None):
-    started = time.perf_counter()
-    selected_model = _model_for_workflow(workflow, model=model)
-    kwargs = {
-        "model": selected_model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "timeout": timeout,
-    }
-    if tools:
-        kwargs["tools"] = tools
-    if tool_choice:
-        kwargs["tool_choice"] = tool_choice
-    try:
-        resp = _get_client().chat.completions.create(**kwargs)
-        usage = getattr(resp, "usage", None)
-        runtime_status.record_openai_call(
-            workflow,
-            ok=True,
-            model=selected_model,
-            duration_ms=round((time.perf_counter() - started) * 1000, 2),
-            prompt_tokens=getattr(usage, "prompt_tokens", None),
-            completion_tokens=getattr(usage, "completion_tokens", None),
-            total_tokens=getattr(usage, "total_tokens", None),
-        )
-        return resp
-    except Exception as exc:
-        runtime_status.record_openai_call(
-            workflow,
-            ok=False,
-            model=selected_model,
-            error=exc,
-            duration_ms=round((time.perf_counter() - started) * 1000, 2),
-        )
-        raise
 
 
 def __export_public(module):
