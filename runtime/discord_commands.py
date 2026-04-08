@@ -610,17 +610,40 @@ def register_elixir_app_commands(bot) -> None:
 
         await send_interaction_text(interaction, "\n".join(lines), ephemeral=True)
 
-    # -- Quiz commands (member-facing, restricted to #card-quiz) -------------
+    elixir_commands.add_command(tournament_commands)
+    elixir_commands.add_command(system_commands)
+    elixir_commands.add_command(clan_commands)
+    elixir_commands.add_command(member_commands)
+    elixir_commands.add_command(memory_commands)
+    elixir_commands.add_command(signal_commands)
+    elixir_commands.add_command(activity_commands)
+    elixir_commands.add_command(integration_commands)
 
-    quiz_commands = app_commands.Group(name="quiz", description="Card quiz commands")
+    try:
+        if app.APP_GUILD is not None:
+            bot.tree.add_command(elixir_commands, guild=app.APP_GUILD)
+        else:
+            bot.tree.add_command(elixir_commands)
+    except app_commands.CommandAlreadyRegistered:
+        app.log.info("/elixir slash commands already registered")
+    except Exception as exc:
+        app.log.error("Slash command registration failed: %s", exc)
+        raise
 
+    # -- /quiz: top-level, visible to all members ----------------------------
+    _register_quiz_commands(bot, app)
+
+
+def _register_quiz_commands(bot, app) -> None:
+    """Register /quiz as a standalone top-level command group (visible to everyone)."""
     from modules.card_training.views import CARD_TRAINING_CHANNEL_ID
+
+    quiz_commands = app_commands.Group(name="quiz", description="Card knowledge quiz")
 
     def _is_card_training_channel(interaction: discord.Interaction) -> bool:
         return CARD_TRAINING_CHANNEL_ID != 0 and interaction.channel_id == CARD_TRAINING_CHANNEL_ID
 
     async def _require_quiz_channel(interaction: discord.Interaction) -> bool:
-        """Check that the interaction is in the card-quiz channel. Sends an error and returns False if not."""
         if _is_card_training_channel(interaction):
             return True
         msg = (
@@ -699,23 +722,13 @@ def register_elixir_app_commands(bot) -> None:
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    elixir_commands.add_command(quiz_commands)
-    elixir_commands.add_command(tournament_commands)
-    elixir_commands.add_command(system_commands)
-    elixir_commands.add_command(clan_commands)
-    elixir_commands.add_command(member_commands)
-    elixir_commands.add_command(memory_commands)
-    elixir_commands.add_command(signal_commands)
-    elixir_commands.add_command(activity_commands)
-    elixir_commands.add_command(integration_commands)
-
     try:
         if app.APP_GUILD is not None:
-            bot.tree.add_command(elixir_commands, guild=app.APP_GUILD)
+            bot.tree.add_command(quiz_commands, guild=app.APP_GUILD)
         else:
-            bot.tree.add_command(elixir_commands)
+            bot.tree.add_command(quiz_commands)
     except app_commands.CommandAlreadyRegistered:
-        app.log.info("/elixir slash commands already registered")
+        app.log.info("/quiz slash commands already registered")
     except Exception as exc:
-        app.log.error("Slash command registration failed: %s", exc)
+        app.log.error("/quiz command registration failed: %s", exc)
         raise
