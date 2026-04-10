@@ -133,6 +133,20 @@ async def _mark_signal_group_completed(signals):
             await asyncio.to_thread(db.mark_system_signal_announced, signal["signal_key"])
 
 
+async def _post_signal_memory(body, outcome, signals):
+    """Fire-and-forget: extract inference facts from signal-driven posts."""
+    try:
+        from agent.memory_tasks import extract_inference_facts, save_inference_facts
+
+        context_label = f"signal:{outcome.get('intent', 'unknown')} in #{outcome.get('target_channel_key', 'unknown')}"
+        facts = await asyncio.to_thread(extract_inference_facts, body, context_label)
+        if facts:
+            channel_id = outcome.get("target_channel_id")
+            await asyncio.to_thread(save_inference_facts, facts, channel_id)
+    except Exception:
+        log.debug("_post_signal_memory failed", exc_info=True)
+
+
 async def _deliver_signal_outcome(outcome, signals, clan, war):
     existing = await asyncio.to_thread(
         db.get_signal_outcome,
@@ -275,6 +289,9 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         )
         if channel_config["subagent_key"] == "river-race" and _signal_group_needs_recap_memory(signals):
             await asyncio.to_thread(_store_recap_memories_for_signal_batch, signals, posts, channel_id)
+        asyncio.get_event_loop().create_task(
+            _post_signal_memory(body, outcome, signals)
+        )
         return True
     except Exception as exc:
         await asyncio.to_thread(

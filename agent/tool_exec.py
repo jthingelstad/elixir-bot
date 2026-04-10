@@ -360,6 +360,41 @@ def _execute_tool(name, arguments):
                 note=arguments["note"],
             )
             result = {"success": True}
+        elif name == "save_clan_memory":
+            from memory_store import attach_tags, create_memory
+            from storage.contextual_memory import upsert_member_note_memory
+
+            title = arguments["title"]
+            body = arguments["body"]
+            tags = arguments.get("tags") or []
+            member_tag_input = arguments.get("member_tag")
+
+            if member_tag_input:
+                resolved_tag = _resolve_member_tag(member_tag_input)
+                memory = upsert_member_note_memory(
+                    member_tag=resolved_tag,
+                    member_label=member_tag_input,
+                    note=body,
+                    created_by="leader:elixir-tool",
+                    metadata={"title": title, "tool": "save_clan_memory"},
+                )
+                if memory and tags:
+                    attach_tags(memory["memory_id"], tags, actor="leader:elixir-tool")
+                result = {"success": True, "memory_id": memory["memory_id"] if memory else None, "type": "member_note"}
+            else:
+                memory = create_memory(
+                    title=title,
+                    body=body,
+                    summary=body[:220],
+                    source_type="leader_note",
+                    is_inference=False,
+                    confidence=1.0,
+                    created_by="leader:elixir-tool",
+                    scope="leadership",
+                )
+                if tags:
+                    attach_tags(memory["memory_id"], tags, actor="leader:elixir-tool")
+                result = {"success": True, "memory_id": memory["memory_id"], "type": "leader_note"}
         else:
             result = {"error": f"Unknown tool: {name}"}
 

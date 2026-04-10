@@ -479,6 +479,66 @@ def save_message(scope, author_type, content, summary=None, channel_id=None, cha
                 (thread_id, *ids_to_keep),
             )
         conn.commit()
+        return message_id
+    finally:
+        if close:
+            conn.close()
+
+
+def update_message_summary(message_id, summary, conn=None):
+    """Retroactively update a message's summary and propagate to memory stores."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row = conn.execute(
+            "SELECT message_id, author_type, discord_user_id, channel_id "
+            "FROM messages WHERE message_id = ?",
+            (message_id,),
+        ).fetchone()
+        if not row:
+            return
+        conn.execute(
+            "UPDATE messages SET summary = ? WHERE message_id = ?",
+            (summary, message_id),
+        )
+        author_type = row["author_type"]
+        discord_user_id = row["discord_user_id"]
+        channel_id = row["channel_id"]
+
+        # Propagate to memory_facts (user summary)
+        if author_type == "user" and discord_user_id:
+            save_memory_fact(
+                "discord_user",
+                str(discord_user_id),
+                "last_user_summary",
+                summary,
+                confidence=0.8,
+                source_message_id=message_id,
+                conn=conn,
+            )
+
+        # Propagate to channel_state (assistant summary)
+        if author_type == "assistant" and channel_id:
+            conn.execute(
+                "UPDATE channel_state SET last_summary = ? WHERE channel_id = ?",
+                (summary, str(channel_id)),
+            )
+
+        # Propagate to the memory_episodes entry linked to this message
+        msg_id_pattern = f"%{message_id}%"
+        episode_row = conn.execute(
+            "SELECT episode_id FROM memory_episodes "
+            "WHERE source_message_ids_json LIKE ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (msg_id_pattern,),
+        ).fetchone()
+        if episode_row:
+            conn.execute(
+                "UPDATE memory_episodes SET summary = ? WHERE episode_id = ?",
+                (summary, episode_row["episode_id"]),
+            )
+
+        conn.commit()
     finally:
         if close:
             conn.close()
