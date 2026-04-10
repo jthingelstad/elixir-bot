@@ -460,7 +460,7 @@ def search_memories(query: str, *, viewer_scope: str = "leadership", include_sys
             if not memory:
                 continue
             score = parts["rrf"]
-            created = datetime.strptime(memory["created_at"], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+            created = datetime.fromisoformat(memory["created_at"].replace("Z", "+00:00"))
             age_days = max(0.0, (now - created).total_seconds() / 86400.0)
             recency_boost = 1.0 + max(0.0, (30 - age_days) / 300.0)
             confidence_penalty = 1.0 if not memory["is_inference"] else max(0.4, float(memory["confidence"]))
