@@ -842,4 +842,31 @@ TOOLS = [
             "required": ["member_tag", "note"],
         },
     },
+    {
+        "name": "save_clan_memory",
+        "description": "Save a durable clan memory or leader note that persists across sessions. Use when leadership asks to remember, record, or note something about a member or the clan. Also use proactively when a significant decision is made during conversation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Short title for the memory (e.g. 'raquaza is war leader', 'Free Pass Royale reward policy')",
+                },
+                "body": {
+                    "type": "string",
+                    "description": "Full text of what to remember",
+                },
+                "member_tag": {
+                    "type": "string",
+                    "description": "Player tag, name, or Discord handle if this memory is about a specific member. Optional.",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Categorization tags (e.g. ['decision', 'war', 'member-note'])",
+                },
+            },
+            "required": ["title", "body"],
+        },
+    },
 ]

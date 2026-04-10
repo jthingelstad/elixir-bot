@@ -3,10 +3,45 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import cr_api
 import db
 import elixir_agent
+
+_log = logging.getLogger("elixir.channel_router")
+
+
+async def _post_conversation_memory(
+    user_message_id, assistant_message_id,
+    user_content, assistant_content,
+    channel_id, discord_user_id, workflow, author_name,
+):
+    """Fire-and-forget: distill summaries and extract inference facts after a turn."""
+    try:
+        from agent.memory_tasks import distill_summary, extract_inference_facts, save_inference_facts
+
+        # Step 1: Distill real summaries for both messages
+        if user_message_id and user_content:
+            user_summary = await asyncio.to_thread(distill_summary, user_content)
+            if user_summary:
+                await asyncio.to_thread(db.update_message_summary, user_message_id, user_summary)
+
+        if assistant_message_id and assistant_content:
+            assistant_summary = await asyncio.to_thread(distill_summary, assistant_content)
+            if assistant_summary:
+                await asyncio.to_thread(db.update_message_summary, assistant_message_id, assistant_summary)
+
+        # Step 2: Extract inference facts (clanops and interactive only)
+        if workflow in {"clanops", "interactive"} and user_content and assistant_content:
+            combined = f"User ({author_name or 'unknown'}): {user_content}\n\nElixir: {assistant_content}"
+            facts = await asyncio.to_thread(
+                extract_inference_facts, combined, f"{workflow} conversation",
+            )
+            if facts:
+                await asyncio.to_thread(save_inference_facts, facts, channel_id)
+    except Exception:
+        _log.debug("_post_conversation_memory failed", exc_info=True)
 
 
 def _agent_failure_payload(result):
@@ -494,7 +529,7 @@ async def route_message(message):
                     channel_id=message.channel.id,
                     viewer_scope=channel_config.get("memory_scope") or "public",
                 )
-                await asyncio.to_thread(
+                _reception_user_msg_id = await asyncio.to_thread(
                     db.save_message,
                     scope,
                     "user",
@@ -573,8 +608,9 @@ async def route_message(message):
                     await message.reply("Having a hiccup. Try again in a sec.")
                     return
                 sent_messages = await app._reply_text(message, content)
+                _reception_asst_msg_id = None
                 try:
-                    await asyncio.to_thread(
+                    _reception_asst_msg_id = await asyncio.to_thread(
                         db.save_message,
                         scope,
                         "assistant",
@@ -588,6 +624,14 @@ async def route_message(message):
                     )
                 except Exception as exc:
                     app.log.error("reception reply save error: %s", exc, exc_info=True)
+                asyncio.get_event_loop().create_task(
+                    _post_conversation_memory(
+                        _reception_user_msg_id, _reception_asst_msg_id,
+                        question, _stored_assistant_content(content),
+                        message.channel.id, message.author.id,
+                        "reception", message.author.display_name,
+                    )
+                )
             except Exception as e:
                 app.log.error("reception error: %s", e)
                 app._log_prompt_failure(
@@ -631,7 +675,7 @@ async def route_message(message):
                     viewer_scope=channel_config.get("memory_scope") or "public",
                 )
 
-                await asyncio.to_thread(
+                _channel_user_msg_id = await asyncio.to_thread(
                     db.save_message,
                     conversation_scope,
                     "user",
@@ -727,8 +771,9 @@ async def route_message(message):
                     await app._share_channel_result(result, workflow)
                 except Exception as exc:
                     app.log.error("%s channel share error: %s", workflow, exc, exc_info=True)
+                _channel_asst_msg_id = None
                 try:
-                    await asyncio.to_thread(
+                    _channel_asst_msg_id = await asyncio.to_thread(
                         db.save_message,
                         conversation_scope,
                         "assistant",
@@ -745,6 +790,14 @@ async def route_message(message):
                     )
                 except Exception as exc:
                     app.log.error("%s channel reply save error: %s", workflow, exc, exc_info=True)
+                asyncio.get_event_loop().create_task(
+                    _post_conversation_memory(
+                        _channel_user_msg_id, _channel_asst_msg_id,
+                        question, _stored_assistant_content(content),
+                        message.channel.id, message.author.id,
+                        workflow, message.author.display_name,
+                    )
+                )
             except Exception as e:
                 app.log.error("%s channel error: %s", workflow, e)
                 app._log_prompt_failure(

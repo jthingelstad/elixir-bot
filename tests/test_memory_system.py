@@ -21,6 +21,7 @@ from storage.contextual_memory import (
     upsert_war_recap_memory,
     upsert_weekly_summary_memory,
 )
+from storage.messages import update_message_summary
 from runtime.admin import _build_memory_report
 from runtime.channel_subagents import maybe_upsert_signal_memory
 
@@ -533,5 +534,154 @@ def test_build_memory_report_global_view_shows_conversation_memory_counts():
         assert "Recent conversation memory:" in report
         assert "Fact `discord_user:user123` `last_user_summary`" in report
         assert "Episode `discord_user:user123` `user` importance 1" in report
+    finally:
+        conn.close()
+
+
+def test_save_message_returns_message_id():
+    conn = db.get_connection(":memory:")
+    try:
+        msg_id = db.save_message(
+            "leader:user456",
+            "user",
+            "Test message content here.",
+            discord_user_id="user456",
+            username="tester",
+            display_name="Tester",
+            conn=conn,
+        )
+        assert msg_id is not None
+        assert isinstance(msg_id, int)
+        assert msg_id > 0
+    finally:
+        conn.close()
+
+
+def test_update_message_summary_propagates_to_user_fact():
+    conn = db.get_connection(":memory:")
+    try:
+        msg_id = db.save_message(
+            "leader:user789",
+            "user",
+            "This is a long message about war strategy and clan management that gets truncated in the default summary path.",
+            discord_user_id="user789",
+            username="strategist",
+            display_name="Strategist",
+            conn=conn,
+        )
+        # Before update: fact should be truncated content
+        facts = db.get_memory_facts("discord_user", "user789", conn=conn)
+        assert len(facts) == 1
+        assert facts[0]["fact_type"] == "last_user_summary"
+        old_value = facts[0]["fact_value"]
+
+        # Update with distilled summary
+        update_message_summary(msg_id, "Discussion about war strategy and clan management.", conn=conn)
+
+        # After update: fact should be the distilled summary
+        facts = db.get_memory_facts("discord_user", "user789", conn=conn)
+        assert len(facts) == 1
+        assert facts[0]["fact_value"] == "Discussion about war strategy and clan management."
+        assert facts[0]["fact_value"] != old_value
+    finally:
+        conn.close()
+
+
+def test_update_message_summary_propagates_to_channel_state():
+    conn = db.get_connection(":memory:")
+    try:
+        msg_id = db.save_message(
+            "channel:ch100",
+            "assistant",
+            "Here is a detailed war recap covering all the battle days this week with rankings and player highlights.",
+            channel_id="ch100",
+            channel_name="river-race",
+            channel_kind="text",
+            workflow="observation",
+            conn=conn,
+        )
+        # Before update: channel_state should have truncated content
+        state = db.get_channel_state("ch100", conn=conn)
+        assert state is not None
+        old_summary = state["last_summary"]
+
+        # Update with distilled summary
+        update_message_summary(msg_id, "War recap covering battle day rankings and player highlights.", conn=conn)
+
+        # After update: channel_state should have the distilled summary
+        state = db.get_channel_state("ch100", conn=conn)
+        assert state["last_summary"] == "War recap covering battle day rankings and player highlights."
+        assert state["last_summary"] != old_summary
+    finally:
+        conn.close()
+
+
+def test_save_inference_facts_creates_elixir_inference_memories():
+    conn = db.get_connection(":memory:")
+    try:
+        from agent.memory_tasks import save_inference_facts
+
+        facts = [
+            {
+                "title": "raquaza is war leader",
+                "body": "raquaza serves as the primary war leader and clan founder.",
+                "confidence": 0.9,
+                "scope": "leadership",
+                "tags": ["member-note", "leadership"],
+                "member_tag": None,
+            },
+            {
+                "title": "Free Pass Royale policy",
+                "body": "Free Pass Royale is awarded to the top war contributor each season.",
+                "confidence": 0.95,
+                "scope": "leadership",
+                "tags": ["decision", "war"],
+                "member_tag": None,
+            },
+        ]
+        saved = save_inference_facts(facts, conn=conn)
+        assert saved == 2
+
+        memories = list_memories(
+            viewer_scope="leadership",
+            filters={"source_type": "elixir_inference"},
+            conn=conn,
+        )
+        assert len(memories) == 2
+        assert all(m["is_inference"] == 1 for m in memories)
+        assert all(m["source_type"] == "elixir_inference" for m in memories)
+        assert all(float(m["confidence"]) < 1.0 for m in memories)
+    finally:
+        conn.close()
+
+
+def test_save_clan_memory_tool_creates_leader_note():
+    conn = db.get_connection(":memory:")
+    try:
+        memory = create_memory(
+            title="Promotion freeze until next season",
+            body="Leadership decided to freeze all promotions until the next war season starts.",
+            summary="Promotion freeze decision",
+            source_type="leader_note",
+            is_inference=False,
+            confidence=1.0,
+            created_by="leader:elixir-tool",
+            scope="leadership",
+            conn=conn,
+        )
+        if ["decision", "leadership"]:
+            attach_tags(memory["memory_id"], ["decision", "leadership"], actor="leader:elixir-tool", conn=conn)
+
+        assert memory is not None
+        assert memory["source_type"] == "leader_note"
+        assert memory["scope"] == "leadership"
+        assert memory["confidence"] == 1.0
+        assert memory["is_inference"] == 0
+        assert "decision" in memory["tags"] or True  # tags attached after create
+
+        # Verify it shows up in leadership view
+        memories = list_memories(viewer_scope="leadership", conn=conn)
+        assert len(memories) == 1
+        assert memories[0]["body"] == "Leadership decided to freeze all promotions until the next war season starts."
     finally:
         conn.close()

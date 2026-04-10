@@ -3,7 +3,7 @@ from agent.tool_defs import TOOLS
 TOOL_DEFINITIONS = []
 for _tool in TOOLS:
     _name = _tool["name"]
-    _side_effect = "write" if _name.startswith("set_member_") else "read"
+    _side_effect = "write" if (_name.startswith("set_member_") or _name == "save_clan_memory") else "read"
     TOOL_DEFINITIONS.append({
         "tool": _tool,
         "name": _name,
