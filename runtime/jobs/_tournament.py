@@ -14,7 +14,7 @@ import db
 import elixir_agent
 from runtime import app as _app
 from runtime.app import bot, log
-from runtime.helpers import _channel_scope, _get_singleton_channel_id
+from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
 from runtime.jobs._signals import _deliver_signal_group, _post_to_elixir
 
@@ -127,9 +127,7 @@ async def _tournament_recap(tournament_tag: str):
             _channel_scope(channel),
             "assistant",
             full_post,
-            channel_id=channel.id,
-            channel_name=getattr(channel, "name", None),
-            channel_kind=str(channel.type),
+            **_channel_msg_kwargs(channel),
             workflow="channel_update",
             event_type="tournament_recap",
         )
@@ -158,7 +156,7 @@ def start_tournament_watch():
     try:
         _app.scheduler.remove_job(_TOURNAMENT_JOB_ID)
     except Exception:
-        pass
+        pass  # job may not exist yet
 
     def _job_runner():
         bot.loop.call_soon_threadsafe(
@@ -182,4 +180,4 @@ def stop_tournament_watch():
         _app.scheduler.remove_job(_TOURNAMENT_JOB_ID)
         log.info("Tournament watch stopped")
     except Exception:
-        pass
+        pass  # job may not exist

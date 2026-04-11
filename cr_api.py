@@ -24,6 +24,10 @@ def _headers():
     return {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json"}
 
 
+def _elapsed_ms(started):
+    return round((time.perf_counter() - started) * 1000, 2)
+
+
 def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
     url = f"{API_BASE}{endpoint_path}"
     last_exc = None
@@ -33,52 +37,47 @@ def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
         started = time.perf_counter()
         try:
             response = requests.get(url, headers=_headers(), timeout=10)
-            duration_ms = round((time.perf_counter() - started) * 1000, 2)
             response.raise_for_status()
             runtime_status.record_api_call(
                 endpoint_name,
                 entity_key,
                 ok=True,
                 status_code=response.status_code,
-                duration_ms=duration_ms,
+                duration_ms=_elapsed_ms(started),
             )
             return response.json()
         except requests.ConnectionError as exc:
             last_exc = exc
-            duration_ms = round((time.perf_counter() - started) * 1000, 2)
             log.warning("CR API connection error on %s (attempt %d/%d): %s",
                         endpoint_name, attempt + 1, _MAX_RETRIES + 1, exc)
             runtime_status.record_api_call(
                 endpoint_name, entity_key, ok=False,
-                status_code=None, error=exc, duration_ms=duration_ms,
+                status_code=None, error=exc, duration_ms=_elapsed_ms(started),
             )
             continue
         except requests.Timeout as exc:
             last_exc = exc
-            duration_ms = round((time.perf_counter() - started) * 1000, 2)
             log.warning("CR API timeout on %s (attempt %d/%d)",
                         endpoint_name, attempt + 1, _MAX_RETRIES + 1)
             runtime_status.record_api_call(
                 endpoint_name, entity_key, ok=False,
-                status_code=None, error=exc, duration_ms=duration_ms,
+                status_code=None, error=exc, duration_ms=_elapsed_ms(started),
             )
             continue
         except requests.HTTPError as exc:
-            duration_ms = round((time.perf_counter() - started) * 1000, 2)
             log.warning("CR API HTTP %s on %s: %s",
                         response.status_code, endpoint_name, exc)
             runtime_status.record_api_call(
                 endpoint_name, entity_key, ok=False,
-                status_code=response.status_code, error=exc, duration_ms=duration_ms,
+                status_code=response.status_code, error=exc, duration_ms=_elapsed_ms(started),
             )
             raise
         except (requests.RequestException, ValueError) as exc:
-            duration_ms = round((time.perf_counter() - started) * 1000, 2)
             log.warning("CR API error on %s: %s", endpoint_name, exc)
             runtime_status.record_api_call(
                 endpoint_name, entity_key, ok=False,
                 status_code=getattr(locals().get("response"), "status_code", None),
-                error=exc, duration_ms=duration_ms,
+                error=exc, duration_ms=_elapsed_ms(started),
             )
             raise
     raise last_exc

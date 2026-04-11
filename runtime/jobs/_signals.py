@@ -21,7 +21,6 @@ from datetime import datetime, timezone
 
 log = logging.getLogger("elixir")
 
-import discord
 import db
 import elixir_agent
 import prompts
@@ -215,7 +214,7 @@ def _build_player_insight_context(tag):
             if form.get("current_streak") and form.get("current_streak_type"):
                 lines.append(f"current_streak: {form['current_streak']}{form['current_streak_type']}")
     except Exception:
-        log.debug("compare_member_form failed for %s", tag, exc_info=True)
+        log.warning("compare_member_form failed for %s", tag, exc_info=True)
     try:
         trend = db.compare_member_trend_windows(tag, window_days=7)
         if trend:
@@ -232,7 +231,7 @@ def _build_player_insight_context(tag):
                 prev_label = f" (prior: {pa.get('battles', 0)})" if pa.get("battles") else ""
                 lines.append(f"battles_this_week: {ca['battles']}{prev_label}")
     except Exception:
-        log.debug("compare_member_trend_windows failed for %s", tag, exc_info=True)
+        log.warning("compare_member_trend_windows failed for %s", tag, exc_info=True)
     return lines
 
 
@@ -493,8 +492,10 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         await asyncio.to_thread(store_observation_facts, signals, channel_id)
         if channel_config["subagent_key"] == "river-race" and _signal_group_needs_recap_memory(signals):
             await asyncio.to_thread(_store_recap_memories_for_signal_batch, signals, posts, channel_id)
-        asyncio.get_event_loop().create_task(
-            _post_signal_memory(body, outcome, signals)
+        from runtime.helpers._common import _safe_create_task
+        _safe_create_task(
+            _post_signal_memory(body, outcome, signals),
+            name="signal_memory",
         )
         return True
     except Exception as exc:

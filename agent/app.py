@@ -1,8 +1,8 @@
 """agent.app — LLM-powered observation and response engine for Elixir."""
 
-import cr_api
-import db
-import prompts
+import cr_api  # re-exported; accessed by tool_exec via _app.cr_api
+import db  # re-exported; accessed by tool_exec via _app.db
+import prompts  # re-exported; accessed by agent submodules via _app.prompts
 from agent.core import (
     BUILD_HASH,
     CLANOPS_WRITE_TOOLS_ENABLED,

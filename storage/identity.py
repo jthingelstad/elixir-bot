@@ -19,10 +19,6 @@ from db import (
 _DISCORD_MENTION_RE = re.compile(r"^<@!?(\d+)>$")
 
 
-def _is_real_discord_user_id(discord_user_id) -> bool:
-    return str(discord_user_id or "").isdigit()
-
-
 def _upsert_discord_user_record(conn, discord_user_id, *, username=None, global_name=None, display_name=None):
     now = _utcnow()
     row = conn.execute("SELECT discord_user_id FROM discord_users WHERE discord_user_id = ?", (str(discord_user_id),)).fetchone()
@@ -248,25 +244,12 @@ def get_linked_member_for_discord_user(discord_user_id: str | int, conn: Optiona
 
 
 @managed_connection
-def format_member_reference(member_or_tag: str | dict, style: str = "plain_name", conn: Optional[sqlite3.Connection] = None) -> str:
+def format_member_reference(member_or_tag: str | dict, conn: Optional[sqlite3.Connection] = None, **_kwargs) -> str:
+    """Return a plain display name for a member tag or identity dict."""
     member = member_or_tag if isinstance(member_or_tag, dict) else get_member_identity(member_or_tag, conn=conn)
     if not member:
         return str(member_or_tag)
-    name = member.get("member_name") or member.get("current_name") or member.get("player_tag")
-    user_id = member.get("discord_user_id")
-    username = member.get("discord_username") or member.get("discord_display_name")
-    if style == "name_with_mention" and _is_real_discord_user_id(user_id):
-        return f"{name} (<@{user_id}>)"
-    if style == "name_with_handle":
-        if _is_real_discord_user_id(user_id):
-            return f"{name} (<@{user_id}>)"
-        if username:
-            handle = username if str(username).startswith("@") else f"@{username}"
-            return f"{name} ({handle})"
-    if style == "name_with_mention" and username:
-        handle = username if str(username).startswith("@") else f"@{username}"
-        return f"{name} ({handle})"
-    return name
+    return member.get("member_name") or member.get("current_name") or member.get("player_tag")
 
 
 @managed_connection

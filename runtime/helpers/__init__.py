@@ -2,8 +2,10 @@
 
 from runtime.helpers._common import (  # noqa: F401
     BOT_ROLE_ID, CHICAGO, LEADER_ROLE_ID, bot, log, scheduler,
+    DISCORD_MAX_MESSAGE_LEN, DISCORD_CHUNK_SIZE,
     _runtime_app, _bot, _scheduler, _log, _chicago,
     _leader_role_id, _bot_role_id,
+    _chunk_for_discord, _safe_create_task,
     _fmt_iso_short, _fmt_relative, _fmt_bytes, _fmt_num, _status_badge,
     _member_label, _join_member_bits, _canon_tag,
     _format_relative_join_age, _recent_join_display_rows,
@@ -27,7 +29,9 @@ from runtime.helpers._requests import (  # noqa: F401
     _is_member_deck_request, _is_help_request, _fallback_channel_response,
 )
 from runtime.helpers._channels import (  # noqa: F401
-    _channel_scope, _channel_conversation_scope, _strip_bot_mentions,
+    _channel_scope, _channel_conversation_scope,
+    _channel_msg_kwargs, _author_msg_kwargs,
+    _strip_bot_mentions,
     _is_bot_mentioned, _leading_bot_mention_pattern, _get_channel_behavior,
     _get_singleton_channel, _get_singleton_channel_id, _channel_reply_target_name,
     _reply_text, _share_channel_result,

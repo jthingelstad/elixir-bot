@@ -76,7 +76,7 @@ def _war_status_prompt_context():
     return "\n".join(lines)
 
 
-_WAR_MENTION_PATTERNS = (
+_WAR_MENTION_PATTERNS = tuple(re.compile(pat, re.IGNORECASE) for pat in (
     r"\bwar\b",
     r"\briver race\b",
     r"\brace\b",
@@ -86,18 +86,17 @@ _WAR_MENTION_PATTERNS = (
     r"\bbattle day\b",
     r"\bpractice day\b",
     r"\bcolosseum\b",
-)
+))
 
 
 def _mentions_war(text):
     """Return True if the text references River Race / war concepts."""
     if not text:
         return False
-    lowered = text.lower()
-    return any(re.search(pat, lowered) for pat in _WAR_MENTION_PATTERNS)
+    return any(pat.search(text) for pat in _WAR_MENTION_PATTERNS)
 
 
-_LIGHTWEIGHT_ASK_ELIXIR_PATTERNS = (
+_LIGHTWEIGHT_ASK_ELIXIR_PATTERNS = tuple(re.compile(pat, re.IGNORECASE) for pat in (
     r"\bthanks?\b",
     r"\bthank you\b",
     r"\bnice\b",
@@ -108,7 +107,7 @@ _LIGHTWEIGHT_ASK_ELIXIR_PATTERNS = (
     r"\bhelpful\b",
     r"\blove that\b",
     r"\byou sure are\b",
-)
+))
 
 
 def _is_lightweight_ask_elixir_turn(channel_name: str, question: str) -> bool:
@@ -120,7 +119,7 @@ def _is_lightweight_ask_elixir_turn(channel_name: str, question: str) -> bool:
     words = re.findall(r"[a-z0-9']+", text)
     if len(words) > 8:
         return False
-    return any(re.search(pattern, text) for pattern in _LIGHTWEIGHT_ASK_ELIXIR_PATTERNS)
+    return any(pat.search(text) for pat in _LIGHTWEIGHT_ASK_ELIXIR_PATTERNS)
 
 
 def _roster_bio_context(clan_data, roster_data=None):
@@ -451,16 +450,28 @@ def generate_message(event, context, recent_posts=None):
     """
     user_msg = f"Event: {event}\n\n{context}"
     user_msg += _format_recent_posts(recent_posts)
+    return _generate_simple_message(
+        _event_system(), user_msg,
+        workflow=f"event:{event}", temperature=0.7, max_tokens=300,
+        error_label=f"generate_message({event})",
+    )
+
+
+# ── Site content generation for poapkings.com ────────────────────────────────
+
+def _generate_simple_message(system_prompt, user_msg, *, workflow, temperature=0.8,
+                              max_tokens=300, error_label="LLM"):
+    """Shared pattern: system+user message -> text or None."""
     messages = [
-        {"role": "system", "content": _event_system()},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_msg},
     ]
     try:
         resp = _create_chat_completion(
-            workflow=f"event:{event}",
+            workflow=workflow,
             messages=messages,
-            temperature=0.7,
-            max_tokens=300,
+            temperature=temperature,
+            max_tokens=max_tokens,
             timeout=60,
         )
         text = (resp.choices[0].message.content or "").strip()
@@ -468,11 +479,9 @@ def generate_message(event, context, recent_posts=None):
             return None
         return text
     except (APIError, APIConnectionError) as e:
-        log.error("generate_message error (%s): %s", event, e)
+        log.error("%s API error: %s", error_label, e)
         return None
 
-
-# ── Site content generation for poapkings.com ────────────────────────────────
 
 def generate_home_message(clan_data, war_data, previous_message, roster_data=None):
     """Generate a message for the poapkings.com home page. Returns text or None."""
@@ -483,26 +492,11 @@ def generate_home_message(clan_data, war_data, previous_message, roster_data=Non
     )
     prev_text = f"Your previous message: {previous_message}" if previous_message else "(none yet)"
     user_msg = f"{context}\n\n{prev_text}\n\nWrite your next message for the home page."
-
-    messages = [
-        {"role": "system", "content": _home_message_system()},
-        {"role": "user", "content": user_msg},
-    ]
-    try:
-        resp = _create_chat_completion(
-            workflow="site_home_message",
-            messages=messages,
-            temperature=0.9,
-            max_tokens=300,
-            timeout=60,
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        if not text or text.lower() == "null":
-            return None
-        return text
-    except (APIError, APIConnectionError) as e:
-        log.error("Home message API error: %s", e)
-        return None
+    return _generate_simple_message(
+        _home_message_system(), user_msg,
+        workflow="site_home_message", temperature=0.9, max_tokens=300,
+        error_label="Home message",
+    )
 
 
 def generate_members_message(clan_data, war_data, previous_message, roster_data=None):
@@ -514,26 +508,11 @@ def generate_members_message(clan_data, war_data, previous_message, roster_data=
     )
     prev_text = f"Your previous message: {previous_message}" if previous_message else "(none yet)"
     user_msg = f"{context}\n\n{prev_text}\n\nWrite your next message for the members page."
-
-    messages = [
-        {"role": "system", "content": _members_message_system()},
-        {"role": "user", "content": user_msg},
-    ]
-    try:
-        resp = _create_chat_completion(
-            workflow="site_members_message",
-            messages=messages,
-            temperature=0.9,
-            max_tokens=400,
-            timeout=60,
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        if not text or text.lower() == "null":
-            return None
-        return text
-    except (APIError, APIConnectionError) as e:
-        log.error("Members message API error: %s", e)
-        return None
+    return _generate_simple_message(
+        _members_message_system(), user_msg,
+        workflow="site_members_message", temperature=0.9, max_tokens=400,
+        error_label="Members message",
+    )
 
 
 def generate_roster_bios(clan_data, war_data, roster_data=None):
@@ -599,48 +578,21 @@ def generate_weekly_digest(summary_context, previous_message=""):
     """Generate a long-form weekly clan recap for Discord. Returns text or None."""
     prev_text = f"Your previous weekly recap: {previous_message}" if previous_message else "(no previous recap provided)"
     user_msg = f"{summary_context}\n\n{prev_text}\n\nWrite this week's clan recap."
-    messages = [
-        {"role": "system", "content": _weekly_digest_system()},
-        {"role": "user", "content": user_msg},
-    ]
-    try:
-        resp = _create_chat_completion(
-            workflow="weekly_digest",
-            messages=messages,
-            temperature=0.8,
-            max_tokens=1200,
-            timeout=60,
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        if not text or text.lower() == "null":
-            return None
-        return text
-    except (APIError, APIConnectionError) as e:
-        log.error("Weekly digest API error: %s", e)
-        return None
+    return _generate_simple_message(
+        _weekly_digest_system(), user_msg,
+        workflow="weekly_digest", temperature=0.8, max_tokens=1200,
+        error_label="Weekly digest",
+    )
+
 
 def generate_tournament_recap(recap_context):
     """Generate a narrative tournament recap for Discord. Returns text or None."""
     user_msg = f"{recap_context}\n\nWrite this tournament's recap."
-    messages = [
-        {"role": "system", "content": _tournament_recap_system()},
-        {"role": "user", "content": user_msg},
-    ]
-    try:
-        resp = _create_chat_completion(
-            workflow="weekly_digest",
-            messages=messages,
-            temperature=0.8,
-            max_tokens=1200,
-            timeout=60,
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        if not text or text.lower() == "null":
-            return None
-        return text
-    except (APIError, APIConnectionError) as e:
-        log.error("Tournament recap API error: %s", e)
-        return None
+    return _generate_simple_message(
+        _tournament_recap_system(), user_msg,
+        workflow="tournament_recap", temperature=0.8, max_tokens=1200,
+        error_label="Tournament recap",
+    )
 
 
 __all__ = [

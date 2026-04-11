@@ -5,15 +5,19 @@ import db
 import prompts
 
 __all__ = [
-    "_channel_scope", "_channel_conversation_scope", "_strip_bot_mentions",
+    "_channel_scope", "_channel_conversation_scope",
+    "_channel_msg_kwargs", "_author_msg_kwargs",
+    "_strip_bot_mentions",
     "_is_bot_mentioned", "_leading_bot_mention_pattern", "_get_channel_behavior",
     "_get_singleton_channel", "_get_singleton_channel_id", "_channel_reply_target_name",
     "_reply_text", "_share_channel_result",
 ]
 
 from runtime.helpers._common import (
+    DISCORD_MAX_MESSAGE_LEN,
     _bot,
     _bot_role_id,
+    _chunk_for_discord,
     _log,
     _post_to_elixir,
     _runtime_app,
@@ -27,6 +31,24 @@ def _channel_scope(channel) -> str:
 
 def _channel_conversation_scope(channel, discord_user_id) -> str:
     return f"channel_user:{channel.id}:{discord_user_id}"
+
+
+def _channel_msg_kwargs(channel) -> dict:
+    """Extract save_message keyword args from a Discord channel object."""
+    return {
+        "channel_id": channel.id,
+        "channel_name": getattr(channel, "name", None),
+        "channel_kind": str(channel.type),
+    }
+
+
+def _author_msg_kwargs(author) -> dict:
+    """Extract save_message keyword args from a Discord member/user object."""
+    return {
+        "discord_user_id": author.id,
+        "username": author.name,
+        "display_name": author.display_name,
+    }
 
 
 def _strip_bot_mentions(text: str) -> str:
@@ -100,8 +122,8 @@ async def _reply_text(message, content):
     for post in posts:
         safe_post = _discord_safe_content(post)
         safe_post = _runtime_app()._resolve_custom_emoji(safe_post, getattr(message, "guild", None))
-        if len(safe_post) > 2000:
-            for chunk in [safe_post[i:i + 1990] for i in range(0, len(safe_post), 1990)]:
+        if len(safe_post) > DISCORD_MAX_MESSAGE_LEN:
+            for chunk in _chunk_for_discord(safe_post):
                 sent = await message.reply(chunk)
                 if sent is not None:
                     sent_messages.append(sent)
@@ -130,12 +152,7 @@ async def _share_channel_result(result, workflow):
     await _post_to_elixir(target_channel, {"content": share_content})
     await asyncio.to_thread(
         db.save_message,
-        _channel_scope(target_channel),
-        "assistant",
-        share_content,
-        channel_id=target_channel.id,
-        channel_name=getattr(target_channel, "name", None),
-        channel_kind=str(target_channel.type),
-        workflow=workflow,
-        event_type=result.get("event_type"),
+        _channel_scope(target_channel), "assistant", share_content,
+        **_channel_msg_kwargs(target_channel),
+        workflow=workflow, event_type=result.get("event_type"),
     )

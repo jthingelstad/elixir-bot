@@ -498,7 +498,7 @@ def _enable_sqlite_vec(conn: sqlite3.Connection) -> None:
     try:
         conn.enable_load_extension(True)
     except Exception:
-        pass
+        log.debug("sqlite enable_load_extension not available, sqlite_vec.load() may still work")
 
     try:
         sqlite_vec.load(conn)

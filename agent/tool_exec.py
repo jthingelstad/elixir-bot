@@ -78,6 +78,44 @@ def _enrich_member_card_collection(result):
     return enriched
 
 
+def _enrich_war_player_type(result, tag):
+    """Add war_player_type classification to a result dict by player tag."""
+    from storage.war_analytics import _war_player_type
+    from db import get_connection
+
+    canon = tag if tag.startswith("#") else f"#{tag}"
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = ?", (canon,),
+        ).fetchone()
+        if row:
+            result["war_player_type"] = _war_player_type(conn, row["member_id"])
+    finally:
+        conn.close()
+
+
+def _enrich_war_player_types(members):
+    """Add war_player_type to each member dict in a list."""
+    from storage.war_analytics import _war_player_type
+    from db import get_connection
+
+    conn = get_connection()
+    try:
+        for member in members:
+            tag = member.get("tag") or member.get("player_tag") or ""
+            if not tag:
+                continue
+            canon = tag if tag.startswith("#") else f"#{tag}"
+            row = conn.execute(
+                "SELECT member_id FROM members WHERE player_tag = ?", (canon,),
+            ).fetchone()
+            if row:
+                member["war_player_type"] = _war_player_type(conn, row["member_id"])
+    finally:
+        conn.close()
+
+
 def _refresh_member_cache(member_tag, include_battles=False):
     """Refresh stored player profile and optionally battle log for a member."""
     player = cr_api.get_player(member_tag)
@@ -198,9 +236,6 @@ def _execute_get_member(arguments):
 
 def _execute_get_member_war_detail(arguments):
     """Execute the consolidated get_member_war_detail tool."""
-    from storage.war_analytics import _war_player_type
-    from db import get_connection
-
     member_tag = _resolve_member_tag(arguments["member_tag"])
     aspect = arguments.get("aspect", "summary")
 
@@ -220,18 +255,8 @@ def _execute_get_member_war_detail(arguments):
     else:
         return {"error": f"Unknown aspect: {aspect}"}
 
-    # Enrich with war_player_type
     if isinstance(result, dict):
-        conn = get_connection()
-        try:
-            member_row = conn.execute(
-                "SELECT member_id FROM members WHERE player_tag = ?",
-                (member_tag if member_tag.startswith("#") else f"#{member_tag}",),
-            ).fetchone()
-            if member_row:
-                result["war_player_type"] = _war_player_type(conn, member_row["member_id"])
-        finally:
-            conn.close()
+        _enrich_war_player_type(result, member_tag)
 
     return result
 
@@ -318,9 +343,6 @@ def _execute_get_war_season(arguments):
 
 def _execute_get_war_member_standings(arguments):
     """Execute the new get_war_member_standings tool."""
-    from storage.war_analytics import _war_player_type
-    from db import get_connection
-
     metric = arguments.get("metric", "fame")
     season_id = arguments.get("season_id")
     limit = arguments.get("limit", 30)
@@ -336,23 +358,9 @@ def _execute_get_war_member_standings(arguments):
     else:
         return {"error": f"Unknown metric: {metric}"}
 
-    # Enrich each member with war_player_type
     if isinstance(raw, dict):
         members = raw.get("members") or raw.get("standings") or raw.get("results") or []
-        conn = get_connection()
-        try:
-            for member in members:
-                tag = member.get("tag") or member.get("player_tag") or ""
-                if not tag:
-                    continue
-                member_row = conn.execute(
-                    "SELECT member_id FROM members WHERE player_tag = ?",
-                    (tag if tag.startswith("#") else f"#{tag}",),
-                ).fetchone()
-                if member_row:
-                    member["war_player_type"] = _war_player_type(conn, member_row["member_id"])
-        finally:
-            conn.close()
+        _enrich_war_player_types(members)
 
     return raw
 

@@ -23,7 +23,7 @@ from modules.poap_kings import site as poap_kings_site
 from runtime import app as _app
 from runtime.channel_subagents import build_subagent_memory_context
 from runtime.app import bot, log
-from runtime.helpers import _channel_scope, _get_singleton_channel_id
+from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
 from runtime.jobs._signals import (
     _channel_config_by_key,
@@ -254,19 +254,13 @@ async def _notify_poapkings_publish(activity_key: str, *, publish_result=None, e
         posts = _app._entry_posts(result_payload)
         await _post_to_elixir(channel, result_payload)
         event_type = "poapkings_publish_failure" if error_detail else "poapkings_publish_success"
-        channel_name = getattr(channel, "name", None)
-        channel_kind = str(getattr(channel, "type", "text"))
+        ch = _channel_msg_kwargs(channel)
         for index, post in enumerate(posts):
             await asyncio.to_thread(
                 db.save_message,
-                _channel_scope(channel),
-                "assistant",
-                post,
+                _channel_scope(channel), "assistant", post,
                 summary=result_payload.get("summary") if index == 0 else None,
-                channel_id=channel.id,
-                channel_name=channel_name,
-                channel_kind=channel_kind,
-                workflow="poapkings-com",
+                **ch, workflow="poapkings-com",
                 event_type=event_type if index == 0 else f"{event_type}_part",
                 raw_json={
                     "activity_key": activity_key,
@@ -345,16 +339,12 @@ async def _promotion_content_cycle():
         return
 
     await _post_to_elixir(channel, {"content": channel_posts})
+    ch = _channel_msg_kwargs(channel)
     for index, post in enumerate(channel_posts):
         await asyncio.to_thread(
             db.save_message,
-            _channel_scope(channel),
-            "assistant",
-            post,
-            channel_id=channel.id,
-            channel_name=getattr(channel, "name", None),
-            channel_kind=str(channel.type),
-            workflow="promotion",
+            _channel_scope(channel), "assistant", post,
+            **ch, workflow="promotion",
             event_type="promotion_content_cycle" if index == 0 else "promotion_content_cycle_part",
         )
     runtime_status.mark_job_success("promotion_content_cycle", "website and Discord promotion content published")

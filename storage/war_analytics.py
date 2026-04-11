@@ -14,10 +14,7 @@ from db import (
 )
 from storage.war_status import _season_bounds, get_current_season_id
 
-def _format_member_reference(*args, **kwargs):
-    from storage.identity import format_member_reference
-
-    return format_member_reference(*args, **kwargs)
+from storage._formatting import format_member_reference as _format_member_reference
 
 
 def _war_player_type(conn, member_id):

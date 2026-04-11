@@ -1278,13 +1278,8 @@ def test_on_message_rewrites_member_refs_before_reply_and_save():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    def fake_format_member_reference(tag, style="plain_name", conn=None):
-        del conn
-        if tag != "#ABC123":
-            return tag
-        if style == "name_with_mention":
-            return "King Levy (<@456>)"
-        return "King Levy"
+    def fake_format_member_reference(tag, conn=None, **_kwargs):
+        return "King Levy" if tag == "#ABC123" else tag
 
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
@@ -3168,13 +3163,8 @@ def test_share_channel_result_rewrites_member_refs_before_posting():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    def fake_format_member_reference(tag, style="plain_name", conn=None):
-        del conn
-        if tag != "#ABC123":
-            return tag
-        if style == "name_with_mention":
-            return "King Levy (<@456>)"
-        return "King Levy"
+    def fake_format_member_reference(tag, conn=None, **_kwargs):
+        return "King Levy" if tag == "#ABC123" else tag
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
