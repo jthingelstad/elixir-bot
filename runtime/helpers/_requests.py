@@ -174,6 +174,7 @@ def _is_member_deck_request(text: str) -> bool:
         r"\bwhat's in my deck\b",
         r"\bshow (?:me )?my deck\b",
         r"\bshow (?:me )?@?[a-z0-9_.-]+'?s deck\b",
+        r"\breview (?:my|@?[a-z0-9_.-]+'?s) deck\b",
         r"\bwhat cards are in @?[a-z0-9_.-]+'?s deck\b",
         r"\bwhat cards are in @?[a-z0-9_.-]+ deck\b",
         r"\bwhat is in @?[a-z0-9_.-]+'?s deck\b",
