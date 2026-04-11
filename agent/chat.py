@@ -12,6 +12,7 @@ from agent.core import (
 )
 from agent.tool_policy import (
     ALL_TOOLS,
+    MAX_ROUNDS_BY_WORKFLOW,
     RESPONSE_SCHEMAS_BY_WORKFLOW,
     TOOL_DEFINITIONS_BY_NAME,
     TOOLSETS_BY_WORKFLOW,
@@ -279,6 +280,8 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
 
     enable_write_tools = workflow == "clanops" and CLANOPS_WRITE_TOOLS_ENABLED
 
+    max_tool_rounds = MAX_ROUNDS_BY_WORKFLOW.get(workflow, MAX_TOOL_ROUNDS)
+
     tools_called = []
     denied_tool_count = 0
     validation_failure_count = 0
@@ -323,7 +326,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             return None
         return "__REPAIR__", f"Schema validation failed: {error}"
 
-    for _round in range(MAX_TOOL_ROUNDS + 1):
+    for _round in range(max_tool_rounds + 1):
         try:
             resp = _create_completion(messages)
         except (APIError, APIConnectionError) as e:
@@ -408,7 +411,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                     tools_called.append(fn_name)
                     result = _build_tool_result_envelope(
                         fn_name,
-                        _execute_tool(fn_name, fn_args),
+                        _execute_tool(fn_name, fn_args, workflow=workflow),
                     )
             tool_result_blocks.append({
                 "type": "tool_result",
@@ -418,7 +421,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         messages.append({"role": "user", "content": tool_result_blocks})
 
     # If we hit max rounds, try to get a final answer without tools
-    log.warning("Hit max tool rounds (%d), requesting final answer", MAX_TOOL_ROUNDS)
+    log.warning("Hit max tool rounds (%d), requesting final answer", max_tool_rounds)
     try:
         resp = _create_completion(messages)
         completion_chars += len(resp.choices[0].message.content or "")
@@ -427,7 +430,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         log.info(
             "agent_loop workflow=%s tool_rounds=%d tools_called=%s denied_tools=%d "
             "validation_failures=%d prompt_chars=%d completion_chars=%d completion_latencies_ms=%s",
-            workflow, MAX_TOOL_ROUNDS, tools_called, denied_tool_count, validation_failure_count,
+            workflow, max_tool_rounds, tools_called, denied_tool_count, validation_failure_count,
             prompt_chars, completion_chars, completion_latencies_ms,
         )
         return parsed
@@ -438,11 +441,14 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         return None
 
 
-def _clan_context(clan_data, war_data, roster_data=None, max_members=MAX_CONTEXT_MEMBERS_DEFAULT):
+def _clan_context(clan_data, war_data, roster_data=None, max_members=MAX_CONTEXT_MEMBERS_DEFAULT,
+                   include_war=True):
     """Format clan data into a concise context string for the LLM.
 
     roster_data: optional enriched roster dict (from build_roster_data with
         include_cards=True). When provided, favorite cards are included per member.
+    include_war: whether to append war status section. Set False for non-war
+        contexts (Trophy Road observations, card discussions) to reduce noise.
     """
     # Build a lookup of enriched roster data (cards, etc.) by tag
     roster_by_tag = {}
@@ -477,21 +483,23 @@ def _clan_context(clan_data, war_data, roster_data=None, max_members=MAX_CONTEXT
     if omitted_count:
         member_summary.append(f"  ... {omitted_count} more members omitted for context budget")
 
-    war_summary = "No active war data."
-    if war_data and war_data.get("state") not in (None, "notInWar"):
-        parts = war_data.get("clan", {}).get("participants", [])
-        fame = war_data.get("clan", {}).get("fame", 0)
-        used = [p["name"] for p in parts if p.get("decksUsedToday", 0) > 0]
-        unused = [p["name"] for p in parts if p.get("decksUsedToday", 0) == 0]
-        war_summary = (
-            f"River Race state: {war_data.get('state')} | fame: {fame:,} | "
-            f"battled today: {', '.join(used) or 'nobody'} | "
-            f"not yet: {', '.join(unused) or 'everyone done'}"
-        )
-    return (
-        f"=== CLAN ROSTER ===\n" + "\n".join(member_summary)
-        + f"\n\n=== WAR STATUS ===\n{war_summary}"
-    )
+    result = f"=== CLAN ROSTER ===\n" + "\n".join(member_summary)
+
+    if include_war:
+        war_summary = "No active war data."
+        if war_data and war_data.get("state") not in (None, "notInWar"):
+            parts = war_data.get("clan", {}).get("participants", [])
+            fame = war_data.get("clan", {}).get("fame", 0)
+            used = [p["name"] for p in parts if p.get("decksUsedToday", 0) > 0]
+            unused = [p["name"] for p in parts if p.get("decksUsedToday", 0) == 0]
+            war_summary = (
+                f"River Race state: {war_data.get('state')} | fame: {fame:,} | "
+                f"battled today: {', '.join(used) or 'nobody'} | "
+                f"not yet: {', '.join(unused) or 'everyone done'}"
+            )
+        result += f"\n\n=== WAR STATUS ===\n{war_summary}"
+
+    return result
 
 
 def _format_recent_posts(recent_posts, channel_label="this channel"):

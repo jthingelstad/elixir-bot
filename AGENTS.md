@@ -259,13 +259,14 @@ This keeps feature announcements discoverable: future changes should usually mea
 
 ## Query Layer (Current)
 
-Elixir’s core member/leader questions should be answered from structured query helpers and tools, not prompt reconstruction. Important read paths include:
+Elixir’s core member/leader questions should be answered from structured query helpers and tools, not prompt reconstruction. The LLM has 15 domain-aligned tools organized into four groups:
 
-- member resolution: `resolve_member`
-- roster summaries: `get_clan_roster_summary`, `list_clan_members`, `list_longest_tenure_members`, `list_recent_joins`
-- member intelligence: `get_member_profile`, `get_member_recent_form`, `get_member_current_deck`, `get_member_signature_cards`
-- war intelligence: `get_current_war_status`, `get_war_deck_status_today`, `get_member_war_status`, `get_war_season_summary`, `get_members_without_war_participation`, `compare_member_war_to_clan_average`
-- trend/support signals: `get_trophy_drops`, `get_members_on_losing_streak`, `get_trending_war_contributors`, `get_members_at_risk`
+- **Member domain**: `resolve_member`, `get_member` (include: profile, form, war, trend, deck, cards, history, memories, chests), `get_member_war_detail` (aspect: summary, attendance, battles, missed_days, vs_clan_avg)
+- **River Race domain**: `get_river_race` (live race state + competing clan standings), `get_war_season` (aspect: summary, standings, win_rates, boat_battles, score_trend, season_comparison, trending, perfect_attendance, no_participation), `get_war_member_standings` (metric: fame, win_rate, attendance)
+- **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards), `get_clan_health` (aspect: at_risk, hot_streaks, losing_streaks, trophy_drops, promotion_candidates), `get_clan_trends`
+- **Utility**: `lookup_cards`, `get_player_details`, `update_member`, `save_clan_memory`
+
+War tools include `war_player_type` (regular/occasional/rare/never) per member. Leadership evaluations include CR account age. Sensitive aspects (at_risk, promotion_candidates) are gated to leadership workflows at execution time.
 
 ### Mostly LLM
 

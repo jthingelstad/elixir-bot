@@ -18,6 +18,43 @@ def _format_member_reference(*args, **kwargs):
     return format_member_reference(*args, **kwargs)
 
 
+def _war_player_type(conn, member_id):
+    """Classify a member's war participation habit based on tracked race history.
+
+    Returns one of: "regular" (75%+), "occasional" (25-74%),
+    "rare" (1-24%), "never" (0%).
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) AS total_races, "
+        "SUM(CASE WHEN COALESCE(wp.decks_used, 0) > 0 THEN 1 ELSE 0 END) AS races_played "
+        "FROM war_participation wp "
+        "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
+        "WHERE wp.member_id = ?",
+        (member_id,),
+    ).fetchone()
+    total = row["total_races"] or 0
+    played = row["races_played"] or 0
+    if total == 0:
+        return "never"
+    rate = played / total
+    if rate >= 0.75:
+        return "regular"
+    if rate >= 0.25:
+        return "occasional"
+    if played > 0:
+        return "rare"
+    return "never"
+
+
+def _get_account_age_years(conn, member_id):
+    """Fetch CR account age in years from member_metadata, or None."""
+    row = conn.execute(
+        "SELECT cr_account_age_years FROM member_metadata WHERE member_id = ?",
+        (member_id,),
+    ).fetchone()
+    return row["cr_account_age_years"] if row else None
+
+
 def _war_trend_anchor(conn):
     latest_state_row = conn.execute(
         "SELECT MAX(observed_at) AS observed_at FROM war_current_state"
@@ -247,6 +284,8 @@ def get_members_at_risk(inactivity_days=7, min_donations_week=20, require_war_pa
                 item["reasons"] = reasons
                 if war_races_played is not None:
                     item["war_races_played"] = war_races_played
+                item["cr_account_age_years"] = _get_account_age_years(conn, row["member_id"])
+                item["war_player_type"] = _war_player_type(conn, row["member_id"])
                 flagged.append(_member_reference_fields(conn, row["member_id"], item))
 
         flagged.sort(
@@ -741,6 +780,8 @@ def get_promotion_candidates(min_donations_week=50, min_tenure_days=14, active_w
                 "checks": checks,
                 "missing": [key for key, passed in checks.items() if not passed],
             }
+            item["cr_account_age_years"] = _get_account_age_years(conn, row["member_id"])
+            item["war_player_type"] = _war_player_type(conn, row["member_id"])
             item = _member_reference_fields(conn, row["member_id"], item)
             if all(checks.values()):
                 recommended.append(item)

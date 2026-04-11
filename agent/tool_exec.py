@@ -115,7 +115,330 @@ def _resolve_member_tag(value):
     raise ValueError(f"Ambiguous member reference '{query}'. Top matches: {choices}")
 
 
-def _execute_tool(name, arguments):
+# ── Member domain execution ───────────────────────────────────────────────
+
+def _execute_get_member(arguments):
+    """Execute the consolidated get_member tool."""
+    member_tag = _resolve_member_tag(arguments["member_tag"])
+    include = arguments.get("include") or ["profile", "form"]
+    scope = arguments.get("scope", "competitive_10")
+    days = arguments.get("days", 30)
+
+    needs_battles = any(a in include for a in ("form", "deck", "war"))
+    _refresh_member_cache(member_tag, include_battles=needs_battles)
+
+    result = {}
+
+    if "profile" in include:
+        result["profile"] = _enrich_member_profile(db.get_member_profile(member_tag))
+
+    if "form" in include:
+        result["form"] = db.get_member_recent_form(member_tag, scope=scope)
+
+    if "war" in include:
+        result["war"] = db.get_member_war_status(member_tag, season_id=None)
+
+    if "trend" in include:
+        result["trend"] = db.build_member_trend_summary_context(
+            member_tag, days=days, window_days=min(days // 4, 7) or 7,
+        )
+
+    if "deck" in include:
+        result["current_deck"] = db.get_member_current_deck(member_tag)
+        result["signature_cards"] = db.get_member_signature_cards(
+            member_tag, mode_scope="overall",
+        )
+
+    if "cards" in include:
+        result["card_collection"] = _enrich_member_card_collection(
+            db.get_member_card_collection(
+                member_tag,
+                limit=arguments.get("limit", 60),
+                min_level=arguments.get("min_level"),
+                include_support=True,
+                rarity=arguments.get("rarity"),
+            )
+        )
+
+    if "history" in include:
+        result["history"] = db.get_member_history(member_tag, days=days)
+
+    if "memories" in include:
+        from memory_store import list_memories
+
+        memories = list_memories(
+            viewer_scope="public",
+            filters={"member_tag": member_tag},
+            limit=15,
+        )
+        if not memories:
+            result["memories"] = {"member_tag": member_tag, "memories": [], "message": "No stored memories for this member."}
+        else:
+            result["memories"] = {
+                "member_tag": member_tag,
+                "count": len(memories),
+                "memories": [
+                    {
+                        "title": m.get("title"),
+                        "summary": m.get("summary") or m.get("body", "")[:220],
+                        "source_type": m.get("source_type"),
+                        "scope": m.get("scope"),
+                        "created_at": m.get("created_at"),
+                        "tags": m.get("tags", []),
+                    }
+                    for m in memories
+                ],
+            }
+
+    if "chests" in include:
+        result["chests"] = cr_api.get_player_chests(member_tag)
+
+    return result
+
+
+def _execute_get_member_war_detail(arguments):
+    """Execute the consolidated get_member_war_detail tool."""
+    from storage.war_analytics import _war_player_type
+    from db import get_connection
+
+    member_tag = _resolve_member_tag(arguments["member_tag"])
+    aspect = arguments.get("aspect", "summary")
+
+    if aspect == "battles":
+        _refresh_member_cache(member_tag, include_battles=True)
+
+    if aspect == "summary":
+        result = db.get_member_war_stats(member_tag)
+    elif aspect == "attendance":
+        result = db.get_member_war_attendance(member_tag, season_id=None)
+    elif aspect == "battles":
+        result = db.get_member_war_battle_record(member_tag, season_id=None)
+    elif aspect == "missed_days":
+        result = db.get_member_missed_war_days(member_tag, season_id=None)
+    elif aspect == "vs_clan_avg":
+        result = db.compare_member_war_to_clan_average(member_tag, season_id=None)
+    else:
+        return {"error": f"Unknown aspect: {aspect}"}
+
+    # Enrich with war_player_type
+    if isinstance(result, dict):
+        conn = get_connection()
+        try:
+            member_row = conn.execute(
+                "SELECT member_id FROM members WHERE player_tag = ?",
+                (member_tag if member_tag.startswith("#") else f"#{member_tag}",),
+            ).fetchone()
+            if member_row:
+                result["war_player_type"] = _war_player_type(conn, member_row["member_id"])
+        finally:
+            conn.close()
+
+    return result
+
+
+# ── River Race domain execution ────────────────────────────────────────────
+
+def _execute_get_river_race(arguments):
+    """Execute the consolidated get_river_race tool."""
+    # Get live war-day state (engagement, deck usage, top fame earners)
+    day_state = db.get_current_war_day_state()
+    # Merge in race standings (competing clan names/fame/ranks)
+    war_status = db.get_current_war_status()
+
+    if isinstance(day_state, dict) and isinstance(war_status, dict):
+        day_state["race_standings"] = war_status.get("race_standings", [])
+        day_state["race_rank"] = war_status.get("race_rank")
+        day_state["season_week_label"] = war_status.get("season_week_label")
+        day_state["colosseum_week"] = war_status.get("colosseum_week")
+        day_state["final_battle_day_active"] = war_status.get("final_battle_day_active")
+        day_state["final_practice_day_active"] = war_status.get("final_practice_day_active")
+        day_state["trophy_stakes_text"] = war_status.get("trophy_stakes_text")
+        return day_state
+
+    # Fallback: if day state is empty, return war status instead
+    return war_status or day_state or {"error": "No active war data available."}
+
+
+def _execute_get_war_season(arguments):
+    """Execute the consolidated get_war_season tool."""
+    aspect = arguments.get("aspect", "summary")
+    season_id = arguments.get("season_id")
+    limit = arguments.get("limit", 10)
+
+    if aspect == "summary":
+        return db.get_war_season_summary(season_id=season_id, top_n=limit)
+    elif aspect == "standings":
+        return db.get_war_champ_standings(season_id=season_id)
+    elif aspect == "win_rates":
+        return db.get_war_battle_win_rates(
+            season_id=season_id, limit=limit, min_battles=1,
+        )
+    elif aspect == "boat_battles":
+        return db.get_clan_boat_battle_record(wars=3)
+    elif aspect == "score_trend":
+        return db.get_war_score_trend(days=30)
+    elif aspect == "season_comparison":
+        return db.compare_fame_per_member_to_previous_season(season_id=season_id)
+    elif aspect == "trending":
+        return db.get_trending_war_contributors(
+            season_id=season_id, recent_races=2, limit=limit,
+        )
+    elif aspect == "perfect_attendance":
+        return db.get_perfect_war_participants(season_id=season_id)
+    elif aspect == "no_participation":
+        return db.get_members_without_war_participation(season_id=season_id)
+    else:
+        return {"error": f"Unknown aspect: {aspect}"}
+
+
+def _execute_get_war_member_standings(arguments):
+    """Execute the new get_war_member_standings tool."""
+    from storage.war_analytics import _war_player_type
+    from db import get_connection
+
+    metric = arguments.get("metric", "fame")
+    season_id = arguments.get("season_id")
+    limit = arguments.get("limit", 30)
+
+    if metric == "fame":
+        raw = db.get_war_champ_standings(season_id=season_id)
+    elif metric == "win_rate":
+        raw = db.get_war_battle_win_rates(
+            season_id=season_id, limit=limit, min_battles=1,
+        )
+    elif metric == "attendance":
+        raw = db.get_members_without_war_participation(season_id=season_id)
+    else:
+        return {"error": f"Unknown metric: {metric}"}
+
+    # Enrich each member with war_player_type
+    if isinstance(raw, dict):
+        members = raw.get("members") or raw.get("standings") or raw.get("results") or []
+        conn = get_connection()
+        try:
+            for member in members:
+                tag = member.get("tag") or member.get("player_tag") or ""
+                if not tag:
+                    continue
+                member_row = conn.execute(
+                    "SELECT member_id FROM members WHERE player_tag = ?",
+                    (tag if tag.startswith("#") else f"#{tag}",),
+                ).fetchone()
+                if member_row:
+                    member["war_player_type"] = _war_player_type(conn, member_row["member_id"])
+        finally:
+            conn.close()
+
+    return raw
+
+
+# ── Clan domain execution ─────────────────────────────────────────────────
+
+def _execute_get_clan_roster(arguments):
+    """Execute the consolidated get_clan_roster tool."""
+    aspect = arguments.get("aspect", "list")
+    days = arguments.get("days", 30)
+    limit = arguments.get("limit", 10)
+
+    if aspect == "list":
+        return db.list_members()
+    elif aspect == "summary":
+        return db.get_clan_roster_summary()
+    elif aspect == "recent_joins":
+        return db.list_recent_joins(days=days)
+    elif aspect == "longest_tenure":
+        return db.list_longest_tenure_members(limit=limit)
+    elif aspect == "role_changes":
+        return db.get_recent_role_changes(days=days)
+    elif aspect == "max_cards":
+        return db.get_members_with_most_level_16_cards(limit=limit)
+    else:
+        return {"error": f"Unknown aspect: {aspect}"}
+
+
+def _execute_get_clan_health(arguments, workflow=None):
+    """Execute the consolidated get_clan_health tool."""
+    aspect = arguments.get("aspect", "at_risk")
+
+    # Sensitive aspect gating
+    sensitive_aspects = {"at_risk", "promotion_candidates"}
+    allowed_workflows = {"clanops", "channel_update_leadership"}
+    if aspect in sensitive_aspects and workflow not in allowed_workflows:
+        return {"error": f"The '{aspect}' analysis is only available in leadership channels."}
+
+    if aspect == "at_risk":
+        return db.get_members_at_risk(
+            inactivity_days=arguments.get("inactivity_days", 7),
+            min_donations_week=arguments.get("min_donations_week", 20),
+            require_war_participation=False,
+            min_war_races=1,
+            tenure_grace_days=14,
+            season_id=arguments.get("season_id"),
+        )
+    elif aspect == "hot_streaks":
+        return db.get_members_on_hot_streak(
+            min_streak=arguments.get("min_streak", 4),
+            scope="ladder_ranked_10",
+        )
+    elif aspect == "losing_streaks":
+        return db.get_members_on_losing_streak(
+            min_streak=arguments.get("min_streak", 3),
+            scope="competitive_10",
+        )
+    elif aspect == "trophy_drops":
+        return db.get_trophy_drops(
+            days=arguments.get("days", 7),
+            min_drop=arguments.get("min_drop", 100),
+        )
+    elif aspect == "promotion_candidates":
+        return db.get_promotion_candidates()
+    else:
+        return {"error": f"Unknown aspect: {aspect}"}
+
+
+def _execute_get_clan_trends(arguments):
+    """Execute the consolidated get_clan_trends tool."""
+    window_days = arguments.get("window_days", 7)
+    days = arguments.get("days", 30)
+    # Return both the comparison and the summary for completeness
+    comparison = db.compare_clan_trend_windows(window_days=window_days)
+    summary = db.build_clan_trend_summary_context(days=days, window_days=window_days)
+    if isinstance(comparison, dict):
+        comparison["trend_summary"] = summary
+        return comparison
+    return {"comparison": comparison, "trend_summary": summary}
+
+
+# ── Write tools execution ─────────────────────────────────────────────────
+
+def _execute_update_member(arguments):
+    """Execute the consolidated update_member tool."""
+    member_tag = _resolve_member_tag(arguments["member_tag"])
+    field = arguments["field"]
+    value = arguments["value"]
+
+    if field == "birthday":
+        if isinstance(value, dict):
+            month = value.get("month")
+            day = value.get("day")
+        else:
+            raise ValueError("birthday value must be {\"month\": M, \"day\": D}")
+        db.set_member_birthday(member_tag, name=None, month=month, day=day)
+    elif field == "join_date":
+        db.set_member_join_date(member_tag, name=None, joined_date=str(value))
+    elif field == "profile_url":
+        db.set_member_profile_url(member_tag, name=None, url=str(value))
+    elif field == "note":
+        db.set_member_note(member_tag, name=None, note=str(value))
+    else:
+        return {"error": f"Unknown field: {field}"}
+
+    return {"success": True, "field": field}
+
+
+# ── Main dispatch ─────────────────────────────────────────────────────────
+
+def _execute_tool(name, arguments, workflow=None):
     """Execute a tool call and return the result as a string."""
     try:
         if name == "resolve_member":
@@ -123,63 +446,22 @@ def _execute_tool(name, arguments):
                 arguments["query"],
                 limit=arguments.get("limit", 5),
             )
-        elif name == "get_clan_roster_summary":
-            result = db.get_clan_roster_summary()
-        elif name == "list_clan_members":
-            result = db.list_members()
-        elif name == "list_longest_tenure_members":
-            result = db.list_longest_tenure_members(
-                limit=arguments.get("limit", 10),
-            )
-        elif name == "list_recent_joins":
-            result = db.list_recent_joins(
-                days=arguments.get("days", 30),
-            )
-        elif name == "get_member_profile":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            _refresh_member_cache(member_tag, include_battles=True)
-            result = _enrich_member_profile(db.get_member_profile(member_tag))
-        elif name == "get_member_overview":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            _refresh_member_cache(member_tag, include_battles=True)
-            result = _enrich_member_profile(db.get_member_overview(member_tag))
-        elif name == "get_member_recent_form":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            _refresh_member_cache(member_tag, include_battles=True)
-            result = db.get_member_recent_form(
-                member_tag,
-                scope=arguments.get("scope", "competitive_10"),
-            )
-        elif name == "get_member_current_deck":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            _refresh_member_cache(member_tag, include_battles=False)
-            result = db.get_member_current_deck(member_tag)
-        elif name == "get_member_card_collection":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            _refresh_member_cache(member_tag, include_battles=False)
-            result = _enrich_member_card_collection(
-                db.get_member_card_collection(
-                    member_tag,
-                    limit=arguments.get("limit", 60),
-                    min_level=arguments.get("min_level"),
-                    include_support=arguments.get("include_support", True),
-                    rarity=arguments.get("rarity"),
-                )
-            )
-        elif name == "get_member_next_chests":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            result = cr_api.get_player_chests(member_tag)
-        elif name == "get_member_signature_cards":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            _refresh_member_cache(member_tag, include_battles=True)
-            result = db.get_member_signature_cards(
-                member_tag,
-                mode_scope=arguments.get("mode_scope", "overall"),
-            )
-        elif name == "get_members_with_most_level_16_cards":
-            result = db.get_members_with_most_level_16_cards(
-                limit=arguments.get("limit", 10),
-            )
+        elif name == "get_member":
+            result = _execute_get_member(arguments)
+        elif name == "get_member_war_detail":
+            result = _execute_get_member_war_detail(arguments)
+        elif name == "get_river_race":
+            result = _execute_get_river_race(arguments)
+        elif name == "get_war_season":
+            result = _execute_get_war_season(arguments)
+        elif name == "get_war_member_standings":
+            result = _execute_get_war_member_standings(arguments)
+        elif name == "get_clan_roster":
+            result = _execute_get_clan_roster(arguments)
+        elif name == "get_clan_health":
+            result = _execute_get_clan_health(arguments, workflow=workflow)
+        elif name == "get_clan_trends":
+            result = _execute_get_clan_trends(arguments)
         elif name == "lookup_cards":
             result = db.lookup_cards(
                 name=arguments.get("name"),
@@ -190,203 +472,11 @@ def _execute_tool(name, arguments):
                 has_evolution=arguments.get("has_evolution"),
                 limit=arguments.get("limit", 25),
             )
-        elif name == "get_member_history":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            result = db.get_member_history(
-                member_tag,
-                days=arguments.get("days", 30),
-            )
-        elif name == "compare_member_trend_windows":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            result = db.compare_member_trend_windows(
-                member_tag,
-                window_days=arguments.get("window_days", 7),
-            )
-        elif name == "get_member_trend_summary":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            result = db.build_member_trend_summary_context(
-                member_tag,
-                days=arguments.get("days", 30),
-                window_days=arguments.get("window_days", 7),
-            )
-        elif name == "compare_clan_trend_windows":
-            result = db.compare_clan_trend_windows(
-                window_days=arguments.get("window_days", 7),
-            )
-        elif name == "get_clan_trend_summary":
-            result = db.build_clan_trend_summary_context(
-                days=arguments.get("days", 30),
-                window_days=arguments.get("window_days", 7),
-            )
-        elif name == "get_member_war_stats":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            result = db.get_member_war_stats(member_tag)
-        elif name == "get_member_war_status":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            result = db.get_member_war_status(
-                member_tag,
-                season_id=arguments.get("season_id"),
-            )
-        elif name == "get_member_war_attendance":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            result = db.get_member_war_attendance(
-                member_tag,
-                season_id=arguments.get("season_id"),
-            )
-        elif name == "get_member_war_battle_record":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            _refresh_member_cache(member_tag, include_battles=True)
-            result = db.get_member_war_battle_record(
-                member_tag,
-                season_id=arguments.get("season_id"),
-            )
-        elif name == "get_current_war_status":
-            result = db.get_current_war_status()
-        elif name == "get_current_war_day_state":
-            result = db.get_current_war_day_state()
-        elif name == "get_war_season_summary":
-            result = db.get_war_season_summary(
-                season_id=arguments.get("season_id"),
-                top_n=arguments.get("top_n", 5),
-            )
-        elif name == "get_war_deck_status_today":
-            result = db.get_war_deck_status_today()
-        elif name == "get_members_without_war_participation":
-            result = db.get_members_without_war_participation(
-                season_id=arguments.get("season_id"),
-            )
-        elif name == "get_trending_war_contributors":
-            result = db.get_trending_war_contributors(
-                season_id=arguments.get("season_id"),
-                recent_races=arguments.get("recent_races", 2),
-                limit=arguments.get("limit", 5),
-            )
-        elif name == "get_promotion_candidates":
-            result = db.get_promotion_candidates()
-        elif name == "compare_member_war_to_clan_average":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            result = db.compare_member_war_to_clan_average(
-                member_tag,
-                season_id=arguments.get("season_id"),
-            )
-        elif name == "get_members_at_risk":
-            result = db.get_members_at_risk(
-                inactivity_days=arguments.get("inactivity_days", 7),
-                min_donations_week=arguments.get("min_donations_week", 20),
-                require_war_participation=arguments.get("require_war_participation", False),
-                min_war_races=arguments.get("min_war_races", 1),
-                tenure_grace_days=arguments.get("tenure_grace_days", 14),
-                season_id=arguments.get("season_id"),
-            )
-        elif name == "get_members_on_hot_streak":
-            result = db.get_members_on_hot_streak(
-                min_streak=arguments.get("min_streak", 4),
-                scope=arguments.get("scope", "ladder_ranked_10"),
-            )
-        elif name == "get_members_on_losing_streak":
-            result = db.get_members_on_losing_streak(
-                min_streak=arguments.get("min_streak", 3),
-                scope=arguments.get("scope", "competitive_10"),
-            )
-        elif name == "get_trophy_drops":
-            result = db.get_trophy_drops(
-                days=arguments.get("days", 7),
-                min_drop=arguments.get("min_drop", 100),
-            )
         elif name == "get_player_details":
             player_tag = _resolve_member_tag(arguments["player_tag"])
             result = cr_api.get_player(player_tag)
-        elif name == "get_war_champ_standings":
-            result = db.get_war_champ_standings(
-                season_id=arguments.get("season_id"),
-            )
-        elif name == "get_war_battle_win_rates":
-            result = db.get_war_battle_win_rates(
-                season_id=arguments.get("season_id"),
-                limit=arguments.get("limit", 10),
-                min_battles=arguments.get("min_battles", 1),
-            )
-        elif name == "get_clan_boat_battle_record":
-            result = db.get_clan_boat_battle_record(
-                wars=arguments.get("wars", 3),
-            )
-        elif name == "get_war_score_trend":
-            result = db.get_war_score_trend(
-                days=arguments.get("days", 30),
-            )
-        elif name == "compare_fame_per_member_to_previous_season":
-            result = db.compare_fame_per_member_to_previous_season(
-                season_id=arguments.get("season_id"),
-            )
-        elif name == "get_recent_role_changes":
-            result = db.get_recent_role_changes(
-                days=arguments.get("days", 30),
-            )
-        elif name == "get_member_missed_war_days":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            result = db.get_member_missed_war_days(
-                member_tag,
-                season_id=arguments.get("season_id"),
-            )
-        elif name == "get_perfect_war_participants":
-            result = db.get_perfect_war_participants(
-                season_id=arguments.get("season_id"),
-            )
-        elif name == "set_member_birthday":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            db.set_member_birthday(
-                member_tag, name=None,
-                month=arguments["month"], day=arguments["day"],
-            )
-            result = {"success": True}
-        elif name == "set_member_join_date":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            db.set_member_join_date(
-                member_tag, name=None,
-                joined_date=arguments["date"],
-            )
-            result = {"success": True}
-        elif name == "set_member_profile_url":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            db.set_member_profile_url(
-                member_tag, name=None,
-                url=arguments["url"],
-            )
-            result = {"success": True}
-        elif name == "set_member_note":
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            db.set_member_note(
-                member_tag, name=None,
-                note=arguments["note"],
-            )
-            result = {"success": True}
-        elif name == "recall_member":
-            from memory_store import list_memories
-
-            member_tag = _resolve_member_tag(arguments["member_tag"])
-            memories = list_memories(
-                viewer_scope="public",
-                filters={"member_tag": member_tag},
-                limit=15,
-            )
-            if not memories:
-                result = {"member_tag": member_tag, "memories": [], "message": "No stored memories for this member."}
-            else:
-                result = {
-                    "member_tag": member_tag,
-                    "count": len(memories),
-                    "memories": [
-                        {
-                            "title": m.get("title"),
-                            "summary": m.get("summary") or m.get("body", "")[:220],
-                            "source_type": m.get("source_type"),
-                            "scope": m.get("scope"),
-                            "created_at": m.get("created_at"),
-                            "tags": m.get("tags", []),
-                        }
-                        for m in memories
-                    ],
-                }
+        elif name == "update_member":
+            result = _execute_update_member(arguments)
         elif name == "save_clan_memory":
             from memory_store import attach_tags, create_memory
             from storage.contextual_memory import upsert_member_note_memory
