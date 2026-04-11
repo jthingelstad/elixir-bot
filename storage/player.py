@@ -845,6 +845,7 @@ def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, pre
             "from_trophies": from_trophies,
             "to_trophies": to_trophies,
             "ranked_battle_count": sum(1 for row in trophy_rows if row["is_ranked"]),
+            "trophies_per_battle": round(trophy_delta / max(1, len(trophy_rows)), 1),
             "latest_battle_type": new_rows[0]["battle_type"],
             "latest_mode_name": new_rows[0]["game_mode_name"],
         })

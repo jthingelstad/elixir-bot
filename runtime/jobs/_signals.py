@@ -64,6 +64,175 @@ def _signal_group_needs_recap_memory(signals):
 
 
 
+def _extract_race_standings_summary(war):
+    """Extract a compact race standings summary from the raw war API payload.
+
+    The raw war JSON includes full participant arrays for all 5 clans, which can
+    be thousands of lines. This extracts just the competitive picture: rank, name,
+    fame, and fame gap vs. our clan.
+    """
+    clans = (war or {}).get("clans") or []
+    if not clans:
+        return []
+    our_tag = None
+    clan_obj = (war or {}).get("clan") or {}
+    if clan_obj.get("tag"):
+        our_tag = clan_obj["tag"].strip("#").upper()
+    ranked = sorted(
+        clans,
+        key=lambda c: (c.get("fame") or 0, c.get("repairPoints") or 0),
+        reverse=True,
+    )
+    our_fame = None
+    for c in ranked:
+        tag = (c.get("tag") or "").strip("#").upper()
+        if our_tag and tag == our_tag:
+            our_fame = c.get("fame") or 0
+            break
+    lines = []
+    for rank, c in enumerate(ranked, start=1):
+        tag = (c.get("tag") or "").strip("#").upper()
+        is_us = our_tag and tag == our_tag
+        fame = c.get("fame") or 0
+        name = c.get("name") or "Unknown"
+        gap = ""
+        if our_fame is not None and not is_us:
+            diff = fame - our_fame
+            gap = f" ({diff:+,} vs us)" if diff != 0 else " (tied)"
+        marker = " ← POAP KINGS" if is_us else ""
+        lines.append(f"  #{rank} {name}: {fame:,} fame{gap}{marker}")
+    return lines
+
+
+def _build_compact_war_context(war):
+    """Build a compact war context summary instead of dumping the full raw JSON.
+
+    The raw currentriverrace API response includes full participant arrays for
+    all 5 clans (50+ members each with fame, decks, repairs), which can easily
+    exceed context limits. This extracts only what the LLM needs for reasoning.
+    """
+    war = war or {}
+    lines = []
+    # War state metadata
+    state = war.get("state")
+    if state:
+        lines.append(f"war_state: {state}")
+    clan = war.get("clan") or {}
+    if clan:
+        lines.append(
+            f"our_clan: {clan.get('name')} | fame {clan.get('fame', 0):,} | "
+            f"repair {clan.get('repairPoints', 0):,} | score {clan.get('clanScore', 0):,}"
+        )
+        finish_time = clan.get("finishTime")
+        if finish_time:
+            lines.append(f"finish_time: {finish_time}")
+        participants = clan.get("participants") or []
+        if participants:
+            lines.append(f"our_participant_count: {len(participants)}")
+    # Period logs count (useful context but not raw data)
+    period_logs = war.get("periodLogs") or []
+    if period_logs:
+        lines.append(f"period_logs_available: {len(period_logs)} week(s)")
+    if not lines:
+        lines.append("(no war data available)")
+    return lines
+
+
+def _build_river_race_insight_layer(signals):
+    """Extract high-value derived fields from river-race signals into a readable insight block."""
+    lines = []
+    for sig in (signals or []):
+        # Lead pressure and narrative (from _battle_lead_payload)
+        if sig.get("lead_pressure"):
+            lines.append(f"lead_pressure: {sig['lead_pressure']}")
+        if sig.get("lead_story"):
+            lines.append(f"lead_story: {sig['lead_story']}")
+        if sig.get("lead_call_to_action"):
+            lines.append(f"lead_call_to_action: {sig['lead_call_to_action']}")
+
+        # Rank movement — the change matters more than the current state
+        if sig.get("gained_ground"):
+            lines.append(f"rank_movement: gained ground (was #{sig.get('previous_rank')} -> now #{sig.get('race_rank')})")
+        elif sig.get("lost_ground"):
+            lines.append(f"rank_movement: lost ground (was #{sig.get('previous_rank')} -> now #{sig.get('race_rank')})")
+        elif sig.get("race_rank") is not None and "gained_ground" not in sig:
+            lines.append(f"rank_movement: holding at #{sig['race_rank']}")
+
+        # Engagement rates — percentages are more insightful than raw counts
+        if sig.get("engagement_pct") is not None:
+            lines.append(
+                f"engagement: {sig['completion_pct']}% finished all decks, "
+                f"{sig['engagement_pct']}% have battled, "
+                f"{100 - sig['engagement_pct']}% untouched"
+            )
+        elif sig.get("total_participants"):
+            total = sig["total_participants"]
+            finished = sig.get("finished_count") or 0
+            engaged = sig.get("engaged_count") or 0
+            lines.append(
+                f"engagement: {round(100 * finished / max(1, total))}% finished all decks, "
+                f"{round(100 * engaged / max(1, total))}% have battled, "
+                f"{round(100 * (total - engaged) / max(1, total))}% untouched"
+            )
+
+        # Pace projection
+        if sig.get("pace_status"):
+            fame_target = sig.get("fame_target") or "10,000"
+            lines.append(f"pace_status: {sig['pace_status']} (finish line: {fame_target:,} fame)" if isinstance(fame_target, int) else f"pace_status: {sig['pace_status']}")
+
+        # Time pressure
+        hours_remaining = sig.get("hours_remaining") or sig.get("checkpoint_hours_remaining")
+        if hours_remaining is not None:
+            lines.append(f"hours_remaining: {hours_remaining}")
+
+        # Trophy stakes if known
+        if sig.get("trophy_stakes_text"):
+            lines.append(f"trophy_stakes: {sig['trophy_stakes_text']}")
+
+    # Deduplicate in case multiple signals contributed the same fields
+    seen = set()
+    unique = []
+    for line in lines:
+        if line not in seen:
+            seen.add(line)
+            unique.append(line)
+    return unique
+
+
+def _build_player_insight_context(tag):
+    """Load recent form and trend data for a player to enrich progress signals."""
+    lines = []
+    try:
+        form = db.get_member_recent_form(tag)
+        if form:
+            parts = [f"recent_form: {form.get('form_label', 'unknown')}"]
+            if form.get("summary"):
+                parts.append(f"({form['summary']})")
+            lines.append(" ".join(parts))
+            if form.get("current_streak") and form.get("current_streak_type"):
+                lines.append(f"current_streak: {form['current_streak']}{form['current_streak_type']}")
+    except Exception:
+        pass
+    try:
+        trend = db.compare_member_trend_windows(tag, window_days=7)
+        if trend:
+            current = trend.get("current") or {}
+            previous = trend.get("previous") or {}
+            ct = current.get("trophies") or {}
+            pt = previous.get("trophies") or {}
+            if ct.get("delta") is not None:
+                prev_label = f" (prior 7 days: {pt['delta']:+d})" if pt.get("delta") is not None else ""
+                lines.append(f"trophy_trend_7d: {ct['delta']:+d}{prev_label}")
+            ca = current.get("battle_activity") or {}
+            pa = previous.get("battle_activity") or {}
+            if ca.get("battles"):
+                prev_label = f" (prior: {pa.get('battles', 0)})" if pa.get("battles") else ""
+                lines.append(f"battles_this_week: {ca['battles']}{prev_label}")
+    except Exception:
+        pass
+    return lines
+
+
 def _build_outcome_context(outcome, signals, clan, war):
     channel_key = outcome["target_channel_key"]
     first = (signals or [{}])[0]
@@ -79,10 +248,22 @@ def _build_outcome_context(outcome, signals, clan, war):
     if channel_key == "river-race":
         lines.extend([
             "",
-            "Focus on River Race state, momentum, and what the clan should do right now.",
-            "Current war data:",
-            json.dumps(war or {}, indent=2, default=str),
+            "Focus on momentum, change, and what the clan cannot easily see in-game.",
         ])
+        # Build insight layer from signal fields the LLM should lead with
+        insight_lines = _build_river_race_insight_layer(signals)
+        if insight_lines:
+            lines.extend(["", "=== INSIGHT LAYER (lead with this) ==="] + insight_lines)
+        # Race standings — extracted compactly so they never get truncated
+        standings_lines = _extract_race_standings_summary(war)
+        if standings_lines:
+            lines.extend(["", "=== RACE STANDINGS ==="] + standings_lines)
+        # Compact war context instead of raw JSON dump
+        lines.extend([
+            "",
+            "=== BACKGROUND DATA (for reasoning, do not restate as-is) ===",
+        ])
+        lines.extend(_build_compact_war_context(war))
         signal_types = {s.get("type") for s in (signals or [])}
         has_complete = bool(signal_types & _DAY_COMPLETE_TYPES)
         has_started = bool(signal_types & _DAY_STARTED_TYPES)
@@ -98,6 +279,12 @@ def _build_outcome_context(outcome, signals, clan, war):
             "",
             "Focus on the player's achievement and why it is worth celebrating.",
         ])
+        # Enrich with form and trend data so the LLM can interpret, not just restate
+        tag = first.get("tag")
+        if tag:
+            insight_lines = _build_player_insight_context(tag)
+            if insight_lines:
+                lines.extend(["", "=== PLAYER CONTEXT (use to interpret the achievement) ==="] + insight_lines)
     elif channel_key == "clan-events":
         has_likely_kick = any(s.get("likely_kicked") for s in (signals or []))
         if has_likely_kick:

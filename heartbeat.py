@@ -15,11 +15,13 @@ import cr_api
 import cr_knowledge
 import db
 import prompts
-from storage.war_calendar import war_signal_date
+from storage.war_calendar import is_colosseum_week, war_signal_date
 
 log = logging.getLogger("elixir_heartbeat")
 
 BATTLE_DAY_SECONDS = 24 * 60 * 60
+_RACE_FAME_TARGET = 10_000
+_COLOSSEUM_FAME_TARGET = 5_000
 _BATTLE_DAY_CHECKPOINTS = (
     {
         "hour": 21,
@@ -777,6 +779,25 @@ def detect_inactivity(current_members, now=None, conn=None):
     return signals
 
 
+def _compute_pace_status(clan_fame, day_number, day_total, hours_elapsed, period_type):
+    """Compare current fame against linear pace expectation.
+
+    Returns 'ahead_of_pace', 'on_pace', or 'behind_pace'.
+    """
+    fame_target = _COLOSSEUM_FAME_TARGET if is_colosseum_week(period_type) else _RACE_FAME_TARGET
+    total_battle_hours = max(1, (day_total or 4) * 24)
+    elapsed_battle_hours = max(0, ((day_number or 1) - 1) * 24 + (hours_elapsed or 0))
+    if elapsed_battle_hours <= 0:
+        return "on_pace"
+    expected_fame = fame_target * elapsed_battle_hours / total_battle_hours
+    ratio = (clan_fame or 0) / max(1, expected_fame)
+    if ratio >= 1.15:
+        return "ahead_of_pace"
+    elif ratio <= 0.85:
+        return "behind_pace"
+    return "on_pace"
+
+
 def detect_war_battle_checkpoints(conn=None):
     """Emit battle-day updates at 12h, 18h, and 21h elapsed.
 
@@ -848,6 +869,16 @@ def detect_war_battle_checkpoints(conn=None):
         "checkpoint_hours_remaining": checkpoint["hours_remaining"],
         "hours_elapsed": elapsed_seconds // 3600,
         "hours_remaining": max(0, time_left_seconds) // 3600,
+        "engagement_pct": round(100 * (day_state.get("engaged_count") or 0) / max(1, day_state.get("total_participants") or 1)),
+        "completion_pct": round(100 * (day_state.get("finished_count") or 0) / max(1, day_state.get("total_participants") or 1)),
+        "pace_status": _compute_pace_status(
+            day_state.get("clan_fame"),
+            day_state.get("day_number"),
+            day_state.get("day_total"),
+            elapsed_seconds // 3600,
+            day_state.get("period_type"),
+        ),
+        "fame_target": _COLOSSEUM_FAME_TARGET if is_colosseum_week(day_state.get("period_type")) else _RACE_FAME_TARGET,
         **_battle_lead_payload(day_state.get("race_rank"), war_state=day_state),
     }]
 

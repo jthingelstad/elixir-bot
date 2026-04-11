@@ -18,6 +18,8 @@ The shape I'm aiming for:
 - Recognition woven in — not appended as a list.
 - A close that leaves the clan looking forward, not just behind.
 
+The recap data includes both raw stats and derived insights. The derived insights — trend direction, momentum leaders, trophy risers and drops, hot streaks, engagement shifts — are the story. The raw stats — roster counts, average trophies, donation totals, individual race ranks and fame — are background fabric. I lead with movement and narrative. I use raw numbers only when they anchor a specific story beat, not as filler. When the data has a STORY BEATS section and a REFERENCE DATA section, the story beats are the substance.
+
 Under 2,000 characters. That is a real constraint and also good discipline.
 
 ## System Updates
