@@ -105,15 +105,27 @@ def _interactive_system(channel_name):
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
         "If they specify a target channel, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
+        "When someone tells you something to remember, corrects a fact, or states a durable fact worth persisting, "
+        "include a \"memories\" array in your JSON response. "
+        "Each entry: {\"title\": \"short label\", \"body\": \"full fact\", \"action\": \"save\" or \"correct\", "
+        "\"member_tag\": \"player tag, name, or handle if member-specific, or null\", \"tags\": [\"tag1\"]}.\n"
+        "CRITICAL: If your response text acknowledges remembering, noting, correcting, or updating something, "
+        "you MUST include a corresponding entry in the memories array. "
+        "Never claim you have updated memory without including it in the array.\n"
+        "For corrections (action: \"correct\"), the body contains the NEW correct information. "
+        "The system will search for and archive the old conflicting memory automatically.\n"
+        "If no memories need saving, omit the field or use an empty array.\n\n"
         f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance()}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
-        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}\n\n'
+        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", '
+        '"memories": [], "metadata": {}}\n\n'
         "Or, when sharing to the clan:\n"
         '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "reply in the current channel", '
-        '"share_content": "the clan-facing post for the target channel", "share_channel": "#clan-events", "metadata": {}}',
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#clan-events", '
+        '"memories": [], "metadata": {}}',
     )
 
 
@@ -143,9 +155,16 @@ def _clanops_system(channel_name):
         "Member profiles can include derived Clash Royale account age from Years Played badge data and recent games-per-day activity. "
         "If someone asks how long a member has been playing, use the account-age fields directly when they are present. "
         "Only say that exact account age is not recorded when those fields are actually missing.\n\n"
-        "When leadership asks you to remember, record, or note something about a member or the clan, "
-        "use the save_clan_memory tool to persist it. Acknowledge the save in your response. "
-        "Also use this tool proactively when a clear leadership decision is made during conversation.\n\n"
+        "When leadership tells you something to remember, corrects a fact, makes a decision, "
+        "or states a durable fact worth persisting, include a \"memories\" array in your JSON response. "
+        "Each entry: {\"title\": \"short label\", \"body\": \"full fact\", \"action\": \"save\" or \"correct\", "
+        "\"member_tag\": \"player tag, name, or handle if member-specific, or null\", \"tags\": [\"tag1\"]}.\n"
+        "CRITICAL: If your response text acknowledges remembering, noting, correcting, or updating something, "
+        "you MUST include a corresponding entry in the memories array. "
+        "Never claim you have updated memory without including it in the array.\n"
+        "For corrections (action: \"correct\"), the body contains the NEW correct information. "
+        "The system will search for and archive the old conflicting memory automatically.\n"
+        "If no memories need saving, omit the field or use an empty array.\n\n"
         "For performance, momentum, or roster-health questions over time, prefer the long-term trend tools and summaries.\n\n"
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
@@ -154,11 +173,13 @@ def _clanops_system(channel_name):
         f"{_discord_emoji_guidance(allow_in_sensitive=True)}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
-        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", "metadata": {}}\n\n'
+        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", '
+        '"memories": [], "metadata": {}}\n\n'
         "Or, when sharing to the clan:\n"
         '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "reply in the current channel", '
-        '"share_content": "the clan-facing post for the target channel", "share_channel": "#clan-events", "metadata": {}}',
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#clan-events", '
+        '"memories": [], "metadata": {}}',
     )
 
 
