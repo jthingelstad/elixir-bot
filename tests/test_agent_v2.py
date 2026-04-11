@@ -371,9 +371,8 @@ def test_execute_tool_get_clan_health_sensitive_aspect_blocked_in_interactive():
     assert "leadership channels" in result["error"]
 
 
-def test_execute_tool_get_river_race_merges_standings():
+def test_execute_tool_get_river_race_standings():
     with patch("elixir_agent.db") as mock_db:
-        mock_db.get_current_war_day_state.return_value = {"war_day_key": "s00129-w01-p010", "phase_display": "Battle Day 1"}
         mock_db.get_current_war_status.return_value = {
             "war_state": "full",
             "season_id": 129,
@@ -386,11 +385,31 @@ def test_execute_tool_get_river_race_merges_standings():
             "trophy_stakes_text": "20 trophies",
         }
         result = json.loads(elixir_agent._execute_tool("get_river_race", {}))
-        assert result["phase_display"] == "Battle Day 1"
         assert result["race_standings"][0]["clan_name"] == "POAP KINGS"
         assert result["race_rank"] == 1
-        mock_db.get_current_war_day_state.assert_called_once()
+        assert result["trophy_stakes_text"] == "20 trophies"
         mock_db.get_current_war_status.assert_called_once()
+
+
+def test_execute_tool_get_river_race_engagement():
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.get_current_war_day_state.return_value = {
+            "war_day_key": "s00129-w01-p010",
+            "phase": "battle",
+            "phase_display": "Battle Day 1",
+            "day_number": 1,
+            "day_total": 4,
+            "clan_fame": 5000,
+            "total_participants": 40,
+            "engaged_count": 30,
+            "finished_count": 20,
+            "untouched_count": 10,
+        }
+        result = json.loads(elixir_agent._execute_tool("get_river_race", {"aspect": "engagement"}))
+        assert result["phase_display"] == "Battle Day 1"
+        assert result["engaged_count"] == 30
+        assert result["untouched_count"] == 10
+        mock_db.get_current_war_day_state.assert_called_once()
 
 
 def test_execute_tool_get_member_war_detail_attendance_resolves_member():
@@ -613,7 +632,7 @@ def test_create_chat_completion_records_llm_telemetry():
     assert mock_record.call_args.args[0] == "interactive"
     assert mock_record.call_args.kwargs["ok"] is True
     assert mock_record.call_args.kwargs["total_tokens"] == 30
-    assert create.call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
+    assert create.call_args.kwargs["model"] == "claude-sonnet-4-6"
 
 
 def test_create_chat_completion_uses_content_model_for_site_workflows():
@@ -631,7 +650,7 @@ def test_create_chat_completion_uses_content_model_for_site_workflows():
             messages=[{"role": "user", "content": "status"}],
         )
 
-    assert create.call_args.kwargs["model"] == "claude-sonnet-4-6"
+    assert create.call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
 
 
 def test_create_chat_completion_respects_model_env_overrides():

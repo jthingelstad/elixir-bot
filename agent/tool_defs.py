@@ -122,14 +122,23 @@ TOOLS = [
     {
         "name": "get_river_race",
         "description": (
-            "Get the current River Race state including live war-day engagement, deck usage, "
-            "top fame earners, and competing clan standings (names, fame, ranks). "
-            "Basic war phase/day/rank may already be in your context — use this for detailed "
-            "live data including who has battled and who the competing clans are."
+            "Get current River Race data. Use 'aspect' to select the view.\n\n"
+            "Aspects:\n"
+            "- standings: competing clan rankings with fame, names, and our position "
+            "(default — use for 'who are we racing', 'how do we compare', rival clans)\n"
+            "- engagement: live war-day member participation — deck usage, top fame earners, "
+            "who hasn't battled yet (use for 'who still needs to battle', 'how are we doing today')"
         ),
         "input_schema": {
             "type": "object",
-            "properties": {},
+            "properties": {
+                "aspect": {
+                    "type": "string",
+                    "description": "Which view to retrieve. Default: standings.",
+                    "default": "standings",
+                    "enum": ["standings", "engagement"],
+                },
+            },
             "required": [],
         },
     },
