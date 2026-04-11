@@ -230,6 +230,26 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "Discord: #leader-lounge",
         ),
     ),
+    ActivityDefinition(
+        activity_key="clan-wars-intel",
+        owner_subagent="river-race",
+        purpose="Generate a detailed intel report on competing clans for the war season.",
+        job_id="clan-wars-intel",
+        job_function="_clan_wars_intel_report",
+        schedule_kind="cron",
+        schedule_config={
+            "month": "*",
+            "day": 1,
+            "hour": 12,
+            "minute": 0,
+        },
+        delivery_targets=(
+            "Discord: #river-race",
+        ),
+        manual_trigger_allowed=True,
+        enabled_by_default=False,
+        legacy_commands=("intel-report",),
+    ),
 )
 
 

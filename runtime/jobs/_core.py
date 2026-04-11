@@ -14,6 +14,7 @@ __all__ = [
     "_ask_elixir_daily_insight", "_clan_awareness_tick",
     "_war_poll_tick", "_war_awareness_tick", "_player_intel_refresh",
     "_clanops_weekly_review", "_weekly_clan_recap",
+    "_clan_wars_intel_report",
 ]
 
 import asyncio
@@ -40,7 +41,7 @@ from runtime.app import (
     bot,
     log,
 )
-from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
+from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id, _safe_create_task
 from runtime import status as runtime_status
 from runtime.system_signals import queue_startup_system_signals
 from runtime.jobs._signals import (
@@ -56,6 +57,7 @@ from runtime.jobs._signals import (
     _publish_pending_system_signal_updates,
     _strip_weekly_recap_header,
 )
+from runtime.jobs._intel import _clan_wars_intel_report
 from runtime.jobs._site import (
     _normalize_poap_kings_publish_result,
     _notify_poapkings_publish,
@@ -346,6 +348,9 @@ async def _war_awareness_tick():
 
         if detection_result.cursor_updates:
             await asyncio.to_thread(_persist_signal_detector_cursors, detection_result.cursor_updates)
+
+        if any(s.get("type") == "war_season_rollover" for s in signals):
+            _safe_create_task(_clan_wars_intel_report(), name="clan_wars_intel_auto")
 
         runtime_status.mark_job_success("war_awareness", f"{len(signals)} war signal(s) processed")
     except Exception as e:

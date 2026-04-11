@@ -353,8 +353,35 @@ def upsert_race_streak_memory(
     )
 
 
+@managed_connection
+def upsert_intel_report_memory(
+    *,
+    season_id: int,
+    body: str,
+    metadata: dict | None = None,
+    conn=None,
+) -> dict | None:
+    """Persist a condensed strategic summary of the Clan Wars Intel Report.
+
+    Keyed by season_id so re-runs upsert rather than duplicate.
+    """
+    return upsert_summary_memory(
+        event_type="clan_wars_intel",
+        event_id=str(season_id),
+        title=f"Clan Wars Intel — Season {season_id}",
+        body=body,
+        scope="public",
+        created_by="elixir:intel-report",
+        tags=["war", "intel", "opponents", f"season-{season_id}"],
+        metadata=metadata,
+        war_season_id=str(season_id),
+        conn=conn,
+    )
+
+
 __all__ = [
     "archive_member_note_memory",
+    "upsert_intel_report_memory",
     "upsert_member_note_memory",
     "upsert_race_streak_memory",
     "upsert_summary_memory",
