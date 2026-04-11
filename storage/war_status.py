@@ -116,6 +116,38 @@ def _resolve_live_race_rank(payload: dict, clan_tag: Optional[str]) -> Optional[
     return None
 
 
+def _extract_race_standings(payload: dict, our_clan_tag: Optional[str]) -> list[dict]:
+    """Extract ranked standings for all clans in the current race."""
+    clans = payload.get("clans") or []
+    if not clans:
+        return []
+    canon_our_tag = _canon_tag(our_clan_tag) if our_clan_tag else None
+    ranked = sorted(
+        clans,
+        key=lambda clan: (
+            clan.get("fame") or 0,
+            clan.get("repairPoints") or 0,
+            clan.get("periodPoints") or 0,
+            clan.get("clanScore") or 0,
+        ),
+        reverse=True,
+    )
+    standings = []
+    for rank, clan in enumerate(ranked, start=1):
+        tag = _canon_tag(clan.get("tag"))
+        standings.append({
+            "rank": rank,
+            "clan_tag": tag,
+            "clan_name": clan.get("name"),
+            "fame": clan.get("fame") or 0,
+            "repair_points": clan.get("repairPoints") or 0,
+            "period_points": clan.get("periodPoints") or 0,
+            "clan_score": clan.get("clanScore") or 0,
+            "is_us": tag == canon_our_tag,
+        })
+    return standings
+
+
 def _usable_live_finish_time(value: Optional[str]) -> Optional[str]:
     finish_time = (value or "").strip()
     if not finish_time or finish_time == LIVE_FINISH_TIME_SENTINEL:
@@ -213,6 +245,7 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
         else None
     )
     result["race_rank"] = _resolve_live_race_rank(payload, result.get("clan_tag")) or result.get("race_rank")
+    result["race_standings"] = _extract_race_standings(payload, result.get("clan_tag"))
     result["period_logs_count"] = len(payload.get("periodLogs") or [])
     result["war_day_key"] = war_day_key(
         result.get("season_id"),
