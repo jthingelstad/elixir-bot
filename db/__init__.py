@@ -398,8 +398,6 @@ def _member_reference_fields(conn: sqlite3.Connection, member_id: int, item: dic
     if not tag:
         return item
     item["member_ref"] = format_member_reference(tag, conn=conn)
-    item["member_ref_with_handle"] = format_member_reference(tag, style="name_with_handle", conn=conn)
-    item["member_ref_with_mention"] = format_member_reference(tag, style="name_with_mention", conn=conn)
     return item
 
 
