@@ -29,19 +29,31 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 
 ## Environment
 
-- Python with venv (`source venv/bin/activate`)
+- Python 3.14 via Homebrew; project venv at `venv/` (gitignored)
 - Requires `.env` with: DISCORD_TOKEN, CLAUDE_API_KEY, CR_API_KEY
 - Non-secret config (channel IDs, clan tag) lives in `prompts/DISCORD.md` and `prompts/CLAN.md`
 - Local start: `venv/bin/python elixir.py`
 - Production process management uses `launchd`; see `SETUP.md`
 
+### Venv setup (one-time)
+
+```bash
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt pytest
+```
+
+If the venv is missing or broken, recreate it with the commands above.
+
 ## Running Tests
 
 ```bash
-venv/bin/python -m pytest tests/ -v
+./venv/bin/pytest tests/ -v
 ```
 
-Tests use in-memory SQLite and mocked external services (no API keys needed).
+- **Always use `./venv/bin/pytest`** — do not use bare `pytest` or `python3 -m pytest`. The Homebrew `pytest` binary runs in its own isolated env and cannot import project dependencies.
+- `pyproject.toml` configures `pythonpath = ["."]` so all project imports resolve without install.
+- Tests use in-memory SQLite and mocked external services (no API keys needed).
+- Test fixtures (e.g. `quiz_db`) handle DB connection lifecycle — use `pytest.fixture` instead of manual try/finally.
 
 ## Cleanup
 

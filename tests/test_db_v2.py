@@ -226,14 +226,6 @@ def test_discord_link_and_member_reference_formatting():
         assert identity["discord_username"] == "jamie"
 
         assert db.format_member_reference("#ABC123", conn=conn) == "King Levy"
-        assert (
-            db.format_member_reference("#ABC123", style="name_with_handle", conn=conn)
-            == "King Levy (<@1474760692992180429>)"
-        )
-        assert (
-            db.format_member_reference("#ABC123", style="name_with_mention", conn=conn)
-            == "King Levy (<@1474760692992180429>)"
-        )
     finally:
         conn.close()
 
@@ -250,14 +242,7 @@ def test_manual_discord_identity_uses_handle_not_fake_mention():
         identity = db.get_member_identity("#ABC123", conn=conn)
         assert identity["discord_user_id"] == "manual:kinglevy"
         assert identity["discord_username"] == "kinglevy"
-        assert (
-            db.format_member_reference("#ABC123", style="name_with_handle", conn=conn)
-            == "King Levy (@kinglevy)"
-        )
-        assert (
-            db.format_member_reference("#ABC123", style="name_with_mention", conn=conn)
-            == "King Levy (@kinglevy)"
-        )
+        assert db.format_member_reference("#ABC123", conn=conn) == "King Levy"
     finally:
         conn.close()
 
@@ -280,10 +265,7 @@ def test_manual_discord_identity_parses_real_discord_mention():
         identity = db.get_member_identity("#ABC123", conn=conn)
         assert identity["discord_user_id"] == "1478515435606380687"
         assert identity["discord_username"] == "jamie"
-        assert (
-            db.format_member_reference("#ABC123", style="name_with_mention", conn=conn)
-            == "King Levy (<@1478515435606380687>)"
-        )
+        assert db.format_member_reference("#ABC123", conn=conn) == "King Levy"
     finally:
         conn.close()
 

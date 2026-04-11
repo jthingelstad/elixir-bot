@@ -10,10 +10,7 @@ from db import (
 )
 from storage.war_status import _season_bounds, get_current_season_id, get_current_war_status
 
-def _format_member_reference(*args, **kwargs):
-    from storage.identity import format_member_reference
-
-    return format_member_reference(*args, **kwargs)
+from storage._formatting import format_member_reference as _format_member_reference
 
 @managed_connection
 def get_member_war_status(tag, season_id=None, conn=None):

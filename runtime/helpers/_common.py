@@ -1,17 +1,22 @@
+import asyncio
+import logging
 import os
 import re
 from datetime import datetime, timezone
 
 import db
-import elixir_agent
-import prompts
 from runtime.activities import schedule_specs_from_registry
 from runtime import status as runtime_status
 
+DISCORD_MAX_MESSAGE_LEN = 2000
+DISCORD_CHUNK_SIZE = 1990  # leave room for overhead
+
 __all__ = [
     "BOT_ROLE_ID", "CHICAGO", "LEADER_ROLE_ID", "bot", "log", "scheduler",
+    "DISCORD_MAX_MESSAGE_LEN", "DISCORD_CHUNK_SIZE",
     "_runtime_app", "_bot", "_scheduler", "_log", "_chicago",
     "_leader_role_id", "_bot_role_id", "_post_to_elixir",
+    "_chunk_for_discord", "_safe_create_task",
     "_fmt_iso_short", "_fmt_relative", "_fmt_bytes", "_fmt_num", "_status_badge",
     "_member_label", "_join_member_bits", "_canon_tag",
     "_format_relative_join_age", "_recent_join_display_rows",
@@ -58,6 +63,24 @@ def _bot_role_id():
 
 async def _post_to_elixir(*args, **kwargs):
     return await _runtime_app()._post_to_elixir(*args, **kwargs)
+
+
+def _chunk_for_discord(text, size=DISCORD_CHUNK_SIZE):
+    """Split text into chunks that fit within Discord's message limit."""
+    return [text[i:i + size] for i in range(0, len(text), size)]
+
+
+def _safe_create_task(coro, *, name=None):
+    """Schedule an asyncio task with automatic exception logging."""
+    _bg_log = logging.getLogger("elixir")
+
+    async def _wrapper():
+        try:
+            await coro
+        except Exception:
+            _bg_log.warning("background task %s failed", name or "unnamed", exc_info=True)
+
+    return asyncio.get_event_loop().create_task(_wrapper(), name=name)
 
 
 def _fmt_iso_short(value):

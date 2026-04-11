@@ -162,6 +162,173 @@ def _stored_assistant_content(content) -> str:
     return (content or "").strip()
 
 
+async def _save_reply_save(app, message, conversation_scope, raw_question, content, workflow, event_type):
+    """Common pattern: save user message, reply, save assistant message."""
+    ch = app._channel_msg_kwargs(message.channel)
+    author = app._author_msg_kwargs(message.author)
+    await asyncio.to_thread(
+        db.save_message,
+        conversation_scope, "user", raw_question,
+        **ch, **author, workflow=workflow,
+        discord_message_id=message.id,
+    )
+    await app._reply_text(message, content)
+    await asyncio.to_thread(
+        db.save_message,
+        conversation_scope, "assistant", content,
+        **ch, **author, workflow=workflow,
+        event_type=event_type,
+    )
+
+
+def _log_route(app, route, message, mentioned, subagent, workflow, raw_question, **extra):
+    parts = [f"message_route route={route} channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s"]
+    args = [message.channel.id, message.author.id, mentioned, subagent, workflow]
+    for k, v in extra.items():
+        parts.append(f"{k}=%r")
+        args.append(v)
+    parts.append("raw_question=%r original=%r")
+    args.extend([raw_question, message.content])
+    app.log.info(" ".join(parts), *args)
+
+
+async def _handle_report_route(app, message, ctx, route, content, event_type=None):
+    """Handle a simple report route: log, save, reply, save."""
+    _log_route(app, route, message, ctx["mentioned"], ctx["subagent"], ctx["workflow"], ctx["raw_question"])
+    await _save_reply_save(
+        app, message, ctx["conversation_scope"], ctx["raw_question"],
+        content, ctx["workflow"], event_type or route,
+    )
+
+
+async def _route_legacy_clanops_hint(app, message, ctx):
+    raw_question = ctx["raw_question"]
+    if not (ctx["workflow"] == "clanops" and app._is_legacy_clanops_command_text(raw_question)):
+        return False
+    if ctx["mentioned"] and app.parse_admin_command(raw_question, require_prefix=True):
+        return False
+    hint_content = app._build_clanops_command_hint()
+    await _save_reply_save(
+        app, message, ctx["conversation_scope"], raw_question,
+        hint_content, "clanops", "clanops_command_hint",
+    )
+    return True
+
+
+async def _route_roster_join_dates(app, message, ctx):
+    if ctx["workflow"] not in {"clanops", "interactive"}:
+        return False
+    if not app._is_roster_join_dates_request(ctx["raw_question"]):
+        return False
+    content = await asyncio.to_thread(app._build_roster_join_dates_report)
+    await _handle_report_route(app, message, ctx, "roster_join_dates_report", content)
+    return True
+
+
+async def _route_help(app, message, ctx):
+    if ctx["workflow"] != "interactive" or not app._is_help_request(ctx["raw_question"]):
+        return False
+    content = await asyncio.to_thread(app._build_help_report, "interactive")
+    await _handle_report_route(app, message, ctx, "interactive_help", content,
+                               event_type="interactive_help")
+    return True
+
+
+async def _route_member_deck(app, message, ctx):
+    if ctx["workflow"] not in {"clanops", "interactive"}:
+        return False
+    if not app._is_member_deck_request(ctx["raw_question"]):
+        return False
+    deck_target = await asyncio.to_thread(app._extract_member_deck_target, ctx["raw_question"], message)
+    if not deck_target:
+        return False
+    _log_route(app, "member_deck_report", message, ctx["mentioned"], ctx["subagent"],
+               ctx["workflow"], ctx["raw_question"], deck_target=deck_target)
+    content = await asyncio.to_thread(app._build_member_deck_report, deck_target)
+    await _save_reply_save(
+        app, message, ctx["conversation_scope"], ctx["raw_question"],
+        content, ctx["workflow"], "member_deck_report",
+    )
+    return True
+
+
+async def _route_kick_risk(app, message, ctx):
+    if ctx["workflow"] != "clanops" or not app._is_kick_risk_request(ctx["raw_question"]):
+        return False
+    content = await asyncio.to_thread(app._build_kick_risk_report)
+    await _handle_report_route(app, message, ctx, "kick_risk_report", content)
+    return True
+
+
+async def _route_top_war_contributors(app, message, ctx):
+    if ctx["workflow"] != "clanops" or not app._is_top_war_contributors_request(ctx["raw_question"]):
+        return False
+    content = await asyncio.to_thread(app._build_top_war_contributors_report)
+    await _handle_report_route(app, message, ctx, "top_war_contributors_report", content)
+    return True
+
+
+async def _route_admin_command(app, message, ctx):
+    if ctx["workflow"] != "clanops" or not ctx["mentioned"]:
+        return False
+    admin_command = app.parse_admin_command(ctx["raw_question"], require_prefix=True)
+    if not admin_command:
+        return False
+    if admin_command.get("kind") == "command" and app.admin_command_requires_leader(admin_command) and not app._has_leader_role(message.author):
+        await _save_reply_save(
+            app, message, ctx["conversation_scope"], ctx["raw_question"],
+            "Leader role required for this command.", "clanops", "clanops_admin_denied",
+        )
+        return True
+    route_key = (admin_command.get("key") or admin_command.get("command") or "admin").replace(".", "_").replace("-", "_")
+    route = f"clanops_admin_{route_key}"
+    if admin_command.get("preview"):
+        route += "_preview"
+    _log_route(app, route, message, ctx["mentioned"], ctx["subagent"], ctx["workflow"], ctx["raw_question"])
+    content = await app.dispatch_admin_command(admin_command)
+    await _save_reply_save(
+        app, message, ctx["conversation_scope"], ctx["raw_question"],
+        content, "clanops", route,
+    )
+    return True
+
+
+async def _route_status(app, message, ctx):
+    if ctx["workflow"] != "clanops":
+        return False
+    raw_question = ctx["raw_question"]
+    clan_status_mode = app._clan_status_mode(raw_question)
+    if not (app._is_status_request(raw_question) or app._is_schedule_request(raw_question) or clan_status_mode):
+        return False
+    route = (
+        "clan_status_report" if clan_status_mode == "full"
+        else "clan_status_short_report" if clan_status_mode == "short"
+        else "schedule_report" if app._is_schedule_request(raw_question)
+        else "status_report"
+    )
+    _log_route(app, route, message, ctx["mentioned"], ctx["subagent"], ctx["workflow"], raw_question)
+    clan = {}
+    war = {}
+    if clan_status_mode:
+        try:
+            clan, war = await app._load_live_clan_context()
+        except Exception as exc:
+            app.log.warning("Clan status refresh failed: %s", exc)
+    if clan_status_mode == "full":
+        content = await asyncio.to_thread(app._build_clan_status_report, clan, war)
+    elif clan_status_mode == "short":
+        content = await asyncio.to_thread(app._build_clan_status_short_report, clan, war)
+    elif app._is_schedule_request(raw_question):
+        content = await asyncio.to_thread(app._build_schedule_report)
+    else:
+        content = await asyncio.to_thread(app._build_status_report)
+    await _save_reply_save(
+        app, message, ctx["conversation_scope"], raw_question,
+        content, "clanops", route,
+    )
+    return True
+
+
 async def route_message(message):
     import runtime.app as app
 
@@ -189,414 +356,31 @@ async def route_message(message):
     conversation_scope = app._channel_conversation_scope(message.channel, message.author.id)
     raw_question = app._strip_bot_mentions(message.content).strip() if mentioned else message.content.strip()
 
-    if workflow == "clanops" and app._is_legacy_clanops_command_text(raw_question):
-        if not mentioned or not app.parse_admin_command(raw_question, require_prefix=True):
-            hint_content = app._build_clanops_command_hint()
-            await asyncio.to_thread(
-                db.save_message,
-                conversation_scope,
-                "user",
-                raw_question,
-                channel_id=message.channel.id,
-                channel_name=getattr(message.channel, "name", None),
-                channel_kind=str(message.channel.type),
-                discord_user_id=message.author.id,
-                username=message.author.name,
-                display_name=message.author.display_name,
-                workflow="clanops",
-                discord_message_id=message.id,
-            )
-            await app._reply_text(message, hint_content)
-            await asyncio.to_thread(
-                db.save_message,
-                conversation_scope,
-                "assistant",
-                hint_content,
-                channel_id=message.channel.id,
-                channel_name=getattr(message.channel, "name", None),
-                channel_kind=str(message.channel.type),
-                discord_user_id=message.author.id,
-                username=message.author.name,
-                display_name=message.author.display_name,
-                workflow="clanops",
-                event_type="clanops_command_hint",
-            )
-            return
+    ctx = {
+        "mentioned": mentioned,
+        "subagent": subagent,
+        "workflow": workflow,
+        "raw_question": raw_question,
+        "conversation_scope": conversation_scope,
+        "allows_open_channel_reply": allows_open_channel_reply,
+    }
 
-    if workflow in {"clanops", "interactive"} and app._is_roster_join_dates_request(raw_question):
-        app.log.info(
-            "message_route route=roster_join_dates_report channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
-            message.channel.id,
-            message.author.id,
-            mentioned,
-            subagent,
-            workflow,
-            raw_question,
-            message.content,
-        )
-        roster_content = await asyncio.to_thread(app._build_roster_join_dates_report)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "user",
-            raw_question,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow=workflow,
-            discord_message_id=message.id,
-        )
-        await app._reply_text(message, roster_content)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "assistant",
-            roster_content,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow=workflow,
-            event_type="roster_join_dates_report",
-        )
+    # Report routes — each returns True if handled
+    if await _route_legacy_clanops_hint(app, message, ctx):
         return
-
-    if workflow == "interactive" and app._is_help_request(raw_question):
-        app.log.info(
-            "message_route route=interactive_help channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
-            message.channel.id,
-            message.author.id,
-            mentioned,
-            subagent,
-            workflow,
-            raw_question,
-            message.content,
-        )
-        help_content = await asyncio.to_thread(app._build_help_report, "interactive")
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "user",
-            raw_question,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow="interactive",
-            discord_message_id=message.id,
-        )
-        await app._reply_text(message, help_content)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "assistant",
-            help_content,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow="interactive",
-            event_type="interactive_help",
-        )
+    if await _route_roster_join_dates(app, message, ctx):
         return
-
-    deck_target = None
-    if workflow in {"clanops", "interactive"} and app._is_member_deck_request(raw_question):
-        deck_target = await asyncio.to_thread(app._extract_member_deck_target, raw_question, message)
-    if workflow in {"clanops", "interactive"} and deck_target:
-        app.log.info(
-            "message_route route=member_deck_report channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s deck_target=%r raw_question=%r original=%r",
-            message.channel.id,
-            message.author.id,
-            mentioned,
-            subagent,
-            workflow,
-            deck_target,
-            raw_question,
-            message.content,
-        )
-        deck_content = await asyncio.to_thread(app._build_member_deck_report, deck_target)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "user",
-            raw_question,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow=workflow,
-            discord_message_id=message.id,
-        )
-        await app._reply_text(message, deck_content)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "assistant",
-            deck_content,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow=workflow,
-            event_type="member_deck_report",
-        )
+    if await _route_help(app, message, ctx):
         return
-
-    if workflow == "clanops" and app._is_kick_risk_request(raw_question):
-        app.log.info(
-            "message_route route=kick_risk_report channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
-            message.channel.id,
-            message.author.id,
-            mentioned,
-            subagent,
-            workflow,
-            raw_question,
-            message.content,
-        )
-        kick_risk_content = await asyncio.to_thread(app._build_kick_risk_report)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "user",
-            raw_question,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow=workflow,
-            discord_message_id=message.id,
-        )
-        await app._reply_text(message, kick_risk_content)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "assistant",
-            kick_risk_content,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow=workflow,
-            event_type="kick_risk_report",
-        )
+    if await _route_member_deck(app, message, ctx):
         return
-
-    if workflow == "clanops" and app._is_top_war_contributors_request(raw_question):
-        app.log.info(
-            "message_route route=top_war_contributors_report channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
-            message.channel.id,
-            message.author.id,
-            mentioned,
-            subagent,
-            workflow,
-            raw_question,
-            message.content,
-        )
-        top_war_content = await asyncio.to_thread(app._build_top_war_contributors_report)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "user",
-            raw_question,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow=workflow,
-            discord_message_id=message.id,
-        )
-        await app._reply_text(message, top_war_content)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "assistant",
-            top_war_content,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow=workflow,
-            event_type="top_war_contributors_report",
-        )
+    if await _route_kick_risk(app, message, ctx):
         return
-
-    admin_command = app.parse_admin_command(raw_question, require_prefix=True) if workflow == "clanops" and mentioned else None
-    if admin_command:
-        if admin_command.get("kind") == "command" and app.admin_command_requires_leader(admin_command) and not app._has_leader_role(message.author):
-            denial = "Leader role required for this command."
-            await asyncio.to_thread(
-                db.save_message,
-                conversation_scope,
-                "user",
-                raw_question,
-                channel_id=message.channel.id,
-                channel_name=getattr(message.channel, "name", None),
-                channel_kind=str(message.channel.type),
-                discord_user_id=message.author.id,
-                username=message.author.name,
-                display_name=message.author.display_name,
-                workflow="clanops",
-                discord_message_id=message.id,
-            )
-            await app._reply_text(message, denial)
-            await asyncio.to_thread(
-                db.save_message,
-                conversation_scope,
-                "assistant",
-                denial,
-                channel_id=message.channel.id,
-                channel_name=getattr(message.channel, "name", None),
-                channel_kind=str(message.channel.type),
-                discord_user_id=message.author.id,
-                username=message.author.name,
-                display_name=message.author.display_name,
-                workflow="clanops",
-                event_type="clanops_admin_denied",
-            )
-            return
-        route_key = (admin_command.get("key") or admin_command.get("command") or "admin").replace(".", "_").replace("-", "_")
-        route = f"clanops_admin_{route_key}"
-        if admin_command.get("preview"):
-            route += "_preview"
-        app.log.info(
-            "message_route route=%s channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
-            route,
-            message.channel.id,
-            message.author.id,
-            mentioned,
-            subagent,
-            workflow,
-            raw_question,
-            message.content,
-        )
-        admin_content = await app.dispatch_admin_command(
-            admin_command,
-        )
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "user",
-            raw_question,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow="clanops",
-            discord_message_id=message.id,
-        )
-        await app._reply_text(message, admin_content)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "assistant",
-            admin_content,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow="clanops",
-            event_type=route,
-        )
+    if await _route_top_war_contributors(app, message, ctx):
         return
-
-    clan_status_mode = app._clan_status_mode(raw_question) if workflow == "clanops" else None
-    if workflow == "clanops" and (app._is_status_request(raw_question) or app._is_schedule_request(raw_question) or clan_status_mode):
-        route = (
-            "clan_status_report" if clan_status_mode == "full"
-            else "clan_status_short_report" if clan_status_mode == "short"
-            else "schedule_report" if app._is_schedule_request(raw_question)
-            else "status_report"
-        )
-        app.log.info(
-            "message_route route=%s channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s raw_question=%r original=%r",
-            route,
-            message.channel.id,
-            message.author.id,
-            mentioned,
-            subagent,
-            workflow,
-            raw_question,
-            message.content,
-        )
-        clan = {}
-        war = {}
-        if clan_status_mode:
-            try:
-                clan, war = await app._load_live_clan_context()
-            except Exception as exc:
-                app.log.warning("Clan status refresh failed: %s", exc)
-        if clan_status_mode == "full":
-            report_builder = app._build_clan_status_report
-            report_args = (clan, war)
-            event_type = "clan_status_report"
-        elif clan_status_mode == "short":
-            report_builder = app._build_clan_status_short_report
-            report_args = (clan, war)
-            event_type = "clan_status_short_report"
-        elif app._is_schedule_request(raw_question):
-            report_builder = app._build_schedule_report
-            report_args = ()
-            event_type = "schedule_report"
-        else:
-            report_builder = app._build_status_report
-            report_args = ()
-            event_type = "status_report"
-        status_content = await asyncio.to_thread(report_builder, *report_args)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "user",
-            raw_question,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow="clanops",
-            discord_message_id=message.id,
-        )
-        await app._reply_text(message, status_content)
-        await asyncio.to_thread(
-            db.save_message,
-            conversation_scope,
-            "assistant",
-            status_content,
-            channel_id=message.channel.id,
-            channel_name=getattr(message.channel, "name", None),
-            channel_kind=str(message.channel.type),
-            discord_user_id=message.author.id,
-            username=message.author.name,
-            display_name=message.author.display_name,
-            workflow="clanops",
-            event_type=event_type,
-        )
+    if await _route_admin_command(app, message, ctx):
+        return
+    if await _route_status(app, message, ctx):
         return
 
     if not mentioned and not allows_open_channel_reply:
@@ -614,18 +398,12 @@ async def route_message(message):
                     channel_id=message.channel.id,
                     viewer_scope=channel_config.get("memory_scope") or "public",
                 )
+                ch = app._channel_msg_kwargs(message.channel)
+                author = app._author_msg_kwargs(message.author)
                 _reception_user_msg_id = await asyncio.to_thread(
                     db.save_message,
-                    scope,
-                    "user",
-                    question,
-                    channel_id=message.channel.id,
-                    channel_name=getattr(message.channel, "name", None),
-                    channel_kind=str(message.channel.type),
-                    discord_user_id=message.author.id,
-                    username=message.author.name,
-                    display_name=message.author.display_name,
-                    workflow="reception",
+                    scope, "user", question,
+                    **ch, **author, workflow="reception",
                     discord_message_id=message.id,
                 )
                 result = await asyncio.to_thread(
@@ -697,25 +475,21 @@ async def route_message(message):
                 try:
                     _reception_asst_msg_id = await asyncio.to_thread(
                         db.save_message,
-                        scope,
-                        "assistant",
-                        _stored_assistant_content(content),
-                        channel_id=message.channel.id,
-                        channel_name=getattr(message.channel, "name", None),
-                        channel_kind=str(message.channel.type),
-                        workflow="reception",
+                        scope, "assistant", _stored_assistant_content(content),
+                        **ch, workflow="reception",
                         event_type=result.get("event_type"),
                         discord_message_id=_primary_discord_message_id(sent_messages),
                     )
                 except Exception as exc:
                     app.log.error("reception reply save error: %s", exc, exc_info=True)
-                asyncio.get_event_loop().create_task(
+                app._safe_create_task(
                     _post_conversation_memory(
                         _reception_user_msg_id, _reception_asst_msg_id,
                         question, _stored_assistant_content(content),
                         message.channel.id, message.author.id,
                         "reception", message.author.display_name,
-                    )
+                    ),
+                    name="reception_memory",
                 )
             except Exception as e:
                 app.log.error("reception error: %s", e)
@@ -760,18 +534,12 @@ async def route_message(message):
                     viewer_scope=channel_config.get("memory_scope") or "public",
                 )
 
+                ch = app._channel_msg_kwargs(message.channel)
+                author = app._author_msg_kwargs(message.author)
                 _channel_user_msg_id = await asyncio.to_thread(
                     db.save_message,
-                    conversation_scope,
-                    "user",
-                    question,
-                    channel_id=message.channel.id,
-                    channel_name=getattr(message.channel, "name", None),
-                    channel_kind=str(message.channel.type),
-                    discord_user_id=message.author.id,
-                    username=message.author.name,
-                    display_name=message.author.display_name,
-                    workflow=workflow,
+                    conversation_scope, "user", question,
+                    **ch, **author, workflow=workflow,
                     discord_message_id=message.id,
                 )
 
@@ -868,28 +636,21 @@ async def route_message(message):
                 try:
                     _channel_asst_msg_id = await asyncio.to_thread(
                         db.save_message,
-                        conversation_scope,
-                        "assistant",
-                        _stored_assistant_content(content),
-                        channel_id=message.channel.id,
-                        channel_name=getattr(message.channel, "name", None),
-                        channel_kind=str(message.channel.type),
-                        discord_user_id=message.author.id,
-                        username=message.author.name,
-                        display_name=message.author.display_name,
-                        workflow=workflow,
+                        conversation_scope, "assistant", _stored_assistant_content(content),
+                        **ch, **author, workflow=workflow,
                         event_type=result.get("event_type"),
                         discord_message_id=_primary_discord_message_id(sent_messages),
                     )
                 except Exception as exc:
                     app.log.error("%s channel reply save error: %s", workflow, exc, exc_info=True)
-                asyncio.get_event_loop().create_task(
+                app._safe_create_task(
                     _post_conversation_memory(
                         _channel_user_msg_id, _channel_asst_msg_id,
                         question, _stored_assistant_content(content),
                         message.channel.id, message.author.id,
                         workflow, message.author.display_name,
-                    )
+                    ),
+                    name=f"{workflow}_memory",
                 )
             except Exception as e:
                 app.log.error("%s channel error: %s", workflow, e)

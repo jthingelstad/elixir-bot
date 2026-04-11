@@ -11,7 +11,7 @@ import os
 import cr_api
 import db
 from runtime.app import bot, log
-from runtime.helpers import _channel_scope, _get_singleton_channel_id
+from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
 from runtime.jobs._signals import _post_to_elixir
 
@@ -158,13 +158,8 @@ async def _db_maintenance_cycle():
         await _post_to_elixir(channel, {"content": report})
         await asyncio.to_thread(
             db.save_message,
-            _channel_scope(channel),
-            "assistant",
-            report,
-            channel_id=channel.id,
-            channel_name=getattr(channel, "name", None),
-            channel_kind=str(channel.type),
-            workflow="clanops",
+            _channel_scope(channel), "assistant", report,
+            **_channel_msg_kwargs(channel), workflow="clanops",
             event_type="db_maintenance",
         )
         runtime_status.mark_job_success("db_maintenance", f"freed {_format_size(size_before - size_after)}")

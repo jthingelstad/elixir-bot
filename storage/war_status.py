@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import sqlite3
+
+log = logging.getLogger("elixir_db")
 
 from db import (
     _canon_tag,
@@ -20,6 +23,7 @@ from storage.war_calendar import (
     coerce_utc_datetime,
     format_utc_iso,
     is_colosseum_week,
+    normalize_period_type,
     phase_day_number,
     period_offset,
     resolve_phase,
@@ -29,10 +33,7 @@ from storage.war_calendar import (
 
 LIVE_FINISH_TIME_SENTINEL = "19691231T235959.000Z"
 
-def _format_member_reference(*args, **kwargs):
-    from storage.identity import format_member_reference
-
-    return format_member_reference(*args, **kwargs)
+from storage._formatting import format_member_reference as _format_member_reference
 
 
 def _load_war_payload(raw_json) -> dict:
@@ -43,6 +44,7 @@ def _load_war_payload(raw_json) -> dict:
     try:
         return json.loads(raw_json)
     except (TypeError, json.JSONDecodeError):
+        log.debug("_load_war_payload: failed to parse JSON (%d chars)", len(str(raw_json)))
         return {}
 
 
@@ -78,8 +80,6 @@ def _infer_current_season_id_from_live_state(payload: dict, latest_logged_race) 
 
 
 def _normalize_period_type(period_type: Optional[str]) -> Optional[str]:
-    from storage.war_calendar import normalize_period_type
-
     return normalize_period_type(period_type)
 
 

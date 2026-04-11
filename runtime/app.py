@@ -18,10 +18,10 @@ from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
 
-import cr_api
+import cr_api  # re-exported; accessed by runtime submodules
 import db
 import elixir_agent
-import heartbeat
+import heartbeat  # re-exported; patched in tests
 import prompts
 from modules.poap_kings import site as poap_kings_site
 from runtime.activities import format_scheduler_startup_summary, register_scheduled_activities
@@ -182,9 +182,7 @@ async def _maybe_alert_cr_api_failure(context: str) -> bool:
             _channel_scope(channel),
             "assistant",
             content,
-            channel_id=channel.id,
-            channel_name=getattr(channel, "name", None),
-            channel_kind=str(channel.type),
+            **_channel_msg_kwargs(channel),
             workflow="clanops",
             event_type="cr_api_auth_failure",
         )
@@ -206,9 +204,7 @@ async def _maybe_alert_cr_api_failure(context: str) -> bool:
             _channel_scope(channel),
             "assistant",
             content,
-            channel_id=channel.id,
-            channel_name=getattr(channel, "name", None),
-            channel_kind=str(channel.type),
+            **_channel_msg_kwargs(channel),
             workflow="clanops",
             event_type="cr_api_outage",
         )
@@ -348,9 +344,7 @@ async def _post_startup_message() -> bool:
             _channel_scope(channel),
             "assistant",
             content,
-            channel_id=channel.id,
-            channel_name=getattr(channel, "name", None),
-            channel_kind=str(channel.type),
+            **_channel_msg_kwargs(channel),
             workflow="clanops",
             event_type="startup_announcement",
         )
@@ -452,8 +446,8 @@ async def _post_to_elixir(channel, entry: dict):
     guild = getattr(channel, "guild", None)
     for post in _entry_posts(entry):
         post = _resolve_custom_emoji(post, guild)
-        if len(post) > 2000:
-            for chunk in [post[i:i+1990] for i in range(0, len(post), 1990)]:
+        if len(post) > DISCORD_MAX_MESSAGE_LEN:
+            for chunk in _chunk_for_discord(post):
                 await channel.send(chunk)
         else:
             await channel.send(post)

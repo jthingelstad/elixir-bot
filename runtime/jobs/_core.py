@@ -40,7 +40,7 @@ from runtime.app import (
     bot,
     log,
 )
-from runtime.helpers import _channel_scope, _get_singleton_channel_id
+from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
 from runtime.system_signals import queue_startup_system_signals
 from runtime.jobs._signals import (
@@ -246,19 +246,13 @@ async def _ask_elixir_daily_insight():
         return
 
     await _post_to_elixir(channel, result)
-    channel_name = getattr(channel, "name", None)
-    channel_kind = str(getattr(channel, "type", "text"))
+    ch = _channel_msg_kwargs(channel)
     for index, post in enumerate(posts):
         await asyncio.to_thread(
             db.save_message,
-            _channel_scope(channel),
-            "assistant",
-            post,
+            _channel_scope(channel), "assistant", post,
             summary=result.get("summary") if index == 0 else None,
-            channel_id=channel.id,
-            channel_name=channel_name,
-            channel_kind=channel_kind,
-            workflow="ask-elixir",
+            **ch, workflow="ask-elixir",
             event_type="daily_clan_insight" if index == 0 else "daily_clan_insight_part",
             raw_json={"result": result, "context_kind": "daily_clan_insight"},
         )
@@ -489,13 +483,8 @@ async def _clanops_weekly_review():
     await _post_to_elixir(channel, {"content": review_content})
     await asyncio.to_thread(
         db.save_message,
-        _channel_scope(channel),
-        "assistant",
-        review_content,
-        channel_id=channel.id,
-        channel_name=getattr(channel, "name", None),
-        channel_kind=str(channel.type),
-        workflow="clanops",
+        _channel_scope(channel), "assistant", review_content,
+        **_channel_msg_kwargs(channel), workflow="clanops",
         event_type="weekly_clanops_review",
     )
     await asyncio.to_thread(
@@ -551,13 +540,8 @@ async def _weekly_clan_recap():
         raise RuntimeError(f"weekly recap post failed: {detail}") from exc
     await asyncio.to_thread(
         db.save_message,
-        _channel_scope(channel),
-        "assistant",
-        recap_post,
-        channel_id=channel.id,
-        channel_name=getattr(channel, "name", None),
-        channel_kind=str(channel.type),
-        workflow="announcements",
+        _channel_scope(channel), "assistant", recap_post,
+        **_channel_msg_kwargs(channel), workflow="announcements",
         event_type="weekly_clan_recap",
     )
     await asyncio.to_thread(
