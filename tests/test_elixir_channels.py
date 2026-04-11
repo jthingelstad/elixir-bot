@@ -697,9 +697,9 @@ def test_ask_elixir_daily_insight_posts_fun_fact():
     channel = SimpleNamespace(id=1482368505058955467, name="ask-elixir", type="text")
 
     with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
         patch.object(elixir.bot, "get_channel", return_value=channel),
-        patch("elixir._get_singleton_channel_id", return_value=1482368505058955467),
+        patch("runtime.jobs._core._get_singleton_channel_id", return_value=1482368505058955467),
         patch(
             "elixir.prompts.discord_channels_by_subagent",
             return_value={
@@ -713,8 +713,8 @@ def test_ask_elixir_daily_insight_posts_fun_fact():
             },
         ),
         patch("elixir.db.list_channel_messages", return_value=[]),
-        patch("elixir.build_subagent_memory_context", return_value={}),
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS", "tag": "#J2RGCRVG", "memberList": [{"name": "Jamie"}]}, {}))),
+        patch("runtime.jobs._core.build_subagent_memory_context", return_value={}),
+        patch("runtime.jobs._core._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS", "tag": "#J2RGCRVG", "memberList": [{"name": "Jamie"}]}, {}))),
         patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 50, "donations_week_total": 12345, "avg_member_trophies": 8123}),
         patch("elixir.db.build_clan_trend_summary_context", return_value="Clan score is up over the last 7 days."),
         patch("elixir.db.get_members_on_hot_streak", return_value=[{"name": "Jamie", "current_streak": 5}]),
@@ -731,7 +731,7 @@ def test_ask_elixir_daily_insight_posts_fun_fact():
                 "content": "Did you know? Our top donor this week is also sitting on a five-win streak. Generosity and momentum travel together.",
             },
         ) as mock_generate,
-        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("runtime.jobs._core._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
     ):
         asyncio.run(elixir._ask_elixir_daily_insight())
@@ -2310,7 +2310,7 @@ def test_build_status_report_omits_job_schedule_section():
                 "system_notes": 2,
             },
         }),
-        patch("elixir._app._member_role_grant_status", return_value={
+        patch("elixir._member_role_grant_status", return_value={
             "configured": True,
             "ok": False,
             "reason": "Manage Roles permission missing",
