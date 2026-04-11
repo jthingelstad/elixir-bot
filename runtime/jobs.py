@@ -144,7 +144,7 @@ async def _post_signal_memory(body, outcome, signals):
             channel_id = outcome.get("target_channel_id")
             await asyncio.to_thread(save_inference_facts, facts, channel_id)
     except Exception:
-        log.debug("_post_signal_memory failed", exc_info=True)
+        log.warning("_post_signal_memory failed", exc_info=True)
 
 
 async def _deliver_signal_outcome(outcome, signals, clan, war):
@@ -287,6 +287,9 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             outcome=outcome,
             signals=signals,
         )
+        # Store structured observation facts directly from signal data
+        from agent.memory_tasks import store_observation_facts
+        await asyncio.to_thread(store_observation_facts, signals, channel_id)
         if channel_config["subagent_key"] == "river-race" and _signal_group_needs_recap_memory(signals):
             await asyncio.to_thread(_store_recap_memories_for_signal_batch, signals, posts, channel_id)
         asyncio.get_event_loop().create_task(

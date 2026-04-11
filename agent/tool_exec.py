@@ -360,6 +360,33 @@ def _execute_tool(name, arguments):
                 note=arguments["note"],
             )
             result = {"success": True}
+        elif name == "recall_member":
+            from memory_store import list_memories
+
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            memories = list_memories(
+                viewer_scope="public",
+                filters={"member_tag": member_tag},
+                limit=15,
+            )
+            if not memories:
+                result = {"member_tag": member_tag, "memories": [], "message": "No stored memories for this member."}
+            else:
+                result = {
+                    "member_tag": member_tag,
+                    "count": len(memories),
+                    "memories": [
+                        {
+                            "title": m.get("title"),
+                            "summary": m.get("summary") or m.get("body", "")[:220],
+                            "source_type": m.get("source_type"),
+                            "scope": m.get("scope"),
+                            "created_at": m.get("created_at"),
+                            "tags": m.get("tags", []),
+                        }
+                        for m in memories
+                    ],
+                }
         elif name == "save_clan_memory":
             from memory_store import attach_tags, create_memory
             from storage.contextual_memory import upsert_member_note_memory

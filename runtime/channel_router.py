@@ -24,8 +24,10 @@ async def _post_conversation_memory(
         # Step 1: Distill real summaries for both messages
         if user_message_id and user_content:
             user_summary = await asyncio.to_thread(distill_summary, user_content)
-            if user_summary:
-                await asyncio.to_thread(db.update_message_summary, user_message_id, user_summary)
+            # Always write user summary — distilled if available, truncated fallback otherwise.
+            # save_message no longer writes last_user_summary to avoid persisting verbatim text.
+            final_user_summary = user_summary or (user_content[:200] if user_content else "")
+            await asyncio.to_thread(db.update_message_summary, user_message_id, final_user_summary)
 
         if assistant_message_id and assistant_content:
             assistant_summary = await asyncio.to_thread(distill_summary, assistant_content)
@@ -41,7 +43,7 @@ async def _post_conversation_memory(
             if facts:
                 await asyncio.to_thread(save_inference_facts, facts, channel_id)
     except Exception:
-        _log.debug("_post_conversation_memory failed", exc_info=True)
+        _log.warning("_post_conversation_memory failed", exc_info=True)
 
 
 def _agent_failure_payload(result):
