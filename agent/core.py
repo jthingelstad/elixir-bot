@@ -28,8 +28,8 @@ def _get_build_hash():
 
 
 BUILD_HASH = _get_build_hash()
-RELEASE_VERSION = os.getenv("ELIXIR_RELEASE_VERSION", "v4.1")
-RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Card Quiz")
+RELEASE_VERSION = os.getenv("ELIXIR_RELEASE_VERSION", "v4.2")
+RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Race Command")
 RELEASE_LABEL = f'{RELEASE_VERSION} "{RELEASE_CODENAME}"'
 
 _client = None
