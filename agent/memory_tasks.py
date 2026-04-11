@@ -13,7 +13,8 @@ from agent.core import _create_chat_completion
 
 log = logging.getLogger("elixir_agent.memory_tasks")
 
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
+# Model selection is handled by _model_for_workflow() in agent.core —
+# memory_inference and memory_distill route to the observation model.
 
 # ── Summary distillation ───────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ def distill_summary(text: str) -> str | None:
     try:
         resp = _create_chat_completion(
             workflow="memory_distill",
-            model=HAIKU_MODEL,
+            model=None,
             messages=[
                 {"role": "system", "content": _DISTILL_SYSTEM},
                 {"role": "user", "content": text[:2000]},
@@ -95,7 +96,7 @@ def extract_inference_facts(content: str, context_label: str | None = None) -> l
     try:
         resp = _create_chat_completion(
             workflow="memory_inference",
-            model=HAIKU_MODEL,
+            model=None,
             messages=[
                 {"role": "system", "content": _INFERENCE_SYSTEM},
                 {"role": "user", "content": user_msg},

@@ -5,6 +5,7 @@ import logging
 import os
 import sqlite3
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -33,12 +34,15 @@ RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Race Command")
 RELEASE_LABEL = f'{RELEASE_VERSION} "{RELEASE_CODENAME}"'
 
 _client = None
+_client_lock = threading.Lock()
 
 
 def _get_client():
     global _client
     if _client is None:
-        _client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"), timeout=60)
+        with _client_lock:
+            if _client is None:
+                _client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"), timeout=60)
     return _client
 
 
@@ -47,7 +51,7 @@ def _chat_model_name():
 
 
 def _content_model_name():
-    return os.getenv("ELIXIR_CONTENT_MODEL", "claude-sonnet-4-6")
+    return os.getenv("ELIXIR_CONTENT_MODEL", "claude-haiku-4-5-20251001")
 
 
 def _promotion_model_name():
@@ -59,7 +63,11 @@ def _observation_model_name():
 
 
 def _interactive_model_name():
-    return os.getenv("ELIXIR_INTERACTIVE_MODEL", "claude-haiku-4-5-20251001")
+    return os.getenv("ELIXIR_INTERACTIVE_MODEL", "claude-sonnet-4-6")
+
+
+def _lightweight_model_name():
+    return os.getenv("ELIXIR_LIGHTWEIGHT_MODEL", "claude-haiku-4-5-20251001")
 
 
 def _model_for_workflow(workflow, model=None):
@@ -68,12 +76,16 @@ def _model_for_workflow(workflow, model=None):
     workflow = workflow or ""
     if workflow == "site_promote_content":
         return _promotion_model_name()
-    if workflow.startswith("site_") or workflow in {"roster_bios", "weekly_digest"}:
+    if workflow == "weekly_digest":
+        return _chat_model_name()
+    if workflow.startswith("site_") or workflow in {"roster_bios"}:
         return _content_model_name()
-    if workflow == "observation":
+    if workflow in {"observation", "memory_inference", "memory_distill"}:
         return _observation_model_name()
     if workflow in {"interactive", "reception"}:
         return _interactive_model_name()
+    if workflow.startswith("event:"):
+        return _lightweight_model_name()
     return _chat_model_name()
 
 

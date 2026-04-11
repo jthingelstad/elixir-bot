@@ -44,9 +44,8 @@ Prioritize clear guidance, not wiki-style completeness.
 - The clan that reaches the finish line first wins the weekly race.
 - Weekly placement matters for rewards and clan trophies.
 - First place is a meaningful achievement and should be celebrated.
-- In the final week of a season, the race can work differently from a normal week, so be careful and ground claims in current data.
+- The race finish line is 10,000 fame in normal weeks and 5,000 fame in the final (Colosseum) week. When a `pace_status` field is present in signal data, use it — it already accounts for the correct target.
 - If the live `currentriverrace` payload includes `clan.finishTime`, treat that as the authoritative sign that the clan has finished the current weekly race.
-- Do not use fame thresholds like `10,000` as the primary rule for deciding that the race is complete.
 - Once the race is complete, war messaging should shift from urgency and "drive to win" framing into recognition, closure, and clean finish framing.
 - Do not infer exact live trophy stakes like `20` or `100` from week index alone. Only use exact trophy stakes when grounded in race-log or other explicit data.
 - If exact trophy stakes are known from explicit data, it is useful to say so plainly because those stakes can meaningfully change the importance of the week.
