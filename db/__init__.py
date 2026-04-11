@@ -8,13 +8,14 @@ The module exposes Elixir's identity, memory, roster, battle, and war query laye
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 from zoneinfo import ZoneInfo
 
 log = logging.getLogger("elixir_db")
@@ -360,7 +361,20 @@ def _current_joined_at(conn: sqlite3.Connection, member_id: int) -> Optional[str
     return None
 
 
+_MEMBER_METADATA_COLUMNS = frozenset({
+    "joined_at", "birth_month", "birth_day", "profile_url", "poap_address", "note",
+    "generated_bio", "generated_highlight", "generated_profile_updated_at",
+    "cr_account_age_days", "cr_account_age_years", "cr_account_age_updated_at",
+    "years_played", "years_played_updated_at",
+    "games_per_day", "games_per_day_updated_at",
+    "cr_games_per_day", "cr_games_per_day_window_days", "cr_games_per_day_updated_at",
+})
+
+
 def _upsert_member_metadata(conn: sqlite3.Connection, member_id: int, **fields) -> None:
+    bad = set(fields) - _MEMBER_METADATA_COLUMNS
+    if bad:
+        raise ValueError(f"Invalid member_metadata columns: {bad}")
     row = conn.execute("SELECT member_id FROM member_metadata WHERE member_id = ?", (member_id,)).fetchone()
     if not row:
         conn.execute("INSERT INTO member_metadata (member_id) VALUES (?)", (member_id,))
@@ -505,7 +519,7 @@ def _enable_sqlite_vec(conn: sqlite3.Connection) -> None:
             pass
 
 
-def get_connection(db_path=None):
+def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     path = os.fspath(db_path or DB_PATH)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
@@ -531,6 +545,25 @@ def get_connection(db_path=None):
     _run_migrations(conn)
     _enable_sqlite_vec(conn)
     return conn
+
+
+def managed_connection(fn: Callable) -> Callable:
+    """Decorator that manages the conn=None lifecycle pattern.
+
+    If the caller passes conn=None (the default), a new connection is opened
+    and closed after the call. If a connection is provided, it is passed
+    through and left open for the caller to manage.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, conn=None, **kwargs):
+        close = conn is None
+        conn = conn or get_connection()
+        try:
+            return fn(*args, conn=conn, **kwargs)
+        finally:
+            if close:
+                conn.close()
+    return wrapper
 
 
 # Allow storage submodules to import db's internal helpers during package init.

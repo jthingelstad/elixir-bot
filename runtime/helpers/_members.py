@@ -1,6 +1,9 @@
+import logging
 import re
 
 import db
+
+log = logging.getLogger("elixir")
 
 __all__ = [
     "_pick_resolved_member", "_rewrite_member_refs_in_text",
@@ -71,7 +74,7 @@ def _match_clan_member(nickname):
                     return (best["player_tag"], best.get("current_name") or best.get("member_name"))
             return None
     except Exception:
-        pass
+        log.debug("resolve_member failed for %r", nickname, exc_info=True)
 
     try:
         snapshot = db.get_active_roster_map()
@@ -79,6 +82,7 @@ def _match_clan_member(nickname):
             if name.lower().strip() == normalized:
                 return (tag, name)
     except Exception:
+        log.debug("roster map lookup failed for %r", nickname, exc_info=True)
         return None
     return None
 

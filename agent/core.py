@@ -233,6 +233,7 @@ def _translate_messages(messages):
                         try:
                             args = json.loads(args)
                         except Exception:
+                            log.debug("Failed to parse tool call arguments as JSON: %s", args[:200], exc_info=True)
                             args = {}
                     blocks.append({
                         "type": "tool_use",
