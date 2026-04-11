@@ -1343,6 +1343,8 @@ def test_detect_cake_days_dedupes_announcements_for_the_day():
 
 
 def test_clan_awareness_tick_marks_cake_day_announcements_after_successful_post():
+    from runtime.jobs._signals import _mark_delivered_signals
+
     bundle = heartbeat.HeartbeatTickResult(
         signals=[{
             "type": "member_birthday",
@@ -1355,26 +1357,16 @@ def test_clan_awareness_tick_marks_cake_day_announcements_after_successful_post(
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    channel = AsyncMock()
-    channel.id = 123
-    channel.name = "announcements"
-    channel.type = "text"
+    async def fake_deliver(signals, clan, war):
+        _mark_delivered_signals(signals)
+        return True
 
     with (
-        patch.object(elixir.bot, "get_channel", return_value=channel),
-        patch("elixir.heartbeat.tick", return_value=bundle),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.db.list_channel_messages", return_value=[]),
-        patch("elixir.db.build_memory_context", return_value={"channel": {"state": None, "episodes": []}}),
-        patch("elixir.db.save_message"),
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core.heartbeat.tick", return_value=bundle),
+        patch("runtime.jobs._core._deliver_signal_group", side_effect=fake_deliver),
         patch("elixir.db.mark_signal_sent") as mock_mark_signal_sent,
         patch("elixir.db.mark_announcement_sent") as mock_mark_announcement_sent,
-        patch("elixir.elixir_agent.observe_and_post", return_value={
-            "event_type": "clan_observation",
-            "summary": "Birthday",
-            "content": "Happy birthday!",
-        }),
-        patch("elixir._post_to_elixir", new=AsyncMock()),
     ):
         asyncio.run(elixir._clan_awareness_tick())
 
