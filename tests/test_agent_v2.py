@@ -1,4 +1,4 @@
-"""Focused tests for agent query tools."""
+"""Focused tests for agent query tools (consolidated tool layer)."""
 
 import json
 import os
@@ -8,10 +8,10 @@ from unittest.mock import Mock, patch
 import elixir_agent
 
 
-def test_execute_tool_list_clan_members():
+def test_execute_tool_get_clan_roster_list():
     with patch("elixir_agent.db") as mock_db:
         mock_db.list_members.return_value = [{"player_tag": "#ABC123", "member_name": "King Levy"}]
-        result = json.loads(elixir_agent._execute_tool("list_clan_members", {}))
+        result = json.loads(elixir_agent._execute_tool("get_clan_roster", {"aspect": "list"}))
         assert result == [{"player_tag": "#ABC123", "member_name": "King Levy"}]
         mock_db.list_members.assert_called_once_with()
 
@@ -31,14 +31,14 @@ def test_execute_tool_get_member_profile_refreshes_member_cache():
         patch("elixir_agent.db") as mock_db,
     ):
         mock_db.get_member_profile.return_value = {"player_tag": "#ABC123", "member_name": "King Levy"}
+        mock_db.get_member_recent_form.return_value = {"form": "hot"}
 
-        result = json.loads(elixir_agent._execute_tool("get_member_profile", {"member_tag": "#ABC123"}))
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123"}))
 
-        assert result["player_tag"] == "#ABC123"
-        assert result["member_name"] == "King Levy"
-        assert result["gold_known"] is False
+        assert result["profile"]["player_tag"] == "#ABC123"
+        assert result["profile"]["member_name"] == "King Levy"
+        assert result["profile"]["gold_known"] is False
         mock_db.snapshot_player_profile.assert_called_once()
-        mock_db.snapshot_player_battlelog.assert_called_once()
         mock_db.get_member_profile.assert_called_once_with("#ABC123")
 
 
@@ -56,13 +56,14 @@ def test_execute_tool_get_member_profile_includes_account_age_and_activity_summa
             "cr_games_per_day": 3.64,
             "cr_games_per_day_window_days": 14,
         }
+        mock_db.get_member_recent_form.return_value = {"form": "hot"}
 
-        result = json.loads(elixir_agent._execute_tool("get_member_profile", {"member_tag": "#ABC123"}))
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123"}))
 
-        assert result["account_age_summary"] == (
+        assert result["profile"]["account_age_summary"] == (
             "Derived Clash Royale account age from Years Played badge data: 4 years / 1,474 days"
         )
-        assert result["recent_activity_summary"] == (
+        assert result["profile"]["recent_activity_summary"] == (
             "Recent activity: 3.64 games played per day over the last 14 days"
         )
 
@@ -78,10 +79,11 @@ def test_execute_tool_get_member_profile_includes_current_role_summary():
             "member_name": "King Thing",
             "role": "leader",
         }
+        mock_db.get_member_recent_form.return_value = {"form": "hot"}
 
-        result = json.loads(elixir_agent._execute_tool("get_member_profile", {"member_tag": "#ABC123"}))
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123"}))
 
-        assert result["current_role_summary"] == "King Thing is currently the clan leader."
+        assert result["profile"]["current_role_summary"] == "King Thing is currently the clan leader."
 
 
 def test_execute_tool_get_member_card_collection_uses_db():
@@ -96,18 +98,18 @@ def test_execute_tool_get_member_card_collection_uses_db():
 
         result = json.loads(
             elixir_agent._execute_tool(
-                "get_member_card_collection",
-                {"member_tag": "#ABC123", "limit": 25, "min_level": 14},
+                "get_member",
+                {"member_tag": "#ABC123", "include": ["cards"], "min_level": 14},
             )
         )
 
-        assert result["summary"]["highest_level"] == 16
-        assert result["gold_known"] is False
-        assert "Current gold is not available" in result["gold_note"]
+        assert result["card_collection"]["summary"]["highest_level"] == 16
+        assert result["card_collection"]["gold_known"] is False
+        assert "Current gold is not available" in result["card_collection"]["gold_note"]
         mock_db.snapshot_player_profile.assert_called_once()
         mock_db.get_member_card_collection.assert_called_once_with(
             "#ABC123",
-            limit=25,
+            limit=60,
             min_level=14,
             include_support=True,
             rarity=None,
@@ -117,8 +119,6 @@ def test_execute_tool_get_member_card_collection_uses_db():
 def test_build_tool_result_envelope_strips_card_image_fields_from_context():
     raw = json.dumps(
         {
-            "player_tag": "#ABC123",
-            "profile_url": "https://example.com/profile",
             "current_deck": {
                 "cards": [
                     {
@@ -139,24 +139,24 @@ def test_build_tool_result_envelope_strips_card_image_fields_from_context():
         }
     )
 
-    envelope = json.loads(elixir_agent._build_tool_result_envelope("get_member_overview", raw))
+    envelope = json.loads(elixir_agent._build_tool_result_envelope("get_member", raw))
 
-    assert envelope["data"]["profile_url"] == "https://example.com/profile"
     assert "iconUrls" not in envelope["data"]["current_deck"]["cards"][0]
     assert "icon_url" not in envelope["data"]["signature_cards"]["cards"][0]
 
 
-def test_interactive_workflow_does_not_expose_sensitive_leadership_read_tools():
+def test_interactive_workflow_exposes_all_read_tools():
     interactive_names = {
         tool["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]
     }
 
-    assert "get_promotion_candidates" not in interactive_names
-    assert "get_members_at_risk" not in interactive_names
-    assert "get_member_profile" in interactive_names
+    # With consolidated tools, all read tools are visible in interactive;
+    # sensitive aspects (at_risk, promotion_candidates) are gated at execution time.
+    assert "get_clan_health" in interactive_names
+    assert "get_member" in interactive_names
 
 
-def test_execute_tool_get_member_profile_resolves_handle_before_refresh():
+def test_execute_tool_get_member_resolves_handle_before_refresh():
     with (
         patch("elixir_agent.cr_api.get_player", return_value={"tag": "#ABC123", "name": "King Levy"}),
         patch("elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
@@ -164,26 +164,30 @@ def test_execute_tool_get_member_profile_resolves_handle_before_refresh():
     ):
         mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 875}]
         mock_db.get_member_profile.return_value = {"player_tag": "#ABC123", "member_name": "King Levy"}
+        mock_db.get_member_recent_form.return_value = {"form": "hot"}
 
-        result = json.loads(elixir_agent._execute_tool("get_member_profile", {"member_tag": "@jamie"}))
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "@jamie"}))
 
-        assert result["player_tag"] == "#ABC123"
-        assert result["member_name"] == "King Levy"
-        assert result["gold_known"] is False
+        assert result["profile"]["player_tag"] == "#ABC123"
+        assert result["profile"]["member_name"] == "King Levy"
+        assert result["profile"]["gold_known"] is False
         mock_db.resolve_member.assert_called_once_with("@jamie", limit=5)
         mock_db.get_member_profile.assert_called_once_with("#ABC123")
 
 
-def test_execute_tool_get_member_card_collection_accepts_bare_player_tag():
+def test_execute_tool_get_member_cards_accepts_bare_player_tag():
     with (
         patch("elixir_agent.cr_api.get_player", return_value={"tag": "#20JJJ2CCRU", "name": "King Thing"}),
         patch("elixir_agent.db") as mock_db,
     ):
         mock_db.get_member_card_collection.return_value = {"summary": {"highest_level": 16}, "cards": []}
 
-        result = json.loads(elixir_agent._execute_tool("get_member_card_collection", {"member_tag": "20JJJ2CCRU"}))
+        result = json.loads(elixir_agent._execute_tool(
+            "get_member",
+            {"member_tag": "20JJJ2CCRU", "include": ["cards"]},
+        ))
 
-        assert result["summary"]["highest_level"] == 16
+        assert result["card_collection"]["summary"]["highest_level"] == 16
         mock_db.resolve_member.assert_not_called()
         mock_db.get_member_card_collection.assert_called_once_with(
             "#20JJJ2CCRU",
@@ -194,7 +198,7 @@ def test_execute_tool_get_member_card_collection_accepts_bare_player_tag():
         )
 
 
-def test_execute_tool_get_member_card_collection_passes_rarity_filter():
+def test_execute_tool_get_member_cards_passes_rarity_filter():
     with (
         patch("elixir_agent.cr_api.get_player", return_value={"tag": "#20JJJ2CCRU", "name": "King Thing"}),
         patch("elixir_agent.db") as mock_db,
@@ -208,13 +212,13 @@ def test_execute_tool_get_member_card_collection_passes_rarity_filter():
 
         result = json.loads(
             elixir_agent._execute_tool(
-                "get_member_card_collection",
-                {"member_tag": "20JJJ2CCRU", "rarity": "legendary"},
+                "get_member",
+                {"member_tag": "20JJJ2CCRU", "include": ["cards"], "rarity": "legendary"},
             )
         )
 
-        assert result["summary"]["rarity_counts"]["legendary"] == 5
-        assert "Royal Ghost" in result["cards_by_rarity"]["legendary"]
+        assert result["card_collection"]["summary"]["rarity_counts"]["legendary"] == 5
+        assert "Royal Ghost" in result["card_collection"]["cards_by_rarity"]["legendary"]
         mock_db.get_member_card_collection.assert_called_once_with(
             "#20JJJ2CCRU",
             limit=60,
@@ -224,35 +228,26 @@ def test_execute_tool_get_member_card_collection_passes_rarity_filter():
         )
 
 
-def test_execute_tool_get_member_overview_refreshes_member_cache():
+def test_execute_tool_get_member_chests_uses_cr_api():
     with (
-        patch("elixir_agent.cr_api.get_player", return_value={"tag": "#ABC123", "name": "King Levy"}),
-        patch("elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
+        patch("elixir_agent.cr_api.get_player_chests", return_value=[{"name": "Silver Chest", "index": 1}]) as mock_chests,
+        patch("elixir_agent.cr_api.get_player", return_value=None),
         patch("elixir_agent.db") as mock_db,
     ):
-        mock_db.get_member_overview.return_value = {"player_tag": "#ABC123", "member_name": "King Levy"}
-        result = json.loads(elixir_agent._execute_tool("get_member_overview", {"member_tag": "#ABC123"}))
-        assert result["player_tag"] == "#ABC123"
-        assert result["member_name"] == "King Levy"
-        assert result["gold_known"] is False
-        mock_db.get_member_overview.assert_called_once_with("#ABC123")
-
-
-def test_execute_tool_get_member_next_chests_uses_cr_api():
-    with patch("elixir_agent.cr_api.get_player_chests", return_value=[{"name": "Silver Chest", "index": 1}]) as mock_chests:
-        result = json.loads(elixir_agent._execute_tool("get_member_next_chests", {"member_tag": "#ABC123"}))
-        assert result == [{"name": "Silver Chest", "index": 1}]
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123", "include": ["chests"]}))
+        assert result["chests"] == [{"name": "Silver Chest", "index": 1}]
         mock_chests.assert_called_once_with("#ABC123")
 
 
-def test_execute_tool_get_member_next_chests_resolves_member_name():
+def test_execute_tool_get_member_chests_resolves_member_name():
     with (
         patch("elixir_agent.cr_api.get_player_chests", return_value=[{"name": "Silver Chest", "index": 1}]) as mock_chests,
+        patch("elixir_agent.cr_api.get_player", return_value=None),
         patch("elixir_agent.db") as mock_db,
     ):
         mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 950}]
-        result = json.loads(elixir_agent._execute_tool("get_member_next_chests", {"member_tag": "King Levy"}))
-        assert result == [{"name": "Silver Chest", "index": 1}]
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "King Levy", "include": ["chests"]}))
+        assert result["chests"] == [{"name": "Silver Chest", "index": 1}]
         mock_db.resolve_member.assert_called_once_with("King Levy", limit=5)
         mock_chests.assert_called_once_with("#ABC123")
 
@@ -260,18 +255,18 @@ def test_execute_tool_get_member_next_chests_resolves_member_name():
 def test_execute_tool_get_war_season_summary_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_war_season_summary.return_value = {"season_id": 129, "races": 4}
-        result = json.loads(elixir_agent._execute_tool("get_war_season_summary", {}))
+        result = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "summary"}))
         assert result == {"season_id": 129, "races": 4}
-        mock_db.get_war_season_summary.assert_called_once_with(season_id=None, top_n=5)
+        mock_db.get_war_season_summary.assert_called_once_with(season_id=None, top_n=10)
 
 
-def test_execute_tool_level_16_and_hot_streak_queries_use_db():
+def test_execute_tool_get_clan_roster_max_cards_and_clan_health_hot_streaks():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_members_with_most_level_16_cards.return_value = [{"tag": "#ABC123", "level_16_count": 42}]
         mock_db.get_members_on_hot_streak.return_value = [{"tag": "#ABC123", "current_streak": 6}]
 
-        elite = json.loads(elixir_agent._execute_tool("get_members_with_most_level_16_cards", {"limit": 5}))
-        hot = json.loads(elixir_agent._execute_tool("get_members_on_hot_streak", {"min_streak": 5}))
+        elite = json.loads(elixir_agent._execute_tool("get_clan_roster", {"aspect": "max_cards", "limit": 5}))
+        hot = json.loads(elixir_agent._execute_tool("get_clan_health", {"aspect": "hot_streaks", "min_streak": 5}))
 
         assert elite == [{"tag": "#ABC123", "level_16_count": 42}]
         assert hot == [{"tag": "#ABC123", "current_streak": 6}]
@@ -279,48 +274,56 @@ def test_execute_tool_level_16_and_hot_streak_queries_use_db():
         mock_db.get_members_on_hot_streak.assert_called_once_with(min_streak=5, scope="ladder_ranked_10")
 
 
-def test_execute_tool_trend_queries_use_db():
+def test_execute_tool_get_clan_trends_uses_db():
     with patch("elixir_agent.db") as mock_db:
-        mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 950}]
-        mock_db.compare_member_trend_windows.return_value = {"member": {"tag": "#ABC123"}, "window_days": 14}
-        mock_db.build_member_trend_summary_context.return_value = "=== MEMBER TREND SUMMARY ==="
         mock_db.compare_clan_trend_windows.return_value = {"clan": {"clan_tag": "#J2RGCRVG"}, "window_days": 14}
         mock_db.build_clan_trend_summary_context.return_value = "=== CLAN TREND SUMMARY ==="
 
-        member_cmp = json.loads(elixir_agent._execute_tool("compare_member_trend_windows", {"member_tag": "King Levy", "window_days": 14}))
-        member_summary = json.loads(elixir_agent._execute_tool("get_member_trend_summary", {"member_tag": "King Levy", "days": 21, "window_days": 14}))
-        clan_cmp = json.loads(elixir_agent._execute_tool("compare_clan_trend_windows", {"window_days": 14}))
-        clan_summary = json.loads(elixir_agent._execute_tool("get_clan_trend_summary", {"days": 21, "window_days": 14}))
+        result = json.loads(elixir_agent._execute_tool("get_clan_trends", {"window_days": 14, "days": 21}))
 
-        assert member_cmp["window_days"] == 14
-        assert member_summary == "=== MEMBER TREND SUMMARY ==="
-        assert clan_cmp["window_days"] == 14
-        assert clan_summary == "=== CLAN TREND SUMMARY ==="
-        mock_db.compare_member_trend_windows.assert_called_once_with("#ABC123", window_days=14)
-        mock_db.build_member_trend_summary_context.assert_called_once_with("#ABC123", days=21, window_days=14)
+        assert result["clan"]["clan_tag"] == "#J2RGCRVG"
+        assert result["window_days"] == 14
+        assert result["trend_summary"] == "=== CLAN TREND SUMMARY ==="
         mock_db.compare_clan_trend_windows.assert_called_once_with(window_days=14)
         mock_db.build_clan_trend_summary_context.assert_called_once_with(days=21, window_days=14)
 
 
-def test_execute_tool_get_trending_war_contributors_uses_db():
+def test_execute_tool_get_war_season_trending_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_trending_war_contributors.return_value = {"season_id": 129, "members": []}
-        result = json.loads(elixir_agent._execute_tool("get_trending_war_contributors", {}))
+        result = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "trending"}))
         assert result == {"season_id": 129, "members": []}
-        mock_db.get_trending_war_contributors.assert_called_once_with(season_id=None, recent_races=2, limit=5)
+        mock_db.get_trending_war_contributors.assert_called_once_with(season_id=None, recent_races=2, limit=10)
 
 
-def test_execute_tool_compare_member_war_to_clan_average_uses_db():
-    with patch("elixir_agent.db") as mock_db:
+def _mock_war_player_type_conn():
+    """Create a mock connection that satisfies _war_player_type queries."""
+    mock_conn = Mock()
+    # member_id lookup
+    member_row = {"member_id": 1}
+    # _war_player_type query result
+    war_type_row = {"total_races": 10, "races_played": 8}
+    mock_conn.execute.return_value.fetchone.side_effect = [member_row, war_type_row]
+    return mock_conn
+
+
+def test_execute_tool_get_member_war_detail_vs_clan_avg():
+    with (
+        patch("elixir_agent.db") as mock_db,
+        patch("db.get_connection") as mock_conn_fn,
+    ):
         mock_db.compare_member_war_to_clan_average.return_value = {"member": {"tag": "#ABC123"}}
+        mock_conn_fn.return_value = _mock_war_player_type_conn()
+
         result = json.loads(
             elixir_agent._execute_tool(
-                "compare_member_war_to_clan_average",
-                {"member_tag": "#ABC123", "season_id": 129},
+                "get_member_war_detail",
+                {"member_tag": "#ABC123", "aspect": "vs_clan_avg"},
             )
         )
-        assert result == {"member": {"tag": "#ABC123"}}
-        mock_db.compare_member_war_to_clan_average.assert_called_once_with("#ABC123", season_id=129)
+        assert result["member"]["tag"] == "#ABC123"
+        assert result["war_player_type"] == "regular"
+        mock_db.compare_member_war_to_clan_average.assert_called_once_with("#ABC123", season_id=None)
 
 
 def test_resolve_member_tag_returns_clear_ambiguity_error():
@@ -329,81 +332,110 @@ def test_resolve_member_tag_returns_clear_ambiguity_error():
             {"player_tag": "#ABC123", "match_score": 650, "member_ref_with_handle": "King Levy (@jamie)"},
             {"player_tag": "#DEF456", "match_score": 625, "member_ref_with_handle": "King Levi (@levi)"},
         ]
-        result = json.loads(elixir_agent._execute_tool("get_member_history", {"member_tag": "King Lev"}))
+        mock_db.get_member_history.return_value = {"history": []}
+        result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "King Lev", "include": ["history"]}))
         assert "error" in result
         assert "Ambiguous member reference" in result["error"]
 
 
-def test_execute_tool_get_members_at_risk_uses_db():
+def test_execute_tool_get_clan_health_at_risk_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_members_at_risk.return_value = {"members": []}
         result = json.loads(
             elixir_agent._execute_tool(
-                "get_members_at_risk",
-                {"require_war_participation": True, "season_id": 129},
+                "get_clan_health",
+                {"aspect": "at_risk", "season_id": 129},
+                workflow="clanops",
             )
         )
         assert result == {"members": []}
         mock_db.get_members_at_risk.assert_called_once_with(
             inactivity_days=7,
             min_donations_week=20,
-            require_war_participation=True,
+            require_war_participation=False,
             min_war_races=1,
             tenure_grace_days=14,
             season_id=129,
         )
 
 
-def test_execute_tool_get_current_war_status_uses_db():
-    with patch("elixir_agent.db") as mock_db:
-        mock_db.get_current_war_status.return_value = {"war_state": "full", "season_id": 129}
-        result = json.loads(elixir_agent._execute_tool("get_current_war_status", {}))
-        assert result == {"war_state": "full", "season_id": 129}
-        mock_db.get_current_war_status.assert_called_once_with()
+def test_execute_tool_get_clan_health_sensitive_aspect_blocked_in_interactive():
+    result = json.loads(
+        elixir_agent._execute_tool(
+            "get_clan_health",
+            {"aspect": "at_risk"},
+            workflow="interactive",
+        )
+    )
+    assert "error" in result
+    assert "leadership channels" in result["error"]
 
 
-def test_execute_tool_get_current_war_day_state_uses_db():
+def test_execute_tool_get_river_race_merges_standings():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_current_war_day_state.return_value = {"war_day_key": "s00129-w01-p010", "phase_display": "Battle Day 1"}
-        result = json.loads(elixir_agent._execute_tool("get_current_war_day_state", {}))
-        assert result == {"war_day_key": "s00129-w01-p010", "phase_display": "Battle Day 1"}
-        mock_db.get_current_war_day_state.assert_called_once_with()
+        mock_db.get_current_war_status.return_value = {
+            "war_state": "full",
+            "season_id": 129,
+            "race_rank": 1,
+            "race_standings": [{"rank": 1, "clan_name": "POAP KINGS", "fame": 5000, "is_us": True}],
+            "season_week_label": "Season 129 Week 1",
+            "colosseum_week": False,
+            "final_battle_day_active": False,
+            "final_practice_day_active": False,
+            "trophy_stakes_text": "20 trophies",
+        }
+        result = json.loads(elixir_agent._execute_tool("get_river_race", {}))
+        assert result["phase_display"] == "Battle Day 1"
+        assert result["race_standings"][0]["clan_name"] == "POAP KINGS"
+        assert result["race_rank"] == 1
+        mock_db.get_current_war_day_state.assert_called_once()
+        mock_db.get_current_war_status.assert_called_once()
 
 
-def test_execute_tool_get_member_war_attendance_resolves_member():
-    with patch("elixir_agent.db") as mock_db:
+def test_execute_tool_get_member_war_detail_attendance_resolves_member():
+    with (
+        patch("elixir_agent.db") as mock_db,
+        patch("db.get_connection") as mock_conn_fn,
+    ):
         mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 950}]
         mock_db.get_member_war_attendance.return_value = {"season": {"participation_rate": 1.0}}
-        result = json.loads(elixir_agent._execute_tool("get_member_war_attendance", {"member_tag": "King Levy"}))
-        assert result == {"season": {"participation_rate": 1.0}}
+        mock_conn_fn.return_value = _mock_war_player_type_conn()
+
+        result = json.loads(elixir_agent._execute_tool(
+            "get_member_war_detail",
+            {"member_tag": "King Levy", "aspect": "attendance"},
+        ))
+        assert result["season"]["participation_rate"] == 1.0
+        assert result["war_player_type"] == "regular"
         mock_db.get_member_war_attendance.assert_called_once_with("#ABC123", season_id=None)
 
 
-def test_execute_tool_get_war_battle_win_rates_uses_db():
+def test_execute_tool_get_war_season_win_rates_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_war_battle_win_rates.return_value = {"season_id": 129, "members": []}
-        result = json.loads(elixir_agent._execute_tool("get_war_battle_win_rates", {"season_id": 129, "limit": 5, "min_battles": 2}))
+        result = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "win_rates", "season_id": 129, "limit": 5}))
         assert result == {"season_id": 129, "members": []}
-        mock_db.get_war_battle_win_rates.assert_called_once_with(season_id=129, limit=5, min_battles=2)
+        mock_db.get_war_battle_win_rates.assert_called_once_with(season_id=129, limit=5, min_battles=1)
 
 
-def test_execute_tool_get_recent_role_changes_uses_db():
+def test_execute_tool_get_clan_roster_role_changes_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_recent_role_changes.return_value = [{"tag": "#ABC123", "old_role": "member", "new_role": "elder"}]
-        result = json.loads(elixir_agent._execute_tool("get_recent_role_changes", {"days": 14}))
+        result = json.loads(elixir_agent._execute_tool("get_clan_roster", {"aspect": "role_changes", "days": 14}))
         assert result[0]["new_role"] == "elder"
         mock_db.get_recent_role_changes.assert_called_once_with(days=14)
 
 
-def test_execute_tool_boat_battle_and_trend_queries_use_db():
+def test_execute_tool_get_war_season_boat_battles_and_trends():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_clan_boat_battle_record.return_value = {"wins": 2, "losses": 1}
         mock_db.get_war_score_trend.return_value = {"direction": "up", "score_change": 30}
         mock_db.compare_fame_per_member_to_previous_season.return_value = {"direction": "up", "delta": 120.0}
 
-        boat = json.loads(elixir_agent._execute_tool("get_clan_boat_battle_record", {"wars": 3}))
-        trend = json.loads(elixir_agent._execute_tool("get_war_score_trend", {"days": 30}))
-        fame = json.loads(elixir_agent._execute_tool("compare_fame_per_member_to_previous_season", {"season_id": 129}))
+        boat = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "boat_battles"}))
+        trend = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "score_trend"}))
+        fame = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "season_comparison", "season_id": 129}))
 
         assert boat == {"wins": 2, "losses": 1}
         assert trend["direction"] == "up"
@@ -413,13 +445,22 @@ def test_execute_tool_boat_battle_and_trend_queries_use_db():
         mock_db.compare_fame_per_member_to_previous_season.assert_called_once_with(season_id=129)
 
 
-def test_execute_tool_get_member_missed_war_days_resolves_member():
-    with patch("elixir_agent.db") as mock_db:
+def test_execute_tool_get_member_war_detail_missed_days():
+    with (
+        patch("elixir_agent.db") as mock_db,
+        patch("db.get_connection") as mock_conn_fn,
+    ):
         mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 950}]
         mock_db.get_member_missed_war_days.return_value = {"days_missed": 1}
-        result = json.loads(elixir_agent._execute_tool("get_member_missed_war_days", {"member_tag": "@jamie", "season_id": 129}))
-        assert result == {"days_missed": 1}
-        mock_db.get_member_missed_war_days.assert_called_once_with("#ABC123", season_id=129)
+        mock_conn_fn.return_value = _mock_war_player_type_conn()
+
+        result = json.loads(elixir_agent._execute_tool(
+            "get_member_war_detail",
+            {"member_tag": "@jamie", "aspect": "missed_days"},
+        ))
+        assert result["days_missed"] == 1
+        assert result["war_player_type"] == "regular"
+        mock_db.get_member_missed_war_days.assert_called_once_with("#ABC123", season_id=None)
 
 
 def test_respond_in_channel_uses_interactive_read_only_workflow():
@@ -465,7 +506,10 @@ def test_respond_in_channel_keeps_ask_elixir_lightweight_followups_focused():
 
 
 def test_respond_in_channel_uses_clanops_workflow():
-    with patch("elixir_agent._chat_with_tools", return_value=None) as mock_chat:
+    with (
+        patch("elixir_agent._chat_with_tools", return_value=None) as mock_chat,
+        patch("agent.workflows.db.get_current_war_status", return_value=None),
+    ):
         result = elixir_agent.respond_in_channel(
             question="We should review promotions this week.",
             author_name="Jamie",
@@ -479,6 +523,61 @@ def test_respond_in_channel_uses_clanops_workflow():
         assert result is None
         assert mock_chat.call_args.kwargs["workflow"] == "clanops"
         assert mock_chat.call_args.kwargs["allowed_tools"] == elixir_agent.TOOLSETS_BY_WORKFLOW["clanops"]
+
+
+def test_respond_in_channel_injects_war_context_for_war_talk():
+    """War context should be injected for #war-talk channel."""
+    with (
+        patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "ok"}) as mock_chat,
+        patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
+        patch("agent.workflows.db.get_current_war_status", return_value={
+            "state": "warDay",
+            "phase_display": "Battle Day 2",
+            "season_week_label": "Season 129 Week 3",
+            "colosseum_week": False,
+            "final_battle_day_active": False,
+            "final_practice_day_active": False,
+            "race_standings": [
+                {"rank": 1, "clan_name": "POAP KINGS", "fame": 12000, "is_us": True},
+                {"rank": 2, "clan_name": "Dragon Riders", "fame": 11000, "is_us": False},
+            ],
+        }),
+    ):
+        elixir_agent.respond_in_channel(
+            question="How's the race going?",
+            author_name="Jamie",
+            channel_name="#war-talk",
+            workflow="interactive",
+            clan_data={"memberList": []},
+            war_data={"state": "warDay"},
+            conversation_history=[],
+            memory_context={},
+        )
+        user_msg = mock_chat.call_args.args[1]
+        assert "RIVER RACE STATUS" in user_msg
+        assert "POAP KINGS" in user_msg
+        assert "Dragon Riders" in user_msg
+
+
+def test_respond_in_channel_omits_war_context_for_non_war_question():
+    """War context should NOT be injected for non-war questions in #ask-elixir."""
+    with (
+        patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "ok"}) as mock_chat,
+        patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
+    ):
+        elixir_agent.respond_in_channel(
+            question="What's a good Hog Rider deck?",
+            author_name="Jamie",
+            channel_name="#ask-elixir",
+            workflow="interactive",
+            clan_data={"memberList": []},
+            war_data={"state": "warDay"},
+            conversation_history=[],
+            memory_context={},
+        )
+        user_msg = mock_chat.call_args.args[1]
+        assert "RIVER RACE STATUS" not in user_msg
+        assert "=== WAR STATUS ===" not in user_msg
 
 
 def _mock_anthropic_response(text="ok", input_tokens=10, output_tokens=20):
@@ -563,7 +662,7 @@ def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
     tool_call = SimpleNamespace(
         id="call_1",
         type="function",
-        function=SimpleNamespace(name="get_current_war_status", arguments="{}"),
+        function=SimpleNamespace(name="get_river_race", arguments="{}"),
     )
     first_message = SimpleNamespace(role="assistant", content=None, tool_calls=[tool_call])
     second_message = SimpleNamespace(
@@ -627,3 +726,28 @@ def test_chat_with_tools_returns_error_payload_for_invalid_final_json():
     assert result["_error"]["kind"] == "parse_error"
     assert result["_error"]["phase"] == "repair_response"
     assert "{\"event_type\":\"channel_response\"" in result["_error"]["result_preview"]
+
+
+def test_execute_tool_update_member_birthday():
+    with patch("elixir_agent.db") as mock_db:
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "update_member",
+                {"member_tag": "#ABC123", "field": "birthday", "value": {"month": 3, "day": 15}},
+            )
+        )
+        assert result["success"] is True
+        assert result["field"] == "birthday"
+        mock_db.set_member_birthday.assert_called_once_with("#ABC123", name=None, month=3, day=15)
+
+
+def test_execute_tool_update_member_note():
+    with patch("elixir_agent.db") as mock_db:
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "update_member",
+                {"member_tag": "#ABC123", "field": "note", "value": "War Machine"},
+            )
+        )
+        assert result["success"] is True
+        mock_db.set_member_note.assert_called_once_with("#ABC123", name=None, note="War Machine")

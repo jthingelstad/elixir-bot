@@ -42,6 +42,61 @@ def _clan_trend_prompt_context(days=30, window_days=7):
         return ""
 
 
+def _war_status_prompt_context():
+    """Build a compact war status context string with competing clan standings."""
+    try:
+        status = db.get_current_war_status()
+    except Exception as exc:
+        log.warning("War status context unavailable: %s", exc)
+        return ""
+    if not status or status.get("state") in (None, "notInWar"):
+        return ""
+    lines = ["=== RIVER RACE STATUS ==="]
+    phase_display = status.get("phase_display") or status.get("phase", "unknown")
+    season_week = status.get("season_week_label") or ""
+    if season_week:
+        lines.append(f"{season_week} | {phase_display}")
+    else:
+        lines.append(phase_display)
+    if status.get("colosseum_week"):
+        lines.append("Colosseum week (100 trophy stakes)")
+    if status.get("final_battle_day_active"):
+        lines.append("FINAL BATTLE DAY")
+    elif status.get("final_practice_day_active"):
+        lines.append("Final practice day")
+    standings = status.get("race_standings") or []
+    if standings:
+        lines.append("Race standings:")
+        for clan in standings:
+            marker = " (us)" if clan.get("is_us") else ""
+            lines.append(
+                f"  {clan['rank']}. {clan.get('clan_name', '?')}{marker} | "
+                f"{clan.get('fame', 0):,} fame"
+            )
+    return "\n".join(lines)
+
+
+_WAR_MENTION_PATTERNS = (
+    r"\bwar\b",
+    r"\briver race\b",
+    r"\brace\b",
+    r"\bfame\b",
+    r"\bboat\b",
+    r"\bdeck.{0,5}(usage|status|today)\b",
+    r"\bbattle day\b",
+    r"\bpractice day\b",
+    r"\bcolosseum\b",
+)
+
+
+def _mentions_war(text):
+    """Return True if the text references River Race / war concepts."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(re.search(pat, lowered) for pat in _WAR_MENTION_PATTERNS)
+
+
 _LIGHTWEIGHT_ASK_ELIXIR_PATTERNS = (
     r"\bthanks?\b",
     r"\bthank you\b",
@@ -253,7 +308,12 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memor
     signals: list of signal dicts from heartbeat.tick(), or None when no detector output is being passed.
     recent_posts: list of recent message dicts from db.list_channel_messages().
     """
-    context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
+    from runtime.channel_subagents import is_war_signal
+
+    # Only include war context when signals are war-related
+    has_war_signals = signals and any(is_war_signal(s) for s in signals)
+    context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT,
+                            include_war=has_war_signals)
 
     if signals:
         signals_text = json.dumps(signals, indent=2, default=str)
@@ -263,6 +323,12 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memor
         )
     else:
         user_msg = context
+
+    # Add war status context (with competing clan standings) for war signals
+    if has_war_signals:
+        war_ctx = _war_status_prompt_context()
+        if war_ctx:
+            user_msg += f"\n\n{war_ctx}"
 
     user_msg += _format_recent_posts(recent_posts)
     user_msg += _format_memory_context(memory_context)
@@ -322,7 +388,19 @@ def respond_in_channel(question, author_name, channel_name, workflow, clan_data,
     if workflow not in {"interactive", "clanops"}:
         raise ValueError(f"unsupported channel workflow: {workflow}")
     lightweight_turn = workflow == "interactive" and _is_lightweight_ask_elixir_turn(channel_name, question)
-    context = "" if lightweight_turn else _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT)
+
+    # Determine whether war context is relevant for this conversation
+    channel_lower = (channel_name or "").strip().lower()
+    war_relevant = (
+        workflow == "clanops"
+        or channel_lower in ("#war-talk", "#river-race")
+        or _mentions_war(question)
+    )
+
+    context = "" if lightweight_turn else _clan_context(
+        clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT,
+        include_war=war_relevant,
+    )
     trend_context = "" if lightweight_turn else _clan_trend_prompt_context()
     if lightweight_turn:
         user_msg = (
@@ -337,6 +415,11 @@ def respond_in_channel(question, author_name, channel_name, workflow, clan_data,
         )
     if trend_context:
         user_msg += f"\n\n{trend_context}"
+    # Add war status context (with competing clan standings) when relevant
+    if not lightweight_turn and war_relevant:
+        war_ctx = _war_status_prompt_context()
+        if war_ctx:
+            user_msg += f"\n\n{war_ctx}"
     user_msg += _format_memory_context(memory_context)
     system_prompt = (
         _interactive_system(channel_name)
