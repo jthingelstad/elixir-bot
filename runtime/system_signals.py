@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import logging
+
 import db
+from storage.contextual_memory import upsert_race_streak_memory
+
+log = logging.getLogger(__name__)
 
 
 STARTUP_SYSTEM_SIGNALS = [
@@ -490,6 +495,26 @@ STARTUP_SYSTEM_SIGNALS = [
 ]
 
 
+def _seed_race_streak_memory(*, conn=None) -> None:
+    """Seed the race win streak identity memory on first deploy."""
+    from memory_store import list_memories
+
+    existing = list_memories(
+        viewer_scope="system_internal",
+        include_system_internal=True,
+        filters={"event_type": "clan_identity", "event_id": "race_win_streak"},
+        limit=1,
+        conn=conn,
+    )
+    if existing:
+        return  # Already seeded
+    try:
+        upsert_race_streak_memory(season_id=0, week=0, race_rank=1, conn=conn)
+        log.info("Seeded race win streak identity memory")
+    except Exception:
+        log.warning("Failed to seed race streak memory", exc_info=True)
+
+
 def queue_startup_system_signals(*, conn=None) -> None:
     for signal in STARTUP_SYSTEM_SIGNALS:
         db.queue_system_signal(
@@ -498,6 +523,7 @@ def queue_startup_system_signals(*, conn=None) -> None:
             signal["payload"],
             conn=conn,
         )
+    _seed_race_streak_memory(conn=conn)
 
 
 __all__ = [
