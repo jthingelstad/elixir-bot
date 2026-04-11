@@ -436,16 +436,9 @@ def save_message(scope, author_type, content, summary=None, channel_id=None, cha
                 source_message_ids=[message_id],
                 conn=conn,
             )
-            if author_type == "user":
-                save_memory_fact(
-                    "discord_user",
-                    str(discord_user_id),
-                    "last_user_summary",
-                    summary,
-                    confidence=0.6,
-                    source_message_id=message_id,
-                    conn=conn,
-                )
+            # Note: last_user_summary is written by _post_conversation_memory
+            # after distillation, not here. Writing the truncated content[:200]
+            # here would persist verbatim text if distillation later fails.
         if member_id is not None:
             importance = 2 if workflow in {"clanops", "reception"} else 1
             save_memory_episode(

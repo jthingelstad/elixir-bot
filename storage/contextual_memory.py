@@ -34,6 +34,8 @@ def upsert_summary_memory(
     metadata: dict | None = None,
     war_season_id: str | None = None,
     war_week_id: str | None = None,
+    member_tag: str | None = None,
+    member_id: int | None = None,
     conn=None,
 ) -> dict | None:
     text = (body or "").strip()
@@ -54,6 +56,12 @@ def upsert_summary_memory(
         payload_metadata = dict(metadata or {})
         payload_metadata.setdefault("event_id", event_id)
 
+        member_kwargs: dict = {}
+        if member_tag is not None:
+            member_kwargs["member_tag"] = member_tag
+        if member_id is not None:
+            member_kwargs["member_id"] = member_id
+
         if existing:
             memory = existing[0]
             updated = update_memory(
@@ -63,6 +71,7 @@ def upsert_summary_memory(
                 body=text,
                 summary=summary,
                 metadata=payload_metadata,
+                **member_kwargs,
                 conn=conn,
             )
             if tags:
@@ -83,6 +92,7 @@ def upsert_summary_memory(
             war_season_id=war_season_id,
             war_week_id=war_week_id,
             metadata=payload_metadata,
+            **member_kwargs,
             conn=conn,
         )
         if tags:

@@ -601,7 +601,9 @@ def test_save_message_auto_links_discord_user_to_member_identity():
         )
         assert leadership_memory["discord_user"]["episodes"]
         assert leadership_memory["member"]["episodes"]
-        assert leadership_memory["discord_user"]["facts"][0]["fact_type"] == "last_user_summary"
+        # last_user_summary is written by _post_conversation_memory after
+        # distillation, not by save_message, so no facts exist yet
+        assert leadership_memory["discord_user"]["facts"] == []
     finally:
         conn.close()
 

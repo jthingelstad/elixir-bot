@@ -843,6 +843,20 @@ TOOLS = [
         },
     },
     {
+        "name": "recall_member",
+        "description": "Retrieve stored memories, observations, and notes about a specific clan member. Returns durable facts Elixir has observed over time — card upgrades, war performance, badges, leader notes, and other milestones. Use this when discussing a member to recall what Elixir knows about them.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_tag": {
+                    "type": "string",
+                    "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
+                },
+            },
+            "required": ["member_tag"],
+        },
+    },
+    {
         "name": "save_clan_memory",
         "description": "Save a durable clan memory or leader note that persists across sessions. Use when leadership asks to remember, record, or note something about a member or the clan. Also use proactively when a significant decision is made during conversation.",
         "input_schema": {

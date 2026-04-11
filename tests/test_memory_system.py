@@ -454,7 +454,7 @@ def test_build_memory_report_shows_member_conversation_and_contextual_memory():
             display_name="King Levy",
             conn=conn,
         )
-        db.save_message(
+        msg_id = db.save_message(
             "leader:1474760692992180429",
             "user",
             "How am I doing lately?",
@@ -463,6 +463,8 @@ def test_build_memory_report_shows_member_conversation_and_contextual_memory():
             display_name="King Levy",
             conn=conn,
         )
+        # Simulate post-distillation summary write (done by _post_conversation_memory)
+        update_message_summary(msg_id, "Asked about recent performance", conn=conn)
         create_memory(
             body="Leader noted steadier war usage from King Levy.",
             summary="Steadier war usage",
@@ -530,9 +532,9 @@ def test_build_memory_report_global_view_shows_conversation_memory_counts():
 
         report = _build_memory_report(limit=2, conn=conn)
 
-        assert "- Conversation store: 1 facts | 1 episodes | 0 channel states" in report
+        assert "- Conversation store: 0 facts | 1 episodes | 0 channel states" in report
         assert "Recent conversation memory:" in report
-        assert "Fact `discord_user:user123` `last_user_summary`" in report
+        # last_user_summary is no longer written by save_message (written after distillation)
         assert "Episode `discord_user:user123` `user` importance 1" in report
     finally:
         conn.close()
@@ -569,20 +571,18 @@ def test_update_message_summary_propagates_to_user_fact():
             display_name="Strategist",
             conn=conn,
         )
-        # Before update: fact should be truncated content
+        # Before update: no fact exists (save_message no longer writes last_user_summary)
+        facts = db.get_memory_facts("discord_user", "user789", conn=conn)
+        assert len(facts) == 0
+
+        # Update with distilled summary (simulates _post_conversation_memory)
+        update_message_summary(msg_id, "Discussion about war strategy and clan management.", conn=conn)
+
+        # After update: fact should be created with the distilled summary
         facts = db.get_memory_facts("discord_user", "user789", conn=conn)
         assert len(facts) == 1
         assert facts[0]["fact_type"] == "last_user_summary"
-        old_value = facts[0]["fact_value"]
-
-        # Update with distilled summary
-        update_message_summary(msg_id, "Discussion about war strategy and clan management.", conn=conn)
-
-        # After update: fact should be the distilled summary
-        facts = db.get_memory_facts("discord_user", "user789", conn=conn)
-        assert len(facts) == 1
         assert facts[0]["fact_value"] == "Discussion about war strategy and clan management."
-        assert facts[0]["fact_value"] != old_value
     finally:
         conn.close()
 

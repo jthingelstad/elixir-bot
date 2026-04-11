@@ -233,7 +233,7 @@ def build_subagent_memory_context(channel_config: dict, *, discord_user_id=None,
     durable_memories = list_memories(
         viewer_scope=channel_config.get("memory_scope") or "public",
         filters=filters,
-        limit=5,
+        limit=10,
     )
     if durable_memories:
         context["durable_memories"] = durable_memories
