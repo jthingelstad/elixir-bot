@@ -12,6 +12,89 @@ import elixir_agent
 _log = logging.getLogger("elixir.channel_router")
 
 
+def _persist_inline_memories(memories, channel_id, workflow):
+    """Persist memories declared inline in the LLM's JSON response."""
+    from agent.tool_exec import _resolve_member_tag
+    from memory_store import archive_memory, attach_tags, create_memory, search_memories
+    from storage.contextual_memory import upsert_member_note_memory
+
+    created_by = f"leader:inline-{workflow}"
+    saved = 0
+    for mem in memories:
+        title = (mem.get("title") or "").strip()
+        body = (mem.get("body") or "").strip()
+        if not title or not body:
+            _log.warning("inline_memory skipped: missing title or body")
+            continue
+        action = (mem.get("action") or "save").strip().lower()
+        member_tag_input = mem.get("member_tag")
+        tags = [str(t).strip().lower() for t in (mem.get("tags") or []) if t]
+
+        try:
+            # For corrections, search for and archive conflicting memories
+            if action == "correct":
+                candidates = search_memories(
+                    title,
+                    viewer_scope="system_internal",
+                    include_system_internal=True,
+                    limit=5,
+                )
+                for result in candidates:
+                    old = result.memory
+                    if old.get("status") == "active":
+                        archive_memory(old["memory_id"], actor=created_by)
+                        _log.info(
+                            "inline_memory corrected: archived memory_id=%s title=%r",
+                            old["memory_id"], old.get("title"),
+                        )
+
+            # Save the new memory
+            if member_tag_input:
+                try:
+                    resolved_tag = _resolve_member_tag(member_tag_input)
+                except (ValueError, Exception):
+                    resolved_tag = None
+                if resolved_tag:
+                    memory = upsert_member_note_memory(
+                        member_tag=resolved_tag,
+                        member_label=member_tag_input,
+                        note=body,
+                        created_by=created_by,
+                        metadata={"title": title, "source": "inline_memory"},
+                    )
+                    if memory and tags:
+                        attach_tags(memory["memory_id"], tags, actor=created_by)
+                    if memory:
+                        saved += 1
+                        _log.info("inline_memory saved: member_note id=%s title=%r", memory["memory_id"], title)
+                else:
+                    # Couldn't resolve member, save as general memory
+                    memory = create_memory(
+                        title=title, body=body, summary=body[:220],
+                        source_type="leader_note", is_inference=False, confidence=1.0,
+                        created_by=created_by, scope="leadership",
+                        channel_id=str(channel_id) if channel_id else None,
+                    )
+                    if tags:
+                        attach_tags(memory["memory_id"], tags, actor=created_by)
+                    saved += 1
+                    _log.info("inline_memory saved: leader_note id=%s title=%r (unresolved member)", memory["memory_id"], title)
+            else:
+                memory = create_memory(
+                    title=title, body=body, summary=body[:220],
+                    source_type="leader_note", is_inference=False, confidence=1.0,
+                    created_by=created_by, scope="leadership",
+                    channel_id=str(channel_id) if channel_id else None,
+                )
+                if tags:
+                    attach_tags(memory["memory_id"], tags, actor=created_by)
+                saved += 1
+                _log.info("inline_memory saved: leader_note id=%s title=%r", memory["memory_id"], title)
+        except Exception:
+            _log.warning("inline_memory failed for %r", title, exc_info=True)
+    return saved
+
+
 async def _post_conversation_memory(
     user_message_id, assistant_message_id,
     user_content, assistant_content,
@@ -751,6 +834,14 @@ async def route_message(message):
                     return
 
                 result = await app._apply_member_refs_to_result(result)
+                inline_memories = result.pop("memories", None) or []
+                if inline_memories:
+                    try:
+                        await asyncio.to_thread(
+                            _persist_inline_memories, inline_memories, message.channel.id, workflow,
+                        )
+                    except Exception:
+                        _log.error("inline memory persistence failed", exc_info=True)
                 content = result.get("content", result.get("summary", ""))
                 if not content:
                     app.log.error("%s channel error: empty result payload %s", workflow, result)
