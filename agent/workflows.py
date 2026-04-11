@@ -1,7 +1,9 @@
 import json
 import re
+import sqlite3
 
 import db
+from anthropic import APIError, APIConnectionError
 
 from agent import app as _app
 from agent.core import (
@@ -35,7 +37,7 @@ def _chat_with_tools(*args, **kwargs):
 def _clan_trend_prompt_context(days=30, window_days=7):
     try:
         return db.build_clan_trend_summary_context(days=days, window_days=window_days) or ""
-    except Exception as exc:
+    except sqlite3.Error as exc:
         log.warning("Clan trend summary context unavailable: %s", exc)
         return ""
 
@@ -77,7 +79,7 @@ def _roster_bio_context(clan_data, roster_data=None):
         canon_tag = tag if str(tag).startswith("#") else f"#{tag}"
         try:
             overview = db.get_member_overview(canon_tag)
-        except Exception:
+        except sqlite3.Error:
             overview = None
         if not overview:
             continue
@@ -233,7 +235,7 @@ def _promotion_context(clan_data, war_data, roster_data=None):
 
     try:
         season_summary = db.get_war_season_summary(top_n=5)
-    except Exception:
+    except sqlite3.Error:
         season_summary = None
     if season_summary:
         lines.append("\n=== WAR SEASON LEADERS ===")
@@ -382,7 +384,7 @@ def generate_message(event, context, recent_posts=None):
         if not text or text.lower() == "null":
             return None
         return text
-    except Exception as e:
+    except (APIError, APIConnectionError) as e:
         log.error("generate_message error (%s): %s", event, e)
         return None
 
@@ -415,7 +417,7 @@ def generate_home_message(clan_data, war_data, previous_message, roster_data=Non
         if not text or text.lower() == "null":
             return None
         return text
-    except Exception as e:
+    except (APIError, APIConnectionError) as e:
         log.error("Home message API error: %s", e)
         return None
 
@@ -446,7 +448,7 @@ def generate_members_message(clan_data, war_data, previous_message, roster_data=
         if not text or text.lower() == "null":
             return None
         return text
-    except Exception as e:
+    except (APIError, APIConnectionError) as e:
         log.error("Members message API error: %s", e)
         return None
 
@@ -505,7 +507,7 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
             timeout=60,
         )
         return _parse_response(resp.choices[0].message.content or "null")
-    except Exception as e:
+    except (APIError, APIConnectionError) as e:
         log.error("Promote API error: %s", e)
         return None
 
@@ -530,7 +532,7 @@ def generate_weekly_digest(summary_context, previous_message=""):
         if not text or text.lower() == "null":
             return None
         return text
-    except Exception as e:
+    except (APIError, APIConnectionError) as e:
         log.error("Weekly digest API error: %s", e)
         return None
 
@@ -553,7 +555,7 @@ def generate_tournament_recap(recap_context):
         if not text or text.lower() == "null":
             return None
         return text
-    except Exception as e:
+    except (APIError, APIConnectionError) as e:
         log.error("Tournament recap API error: %s", e)
         return None
 

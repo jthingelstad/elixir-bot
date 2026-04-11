@@ -1,5 +1,6 @@
 import os
 import re
+import sqlite3
 
 from db import (
     _canon_tag,
@@ -523,7 +524,7 @@ def get_database_status(conn=None):
                 "SELECT name, SUM(pgsize) AS total_bytes FROM dbstat GROUP BY name"
             ).fetchall():
                 size_by_name[row["name"]] = row["total_bytes"] or 0
-        except Exception:
+        except sqlite3.OperationalError:
             size_by_name = {}
 
         tables = []

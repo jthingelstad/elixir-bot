@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Optional
@@ -424,7 +425,7 @@ def search_memories(query: str, *, viewer_scope: str = "leadership", include_sys
                     (q, *ids, limit * 4),
                 ).fetchall()
                 lexical_ranks = [r["memory_id"] for r in fts_rows]
-            except Exception:
+            except sqlite3.OperationalError:
                 # FTS fallback (degraded mode)
                 ranked = []
                 low = q.lower()

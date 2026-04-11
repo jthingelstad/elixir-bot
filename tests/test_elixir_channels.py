@@ -79,7 +79,7 @@ def test_on_message_routes_interactive_channel_when_mentioned():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
+        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
         patch("elixir._get_channel_behavior", return_value={
             "id": 100,
             "name": "#member-chat",
@@ -191,7 +191,7 @@ def test_on_message_does_not_save_unsent_interactive_reply():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
+        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
         patch("elixir._get_channel_behavior", return_value={
             "id": 100,
             "name": "#member-chat",
@@ -479,15 +479,15 @@ def test_is_bot_mentioned_requires_leading_mention():
     direct_message = _make_message(100, "member-chat", "<@999> how am I doing?")
     mid_message = _make_message(100, "member-chat", "how am I doing, <@999>?")
 
-    with patch("runtime.helpers.bot", new=SimpleNamespace(user=bot_user)):
+    with patch("runtime.helpers._common.bot", new=SimpleNamespace(user=bot_user)):
         assert elixir._is_bot_mentioned(direct_message) is True
         assert elixir._is_bot_mentioned(mid_message) is False
 
 
 def test_strip_bot_mentions_removes_only_leading_mention():
     with (
-        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
-        patch("runtime.helpers.BOT_ROLE_ID", 777),
+        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
+        patch("runtime.helpers._common.BOT_ROLE_ID", 777),
     ):
         assert elixir._strip_bot_mentions("<@999> help <@999>") == "help <@999>"
         assert elixir._strip_bot_mentions("help <@999>") == "help <@999>"
@@ -764,7 +764,7 @@ def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
+        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
         patch("elixir._get_channel_behavior", return_value={
             "id": 200,
             "name": "#clan-ops",
@@ -823,7 +823,7 @@ def test_on_message_logs_agent_failure_payload_details():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
+        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
         patch("elixir._get_channel_behavior", return_value={
             "id": 200,
             "name": "#clan-ops",
@@ -2509,7 +2509,7 @@ def test_on_message_handles_roster_join_dates_directly():
     with (
         patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.helpers.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
+        patch("runtime.helpers._common.bot", new=SimpleNamespace(user=SimpleNamespace(id=999))),
         patch("elixir._get_channel_behavior", return_value={
             "id": 200,
             "name": "#clan-ops",

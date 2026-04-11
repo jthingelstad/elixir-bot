@@ -17,6 +17,7 @@ from agent.tool_policy import (
     TOOLSETS_BY_WORKFLOW,
 )
 from agent.tool_exec import _execute_tool
+from anthropic import APIError, APIConnectionError
 
 
 def _preview_text(value, limit=500):
@@ -27,7 +28,7 @@ def _preview_text(value, limit=500):
     else:
         try:
             text = json.dumps(value, default=str, ensure_ascii=False)
-        except Exception:
+        except (TypeError, ValueError):
             text = repr(value)
     return text[:limit]
 
@@ -62,7 +63,7 @@ def _parse_response(text):
             if cleaned.startswith("json"):
                 cleaned = cleaned[4:]
         return json.loads(cleaned.strip())
-    except Exception:
+    except (json.JSONDecodeError, ValueError, IndexError):
         if text:
             log.warning("LLM returned plain text instead of JSON, wrapping: %s", text[:120])
             return {"content": text, "summary": "agent response"}
@@ -170,7 +171,7 @@ def _normalize_message(message):
             args_str = getattr(fn, "arguments", "{}") if fn else "{}"
             try:
                 args = json.loads(args_str) if isinstance(args_str, str) else args_str
-            except Exception:
+            except (json.JSONDecodeError, ValueError):
                 args = {}
             blocks.append({
                 "type": "tool_use",
@@ -216,7 +217,7 @@ def _build_tool_result_envelope(name, raw_result):
     """Normalize tool output into a compact envelope for model context."""
     try:
         parsed = json.loads(raw_result)
-    except Exception:
+    except (json.JSONDecodeError, TypeError, ValueError):
         parsed = {"error": "tool_result_not_json", "raw": str(raw_result)[:500]}
     parsed = _strip_context_image_fields(parsed)
 
@@ -302,7 +303,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         nonlocal validation_failure_count
         try:
             parsed = _parse_json_response(content) if strict_json else _parse_response(content or "null")
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError) as e:
             validation_failure_count += 1
             if not repair_allowed:
                 log.warning("validation_failure workflow=%s reason=parse_error detail=%s", workflow, e)
@@ -325,7 +326,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     for _round in range(MAX_TOOL_ROUNDS + 1):
         try:
             resp = _create_completion(messages)
-        except Exception as e:
+        except (APIError, APIConnectionError) as e:
             log.error("LLM API error: %s", e)
             if return_errors:
                 return _failure_payload("llm_api_error", e, phase="initial_completion")
@@ -348,7 +349,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                 })
                 try:
                     repair_resp = _create_completion(messages)
-                except Exception as e:
+                except (APIError, APIConnectionError) as e:
                     log.error("LLM API repair error: %s", e)
                     if return_errors:
                         return _failure_payload("llm_api_error", e, phase="repair_completion")
@@ -430,7 +431,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             prompt_chars, completion_chars, completion_latencies_ms,
         )
         return parsed
-    except Exception as e:
+    except (APIError, APIConnectionError) as e:
         log.error("Final answer error: %s", e)
         if return_errors:
             return _failure_payload("llm_api_error", e, phase="final_completion")
