@@ -345,7 +345,7 @@ def target_path(content_type: str) -> str:
 
 
 def serialize_content(data) -> str:
-    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    return json.dumps(data, indent=2, ensure_ascii=True) + "\n"
 
 
 def _repo_parts(repo_slug: str | None = None) -> tuple[str, str]:
