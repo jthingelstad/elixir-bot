@@ -178,6 +178,23 @@ def get_player_chests(tag):
         return None
 
 
+def get_clan_by_tag(tag):
+    """Fetch any clan's profile by tag.
+
+    tag: clan tag with or without '#' prefix.
+    Returns clan dict or None on error.
+    """
+    clean_tag = tag.lstrip("#")
+    try:
+        return _request_json(
+            f"/clans/%23{clean_tag}",
+            endpoint_name="clan_by_tag",
+            entity_key=clean_tag.upper(),
+        )
+    except requests.RequestException:
+        return None
+
+
 def get_cards():
     """Fetch the full card catalog from the Clash Royale API.
 

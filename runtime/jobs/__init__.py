@@ -11,6 +11,7 @@ from runtime.jobs._core import (  # noqa: F401
     _build_ask_elixir_daily_insight_context, _ask_elixir_daily_insight,
     _clan_awareness_tick, _war_poll_tick, _war_awareness_tick,
     _player_intel_refresh, _clanops_weekly_review, _weekly_clan_recap,
+    _clan_wars_intel_report,
 )
 # _build_weekly_clanops_review and _build_weekly_clan_recap_context are
 # delegation wrappers in _core.py that forward to runtime.app — re-exporting
