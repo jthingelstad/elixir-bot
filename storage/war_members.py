@@ -46,7 +46,7 @@ def get_member_war_status(tag, season_id=None, conn=None):
 
         summary = {
             "season_id": season_id,
-            "member_ref": _format_member_reference(canon_tag, style="name_with_handle", conn=conn),
+            "member_ref": _format_member_reference(canon_tag, conn=conn),
             "current_day": current_day,
             "season": None,
         }
@@ -137,7 +137,7 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
             "season_id": season_id,
             "tag": canon_tag,
             "name": member["current_name"],
-            "member_ref": _format_member_reference(canon_tag, style="name_with_handle", conn=conn),
+            "member_ref": _format_member_reference(canon_tag, conn=conn),
             "season": {
                 "races_played": season_row["races_played"] if season_row else 0,
                 "total_races": total_races,
@@ -192,7 +192,7 @@ def get_member_war_battle_record(tag, season_id=None, conn=None):
             "season_id": season_id,
             "tag": canon_tag,
             "name": member["current_name"],
-            "member_ref": _format_member_reference(canon_tag, style="name_with_handle", conn=conn),
+            "member_ref": _format_member_reference(canon_tag, conn=conn),
             "wins": wins,
             "losses": losses,
             "draws": draws,
@@ -251,7 +251,7 @@ def get_member_missed_war_days(tag, season_id=None, conn=None):
             "season_id": season_id,
             "tag": canon_tag,
             "name": member["current_name"],
-            "member_ref": _format_member_reference(canon_tag, style="name_with_handle", conn=conn),
+            "member_ref": _format_member_reference(canon_tag, conn=conn),
             "tracked_days": len(tracked_days),
             "days_participated": participated,
             "days_missed": len(missed),

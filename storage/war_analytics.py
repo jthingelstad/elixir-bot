@@ -145,7 +145,7 @@ def compare_member_war_to_clan_average(tag, season_id=None, conn=None):
             "member": {
                 "tag": member["tag"],
                 "name": member["name"],
-                "member_ref": _format_member_reference(member["tag"], style="name_with_handle", conn=conn),
+                "member_ref": _format_member_reference(member["tag"], conn=conn),
                 "races_played": member_stats["races_played"] or 0,
                 "total_fame": member_stats["total_fame"] or 0,
                 "total_decks_used": member_stats["total_decks_used"] or 0,
