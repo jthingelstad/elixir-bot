@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytz
 
-from db import _canon_tag, get_connection
+from db import _canon_tag, managed_connection
 from memory_store import archive_memory, attach_tags, create_memory, list_memories, update_memory
 
 CHICAGO = pytz.timezone("America/Chicago")
@@ -22,6 +22,7 @@ def _memory_summary(text: str, limit: int = 220) -> str:
     return clean[: limit - 3].rstrip() + "..."
 
 
+@managed_connection
 def upsert_summary_memory(
     *,
     event_type: str,
@@ -42,65 +43,59 @@ def upsert_summary_memory(
     if not text:
         return None
 
-    close = conn is None
-    conn = conn or get_connection()
-    try:
-        existing = list_memories(
-            viewer_scope="system_internal",
-            include_system_internal=True,
-            filters={"event_type": event_type, "event_id": event_id},
-            limit=1,
-            conn=conn,
-        )
-        summary = _memory_summary(text)
-        payload_metadata = dict(metadata or {})
-        payload_metadata.setdefault("event_id", event_id)
+    existing = list_memories(
+        viewer_scope="system_internal",
+        include_system_internal=True,
+        filters={"event_type": event_type, "event_id": event_id},
+        limit=1,
+        conn=conn,
+    )
+    summary = _memory_summary(text)
+    payload_metadata = dict(metadata or {})
+    payload_metadata.setdefault("event_id", event_id)
 
-        member_kwargs: dict = {}
-        if member_tag is not None:
-            member_kwargs["member_tag"] = member_tag
-        if member_id is not None:
-            member_kwargs["member_id"] = member_id
+    member_kwargs: dict = {}
+    if member_tag is not None:
+        member_kwargs["member_tag"] = member_tag
+    if member_id is not None:
+        member_kwargs["member_id"] = member_id
 
-        if existing:
-            memory = existing[0]
-            updated = update_memory(
-                memory["memory_id"],
-                actor=created_by,
-                title=title,
-                body=text,
-                summary=summary,
-                metadata=payload_metadata,
-                **member_kwargs,
-                conn=conn,
-            )
-            if tags:
-                attach_tags(updated["memory_id"], tags, actor=created_by, conn=conn)
-            return updated
-
-        created = create_memory(
+    if existing:
+        memory = existing[0]
+        updated = update_memory(
+            memory["memory_id"],
+            actor=created_by,
             title=title,
             body=text,
             summary=summary,
-            source_type="system",
-            is_inference=False,
-            confidence=1.0,
-            created_by=created_by,
-            scope=scope,
-            event_type=event_type,
-            event_id=event_id,
-            war_season_id=war_season_id,
-            war_week_id=war_week_id,
             metadata=payload_metadata,
             **member_kwargs,
             conn=conn,
         )
         if tags:
-            attach_tags(created["memory_id"], tags, actor=created_by, conn=conn)
-        return created
-    finally:
-        if close:
-            conn.close()
+            attach_tags(updated["memory_id"], tags, actor=created_by, conn=conn)
+        return updated
+
+    created = create_memory(
+        title=title,
+        body=text,
+        summary=summary,
+        source_type="system",
+        is_inference=False,
+        confidence=1.0,
+        created_by=created_by,
+        scope=scope,
+        event_type=event_type,
+        event_id=event_id,
+        war_season_id=war_season_id,
+        war_week_id=war_week_id,
+        metadata=payload_metadata,
+        **member_kwargs,
+        conn=conn,
+    )
+    if tags:
+        attach_tags(created["memory_id"], tags, actor=created_by, conn=conn)
+    return created
 
 
 def upsert_weekly_summary_memory(
@@ -216,6 +211,7 @@ def upsert_war_recap_memory(
     return None
 
 
+@managed_connection
 def upsert_member_note_memory(
     *,
     member_tag: str,
@@ -230,45 +226,40 @@ def upsert_member_note_memory(
     if not tag or not text:
         return None
 
-    close = conn is None
-    conn = conn or get_connection()
-    try:
-        member_row = conn.execute(
-            "SELECT m.member_id, m.current_name, cs.role "
-            "FROM members m "
-            "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-            "WHERE m.player_tag = ?",
-            (tag,),
-        ).fetchone()
-        title = f"Leader Note: {member_label}"
-        payload_metadata = dict(metadata or {})
-        payload_metadata.setdefault("member_label", member_label)
-        memory = upsert_summary_memory(
-            event_type="member_note",
-            event_id=tag,
-            title=title,
-            body=text,
-            scope="leadership",
-            created_by=created_by,
-            tags=["leader-note", "member-note"],
-            metadata=payload_metadata,
+    member_row = conn.execute(
+        "SELECT m.member_id, m.current_name, cs.role "
+        "FROM members m "
+        "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
+        "WHERE m.player_tag = ?",
+        (tag,),
+    ).fetchone()
+    title = f"Leader Note: {member_label}"
+    payload_metadata = dict(metadata or {})
+    payload_metadata.setdefault("member_label", member_label)
+    memory = upsert_summary_memory(
+        event_type="member_note",
+        event_id=tag,
+        title=title,
+        body=text,
+        scope="leadership",
+        created_by=created_by,
+        tags=["leader-note", "member-note"],
+        metadata=payload_metadata,
+        conn=conn,
+    )
+    if memory and member_row:
+        memory = update_memory(
+            memory["memory_id"],
+            actor=created_by,
+            member_id=member_row["member_id"],
+            member_tag=tag,
+            role=member_row["role"],
             conn=conn,
         )
-        if memory and member_row:
-            memory = update_memory(
-                memory["memory_id"],
-                actor=created_by,
-                member_id=member_row["member_id"],
-                member_tag=tag,
-                role=member_row["role"],
-                conn=conn,
-            )
-        return memory
-    finally:
-        if close:
-            conn.close()
+    return memory
 
 
+@managed_connection
 def archive_member_note_memory(
     *,
     member_tag: str,
@@ -279,26 +270,20 @@ def archive_member_note_memory(
     if not tag:
         return None
 
-    close = conn is None
-    conn = conn or get_connection()
-    try:
-        existing = list_memories(
-            viewer_scope="system_internal",
-            include_system_internal=True,
-            include_archived=True,
-            filters={"event_type": "member_note", "event_id": tag},
-            limit=1,
-            conn=conn,
-        )
-        if not existing:
-            return None
-        memory = existing[0]
-        if memory.get("status") == "archived":
-            return memory
-        return archive_memory(memory["memory_id"], actor=actor, conn=conn)
-    finally:
-        if close:
-            conn.close()
+    existing = list_memories(
+        viewer_scope="system_internal",
+        include_system_internal=True,
+        include_archived=True,
+        filters={"event_type": "member_note", "event_id": tag},
+        limit=1,
+        conn=conn,
+    )
+    if not existing:
+        return None
+    memory = existing[0]
+    if memory.get("status") == "archived":
+        return memory
+    return archive_memory(memory["memory_id"], actor=actor, conn=conn)
 
 
 STREAK_START_SEASON = 129
@@ -331,6 +316,7 @@ def _count_race_streak(conn) -> tuple[int, int | None, int | None]:
     return count, latest_season, latest_week
 
 
+@managed_connection
 def upsert_race_streak_memory(
     *,
     season_id: int,
@@ -339,38 +325,32 @@ def upsert_race_streak_memory(
     conn=None,
 ) -> dict | None:
     """Update the race win streak identity memory after a race completes."""
-    close = conn is None
-    conn = conn or get_connection()
-    try:
-        streak_count, latest_season, latest_week = _count_race_streak(conn)
+    streak_count, latest_season, latest_week = _count_race_streak(conn)
 
-        if streak_count == 0:
-            body = (
-                f"POAP KINGS' consecutive 1st-place streak ended in "
-                f"Season {season_id} Week {week}."
-            )
-        else:
-            body = (
-                f"POAP KINGS has finished 1st in every river race from "
-                f"Season {STREAK_START_SEASON} Week {STREAK_START_WEEK} through "
-                f"Season {latest_season} Week {latest_week} — "
-                f"a streak of {streak_count} consecutive 1st-place finishes."
-            )
-
-        return upsert_summary_memory(
-            event_type="clan_identity",
-            event_id="race_win_streak",
-            title="River Race Win Streak",
-            body=body,
-            scope="public",
-            created_by="elixir:observation",
-            tags=["war", "clan-identity", "streak"],
-            metadata={"streak_count": streak_count, "latest_season": latest_season, "latest_week": latest_week},
-            conn=conn,
+    if streak_count == 0:
+        body = (
+            f"POAP KINGS' consecutive 1st-place streak ended in "
+            f"Season {season_id} Week {week}."
         )
-    finally:
-        if close:
-            conn.close()
+    else:
+        body = (
+            f"POAP KINGS has finished 1st in every river race from "
+            f"Season {STREAK_START_SEASON} Week {STREAK_START_WEEK} through "
+            f"Season {latest_season} Week {latest_week} — "
+            f"a streak of {streak_count} consecutive 1st-place finishes."
+        )
+
+    return upsert_summary_memory(
+        event_type="clan_identity",
+        event_id="race_win_streak",
+        title="River Race Win Streak",
+        body=body,
+        scope="public",
+        created_by="elixir:observation",
+        tags=["war", "clan-identity", "streak"],
+        metadata={"streak_count": streak_count, "latest_season": latest_season, "latest_week": latest_week},
+        conn=conn,
+    )
 
 
 __all__ = [

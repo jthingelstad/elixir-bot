@@ -1,0 +1,194 @@
+"""heartbeat._roster — Non-war member detectors."""
+
+import logging
+from datetime import datetime
+
+import cr_knowledge
+import db
+import prompts
+from heartbeat._helpers import _enrich_leave_signal
+
+log = logging.getLogger("elixir_heartbeat")
+
+
+def detect_joins_leaves(current_members, known_snapshot, conn=None):
+    """Compare current roster to known snapshot for joins/departures.
+
+    current_members: list of member dicts from CR API memberList.
+    known_snapshot: dict of {tag: name} from the previous roster.
+
+    Returns (signals, updated_snapshot).
+    """
+    current = {m["tag"]: m["name"] for m in current_members}
+    signals = []
+
+    for tag, name in current.items():
+        if tag not in known_snapshot:
+            signals.append({
+                "type": "member_join",
+                "tag": tag,
+                "name": name,
+            })
+
+    for tag, name in known_snapshot.items():
+        if tag not in current:
+            signals.append(_enrich_leave_signal(tag, name, conn))
+
+    return signals, current
+
+
+def detect_arena_changes(conn=None):
+    """Check DB for arena changes since last snapshot."""
+    milestones = db.detect_milestones(conn=conn)
+    return [
+        {
+            "type": "arena_change",
+            "tag": m["tag"],
+            "name": m["name"],
+            "old_arena": m["old_value"],
+            "new_arena": m["new_value"],
+        }
+        for m in milestones
+        if m["type"] == "arena_change"
+    ]
+
+
+def detect_role_changes(conn=None):
+    """Check DB for leadership-relevant role promotions since last snapshot."""
+    changes = db.detect_role_changes(conn=conn)
+    signals = []
+    for change in changes:
+        old_role = (change.get("old_role") or "").strip()
+        new_role = (change.get("new_role") or "").strip()
+        if old_role != "member" or new_role != "elder":
+            continue
+        signals.append({
+            "type": "elder_promotion",
+            "tag": change["tag"],
+            "name": change["name"],
+            "old_role": old_role,
+            "new_role": new_role,
+            "signal_log_type": change.get("signal_log_type"),
+            "message": f"{change['name']} was promoted to Elder.",
+        })
+    return signals
+
+
+def detect_donation_leaders(current_members, conn=None):
+    """Identify the top 3 donors from the current roster.
+
+    Only fires once per day.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    if db.was_signal_sent("donation_leaders", today, conn=conn):
+        return []
+    sorted_members = sorted(current_members, key=lambda m: m.get("donations", 0), reverse=True)
+    top = sorted_members[:3]
+    if not top or top[0].get("donations", 0) == 0:
+        return []
+    return [{
+        "type": "donation_leaders",
+        "leaders": [
+            {"name": m.get("name", "?"), "donations": m.get("donations", 0), "rank": i + 1}
+            for i, m in enumerate(top)
+        ],
+    }]
+
+
+def detect_inactivity(current_members, now=None, conn=None):
+    """Flag members not seen in 3+ days.
+
+    Uses the lastSeen field from CR API (format: 20260304T120000.000Z).
+    Only fires once per day.
+    """
+    today = (now or datetime.now()).strftime("%Y-%m-%d")
+    if db.was_signal_sent("inactive_members", today, conn=conn):
+        return []
+    now = now or datetime.now()
+    signals = []
+    inactive = []
+    threshold = cr_knowledge.INACTIVITY_DAYS
+
+    for m in current_members:
+        last_seen = m.get("lastSeen", m.get("last_seen", ""))
+        if not last_seen:
+            continue
+        try:
+            # Parse CR API date format: 20260304T120000.000Z
+            clean = last_seen.split(".")[0]  # Remove .000Z
+            seen_dt = datetime.strptime(clean, "%Y%m%dT%H%M%S")
+            days_away = (now - seen_dt).days
+            if days_away >= threshold:
+                inactive.append({
+                    "name": m.get("name", "?"),
+                    "tag": m.get("tag", ""),
+                    "days_inactive": days_away,
+                    "role": m.get("role", "member"),
+                })
+        except (ValueError, TypeError):
+            continue
+
+    if inactive:
+        signals.append({
+            "type": "inactive_members",
+            "members": sorted(inactive, key=lambda x: x["days_inactive"], reverse=True),
+        })
+
+    return signals
+
+
+@db.managed_connection
+def detect_cake_days(today_str=None, conn=None):
+    """Check for clan birthday, join anniversaries, and member birthdays.
+
+    Uses cake_day_announcements table for dedup -- only returns signals
+    for events not yet announced today.
+
+    Returns list of signal dicts.
+    """
+    if today_str is None:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+    signals = []
+
+    # Clan birthday -- founded date from config
+    thresholds = prompts.thresholds()
+    clan_founded = thresholds.get("clan_founded", "2026-02-04")
+    if today_str[5:] == clan_founded[5:]:  # month-day match
+        if not db.was_announcement_sent(today_str, "clan_birthday", None, conn=conn):
+            years = int(today_str[:4]) - int(clan_founded[:4])
+            signals.append({
+                "type": "clan_birthday",
+                "years": years,
+            })
+
+    # Join anniversaries
+    anniversaries = db.get_join_anniversaries_today(today_str, conn=conn)
+    unannounced = []
+    for a in anniversaries:
+        if not db.was_announcement_sent(today_str, "join_anniversary", a["tag"], conn=conn):
+            unannounced.append(a)
+    if unannounced:
+        signals.append({
+            "type": "join_anniversary",
+            "members": unannounced,
+        })
+
+    # Member birthdays
+    birthdays = db.get_birthdays_today(today_str, conn=conn)
+    unannounced_bdays = []
+    for b in birthdays:
+        if not db.was_announcement_sent(today_str, "birthday", b["tag"], conn=conn):
+            unannounced_bdays.append(b)
+    if unannounced_bdays:
+        signals.append({
+            "type": "member_birthday",
+            "members": unannounced_bdays,
+        })
+
+    return signals
+
+
+def detect_pending_system_signals(today_str=None, conn=None):
+    del today_str
+    return db.list_pending_system_signals(conn=conn)

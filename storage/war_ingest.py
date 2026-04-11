@@ -5,7 +5,7 @@ from db import (
     _store_raw_payload,
     _tag_key,
     _utcnow,
-    get_connection,
+    managed_connection,
 )
 from storage.war_calendar import (
     PERIODS_PER_WEEK,
@@ -124,106 +124,96 @@ def _upsert_period_logs(conn, observed_at, war_data, season_id):
             )
 
 
+@managed_connection
 def store_war_log(race_log, clan_tag, conn=None):
-    close = conn is None
-    conn = conn or get_connection()
-    try:
-        clan_tag = _tag_key(clan_tag)
-        _store_raw_payload(conn, "clan_war_log", clan_tag, race_log)
-        stored = 0
-        for entry in (race_log or {}).get("items", []):
-            season_id = entry.get("seasonId")
-            section_index = entry.get("sectionIndex")
-            standings = entry.get("standings", [])
-            our = None
-            for standing in standings:
-                clan = standing.get("clan", {})
-                if _tag_key(clan.get("tag")) == clan_tag:
-                    our = standing
-                    break
-            total_clans = len(standings)
-            trophy_change = our.get("trophyChange") if our else None
-            our_rank = our.get("rank") if our else None
-            clan = (our or {}).get("clan", {})
-            cur = conn.execute(
-                "INSERT OR IGNORE INTO war_races (season_id, section_index, created_date, our_rank, trophy_change, our_fame, total_clans, finish_time, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (season_id, section_index, entry.get("createdDate"), our_rank, trophy_change, clan.get("fame"), total_clans, clan.get("finishTime"), _json_or_none(entry)),
-            )
-            if cur.rowcount == 0:
-                race_row = conn.execute("SELECT war_race_id FROM war_races WHERE season_id = ? AND section_index = ?", (season_id, section_index)).fetchone()
-                war_race_id = race_row["war_race_id"]
-            else:
-                war_race_id = cur.lastrowid
-                stored += 1
-
-            if our:
-                for participant in clan.get("participants", []):
-                    ptag = _canon_tag(participant.get("tag"))
-                    member_id = _ensure_member(conn, ptag, participant.get("name"), status=None) if ptag else None
-                    conn.execute(
-                        "INSERT OR REPLACE INTO war_participation (war_race_id, member_id, player_tag, player_name, fame, repair_points, boat_attacks, decks_used, decks_used_today, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (war_race_id, member_id, ptag, participant.get("name"), participant.get("fame", 0), participant.get("repairPoints", 0), participant.get("boatAttacks", 0), participant.get("decksUsed", 0), participant.get("decksUsedToday", 0), _json_or_none(participant)),
-                    )
-        conn.commit()
-        return stored
-    finally:
-        if close:
-            conn.close()
-
-
-def upsert_war_current_state(war_data, conn=None):
-    close = conn is None
-    conn = conn or get_connection()
-    try:
-        observed_at = _utcnow()
-        clan = (war_data or {}).get("clan", {})
-        conn.execute(
-            "INSERT INTO war_current_state (observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (observed_at, war_data.get("state"), _canon_tag(clan.get("tag")), clan.get("name"), clan.get("fame"), clan.get("repairPoints"), clan.get("periodPoints"), clan.get("clanScore"), _json_or_none(war_data)),
+    clan_tag = _tag_key(clan_tag)
+    _store_raw_payload(conn, "clan_war_log", clan_tag, race_log)
+    stored = 0
+    for entry in (race_log or {}).get("items", []):
+        season_id = entry.get("seasonId")
+        section_index = entry.get("sectionIndex")
+        standings = entry.get("standings", [])
+        our = None
+        for standing in standings:
+            clan = standing.get("clan", {})
+            if _tag_key(clan.get("tag")) == clan_tag:
+                our = standing
+                break
+        total_clans = len(standings)
+        trophy_change = our.get("trophyChange") if our else None
+        our_rank = our.get("rank") if our else None
+        clan = (our or {}).get("clan", {})
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO war_races (season_id, section_index, created_date, our_rank, trophy_change, our_fame, total_clans, finish_time, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (season_id, section_index, entry.get("createdDate"), our_rank, trophy_change, clan.get("fame"), total_clans, clan.get("finishTime"), _json_or_none(entry)),
         )
-        latest_logged_race = _get_latest_logged_race(conn)
-        season_id = _infer_current_season_id_from_live_state(war_data, latest_logged_race)
-        section_index = war_data.get("sectionIndex")
-        period_index = war_data.get("periodIndex")
-        phase = _resolve_phase(war_data.get("periodType"), period_index)
-        phase_day_number = _phase_day_number(phase, period_index)
-        battle_date = _war_day_key(season_id, section_index, period_index, observed_at)
-        for participant in clan.get("participants", []):
-            member_id = _ensure_member(conn, participant.get("tag"), participant.get("name"), status=None)
-            conn.execute(
-                "INSERT INTO war_day_status (member_id, battle_date, observed_at, fame, repair_points, boat_attacks, decks_used_total, decks_used_today, season_id, section_index, period_index, phase, phase_day_number, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(member_id, battle_date) DO UPDATE SET observed_at = excluded.observed_at, fame = excluded.fame, repair_points = excluded.repair_points, boat_attacks = excluded.boat_attacks, decks_used_total = excluded.decks_used_total, decks_used_today = excluded.decks_used_today, season_id = excluded.season_id, section_index = excluded.section_index, period_index = excluded.period_index, phase = excluded.phase, phase_day_number = excluded.phase_day_number, raw_json = excluded.raw_json",
-                (member_id, battle_date, observed_at, participant.get("fame", 0), participant.get("repairPoints", 0), participant.get("boatAttacks", 0), participant.get("decksUsed", 0), participant.get("decksUsedToday", 0), season_id, section_index, period_index, phase, phase_day_number, _json_or_none(participant)),
-            )
-            conn.execute(
-                "INSERT OR IGNORE INTO war_participant_snapshots (observed_at, war_day_key, season_id, section_index, period_index, phase, phase_day_number, clan_tag, clan_name, member_id, player_tag, player_name, fame, repair_points, boat_attacks, decks_used_total, decks_used_today, raw_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    observed_at,
-                    battle_date,
-                    season_id,
-                    section_index,
-                    period_index,
-                    phase,
-                    phase_day_number,
-                    _canon_tag(clan.get("tag")),
-                    clan.get("name"),
-                    member_id,
-                    _canon_tag(participant.get("tag")),
-                    participant.get("name"),
-                    participant.get("fame", 0),
-                    participant.get("repairPoints", 0),
-                    participant.get("boatAttacks", 0),
-                    participant.get("decksUsed", 0),
-                    participant.get("decksUsedToday", 0),
-                    _json_or_none(participant),
-                ),
-            )
-        _upsert_period_logs(conn, observed_at, war_data, season_id)
-        conn.commit()
-    finally:
-        if close:
-            conn.close()
+        if cur.rowcount == 0:
+            race_row = conn.execute("SELECT war_race_id FROM war_races WHERE season_id = ? AND section_index = ?", (season_id, section_index)).fetchone()
+            war_race_id = race_row["war_race_id"]
+        else:
+            war_race_id = cur.lastrowid
+            stored += 1
+
+        if our:
+            for participant in clan.get("participants", []):
+                ptag = _canon_tag(participant.get("tag"))
+                member_id = _ensure_member(conn, ptag, participant.get("name"), status=None) if ptag else None
+                conn.execute(
+                    "INSERT OR REPLACE INTO war_participation (war_race_id, member_id, player_tag, player_name, fame, repair_points, boat_attacks, decks_used, decks_used_today, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (war_race_id, member_id, ptag, participant.get("name"), participant.get("fame", 0), participant.get("repairPoints", 0), participant.get("boatAttacks", 0), participant.get("decksUsed", 0), participant.get("decksUsedToday", 0), _json_or_none(participant)),
+                )
+    conn.commit()
+    return stored
+
+
+@managed_connection
+def upsert_war_current_state(war_data, conn=None):
+    observed_at = _utcnow()
+    clan = (war_data or {}).get("clan", {})
+    conn.execute(
+        "INSERT INTO war_current_state (observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (observed_at, war_data.get("state"), _canon_tag(clan.get("tag")), clan.get("name"), clan.get("fame"), clan.get("repairPoints"), clan.get("periodPoints"), clan.get("clanScore"), _json_or_none(war_data)),
+    )
+    latest_logged_race = _get_latest_logged_race(conn)
+    season_id = _infer_current_season_id_from_live_state(war_data, latest_logged_race)
+    section_index = war_data.get("sectionIndex")
+    period_index = war_data.get("periodIndex")
+    phase = _resolve_phase(war_data.get("periodType"), period_index)
+    phase_day_number = _phase_day_number(phase, period_index)
+    battle_date = _war_day_key(season_id, section_index, period_index, observed_at)
+    for participant in clan.get("participants", []):
+        member_id = _ensure_member(conn, participant.get("tag"), participant.get("name"), status=None)
+        conn.execute(
+            "INSERT INTO war_day_status (member_id, battle_date, observed_at, fame, repair_points, boat_attacks, decks_used_total, decks_used_today, season_id, section_index, period_index, phase, phase_day_number, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(member_id, battle_date) DO UPDATE SET observed_at = excluded.observed_at, fame = excluded.fame, repair_points = excluded.repair_points, boat_attacks = excluded.boat_attacks, decks_used_total = excluded.decks_used_total, decks_used_today = excluded.decks_used_today, season_id = excluded.season_id, section_index = excluded.section_index, period_index = excluded.period_index, phase = excluded.phase, phase_day_number = excluded.phase_day_number, raw_json = excluded.raw_json",
+            (member_id, battle_date, observed_at, participant.get("fame", 0), participant.get("repairPoints", 0), participant.get("boatAttacks", 0), participant.get("decksUsed", 0), participant.get("decksUsedToday", 0), season_id, section_index, period_index, phase, phase_day_number, _json_or_none(participant)),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO war_participant_snapshots (observed_at, war_day_key, season_id, section_index, period_index, phase, phase_day_number, clan_tag, clan_name, member_id, player_tag, player_name, fame, repair_points, boat_attacks, decks_used_total, decks_used_today, raw_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                observed_at,
+                battle_date,
+                season_id,
+                section_index,
+                period_index,
+                phase,
+                phase_day_number,
+                _canon_tag(clan.get("tag")),
+                clan.get("name"),
+                member_id,
+                _canon_tag(participant.get("tag")),
+                participant.get("name"),
+                participant.get("fame", 0),
+                participant.get("repairPoints", 0),
+                participant.get("boatAttacks", 0),
+                participant.get("decksUsed", 0),
+                participant.get("decksUsedToday", 0),
+                _json_or_none(participant),
+            ),
+        )
+    _upsert_period_logs(conn, observed_at, war_data, season_id)
+    conn.commit()
 
 
 # -- Player profiles and battle facts --------------------------------------

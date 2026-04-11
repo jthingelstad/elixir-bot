@@ -225,6 +225,7 @@ async def _resolve_runtime_channel(channel_id: int):
     try:
         return await bot.fetch_channel(channel_id)
     except Exception:
+        log.debug("Failed to fetch channel %s", channel_id, exc_info=True)
         return None
 
 

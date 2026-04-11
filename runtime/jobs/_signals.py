@@ -15,8 +15,11 @@ __all__ = [
 
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime, timezone
+
+log = logging.getLogger("elixir")
 
 import discord
 import db
@@ -212,7 +215,7 @@ def _build_player_insight_context(tag):
             if form.get("current_streak") and form.get("current_streak_type"):
                 lines.append(f"current_streak: {form['current_streak']}{form['current_streak_type']}")
     except Exception:
-        pass
+        log.debug("compare_member_form failed for %s", tag, exc_info=True)
     try:
         trend = db.compare_member_trend_windows(tag, window_days=7)
         if trend:
@@ -229,7 +232,7 @@ def _build_player_insight_context(tag):
                 prev_label = f" (prior: {pa.get('battles', 0)})" if pa.get("battles") else ""
                 lines.append(f"battles_this_week: {ca['battles']}{prev_label}")
     except Exception:
-        pass
+        log.debug("compare_member_trend_windows failed for %s", tag, exc_info=True)
     return lines
 
 
