@@ -72,25 +72,42 @@ def _parse_response(text):
 
 
 def _parse_json_response(text):
-    """Parse strict JSON-only model responses."""
+    """Parse strict JSON-only model responses.
+
+    Handles bare JSON, markdown-fenced JSON (even with preamble text),
+    and JSON embedded after conversational preamble.
+    """
     text = (text or "").strip()
     if not text:
         return None
     if text.lower() == "null":
         return None
-    cleaned = text
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```")[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:]
-    return json.loads(cleaned.strip())
+    # Fast path: bare JSON
+    if text.startswith("{") or text.startswith("["):
+        return json.loads(text)
+    # Extract from markdown code fence (handles preamble before ```)
+    fence = text.find("```")
+    if fence != -1:
+        inner = text[fence + 3:]
+        end = inner.find("```")
+        if end != -1:
+            inner = inner[:end]
+        if inner.startswith("json"):
+            inner = inner[4:]
+        return json.loads(inner.strip())
+    # Fallback: find first JSON object in the text
+    brace = text.find("{")
+    if brace != -1:
+        obj, _ = json.JSONDecoder().raw_decode(text, brace)
+        return obj
+    return json.loads(text)
 
 
 def _validate_response(workflow, parsed_obj, response_schema=None):
     """Validate parsed model responses against workflow contracts."""
     schema = response_schema or RESPONSE_SCHEMAS_BY_WORKFLOW.get(workflow)
     if parsed_obj is None:
-        if workflow == "observation":
+        if workflow in {"observation", "channel_update", "channel_update_leadership"}:
             return True, None
         if schema:
             return False, "null response is not allowed for this workflow"

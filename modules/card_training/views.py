@@ -286,7 +286,7 @@ class DailyChoiceButton(discord.ui.Button):
         # Add streak info to the result
         streak_info = result["streak_info"]
         if streak_info:
-            streak = streak_info["current_streak"]
+            streak = streak_info["current_streak"] or 0
             if is_correct and streak > 1:
                 result_embed.add_field(
                     name="Streak",

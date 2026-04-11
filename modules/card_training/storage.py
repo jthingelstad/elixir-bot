@@ -165,10 +165,10 @@ def update_daily_streak(discord_user_id: str, is_correct: bool, date_str: str, c
             )
         else:
             last_date = row["last_correct_date"]
-            current_streak = row["current_streak"]
-            longest_streak = row["longest_streak"]
-            total_correct = row["total_daily_correct"]
-            total_answered = row["total_daily_answered"]
+            current_streak = row["current_streak"] or 0
+            longest_streak = row["longest_streak"] or 0
+            total_correct = row["total_daily_correct"] or 0
+            total_answered = row["total_daily_answered"] or 0
 
             if is_correct:
                 if last_date == date_str:
