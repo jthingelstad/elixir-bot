@@ -3152,7 +3152,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
         )
 
     assert "=== WEEKLY CLAN RECAP SNAPSHOT ===" in report
-    assert "=== RECENT RIVER RACES ===" in report
+    assert "recent river races:" in report
     assert "=== PLAYER PROGRESSION HIGHLIGHTS ===" in report
     assert "=== CLAN TREND SUMMARY ===" in report
     assert "battle pulse heaters: Finn won 5 straight" in report

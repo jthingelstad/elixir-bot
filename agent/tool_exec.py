@@ -240,23 +240,48 @@ def _execute_get_member_war_detail(arguments):
 
 def _execute_get_river_race(arguments):
     """Execute the consolidated get_river_race tool."""
-    # Get live war-day state (engagement, deck usage, top fame earners)
-    day_state = db.get_current_war_day_state()
-    # Merge in race standings (competing clan names/fame/ranks)
-    war_status = db.get_current_war_status()
+    aspect = arguments.get("aspect", "standings")
 
-    if isinstance(day_state, dict) and isinstance(war_status, dict):
-        day_state["race_standings"] = war_status.get("race_standings", [])
-        day_state["race_rank"] = war_status.get("race_rank")
-        day_state["season_week_label"] = war_status.get("season_week_label")
-        day_state["colosseum_week"] = war_status.get("colosseum_week")
-        day_state["final_battle_day_active"] = war_status.get("final_battle_day_active")
-        day_state["final_practice_day_active"] = war_status.get("final_practice_day_active")
-        day_state["trophy_stakes_text"] = war_status.get("trophy_stakes_text")
-        return day_state
+    if aspect == "standings":
+        war_status = db.get_current_war_status()
+        if not isinstance(war_status, dict):
+            return {"error": "No active war data available."}
+        return {
+            "race_standings": war_status.get("race_standings", []),
+            "race_rank": war_status.get("race_rank"),
+            "season_week_label": war_status.get("season_week_label"),
+            "colosseum_week": war_status.get("colosseum_week"),
+            "final_battle_day_active": war_status.get("final_battle_day_active"),
+            "final_practice_day_active": war_status.get("final_practice_day_active"),
+            "trophy_stakes_text": war_status.get("trophy_stakes_text"),
+        }
 
-    # Fallback: if day state is empty, return war status instead
-    return war_status or day_state or {"error": "No active war data available."}
+    if aspect == "engagement":
+        day_state = db.get_current_war_day_state()
+        if not isinstance(day_state, dict):
+            return {"error": "No active war data available."}
+        return {
+            "war_day_key": day_state.get("war_day_key"),
+            "phase": day_state.get("phase"),
+            "phase_display": day_state.get("phase_display"),
+            "day_number": day_state.get("day_number"),
+            "day_total": day_state.get("day_total"),
+            "clan_fame": day_state.get("clan_fame"),
+            "period_started_at": day_state.get("period_started_at"),
+            "period_ends_at": day_state.get("period_ends_at"),
+            "time_left_text": day_state.get("time_left_text"),
+            "total_participants": day_state.get("total_participants"),
+            "engaged_count": day_state.get("engaged_count"),
+            "finished_count": day_state.get("finished_count"),
+            "untouched_count": day_state.get("untouched_count"),
+            "top_fame_today": day_state.get("top_fame_today"),
+            "top_fame_total": day_state.get("top_fame_total"),
+            "used_all_4": day_state.get("used_all_4"),
+            "used_some": day_state.get("used_some"),
+            "used_none": day_state.get("used_none"),
+        }
+
+    return {"error": f"Unknown aspect: {aspect}"}
 
 
 def _execute_get_war_season(arguments):
