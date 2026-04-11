@@ -3,11 +3,12 @@
 import json
 import logging
 import os
+import sqlite3
 import subprocess
 import time
 from dataclasses import dataclass, field
 
-from anthropic import Anthropic
+from anthropic import Anthropic, APIError, APIConnectionError
 
 import db
 from runtime import status as runtime_status
@@ -22,7 +23,7 @@ def _get_build_hash():
             cwd=os.path.dirname(__file__) or ".",
             stderr=subprocess.DEVNULL,
         ).decode().strip()
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         return "unknown"
 
 
@@ -317,10 +318,10 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
                 cache_creation_tokens=wrapped.cache_stats.creation_tokens,
                 cache_read_tokens=wrapped.cache_stats.read_tokens,
             )
-        except Exception:
+        except (OSError, sqlite3.Error):
             log.debug("failed to persist llm_call record", exc_info=True)
         return wrapped
-    except Exception as exc:
+    except (APIError, APIConnectionError) as exc:
         duration = round((time.perf_counter() - started) * 1000, 2)
         runtime_status.record_llm_call(
             workflow,
@@ -336,7 +337,7 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
                 error=exc,
                 duration_ms=duration,
             )
-        except Exception:
+        except (OSError, sqlite3.Error):
             log.debug("failed to persist llm_call record", exc_info=True)
         raise
 

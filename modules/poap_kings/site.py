@@ -19,6 +19,8 @@ from urllib import parse as urlparse
 from urllib import request as urlrequest
 
 import jsonschema
+import requests
+import sqlite3
 
 import time
 
@@ -430,7 +432,7 @@ def _load_existing_content(content_type: str):
             published = load_published(content_type)
             if published is not None:
                 return published
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError, urlerror.URLError) as exc:
             log.warning("POAP KINGS site load fallback for %s: %s", content_type, exc)
     return load_current(content_type)
 
@@ -925,7 +927,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                     if battle_log:
                         db.snapshot_player_battlelog(tag, battle_log, conn=conn)
                     member["favorite_cards"] = aggregate_card_usage(battle_log, tag)
-                except Exception:
+                except (requests.RequestException, sqlite3.Error, KeyError, TypeError):
                     _hydrate_member_card_data(member, conn, existing_member=existing_by_tag.get(tag))
 
                 try:
@@ -961,7 +963,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                         member["cr_games_per_day"] = refreshed_meta.get("cr_games_per_day")
                         member["cr_games_per_day_window_days"] = refreshed_meta.get("cr_games_per_day_window_days")
                         member["cr_games_per_day_updated_at"] = refreshed_meta.get("cr_games_per_day_updated_at")
-                except Exception:
+                except (requests.RequestException, sqlite3.Error, KeyError, TypeError):
                     _hydrate_member_card_data(member, conn, existing_member=existing_by_tag.get(tag))
 
                 time.sleep(0.3)

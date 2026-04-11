@@ -473,7 +473,7 @@ def _preview_text(value, limit=500):
     else:
         try:
             text = json.dumps(value, default=str, ensure_ascii=False)
-        except Exception:
+        except (TypeError, ValueError):
             text = repr(value)
     return text[:limit]
 
@@ -724,7 +724,7 @@ def _process_command(pid: int) -> str:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         return ""
 
 

@@ -1,4 +1,5 @@
 """Clash Royale API client."""
+import logging
 import os
 import time
 import requests
@@ -9,9 +10,14 @@ from runtime import status as runtime_status
 
 load_dotenv()
 
+log = logging.getLogger(__name__)
+
 API_BASE = "https://api.clashroyale.com/v1"
 CLAN_TAG = prompts.clan_tag()
 API_KEY = os.getenv("CR_API_KEY", "")
+
+_MAX_RETRIES = 2
+_RETRY_BACKOFF = 1  # seconds
 
 
 def _headers():
@@ -20,31 +26,62 @@ def _headers():
 
 def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
     url = f"{API_BASE}{endpoint_path}"
-    started = time.perf_counter()
-    try:
-        response = requests.get(url, headers=_headers(), timeout=10)
-        duration_ms = round((time.perf_counter() - started) * 1000, 2)
-        response.raise_for_status()
-        runtime_status.record_api_call(
-            endpoint_name,
-            entity_key,
-            ok=True,
-            status_code=response.status_code,
-            duration_ms=duration_ms,
-        )
-        return response.json()
-    except Exception as exc:
-        response = locals().get("response")
-        duration_ms = round((time.perf_counter() - started) * 1000, 2)
-        runtime_status.record_api_call(
-            endpoint_name,
-            entity_key,
-            ok=False,
-            status_code=getattr(response, "status_code", None),
-            error=exc,
-            duration_ms=duration_ms,
-        )
-        raise
+    last_exc = None
+    for attempt in range(_MAX_RETRIES + 1):
+        if attempt > 0:
+            time.sleep(_RETRY_BACKOFF * attempt)
+        started = time.perf_counter()
+        try:
+            response = requests.get(url, headers=_headers(), timeout=10)
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            response.raise_for_status()
+            runtime_status.record_api_call(
+                endpoint_name,
+                entity_key,
+                ok=True,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+            )
+            return response.json()
+        except requests.ConnectionError as exc:
+            last_exc = exc
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            log.warning("CR API connection error on %s (attempt %d/%d): %s",
+                        endpoint_name, attempt + 1, _MAX_RETRIES + 1, exc)
+            runtime_status.record_api_call(
+                endpoint_name, entity_key, ok=False,
+                status_code=None, error=exc, duration_ms=duration_ms,
+            )
+            continue
+        except requests.Timeout as exc:
+            last_exc = exc
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            log.warning("CR API timeout on %s (attempt %d/%d)",
+                        endpoint_name, attempt + 1, _MAX_RETRIES + 1)
+            runtime_status.record_api_call(
+                endpoint_name, entity_key, ok=False,
+                status_code=None, error=exc, duration_ms=duration_ms,
+            )
+            continue
+        except requests.HTTPError as exc:
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            log.warning("CR API HTTP %s on %s: %s",
+                        response.status_code, endpoint_name, exc)
+            runtime_status.record_api_call(
+                endpoint_name, entity_key, ok=False,
+                status_code=response.status_code, error=exc, duration_ms=duration_ms,
+            )
+            raise
+        except (requests.RequestException, ValueError) as exc:
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            log.warning("CR API error on %s: %s", endpoint_name, exc)
+            runtime_status.record_api_call(
+                endpoint_name, entity_key, ok=False,
+                status_code=getattr(locals().get("response"), "status_code", None),
+                error=exc, duration_ms=duration_ms,
+            )
+            raise
+    raise last_exc
 
 
 def get_clan():
@@ -58,7 +95,7 @@ def get_current_war():
             endpoint_name="currentriverrace",
             entity_key=CLAN_TAG,
         )
-    except Exception:
+    except requests.RequestException:
         return None
 
 
@@ -69,7 +106,7 @@ def get_river_race_log():
             endpoint_name="riverracelog",
             entity_key=CLAN_TAG,
         )
-    except Exception:
+    except requests.RequestException:
         return None
 
 
@@ -86,7 +123,7 @@ def get_player(tag):
             endpoint_name="player",
             entity_key=clean_tag.upper(),
         )
-    except Exception:
+    except requests.RequestException:
         return None
 
 
@@ -103,7 +140,7 @@ def get_player_battle_log(tag):
             endpoint_name="player_battlelog",
             entity_key=clean_tag.upper(),
         )
-    except Exception:
+    except requests.RequestException:
         return None
 
 
@@ -120,7 +157,7 @@ def get_tournament(tag):
             endpoint_name="tournament",
             entity_key=clean_tag.upper(),
         )
-    except Exception:
+    except requests.RequestException:
         return None
 
 
@@ -138,7 +175,7 @@ def get_player_chests(tag):
             entity_key=clean_tag.upper(),
         )
         return payload.get("items", [])
-    except Exception:
+    except requests.RequestException:
         return None
 
 
@@ -150,5 +187,5 @@ def get_cards():
     """
     try:
         return _request_json("/cards", endpoint_name="cards")
-    except Exception:
+    except requests.RequestException:
         return None

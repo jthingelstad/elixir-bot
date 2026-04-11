@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from datetime import datetime, timezone
+
+from anthropic import APIError, APIConnectionError
 
 from agent.core import _create_chat_completion
 
@@ -45,7 +48,7 @@ def distill_summary(text: str) -> str | None:
         if content and content.strip():
             return content.strip()
         return None
-    except Exception:
+    except (APIError, APIConnectionError):
         log.warning("distill_summary failed", exc_info=True)
         return None
 
@@ -127,7 +130,7 @@ def extract_inference_facts(content: str, context_label: str | None = None) -> l
     except (json.JSONDecodeError, ValueError, TypeError):
         log.debug("extract_inference_facts JSON parse failed", exc_info=True)
         return []
-    except Exception:
+    except (APIError, APIConnectionError):
         log.debug("extract_inference_facts failed", exc_info=True)
         return []
 
@@ -182,7 +185,7 @@ def save_inference_facts(facts: list[dict], channel_id: str | int | None = None,
             if memory and fact.get("tags"):
                 attach_tags(memory["memory_id"], fact["tags"], actor="elixir:inference", conn=conn)
             saved += 1
-        except Exception:
+        except (sqlite3.Error, KeyError, TypeError):
             log.warning("save_inference_facts: failed to save fact %r", fact.get("title"), exc_info=True)
     return saved
 
@@ -420,7 +423,7 @@ def store_observation_facts(signals: list[dict], channel_id: str | int | None = 
                 )
                 if result:
                     saved += 1
-            except Exception:
+            except (sqlite3.Error, KeyError, TypeError):
                 log.warning("store_observation_facts: failed for signal %s", signal_type, exc_info=True)
         return saved
     finally:

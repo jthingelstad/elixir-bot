@@ -40,7 +40,7 @@ def test_clan_awareness_tick_uses_bundle_without_refetch():
         patch("elixir.cr_api.get_clan") as mock_get_clan,
         patch("elixir.cr_api.get_current_war") as mock_get_war,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._clan_awareness_tick())
 
@@ -60,7 +60,7 @@ def test_clan_awareness_tick_reseeds_startup_system_signals_before_tick():
         return fn(*args, **kwargs)
 
     with (
-        patch("runtime.jobs.queue_startup_system_signals") as mock_queue,
+        patch("runtime.jobs._core.queue_startup_system_signals") as mock_queue,
         patch("elixir.heartbeat.tick", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.runtime_status.mark_job_success"),
@@ -147,8 +147,8 @@ def test_war_awareness_tick_uses_stored_war_detection_bundle():
     with (
         patch("elixir.heartbeat.detect_war_signals_from_storage", return_value=bundle) as mock_detect,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock(return_value=True)) as mock_deliver,
-        patch("runtime.jobs._persist_signal_detector_cursors") as mock_persist,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock(return_value=True)) as mock_deliver,
+        patch("runtime.jobs._core._persist_signal_detector_cursors") as mock_persist,
     ):
         asyncio.run(elixir._war_awareness_tick())
 
@@ -193,8 +193,8 @@ def test_war_awareness_tick_does_not_advance_cursors_when_delivery_fails():
     with (
         patch("elixir.heartbeat.detect_war_signals_from_storage", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock(return_value=False)),
-        patch("runtime.jobs._persist_signal_detector_cursors") as mock_persist,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock(return_value=False)),
+        patch("runtime.jobs._core._persist_signal_detector_cursors") as mock_persist,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
         asyncio.run(elixir._war_awareness_tick())
@@ -231,7 +231,7 @@ def test_deliver_signal_group_saves_multipart_channel_update_as_separate_message
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.plan_signal_outcomes", return_value=[{
+        patch("runtime.jobs._signals.plan_signal_outcomes", return_value=[{
             "source_signal_key": "war-week-1",
             "source_signal_type": "war_week_rollover",
             "target_channel_key": "river-race",
@@ -254,7 +254,7 @@ def test_deliver_signal_group_saves_multipart_channel_update_as_separate_message
             "content": ["First post", "Second post"],
         }),
         patch("elixir._post_to_elixir", new=AsyncMock()),
-        patch("runtime.jobs.maybe_upsert_signal_memory"),
+        patch("runtime.jobs._signals.maybe_upsert_signal_memory"),
     ):
         asyncio.run(elixir._deliver_signal_group(signals, clan, war))
 
@@ -291,7 +291,7 @@ def test_deliver_signal_group_posts_preauthored_system_signal_without_llm():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.plan_signal_outcomes", return_value=[{
+        patch("runtime.jobs._signals.plan_signal_outcomes", return_value=[{
             "source_signal_key": "capability_card_modes_and_war_completion_v1",
             "source_signal_type": "capability_unlock",
             "target_channel_key": "announcements",
@@ -311,7 +311,7 @@ def test_deliver_signal_group_posts_preauthored_system_signal_without_llm():
         patch("elixir.db.mark_system_signal_announced"),
         patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
-        patch("runtime.jobs.maybe_upsert_signal_memory"),
+        patch("runtime.jobs._signals.maybe_upsert_signal_memory"),
     ):
         asyncio.run(elixir._deliver_signal_group(signals, clan, war))
 
@@ -341,7 +341,7 @@ def test_deliver_signal_group_stores_war_recap_memory_for_river_race_batch():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.plan_signal_outcomes", return_value=[{
+        patch("runtime.jobs._signals.plan_signal_outcomes", return_value=[{
             "source_signal_key": "war-day-recap",
             "source_signal_type": "war_battle_day_complete",
             "target_channel_key": "river-race",
@@ -364,8 +364,8 @@ def test_deliver_signal_group_stores_war_recap_memory_for_river_race_batch():
             "content": "Battle day recap post",
         }),
         patch("elixir._post_to_elixir", new=AsyncMock()),
-        patch("runtime.jobs.maybe_upsert_signal_memory"),
-        patch("runtime.jobs._store_recap_memories_for_signal_batch") as mock_memory,
+        patch("runtime.jobs._signals.maybe_upsert_signal_memory"),
+        patch("runtime.jobs._signals._store_recap_memories_for_signal_batch") as mock_memory,
     ):
         asyncio.run(elixir._deliver_signal_group(signals, clan, war))
 
@@ -385,7 +385,7 @@ def test_clan_awareness_tick_posts_join_messages_through_shared_sender():
     with (
         patch("elixir.heartbeat.tick", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._clan_awareness_tick())
 
@@ -479,7 +479,7 @@ def test_clan_awareness_tick_does_not_mark_system_signal_sent_before_success():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.db.mark_signal_sent") as mock_mark_signal_sent,
         patch("elixir.db.mark_system_signal_announced") as mock_mark_announced,
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock(return_value=False)) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock(return_value=False)) as mock_deliver,
     ):
         asyncio.run(elixir._clan_awareness_tick())
 
@@ -512,7 +512,7 @@ def test_clan_awareness_tick_routes_multiple_system_signals_independently():
     with (
         patch("elixir.heartbeat.tick", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._clan_awareness_tick())
 
@@ -530,8 +530,8 @@ def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
-        patch("runtime.jobs._get_singleton_channel_id", return_value=456),
+        patch("runtime.jobs._core.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._core._get_singleton_channel_id", return_value=456),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {"state": "training"}))),
         patch("elixir._build_weekly_clan_recap_context", return_value="summary context"),
@@ -539,8 +539,8 @@ def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
         patch("elixir.elixir_agent.generate_weekly_digest", return_value="This week POAP KINGS pushed hard."),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message"),
-        patch("runtime.jobs.poap_kings_site.publish_site_content", return_value=_publish_result("members")) as mock_publish,
-        patch("runtime.jobs._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
+        patch("runtime.jobs._site.poap_kings_site.publish_site_content", return_value=_publish_result("members")) as mock_publish,
+        patch("runtime.jobs._core._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
     ):
         asyncio.run(elixir._weekly_clan_recap())
 
@@ -630,7 +630,7 @@ def test_player_intel_refresh_posts_progression_signals():
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[{"type": "player_level_up", "tag": "#ABC", "name": "King Levy", "old_level": 65, "new_level": 66}]),
         patch("elixir.db.snapshot_player_battlelog"),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -661,7 +661,7 @@ def test_player_intel_refresh_splits_optional_badge_level_batches():
             {"type": "badge_level_milestone", "tag": "#ABC", "name": "King Levy", "badge_name": "MasteryKnight"},
         ]),
         patch("elixir.db.snapshot_player_battlelog", return_value=[]),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -693,7 +693,7 @@ def test_player_intel_refresh_posts_battle_pulse_signals():
             {"type": "battle_hot_streak", "tag": "#ABC", "name": "King Levy", "streak": 4},
             {"type": "battle_trophy_push", "tag": "#ABC", "name": "King Levy", "trophy_delta": 111},
         ]),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -733,7 +733,7 @@ def test_player_intel_refresh_does_not_post_baseline_profile_discovery():
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[]),
         patch("elixir.db.snapshot_player_battlelog", return_value=[]),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -756,7 +756,7 @@ def test_player_intel_refresh_marks_failure_when_all_player_endpoints_fail():
         patch("elixir.db.snapshot_members"),
         patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
         patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
@@ -790,7 +790,7 @@ def test_player_intel_refresh_reports_partial_endpoint_failures_without_hiding_s
         patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[]),
-        patch("runtime.jobs._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
         patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
@@ -822,7 +822,7 @@ def test_clanops_weekly_review_posts_to_clanops_channel():
         patch("elixir._build_weekly_clanops_review", return_value="<@&1474762111287824584>\n**Weekly ClanOps Review**") as mock_build,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
-        patch("runtime.jobs.upsert_weekly_summary_memory") as mock_memory,
+        patch("runtime.jobs._core.upsert_weekly_summary_memory") as mock_memory,
     ):
         asyncio.run(elixir._clanops_weekly_review())
 
@@ -845,8 +845,8 @@ def test_weekly_clan_recap_posts_to_weekly_digest_channel():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=False),
-        patch("runtime.jobs._get_singleton_channel_id", return_value=500),
+        patch("runtime.jobs._core.poap_kings_site.site_enabled", return_value=False),
+        patch("runtime.jobs._core._get_singleton_channel_id", return_value=500),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS"}, {"state": "warDay"}))),
         patch("elixir._build_weekly_clan_recap_context", return_value="=== WEEKLY CLAN RECAP SNAPSHOT ===") as mock_build,
@@ -854,7 +854,7 @@ def test_weekly_clan_recap_posts_to_weekly_digest_channel():
         patch("elixir.elixir_agent.generate_weekly_digest", return_value="This week POAP KINGS pushed hard.") as mock_generate,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
-        patch("runtime.jobs.upsert_weekly_summary_memory") as mock_memory,
+        patch("runtime.jobs._core.upsert_weekly_summary_memory") as mock_memory,
     ):
         asyncio.run(elixir._weekly_clan_recap())
 
@@ -923,8 +923,8 @@ def test_promotion_content_cycle_publishes_website_and_promotion_channel():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
-        patch("runtime.jobs._get_singleton_channel_id", return_value=400),
+        patch("runtime.jobs._site.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._site._get_singleton_channel_id", return_value=400),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=(clan, {"state": "warDay"}))),
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}) as mock_roster,
@@ -935,8 +935,8 @@ def test_promotion_content_cycle_publishes_website_and_promotion_channel():
                 "reddit": {"title": "POAP KINGS #J2RGCRVG [2000]", "body": "Recruiting body"},
             },
         ) as mock_generate,
-        patch("runtime.jobs.poap_kings_site.publish_site_content", return_value=_publish_result("promote")) as mock_publish,
-        patch("runtime.jobs._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
+        patch("runtime.jobs._site.poap_kings_site.publish_site_content", return_value=_publish_result("promote")) as mock_publish,
+        patch("runtime.jobs._site._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
     ):
@@ -981,8 +981,8 @@ def test_promotion_content_cycle_fails_when_site_write_returns_false():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
-        patch("runtime.jobs._get_singleton_channel_id", return_value=400),
+        patch("runtime.jobs._site.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._site._get_singleton_channel_id", return_value=400),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=(clan, {"state": "warDay"}))),
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
@@ -990,8 +990,8 @@ def test_promotion_content_cycle_fails_when_site_write_returns_false():
             "elixir.elixir_agent.generate_promote_content",
             return_value={"discord": {"body": "**POAP KINGS is recruiting | Required Trophies: [2000]**\nJoin POAP KINGS this weekend."}},
         ),
-        patch("runtime.jobs.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
-        patch("runtime.jobs._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
+        patch("runtime.jobs._site.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
+        patch("runtime.jobs._site._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
@@ -1023,8 +1023,8 @@ def test_promotion_content_cycle_fails_when_discord_header_misses_required_troph
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
-        patch("runtime.jobs._get_singleton_channel_id", return_value=400),
+        patch("runtime.jobs._site.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._site._get_singleton_channel_id", return_value=400),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=(clan, {"state": "warDay"}))),
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
@@ -1035,7 +1035,7 @@ def test_promotion_content_cycle_fails_when_discord_header_misses_required_troph
                 "reddit": {"title": "POAP KINGS #J2RGCRVG [2000]", "body": "Recruiting body"},
             },
         ),
-        patch("runtime.jobs.poap_kings_site.publish_site_content") as mock_publish,
+        patch("runtime.jobs._site.poap_kings_site.publish_site_content") as mock_publish,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
@@ -1065,8 +1065,8 @@ def test_promotion_content_cycle_fails_when_reddit_title_misses_required_token()
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
-        patch("runtime.jobs._get_singleton_channel_id", return_value=400),
+        patch("runtime.jobs._site.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._site._get_singleton_channel_id", return_value=400),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=(clan, {"state": "warDay"}))),
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
@@ -1077,7 +1077,7 @@ def test_promotion_content_cycle_fails_when_reddit_title_misses_required_token()
                 "reddit": {"title": "POAP KINGS #J2RGCRVG", "body": "Recruiting body"},
             },
         ),
-        patch("runtime.jobs.poap_kings_site.publish_site_content") as mock_publish,
+        patch("runtime.jobs._site.poap_kings_site.publish_site_content") as mock_publish,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
@@ -1095,12 +1095,12 @@ def test_site_data_refresh_fails_when_poap_kings_publish_raises():
     }
 
     with (
-        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._site.poap_kings_site.site_enabled", return_value=True),
         patch("elixir.cr_api.get_clan", return_value=clan),
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
         patch("elixir.poap_kings_site.build_clan_data", return_value={"memberCount": 1}),
-        patch("runtime.jobs.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
-        patch("runtime.jobs._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
+        patch("runtime.jobs._site.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
+        patch("runtime.jobs._site._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
         asyncio.run(elixir._site_data_refresh())
@@ -1121,15 +1121,15 @@ def test_site_content_cycle_fails_when_daily_site_publish_raises():
     }
 
     with (
-        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._site.poap_kings_site.site_enabled", return_value=True),
         patch("elixir.cr_api.get_clan", return_value=clan),
         patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy", "tag": "ABC"}]}),
         patch("elixir.poap_kings_site.build_clan_data", return_value={"memberCount": 1}),
         patch("elixir.elixir_agent.generate_home_message", return_value="Home message"),
-        patch("runtime.jobs.poap_kings_site.load_published", return_value=None),
-        patch("runtime.jobs.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
-        patch("runtime.jobs._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
+        patch("runtime.jobs._site.poap_kings_site.load_published", return_value=None),
+        patch("runtime.jobs._site.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
+        patch("runtime.jobs._site._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
         asyncio.run(elixir._site_content_cycle())
@@ -1158,7 +1158,7 @@ def test_notify_poapkings_publish_posts_success_to_poapkings_channel():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._channel_config_by_key", return_value={
+        patch("runtime.jobs._site._channel_config_by_key", return_value={
             "id": 900,
             "name": "#poapkings-com",
             "subagent_key": "poapkings-com",
@@ -1166,7 +1166,7 @@ def test_notify_poapkings_publish_posts_success_to_poapkings_channel():
         }),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir.db.list_channel_messages", return_value=[]),
-        patch("runtime.jobs.build_subagent_memory_context", return_value=""),
+        patch("runtime.jobs._site.build_subagent_memory_context", return_value=""),
         patch("elixir.elixir_agent.generate_channel_update", return_value={
             "event_type": "channel_update",
             "summary": "POAP KINGS publish complete",
@@ -1207,15 +1207,15 @@ def test_site_content_cycle_notifies_poapkings_channel_on_success():
     }
 
     with (
-        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._site.poap_kings_site.site_enabled", return_value=True),
         patch("elixir.cr_api.get_clan", return_value=clan),
         patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy", "tag": "ABC"}]}),
         patch("elixir.poap_kings_site.build_clan_data", return_value={"memberCount": 1}),
         patch("elixir.elixir_agent.generate_home_message", return_value="Home message"),
-        patch("runtime.jobs.poap_kings_site.load_published", return_value=None),
-        patch("runtime.jobs.poap_kings_site.publish_site_content", return_value=_publish_result("roster", "clan", "home")) as mock_publish,
-        patch("runtime.jobs._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
+        patch("runtime.jobs._site.poap_kings_site.load_published", return_value=None),
+        patch("runtime.jobs._site.poap_kings_site.publish_site_content", return_value=_publish_result("roster", "clan", "home")) as mock_publish,
+        patch("runtime.jobs._site._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
         patch("elixir.runtime_status.mark_job_success"),
     ):
         asyncio.run(elixir._site_content_cycle())
@@ -1234,15 +1234,15 @@ def test_site_content_cycle_skips_poapkings_notification_when_no_change():
     }
 
     with (
-        patch("runtime.jobs.poap_kings_site.site_enabled", return_value=True),
+        patch("runtime.jobs._site.poap_kings_site.site_enabled", return_value=True),
         patch("elixir.cr_api.get_clan", return_value=clan),
         patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy", "tag": "ABC"}]}),
         patch("elixir.poap_kings_site.build_clan_data", return_value={"memberCount": 1}),
         patch("elixir.elixir_agent.generate_home_message", return_value="Home message"),
-        patch("runtime.jobs.poap_kings_site.load_published", return_value=None),
-        patch("runtime.jobs.poap_kings_site.publish_site_content", return_value={"changed": False}) as mock_publish,
-        patch("runtime.jobs._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
+        patch("runtime.jobs._site.poap_kings_site.load_published", return_value=None),
+        patch("runtime.jobs._site.poap_kings_site.publish_site_content", return_value={"changed": False}) as mock_publish,
+        patch("runtime.jobs._site._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
         patch("elixir.runtime_status.mark_job_success"),
     ):
         asyncio.run(elixir._site_content_cycle())

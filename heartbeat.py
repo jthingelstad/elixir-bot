@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
+import requests
+
 import cr_api
 import cr_knowledge
 import db
@@ -932,7 +934,7 @@ def detect_war_completion(clan_tag=None, conn=None, *, refresh_log=True):
         if refresh_log:
             try:
                 race_log = cr_api.get_river_race_log()
-            except Exception as e:
+            except requests.RequestException as e:
                 log.warning("Failed to fetch river race log: %s", e)
                 return []
             if not race_log:
@@ -1205,7 +1207,7 @@ def ingest_live_war_state(conn=None, *, refresh_race_log=True):
         if refresh_race_log:
             try:
                 race_log = cr_api.get_river_race_log()
-            except Exception as exc:
+            except requests.RequestException as exc:
                 log.warning("War ingest: failed to refresh river race log: %s", exc)
                 race_log = None
             if race_log:
@@ -1269,7 +1271,7 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
     """
     try:
         clan = cr_api.get_clan()
-    except Exception as e:
+    except requests.RequestException as e:
         log.error("Heartbeat: failed to fetch clan data: %s", e)
         return HeartbeatTickResult(signals=[], clan={}, war={})
 
@@ -1282,7 +1284,7 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
     if include_war:
         try:
             war = cr_api.get_current_war()
-        except Exception:
+        except requests.RequestException:
             war = {}
 
     close = conn is None
