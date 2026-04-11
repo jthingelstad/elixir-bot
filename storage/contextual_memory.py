@@ -301,9 +301,82 @@ def archive_member_note_memory(
             conn.close()
 
 
+STREAK_START_SEASON = 129
+STREAK_START_WEEK = 2
+
+
+def _count_race_streak(conn) -> tuple[int, int | None, int | None]:
+    """Count consecutive 1st-place finishes from the streak start to the latest race.
+
+    Returns (streak_count, latest_season_id, latest_week).
+    """
+    rows = conn.execute(
+        "SELECT season_id, section_index, our_rank FROM war_races "
+        "WHERE (season_id > ? OR (season_id = ? AND section_index >= ?)) "
+        "ORDER BY season_id ASC, section_index ASC",
+        (STREAK_START_SEASON, STREAK_START_SEASON, STREAK_START_WEEK - 1),
+    ).fetchall()
+    count = 0
+    latest_season = None
+    latest_week = None
+    for row in rows:
+        if row["our_rank"] == 1:
+            count += 1
+            latest_season = row["season_id"]
+            latest_week = row["section_index"] + 1
+        else:
+            count = 0
+            latest_season = None
+            latest_week = None
+    return count, latest_season, latest_week
+
+
+def upsert_race_streak_memory(
+    *,
+    season_id: int,
+    week: int,
+    race_rank: int,
+    conn=None,
+) -> dict | None:
+    """Update the race win streak identity memory after a race completes."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        streak_count, latest_season, latest_week = _count_race_streak(conn)
+
+        if streak_count == 0:
+            body = (
+                f"POAP KINGS' consecutive 1st-place streak ended in "
+                f"Season {season_id} Week {week}."
+            )
+        else:
+            body = (
+                f"POAP KINGS has finished 1st in every river race from "
+                f"Season {STREAK_START_SEASON} Week {STREAK_START_WEEK} through "
+                f"Season {latest_season} Week {latest_week} — "
+                f"a streak of {streak_count} consecutive 1st-place finishes."
+            )
+
+        return upsert_summary_memory(
+            event_type="clan_identity",
+            event_id="race_win_streak",
+            title="River Race Win Streak",
+            body=body,
+            scope="public",
+            created_by="elixir:observation",
+            tags=["war", "clan-identity", "streak"],
+            metadata={"streak_count": streak_count, "latest_season": latest_season, "latest_week": latest_week},
+            conn=conn,
+        )
+    finally:
+        if close:
+            conn.close()
+
+
 __all__ = [
     "archive_member_note_memory",
     "upsert_member_note_memory",
+    "upsert_race_streak_memory",
     "upsert_summary_memory",
     "upsert_weekly_summary_memory",
     "upsert_war_recap_memory",

@@ -235,8 +235,15 @@ def build_subagent_memory_context(channel_config: dict, *, discord_user_id=None,
         filters=filters,
         limit=10,
     )
-    if durable_memories:
-        context["durable_memories"] = durable_memories
+    # Also load unscoped identity memories (e.g. win streak) regardless of week/season
+    identity_memories = list_memories(
+        viewer_scope=channel_config.get("memory_scope") or "public",
+        filters={"event_type": "clan_identity"},
+        limit=5,
+    )
+    all_memories = (durable_memories or []) + (identity_memories or [])
+    if all_memories:
+        context["durable_memories"] = all_memories
     return context
 
 

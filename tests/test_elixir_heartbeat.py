@@ -2698,3 +2698,63 @@ def test_observation_signal_batches_group_completion_family_together():
         "war_week_complete",
         "war_champ_standings",
     ]
+
+
+def test_observation_signal_batches_merge_day_transition():
+    """Complete + started signals with same season/week merge into one batch."""
+    batches = elixir._observation_signal_batches(
+        [
+            {"type": "war_battle_day_complete", "season_id": 131, "week": 3, "day_number": 2},
+            {"type": "war_battle_day_started", "season_id": 131, "week": 3, "day_number": 3},
+        ]
+    )
+    assert len(batches) == 1
+    assert [s["type"] for s in batches[0]] == [
+        "war_battle_day_complete",
+        "war_battle_day_started",
+    ]
+
+
+def test_observation_signal_batches_merge_phase_transition():
+    """Practice complete + battle started merge (phase transition within same week)."""
+    batches = elixir._observation_signal_batches(
+        [
+            {"type": "war_practice_day_complete", "season_id": 131, "week": 3, "day_number": 3},
+            {"type": "war_battle_day_started", "season_id": 131, "week": 3, "day_number": 1},
+        ]
+    )
+    assert len(batches) == 1
+    assert [s["type"] for s in batches[0]] == [
+        "war_practice_day_complete",
+        "war_battle_day_started",
+    ]
+
+
+def test_observation_signal_batches_no_merge_different_weeks():
+    """Complete and started from different weeks stay separate."""
+    batches = elixir._observation_signal_batches(
+        [
+            {"type": "war_battle_day_complete", "season_id": 131, "week": 2, "day_number": 4},
+            {"type": "war_battle_day_started", "season_id": 131, "week": 3, "day_number": 1},
+        ]
+    )
+    assert len(batches) == 2
+
+
+def test_observation_signal_batches_rank_change_stays_separate():
+    """Rank change signal is not merged with day transition."""
+    batches = elixir._observation_signal_batches(
+        [
+            {"type": "war_battle_day_complete", "season_id": 131, "week": 3, "day_number": 2},
+            {"type": "war_battle_day_started", "season_id": 131, "week": 3, "day_number": 3},
+            {"type": "war_battle_rank_change", "season_id": 131, "week": 3},
+        ]
+    )
+    assert len(batches) == 2
+    merged = [b for b in batches if len(b) == 2][0]
+    assert [s["type"] for s in merged] == [
+        "war_battle_day_complete",
+        "war_battle_day_started",
+    ]
+    solo = [b for b in batches if len(b) == 1][0]
+    assert solo[0]["type"] == "war_battle_rank_change"

@@ -448,6 +448,45 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "card_quiz",
         },
     },
+    {
+        "signal_key": "capability_race_command_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Race Command",
+            "message": (
+                "Elixir's River Race coverage just got a major upgrade. "
+                "I now track the full competitive field — not just POAP KINGS — and carry the weight of our unbroken 1st-place streak in how I talk about the race."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Race Command** :elixir:\n\n"
+                "Elixir's River Race coverage just leveled up. "
+                "I'm not just watching POAP KINGS anymore — I'm watching the entire field.\n\n"
+                "**What's new in #river-race:**\n"
+                "- I now call out competing clans by name. "
+                "Who's closest, who's making a move, and who's barely showing up — it all makes the updates now.\n"
+                "- The fame gap sets the tone. "
+                "A 200-fame lead feels different than a 5,000-fame lead, and the posts will reflect that.\n"
+                "- Day transitions are now one clean message instead of two back-to-back posts. "
+                "When a battle day ends and a new one starts, you get one cohesive update covering both.\n\n"
+                "**The streak:**\n"
+                "- POAP KINGS has finished 1st in every single river race since our very first one. "
+                "That streak is now part of how I frame the race — "
+                "not as a stat I announce every post, but as the floor I stand on.\n\n"
+                "**Under the hood:**\n"
+                "- Elixir's tool layer was consolidated from 51 tools down to 15 domain-aligned tools — "
+                "cleaner, faster, and easier to reason about.\n\n"
+                "This is **Elixir v4.2 \"Race Command\"** — sharper eyes on the river."
+            ),
+            "details": [
+                "River Race updates now reference competing clans by name with fame-gap framing.",
+                "Day transition signals (end of day + start of day) are merged into one cohesive post.",
+                "The clan's unbroken 1st-place streak is now tracked as a durable identity memory.",
+                "LLM tool layer consolidated from 51 to 15 domain-aligned tools.",
+            ],
+            "audience": "clan",
+            "capability_area": "race_command",
+        },
+    },
 ]
 
 
