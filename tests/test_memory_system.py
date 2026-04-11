@@ -18,6 +18,7 @@ from memory_store import (
 from storage.contextual_memory import (
     archive_member_note_memory,
     upsert_member_note_memory,
+    upsert_race_streak_memory,
     upsert_war_recap_memory,
     upsert_weekly_summary_memory,
 )
@@ -683,5 +684,72 @@ def test_save_clan_memory_tool_creates_leader_note():
         memories = list_memories(viewer_scope="leadership", conn=conn)
         assert len(memories) == 1
         assert memories[0]["body"] == "Leadership decided to freeze all promotions until the next war season starts."
+    finally:
+        conn.close()
+
+
+def test_upsert_race_streak_memory_creates_identity_memory():
+    """Streak memory uses event_type=clan_identity with no war_week_id scoping."""
+    conn = db.get_connection(":memory:")
+    try:
+        # Insert some war_races entries
+        conn.execute(
+            "INSERT INTO war_races (season_id, section_index, our_rank, our_fame, total_clans) "
+            "VALUES (129, 1, 1, 50000, 5)",
+        )
+        conn.execute(
+            "INSERT INTO war_races (season_id, section_index, our_rank, our_fame, total_clans) "
+            "VALUES (129, 2, 1, 48000, 5)",
+        )
+        conn.commit()
+
+        memory = upsert_race_streak_memory(
+            season_id=129,
+            week=3,
+            race_rank=1,
+            conn=conn,
+        )
+        assert memory is not None
+        assert memory["event_type"] == "clan_identity"
+        assert memory["event_id"] == "race_win_streak"
+        assert memory["war_week_id"] is None
+        assert memory["war_season_id"] is None
+        assert "streak of 2" in memory["body"]
+        assert "Season 129" in memory["body"]
+
+        # Verify it loads via clan_identity filter (unscoped)
+        results = list_memories(
+            viewer_scope="public",
+            filters={"event_type": "clan_identity"},
+            conn=conn,
+        )
+        assert len(results) == 1
+        assert results[0]["event_id"] == "race_win_streak"
+    finally:
+        conn.close()
+
+
+def test_upsert_race_streak_memory_updates_on_repeat_call():
+    """Calling upsert_race_streak_memory again updates the same memory."""
+    conn = db.get_connection(":memory:")
+    try:
+        conn.execute(
+            "INSERT INTO war_races (season_id, section_index, our_rank, our_fame, total_clans) "
+            "VALUES (129, 1, 1, 50000, 5)",
+        )
+        conn.commit()
+
+        m1 = upsert_race_streak_memory(season_id=129, week=2, race_rank=1, conn=conn)
+        assert "streak of 1" in m1["body"]
+
+        # Add another win and update
+        conn.execute(
+            "INSERT INTO war_races (season_id, section_index, our_rank, our_fame, total_clans) "
+            "VALUES (129, 2, 1, 48000, 5)",
+        )
+        conn.commit()
+        m2 = upsert_race_streak_memory(season_id=129, week=3, race_rank=1, conn=conn)
+        assert "streak of 2" in m2["body"]
+        assert m2["memory_id"] == m1["memory_id"]  # Same memory updated
     finally:
         conn.close()

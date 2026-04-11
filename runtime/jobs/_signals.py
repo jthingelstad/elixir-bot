@@ -22,7 +22,7 @@ import discord
 import db
 import elixir_agent
 import prompts
-from storage.contextual_memory import upsert_war_recap_memory
+from storage.contextual_memory import upsert_race_streak_memory, upsert_war_recap_memory
 from runtime import app as _app
 from runtime.channel_subagents import (
     build_subagent_memory_context,
@@ -83,6 +83,16 @@ def _build_outcome_context(outcome, signals, clan, war):
             "Current war data:",
             json.dumps(war or {}, indent=2, default=str),
         ])
+        signal_types = {s.get("type") for s in (signals or [])}
+        has_complete = bool(signal_types & _DAY_COMPLETE_TYPES)
+        has_started = bool(signal_types & _DAY_STARTED_TYPES)
+        if has_complete and has_started:
+            lines.extend([
+                "",
+                "This batch covers a day transition — the previous day just ended and a new day has started. "
+                "Write ONE cohesive message that recaps the completed day and sets up the new one. "
+                "Do not write two separate posts.",
+            ])
     elif channel_key == "player-progress":
         lines.extend([
             "",
@@ -351,6 +361,42 @@ def _format_weekly_recap_post(recap_text: str, *, now: datetime | None = None) -
     return f"{title}\n\n{body}"
 
 
+_DAY_COMPLETE_TYPES = {
+    "war_battle_day_complete",
+    "war_practice_day_complete",
+}
+_DAY_STARTED_TYPES = {
+    "war_battle_day_started",
+    "war_practice_day_started",
+}
+
+
+def _merge_day_transition_batches(batches):
+    """Merge adjacent *_complete + *_started solo batches into single batches."""
+    # Index solo batches by type for matching
+    complete_indices = {}
+    started_indices = {}
+    for i, batch in enumerate(batches):
+        if len(batch) != 1:
+            continue
+        sig_type = batch[0].get("type") or ""
+        key = (batch[0].get("season_id"), batch[0].get("week"))
+        if sig_type in _DAY_COMPLETE_TYPES:
+            complete_indices.setdefault(key, []).append(i)
+        elif sig_type in _DAY_STARTED_TYPES:
+            started_indices.setdefault(key, []).append(i)
+
+    merged_indices = set()
+    for key, c_indices in complete_indices.items():
+        s_indices = started_indices.get(key, [])
+        for c_idx, s_idx in zip(c_indices, s_indices):
+            # Merge: complete first, then started
+            batches[c_idx] = [batches[c_idx][0], batches[s_idx][0]]
+            merged_indices.add(s_idx)
+
+    return [b for i, b in enumerate(batches) if i not in merged_indices]
+
+
 def _observation_signal_batches(signals):
     if not signals:
         return []
@@ -371,6 +417,7 @@ def _observation_signal_batches(signals):
             batches.append([signal])
         else:
             grouped.append(signal)
+    batches = _merge_day_transition_batches(batches)
     if grouped:
         batches.insert(0, grouped)
     if completion_batch:
@@ -407,12 +454,32 @@ def _store_recap_memories_for_signal_batch(signal_batch, posts, channel_id):
     body = "\n\n".join((post or "").strip() for post in (posts or []) if (post or "").strip())
     if not body:
         return None
-    return upsert_war_recap_memory(
+    recap = upsert_war_recap_memory(
         signals=signal_batch,
         body=body,
         channel_id=channel_id,
         workflow="observation",
     )
+    # Update the race win streak memory on race completion
+    streak_signal_types = {"war_week_complete", "war_completed"}
+    for signal in (signal_batch or []):
+        if signal.get("type") in streak_signal_types:
+            season_id = signal.get("season_id")
+            week = signal.get("week")
+            if week is None and signal.get("section_index") is not None:
+                week = int(signal["section_index"]) + 1
+            race_rank = signal.get("race_rank") or signal.get("rank")
+            if season_id is not None and week is not None and race_rank is not None:
+                try:
+                    upsert_race_streak_memory(
+                        season_id=season_id,
+                        week=week,
+                        race_rank=race_rank,
+                    )
+                except Exception:
+                    log.warning("Failed to update race streak memory", exc_info=True)
+            break
+    return recap
 
 
 def _build_system_signal_context(signal, channel_name):
