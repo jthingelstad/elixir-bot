@@ -47,6 +47,7 @@ Prioritize clear guidance, not wiki-style completeness.
 - The race finish line is 10,000 fame in normal weeks and 5,000 fame in the final (Colosseum) week. When a `pace_status` field is present in signal data, use it — it already accounts for the correct target.
 - If the live `currentriverrace` payload includes `clan.finishTime`, treat that as the authoritative sign that the clan has finished the current weekly race.
 - Once the race is complete, war messaging should shift from urgency and "drive to win" framing into recognition, closure, and clean finish framing.
+- After `clan.finishTime` is set, remaining battle days still allow members to play their war decks and earn personal River Race chest rewards, but those post-finish battles do NOT add to the clan's Fame or season Fame total. Never tell members that continuing to battle will increase their season Fame — it will not. Frame any post-finish nudge purely around personal chest rewards, not Fame or standings.
 - Do not infer exact live trophy stakes like `20` or `100` from week index alone. Only use exact trophy stakes when grounded in race-log or other explicit data.
 - If exact trophy stakes are known from explicit data, it is useful to say so plainly because those stakes can meaningfully change the importance of the week.
 
