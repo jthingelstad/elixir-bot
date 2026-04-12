@@ -97,23 +97,30 @@ def _enrich_war_player_type(result, tag):
 
 def _enrich_war_player_types(members):
     """Add war_player_type to each member dict in a list."""
-    from storage.war_analytics import _war_player_type
+    from storage.war_analytics import war_player_types_by_tag
     from db import get_connection
+
+    tags = [
+        member.get("tag") or member.get("player_tag") or ""
+        for member in members
+    ]
+    tags = [t for t in tags if t]
+    if not tags:
+        return
 
     conn = get_connection()
     try:
-        for member in members:
-            tag = member.get("tag") or member.get("player_tag") or ""
-            if not tag:
-                continue
-            canon = tag if tag.startswith("#") else f"#{tag}"
-            row = conn.execute(
-                "SELECT member_id FROM members WHERE player_tag = ?", (canon,),
-            ).fetchone()
-            if row:
-                member["war_player_type"] = _war_player_type(conn, row["member_id"])
+        types_by_tag = war_player_types_by_tag(conn, tags)
     finally:
         conn.close()
+
+    for member in members:
+        tag = member.get("tag") or member.get("player_tag") or ""
+        if not tag:
+            continue
+        canon = tag if tag.startswith("#") else f"#{tag}"
+        if canon in types_by_tag:
+            member["war_player_type"] = types_by_tag[canon]
 
 
 def _refresh_member_cache(member_tag, include_battles=False):

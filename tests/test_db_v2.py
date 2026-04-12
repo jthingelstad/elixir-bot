@@ -3596,3 +3596,98 @@ def test_player_intel_refresh_targets_prioritize_stale_active_members():
         assert targets[1]["needs_profile_refresh"] is True
     finally:
         conn.close()
+
+
+def test_war_player_types_by_tag_batches_classification():
+    from storage.war_analytics import war_player_types_by_tag
+
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#REG", "name": "Regular", "role": "member"},
+                {"tag": "#OCC", "name": "Occasional", "role": "member"},
+                {"tag": "#RARE", "name": "Rare", "role": "member"},
+                {"tag": "#NEVER", "name": "Never", "role": "member"},
+            ],
+            conn=conn,
+        )
+        member_ids = {
+            row["player_tag"]: row["member_id"]
+            for row in conn.execute("SELECT player_tag, member_id FROM members").fetchall()
+        }
+        # 4 war races, season 129
+        for section in range(1, 5):
+            conn.execute(
+                "INSERT INTO war_races (season_id, section_index, our_rank, our_fame, total_clans) "
+                "VALUES (?, ?, 1, 50000, 5)",
+                (129, section),
+            )
+        race_ids = [
+            row["war_race_id"]
+            for row in conn.execute("SELECT war_race_id FROM war_races ORDER BY section_index").fetchall()
+        ]
+        # Regular: played all 4 (100%). Occasional: played 2 (50%). Rare: played 1 (25% = occasional boundary).
+        # Never: no participation rows.
+        for race_id in race_ids:
+            conn.execute(
+                "INSERT INTO war_participation (war_race_id, member_id, player_tag, decks_used) "
+                "VALUES (?, ?, ?, 4)",
+                (race_id, member_ids["#REG"], "#REG"),
+            )
+        # Occasional: played 2 of 4 (50%); filler rows for the 2 unplayed races
+        for i, race_id in enumerate(race_ids):
+            decks = 4 if i < 2 else 0
+            conn.execute(
+                "INSERT INTO war_participation (war_race_id, member_id, player_tag, decks_used) "
+                "VALUES (?, ?, ?, ?)",
+                (race_id, member_ids["#OCC"], "#OCC", decks),
+            )
+        # Rare: played 1 of 4 (25% = boundary, should still land as occasional since
+        # the threshold is >=25%). To force "rare" (<25%), we need played/total < 0.25.
+        # Use 1 of 5 races: add one more race so rare has 1 played / 5 total = 20%.
+        conn.execute(
+            "INSERT INTO war_races (season_id, section_index, our_rank, our_fame, total_clans) "
+            "VALUES (?, 99, 1, 50000, 5)",
+            (129,),
+        )
+        extra_race = conn.execute(
+            "SELECT war_race_id FROM war_races WHERE section_index = 99"
+        ).fetchone()["war_race_id"]
+        rare_races = race_ids + [extra_race]
+        for i, race_id in enumerate(rare_races):
+            decks = 2 if i == 0 else 0
+            conn.execute(
+                "INSERT INTO war_participation (war_race_id, member_id, player_tag, decks_used) "
+                "VALUES (?, ?, ?, ?)",
+                (race_id, member_ids["#RARE"], "#RARE", decks),
+            )
+        # Never member: insert a 0-deck participation so total_races > 0 but played = 0
+        for race_id in race_ids:
+            conn.execute(
+                "INSERT INTO war_participation (war_race_id, member_id, player_tag, decks_used) "
+                "VALUES (?, ?, ?, 0)",
+                (race_id, member_ids["#NEVER"], "#NEVER"),
+            )
+        conn.commit()
+
+        result = war_player_types_by_tag(conn, ["#REG", "#OCC", "#RARE", "#NEVER", "#UNKNOWN"])
+        assert result["#REG"] == "regular"
+        assert result["#OCC"] == "occasional"
+        assert result["#RARE"] == "rare"
+        assert result["#NEVER"] == "never"
+        assert "#UNKNOWN" not in result
+
+    finally:
+        conn.close()
+
+
+def test_war_player_types_by_tag_empty_input_returns_empty():
+    from storage.war_analytics import war_player_types_by_tag
+
+    conn = db.get_connection(":memory:")
+    try:
+        assert war_player_types_by_tag(conn, []) == {}
+        assert war_player_types_by_tag(conn, [""]) == {}
+    finally:
+        conn.close()

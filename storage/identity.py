@@ -441,17 +441,26 @@ def get_database_status(conn: Optional[sqlite3.Connection] = None) -> dict:
     except sqlite3.OperationalError:
         size_by_name = {}
 
-    tables = []
-    for table_name in table_names:
-        quoted = table_name.replace('"', '""')
-        row_count = conn.execute(
-            f'SELECT COUNT(*) AS cnt FROM "{quoted}"'
-        ).fetchone()["cnt"]
-        tables.append({
-            "name": table_name,
-            "row_count": row_count,
-            "approx_bytes": size_by_name.get(table_name),
-        })
+    counts_by_name: dict[str, int] = {}
+    if table_names:
+        # Single UNION ALL query avoids N round-trips for a list of ~30 tables.
+        # table_names come from sqlite_master (not user input); quotes still
+        # escaped defensively.
+        union_parts = [
+            f"SELECT '{name.replace(chr(39), chr(39) * 2)}' AS name, COUNT(*) AS cnt FROM \"{name.replace(chr(34), chr(34) * 2)}\""
+            for name in table_names
+        ]
+        for row in conn.execute(" UNION ALL ".join(union_parts)).fetchall():
+            counts_by_name[row["name"]] = row["cnt"]
+
+    tables = [
+        {
+            "name": name,
+            "row_count": counts_by_name.get(name, 0),
+            "approx_bytes": size_by_name.get(name),
+        }
+        for name in table_names
+    ]
 
     tables.sort(
         key=lambda item: (
