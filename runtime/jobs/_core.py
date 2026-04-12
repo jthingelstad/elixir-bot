@@ -305,12 +305,24 @@ async def _clan_awareness_tick():
         clan = tick_result.clan
         war = tick_result.war
 
+        failed = 0
         for signal in signals:
-            await _deliver_signal_group([signal], clan, war)
+            if not await _deliver_signal_group([signal], clan, war):
+                failed += 1
+                log.warning(
+                    "clan_awareness signal delivery failed type=%s tag=%s",
+                    signal.get("type"), signal.get("tag"),
+                )
 
         await _revoke_member_role_for_leavers(signals)
 
-        runtime_status.mark_job_success("clan_awareness", f"{len(signals)} signal(s) processed")
+        if failed:
+            runtime_status.mark_job_failure(
+                "clan_awareness",
+                f"{failed} of {len(signals)} signal(s) failed to deliver",
+            )
+        else:
+            runtime_status.mark_job_success("clan_awareness", f"{len(signals)} signal(s) processed")
 
     except Exception as e:
         log.error("Clan awareness error: %s", e, exc_info=True)
@@ -449,8 +461,14 @@ async def _player_intel_refresh():
             failed_targets += 1
             log.warning("Player intel refresh failed for %s: %s", tag, e)
 
+    progression_delivery_failures = 0
     for signal_batch in _progression_signal_batches(progression_signals):
-        await _deliver_signal_group(signal_batch, clan, war)
+        if not await _deliver_signal_group(signal_batch, clan, war):
+            progression_delivery_failures += 1
+            log.warning(
+                "player_intel_refresh progression batch delivery failed size=%d",
+                len(signal_batch),
+            )
 
     if profile_failures or battle_log_failures:
         await _app._maybe_alert_cr_api_failure("player intel refresh")
@@ -465,6 +483,8 @@ async def _player_intel_refresh():
         failure_summary.append(f"full target failures {failed_targets}")
     if processing_failures:
         failure_summary.append(f"processing failures {processing_failures}")
+    if progression_delivery_failures:
+        failure_summary.append(f"progression delivery failures {progression_delivery_failures}")
 
     if refreshed == 0 and failure_summary:
         detail = f"refreshed 0 of {total_targets} member(s); " + "; ".join(failure_summary)

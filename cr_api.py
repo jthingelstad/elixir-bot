@@ -1,6 +1,7 @@
 """Clash Royale API client."""
 import logging
 import os
+import random
 import time
 import requests
 from dotenv import load_dotenv
@@ -17,7 +18,8 @@ CLAN_TAG = prompts.clan_tag()
 API_KEY = os.getenv("CR_API_KEY", "")
 
 _MAX_RETRIES = 2
-_RETRY_BACKOFF = 1  # seconds
+_RETRY_BASE_SECONDS = 1.0
+_RETRY_MAX_SECONDS = 30.0
 
 
 def _headers():
@@ -28,13 +30,33 @@ def _elapsed_ms(started):
     return round((time.perf_counter() - started) * 1000, 2)
 
 
+def _is_transient_status(status_code: int | None) -> bool:
+    """429 (rate limit) and 5xx are considered transient and retried."""
+    if status_code is None:
+        return False
+    return status_code == 429 or 500 <= status_code < 600
+
+
+def _retry_delay(attempt: int, response: "requests.Response | None") -> float:
+    """Exponential backoff with jitter, honouring Retry-After if present."""
+    if response is not None:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return min(float(retry_after), _RETRY_MAX_SECONDS)
+            except (TypeError, ValueError):
+                pass
+    # 1, 2, 4, 8, … with up to 50% jitter.
+    base = min(_RETRY_BASE_SECONDS * (2 ** attempt), _RETRY_MAX_SECONDS)
+    return base + random.uniform(0, base * 0.5)
+
+
 def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
     url = f"{API_BASE}{endpoint_path}"
     last_exc = None
     for attempt in range(_MAX_RETRIES + 1):
-        if attempt > 0:
-            time.sleep(_RETRY_BACKOFF * attempt)
         started = time.perf_counter()
+        response = None
         try:
             response = requests.get(url, headers=_headers(), timeout=10)
             response.raise_for_status()
@@ -51,37 +73,36 @@ def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
                     endpoint_name, attempt + 1, _MAX_RETRIES + 1, _elapsed_ms(started),
                 )
             return response.json()
-        except requests.ConnectionError as exc:
+        except (requests.ConnectionError, requests.Timeout) as exc:
             last_exc = exc
-            log.warning("CR API connection error on %s (attempt %d/%d): %s",
-                        endpoint_name, attempt + 1, _MAX_RETRIES + 1, exc)
+            status_code = None
+            log.warning("CR API %s on %s (attempt %d/%d): %s",
+                        type(exc).__name__, endpoint_name, attempt + 1, _MAX_RETRIES + 1, exc)
             runtime_status.record_api_call(
                 endpoint_name, entity_key, ok=False,
-                status_code=None, error=exc, duration_ms=_elapsed_ms(started),
+                status_code=status_code, error=exc, duration_ms=_elapsed_ms(started),
             )
-            continue
-        except requests.Timeout as exc:
-            last_exc = exc
-            log.warning("CR API timeout on %s (attempt %d/%d)",
-                        endpoint_name, attempt + 1, _MAX_RETRIES + 1)
-            runtime_status.record_api_call(
-                endpoint_name, entity_key, ok=False,
-                status_code=None, error=exc, duration_ms=_elapsed_ms(started),
-            )
-            continue
+            if attempt < _MAX_RETRIES:
+                time.sleep(_retry_delay(attempt, None))
+                continue
         except requests.HTTPError as exc:
-            log.warning("CR API HTTP %s on %s: %s",
-                        response.status_code, endpoint_name, exc)
+            last_exc = exc
+            status_code = response.status_code if response is not None else None
+            log.warning("CR API HTTP %s on %s (attempt %d/%d): %s",
+                        status_code, endpoint_name, attempt + 1, _MAX_RETRIES + 1, exc)
             runtime_status.record_api_call(
                 endpoint_name, entity_key, ok=False,
-                status_code=response.status_code, error=exc, duration_ms=_elapsed_ms(started),
+                status_code=status_code, error=exc, duration_ms=_elapsed_ms(started),
             )
+            if _is_transient_status(status_code) and attempt < _MAX_RETRIES:
+                time.sleep(_retry_delay(attempt, response))
+                continue
             raise
         except (requests.RequestException, ValueError) as exc:
             log.warning("CR API error on %s: %s", endpoint_name, exc)
             runtime_status.record_api_call(
                 endpoint_name, entity_key, ok=False,
-                status_code=getattr(locals().get("response"), "status_code", None),
+                status_code=getattr(response, "status_code", None),
                 error=exc, duration_ms=_elapsed_ms(started),
             )
             raise

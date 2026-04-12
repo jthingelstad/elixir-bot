@@ -49,6 +49,33 @@ def test_clan_awareness_tick_uses_bundle_without_refetch():
     mock_get_war.assert_not_called()
 
 
+def test_clan_awareness_tick_marks_failure_when_delivery_fails():
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[
+            {"type": "player_level_up", "tag": "#A", "name": "A"},
+            {"type": "player_level_up", "tag": "#B", "name": "B"},
+        ],
+        clan={"memberList": []},
+        war={},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.heartbeat.tick", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock(side_effect=[True, False])),
+        patch("runtime.jobs._core.runtime_status.mark_job_failure") as mock_fail,
+        patch("runtime.jobs._core.runtime_status.mark_job_success") as mock_success,
+    ):
+        asyncio.run(elixir._clan_awareness_tick())
+
+    mock_success.assert_not_called()
+    mock_fail.assert_called_once()
+    assert "1 of 2" in mock_fail.call_args.args[1]
+
+
 def test_clan_awareness_tick_revokes_member_role_for_leavers():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[
