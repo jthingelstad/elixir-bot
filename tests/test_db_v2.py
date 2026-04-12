@@ -621,6 +621,39 @@ def test_channel_messages_and_state_are_tracked_for_channel_user_threads():
         conn.close()
 
 
+def test_resolve_member_folds_diacritics_for_non_ascii_names():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#ABC123", "name": "José", "role": "member"},
+                {"tag": "#DEF456", "name": "Pokémon", "role": "member"},
+                {"tag": "#GHI789", "name": "Malmö", "role": "member"},
+            ],
+            conn=conn,
+        )
+
+        # ASCII query matches accented stored name
+        jose = db.resolve_member("jose", conn=conn)
+        assert jose[0]["player_tag"] == "#ABC123"
+        assert jose[0]["match_source"] == "current_name_exact"
+
+        # Accented query matches accented stored name
+        jose_accented = db.resolve_member("José", conn=conn)
+        assert jose_accented[0]["player_tag"] == "#ABC123"
+
+        # Substring with accents folds correctly
+        pokemon = db.resolve_member("pokem", conn=conn)
+        assert pokemon[0]["player_tag"] == "#DEF456"
+        assert pokemon[0]["match_source"] == "current_name_prefix"
+
+        # Accented query folds on the query side too
+        malmo = db.resolve_member("malmo", conn=conn)
+        assert malmo[0]["player_tag"] == "#GHI789"
+    finally:
+        conn.close()
+
+
 def test_resolve_member_matches_at_prefixed_discord_display_name():
     conn = db.get_connection(":memory:")
     try:

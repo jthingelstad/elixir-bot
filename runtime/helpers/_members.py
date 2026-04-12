@@ -2,6 +2,7 @@ import logging
 import re
 
 import db
+from storage.roster import _fold_for_search
 
 log = logging.getLogger("elixir")
 
@@ -39,7 +40,7 @@ def _match_clan_member(nickname):
 
     Uses Elixir's member resolver but only accepts high-confidence exact matches.
     """
-    normalized = (nickname or "").lower().strip()
+    normalized = _fold_for_search((nickname or "").strip())
     if not normalized:
         return None
 
@@ -57,7 +58,7 @@ def _match_clan_member(nickname):
     try:
         snapshot = db.get_active_roster_map()
         for tag, name in snapshot.items():
-            if name.lower().strip() == normalized:
+            if _fold_for_search(name) == normalized:
                 return (tag, name)
     except Exception:
         log.warning("roster_map_lookup_failed nickname=%r", nickname, exc_info=True)

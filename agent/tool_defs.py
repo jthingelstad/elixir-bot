@@ -12,7 +12,14 @@ TOOLS = [
 
     {
         "name": "resolve_member",
-        "description": "Resolve a clan member from a player name, alias, Discord handle, or player tag and return the best matching candidates.",
+        "description": (
+            "Resolve a clan member from a player name, alias, Discord handle, or player tag "
+            "and return the best matching candidates. Matching is case-insensitive and "
+            "diacritic-folded, so 'jose' matches 'José' and 'pokemon' matches 'Pokémon' — "
+            "pass the user's literal query rather than trying to normalize it yourself. "
+            "If multiple candidates come back with similar scores, ask the user which "
+            "one they meant instead of guessing."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
