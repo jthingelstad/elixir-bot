@@ -129,10 +129,10 @@ def extract_inference_facts(content: str, context_label: str | None = None) -> l
             })
         return valid
     except (json.JSONDecodeError, ValueError, TypeError):
-        log.debug("extract_inference_facts JSON parse failed", exc_info=True)
+        log.warning("extract_inference_facts_parse_failed", exc_info=True)
         return []
     except (APIError, APIConnectionError):
-        log.debug("extract_inference_facts failed", exc_info=True)
+        log.warning("extract_inference_facts_api_failed", exc_info=True)
         return []
 
 

@@ -39,10 +39,17 @@ async def _fetch_channel_and_message(payload):
         try:
             channel = await app.bot.fetch_channel(payload.channel_id)
         except Exception:
+            app.log.warning(
+                "prompt_feedback channel fetch failed channel_id=%s", payload.channel_id, exc_info=True,
+            )
             return None, None
     try:
         message = await channel.fetch_message(payload.message_id)
     except Exception:
+        app.log.warning(
+            "prompt_feedback message fetch failed channel_id=%s message_id=%s",
+            payload.channel_id, payload.message_id, exc_info=True,
+        )
         return channel, None
     return channel, message
 

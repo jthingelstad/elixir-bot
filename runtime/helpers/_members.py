@@ -74,7 +74,7 @@ def _match_clan_member(nickname):
                     return (best["player_tag"], best.get("current_name") or best.get("member_name"))
             return None
     except Exception:
-        log.debug("resolve_member failed for %r", nickname, exc_info=True)
+        log.warning("resolve_member_db_error nickname=%r", nickname, exc_info=True)
 
     try:
         snapshot = db.get_active_roster_map()
@@ -82,7 +82,7 @@ def _match_clan_member(nickname):
             if name.lower().strip() == normalized:
                 return (tag, name)
     except Exception:
-        log.debug("roster map lookup failed for %r", nickname, exc_info=True)
+        log.warning("roster_map_lookup_failed nickname=%r", nickname, exc_info=True)
         return None
     return None
 

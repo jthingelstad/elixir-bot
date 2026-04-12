@@ -121,10 +121,14 @@ def _refresh_member_cache(member_tag, include_battles=False):
     player = cr_api.get_player(member_tag)
     if player:
         db.snapshot_player_profile(player)
+    else:
+        log.warning("player_profile_refresh_skipped tag=%s reason=cr_api_returned_none", member_tag)
     if include_battles:
         battles = cr_api.get_player_battle_log(member_tag)
         if battles:
             db.snapshot_player_battlelog(member_tag, battles)
+        else:
+            log.warning("player_battlelog_refresh_skipped tag=%s reason=cr_api_returned_none", member_tag)
 
 
 def _resolve_member_tag(value):
@@ -139,6 +143,7 @@ def _resolve_member_tag(value):
 
     matches = db.resolve_member(query, limit=5)
     if not matches:
+        log.warning("member_resolution_failed query=%r reason=no_matches", query)
         raise ValueError(f"Could not resolve member reference: {query}")
     exactish = [m for m in matches if m.get("match_score", 0) >= 850]
     if len(exactish) == 1:
@@ -150,6 +155,10 @@ def _resolve_member_tag(value):
     if (top.get("match_score", 0) - second.get("match_score", 0)) >= 100:
         return top["player_tag"]
     choices = ", ".join(m.get("member_ref_with_handle") or m.get("current_name") or m["player_tag"] for m in matches[:3])
+    log.warning(
+        "member_resolution_ambiguous query=%r top_score=%d second_score=%d choices=%s",
+        query, top.get("match_score", 0), second.get("match_score", 0), choices,
+    )
     raise ValueError(f"Ambiguous member reference '{query}'. Top matches: {choices}")
 
 

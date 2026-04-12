@@ -258,6 +258,10 @@ def _build_tool_result_envelope(name, raw_result):
             envelope["truncated"] = True
             envelope["meta"]["original_count"] = original_count
             envelope["meta"]["returned_count"] = TOOL_RESULT_MAX_ITEMS
+            log.warning(
+                "tool_result_truncated tool=%s reason=item_limit original=%d returned=%d",
+                name, original_count, TOOL_RESULT_MAX_ITEMS,
+            )
 
     serialized = json.dumps(envelope, default=str)
     if len(serialized) > TOOL_RESULT_MAX_CHARS:
@@ -268,6 +272,10 @@ def _build_tool_result_envelope(name, raw_result):
         envelope["data"] = data_s[:TOOL_RESULT_MAX_CHARS // 2] + "...[truncated]"
         if envelope["ok"] and envelope["error"] is None:
             envelope["error"] = "tool_result_truncated_for_context"
+        log.warning(
+            "tool_result_truncated tool=%s reason=char_limit char_size=%d char_limit=%d",
+            name, len(serialized), TOOL_RESULT_MAX_CHARS,
+        )
 
     return json.dumps(envelope, default=str)
 
