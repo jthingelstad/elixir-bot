@@ -7,3 +7,7 @@ elixir.db
 .pytest_cache/
 elixir.pid
 .DS_Store
+.claude/
+
+# Eval-script output artifacts (scripts themselves are committed; results aren't)
+scripts/deck_conversations_eval*.json
