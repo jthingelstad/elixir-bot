@@ -223,6 +223,14 @@ def register_elixir_app_commands(bot) -> None:
             write=True,
         )
 
+    @member_commands.command(name="audit-discord", description=COMMAND_SPECS["member.audit-discord"].description)
+    async def slash_member_audit_discord(interaction: discord.Interaction):
+        await run_admin_interaction(
+            interaction,
+            command_name="member.audit-discord",
+            event_type=COMMAND_SPECS["member.audit-discord"].event_type,
+        )
+
     @member_commands.command(name="set", description=COMMAND_SPECS["member.set"].description)
     @app_commands.describe(member="Member name or tag.", field="Field to set.", value="Field value.")
     @app_commands.choices(field=[

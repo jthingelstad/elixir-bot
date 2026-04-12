@@ -22,7 +22,6 @@ from runtime.helpers._common import (
     _post_to_elixir,
     _runtime_app,
 )
-from runtime.helpers._members import _apply_member_refs_to_result
 
 
 def _channel_scope(channel) -> str:
@@ -135,7 +134,6 @@ async def _reply_text(message, content):
 
 
 async def _share_channel_result(result, workflow):
-    result = await _apply_member_refs_to_result(result)
     if result.get("event_type") != "channel_share":
         return
     share_content = result.get("share_content", "")

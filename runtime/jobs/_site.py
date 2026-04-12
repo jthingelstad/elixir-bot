@@ -250,7 +250,6 @@ async def _notify_poapkings_publish(activity_key: str, *, publish_result=None, e
     }
 
     try:
-        result_payload = await _app._apply_member_refs_to_result(result_payload)
         posts = _app._entry_posts(result_payload)
         await _post_to_elixir(channel, result_payload)
         event_type = "poapkings_publish_failure" if error_detail else "poapkings_publish_success"

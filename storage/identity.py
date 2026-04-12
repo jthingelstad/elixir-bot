@@ -244,7 +244,7 @@ def get_linked_member_for_discord_user(discord_user_id: str | int, conn: Optiona
 
 
 @managed_connection
-def format_member_reference(member_or_tag: str | dict, conn: Optional[sqlite3.Connection] = None, **_kwargs) -> str:
+def format_member_reference(member_or_tag: str | dict, conn: Optional[sqlite3.Connection] = None) -> str:
     """Return a plain display name for a member tag or identity dict."""
     member = member_or_tag if isinstance(member_or_tag, dict) else get_member_identity(member_or_tag, conn=conn)
     if not member:

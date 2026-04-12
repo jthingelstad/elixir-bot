@@ -747,18 +747,6 @@ def test_ask_elixir_daily_insight_posts_fun_fact():
     assert mock_save.call_args.kwargs["event_type"] == "daily_clan_insight"
 
 
-def test_apply_member_refs_to_result_is_noop():
-    """Mention injection is disabled — result passes through unchanged."""
-    input_result = {
-        "content": "King Levy is heating up.",
-        "share_content": "Tell King Levy to keep going.",
-        "member_tags": ["#ABC123"],
-    }
-    result = asyncio.run(elixir._apply_member_refs_to_result(input_result))
-    assert result["content"] == "King Levy is heating up."
-    assert result["share_content"] == "Tell King Levy to keep going."
-
-
 def test_on_message_replies_with_fallback_when_channel_agent_returns_none():
     message = _make_message(200, "clan-ops", "<@999> What is my current war participation rate over the last 4 weeks?")
 
@@ -1093,6 +1081,56 @@ def test_register_elixir_app_commands_includes_signals():
     signal_group = root.get_command("signal")
     assert signal_group is not None
     assert signal_group.get_command("show") is not None
+
+
+def test_register_elixir_app_commands_includes_member_audit_discord():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+    member_group = root.get_command("member")
+    assert member_group is not None
+    assert member_group.get_command("audit-discord") is not None
+
+
+def test_dispatch_admin_command_handles_member_audit_discord():
+    human = SimpleNamespace(
+        id=555, bot=False, display_name="UnlinkedUser", nick=None,
+        name="UnlinkedUser", global_name="UnlinkedUser",
+        roles=[],
+    )
+    linked = SimpleNamespace(
+        id=777, bot=False, display_name="King Levy", nick="King Levy",
+        name="kinglevy", global_name="King Levy",
+        roles=[SimpleNamespace(id=999)],
+    )
+    bot_member = SimpleNamespace(id=888, bot=True)
+    guild = SimpleNamespace(
+        members=[human, linked, bot_member],
+        get_role=lambda rid: SimpleNamespace(id=999),
+    )
+
+    def fake_linked_lookup(user_id, **_kwargs):
+        return {"player_tag": "#ABC"} if int(user_id) == 777 else None
+
+    with (
+        patch("runtime.app.bot", new=SimpleNamespace(get_guild=lambda gid: guild)),
+        patch("runtime.app.GUILD_ID", 100),
+        patch("runtime.app.MEMBER_ROLE_ID", 999),
+        patch("db.list_members", return_value=[
+            {"player_tag": "#ABC", "current_name": "King Levy", "discord_user_id": "777"},
+            {"player_tag": "#DEF", "current_name": "Lonely", "discord_user_id": None},
+        ]),
+        patch("db.get_linked_member_for_discord_user", side_effect=fake_linked_lookup),
+        patch("db.resolve_member", return_value=[]),
+    ):
+        result = asyncio.run(
+            elixir.dispatch_admin_command("member.audit-discord", preview=False, short=False, args={}),
+        )
+
+    assert "Active clan members: 2 (1 without a Discord link)" in result
+    assert "Unlinked Discord users: 1" in result
+    assert "Lonely" in result
+    assert "UnlinkedUser" in result
 
 
 def test_dispatch_admin_command_handles_verify_discord():

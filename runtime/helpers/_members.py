@@ -6,8 +6,7 @@ import db
 log = logging.getLogger("elixir")
 
 __all__ = [
-    "_pick_resolved_member", "_rewrite_member_refs_in_text",
-    "_apply_member_refs_to_result", "_match_clan_member",
+    "_pick_resolved_member", "_match_clan_member",
     "_resolve_member_candidate", "_extract_member_deck_target",
     "_build_member_deck_report",
 ]
@@ -34,27 +33,6 @@ def _pick_resolved_member(matches):
         return top
     return None
 
-
-def _rewrite_member_refs_in_text(text: str, replacements: list[tuple[str, str]]) -> str:
-    updated = text or ""
-    if not updated:
-        return updated
-    for alias, ref in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
-        if not alias or not ref or ref == alias:
-            continue
-        pattern = re.compile(
-            rf"(?<![\w<]){re.escape(alias)}(?![\w>])(?!\s*\((?:<@|@))",
-            re.IGNORECASE,
-        )
-        updated = pattern.sub(ref, updated)
-    return updated
-
-
-async def _apply_member_refs_to_result(result: dict | None):
-    # Mention injection disabled — return result unchanged.
-    # Data (discord links, identities) is preserved; we just no longer
-    # rewrite player names into Discord <@id> pings in bot output.
-    return result
 
 def _match_clan_member(nickname):
     """Match a Discord nickname to a clan member. Returns (tag, name) or None.

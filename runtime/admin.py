@@ -38,6 +38,7 @@ COMMAND_SPECS = {
     "clan.members": AdminCommandSpec("clan.members", ("clan", "members"), "List active clan members.", event_type="clan_members_report"),
     "member.show": AdminCommandSpec("member.show", ("member", "show"), "Show the stored member profile and metadata for one member.", event_type="member_profile_report"),
     "member.verify-discord": AdminCommandSpec("member.verify-discord", ("member", "verify-discord"), "Verify a member's Discord link and Member role.", leader_only=True, write=True, event_type="member_verify_discord"),
+    "member.audit-discord": AdminCommandSpec("member.audit-discord", ("member", "audit-discord"), "Audit Discord ↔ clan member linkage and surface gaps.", leader_only=True, event_type="member_audit_discord"),
     "member.set": AdminCommandSpec("member.set", ("member", "set"), "Set one member field.", leader_only=True, write=True, event_type="member_set"),
     "member.clear": AdminCommandSpec("member.clear", ("member", "clear"), "Clear one member field.", leader_only=True, write=True, event_type="member_clear"),
     "memory.show": AdminCommandSpec("memory.show", ("memory", "show"), "Inspect stored conversation and contextual memory.", leader_only=True, event_type="memory_report"),
@@ -990,6 +991,100 @@ async def _run_verify_discord(*, preview: bool, args: dict) -> str:
     return await onboarding.verify_discord_membership(member_tag)
 
 
+def _suggest_clan_member_for_discord_user(display_values: list[str]) -> str | None:
+    import db as _db
+    for value in display_values:
+        if not value:
+            continue
+        matches = _db.resolve_member(value, limit=2)
+        if not matches:
+            continue
+        top = matches[0]
+        exactish = top.get("match_source") in {"current_name_exact", "alias_exact", "player_tag_exact"}
+        if exactish and (len(matches) == 1 or top.get("match_score", 0) - matches[1].get("match_score", 0) >= 100):
+            name = top.get("current_name") or top.get("member_name") or top.get("player_tag")
+            return f"{name} (`{top['player_tag']}`)"
+    return None
+
+
+async def _run_member_audit_discord() -> str:
+    import db
+    import runtime.app as app
+
+    guild = app.bot.get_guild(app.GUILD_ID) if app.GUILD_ID else None
+    if guild is None:
+        return "Guild not cached in the running bot."
+
+    member_role = guild.get_role(app.MEMBER_ROLE_ID) if app.MEMBER_ROLE_ID else None
+
+    clan_members = await asyncio.to_thread(db.list_members, "active")
+    unlinked_clan = [m for m in clan_members if not m.get("discord_user_id")]
+
+    unlinked_discord: list[tuple[object, str | None]] = []
+    role_missing: list[object] = []
+    for guild_member in guild.members:
+        if guild_member.bot:
+            continue
+        link = await asyncio.to_thread(db.get_linked_member_for_discord_user, guild_member.id)
+        if link:
+            if member_role and member_role not in guild_member.roles:
+                role_missing.append(guild_member)
+            continue
+        display_values = [
+            getattr(guild_member, "nick", None),
+            getattr(guild_member, "display_name", None),
+            getattr(guild_member, "global_name", None),
+            getattr(guild_member, "name", None),
+        ]
+        suggestion = await asyncio.to_thread(
+            _suggest_clan_member_for_discord_user,
+            [v for v in display_values if v],
+        )
+        unlinked_discord.append((guild_member, suggestion))
+
+    lines = [
+        "**Discord ↔ Clan Member Audit**",
+        f"- Active clan members: {len(clan_members)} ({len(unlinked_clan)} without a Discord link)",
+        f"- Unlinked Discord users: {len(unlinked_discord)}",
+        f"- Linked users missing the Member role: {len(role_missing)}",
+        "",
+    ]
+
+    if unlinked_clan:
+        lines.append("**Clan members without a Discord link**")
+        for m in unlinked_clan[:25]:
+            name = m.get("current_name") or m.get("member_name") or m.get("player_tag")
+            lines.append(f"- {name} (`{m['player_tag']}`)")
+        if len(unlinked_clan) > 25:
+            lines.append(f"- …and {len(unlinked_clan) - 25} more")
+        lines.append("")
+
+    if unlinked_discord:
+        lines.append("**Discord users not linked to a clan member**")
+        for guild_member, suggestion in unlinked_discord[:25]:
+            label = f"{guild_member.display_name} (<@{guild_member.id}>)"
+            if suggestion:
+                lines.append(f"- {label} → likely **{suggestion}**. Run `/elixir member verify-discord member:{suggestion.split(' (`')[0]}`.")
+            else:
+                lines.append(f"- {label} → no confident match. Use `/elixir member set` to link manually.")
+        if len(unlinked_discord) > 25:
+            lines.append(f"- …and {len(unlinked_discord) - 25} more")
+        lines.append("")
+
+    if role_missing:
+        lines.append("**Linked users missing the Member role**")
+        for guild_member in role_missing[:25]:
+            lines.append(f"- {guild_member.display_name} (<@{guild_member.id}>) — run `/elixir member verify-discord` to reapply")
+        if len(role_missing) > 25:
+            lines.append(f"- …and {len(role_missing) - 25} more")
+        lines.append("")
+
+    if not unlinked_clan and not unlinked_discord and not role_missing:
+        lines.append("Everything is linked.")
+
+    return "\n".join(lines).rstrip()
+
+
 def _translate_member_field_command(action: str, field: str, value: str | None = None) -> tuple[str, dict]:
     field = normalize_admin_command(field)
     if action == "set":
@@ -1091,6 +1186,8 @@ async def dispatch_admin_command(command: str | dict, *, preview: bool = False, 
         )
     if key == "member.verify-discord":
         return await _run_verify_discord(preview=preview, args=args)
+    if key == "member.audit-discord":
+        return await _run_member_audit_discord()
     if key == "member.set":
         return await _run_member_field_command("set", preview=preview, args=args)
     if key == "member.clear":
