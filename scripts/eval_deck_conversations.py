@@ -34,7 +34,10 @@ import elixir_agent
 from agent import tool_exec
 from agent.core import _create_chat_completion, _chat_model_name
 from agent.intent_router import classify_intent
-from runtime.helpers._members import _build_member_deck_report
+from runtime.helpers._members import (
+    _build_member_deck_report,
+    _build_member_war_decks_report,
+)
 from storage.war_analytics import war_player_types_by_tag
 
 
@@ -200,10 +203,14 @@ def run_turn(member: dict, question: str, conversation_history: list[dict]) -> d
 
     if route == "deck_display":
         try:
-            content = _build_member_deck_report(member["player_tag"])
+            if mode == "war":
+                content = _build_member_war_decks_report(member["player_tag"])
+                row["event_type"] = "deck_display_war"
+            else:
+                content = _build_member_deck_report(member["player_tag"])
+                row["event_type"] = "deck_display"
             row["content"] = content
             row["content_len"] = len(content or "")
-            row["event_type"] = "deck_display"
         except Exception as exc:
             row["error"] = f"deck_display raised: {exc}"
         row["tool_calls"] = []

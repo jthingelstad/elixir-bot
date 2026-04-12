@@ -449,12 +449,20 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
             # Router thought this was a deck display but we couldn't resolve a member.
             # Fall through to llm_chat so the model can ask a clarifying question.
             return False
-        _log_route(app, "member_deck_report", message, ctx["mentioned"], ctx["subagent"],
-                   workflow, ctx["raw_question"], deck_target=deck_target)
-        content = await asyncio.to_thread(app._build_member_deck_report, deck_target)
+        mode = intent.get("mode") or "regular"
+        if mode == "war":
+            _log_route(app, "member_war_decks_report", message, ctx["mentioned"], ctx["subagent"],
+                       workflow, ctx["raw_question"], deck_target=deck_target, mode="war")
+            content = await asyncio.to_thread(app._build_member_war_decks_report, deck_target)
+            event_type = "member_war_decks_report"
+        else:
+            _log_route(app, "member_deck_report", message, ctx["mentioned"], ctx["subagent"],
+                       workflow, ctx["raw_question"], deck_target=deck_target)
+            content = await asyncio.to_thread(app._build_member_deck_report, deck_target)
+            event_type = "member_deck_report"
         await _save_reply_save(
             app, message, ctx["conversation_scope"], ctx["raw_question"],
-            content, workflow, "member_deck_report",
+            content, workflow, event_type,
         )
         return True
 
