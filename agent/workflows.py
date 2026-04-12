@@ -451,6 +451,35 @@ def respond_in_deck_review(question, author_name, channel_name, *, mode, subject
                 "(Treat this as the result of get_member_war_detail aspect='war_decks'. "
                 "Do not call that tool again unless you need a refresh.)\n"
             )
+            card_names = {
+                card.get("name")
+                for deck in war_decks.get("decks") or []
+                if isinstance(deck, dict)
+                for card in deck.get("cards") or []
+                if isinstance(card, dict) and card.get("name")
+            }
+            if card_names:
+                try:
+                    catalog = db.lookup_cards(limit=max(len(card_names) * 2, 50))
+                except Exception as exc:
+                    log.warning("verified-costs pre-fetch failed for %s: %s", target_member_tag, exc)
+                    catalog = []
+                costs = {
+                    c["name"]: c.get("elixir_cost")
+                    for c in catalog
+                    if isinstance(c, dict) and c.get("name") in card_names
+                }
+                if costs:
+                    cost_lines = "\n".join(
+                        f"  {name}: {cost if cost is not None else 'n/a (support card)'}"
+                        for name, cost in sorted(costs.items())
+                    )
+                    base_user_msg += (
+                        "\n\n=== VERIFIED CARD ELIXIR COSTS (from card catalog) ===\n"
+                        f"{cost_lines}\n"
+                        "These are the authoritative elixir costs for every card in the reconstructed decks. "
+                        "Use ONLY these values when computing averages or totals. Do not use memory.\n"
+                    )
             if war_decks.get("status") == "insufficient_data" and subject == "review":
                 base_user_msg += (
                     "\nSPECIAL CASE — NEW WAR PLAYER:\n"
