@@ -22,6 +22,9 @@ def _discord_formatting_guidance() -> str:
         "Discord does not render markdown tables. Never use pipe-and-dash table syntax. "
         "When you need to show tabular data, use a bulleted or numbered list where each item inlines the fields, "
         "for example `- **Name** — wins: 12 · losses: 3 · fame: 2400`.\n\n"
+        "Discord has a hard 2000-character limit per message and will split longer content at exactly the 2000th character — usually mid-sentence, which looks bad. "
+        "Aim to keep each message under 1900 characters. "
+        "If the response genuinely needs more room, return `content` as an array of strings like `[\"first message\", \"second message\"]` and split at a clean paragraph or section break. Each element is sent as its own Discord message.\n\n"
     )
 
 
@@ -122,7 +125,7 @@ def _interactive_system(channel_name):
         f"{_discord_emoji_guidance()}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
-        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", '
+        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response (string, OR an array [\\"part 1\\", \\"part 2\\"] when the answer needs more than ~1900 characters)", '
         '"memories": [], "metadata": {}}\n\n'
         "Or, when sharing to the clan:\n"
         '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
@@ -176,7 +179,7 @@ def _clanops_system(channel_name):
         f"{_discord_emoji_guidance(allow_in_sensitive=True)}"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "channel_response", "member_tags": [], "member_names": [], '
-        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", '
+        '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response (string, OR an array [\\"part 1\\", \\"part 2\\"] when the answer needs more than ~1900 characters)", '
         '"memories": [], "metadata": {}}\n\n'
         "Or, when sharing to the clan:\n"
         '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
@@ -257,7 +260,7 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
         response_format = (
             "Respond with JSON only (no markdown wrapper). The proposed_decks field is REQUIRED for war suggest mode and is validated:\n"
             '{"event_type": "deck_review_response", "member_tags": [], "member_names": [], '
-            '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response with the four decks and per-card reasoning", '
+            '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response with the four decks and per-card reasoning (string, OR an array [\\"part 1\\", \\"part 2\\"] when the answer needs more than ~1900 characters — e.g. one message per deck)", '
             '"proposed_decks": [["Card1", "Card2", "Card3", "Card4", "Card5", "Card6", "Card7", "Card8"], '
             '["8 cards"], ["8 cards"], ["8 cards"]], '
             '"metadata": {}}\n\n'
@@ -269,7 +272,7 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
         response_format = (
             "Respond with JSON only (no markdown wrapper):\n"
             '{"event_type": "deck_review_response", "member_tags": [], "member_names": [], '
-            '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", '
+            '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response (string, OR an array [\\"part 1\\", \\"part 2\\"] when the answer needs more than ~1900 characters)", '
             '"metadata": {}}'
         )
 
