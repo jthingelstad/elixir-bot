@@ -1395,6 +1395,18 @@ def test_resolve_member_tag_accepts_name_with_tag_label():
     mock_resolve.assert_called_once_with("#VGJJLC9PR", limit=3, conn=None)
 
 
+def test_resolve_member_tag_rejects_empty_and_overlong_inputs():
+    from runtime import admin as runtime_admin
+    import pytest
+
+    with pytest.raises(ValueError, match="required"):
+        runtime_admin._resolve_member_tag("")
+    with pytest.raises(ValueError, match="required"):
+        runtime_admin._resolve_member_tag("   ")
+    with pytest.raises(ValueError, match="64 characters"):
+        runtime_admin._resolve_member_tag("x" * 100)
+
+
 def test_admin_command_requires_leader_for_memory():
     assert admin_command_requires_leader("memory.show") is True
     assert admin_command_requires_leader("system.status") is False

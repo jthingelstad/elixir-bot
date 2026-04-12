@@ -140,6 +140,8 @@ def _refresh_member_cache(member_tag, include_battles=False):
 
 def _resolve_member_tag(value):
     """Accept a tag, name, alias, or Discord handle and return a canonical player tag."""
+    from storage.roster import pick_best_match
+
     query = (value or "").strip()
     if not query:
         raise ValueError("member reference is required")
@@ -152,15 +154,10 @@ def _resolve_member_tag(value):
     if not matches:
         log.warning("member_resolution_failed query=%r reason=no_matches", query)
         raise ValueError(f"Could not resolve member reference: {query}")
-    exactish = [m for m in matches if m.get("match_score", 0) >= 850]
-    if len(exactish) == 1:
-        return exactish[0]["player_tag"]
-    if len(matches) == 1:
-        return matches[0]["player_tag"]
-    top = matches[0]
-    second = matches[1]
-    if (top.get("match_score", 0) - second.get("match_score", 0)) >= 100:
-        return top["player_tag"]
+    best = pick_best_match(matches)
+    if best is not None:
+        return best["player_tag"]
+    top, second = matches[0], matches[1]
     choices = ", ".join(m.get("member_ref_with_handle") or m.get("current_name") or m["player_tag"] for m in matches[:3])
     log.warning(
         "member_resolution_ambiguous query=%r top_score=%d second_score=%d choices=%s",

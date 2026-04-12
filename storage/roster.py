@@ -17,6 +17,27 @@ def _fold_for_search(value: str) -> str:
     nfd = unicodedata.normalize("NFD", value or "")
     return "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn").lower()
 
+
+def pick_best_match(matches: list[dict]) -> dict | None:
+    """Pick the single best candidate from a resolve_member result list.
+
+    Accepts a high-confidence exact match (score >= 850) when there's only one,
+    or the top match when it outscores second place by 100 points, or the only
+    candidate when there's one. Returns None when the result is genuinely
+    ambiguous so callers can present disambiguation to the user.
+    """
+    if not matches:
+        return None
+    exactish = [m for m in matches if m.get("match_score", 0) >= 850]
+    if len(exactish) == 1:
+        return exactish[0]
+    if len(matches) == 1:
+        return matches[0]
+    top, second = matches[0], matches[1]
+    if (top.get("match_score", 0) - second.get("match_score", 0)) >= 100:
+        return top
+    return None
+
 from db import (
     _canon_tag,
     _card_level,
