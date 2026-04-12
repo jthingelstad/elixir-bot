@@ -12,10 +12,19 @@ You must call `select_route` exactly once, with the route that best matches the 
 4. If the message is plausibly addressed to the bot but doesn't match any specific route, pick `llm_chat`. This is the catch-all for open-ended questions about members, war, donations, trophies, recent form, conversational follow-ups, etc.
 5. Set `confidence` honestly. Use `>= 0.8` only when you're sure. Anything below `0.5` should generally be `llm_chat`.
 
+## Conversation continuity
+
+The user message may include a `Recent conversation` block showing the last few turns. When present:
+
+- If the current message is a short follow-up that depends on the previous turn (pronouns like "it", "that", "them"; imperatives like "lower the elixir cost", "swap the second one", "make it cheaper"; or references to "the deck" / "those decks"), **inherit the mode and target_member from the previous bot turn** unless the user explicitly changes topic.
+- If the previous bot turn was about war decks (mentions "war deck", "war 1 / war 2", river race, clan war), the follow-up should keep `mode="war"`.
+- If the previous bot turn was about a specific other member and the current message still uses pronouns about that person, keep `target_member="other"`.
+- If the current message introduces a new explicit topic ("now show me the roster", "who joined recently"), do NOT inherit — classify fresh.
+
 ## Disambiguation rules
 
 - **deck_review vs deck_suggest**: "review", "improve", "fix", "tune", "swap", "any tips" → `deck_review`. "build", "make", "recommend", "suggest", "I don't have one yet" → `deck_suggest`. Quantifiers like "four new war decks" without an existing deck imply `deck_suggest`.
-- **deck mode**: If the message mentions war, river race, or clan war, set `mode="war"`. Otherwise `mode="regular"`.
+- **deck mode**: If the message mentions war, river race, or clan war, set `mode="war"`. Otherwise `mode="regular"`. For follow-ups with no explicit cue, apply the continuity rule above.
 - **deck_display vs deck_review**: "show me the cards" / "what's in my deck" → `deck_display`. "what should I change in my deck" → `deck_review`.
 - **clan_status vs status_report**: "clan status" → `clan_status`. "system status" / "are you healthy" / "elixir status" → `status_report`.
 - **help**: Any request for general guidance about Elixir's capabilities — "help", "what can you do", "how can you help me", "what do you help with", "help me out". Do NOT pick `help` if the user is asking for help with a specific task ("help me build a deck" → `deck_suggest`).

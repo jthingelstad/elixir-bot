@@ -82,14 +82,56 @@ def _load_prompt(workflows: tuple[str, ...]) -> str:
     return template.replace("{ROUTE_TABLE}", router_route_summaries(workflows))
 
 
-def _build_user_message(question: str, *, workflow: str, mentioned: bool, allows_open_channel_reply: bool) -> str:
-    return (
-        f"Channel workflow: {workflow}\n"
-        f"Bot was mentioned: {mentioned}\n"
-        f"Channel allows open-channel replies: {allows_open_channel_reply}\n\n"
-        f"Message: {question}\n\n"
-        "Call select_route exactly once."
-    )
+_HISTORY_TURNS = 4  # Last N turns (user+assistant combined) the router sees.
+_HISTORY_CHAR_CAP = 800  # Per-turn content cap to keep router prompt compact.
+
+
+def _format_conversation_history(history: list[dict] | None) -> str:
+    if not history:
+        return ""
+    # Oldest-first preferred; db.list_thread_messages already returns ASC.
+    recent = list(history)[-_HISTORY_TURNS:]
+    lines = []
+    for turn in recent:
+        role = turn.get("role") or turn.get("author_type") or "user"
+        content = turn.get("content") or ""
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content if c)
+        content = str(content).strip().replace("\n", " ")
+        if len(content) > _HISTORY_CHAR_CAP:
+            content = content[:_HISTORY_CHAR_CAP] + "…"
+        if not content:
+            continue
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
+def _build_user_message(
+    question: str,
+    *,
+    workflow: str,
+    mentioned: bool,
+    allows_open_channel_reply: bool,
+    history_text: str = "",
+) -> str:
+    parts = [
+        f"Channel workflow: {workflow}",
+        f"Bot was mentioned: {mentioned}",
+        f"Channel allows open-channel replies: {allows_open_channel_reply}",
+        "",
+    ]
+    if history_text:
+        parts.extend([
+            "Recent conversation (oldest first):",
+            history_text,
+            "",
+        ])
+    parts.extend([
+        f"Current message: {question}",
+        "",
+        "Call select_route exactly once.",
+    ])
+    return "\n".join(parts)
 
 
 def classify_intent(
@@ -98,9 +140,14 @@ def classify_intent(
     workflow: str,
     mentioned: bool,
     allows_open_channel_reply: bool = False,
+    conversation_history: list[dict] | None = None,
     model: str | None = None,
 ) -> Intent:
     """Classify a Discord message into a route. Always returns an Intent.
+
+    ``conversation_history`` is a list of ``{role, content}`` dicts, oldest
+    first. The most recent turns are included in the router prompt so that
+    follow-ups inherit mode/subject from the previous bot response.
 
     On failure (LLM error, missing tool call, unknown route) returns an Intent
     with route='llm_chat' and a fallback_reason field set, so the caller can
@@ -111,11 +158,13 @@ def classify_intent(
 
     workflows = ("interactive", "clanops") if workflow not in {"interactive", "clanops"} else (workflow,)
     system_prompt = _load_prompt(workflows)
+    history_text = _format_conversation_history(conversation_history)
     user_msg = _build_user_message(
         question,
         workflow=workflow,
         mentioned=mentioned,
         allows_open_channel_reply=allows_open_channel_reply,
+        history_text=history_text,
     )
 
     try:
