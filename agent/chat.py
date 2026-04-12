@@ -399,7 +399,12 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                     "role": "user",
                     "content": (
                         "Your previous response was invalid for this workflow. "
-                        f"{parsed[1]} Return JSON only that satisfies the required schema."
+                        f"{parsed[1]} Return JSON only that satisfies the required schema. "
+                        "Do NOT return `null` — if the user's question is based on a false "
+                        "premise (a card they mentioned isn't actually in the deck, or the "
+                        "swap they proposed already exists), still return a valid response "
+                        "object with `content` explaining the mismatch and offering to "
+                        "help with what's actually there."
                     ),
                 })
                 try:

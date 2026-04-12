@@ -108,6 +108,16 @@ def generate_conversation_script(member: dict) -> list[str]:
         if has_deck else "has no current deck data (new or lapsed player)"
     )
 
+    # Steer war-capable members toward exercising the war-deck display path
+    # at least once so the eval covers it.
+    war_guidance = (
+        "- At least ONE of the 3 turns should involve war decks (either "
+        "asking to see them, review them, or tweak them). Example phrasings: "
+        "'show me my war decks', 'pull up my 4 war decks', 'review my war decks'."
+        if war_type in {"regular", "occasional"} else
+        "- This member doesn't play war much, so do NOT have them ask about war decks."
+    )
+
     prompt = (
         f"You are generating a realistic 3-turn Discord conversation that a clan "
         f"member might have with the Elixir bot about their decks.\n\n"
@@ -119,9 +129,9 @@ def generate_conversation_script(member: dict) -> list[str]:
         f"- Write 3 sequential messages the member would send, varying in phrasing.\n"
         f"- They address the bot directly (so each message would trigger the deck workflow).\n"
         f"- The 3 turns should build on each other — e.g., show deck → review → tweak; "
-        f"or build decks → adjust one → change cost profile.\n"
-        f"- Mix war decks and regular decks depending on profile. A 'never' war player should NOT "
-        f"ask for war decks. A 'regular' war player probably should.\n"
+        f"or show war decks → review one → swap a card.\n"
+        f"{war_guidance}\n"
+        f"- Vary phrasing across casual/formal, short/long, with/without typos.\n"
         f"- Don't use the member's own name in the message — they're speaking as themselves "
         f"(so 'my deck', 'my war decks', etc.).\n"
         f"- Keep each message conversational and concise (under 30 words).\n\n"
@@ -305,20 +315,46 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     errors = sum(1 for _, t in all_turns if t.get("error"))
     skipped = sum(1 for _, t in all_turns if t.get("skipped"))
     routes = Counter(t.get("route") for _, t in all_turns)
+    route_modes = Counter(
+        f"{t.get('route')}/{t.get('mode') or '-'}" for _, t in all_turns
+    )
+    event_types = Counter(t.get("event_type") for _, t in all_turns if t.get("event_type"))
     tools = Counter()
     for _, t in all_turns:
         for name, _args in t.get("tool_calls") or []:
             tools[name] += 1
 
+    # Errors with details
     print(f"Total turns: {total}")
     print(f"Errors: {errors}")
     print(f"Off-topic routes (skipped): {skipped}")
+    if errors:
+        print(f"\nError details:")
+        for m, t in all_turns:
+            if t.get("error"):
+                print(f"  {m.get('current_name', m.get('player_tag', '?'))} — {t['error']}")
+
     print(f"\nRoute distribution:")
     for route, n in routes.most_common():
         print(f"  {route:22s} {n:>4}")
+    print(f"\nRoute + mode distribution:")
+    for label, n in route_modes.most_common():
+        print(f"  {label:25s} {n:>4}")
+    print(f"\nEvent types:")
+    for et, n in event_types.most_common():
+        print(f"  {et:28s} {n:>4}")
     print(f"\nTool call tally:")
     for name, n in tools.most_common():
         print(f"  {name:25s} {n:>4}")
+
+    # Mode inheritance: a follow-up turn (turn index > 1) whose question lacks
+    # an explicit war/regular cue but still carries the right mode is a win.
+    follow_ups_with_mode = [
+        (m, t) for m, t in all_turns
+        if t.get("mode") in {"war", "regular"}
+        and t.get("route") in {"deck_review", "deck_suggest"}
+    ]
+    print(f"\nFollow-ups with concrete mode: {len(follow_ups_with_mode)}")
 
     war_suggest_turns = [
         t for _, t in all_turns
