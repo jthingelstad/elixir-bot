@@ -66,8 +66,39 @@ async def _post_to_elixir(*args, **kwargs):
 
 
 def _chunk_for_discord(text, size=DISCORD_CHUNK_SIZE):
-    """Split text into chunks that fit within Discord's message limit."""
-    return [text[i:i + size] for i in range(0, len(text), size)]
+    """Split text into chunks that fit within Discord's message limit.
+
+    Prefers paragraph breaks, then line breaks, then word boundaries, so
+    dense replies don't split mid-word or mid-code-block. Falls back to a
+    hard character split only when no whitespace is found inside the
+    window — the size limit is an absolute ceiling.
+    """
+    if not text:
+        return []
+    if len(text) <= size:
+        return [text]
+
+    chunks = []
+    remaining = text
+    while len(remaining) > size:
+        window = remaining[:size]
+        split_at = window.rfind("\n\n")
+        if split_at > 0:
+            split_at += 2
+        else:
+            newline = window.rfind("\n")
+            if newline > 0:
+                split_at = newline + 1
+            else:
+                space = window.rfind(" ")
+                split_at = space + 1 if space > 0 else size
+        piece = remaining[:split_at].rstrip()
+        if piece:
+            chunks.append(piece)
+        remaining = remaining[split_at:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
 
 
 def _safe_create_task(coro, *, name=None):
