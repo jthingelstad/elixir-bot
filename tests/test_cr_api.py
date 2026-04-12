@@ -21,10 +21,11 @@ def _mock_response(json_data, status_code=200):
     return resp
 
 
-def _mock_response_http_error(status_code=404):
+def _mock_response_http_error(status_code=404, headers=None):
     """Create a mock response that raises HTTPError on raise_for_status."""
     resp = MagicMock(spec=requests.Response)
     resp.status_code = status_code
+    resp.headers = headers or {}
     resp.raise_for_status.side_effect = requests.HTTPError(
         response=resp,
     )
@@ -99,19 +100,77 @@ def test_request_json_retry_then_succeed(mock_get, mock_record, mock_sleep):
 
 @patch("cr_api.runtime_status.record_api_call")
 @patch("cr_api.requests.get")
-def test_request_json_raises_on_http_error(mock_get, mock_record):
-    """HTTPError is raised immediately with no retry."""
+def test_request_json_raises_immediately_on_permanent_http_error(mock_get, mock_record):
+    """4xx (non-429) is permanent — raised without retry."""
     mock_get.return_value = _mock_response_http_error(404)
 
     with pytest.raises(requests.HTTPError):
         cr_api._request_json("/test", endpoint_name="test")
 
-    # Only one attempt — no retry on HTTP errors
     mock_get.assert_called_once()
-    mock_record.assert_called_once()
     _, kwargs = mock_record.call_args
     assert kwargs["ok"] is False
     assert kwargs["status_code"] == 404
+
+
+@patch("cr_api.time.sleep")
+@patch("cr_api.runtime_status.record_api_call")
+@patch("cr_api.requests.get")
+def test_request_json_retries_on_429(mock_get, mock_record, mock_sleep):
+    """429 (rate limit) is transient — retried up to _MAX_RETRIES."""
+    mock_get.return_value = _mock_response_http_error(429)
+
+    with pytest.raises(requests.HTTPError):
+        cr_api._request_json("/test", endpoint_name="test")
+
+    assert mock_get.call_count == cr_api._MAX_RETRIES + 1
+    assert mock_sleep.call_count == cr_api._MAX_RETRIES
+
+
+@patch("cr_api.time.sleep")
+@patch("cr_api.runtime_status.record_api_call")
+@patch("cr_api.requests.get")
+def test_request_json_retries_on_5xx(mock_get, mock_record, mock_sleep):
+    """5xx (transient server error) is retried."""
+    mock_get.return_value = _mock_response_http_error(503)
+
+    with pytest.raises(requests.HTTPError):
+        cr_api._request_json("/test", endpoint_name="test")
+
+    assert mock_get.call_count == cr_api._MAX_RETRIES + 1
+
+
+@patch("cr_api.time.sleep")
+@patch("cr_api.runtime_status.record_api_call")
+@patch("cr_api.requests.get")
+def test_request_json_retry_honors_retry_after_header(mock_get, mock_record, mock_sleep):
+    """Retry-After header is respected over exponential backoff."""
+    mock_get.return_value = _mock_response_http_error(429, headers={"Retry-After": "7"})
+
+    with pytest.raises(requests.HTTPError):
+        cr_api._request_json("/test", endpoint_name="test")
+
+    # Every sleep call should be exactly 7s (the Retry-After value).
+    assert mock_sleep.call_count == cr_api._MAX_RETRIES
+    for call in mock_sleep.call_args_list:
+        assert call.args[0] == 7.0
+
+
+@patch("cr_api.time.sleep")
+@patch("cr_api.runtime_status.record_api_call")
+@patch("cr_api.requests.get")
+def test_request_json_429_then_success(mock_get, mock_record, mock_sleep):
+    """A 429 followed by a 200 succeeds via retry."""
+    mock_get.side_effect = [
+        _mock_response_http_error(429),
+        _mock_response({"ok": True}),
+    ]
+
+    result = cr_api._request_json("/test", endpoint_name="test")
+
+    assert result == {"ok": True}
+    assert mock_get.call_count == 2
+    assert mock_sleep.call_count == 1
 
 
 # ---------------------------------------------------------------------------
