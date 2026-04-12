@@ -87,50 +87,100 @@ async def _clan_wars_intel_report():
 
     season_id = war.get("seasonId")
 
-    # 6. Generate LLM strategic summary
-    llm_summary = None
+    # 6. Set up shared LLM context
+    channel_config = None
+    memory_context = None
     try:
-        data_summary = await asyncio.to_thread(format_intel_summary_for_memory, analyses)
         channel_config = _channel_config_by_key("river-race")
         memory_context = await asyncio.to_thread(
             build_subagent_memory_context, channel_config, signals=[],
         )
-
-        context = (
-            f"A new clan wars season has begun (Season {season_id}).\n"
-            f"Here is the scouting data on our {len([a for a in analyses if not a['is_us']])} opponents:\n\n"
-            f"{data_summary}\n\n"
-            "Write a brief strategic assessment (2-4 sentences) highlighting which clans "
-            "pose the biggest threats and why, and any notable weaknesses we could exploit. "
-            "Be direct and actionable."
-        )
-        llm_summary = await asyncio.to_thread(
-            elixir_agent.generate_channel_update,
-            channel_config["name"],
-            channel_config["subagent_key"],
-            context,
-            memory_context=memory_context,
-            leadership=False,
-        )
-        if isinstance(llm_summary, dict):
-            llm_summary = llm_summary.get("content")
-        if isinstance(llm_summary, list):
-            llm_summary = "\n\n".join(str(item) for item in llm_summary if item)
-        llm_summary = (llm_summary or "").strip() or None
     except Exception as exc:
-        log.warning("Intel report: LLM summary generation failed (continuing without): %s", exc)
-        llm_summary = None
+        log.warning("Intel report: LLM context setup failed: %s", exc)
 
-    # 7. Format Discord messages
+    # 7. Generate strategic summary (header)
+    llm_summary = None
+    if channel_config is not None:
+        try:
+            data_summary = await asyncio.to_thread(format_intel_summary_for_memory, analyses)
+            context = (
+                f"A new clan wars season has begun (Season {season_id}).\n"
+                f"Here is the scouting data on our {len([a for a in analyses if not a['is_us']])} opponents:\n\n"
+                f"{data_summary}\n\n"
+                "Write a brief strategic assessment (2-4 sentences) highlighting which clans "
+                "pose the biggest threats and why, and any notable weaknesses we could exploit. "
+                "Be direct and actionable."
+            )
+            llm_summary = await asyncio.to_thread(
+                elixir_agent.generate_channel_update,
+                channel_config["name"],
+                channel_config["subagent_key"],
+                context,
+                memory_context=memory_context,
+                leadership=False,
+            )
+            if isinstance(llm_summary, dict):
+                llm_summary = llm_summary.get("content")
+            if isinstance(llm_summary, list):
+                llm_summary = "\n\n".join(str(item) for item in llm_summary if item)
+            llm_summary = (llm_summary or "").strip() or None
+        except Exception as exc:
+            log.warning("Intel report: LLM summary generation failed (continuing without): %s", exc)
+            llm_summary = None
+
+    # 8. Generate per-clan snarky briefs (best-effort; skip on failure)
+    clan_briefs: dict[str, str] = {}
+    if channel_config is not None:
+        for analysis in analyses:
+            if analysis.get("is_us"):
+                continue
+            try:
+                per_clan_data = await asyncio.to_thread(
+                    format_intel_summary_for_memory, [analysis],
+                )
+                brief_context = (
+                    f"Write a brief, snarky one-line recap (1 sentence, under 200 chars) "
+                    f"for this opponent clan. Be specific — call out what stands out about "
+                    f"them from the data. Dry wit welcome; no emojis.\n\n"
+                    f"Clan: {analysis['name']} ({analysis['tag']})\n"
+                    f"Threat rating: {analysis.get('threat_rating', 1)}/5\n"
+                    f"Stats: {per_clan_data}"
+                )
+                brief = await asyncio.to_thread(
+                    elixir_agent.generate_channel_update,
+                    channel_config["name"],
+                    channel_config["subagent_key"],
+                    brief_context,
+                    memory_context=memory_context,
+                    leadership=False,
+                )
+                if isinstance(brief, dict):
+                    brief = brief.get("content")
+                if isinstance(brief, list):
+                    brief = "\n\n".join(str(item) for item in brief if item)
+                brief = (brief or "").strip()
+                if brief:
+                    clan_briefs[analysis["tag"]] = brief
+            except Exception as exc:
+                log.warning(
+                    "Intel report: brief generation failed for %s: %s",
+                    analysis.get("tag"), exc,
+                )
+
+    # 9. Format Discord messages
     messages = await asyncio.to_thread(
-        format_intel_report, analyses, season_id=season_id, llm_summary=llm_summary,
+        format_intel_report,
+        analyses,
+        season_id=season_id,
+        llm_summary=llm_summary,
+        clan_briefs=clan_briefs,
     )
 
-    # 8. Post to river-race
+    # 10. Post to river-race
     for message_text in messages:
         await _post_to_elixir(channel, {"content": message_text})
 
-    # 9. Persist memory
+    # 11. Persist memory
     if season_id is not None:
         try:
             memory_body = await asyncio.to_thread(format_intel_summary_for_memory, analyses)
