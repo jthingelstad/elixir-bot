@@ -366,11 +366,7 @@ def _is_clanops_channel(channel) -> bool:
 
 
 def _chunk_discord_text(text: str, limit: int = 2000) -> list[str]:
-    if not text:
-        return []
-    if len(text) <= limit:
-        return [text]
-    return [text[i:i + (limit - 10)] for i in range(0, len(text), limit - 10)]
+    return _chunk_for_discord(text, size=limit - 10)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

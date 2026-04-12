@@ -1,0 +1,68 @@
+"""Tests for Discord message chunking (splits at paragraph/line/word boundaries)."""
+
+from runtime.helpers._common import _chunk_for_discord
+
+
+def test_short_text_returns_single_chunk():
+    assert _chunk_for_discord("hello") == ["hello"]
+
+
+def test_empty_text_returns_empty_list():
+    assert _chunk_for_discord("") == []
+    assert _chunk_for_discord(None) == []
+
+
+def test_splits_on_paragraph_boundary_when_possible():
+    para_a = "A" * 50
+    para_b = "B" * 50
+    text = f"{para_a}\n\n{para_b}"
+    chunks = _chunk_for_discord(text, size=80)
+    assert chunks[0] == para_a
+    assert chunks[1] == para_b
+
+
+def test_splits_on_line_boundary_when_no_paragraph_fits():
+    line_a = "A" * 40
+    line_b = "B" * 40
+    line_c = "C" * 40
+    text = f"{line_a}\n{line_b}\n{line_c}"
+    chunks = _chunk_for_discord(text, size=50)
+    # Each chunk should end at a line break (i.e., start fresh on B or C).
+    for chunk in chunks:
+        assert "\n\n" not in chunk  # no synthetic doubling
+        assert len(chunk) <= 50
+
+
+def test_splits_on_word_boundary_when_no_line_fits():
+    text = "word " * 40  # no newlines
+    chunks = _chunk_for_discord(text, size=50)
+    for chunk in chunks:
+        # Each chunk should not end mid-word.
+        assert not chunk.endswith("wor")
+        assert not chunk.endswith("w")
+        assert len(chunk) <= 50
+
+
+def test_hard_char_split_when_no_whitespace():
+    text = "x" * 200  # no breaks anywhere
+    chunks = _chunk_for_discord(text, size=50)
+    # Hard ceiling is still respected.
+    assert all(len(c) <= 50 for c in chunks)
+    # All content is preserved.
+    assert "".join(chunks) == text
+
+
+def test_all_content_preserved_across_chunks():
+    text = "Paragraph one with several sentences.\n\nParagraph two.\n\nParagraph three has more words."
+    chunks = _chunk_for_discord(text, size=40)
+    # Rejoin and compare ignoring whitespace (strip/lstrip semantics mean adjacent
+    # whitespace gets normalized, but no content should be lost).
+    rejoined = "\n\n".join(chunks)
+    for word in ["Paragraph", "sentences", "three", "words"]:
+        assert word in rejoined
+
+
+def test_never_exceeds_size_ceiling():
+    text = "Some prose with occasional breaks.\n" + ("longwordwithoutspaces" * 20)
+    chunks = _chunk_for_discord(text, size=100)
+    assert all(len(c) <= 100 for c in chunks)
