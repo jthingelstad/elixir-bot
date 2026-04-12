@@ -33,17 +33,25 @@ def _role_summary(breakdown: dict) -> str:
     return ", ".join(parts) if parts else "Unknown"
 
 
-def _format_clan_block(analysis: dict) -> str:
+def _format_clan_block(analysis: dict, brief: str | None = None) -> str:
     """Format a single competing clan's analysis into a Discord message block."""
     name = analysis["name"]
     tag = analysis["tag"]
-    threat = analysis.get("threat_rating", 1)
-    stars = _THREAT_STARS.get(threat, _THREAT_STARS[1])
+    threat = max(1, min(5, int(analysis.get("threat_rating", 1) or 1)))
+    fire = "\U0001f525" * threat
     roster = analysis.get("roster")
     war = analysis.get("war")
     profile_available = analysis.get("profile_available", False)
 
-    lines = [f"**[Threat: {stars}] {name}** ({tag})"]
+    tag_clean = tag.lstrip("#")
+    header = (
+        f"\u2694\ufe0f **[{name}](https://royaleapi.com/clan/{tag_clean})** "
+        f"({tag}) {fire}"
+    )
+    lines = [header]
+
+    if brief:
+        lines.append(f"_{brief.strip()}_")
 
     if roster and profile_available:
         lines.append(
@@ -98,11 +106,15 @@ def format_intel_report(
     *,
     season_id: int | None = None,
     llm_summary: str | None = None,
+    clan_briefs: dict[str, str] | None = None,
 ) -> list[str]:
     """Format the full intel report as a list of Discord messages.
 
     Returns one header message, optionally an LLM summary message,
     then one message per competing clan (excluding our clan).
+
+    ``clan_briefs`` maps clan tag (with ``#`` prefix, matching ``analysis["tag"]``)
+    to a short snarky recap string that is rendered in italics under the header.
     """
     now = datetime.now(timezone.utc).astimezone(CHICAGO)
     timestamp = now.strftime("%b %d, %Y at %I:%M %p CT")
@@ -121,8 +133,9 @@ def format_intel_report(
 
     messages = ["\n".join(header_parts)]
 
+    briefs = clan_briefs or {}
     for analysis in opponents:
-        messages.append(_format_clan_block(analysis))
+        messages.append(_format_clan_block(analysis, brief=briefs.get(analysis["tag"])))
 
     return messages
 
