@@ -454,6 +454,51 @@ STARTUP_SYSTEM_SIGNALS = [
         },
     },
     {
+        "signal_key": "capability_deck_review_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Deck Review",
+            "message": (
+                "Elixir now has a dedicated deck-review workflow that grounds advice in your actual battle history "
+                "instead of generic meta talk. It handles regular Trophy Road decks, your four river-race war decks "
+                "(reconstructed from battle data since the Clash Royale API does not expose them), and a build-from-scratch "
+                "mode for clan members who want a starter kit."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Deck Review** :elixir:\n\n"
+                "Asking Elixir for deck help just got a lot more personal. "
+                "Instead of generic meta talk, advice is now grounded in **your own battle history** — "
+                "the cards that have actually been beating you, the cards you actually own at competitive level, "
+                "and the four war decks Elixir reconstructs from your river-race battles.\n\n"
+                "**In #ask-elixir:**\n"
+                "- `review my deck` — Elixir cites the specific cards in your recent losses "
+                "(e.g. \"Mega Knight has been in 6 of your last 9 losses\") and proposes swaps you can actually run.\n"
+                "- `review my war decks` — reconstructs your four war decks from battle history "
+                "(the Clash Royale API does not show them directly), then reviews each one with the "
+                "no-overlap rule enforced on every swap suggestion.\n"
+                "- `build me a deck` — proposes a deck built entirely from cards you own, with reasoning per slot.\n"
+                "- `build my war decks` — builds all **four** war decks for you (32 unique cards, no overlaps), "
+                "with distinct roles per deck.\n\n"
+                "**For clan members new to war:**\n"
+                "- If you have not played river race yet and ask Elixir to review your war decks, "
+                "you will get a warm offer instead of a brick wall: Elixir will offer to build you four starter "
+                "decks from your collection so you can stop staring at the deck-builder screen.\n"
+                "- Building four non-overlapping decks is the most common blocker keeping members out of war. "
+                "Elixir can hand you a kit. Reply `build my war decks` and you are in.\n\n"
+                "This is **Elixir v4.3 \"Deck Review\"** — your decks, your data, your call."
+            ),
+            "details": [
+                "Deck advice is now grounded in real opponent cards from your recent losses, not generic meta knowledge.",
+                "War deck reconstruction infers your four river-race decks from battle history since the Clash Royale API does not expose them.",
+                "Build-from-scratch mode can propose a single deck or all four war decks (32 unique cards) from your collection.",
+                "New-war-player flow: asking to review war decks with no war activity triggers an offer to build you a starter kit.",
+                "Every swap suggestion is validated against the no-overlap rule and your card collection, so Elixir never recommends a card you do not own.",
+            ],
+            "audience": "clan",
+            "capability_area": "deck_review",
+        },
+    },
+    {
         "signal_key": "capability_race_command_v1",
         "signal_type": "capability_unlock",
         "payload": {

@@ -1240,7 +1240,46 @@ def _migration_24(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24]
+def _migration_25(conn: sqlite3.Connection) -> None:
+    """Capture opponent decks on member_battle_facts.
+
+    Opponent cards are present in raw_json (battle["opponent"][0]["cards"]) but were
+    not extracted to typed columns. This migration adds opponent_deck_json and
+    opponent_support_cards_json, then backfills both from raw_json so the new
+    deck-review tooling can aggregate "what's beating you" without parsing every
+    raw payload at query time.
+    """
+    columns = _table_columns(conn, "member_battle_facts")
+    if "opponent_deck_json" not in columns:
+        conn.execute("ALTER TABLE member_battle_facts ADD COLUMN opponent_deck_json TEXT")
+    if "opponent_support_cards_json" not in columns:
+        conn.execute("ALTER TABLE member_battle_facts ADD COLUMN opponent_support_cards_json TEXT")
+
+    rows = conn.execute(
+        "SELECT battle_fact_id, raw_json FROM member_battle_facts "
+        "WHERE opponent_deck_json IS NULL AND raw_json IS NOT NULL"
+    ).fetchall()
+
+    for row in rows:
+        try:
+            battle = json.loads(row["raw_json"])
+        except (TypeError, ValueError):
+            continue
+        opponents = battle.get("opponent") or []
+        if not opponents:
+            continue
+        opp = opponents[0] if isinstance(opponents[0], dict) else {}
+        cards = opp.get("cards") or []
+        support_cards = opp.get("supportCards") or []
+        deck_payload = json.dumps(cards) if cards else None
+        support_payload = json.dumps(support_cards) if support_cards else None
+        conn.execute(
+            "UPDATE member_battle_facts SET opponent_deck_json = ?, opponent_support_cards_json = ? WHERE battle_fact_id = ?",
+            (deck_payload, support_payload, row["battle_fact_id"]),
+        )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

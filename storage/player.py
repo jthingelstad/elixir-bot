@@ -871,7 +871,7 @@ def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Opt
         arena = battle.get("arena") or {}
         classified = _classify_battle(battle)
         conn.execute(
-            "INSERT OR IGNORE INTO member_battle_facts (member_id, battle_time, battle_type, game_mode_name, game_mode_id, deck_selection, arena_id, arena_name, crowns_for, crowns_against, outcome, trophy_change, starting_trophies, is_competitive, is_ladder, is_ranked, is_war, is_special_event, deck_json, support_cards_json, opponent_name, opponent_tag, opponent_clan_tag, event_tag, league_number, is_hosted_match, modifiers_json, team_rounds_json, opponent_rounds_json, boat_battle_side, boat_battle_won, new_towers_destroyed, prev_towers_destroyed, remaining_towers, tournament_tag, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO member_battle_facts (member_id, battle_time, battle_type, game_mode_name, game_mode_id, deck_selection, arena_id, arena_name, crowns_for, crowns_against, outcome, trophy_change, starting_trophies, is_competitive, is_ladder, is_ranked, is_war, is_special_event, deck_json, support_cards_json, opponent_deck_json, opponent_support_cards_json, opponent_name, opponent_tag, opponent_clan_tag, event_tag, league_number, is_hosted_match, modifiers_json, team_rounds_json, opponent_rounds_json, boat_battle_side, boat_battle_won, new_towers_destroyed, prev_towers_destroyed, remaining_towers, tournament_tag, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 member_id,
                 battle.get("battleTime"),
@@ -893,6 +893,8 @@ def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Opt
                 classified["is_special_event"],
                 _json_or_none(_normalize_cards_for_storage(team.get("cards") or [])),
                 _json_or_none(_normalize_cards_for_storage(team.get("supportCards") or [])),
+                _json_or_none(_normalize_cards_for_storage(opp.get("cards") or [])) if opp else None,
+                _json_or_none(_normalize_cards_for_storage(opp.get("supportCards") or [])) if opp else None,
                 opp.get("name") if opp else None,
                 _canon_tag(opp.get("tag")) if opp and opp.get("tag") else None,
                 _canon_tag((opp.get("clan") or {}).get("tag")) if opp else None,
@@ -950,6 +952,110 @@ def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Opt
     )
     conn.commit()
     return signals
+
+
+_LOSSES_SCOPE_PREDICATES = {
+    "overall_10": "1=1",
+    "competitive_10": "is_competitive = 1",
+    "ladder_ranked_10": "(is_ladder = 1 OR is_ranked = 1)",
+    "war_10": "is_war = 1",
+}
+
+
+@managed_connection
+def get_member_recent_losses(
+    tag: str,
+    scope: str = "competitive_10",
+    limit: int = 30,
+    top_cards: int = 10,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """Aggregate the cards a player has been losing to recently.
+
+    Looks at the most recent `limit` battles in the given scope, filters to
+    losses, and returns the top opponent cards seen alongside crown deficit
+    and current loss-streak context. Powers the `losses` include on get_member.
+    """
+    member_tag = _canon_tag(tag)
+    predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["competitive_10"])
+    member_row = conn.execute(
+        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        (member_tag,),
+    ).fetchone()
+    if not member_row:
+        return None
+    member_id = member_row["member_id"]
+    rows = conn.execute(
+        f"SELECT outcome, crowns_for, crowns_against, opponent_deck_json, battle_time, battle_type, game_mode_name "
+        f"FROM member_battle_facts WHERE member_id = ? AND {predicate} "
+        f"ORDER BY battle_time DESC LIMIT ?",
+        (member_id, limit),
+    ).fetchall()
+    sample_battles = len(rows)
+    losses = [r for r in rows if r["outcome"] == "L"]
+    losses_examined = len(losses)
+    counts: dict[str, int] = {}
+    icons: dict[str, str] = {}
+    for row in losses:
+        try:
+            opp_cards = json.loads(row["opponent_deck_json"] or "[]")
+        except (TypeError, ValueError):
+            continue
+        for card in opp_cards:
+            name = card.get("name")
+            if not name:
+                continue
+            counts[name] = counts.get(name, 0) + 1
+            icon = (card.get("iconUrls") or {}).get("medium") if isinstance(card.get("iconUrls"), dict) else None
+            if icon and name not in icons:
+                icons[name] = icon
+    ordered = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:top_cards]
+    top_opponent_cards = [
+        {
+            "name": name,
+            "icon_url": icons.get(name, ""),
+            "appearances": count,
+            "pct_of_losses": round(count / losses_examined * 100) if losses_examined else 0,
+        }
+        for name, count in ordered
+    ]
+    crown_diffs = [
+        (r["crowns_for"] or 0) - (r["crowns_against"] or 0)
+        for r in losses
+        if r["crowns_for"] is not None and r["crowns_against"] is not None
+    ]
+    avg_crown_deficit = round(sum(crown_diffs) / len(crown_diffs), 2) if crown_diffs else None
+    current_loss_streak = 0
+    for row in rows:
+        if row["outcome"] == "L":
+            current_loss_streak += 1
+        else:
+            break
+    losses_with_opponent_data = sum(
+        1 for r in losses if (r["opponent_deck_json"] or "").strip() not in ("", "[]", "null")
+    )
+    coverage_note = None
+    if losses_examined and losses_with_opponent_data < losses_examined:
+        coverage_note = (
+            f"{losses_with_opponent_data}/{losses_examined} losses had opponent deck data captured "
+            "(older battles may pre-date opponent-deck capture)."
+        )
+    return {
+        "member_tag": member_tag,
+        "member_name": member_row["current_name"],
+        "scope": scope,
+        "lookback_battles": sample_battles,
+        "losses_examined": losses_examined,
+        "losses_with_opponent_data": losses_with_opponent_data,
+        "current_loss_streak": current_loss_streak,
+        "avg_crown_deficit": avg_crown_deficit,
+        "top_opponent_cards": top_opponent_cards,
+        "coverage_note": coverage_note,
+        "guidance": (
+            "Use top_opponent_cards to ground swap suggestions: cite specific cards that have "
+            "appeared most often in this player's recent losses, then propose counters they own."
+        ),
+    }
 
 
 @managed_connection

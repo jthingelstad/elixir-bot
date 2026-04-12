@@ -33,6 +33,7 @@ TOOLSETS_BY_WORKFLOW = {
     "clanops": ALL_TOOLS,
     "reception": [],
     "roster_bios": READ_TOOLS,
+    "deck_review": INTERACTIVE_READ_TOOLS,
 }
 
 MAX_ROUNDS_BY_WORKFLOW = {
@@ -44,6 +45,11 @@ MAX_ROUNDS_BY_WORKFLOW = {
     "channel_update": 3,
     "reception": 0,
     "roster_bios": 3,
+    # deck_review chains are unusually long: war reconstruction → losses
+    # lookup → multiple lookup_cards calls → ownership validation → final
+    # answer. Suggest mode adds a validator-driven revision turn. 10 rounds
+    # leaves headroom without inviting runaway loops.
+    "deck_review": 10,
 }
 
 RESPONSE_SCHEMAS_BY_WORKFLOW = {
@@ -54,4 +60,5 @@ RESPONSE_SCHEMAS_BY_WORKFLOW = {
     "clanops": {"required": ["event_type", "summary", "content"]},
     "reception": {"required": ["event_type", "content"]},
     "roster_bios": {"required": ["intro", "members"]},
+    "deck_review": {"required": ["event_type", "summary", "content"]},
 }

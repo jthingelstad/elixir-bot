@@ -4,6 +4,48 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## v4.3 — Deck Review
+
+**Date:** 2026-04-12
+
+Elixir gained a dedicated deck-review workflow that grounds advice in each player's own battle history rather than generic meta talk. It handles regular Trophy Road decks, the four-deck River Race / Clan Wars war pool (which the Clash Royale API doesn't expose directly), and a build-from-scratch suggest mode that's especially useful for clan members who haven't played war yet because they can't figure out how to assemble four non-overlapping decks.
+
+### Personalized Deck Review (`#ask-elixir`)
+
+- Asking "review my deck" / "improve my deck" / "what should I change" now routes to a specialized workflow instead of generic Q&A.
+- Advice is grounded in the player's actual recent losses — Elixir cites specific opponent cards (e.g. "Mega Knight has been in 6 of your last 9 losses") instead of repeating meta knowledge.
+- All suggestions are validated against the player's collection and card levels — no recommending a card they don't own at competitive level.
+
+### War Deck Review (`review my war decks`)
+
+- Reconstructs the player's four river-race war decks from battle history, since the Clash Royale API doesn't expose them directly.
+- Duel battles reveal three decks per battle (one per round); river-race PvP battles reveal one each.
+- Returns confidence (`high` / `medium` / `low`) and asks for confirmation when the reconstruction is uncertain.
+- Enforces the no-overlap rule on every swap suggestion: a card moved into one deck must come out of wherever it currently lives across the other three.
+
+### Build From Scratch (`build me a deck`, `build my war decks`)
+
+- "Build me a deck" → suggests 1–2 candidate decks with per-card reasoning, drawn from the player's collection and shaped by what's been beating them.
+- "Build my war decks" / "I want to start playing war" → builds four full war decks (32 unique cards) with distinct roles per deck. A post-response validator confirms the no-overlap and ownership constraints, asking the LLM to revise (up to 2 attempts) on violations.
+
+### New War Player Onboarding
+
+- Asking "review my war decks" with no war activity yet triggers a warm offer: Elixir acknowledges the player hasn't played war, explains that building four non-overlapping decks is the most common blocker, and offers to put together a starter kit.
+- The reply prompt routes seamlessly into the four-deck builder.
+
+### Data Foundation
+
+- New `opponent_deck_json` column on `member_battle_facts` captures opponent decks on every battle ingest going forward, plus a one-time backfill of all 11K+ historical battles from raw API payloads.
+- New `losses` include on `get_member` and new `war_decks` aspect on `get_member_war_detail` cleanly extend the existing tool surface (no new top-level tools added).
+
+### Structural
+
+- New `deck_review` LLM workflow registered alongside `interactive` / `clanops` / `observation`, with a higher 10-round budget for the longer war-mode chains.
+- New deck-request classifier separates "show my deck" (fast static report, unchanged) from "review my deck" (LLM workflow), eliminating a long-standing routing bug where review intent silently fell through to the display report.
+- 12 new tests covering opponent capture, losses aggregation, war-deck reconstruction status logic, no-overlap regression, and the war-suggest validator.
+
+---
+
 ## v4.2 — Race Command
 
 **Date:** 2026-04-11
