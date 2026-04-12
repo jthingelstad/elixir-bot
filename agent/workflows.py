@@ -18,6 +18,7 @@ from agent.prompts import (
     _clanops_system,
     _deck_review_system,
     _event_system,
+    _help_system,
     _home_message_system,
     _interactive_system,
     _members_message_system,
@@ -533,6 +534,56 @@ def respond_in_deck_review(question, author_name, channel_name, *, mode, subject
     return last_result
 
 
+def respond_to_help_request(question, *, author_name, channel_name, role,
+                             memory_context=None, conversation_history=None):
+    """Generate an in-character answer to a 'what can you do?' style question.
+
+    The capability list comes from the intent registry so adding a new route
+    keeps the help reply current automatically.
+    """
+    from runtime.intent_registry import help_routes_for_workflow
+
+    routes = help_routes_for_workflow("clanops" if role == "clanops" else "interactive")
+    capability_lines = []
+    for r in routes:
+        examples = r.get("examples") or []
+        example = f' (e.g. "{examples[0]}")' if examples else ""
+        capability_lines.append(f"- {r['label']}: {r['help_summary']}{example}")
+    capabilities_block = "\n".join(capability_lines)
+
+    user_msg = (
+        f"'{author_name}' just asked in {channel_name}: {question}\n\n"
+        "Here is the current list of capabilities available in this channel — pick the most "
+        "relevant two or three and weave them into a short, natural reply in your own voice. "
+        "Don't list every capability and don't write a manual; the goal is for them to feel "
+        "invited to ask, not lectured.\n\n"
+        f"=== CAPABILITIES ===\n{capabilities_block}"
+    )
+    user_msg += _format_memory_context(memory_context)
+
+    system_prompt = _help_system(channel_name, role=role)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_msg},
+    ]
+
+    try:
+        resp = _create_chat_completion(
+            workflow="help",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=600,
+            timeout=60,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        if not text:
+            return None
+        return {"event_type": "help_response", "content": text, "summary": text[:200]}
+    except (APIError, APIConnectionError) as exc:
+        log.warning("respond_to_help_request_failed: %s", exc)
+        return None
+
+
 def respond_in_channel(question, author_name, channel_name, workflow, clan_data, war_data,
                        conversation_history=None, memory_context=None):
     """Channel Q&A for interactive/clanops workflows."""
@@ -753,6 +804,7 @@ __all__ = [
     "respond_in_reception",
     "respond_in_channel",
     "respond_in_deck_review",
+    "respond_to_help_request",
     "generate_message",
     "generate_home_message",
     "generate_members_message",
