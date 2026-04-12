@@ -856,26 +856,29 @@ async def _run_promote_content(preview: bool) -> str:
     return json.dumps(promote, indent=2)
 
 
+_MEMBER_QUERY_MAX_LEN = 64
+
+
 def _resolve_member_tag(member_query: str, *, conn=None) -> tuple[str, str]:
     import db
+    from storage.roster import pick_best_match
 
     query = (member_query or "").strip()
+    if not query:
+        raise ValueError("Member name or tag is required.")
+    if len(query) > _MEMBER_QUERY_MAX_LEN:
+        raise ValueError(
+            f"Member name/tag must be {_MEMBER_QUERY_MAX_LEN} characters or fewer."
+        )
     tag_match = re.search(r"(#?[A-Z0-9]+)\)$", query, re.IGNORECASE)
     if tag_match:
-        candidate_tag = tag_match.group(1)
-        matches = db.resolve_member(candidate_tag, limit=3, conn=conn)
+        matches = db.resolve_member(tag_match.group(1), limit=3, conn=conn)
     else:
         matches = db.resolve_member(query, limit=3, conn=conn)
     if not matches:
         raise ValueError(f"No clan member matched {member_query!r}.")
-    exactish = [item for item in matches if item.get("match_score", 0) >= 850]
-    if len(exactish) == 1:
-        best = exactish[0]
-    elif len(matches) == 1:
-        best = matches[0]
-    elif (matches[0].get("match_score", 0) - matches[1].get("match_score", 0)) >= 100:
-        best = matches[0]
-    else:
+    best = pick_best_match(matches)
+    if best is None:
         choices = ", ".join(
             item.get("member_ref_with_handle") or item.get("current_name") or item.get("player_tag")
             for item in matches[:3]

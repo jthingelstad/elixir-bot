@@ -137,6 +137,24 @@ def _agent_failure_payload(result):
     return None
 
 
+def _classify_agent_result(result) -> tuple[str, dict | None] | None:
+    """Inspect an agent workflow result and return a failure classification.
+
+    Returns None when the result is a well-formed dict (success). Otherwise
+    returns ``(failure_kind, error_payload)`` where ``error_payload`` is the
+    structured ``_error`` block (if any). Callers use the kind for telemetry
+    and the payload for detail logging.
+    """
+    agent_error = _agent_failure_payload(result)
+    if agent_error:
+        return (agent_error.get("kind") or "agent_error", agent_error)
+    if result is None:
+        return ("agent_none", None)
+    if not isinstance(result, dict):
+        return ("invalid_result_type", None)
+    return None
+
+
 def _agent_failure_detail(error: dict) -> str | None:
     detail = (error.get("detail") or "").strip()
     phase = (error.get("phase") or "").strip()
@@ -254,15 +272,12 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
                 memory_context=memory_context,
             )
 
-            agent_error = _agent_failure_payload(result)
-            if agent_error or result is None or not isinstance(result, dict):
-                failure_type = (
-                    (agent_error.get("kind") if isinstance(agent_error, dict) else None)
-                    or ("agent_none" if result is None else "invalid_result_type")
-                )
+            failure = _classify_agent_result(result)
+            if failure:
+                failure_kind, agent_error = failure
                 app._log_prompt_failure(
                     question=ctx["raw_question"], workflow="deck_review",
-                    failure_type=failure_type, failure_stage="respond_in_deck_review",
+                    failure_type=failure_kind, failure_stage="respond_in_deck_review",
                     channel=message.channel, author=message.author,
                     discord_message_id=message.id,
                     detail=_agent_failure_detail(agent_error) if agent_error else None,
@@ -570,46 +585,29 @@ async def route_message(message):
                     clan_data=clan,
                     memory_context=memory_context,
                 )
-                agent_error = _agent_failure_payload(result)
-                if agent_error:
-                    app._log_prompt_failure(
-                        question=question,
-                        workflow="reception",
-                        failure_type=agent_error.get("kind") or "agent_error",
-                        failure_stage="respond_in_reception",
-                        channel=message.channel,
-                        author=message.author,
-                        discord_message_id=message.id,
-                        detail=_agent_failure_detail(agent_error),
-                        result_preview=agent_error.get("result_preview"),
-                        raw_json=agent_error.get("raw_json") or {"response_text": agent_error.get("response_text")},
-                    )
-                    await message.reply("Having a hiccup. Try again in a sec.")
-                    return
-                if result is None:
-                    app._log_prompt_failure(
-                        question=question,
-                        workflow="reception",
-                        failure_type="agent_none",
-                        failure_stage="respond_in_reception",
-                        channel=message.channel,
-                        author=message.author,
-                        discord_message_id=message.id,
-                    )
-                    await message.reply("Having a hiccup. Try again in a sec.")
-                    return
-                if not isinstance(result, dict):
-                    app._log_prompt_failure(
-                        question=question,
-                        workflow="reception",
-                        failure_type="invalid_result_type",
-                        failure_stage="respond_in_reception",
-                        channel=message.channel,
-                        author=message.author,
-                        discord_message_id=message.id,
-                        detail=type(result).__name__,
-                        result_preview=app._preview_text(result),
-                    )
+                failure = _classify_agent_result(result)
+                if failure:
+                    failure_kind, agent_error = failure
+                    failure_kwargs = {
+                        "question": question,
+                        "workflow": "reception",
+                        "failure_type": failure_kind,
+                        "failure_stage": "respond_in_reception",
+                        "channel": message.channel,
+                        "author": message.author,
+                        "discord_message_id": message.id,
+                    }
+                    if agent_error:
+                        failure_kwargs["detail"] = _agent_failure_detail(agent_error)
+                        failure_kwargs["result_preview"] = agent_error.get("result_preview")
+                        failure_kwargs["raw_json"] = (
+                            agent_error.get("raw_json")
+                            or {"response_text": agent_error.get("response_text")}
+                        )
+                    elif failure_kind == "invalid_result_type":
+                        failure_kwargs["detail"] = type(result).__name__
+                        failure_kwargs["result_preview"] = app._preview_text(result)
+                    app._log_prompt_failure(**failure_kwargs)
                     await message.reply("Having a hiccup. Try again in a sec.")
                     return
                 content = result.get("content", result.get("summary", ""))
@@ -711,49 +709,34 @@ async def route_message(message):
                     conversation_history=conversation_history,
                     memory_context=memory_context,
                 )
-                agent_error = _agent_failure_payload(result)
-                if agent_error:
-                    app._log_prompt_failure(
-                        question=raw_question,
-                        workflow=workflow,
-                        failure_type=agent_error.get("kind") or "agent_error",
-                        failure_stage="respond_in_channel",
-                        channel=message.channel,
-                        author=message.author,
-                        discord_message_id=message.id,
-                        detail=_agent_failure_detail(agent_error),
-                        result_preview=agent_error.get("result_preview"),
-                        raw_json=agent_error.get("raw_json") or {"response_text": agent_error.get("response_text")},
-                    )
-                    if mentioned or allows_open_channel_reply:
-                        await message.reply(app._fallback_channel_response(raw_question, workflow))
-                    return
-                if result is None:
-                    app._log_prompt_failure(
-                        question=raw_question,
-                        workflow=workflow,
-                        failure_type="agent_none",
-                        failure_stage="respond_in_channel",
-                        channel=message.channel,
-                        author=message.author,
-                        discord_message_id=message.id,
-                    )
-                    if mentioned or allows_open_channel_reply:
-                        await message.reply(app._fallback_channel_response(raw_question, workflow))
-                    return
-                if not isinstance(result, dict):
-                    app.log.error("%s channel error: invalid result type %s", workflow, type(result).__name__)
-                    app._log_prompt_failure(
-                        question=raw_question,
-                        workflow=workflow,
-                        failure_type="invalid_result_type",
-                        failure_stage="respond_in_channel",
-                        channel=message.channel,
-                        author=message.author,
-                        discord_message_id=message.id,
-                        detail=type(result).__name__,
-                        result_preview=app._preview_text(result),
-                    )
+                failure = _classify_agent_result(result)
+                if failure:
+                    failure_kind, agent_error = failure
+                    if failure_kind == "invalid_result_type":
+                        app.log.error(
+                            "%s channel error: invalid result type %s",
+                            workflow, type(result).__name__,
+                        )
+                    failure_kwargs = {
+                        "question": raw_question,
+                        "workflow": workflow,
+                        "failure_type": failure_kind,
+                        "failure_stage": "respond_in_channel",
+                        "channel": message.channel,
+                        "author": message.author,
+                        "discord_message_id": message.id,
+                    }
+                    if agent_error:
+                        failure_kwargs["detail"] = _agent_failure_detail(agent_error)
+                        failure_kwargs["result_preview"] = agent_error.get("result_preview")
+                        failure_kwargs["raw_json"] = (
+                            agent_error.get("raw_json")
+                            or {"response_text": agent_error.get("response_text")}
+                        )
+                    elif failure_kind == "invalid_result_type":
+                        failure_kwargs["detail"] = type(result).__name__
+                        failure_kwargs["result_preview"] = app._preview_text(result)
+                    app._log_prompt_failure(**failure_kwargs)
                     if mentioned or allows_open_channel_reply:
                         await message.reply(app._fallback_channel_response(raw_question, workflow))
                     return

@@ -3682,6 +3682,37 @@ def test_war_player_types_by_tag_batches_classification():
         conn.close()
 
 
+def test_pick_best_match_scoring_rules():
+    from storage.roster import pick_best_match
+
+    # Empty input
+    assert pick_best_match([]) is None
+
+    # Single exact-ish match (score >= 850) → accept
+    assert pick_best_match([{"match_score": 950, "player_tag": "#A"}])["player_tag"] == "#A"
+
+    # Two exact-ish matches → reject (ambiguous)
+    assert pick_best_match([
+        {"match_score": 950, "player_tag": "#A"},
+        {"match_score": 900, "player_tag": "#B"},
+    ]) is None
+
+    # Single fuzzy match → accept
+    assert pick_best_match([{"match_score": 600, "player_tag": "#A"}])["player_tag"] == "#A"
+
+    # Top outscores second by >=100 → accept top
+    assert pick_best_match([
+        {"match_score": 775, "player_tag": "#A"},
+        {"match_score": 650, "player_tag": "#B"},
+    ])["player_tag"] == "#A"
+
+    # Top-second gap <100 → ambiguous
+    assert pick_best_match([
+        {"match_score": 650, "player_tag": "#A"},
+        {"match_score": 625, "player_tag": "#B"},
+    ]) is None
+
+
 def test_war_player_types_by_tag_empty_input_returns_empty():
     from storage.war_analytics import war_player_types_by_tag
 

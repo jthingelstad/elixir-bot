@@ -2,12 +2,12 @@ import logging
 import re
 
 import db
-from storage.roster import _fold_for_search
+from storage.roster import _fold_for_search, pick_best_match
 
 log = logging.getLogger("elixir")
 
 __all__ = [
-    "_pick_resolved_member", "_match_clan_member",
+    "_match_clan_member",
     "_resolve_member_candidate", "_extract_member_deck_target",
     "_build_member_deck_report",
 ]
@@ -18,21 +18,6 @@ from runtime.helpers._common import (
     _fmt_iso_short,
     _runtime_app,
 )
-
-
-def _pick_resolved_member(matches):
-    if not matches:
-        return None
-    exactish = [item for item in matches if item.get("match_score", 0) >= 850]
-    if len(exactish) == 1:
-        return exactish[0]
-    if len(matches) == 1:
-        return matches[0]
-    top = matches[0]
-    second = matches[1]
-    if (top.get("match_score", 0) - second.get("match_score", 0)) >= 100:
-        return top
-    return None
 
 
 def _match_clan_member(nickname):
@@ -70,15 +55,9 @@ def _resolve_member_candidate(query: str):
     matches = db.resolve_member(query, limit=3)
     if not matches:
         return None, f"I couldn't find a clan member matching {query}."
-    exactish = [item for item in matches if item.get("match_score", 0) >= 850]
-    if len(exactish) == 1:
-        return exactish[0], None
-    if len(matches) == 1:
-        return matches[0], None
-    top = matches[0]
-    second = matches[1]
-    if (top.get("match_score", 0) - second.get("match_score", 0)) >= 100:
-        return top, None
+    best = pick_best_match(matches)
+    if best:
+        return best, None
     choices = ", ".join(
         item.get("member_ref_with_handle") or item.get("current_name") or item["player_tag"]
         for item in matches[:3]
