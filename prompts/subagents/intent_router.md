@@ -24,6 +24,7 @@ The user message may include a `Recent conversation` block showing the last few 
 ## Disambiguation rules
 
 - **deck_review vs deck_suggest**: "review", "improve", "fix", "tune", "swap", "any tips" → `deck_review`. "build", "make", "recommend", "suggest", "I don't have one yet" → `deck_suggest`. Quantifiers like "four new war decks" without an existing deck imply `deck_suggest`.
+- **Swap/tweak requests always route to `deck_review`** — even if the user names a card you don't think is in their deck ("swap out the pekka"), route to `deck_review`, NOT `llm_chat`. The deck_review subagent handles false-premise swaps gracefully by noting the mismatch and showing what's actually there. Do NOT send swap requests to llm_chat.
 - **deck mode**: If the message mentions war, river race, or clan war, set `mode="war"`. Otherwise `mode="regular"`. For follow-ups with no explicit cue, apply the continuity rule above.
 - **deck_display vs deck_review**: "show me the cards" / "what's in my deck" → `deck_display`. "what should I change in my deck" → `deck_review`.
 - **clan_status vs status_report**: "clan status" → `clan_status`. "system status" / "are you healthy" / "elixir status" → `status_report`.
