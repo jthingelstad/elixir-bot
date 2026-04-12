@@ -132,6 +132,7 @@ class _Message:
 @dataclass
 class _Choice:
     message: _Message
+    stop_reason: str | None = None
 
 
 @dataclass
@@ -179,11 +180,14 @@ def _wrap_anthropic_response(response):
     )
 
     return _LLMResponse(
-        choices=[_Choice(message=_Message(
-            role="assistant",
-            content=content_text,
-            tool_calls=tool_calls if tool_calls else None,
-        ))],
+        choices=[_Choice(
+            message=_Message(
+                role="assistant",
+                content=content_text,
+                tool_calls=tool_calls if tool_calls else None,
+            ),
+            stop_reason=getattr(response, "stop_reason", None),
+        )],
         usage=_Usage(
             prompt_tokens=getattr(usage, "input_tokens", None),
             completion_tokens=getattr(usage, "output_tokens", None),
@@ -276,7 +280,7 @@ def _translate_tool_choice(tool_choice):
 # ── Main completion function ─────────────────────────────────────────────────
 
 
-def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, max_tokens=800, timeout=60, tools=None, tool_choice=None):
+def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, max_tokens=4096, timeout=60, tools=None, tool_choice=None):
     started = time.perf_counter()
     selected_model = _model_for_workflow(workflow, model=model)
 

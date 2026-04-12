@@ -747,6 +747,82 @@ def test_chat_with_tools_returns_error_payload_for_invalid_final_json():
     assert "{\"event_type\":\"channel_response\"" in result["_error"]["result_preview"]
 
 
+def test_chat_with_tools_returns_truncation_when_initial_response_hits_max_tokens(caplog):
+    truncated_message = SimpleNamespace(
+        role="assistant",
+        content='{"event_type":"channel_response","summary":"deck","content":"This deck has',
+        tool_calls=None,
+    )
+    truncated_choice = SimpleNamespace(message=truncated_message, stop_reason="max_tokens")
+    responses = [SimpleNamespace(choices=[truncated_choice])]
+
+    def fake_create_chat_completion(**kwargs):
+        return responses.pop(0)
+
+    with patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion):
+        with caplog.at_level("WARNING", logger="elixir_agent"):
+            result = elixir_agent._chat_with_tools(
+                "system",
+                "user",
+                workflow="interactive",
+                allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"],
+                response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["interactive"],
+                strict_json=True,
+                return_errors=True,
+            )
+
+    assert result["_error"]["kind"] == "truncation"
+    assert result["_error"]["phase"] == "initial_response"
+    assert "max_tokens" in result["_error"]["detail"]
+    assert any("llm_truncated" in rec.message for rec in caplog.records)
+
+
+def test_chat_with_tools_returns_empty_response_after_max_tool_rounds(caplog):
+    tool_call = SimpleNamespace(
+        id="call_1",
+        type="function",
+        function=SimpleNamespace(name="get_river_race", arguments="{}"),
+    )
+    tool_message = SimpleNamespace(role="assistant", content=None, tool_calls=[tool_call])
+    tool_choice = SimpleNamespace(message=tool_message, stop_reason="tool_use")
+    # interactive max_tool_rounds=3 → loop runs 4 iterations of tool calls, then 1 final call
+    tool_responses = [SimpleNamespace(choices=[tool_choice]) for _ in range(4)]
+    empty_message = SimpleNamespace(role="assistant", content="", tool_calls=None)
+    empty_choice = SimpleNamespace(message=empty_message, stop_reason="end_turn")
+    responses = tool_responses + [SimpleNamespace(choices=[empty_choice])]
+
+    captured_messages = []
+
+    def fake_create_chat_completion(**kwargs):
+        captured_messages.append([dict(m) for m in kwargs["messages"]])
+        return responses.pop(0)
+
+    with (
+        patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion),
+        patch("agent.chat._execute_tool", return_value=json.dumps({"war_state": "warDay"})),
+    ):
+        with caplog.at_level("WARNING", logger="elixir_agent"):
+            result = elixir_agent._chat_with_tools(
+                "system",
+                "user",
+                workflow="interactive",
+                allowed_tools=elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"],
+                response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["interactive"],
+                strict_json=True,
+                return_errors=True,
+            )
+
+    assert result["_error"]["kind"] == "empty_response"
+    assert result["_error"]["phase"] == "final_response"
+    assert any("empty_final_response" in rec.message for rec in caplog.records)
+    # Verify the explicit nudge was appended before the final call
+    final_call_messages = captured_messages[-1]
+    assert any(
+        m["role"] == "user" and "Do not request any more tools" in m.get("content", "")
+        for m in final_call_messages
+    )
+
+
 def test_execute_tool_update_member_birthday():
     with patch("elixir_agent.db") as mock_db:
         result = json.loads(

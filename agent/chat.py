@@ -273,7 +273,7 @@ def _build_tool_result_envelope(name, raw_result):
 
 
 def _chat_with_tools(system_prompt, user_message, conversation_history=None,
-                     temperature=0.7, max_tokens=800, workflow="generic",
+                     temperature=0.7, max_tokens=4096, workflow="generic",
                      allowed_tools=None, response_schema=None, strict_json=True,
                      return_errors=False):
     """Run a chat completion with tool-calling loop.
@@ -343,6 +343,29 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             return None
         return "__REPAIR__", f"Schema validation failed: {error}"
 
+    def _is_truncated(choice):
+        return getattr(choice, "stop_reason", None) == "max_tokens"
+
+    def _truncation_failure(phase, content):
+        log.warning("llm_truncated workflow=%s phase=%s max_tokens=%d", workflow, phase, max_tokens)
+        if return_errors:
+            return _failure_payload(
+                "truncation",
+                f"LLM response truncated by max_tokens={max_tokens}",
+                response_text=content,
+                phase=phase,
+            )
+        return None
+
+    def _log_agent_loop(round_num):
+        prompt_chars = _estimate_message_chars(messages)
+        log.info(
+            "agent_loop workflow=%s tool_rounds=%d tools_called=%s denied_tools=%d "
+            "validation_failures=%d prompt_chars=%d completion_chars=%d completion_latencies_ms=%s",
+            workflow, round_num, tools_called, denied_tool_count, validation_failure_count,
+            prompt_chars, completion_chars, completion_latencies_ms,
+        )
+
     for _round in range(max_tool_rounds + 1):
         try:
             resp = _create_completion(messages)
@@ -356,10 +379,14 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
 
         # If no tool calls, we have the final answer
         if not choice.message.tool_calls:
-            completion_chars += len(choice.message.content or "")
-            parsed = _parse_and_validate(choice.message.content or "null", repair_allowed=True, phase="initial_response")
+            initial_content = choice.message.content or ""
+            completion_chars += len(initial_content)
+            if _is_truncated(choice):
+                _log_agent_loop(_round)
+                return _truncation_failure("initial_response", initial_content)
+            parsed = _parse_and_validate(initial_content or "null", repair_allowed=True, phase="initial_response")
             if isinstance(parsed, tuple) and parsed[0] == "__REPAIR__":
-                messages.append({"role": "assistant", "content": choice.message.content or ""})
+                messages.append({"role": "assistant", "content": initial_content})
                 messages.append({
                     "role": "user",
                     "content": (
@@ -375,17 +402,15 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                         return _failure_payload("llm_api_error", e, phase="repair_completion")
                     return None
 
-                repaired = repair_resp.choices[0].message.content or "null"
+                repair_choice = repair_resp.choices[0]
+                repaired = repair_choice.message.content or ""
                 completion_chars += len(repaired)
-                parsed = _parse_and_validate(repaired, repair_allowed=False, phase="repair_response")
+                if _is_truncated(repair_choice):
+                    _log_agent_loop(_round)
+                    return _truncation_failure("repair_response", repaired)
+                parsed = _parse_and_validate(repaired or "null", repair_allowed=False, phase="repair_response")
 
-            prompt_chars = _estimate_message_chars(messages)
-            log.info(
-                "agent_loop workflow=%s tool_rounds=%d tools_called=%s denied_tools=%d "
-                "validation_failures=%d prompt_chars=%d completion_chars=%d completion_latencies_ms=%s",
-                workflow, _round, tools_called, denied_tool_count, validation_failure_count,
-                prompt_chars, completion_chars, completion_latencies_ms,
-            )
+            _log_agent_loop(_round)
             return parsed
 
         # Process tool calls
@@ -437,19 +462,36 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             })
         messages.append({"role": "user", "content": tool_result_blocks})
 
-    # If we hit max rounds, try to get a final answer without tools
+    # If we hit max rounds, nudge the model to produce a final JSON answer with no more tools
     log.warning("Hit max tool rounds (%d), requesting final answer", max_tool_rounds)
+    messages.append({
+        "role": "user",
+        "content": (
+            "You have used all available tool rounds. Do not request any more tools. "
+            "Reply now with the final JSON response that satisfies the required schema."
+        ),
+    })
     try:
         resp = _create_completion(messages)
-        completion_chars += len(resp.choices[0].message.content or "")
-        parsed = _parse_and_validate(resp.choices[0].message.content or "null", repair_allowed=False, phase="final_response")
-        prompt_chars = _estimate_message_chars(messages)
-        log.info(
-            "agent_loop workflow=%s tool_rounds=%d tools_called=%s denied_tools=%d "
-            "validation_failures=%d prompt_chars=%d completion_chars=%d completion_latencies_ms=%s",
-            workflow, max_tool_rounds, tools_called, denied_tool_count, validation_failure_count,
-            prompt_chars, completion_chars, completion_latencies_ms,
-        )
+        final_choice = resp.choices[0]
+        final_content = final_choice.message.content or ""
+        completion_chars += len(final_content)
+        if _is_truncated(final_choice):
+            _log_agent_loop(max_tool_rounds)
+            return _truncation_failure("final_response", final_content)
+        if not final_content.strip():
+            log.warning("empty_final_response workflow=%s tools_called=%s", workflow, tools_called)
+            _log_agent_loop(max_tool_rounds)
+            if return_errors:
+                return _failure_payload(
+                    "empty_response",
+                    "LLM returned empty final answer after max tool rounds",
+                    response_text=final_content,
+                    phase="final_response",
+                )
+            return None
+        parsed = _parse_and_validate(final_content, repair_allowed=False, phase="final_response")
+        _log_agent_loop(max_tool_rounds)
         return parsed
     except (APIError, APIConnectionError) as e:
         log.error("Final answer error: %s", e)
