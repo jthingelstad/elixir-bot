@@ -237,7 +237,10 @@ def _translate_messages(messages):
                         try:
                             args = json.loads(args)
                         except Exception:
-                            log.debug("Failed to parse tool call arguments as JSON: %s", args[:200], exc_info=True)
+                            log.warning(
+                                "tool_call_args_parse_failed name=%s args_preview=%r",
+                                fn.get("name", ""), args[:200], exc_info=True,
+                            )
                             args = {}
                     blocks.append({
                         "type": "tool_use",
@@ -336,7 +339,7 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
                 cache_read_tokens=wrapped.cache_stats.read_tokens,
             )
         except (OSError, sqlite3.Error):
-            log.debug("failed to persist llm_call record", exc_info=True)
+            log.warning("llm_call_persist_failed workflow=%s", workflow, exc_info=True)
         return wrapped
     except (APIError, APIConnectionError) as exc:
         duration = round((time.perf_counter() - started) * 1000, 2)
@@ -355,7 +358,7 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
                 duration_ms=duration,
             )
         except (OSError, sqlite3.Error):
-            log.debug("failed to persist llm_call record", exc_info=True)
+            log.warning("llm_call_persist_failed workflow=%s", workflow, exc_info=True)
         raise
 
 

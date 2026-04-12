@@ -45,6 +45,11 @@ def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
                 status_code=response.status_code,
                 duration_ms=_elapsed_ms(started),
             )
+            if attempt > 0:
+                log.info(
+                    "api_retry_success endpoint=%s attempt=%d/%d duration_ms=%.1f",
+                    endpoint_name, attempt + 1, _MAX_RETRIES + 1, _elapsed_ms(started),
+                )
             return response.json()
         except requests.ConnectionError as exc:
             last_exc = exc

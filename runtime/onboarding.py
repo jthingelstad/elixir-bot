@@ -273,6 +273,10 @@ async def verify_discord_membership(member_tag: str) -> str:
             try:
                 guild_member = await guild.fetch_member(int(discord_user_id))
             except Exception:
+                app.log.warning(
+                    "onboarding guild.fetch_member failed discord_user_id=%s member_tag=%s",
+                    discord_user_id, member_tag, exc_info=True,
+                )
                 guild_member = None
 
     if guild_member is None:
