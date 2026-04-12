@@ -492,6 +492,51 @@ def respond_in_deck_review(question, author_name, channel_name, *, mode, subject
                     "Do not call the war_decks tool again. Do not reconstruct anything.\n"
                 )
 
+    # For regular-mode review/suggest, pre-fetch the current deck and its card
+    # catalog entries so the agent doesn't burn 8+ tool calls re-looking up
+    # elixir costs it could have had for free.
+    if mode == "regular" and target_member_tag and subject == "review":
+        try:
+            current_deck = db.get_member_current_deck(target_member_tag)
+        except Exception as exc:
+            log.warning("current_deck pre-fetch failed for %s: %s", target_member_tag, exc)
+            current_deck = None
+        if isinstance(current_deck, dict) and current_deck.get("cards"):
+            deck_card_names = [
+                card.get("name")
+                for card in current_deck.get("cards") or []
+                if isinstance(card, dict) and card.get("name")
+            ]
+            base_user_msg += (
+                "\n\n=== PRE-FETCHED CURRENT DECK ===\n"
+                f"{json.dumps(current_deck, indent=2, default=str)}\n"
+                "(Treat this as the result of get_member include='deck'. Don't re-fetch "
+                "the deck itself unless the user asks about a different time window.)\n"
+            )
+            if deck_card_names:
+                try:
+                    catalog = db.lookup_cards(limit=max(len(deck_card_names) * 2, 50))
+                except Exception as exc:
+                    log.warning("verified-costs pre-fetch failed for %s: %s", target_member_tag, exc)
+                    catalog = []
+                costs = {
+                    c["name"]: c.get("elixir_cost")
+                    for c in catalog
+                    if isinstance(c, dict) and c.get("name") in set(deck_card_names)
+                }
+                if costs:
+                    cost_lines = "\n".join(
+                        f"  {name}: {cost if cost is not None else 'n/a (support card)'}"
+                        for name, cost in sorted(costs.items())
+                    )
+                    base_user_msg += (
+                        "\n\n=== VERIFIED CARD ELIXIR COSTS (from card catalog) ===\n"
+                        f"{cost_lines}\n"
+                        "These are the authoritative elixir costs for every card in the current deck. "
+                        "Use ONLY these values for averages or totals. Only call lookup_cards for "
+                        "cards that aren't in this list (e.g. when proposing a swap target).\n"
+                    )
+
     base_user_msg += _format_memory_context(memory_context)
     system_prompt = _deck_review_system(channel_name, mode=mode, subject=subject)
     validate = mode == "war" and subject == "suggest"
