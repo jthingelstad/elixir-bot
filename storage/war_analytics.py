@@ -18,6 +18,19 @@ from storage.war_status import _season_bounds, get_current_season_id
 from storage._formatting import format_member_reference as _format_member_reference
 
 
+def _classify_war_player_rate(total: int, played: int) -> str:
+    if total == 0:
+        return "never"
+    rate = played / total
+    if rate >= 0.75:
+        return "regular"
+    if rate >= 0.25:
+        return "occasional"
+    if played > 0:
+        return "rare"
+    return "never"
+
+
 def _war_player_type(conn, member_id):
     """Classify a member's war participation habit based on tracked race history.
 
@@ -32,18 +45,36 @@ def _war_player_type(conn, member_id):
         "WHERE wp.member_id = ?",
         (member_id,),
     ).fetchone()
-    total = row["total_races"] or 0
-    played = row["races_played"] or 0
-    if total == 0:
-        return "never"
-    rate = played / total
-    if rate >= 0.75:
-        return "regular"
-    if rate >= 0.25:
-        return "occasional"
-    if played > 0:
-        return "rare"
-    return "never"
+    return _classify_war_player_rate(row["total_races"] or 0, row["races_played"] or 0)
+
+
+def war_player_types_by_tag(conn, player_tags: list[str]) -> dict[str, str]:
+    """Batch-classify war player types for a list of player tags.
+
+    Returns {canonicalised_tag: "regular"|"occasional"|"rare"|"never"}.
+    Tags the bot doesn't recognise are omitted from the result.
+    """
+    if not player_tags:
+        return {}
+    canon_tags = [tag if tag.startswith("#") else f"#{tag}" for tag in player_tags if tag]
+    if not canon_tags:
+        return {}
+    placeholders = ",".join("?" * len(canon_tags))
+    rows = conn.execute(
+        f"SELECT m.player_tag, "
+        f"COUNT(wr.war_race_id) AS total_races, "
+        f"SUM(CASE WHEN COALESCE(wp.decks_used, 0) > 0 THEN 1 ELSE 0 END) AS races_played "
+        f"FROM members m "
+        f"LEFT JOIN war_participation wp ON wp.member_id = m.member_id "
+        f"LEFT JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
+        f"WHERE m.player_tag IN ({placeholders}) "
+        f"GROUP BY m.player_tag",
+        canon_tags,
+    ).fetchall()
+    return {
+        row["player_tag"]: _classify_war_player_rate(row["total_races"] or 0, row["races_played"] or 0)
+        for row in rows
+    }
 
 
 def _get_account_age_years(conn, member_id):

@@ -519,12 +519,22 @@ def _enable_sqlite_vec(conn: sqlite3.Connection) -> None:
             pass
 
 
+def _configure_connection(conn: sqlite3.Connection, path: str) -> None:
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    # WAL lets reads run concurrently with writes — important because the
+    # heartbeat job snapshot-inserts while interactive channel handlers read.
+    # :memory: databases can't use WAL (each connection is isolated).
+    if path != ":memory:":
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+    _enable_sqlite_vec(conn)
+
+
 def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     path = os.fspath(db_path or DB_PATH)
     conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    _enable_sqlite_vec(conn)
+    _configure_connection(conn, path)
     if path != ":memory:" and not _schema_is_compatible(conn):
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         tables = sorted(_existing_tables(conn))
@@ -539,9 +549,7 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
             backup_path,
         )
         conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        _enable_sqlite_vec(conn)
+        _configure_connection(conn, path)
     _run_migrations(conn)
     _enable_sqlite_vec(conn)
     return conn
