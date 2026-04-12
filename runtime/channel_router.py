@@ -201,20 +201,6 @@ async def _handle_report_route(app, message, ctx, route, content, event_type=Non
     )
 
 
-async def _route_legacy_clanops_hint(app, message, ctx):
-    raw_question = ctx["raw_question"]
-    if not (ctx["workflow"] == "clanops" and app._is_legacy_clanops_command_text(raw_question)):
-        return False
-    if ctx["mentioned"] and app.parse_admin_command(raw_question, require_prefix=True):
-        return False
-    hint_content = app._build_clanops_command_hint()
-    await _save_reply_save(
-        app, message, ctx["conversation_scope"], raw_question,
-        hint_content, "clanops", "clanops_command_hint",
-    )
-    return True
-
-
 async def _perform_deck_review(app, message, ctx, *, mode, subject):
     """Run the deck_review workflow. Caller has already decided this is the right route."""
     deck_target = await asyncio.to_thread(app._extract_member_deck_target, ctx["raw_question"], message)
@@ -326,31 +312,6 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
                 discord_message_id=message.id, detail=str(e),
             )
             await message.reply("Hit an error reviewing the deck. Try again in a sec.")
-    return True
-
-
-async def _route_admin_command(app, message, ctx):
-    if ctx["workflow"] != "clanops" or not ctx["mentioned"]:
-        return False
-    admin_command = app.parse_admin_command(ctx["raw_question"], require_prefix=True)
-    if not admin_command:
-        return False
-    if admin_command.get("kind") == "command" and app.admin_command_requires_leader(admin_command) and not app._has_leader_role(message.author):
-        await _save_reply_save(
-            app, message, ctx["conversation_scope"], ctx["raw_question"],
-            "Leader role required for this command.", "clanops", "clanops_admin_denied",
-        )
-        return True
-    route_key = (admin_command.get("key") or admin_command.get("command") or "admin").replace(".", "_").replace("-", "_")
-    route = f"clanops_admin_{route_key}"
-    if admin_command.get("preview"):
-        route += "_preview"
-    _log_route(app, route, message, ctx["mentioned"], ctx["subagent"], ctx["workflow"], ctx["raw_question"])
-    content = await app.dispatch_admin_command(admin_command)
-    await _save_reply_save(
-        app, message, ctx["conversation_scope"], ctx["raw_question"],
-        content, "clanops", route,
-    )
     return True
 
 
@@ -554,14 +515,6 @@ async def route_message(message):
         "conversation_scope": conversation_scope,
         "allows_open_channel_reply": allows_open_channel_reply,
     }
-
-    # Privileged regex routes that stay regex-gated:
-    #  - legacy clanops hint: deprecation nudge directing users to /elixir or @Elixir do
-    #  - admin command: privileged prefix-based protocol
-    if await _route_legacy_clanops_hint(app, message, ctx):
-        return
-    if await _route_admin_command(app, message, ctx):
-        return
 
     # If the bot wasn't addressed and the channel doesn't allow proactive
     # replies, skip routing entirely. Avoids wasting an LLM router call on

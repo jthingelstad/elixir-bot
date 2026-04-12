@@ -25,7 +25,7 @@ import heartbeat  # re-exported; patched in tests
 import prompts
 from modules.poap_kings import site as poap_kings_site
 from runtime.activities import format_scheduler_startup_summary, register_scheduled_activities
-from runtime.admin import admin_command_requires_leader, dispatch_admin_command, parse_admin_command
+from runtime.admin import admin_command_requires_leader, dispatch_admin_command
 from runtime.channel_router import route_message
 from runtime.discord_commands import register_elixir_app_commands
 from runtime import onboarding
@@ -628,27 +628,6 @@ async def on_member_join(member):
 async def on_member_update(before, after):
     """Detect nickname changes and grant member role when name matches a clan member."""
     await onboarding.handle_member_update(before, after)
-
-
-def _is_legacy_clanops_command_text(text: str) -> bool:
-    return bool(
-        _is_help_request(text)
-        or _is_status_request(text)
-        or _is_db_status_request(text)
-        or _is_schedule_request(text)
-        or _is_war_status_request(text)
-        or _clan_status_mode(text)
-        or _is_clan_list_request(text)
-        or _extract_profile_target(text)
-        or parse_admin_command(text, require_prefix=True)
-    )
-
-
-def _build_clanops_command_hint() -> str:
-    return (
-        "Use `/elixir ...` for private clanops commands or mention me with `@Elixir do ...` "
-        "for public room commands."
-    )
 
 
 @bot.event
