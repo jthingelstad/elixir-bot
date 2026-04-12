@@ -215,55 +215,8 @@ async def _route_legacy_clanops_hint(app, message, ctx):
     return True
 
 
-async def _route_roster_join_dates(app, message, ctx):
-    if ctx["workflow"] not in {"clanops", "interactive"}:
-        return False
-    if not app._is_roster_join_dates_request(ctx["raw_question"]):
-        return False
-    content = await asyncio.to_thread(app._build_roster_join_dates_report)
-    await _handle_report_route(app, message, ctx, "roster_join_dates_report", content)
-    return True
-
-
-async def _route_help(app, message, ctx):
-    if ctx["workflow"] != "interactive" or not app._is_help_request(ctx["raw_question"]):
-        return False
-    content = await asyncio.to_thread(app._build_help_report, "interactive")
-    await _handle_report_route(app, message, ctx, "interactive_help", content,
-                               event_type="interactive_help")
-    return True
-
-
-async def _route_member_deck(app, message, ctx):
-    if ctx["workflow"] not in {"clanops", "interactive"}:
-        return False
-    if not app._is_member_deck_request(ctx["raw_question"]):
-        return False
-    deck_target = await asyncio.to_thread(app._extract_member_deck_target, ctx["raw_question"], message)
-    if not deck_target:
-        return False
-    _log_route(app, "member_deck_report", message, ctx["mentioned"], ctx["subagent"],
-               ctx["workflow"], ctx["raw_question"], deck_target=deck_target)
-    content = await asyncio.to_thread(app._build_member_deck_report, deck_target)
-    await _save_reply_save(
-        app, message, ctx["conversation_scope"], ctx["raw_question"],
-        content, ctx["workflow"], "member_deck_report",
-    )
-    return True
-
-
-async def _route_deck_review(app, message, ctx):
-    """Route deck review/suggest requests to the deck_review LLM workflow."""
-    if ctx["workflow"] not in {"clanops", "interactive"}:
-        return False
-    if not ctx["mentioned"] and not ctx["allows_open_channel_reply"]:
-        return False
-    classified = app._classify_deck_request(ctx["raw_question"])
-    if not classified or classified["subject"] not in {"review", "suggest"}:
-        return False
-    mode = classified["mode"]
-    subject = classified["subject"]
-
+async def _perform_deck_review(app, message, ctx, *, mode, subject):
+    """Run the deck_review workflow. Caller has already decided this is the right route."""
     deck_target = await asyncio.to_thread(app._extract_member_deck_target, ctx["raw_question"], message)
     target_tag = deck_target if isinstance(deck_target, str) and deck_target.startswith("#") else None
     target_name = None
@@ -376,22 +329,6 @@ async def _route_deck_review(app, message, ctx):
     return True
 
 
-async def _route_kick_risk(app, message, ctx):
-    if ctx["workflow"] != "clanops" or not app._is_kick_risk_request(ctx["raw_question"]):
-        return False
-    content = await asyncio.to_thread(app._build_kick_risk_report)
-    await _handle_report_route(app, message, ctx, "kick_risk_report", content)
-    return True
-
-
-async def _route_top_war_contributors(app, message, ctx):
-    if ctx["workflow"] != "clanops" or not app._is_top_war_contributors_request(ctx["raw_question"]):
-        return False
-    content = await asyncio.to_thread(app._build_top_war_contributors_report)
-    await _handle_report_route(app, message, ctx, "top_war_contributors_report", content)
-    return True
-
-
 async def _route_admin_command(app, message, ctx):
     if ctx["workflow"] != "clanops" or not ctx["mentioned"]:
         return False
@@ -417,44 +354,173 @@ async def _route_admin_command(app, message, ctx):
     return True
 
 
-async def _route_status(app, message, ctx):
-    if ctx["workflow"] != "clanops":
-        return False
-    raw_question = ctx["raw_question"]
-    clan_status_mode = app._clan_status_mode(raw_question)
-    if not (app._is_status_request(raw_question) or app._is_schedule_request(raw_question) or clan_status_mode):
-        return False
-    route = (
-        "clan_status_report" if clan_status_mode == "full"
-        else "clan_status_short_report" if clan_status_mode == "short"
-        else "schedule_report" if app._is_schedule_request(raw_question)
-        else "status_report"
-    )
-    _log_route(app, route, message, ctx["mentioned"], ctx["subagent"], ctx["workflow"], raw_question)
-    clan = {}
-    war = {}
-    if clan_status_mode:
+async def _dispatch_intent(app, message, ctx, intent) -> bool:
+    """Dispatch a classified intent to its handler.
+
+    Returns True if the message was handled. Returns False to fall through to
+    the generic LLM channel/reception workflow (the `llm_chat` route also
+    returns False — its work is the existing channel_llm code path).
+    """
+    route = intent.get("route") or "llm_chat"
+    workflow = ctx["workflow"]
+
+    if route == "not_for_bot":
+        # Quietly do nothing — message was conversation between humans.
+        return True
+
+    if route == "help":
+        role = "clanops" if workflow == "clanops" else "interactive"
+        event = "clanops_help" if role == "clanops" else "interactive_help"
+        _log_route(app, event, message, ctx["mentioned"], ctx["subagent"], workflow, ctx["raw_question"])
+        channel_config = app._get_channel_behavior(message.channel.id) or {}
+        memory_context = await asyncio.to_thread(
+            db.build_memory_context,
+            discord_user_id=message.author.id,
+            channel_id=message.channel.id,
+            viewer_scope=channel_config.get("memory_scope") or "public",
+        )
+        result = await asyncio.to_thread(
+            elixir_agent.respond_to_help_request,
+            ctx["raw_question"],
+            author_name=message.author.display_name,
+            channel_name=app._channel_reply_target_name(channel_config),
+            role=role,
+            memory_context=memory_context,
+        )
+        content = (result or {}).get("content")
+        if not content:
+            # LLM call failed or returned empty — fall back to the static report
+            # so the user always gets a useful answer.
+            app.log.warning("help_llm_empty: falling back to static help report")
+            content = await asyncio.to_thread(app._build_help_report, role)
+        await _save_reply_save(
+            app, message, ctx["conversation_scope"], ctx["raw_question"],
+            content, workflow, event,
+        )
+        return True
+
+    if route == "roster_join_dates":
+        if workflow not in {"clanops", "interactive"}:
+            return False
+        content = await asyncio.to_thread(app._build_roster_join_dates_report)
+        await _handle_report_route(app, message, ctx, "roster_join_dates_report", content)
+        return True
+
+    if route == "kick_risk":
+        if workflow != "clanops":
+            return False
+        content = await asyncio.to_thread(app._build_kick_risk_report)
+        await _handle_report_route(app, message, ctx, "kick_risk_report", content)
+        return True
+
+    if route == "top_war_contributors":
+        if workflow != "clanops":
+            return False
+        content = await asyncio.to_thread(app._build_top_war_contributors_report)
+        await _handle_report_route(app, message, ctx, "top_war_contributors_report", content)
+        return True
+
+    if route == "status_report":
+        if workflow != "clanops":
+            return False
+        _log_route(app, "status_report", message, ctx["mentioned"], ctx["subagent"], workflow, ctx["raw_question"])
+        content = await asyncio.to_thread(app._build_status_report)
+        await _save_reply_save(
+            app, message, ctx["conversation_scope"], ctx["raw_question"],
+            content, "clanops", "status_report",
+        )
+        return True
+
+    if route == "schedule_report":
+        if workflow != "clanops":
+            return False
+        _log_route(app, "schedule_report", message, ctx["mentioned"], ctx["subagent"], workflow, ctx["raw_question"])
+        content = await asyncio.to_thread(app._build_schedule_report)
+        await _save_reply_save(
+            app, message, ctx["conversation_scope"], ctx["raw_question"],
+            content, "clanops", "schedule_report",
+        )
+        return True
+
+    if route == "clan_status":
+        if workflow != "clanops":
+            return False
+        mode = intent.get("mode") or "full"
         try:
             clan, war = await app._load_live_clan_context()
         except Exception as exc:
             app.log.warning("Clan status refresh failed: %s", exc)
-    if clan_status_mode == "full":
-        content = await asyncio.to_thread(app._build_clan_status_report, clan, war)
-    elif clan_status_mode == "short":
-        content = await asyncio.to_thread(app._build_clan_status_short_report, clan, war)
-    elif app._is_schedule_request(raw_question):
-        content = await asyncio.to_thread(app._build_schedule_report)
-    else:
-        content = await asyncio.to_thread(app._build_status_report)
-    await _save_reply_save(
-        app, message, ctx["conversation_scope"], raw_question,
-        content, "clanops", route,
+            clan, war = {}, {}
+        if mode == "short":
+            route_name = "clan_status_short_report"
+            content = await asyncio.to_thread(app._build_clan_status_short_report, clan, war)
+        else:
+            route_name = "clan_status_report"
+            content = await asyncio.to_thread(app._build_clan_status_report, clan, war)
+        _log_route(app, route_name, message, ctx["mentioned"], ctx["subagent"], workflow, ctx["raw_question"])
+        await _save_reply_save(
+            app, message, ctx["conversation_scope"], ctx["raw_question"],
+            content, "clanops", route_name,
+        )
+        return True
+
+    if route == "deck_display":
+        if workflow not in {"clanops", "interactive"}:
+            return False
+        deck_target = await asyncio.to_thread(app._extract_member_deck_target, ctx["raw_question"], message)
+        if not deck_target:
+            # Router thought this was a deck display but we couldn't resolve a member.
+            # Fall through to llm_chat so the model can ask a clarifying question.
+            return False
+        _log_route(app, "member_deck_report", message, ctx["mentioned"], ctx["subagent"],
+                   workflow, ctx["raw_question"], deck_target=deck_target)
+        content = await asyncio.to_thread(app._build_member_deck_report, deck_target)
+        await _save_reply_save(
+            app, message, ctx["conversation_scope"], ctx["raw_question"],
+            content, workflow, "member_deck_report",
+        )
+        return True
+
+    if route in {"deck_review", "deck_suggest"}:
+        if workflow not in {"clanops", "interactive"}:
+            return False
+        if not ctx["mentioned"] and not ctx["allows_open_channel_reply"]:
+            return False
+        subject = "review" if route == "deck_review" else "suggest"
+        mode = intent.get("mode") or "regular"
+        if mode not in {"regular", "war"}:
+            mode = "regular"
+        return await _perform_deck_review(app, message, ctx, mode=mode, subject=subject)
+
+    # llm_chat (or unknown) — let the existing channel_llm path handle it.
+    return False
+
+
+def _log_intent_classification(app, message, ctx, intent, *, mode_label="dispatch"):
+    """Log a classified intent for both live and shadow modes."""
+    app.log.info(
+        "intent_router mode=%s channel_id=%s author_id=%s workflow=%s mentioned=%s "
+        "route=%s confidence=%.2f sub_mode=%r target_member=%r latency_ms=%.1f "
+        "fallback_reason=%r rationale=%r raw_question=%r",
+        mode_label,
+        message.channel.id,
+        message.author.id,
+        ctx["workflow"],
+        ctx["mentioned"],
+        intent.get("route"),
+        float(intent.get("confidence") or 0.0),
+        intent.get("mode"),
+        intent.get("target_member"),
+        float(intent.get("latency_ms") or 0.0),
+        intent.get("fallback_reason"),
+        intent.get("rationale"),
+        ctx["raw_question"],
     )
-    return True
 
 
 async def route_message(message):
     import runtime.app as app
+    from agent import intent_router as _intent_router
 
     if message.author.bot:
         return
@@ -489,25 +555,38 @@ async def route_message(message):
         "allows_open_channel_reply": allows_open_channel_reply,
     }
 
-    # Report routes — each returns True if handled
+    # Privileged regex routes that stay regex-gated:
+    #  - legacy clanops hint: deprecation nudge directing users to /elixir or @Elixir do
+    #  - admin command: privileged prefix-based protocol
     if await _route_legacy_clanops_hint(app, message, ctx):
-        return
-    if await _route_roster_join_dates(app, message, ctx):
-        return
-    if await _route_help(app, message, ctx):
-        return
-    if await _route_member_deck(app, message, ctx):
-        return
-    if await _route_deck_review(app, message, ctx):
-        return
-    if await _route_kick_risk(app, message, ctx):
-        return
-    if await _route_top_war_contributors(app, message, ctx):
         return
     if await _route_admin_command(app, message, ctx):
         return
-    if await _route_status(app, message, ctx):
-        return
+
+    # If the bot wasn't addressed and the channel doesn't allow proactive
+    # replies, skip routing entirely. Avoids wasting an LLM router call on
+    # human-to-human chatter.
+    bot_should_consider = mentioned or allows_open_channel_reply or workflow == "reception"
+
+    # LLM intent classifier — only for interactive/clanops where the bot was
+    # addressed. Reception has its own onboarding pipeline below.
+    if workflow in {"interactive", "clanops"} and bot_should_consider:
+        try:
+            intent = await asyncio.to_thread(
+                _intent_router.classify_intent,
+                ctx["raw_question"],
+                workflow=workflow,
+                mentioned=mentioned,
+                allows_open_channel_reply=allows_open_channel_reply,
+            )
+        except Exception as exc:
+            app.log.warning("intent_router_dispatch_failed: %s", exc, exc_info=True)
+            intent = {"route": "llm_chat", "fallback_reason": "dispatch_exception"}
+        _log_intent_classification(app, message, ctx, intent)
+        if await _dispatch_intent(app, message, ctx, intent):
+            return
+        # `llm_chat` (and routes that bailed for wrong workflow) fall through
+        # to the generic channel_llm path below.
 
     if not mentioned and not allows_open_channel_reply:
         await app.bot.process_commands(message)

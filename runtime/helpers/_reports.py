@@ -554,29 +554,51 @@ def _build_clan_status_short_report(clan=None, war=None):
 
 
 def _build_help_report(role: str) -> str:
+    """Build the help response. The capability list is sourced from the intent
+    registry so adding a new route in one place updates both the LLM router and
+    this report.
+    """
+    from runtime.intent_registry import help_routes_for_workflow
+
+    workflow = "clanops" if role == "clanops" else "interactive"
+    routes = help_routes_for_workflow(workflow)
+
+    capability_lines = []
+    for r in routes:
+        examples = r.get("examples") or []
+        example_hint = f' — try "{examples[0]}"' if examples else ""
+        capability_lines.append(f"- **{r['label']}**: {r['help_summary']}{example_hint}")
+
     if role == "clanops":
+        operator_section = [
+            "",
+            "**Operator commands** (slash commands, not natural language)",
+            "- Use `/elixir ...` for private operator commands in this channel.",
+            "- Use `@Elixir do ...` when you want the command and result to stay public.",
+            "- System: `/elixir system status`, `/elixir system storage`, `/elixir system schedule`.",
+            "- Clan: `/elixir clan status`, `/elixir clan war`, `/elixir clan members`.",
+            "- Member: `/elixir member show`, `/elixir member verify-discord`, `/elixir member set`, `/elixir member clear`.",
+            "- Signal: `/elixir signal show`, `/elixir signal publish-pending`.",
+            "- Activity: `/elixir activity list`, `/elixir activity show`, `/elixir activity run`.",
+            "- Integration: `/elixir integration list`, `/elixir integration poap-kings status`, `/elixir integration poap-kings publish`.",
+            "- Public examples: `@Elixir do clan status`, `@Elixir do member show \"weird name\"`.",
+        ]
         return "\n".join(
-            [
-                "**Elixir Help — ClanOps**",
-                "- Use `/elixir ...` for private operator commands in this channel.",
-                "- Use `@Elixir do ...` when you want the command and result to stay public in the room.",
-                "- System workflow: `/elixir system status`, `/elixir system storage`, and `/elixir system schedule`.",
-                "- Clan workflow: `/elixir clan status`, `/elixir clan war`, `/elixir clan members`.",
-                "- Member workflow: `/elixir member show`, `/elixir member verify-discord`, `/elixir member set`, and `/elixir member clear`.",
-                "- Signal workflow: `/elixir signal show` and `/elixir signal publish-pending`.",
-                "- Activity workflow: `/elixir activity list`, `/elixir activity show`, `/elixir activity run`.",
-                "- Integration workflow: `/elixir integration list`, `/elixir integration poap-kings status`, `/elixir integration poap-kings publish`.",
-                "- Public examples: `@Elixir do clan status`, `@Elixir do member show \"weird name\"`, `@Elixir do integration poap-kings publish data --preview`.",
-                "- I can help with roster reviews, war participation, promotions, demotions, kicks, recent form, decks, donations, and member lookups.",
-                "- I can resolve members by in-game name, tag, alias, or Discord handle.",
-            ]
+            ["**Elixir Help — ClanOps**", "", "**What I can help with**"]
+            + capability_lines
+            + operator_section
         )
+
     return "\n".join(
         [
             "**Elixir Help — Interactive**",
+            "",
             "- Mention me in this channel when you want help: `@Elixir help`.",
-            "- I can answer member questions about current trophies, league/arena, deck, signature cards, recent form, war decks left, war participation, and clan rank.",
-            "- I can answer clan questions like who is in the clan, recent joins, donation leaders, and current war status.",
+            "",
+        ]
+        + capability_lines
+        + [
+            "",
             "- I am read-only in interactive channels. I do not make admin decisions here.",
         ]
     )

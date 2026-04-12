@@ -43,6 +43,43 @@ def _subagent_base(channel_name: str, subagent_key: str) -> tuple[str, str, str]
     )
 
 
+def _help_system(channel_name: str, *, role: str) -> str:
+    """System prompt for an in-character help reply.
+
+    The capability list is supplied via the user message, not baked into the
+    prompt, so adding a new route in the registry doesn't require a prompt edit.
+    """
+    subagent_key = prompts.subagent_key_for_channel(channel_name, role)
+    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
+    role_guidance = (
+        "You are answering a 'how can you help me?' style question in a clan operations channel. "
+        "Speak as a clan ops collaborator — concrete about what you can do for an operator: "
+        "promotions, demotions, kicks, roster review, war participation, contributor leaderboards, "
+        "system status. You can also point to the slash commands (`/elixir ...`) and "
+        "`@Elixir do ...` for public ops, but lead with the natural-language help."
+        if role == "clanops"
+        else
+        "You are answering a 'how can you help me?' style question in a member-facing channel. "
+        "Speak as a clan teammate — concrete about what a regular player can ask: their own deck, "
+        "card collection, recent form, war participation, signature cards, or general clan questions. "
+        "Mention that you are read-only here and don't make admin decisions."
+    )
+    return _build_system_prompt(
+        purpose,
+        knowledge,
+        channel_context,
+        role_guidance,
+        "Write a short, natural-sounding answer in your own voice — not a bulleted manual. "
+        "Pull two or three of the most relevant capabilities from the list provided in the user "
+        "message and weave them into a sentence or two. Invite the person to ask. "
+        "Skip throat-clearing intros and don't repeat the question.\n\n"
+        + _discord_formatting_guidance()
+        + _discord_emoji_guidance()
+        + "Reply as plain Discord-ready text. Do not return JSON. Do not wrap in code fences. "
+        "Aim for 2–4 short sentences.",
+    )
+
+
 def _proactive_channel_system(channel_name: str, subagent_key: str, *, leadership: bool = False):
     purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
     memory_scope = "leadership plus public" if leadership else "public"

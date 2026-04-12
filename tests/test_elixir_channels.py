@@ -456,6 +456,10 @@ def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_re
         patch("elixir.db.save_message") as mock_save,
         patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
         patch(
+            "agent.intent_router.classify_intent",
+            return_value={"route": "llm_chat", "confidence": 1.0, "rationale": "test"},
+        ),
+        patch(
             "elixir.elixir_agent.respond_in_channel",
             return_value={
                 "event_type": "channel_response",
@@ -2483,13 +2487,28 @@ def test_on_message_handles_interactive_help_directly():
             "allow_proactive": False,
         }),
         patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.build_memory_context", return_value={}),
         patch("elixir.db.save_message") as mock_save,
+        patch(
+            "agent.intent_router.classify_intent",
+            return_value={"route": "help", "confidence": 0.95, "rationale": "asking for help"},
+        ),
+        patch(
+            "elixir.elixir_agent.respond_to_help_request",
+            return_value={
+                "event_type": "help_response",
+                "content": "Ask me about your deck, war participation, or recent form.",
+                "summary": "...",
+            },
+        ) as mock_help,
         patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
     ):
         asyncio.run(elixir.on_message(message))
 
-    message.reply.assert_awaited_once()
-    assert "Interactive" in message.reply.await_args.args[0]
+    mock_help.assert_called_once()
+    message.reply.assert_awaited_once_with(
+        "Ask me about your deck, war participation, or recent form."
+    )
     assert mock_save.call_args_list[1].kwargs["event_type"] == "interactive_help"
     mock_respond.assert_not_called()
     mock_process.assert_not_awaited()
@@ -2515,6 +2534,10 @@ def test_on_message_handles_roster_join_dates_directly():
         }),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
+        patch(
+            "agent.intent_router.classify_intent",
+            return_value={"route": "roster_join_dates", "confidence": 0.95, "rationale": "asking for join dates"},
+        ),
         patch(
             "elixir._build_roster_join_dates_report",
             return_value="**Clan Roster + Join Dates**\n1. King Levy (coLeader) — joined 2024-01-15",
@@ -2553,6 +2576,10 @@ def test_on_message_handles_kick_risk_directly():
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
         patch(
+            "agent.intent_router.classify_intent",
+            return_value={"route": "kick_risk", "confidence": 0.95, "rationale": "asking about kicks"},
+        ),
+        patch(
             "elixir._build_kick_risk_report",
             return_value="**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago",
         ) as mock_build,
@@ -2589,6 +2616,10 @@ def test_on_message_handles_top_war_contributors_directly():
         }),
         patch("elixir.db.upsert_discord_user"),
         patch("elixir.db.save_message") as mock_save,
+        patch(
+            "agent.intent_router.classify_intent",
+            return_value={"route": "top_war_contributors", "confidence": 0.95, "rationale": "asking for top contributors"},
+        ),
         patch(
             "elixir._build_top_war_contributors_report",
             return_value="**Top War Contributors (Season 130)**\n1. King Levy — 3,200 fame across 4 race(s)",

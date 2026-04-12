@@ -262,31 +262,6 @@ def test_reconstruct_war_decks_partial_when_under_4_distinct():
         conn.close()
 
 
-# ── Phase 3: deck request classification ──────────────────────────────────────
-
-def test_classify_deck_request_distinguishes_display_review_suggest_modes():
-    from runtime.helpers._requests import _classify_deck_request
-    cases = [
-        ("show my deck", ("display", "regular")),
-        ("what cards are in my deck", ("display", "regular")),
-        ("review my deck", ("review", "regular")),
-        ("review my war decks", ("review", "war")),
-        ("improve my deck", ("review", "regular")),
-        ("build me a deck", ("suggest", "regular")),
-        ("build me four war decks", ("suggest", "war")),
-        ("I want to start playing war", ("suggest", "war")),
-        ("help me start playing river race", ("suggest", "war")),
-        ("how is the weather", None),
-        ("what is the meta", None),
-    ]
-    for text, expected in cases:
-        got = _classify_deck_request(text)
-        if expected is None:
-            assert got is None, f"{text!r} expected None, got {got}"
-        else:
-            assert got == {"subject": expected[0], "mode": expected[1]}, f"{text!r} → {got}"
-
-
 # ── Phase 5: war deck suggestion validator ────────────────────────────────────
 
 def test_validate_war_deck_suggestion_accepts_4_decks_of_8_unique_cards():
@@ -404,9 +379,3 @@ def test_respond_in_deck_review_war_review_with_decks_does_not_inject_new_player
     assert "NEW WAR PLAYER" not in msg
 
 
-def test_classifier_routes_build_my_war_decks_followup_to_suggest_mode():
-    """The new-war-player offer asks the user to reply 'build my war decks'.
-    That phrasing must classify as suggest+war so the follow-up routes correctly."""
-    from runtime.helpers._requests import _classify_deck_request
-    assert _classify_deck_request("build my war decks") == {"subject": "suggest", "mode": "war"}
-    assert _classify_deck_request("Build my war decks!") == {"subject": "suggest", "mode": "war"}
