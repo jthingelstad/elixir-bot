@@ -183,12 +183,7 @@ Use the live admin surface when you want the actual schedule rendered from the r
 
 ```text
 /elixir system schedule
-@Elixir do system schedule
 ```
-
-Or in Discord:
-- `/elixir system schedule`
-- `@Elixir do system schedule`
 
 ## Health Checks
 
@@ -196,9 +191,8 @@ Useful live checks:
 
 ```text
 /elixir system status
-@Elixir do system status
-@Elixir do signal show recent --limit 5
-@Elixir do activity list
+/elixir signal show view:recent limit:5
+/elixir activity list
 ```
 
 Useful Discord checks:
@@ -217,7 +211,6 @@ Manual non-posting previews are available for many admin jobs:
 /elixir activity run activity:site-content preview:true
 /elixir activity run activity:weekly-recap preview:true
 /elixir activity run activity:promotion-content preview:true
-@Elixir do activity run site-content --preview
 ```
 
 Preview mode suppresses Discord sends and GitHub site pushes, but still runs the job logic.
@@ -289,7 +282,6 @@ If you want to run a recurring activity directly through the supported admin sur
 /elixir activity run activity:clan-awareness preview:true
 /elixir activity run activity:war-awareness preview:true
 /elixir activity run activity:player-progression preview:true
-@Elixir do activity run clan-awareness --preview
 ```
 
 ## Member Metadata Operations

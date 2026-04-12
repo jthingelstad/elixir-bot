@@ -573,15 +573,13 @@ def _build_help_report(role: str) -> str:
         operator_section = [
             "",
             "**Operator commands** (slash commands, not natural language)",
-            "- Use `/elixir ...` for private operator commands in this channel.",
-            "- Use `@Elixir do ...` when you want the command and result to stay public.",
+            "- Use `/elixir ...` for operator commands in this channel.",
             "- System: `/elixir system status`, `/elixir system storage`, `/elixir system schedule`.",
             "- Clan: `/elixir clan status`, `/elixir clan war`, `/elixir clan members`.",
             "- Member: `/elixir member show`, `/elixir member verify-discord`, `/elixir member set`, `/elixir member clear`.",
             "- Signal: `/elixir signal show`, `/elixir signal publish-pending`.",
             "- Activity: `/elixir activity list`, `/elixir activity show`, `/elixir activity run`.",
-            "- Integration: `/elixir integration list`, `/elixir integration poap-kings status`, `/elixir integration poap-kings publish`.",
-            "- Public examples: `@Elixir do clan status`, `@Elixir do member show \"weird name\"`.",
+            "- Integration: `/elixir integration list`, `/elixir integration status integration:poap-kings`, `/elixir integration publish integration:poap-kings target:...`.",
         ]
         return "\n".join(
             ["**Elixir Help — ClanOps**", "", "**What I can help with**"]

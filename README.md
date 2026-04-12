@@ -228,18 +228,16 @@ No-change publishes stay quiet.
 
 Elixir's operator surface now lives entirely in Discord `#leader-lounge`.
 
-Use:
-- private slash commands under `/elixir ...`
-- public room commands with `@Elixir do ...`
+Use slash commands under `/elixir ...`.
 
 Examples:
 
 ```text
 /elixir system status
 /elixir activity show activity:clan-awareness
-/elixir integration poap-kings publish target:data preview:true
-@Elixir do member set Ditika join-date 2026-03-07
-@Elixir do signal show recent --limit 5
+/elixir integration publish integration:poap-kings target:data preview:true
+/elixir member set member:Ditika field:join-date value:2026-03-07
+/elixir signal show view:recent limit:5
 ```
 
 The command model is object-first and grouped around:
