@@ -16,6 +16,7 @@ from agent.chat import _clan_context, _format_memory_context, _format_recent_pos
 from agent.prompts import (
     _channel_subagent_system,
     _clanops_system,
+    _deck_review_system,
     _event_system,
     _home_message_system,
     _interactive_system,
@@ -381,6 +382,128 @@ def respond_in_reception(question, author_name, clan_data, memory_context=None):
     )
 
 
+def _validate_war_deck_suggestion(result):
+    """Validate war+suggest LLM response: 4 decks of 8 unique cards, 32 unique total.
+
+    Returns None when valid, otherwise an error string describing the violation.
+    """
+    if not isinstance(result, dict):
+        return "Response was not a JSON object."
+    decks = result.get("proposed_decks")
+    if not isinstance(decks, list) or len(decks) != 4:
+        return "proposed_decks must be an array of exactly 4 decks."
+    seen_total: dict[str, int] = {}
+    for idx, deck in enumerate(decks, start=1):
+        if not isinstance(deck, list) or len(deck) != 8:
+            return f"Deck {idx} must contain exactly 8 cards (got {len(deck) if isinstance(deck, list) else type(deck).__name__})."
+        normalized = []
+        for slot in deck:
+            if not isinstance(slot, str) or not slot.strip():
+                return f"Deck {idx} contains a non-string or empty card slot."
+            normalized.append(slot.strip())
+        if len(set(normalized)) != 8:
+            return f"Deck {idx} has duplicate cards within itself."
+        for name in normalized:
+            seen_total[name] = seen_total.get(name, 0) + 1
+    duplicates = sorted([name for name, count in seen_total.items() if count > 1])
+    if duplicates:
+        return f"These cards appear in more than one deck (no-overlap rule): {', '.join(duplicates)}."
+    return None
+
+
+def respond_in_deck_review(question, author_name, channel_name, *, mode, subject,
+                           target_member_tag=None, target_member_name=None,
+                           conversation_history=None, memory_context=None):
+    """Run the dedicated deck_review workflow.
+
+    mode: 'regular' or 'war'
+    subject: 'review' or 'suggest'
+
+    For war+suggest, validates the proposed_decks structured field and asks the
+    LLM to revise (up to 2 attempts) when the no-overlap or 32-unique constraint
+    is violated.
+    """
+    target_line = ""
+    if target_member_tag:
+        target_line = (
+            f"\nThe deck review target is member: {target_member_name or target_member_tag} "
+            f"({target_member_tag}). Use this tag with the member tools.\n"
+        )
+    base_user_msg = (
+        f"Latest deck-{subject} request from '{author_name}' in {channel_name} "
+        f"(mode={mode}, subject={subject}): {question}{target_line}\n\n"
+        "Follow the deck-review workflow guidance precisely. Ground every claim in tool calls."
+    )
+
+    # For war review/suggest, pre-fetch reconstruction so the LLM sees the
+    # status without burning a tool round, and so we can short-circuit the
+    # new-player case with a deterministic instruction.
+    if mode == "war" and target_member_tag:
+        try:
+            war_decks = db.reconstruct_member_war_decks(target_member_tag)
+        except Exception as exc:
+            log.warning("war_decks pre-fetch failed for %s: %s", target_member_tag, exc)
+            war_decks = None
+        if isinstance(war_decks, dict):
+            base_user_msg += (
+                "\n\n=== PRE-FETCHED WAR DECK RECONSTRUCTION ===\n"
+                f"{json.dumps(war_decks, indent=2)}\n"
+                "(Treat this as the result of get_member_war_detail aspect='war_decks'. "
+                "Do not call that tool again unless you need a refresh.)\n"
+            )
+            if war_decks.get("status") == "insufficient_data" and subject == "review":
+                base_user_msg += (
+                    "\nSPECIAL CASE — NEW WAR PLAYER:\n"
+                    "This member has no reconstructable war decks. Your reply MUST:\n"
+                    "1. Acknowledge warmly that they haven't played war battles yet.\n"
+                    "2. Make an explicit offer to build four starter war decks from their card collection.\n"
+                    "3. Tell them how to accept — use this exact callout phrase so the next message routes correctly: "
+                    "**Reply `build my war decks` and I'll put together a starter kit.**\n"
+                    "Do not call the war_decks tool again. Do not reconstruct anything.\n"
+                )
+
+    base_user_msg += _format_memory_context(memory_context)
+    system_prompt = _deck_review_system(channel_name, mode=mode, subject=subject)
+    validate = mode == "war" and subject == "suggest"
+    max_attempts = 3 if validate else 1
+    history = list(conversation_history or [])
+    user_msg = base_user_msg
+    last_result = None
+    for attempt in range(max_attempts):
+        result = _chat_with_tools(
+            system_prompt,
+            user_msg,
+            conversation_history=history,
+            workflow="deck_review",
+            allowed_tools=TOOLSETS_BY_WORKFLOW["deck_review"],
+            response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["deck_review"],
+            strict_json=True,
+            return_errors=True,
+        )
+        last_result = result
+        if not validate:
+            return result
+        error = _validate_war_deck_suggestion(result)
+        if error is None:
+            return result
+        log.warning(
+            "deck_review war-suggest validation failed (attempt %d/%d): %s",
+            attempt + 1, max_attempts, error,
+        )
+        if attempt + 1 >= max_attempts:
+            break
+        # Carry the prior turn forward and ask for a revision.
+        history.append({"role": "user", "content": user_msg})
+        prior_content = json.dumps(result) if isinstance(result, dict) else str(result)
+        history.append({"role": "assistant", "content": prior_content})
+        user_msg = (
+            f"VALIDATION FAILED on your previous war-deck suggestion: {error}\n"
+            "Revise the four decks so all 32 cards are unique and every card is owned by the player. "
+            "Return the same JSON shape with the corrected proposed_decks."
+        )
+    return last_result
+
+
 def respond_in_channel(question, author_name, channel_name, workflow, clan_data, war_data,
                        conversation_history=None, memory_context=None):
     """Channel Q&A for interactive/clanops workflows."""
@@ -600,6 +723,7 @@ __all__ = [
     "generate_channel_update",
     "respond_in_reception",
     "respond_in_channel",
+    "respond_in_deck_review",
     "generate_message",
     "generate_home_message",
     "generate_members_message",

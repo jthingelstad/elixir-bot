@@ -183,6 +183,100 @@ def _clanops_system(channel_name):
     )
 
 
+def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "review"):
+    """System prompt for the deck_review workflow.
+
+    mode: 'regular' (Trophy Road / current deck) or 'war' (the four river-race war decks).
+    subject: 'review' (critique an existing deck) or 'suggest' (build new decks from collection).
+    """
+    subagent_key = prompts.subagent_key_for_channel(channel_name, "interactive")
+    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
+
+    base_guidance = (
+        "You are running Elixir's specialized DECK REVIEW workflow. "
+        "Every recommendation you make MUST be grounded in tool calls — never in card stats from memory. "
+        "Discord does not support markdown image syntax. Do not use ![alt](url). If you reference a card visually, give the name then the raw URL.\n\n"
+        "The newest user message is always the primary thing to respond to. Use recent conversation turns to follow up rather than restarting the analysis from scratch.\n\n"
+        "Always call lookup_cards before claiming anything about a card's elixir cost, rarity, type, or evolution capability.\n"
+        "Always call get_member with include=['cards'] before suggesting any card swap — never recommend a card the player does not own at competitive level.\n"
+        "Always call get_member with include=['losses'] (passing scope='war' for war mode, scope='ladder_ranked_10' for regular mode) before giving advice. Cite specific opponent cards from the losses data instead of generic meta talk. Example: 'Mega Knight has been in 6 of your last 9 losses — your deck has no clean answer for it.'\n\n"
+    )
+
+    if mode == "war":
+        mode_guidance = (
+            "WAR MODE: River Race / Clan Wars 2 requires FOUR separate decks with NO overlapping cards across them.\n"
+            "The Clash Royale API does not expose the four war decks directly. Always call get_member_war_detail with aspect='war_decks' FIRST to reconstruct them from battle history. "
+            "(In some routes the system pre-fetches this for you and includes it in the user message — if so, do not call the tool again.)\n\n"
+            "Branch on the returned status:\n"
+            "- status='insufficient_data' (NEW WAR PLAYER): do NOT present a half-built reconstruction. "
+            "Be warm and inviting. Acknowledge they don't have war battles yet. "
+            "Then make an EXPLICIT offer to build them four starter war decks from their card collection, and tell them HOW to accept. "
+            "Example phrasing: 'You haven't played any war battles yet, so I can't reconstruct your war decks. "
+            "Building four decks (with no overlapping cards across them) is the most common blocker for new war players — "
+            "want me to put together a starter kit from your collection? Reply **build my war decks** and I'll have four ready for you.' "
+            "If the user's request was already 'build my war decks' or similar (suggest subject), skip the offer and proceed directly into suggest-mode using their collection.\n"
+            "- status='partial': present what was reconstructed and the gaps; ask the user to fill in the missing decks before reviewing.\n"
+            "- status='reconstructed' with confidence='high': proceed straight to per-deck review.\n"
+            "- status='reconstructed' with confidence='medium' or 'low': present the four decks and ask the user to confirm or correct before reviewing.\n\n"
+            "When suggesting any swap, the no-overlap rule is mandatory: state explicitly which deck the new card is being pulled from (and what replaces it there), or confirm the card is currently unused across all four decks.\n"
+            "If the player's war_player_type is 'rare' or 'never', frame advice as onboarding rather than optimization.\n\n"
+        )
+    else:
+        mode_guidance = (
+            "REGULAR MODE: Use get_member with include=['deck'] to fetch the player's current Trophy Road deck. "
+            "Use include=['cards'] for the full collection.\n\n"
+        )
+
+    if subject == "suggest":
+        subject_guidance = (
+            "SUGGEST MODE: You are BUILDING decks from the player's collection, not critiquing existing ones.\n"
+            "For regular mode: propose 1–2 candidate decks. For each card, briefly cite WHY (win condition, cycle filler, spell coverage, anti-air, etc.).\n"
+            "For war mode: propose FOUR full 8-card decks (32 unique cards total) plus a suggested support card / tower troop per deck.\n"
+            "Each war deck should have a distinct role — e.g. Deck 1: beatdown anchor; Deck 2: control; Deck 3: cycle/chip; Deck 4: siege. Avoid four variants of the same archetype.\n"
+            "BEFORE finalizing four war decks, list every card across all four (32 total) and explicitly verify there are no duplicates and that every card is in the player's collection at competitive level.\n"
+            "If you cannot satisfy the no-overlap + ownership constraints, say so and ask the user which deck they want simplified.\n\n"
+        )
+    else:
+        subject_guidance = (
+            "REVIEW MODE: You are critiquing an EXISTING deck. Highlight strengths first, then 1–3 specific concrete swap suggestions grounded in recent losses and the player's collection. Don't redesign the whole deck unless asked.\n\n"
+        )
+
+    closing_guidance = (
+        "Card mode labels (`mode_label`, `evo_unlocked`, `hero_unlocked`) describe support / unlock state, not active deck slot. "
+        "Refer to them as Evo, Hero, or Evo + Hero. Do not call them 'evolution level'.\n\n"
+        "Do not claim to know a member's current gold or upgrade resources unless a tool returns them.\n\n"
+        f"{_discord_formatting_guidance()}"
+        f"{_discord_emoji_guidance()}"
+    )
+
+    if mode == "war" and subject == "suggest":
+        response_format = (
+            "Respond with JSON only (no markdown wrapper). The proposed_decks field is REQUIRED for war suggest mode and is validated:\n"
+            '{"event_type": "deck_review_response", "member_tags": [], "member_names": [], '
+            '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response with the four decks and per-card reasoning", '
+            '"proposed_decks": [["Card1", "Card2", "Card3", "Card4", "Card5", "Card6", "Card7", "Card8"], '
+            '["8 cards"], ["8 cards"], ["8 cards"]], '
+            '"metadata": {}}\n\n'
+            "proposed_decks MUST be an array of exactly 4 inner arrays, each containing exactly 8 card name strings. "
+            "All 32 names across the 4 decks MUST be unique (the no-overlap rule). "
+            "If validation fails, the system will ask you to revise — fix the offending deck(s) and try again."
+        )
+    else:
+        response_format = (
+            "Respond with JSON only (no markdown wrapper):\n"
+            '{"event_type": "deck_review_response", "member_tags": [], "member_names": [], '
+            '"summary": "one sentence TL;DR", "content": "full Discord-ready markdown response", '
+            '"metadata": {}}'
+        )
+
+    return _build_system_prompt(
+        purpose,
+        knowledge,
+        channel_context,
+        base_guidance + mode_guidance + subject_guidance + closing_guidance + response_format,
+    )
+
+
 def _reception_system():
     reception = prompts.discord_singleton_subagent("reception")
     purpose, _, channel_context = _subagent_base(reception["name"], reception["subagent_key"])

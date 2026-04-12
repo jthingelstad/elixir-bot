@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -752,4 +753,280 @@ def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int 
         "composition": composition,
         "recommended": recommended,
         "borderline": borderline,
+    }
+
+
+_WAR_DECK_BATTLE_TYPES = {"riverRacePvP", "riverRaceDuel", "riverRaceDuelColosseum"}
+
+
+def _deck_card_summary(cards: list[dict]) -> list[dict]:
+    """Strip a card list down to display-relevant fields."""
+    summary = []
+    for card in cards:
+        if not isinstance(card, dict) or not card.get("name"):
+            continue
+        summary.append({
+            "name": card["name"],
+            "level": card.get("level"),
+            "max_level": card.get("maxLevel"),
+            "elixir_cost": card.get("elixirCost"),
+            "rarity": card.get("rarity"),
+            "evolution_level": card.get("evolutionLevel"),
+            "icon_url": (card.get("iconUrls") or {}).get("medium") if isinstance(card.get("iconUrls"), dict) else None,
+        })
+    return summary
+
+
+def _extract_deck_candidates(rows: list[sqlite3.Row]) -> list[dict]:
+    """Walk war battle rows and yield candidate decks (one per duel round, one per riverRacePvP).
+
+    Returns a list of dicts with: cards (list), key (frozenset of names), battle_time, source.
+    """
+    candidates = []
+    for row in rows:
+        battle_type = row["battle_type"]
+        battle_time = row["battle_time"]
+        if battle_type in ("riverRaceDuel", "riverRaceDuelColosseum"):
+            try:
+                rounds = json.loads(row["team_rounds_json"] or "[]")
+            except (TypeError, ValueError):
+                rounds = []
+            for idx, rnd in enumerate(rounds):
+                cards = rnd.get("cards") if isinstance(rnd, dict) else None
+                if not isinstance(cards, list) or len(cards) != 8:
+                    continue
+                names = [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
+                if len(names) != 8 or len(set(names)) != 8:
+                    continue
+                candidates.append({
+                    "cards": cards,
+                    "key": frozenset(names),
+                    "battle_time": battle_time,
+                    "source": f"{battle_type}#round{idx + 1}",
+                })
+        elif battle_type == "riverRacePvP":
+            try:
+                cards = json.loads(row["deck_json"] or "[]")
+            except (TypeError, ValueError):
+                cards = []
+            if len(cards) != 8:
+                continue
+            names = [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
+            if len(names) != 8 or len(set(names)) != 8:
+                continue
+            candidates.append({
+                "cards": cards,
+                "key": frozenset(names),
+                "battle_time": battle_time,
+                "source": "riverRacePvP",
+            })
+    return candidates
+
+
+def _group_candidates(candidates: list[dict]) -> list[dict]:
+    """Group candidates by exact deck composition. Returns list sorted by recency then frequency."""
+    grouped: dict[frozenset, dict] = {}
+    for cand in candidates:
+        bucket = grouped.get(cand["key"])
+        if bucket is None:
+            grouped[cand["key"]] = {
+                "key": cand["key"],
+                "cards": cand["cards"],
+                "occurrences": 1,
+                "latest_battle_time": cand["battle_time"],
+                "earliest_battle_time": cand["battle_time"],
+                "sources": [cand["source"]],
+            }
+        else:
+            bucket["occurrences"] += 1
+            if cand["battle_time"] and (not bucket["latest_battle_time"] or cand["battle_time"] > bucket["latest_battle_time"]):
+                bucket["latest_battle_time"] = cand["battle_time"]
+                bucket["cards"] = cand["cards"]  # keep most-recent card-level data
+            if cand["battle_time"] and (not bucket["earliest_battle_time"] or cand["battle_time"] < bucket["earliest_battle_time"]):
+                bucket["earliest_battle_time"] = cand["battle_time"]
+            if cand["source"] not in bucket["sources"]:
+                bucket["sources"].append(cand["source"])
+    return sorted(
+        grouped.values(),
+        key=lambda d: (d["latest_battle_time"] or "", d["occurrences"]),
+        reverse=True,
+    )
+
+
+def _select_war_decks(distinct_decks: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Greedy partition: pick up to 4 non-overlapping decks; return (selected, skipped_due_to_overlap)."""
+    selected: list[dict] = []
+    skipped: list[dict] = []
+    used_cards: set[str] = set()
+    for deck in distinct_decks:
+        if len(selected) >= 4:
+            break
+        if used_cards.isdisjoint(deck["key"]):
+            selected.append(deck)
+            used_cards |= deck["key"]
+        else:
+            skipped.append(deck)
+    return selected, skipped
+
+
+def _war_decks_confidence(
+    selected: list[dict],
+    skipped: list[dict],
+    war_battles_seen: int,
+    rows: list[sqlite3.Row],
+) -> str:
+    """Classify confidence: high / medium / low."""
+    if len(selected) < 4:
+        # Confidence rules only matter if we're returning decks at all.
+        return "low" if skipped else "medium"
+    # Look for a recent (top-3) duel that contributed >= 3 selected decks.
+    recent_duels = [r for r in rows[:3] if r["battle_type"] in ("riverRaceDuel", "riverRaceDuelColosseum")]
+    selected_keys = {d["key"] for d in selected}
+    for duel in recent_duels:
+        try:
+            rounds = json.loads(duel["team_rounds_json"] or "[]")
+        except (TypeError, ValueError):
+            continue
+        round_keys = []
+        for rnd in rounds:
+            cards = rnd.get("cards") if isinstance(rnd, dict) else None
+            if not isinstance(cards, list) or len(cards) != 8:
+                continue
+            names = [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
+            if len(names) == 8 and len(set(names)) == 8:
+                round_keys.append(frozenset(names))
+        matched = sum(1 for k in round_keys if k in selected_keys)
+        if matched >= 3 and not skipped:
+            return "high"
+    if skipped:
+        return "low" if len(skipped) >= len(selected) else "medium"
+    return "medium"
+
+
+@managed_connection
+def reconstruct_member_war_decks(
+    tag: str,
+    lookback_battles: int = 80,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Reconstruct a player's four war decks from their River Race battle history.
+
+    The Clash Royale API exposes only the trophy-road `currentDeck`, not the four
+    war decks. We approximate them by extracting decks from recent war battles —
+    duels reveal up to 3 decks per battle (one per round), and riverRacePvP
+    battles reveal one deck each. We then greedily partition the most-recent
+    distinct decks into 4 non-overlapping decks (the no-overlap constraint of
+    the war deck pool).
+    """
+    member_tag = _canon_tag(tag)
+    member_row = conn.execute(
+        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        (member_tag,),
+    ).fetchone()
+    if not member_row:
+        return {
+            "status": "insufficient_data",
+            "member_tag": member_tag,
+            "reason": "Member not found in roster.",
+            "decks": [],
+            "evidence": {"war_battles_seen": 0, "distinct_decks_observed": 0},
+            "guidance": "Resolve the member tag first or ask the user to confirm who they meant.",
+        }
+    member_id = member_row["member_id"]
+    placeholders = ",".join("?" for _ in _WAR_DECK_BATTLE_TYPES)
+    rows = conn.execute(
+        f"SELECT battle_time, battle_type, deck_json, team_rounds_json, deck_selection "
+        f"FROM member_battle_facts "
+        f"WHERE member_id = ? AND is_war = 1 AND battle_type IN ({placeholders}) "
+        f"ORDER BY battle_time DESC LIMIT ?",
+        (member_id, *_WAR_DECK_BATTLE_TYPES, lookback_battles),
+    ).fetchall()
+    war_battles_seen = len(rows)
+    candidates = _extract_deck_candidates(rows)
+    distinct_decks = _group_candidates(candidates)
+
+    base_payload = {
+        "member_tag": member_tag,
+        "member_name": member_row["current_name"],
+        "evidence": {
+            "war_battles_seen": war_battles_seen,
+            "distinct_decks_observed": len(distinct_decks),
+            "candidate_decks_extracted": len(candidates),
+            "duel_battles_seen": sum(1 for r in rows if r["battle_type"] in ("riverRaceDuel", "riverRaceDuelColosseum")),
+            "earliest_battle_time": rows[-1]["battle_time"] if rows else None,
+            "latest_battle_time": rows[0]["battle_time"] if rows else None,
+        },
+    }
+
+    # A single duel yields up to 3 candidate decks, so we gate on candidate
+    # count rather than raw war_battles_seen — that way a duel-heavy player
+    # with few battles can still be reconstructed.
+    if len(candidates) < 3 or len(distinct_decks) < 2:
+        return {
+            **base_payload,
+            "status": "insufficient_data",
+            "decks": [],
+            "gaps": [
+                f"Only {war_battles_seen} war battle(s) recorded for this member; "
+                f"{len(distinct_decks)} distinct deck(s) observed across {len(candidates)} candidate(s). "
+                "Need at least 3 candidate decks (e.g. 1 duel or 3 river-race battles) and "
+                "2 distinct compositions before reconstruction is meaningful."
+            ],
+            "guidance": (
+                "Do not present a half-built reconstruction. Tell the user there isn't "
+                "enough recent war battle data, and offer to either build them four war "
+                "decks from their card collection (suggest mode) or ask them to paste "
+                "the four decks manually."
+            ),
+        }
+
+    selected, skipped = _select_war_decks(distinct_decks)
+    confidence = _war_decks_confidence(selected, skipped, war_battles_seen, rows)
+    decks_payload = [
+        {
+            "deck_index": i + 1,
+            "cards": _deck_card_summary(deck["cards"]),
+            "occurrences": deck["occurrences"],
+            "latest_used_at": deck["latest_battle_time"],
+            "earliest_used_at": deck["earliest_battle_time"],
+            "sources": deck["sources"],
+        }
+        for i, deck in enumerate(selected)
+    ]
+    gaps: list[str] = []
+    if len(selected) < 4:
+        gaps.append(
+            f"Only {len(selected)} of 4 war decks could be reconstructed from {war_battles_seen} "
+            f"recent war battle(s). Ask the user to confirm or fill in the missing deck(s)."
+        )
+    if skipped:
+        gaps.append(
+            f"{len(skipped)} candidate deck(s) were skipped because they shared cards with already-"
+            "selected decks. This often means the player has changed their war decks recently — "
+            "ask the user to confirm the reconstruction is current."
+        )
+
+    status = "reconstructed" if len(selected) == 4 else "partial"
+    return {
+        **base_payload,
+        "status": status,
+        "confidence": confidence,
+        "decks": decks_payload,
+        "skipped_candidates": [
+            {
+                "cards": [c.get("name") for c in deck["cards"] if isinstance(c, dict)],
+                "occurrences": deck["occurrences"],
+                "latest_used_at": deck["latest_battle_time"],
+                "sources": deck["sources"],
+            }
+            for deck in skipped[:5]
+        ],
+        "gaps": gaps,
+        "guidance": (
+            "If status is 'reconstructed' with confidence='high', proceed straight to per-deck "
+            "review. Otherwise present the reconstructed decks to the user and ask them to "
+            "confirm or correct before reviewing. Always enforce the no-overlap rule when "
+            "suggesting swaps: a card moved into one deck must come out of wherever it currently "
+            "lives across the other three."
+        ),
     }

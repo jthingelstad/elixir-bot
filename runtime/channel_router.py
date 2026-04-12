@@ -252,6 +252,130 @@ async def _route_member_deck(app, message, ctx):
     return True
 
 
+async def _route_deck_review(app, message, ctx):
+    """Route deck review/suggest requests to the deck_review LLM workflow."""
+    if ctx["workflow"] not in {"clanops", "interactive"}:
+        return False
+    if not ctx["mentioned"] and not ctx["allows_open_channel_reply"]:
+        return False
+    classified = app._classify_deck_request(ctx["raw_question"])
+    if not classified or classified["subject"] not in {"review", "suggest"}:
+        return False
+    mode = classified["mode"]
+    subject = classified["subject"]
+
+    deck_target = await asyncio.to_thread(app._extract_member_deck_target, ctx["raw_question"], message)
+    target_tag = deck_target if isinstance(deck_target, str) and deck_target.startswith("#") else None
+    target_name = None
+    if target_tag:
+        try:
+            row = await asyncio.to_thread(db.get_member_profile, target_tag)
+            if isinstance(row, dict):
+                target_name = row.get("current_name") or row.get("name")
+        except Exception:
+            target_name = None
+
+    route = f"deck_review_{mode}_{subject}"
+    _log_route(app, route, message, ctx["mentioned"], ctx["subagent"], ctx["workflow"],
+               ctx["raw_question"], deck_target=target_tag, mode=mode, subject=subject)
+
+    async with message.channel.typing():
+        try:
+            channel_config = app._get_channel_behavior(message.channel.id)
+            conversation_scope = ctx["conversation_scope"]
+            conversation_history = await asyncio.to_thread(
+                db.list_thread_messages, conversation_scope, app.CHANNEL_CONVERSATION_LIMIT,
+            )
+            memory_context = await asyncio.to_thread(
+                db.build_memory_context,
+                discord_user_id=message.author.id,
+                channel_id=message.channel.id,
+                viewer_scope=channel_config.get("memory_scope") or "public",
+            )
+
+            ch = app._channel_msg_kwargs(message.channel)
+            author = app._author_msg_kwargs(message.author)
+            user_msg_id = await asyncio.to_thread(
+                db.save_message,
+                conversation_scope, "user", ctx["raw_question"],
+                **ch, **author, workflow="deck_review",
+                discord_message_id=message.id,
+            )
+
+            result = await asyncio.to_thread(
+                elixir_agent.respond_in_deck_review,
+                question=ctx["raw_question"],
+                author_name=message.author.display_name,
+                channel_name=app._channel_reply_target_name(channel_config),
+                mode=mode,
+                subject=subject,
+                target_member_tag=target_tag,
+                target_member_name=target_name,
+                conversation_history=conversation_history,
+                memory_context=memory_context,
+            )
+
+            agent_error = _agent_failure_payload(result)
+            if agent_error or result is None or not isinstance(result, dict):
+                failure_type = (
+                    (agent_error.get("kind") if isinstance(agent_error, dict) else None)
+                    or ("agent_none" if result is None else "invalid_result_type")
+                )
+                app._log_prompt_failure(
+                    question=ctx["raw_question"], workflow="deck_review",
+                    failure_type=failure_type, failure_stage="respond_in_deck_review",
+                    channel=message.channel, author=message.author,
+                    discord_message_id=message.id,
+                    detail=_agent_failure_detail(agent_error) if agent_error else None,
+                )
+                await message.reply(app._fallback_channel_response(ctx["raw_question"], "interactive"))
+                return True
+
+            result = await app._apply_member_refs_to_result(result)
+            content = result.get("content") or result.get("summary") or ""
+            if not content:
+                app._log_prompt_failure(
+                    question=ctx["raw_question"], workflow="deck_review",
+                    failure_type="empty_result", failure_stage="respond_in_deck_review",
+                    channel=message.channel, author=message.author,
+                    discord_message_id=message.id, raw_json=result,
+                )
+                await message.reply(app._fallback_channel_response(ctx["raw_question"], "interactive"))
+                return True
+
+            sent = await app._reply_text(message, content)
+            asst_msg_id = None
+            try:
+                asst_msg_id = await asyncio.to_thread(
+                    db.save_message,
+                    conversation_scope, "assistant", _stored_assistant_content(content),
+                    **ch, **author, workflow="deck_review",
+                    event_type=result.get("event_type"),
+                    discord_message_id=_primary_discord_message_id(sent),
+                )
+            except Exception as exc:
+                app.log.error("deck_review reply save error: %s", exc, exc_info=True)
+            app._safe_create_task(
+                _post_conversation_memory(
+                    user_msg_id, asst_msg_id,
+                    ctx["raw_question"], _stored_assistant_content(content),
+                    message.channel.id, message.author.id,
+                    "deck_review", message.author.display_name,
+                ),
+                name="deck_review_memory",
+            )
+        except Exception as e:
+            app.log.error("deck_review error: %s", e, exc_info=True)
+            app._log_prompt_failure(
+                question=ctx["raw_question"], workflow="deck_review",
+                failure_type="exception", failure_stage="route_deck_review",
+                channel=message.channel, author=message.author,
+                discord_message_id=message.id, detail=str(e),
+            )
+            await message.reply("Hit an error reviewing the deck. Try again in a sec.")
+    return True
+
+
 async def _route_kick_risk(app, message, ctx):
     if ctx["workflow"] != "clanops" or not app._is_kick_risk_request(ctx["raw_question"]):
         return False
@@ -373,6 +497,8 @@ async def route_message(message):
     if await _route_help(app, message, ctx):
         return
     if await _route_member_deck(app, message, ctx):
+        return
+    if await _route_deck_review(app, message, ctx):
         return
     if await _route_kick_risk(app, message, ctx):
         return

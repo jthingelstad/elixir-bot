@@ -207,6 +207,13 @@ def _execute_get_member(arguments):
             )
         )
 
+    if "losses" in include:
+        result["losses"] = db.get_member_recent_losses(
+            member_tag,
+            scope=scope,
+            limit=arguments.get("losses_limit", 30),
+        )
+
     if "history" in include:
         result["history"] = db.get_member_history(member_tag, days=days)
 
@@ -261,6 +268,9 @@ def _execute_get_member_war_detail(arguments):
         result = db.get_member_missed_war_days(member_tag, season_id=None)
     elif aspect == "vs_clan_avg":
         result = db.compare_member_war_to_clan_average(member_tag, season_id=None)
+    elif aspect == "war_decks":
+        _refresh_member_cache(member_tag, include_battles=True)
+        result = db.reconstruct_member_war_decks(member_tag)
     else:
         return {"error": f"Unknown aspect: {aspect}"}
 

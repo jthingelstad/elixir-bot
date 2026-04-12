@@ -26,7 +26,8 @@ from runtime.helpers._requests import (  # noqa: F401
     _is_clan_list_request, _clan_status_mode, _is_war_status_request,
     _extract_profile_target, _is_roster_join_dates_request,
     _is_kick_risk_request, _is_top_war_contributors_request,
-    _is_member_deck_request, _is_help_request, _fallback_channel_response,
+    _is_member_deck_request, _is_deck_review_request, _classify_deck_request,
+    _is_help_request, _fallback_channel_response,
 )
 from runtime.helpers._channels import (  # noqa: F401
     _channel_scope, _channel_conversation_scope,

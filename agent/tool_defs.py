@@ -41,11 +41,13 @@ TOOLS = [
             "- trend: trophy/activity trend with window comparison\n"
             "- deck: current deck + signature cards (most-used from battle logs)\n"
             "- cards: full card collection with levels, rarity summaries, strongest cards\n"
+            "- losses: top opponent cards seen in recent losses + crown deficit + loss-streak context (uses scope param to pick mode: war_10/ladder_ranked_10/competitive_10/overall_10)\n"
             "- history: trophy and donation history from snapshots\n"
             "- memories: stored memories/observations about this member\n"
             "- chests: upcoming chest cycle (live API)\n\n"
             "For 'tell me about X', use default includes. "
             "For 'what deck does X use', include=['deck']. "
+            "For deck-review work, include=['deck','cards','losses']. "
             "For leadership evaluation, include=['profile', 'war', 'history', 'memories']."
         ),
         "input_schema": {
@@ -60,7 +62,7 @@ TOOLS = [
                     "items": {"type": "string"},
                     "description": (
                         "Which aspects to include. Options: profile, form, war, trend, deck, "
-                        "cards, history, memories, chests. Default: ['profile', 'form']."
+                        "cards, losses, history, memories, chests. Default: ['profile', 'form']."
                     ),
                     "default": ["profile", "form"],
                 },
@@ -82,6 +84,11 @@ TOOLS = [
                     "type": "integer",
                     "description": "Minimum displayed card level filter (for 'cards' include).",
                 },
+                "losses_limit": {
+                    "type": "integer",
+                    "description": "How many recent battles to scan for the 'losses' include. Default 30.",
+                    "default": 30,
+                },
             },
             "required": ["member_tag"],
         },
@@ -97,7 +104,11 @@ TOOLS = [
             "- attendance: participation rate, races played/missed, last 4 weeks\n"
             "- battles: war-battle win/loss/draw record for the season\n"
             "- missed_days: which specific war days were missed\n"
-            "- vs_clan_avg: compare this member's war contribution to the clan average"
+            "- vs_clan_avg: compare this member's war contribution to the clan average\n"
+            "- war_decks: reconstruct the four river-race war decks from recent battle history. "
+            "Returns status (insufficient_data/partial/reconstructed), confidence (high/medium/low), "
+            "the four decks, and gaps. Use this for any war-deck review or war-deck swap question. "
+            "The CR API does NOT directly expose the four war decks — this aspect infers them."
         ),
         "input_schema": {
             "type": "object",
@@ -110,7 +121,7 @@ TOOLS = [
                     "type": "string",
                     "description": "Which war detail to retrieve. Default: summary.",
                     "default": "summary",
-                    "enum": ["summary", "attendance", "battles", "missed_days", "vs_clan_avg"],
+                    "enum": ["summary", "attendance", "battles", "missed_days", "vs_clan_avg", "war_decks"],
                 },
             },
             "required": ["member_tag"],
