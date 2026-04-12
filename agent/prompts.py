@@ -18,7 +18,10 @@ def _discord_formatting_guidance() -> str:
         "Use readable Discord-native formatting. "
         "Keep most messages compact unless the task genuinely calls for more structure. "
         "Use occasional **bold** emphasis to make key names, turning points, or labels easier to scan. "
-        "Do not over-format every sentence or force extra paragraph breaks.\n\n"
+        "Do not over-format every sentence or force extra paragraph breaks. "
+        "Discord does not render markdown tables. Never use pipe-and-dash table syntax. "
+        "When you need to show tabular data, use a bulleted or numbered list where each item inlines the fields, "
+        "for example `- **Name** — wins: 12 · losses: 3 · fame: 2400`.\n\n"
     )
 
 
