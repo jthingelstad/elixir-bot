@@ -9,7 +9,7 @@ log = logging.getLogger("elixir")
 __all__ = [
     "_match_clan_member",
     "_resolve_member_candidate", "_extract_member_deck_target",
-    "_build_member_deck_report",
+    "_build_member_deck_report", "_build_member_war_decks_report",
 ]
 
 from runtime.helpers._common import (
@@ -119,4 +119,60 @@ def _build_member_deck_report(member_query: str):
         )
     if deck.get("fetched_at"):
         lines.append(f"_Snapshot: {_fmt_iso_short(deck['fetched_at'])}_")
+    return "\n".join(lines)
+
+
+def _build_member_war_decks_report(member_query: str):
+    """Render the 4 reconstructed war decks for a member as a static report.
+
+    Uses storage.war_analytics.reconstruct_member_war_decks, which derives the
+    decks from recent River Race battle history (the CR API doesn't expose
+    war decks directly). Returns a single-string report ready to post.
+    """
+    from storage.war_analytics import reconstruct_member_war_decks
+
+    member, error = _resolve_member_candidate(member_query)
+    if error:
+        return error
+
+    label = (
+        member.get("member_ref_with_handle")
+        or member.get("member_ref")
+        or member.get("current_name")
+        or member["player_tag"]
+    )
+    result = reconstruct_member_war_decks(member["player_tag"])
+    status = result.get("status")
+    decks = result.get("decks") or []
+
+    if status == "insufficient_data" or not decks:
+        reason = result.get("reason")
+        gaps = result.get("gaps") or []
+        detail = reason or (gaps[0] if gaps else "not enough recent war battles to reconstruct.")
+        return (
+            f"I don't have enough recent war battle data to reconstruct {label}'s war decks yet. "
+            f"{detail}"
+        )
+
+    lines = [f"**War Decks for {label}**"]
+    if status == "partial":
+        lines.append(
+            f"_Reconstructed {len(decks)} of 4 decks from battle history; "
+            "the others need more recent war battles to appear._"
+        )
+    for deck in decks:
+        lines.append("")
+        idx = deck.get("deck_index") or len(lines)
+        lines.append(f"**Deck {idx}**")
+        for card in deck.get("cards") or []:
+            name = card.get("name") if isinstance(card, dict) else str(card)
+            level = card.get("level") if isinstance(card, dict) else None
+            if level is None:
+                lines.append(f"- {name}")
+            else:
+                lines.append(f"- {name} — Level {level}")
+    confidence = result.get("confidence")
+    if confidence:
+        lines.append("")
+        lines.append(f"_Reconstruction confidence: {confidence}_")
     return "\n".join(lines)

@@ -18,7 +18,7 @@ from runtime.helpers._common import (  # noqa: F401
 from runtime.helpers._members import (  # noqa: F401
     _match_clan_member,
     _resolve_member_candidate, _extract_member_deck_target,
-    _build_member_deck_report,
+    _build_member_deck_report, _build_member_war_decks_report,
 )
 from runtime.helpers._requests import (  # noqa: F401
     _fallback_channel_response,

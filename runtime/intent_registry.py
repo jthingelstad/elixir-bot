@@ -48,22 +48,28 @@ ROUTES: list[dict] = [
     },
     {
         "key": "deck_display",
-        "label": "Show a member's current deck",
+        "label": "Show a member's current deck(s)",
         "router_description": (
-            "User wants to see the cards in their own current deck or another "
-            "member's current deck. This is a static lookup — they want the "
-            "cards listed, not advice."
+            "User wants to see the cards in a deck — no advice, just the "
+            "list. Use mode='regular' for the current ladder/trophy-road "
+            "deck (default). Use mode='war' when the user asks for their "
+            "war decks, river-race decks, or wants to see all four war "
+            "decks from the battle log."
         ),
-        "help_summary": "Show the cards in your current deck or another member's deck.",
+        "help_summary": "Show the cards in your current deck or your four war decks.",
         "examples": [
             "what cards are in my deck",
             "show me my deck",
             "what's in jamie's deck",
             "show jamie's deck",
             "current deck",
+            "show me my war decks",
+            "pull up my four war decks from the battle log",
+            "what are my river race decks",
         ],
         "workflows": {"interactive", "clanops"},
         "requires_mention": False,
+        "mode_choices": ["regular", "war"],
     },
     {
         "key": "deck_review",
