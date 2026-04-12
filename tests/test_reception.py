@@ -166,3 +166,87 @@ def test_handle_member_update_skips_refresh_when_initial_match_succeeds():
     mock_match.assert_called_once_with("King Levy")
     mock_grant.assert_awaited_once()
     mock_send.assert_awaited_once()
+
+
+class TestRemoveMemberRoleForTag:
+    """Tests for remove_member_role_for_tag called when a clan member leaves."""
+
+    def _run(self, *, identity, guild_member, member_role, manage_roles=True, forbidden=False):
+        guild = SimpleNamespace(
+            get_member=lambda uid: guild_member,
+            get_role=lambda rid: member_role,
+        )
+        bot = SimpleNamespace(get_guild=lambda gid: guild)
+        remove_mock = AsyncMock(side_effect=__import__("discord").Forbidden(
+            SimpleNamespace(status=403, reason="Forbidden"), "forbidden",
+        )) if forbidden else AsyncMock()
+        if guild_member is not None:
+            guild_member.remove_roles = remove_mock
+
+        with (
+            patch("runtime.onboarding.db.get_member_identity", return_value=identity),
+            patch("runtime.app.MEMBER_ROLE_ID", 777),
+            patch("runtime.app.GUILD_ID", 100),
+            patch("runtime.app.bot", new=bot),
+            patch("runtime.app._member_role_grant_status", return_value={"ok": manage_roles, "reason": "x"}),
+        ):
+            return asyncio.run(
+                onboarding.remove_member_role_for_tag("#ABC123", reason="left clan"),
+            ), remove_mock
+
+    def test_removes_role_when_linked_and_present(self):
+        role = SimpleNamespace(id=777)
+        guild_member = SimpleNamespace(id=555, display_name="King Levy", roles=[role])
+        (ok, detail), remove_mock = self._run(
+            identity={"discord_user_id": "555"},
+            guild_member=guild_member,
+            member_role=role,
+        )
+        assert ok is True
+        assert "Removed Member role" in detail
+        remove_mock.assert_awaited_once()
+
+    def test_noop_when_role_already_absent(self):
+        role = SimpleNamespace(id=777)
+        guild_member = SimpleNamespace(id=555, display_name="King Levy", roles=[])
+        (ok, detail), remove_mock = self._run(
+            identity={"discord_user_id": "555"},
+            guild_member=guild_member,
+            member_role=role,
+        )
+        assert ok is True
+        assert "did not have the Member role" in detail
+        remove_mock.assert_not_awaited()
+
+    def test_no_link_short_circuits(self):
+        (ok, detail), remove_mock = self._run(
+            identity={"discord_user_id": None},
+            guild_member=None,
+            member_role=None,
+        )
+        assert ok is False
+        assert "No linked Discord user" in detail
+        remove_mock.assert_not_awaited()
+
+    def test_guild_member_missing(self):
+        role = SimpleNamespace(id=777)
+        (ok, detail), remove_mock = self._run(
+            identity={"discord_user_id": "555"},
+            guild_member=None,
+            member_role=role,
+        )
+        assert ok is False
+        assert "not in guild" in detail
+        remove_mock.assert_not_awaited()
+
+    def test_forbidden_returns_false(self):
+        role = SimpleNamespace(id=777)
+        guild_member = SimpleNamespace(id=555, display_name="King Levy", roles=[role])
+        (ok, detail), _ = self._run(
+            identity={"discord_user_id": "555"},
+            guild_member=guild_member,
+            member_role=role,
+            forbidden=True,
+        )
+        assert ok is False
+        assert "Discord permissions" in detail

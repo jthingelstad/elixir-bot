@@ -439,7 +439,6 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             )
             return status == "skipped"
 
-        result = await _app._apply_member_refs_to_result(result)
         posts = _app._entry_posts(result)
         await _post_to_elixir(channel, result)
         summary = result.get("summary")

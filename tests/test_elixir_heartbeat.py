@@ -49,6 +49,54 @@ def test_clan_awareness_tick_uses_bundle_without_refetch():
     mock_get_war.assert_not_called()
 
 
+def test_clan_awareness_tick_revokes_member_role_for_leavers():
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[
+            {"type": "member_leave", "tag": "#GONE", "name": "WhoDis"},
+            {"type": "player_level_up", "tag": "#STAY", "name": "King Levy"},
+        ],
+        clan={"memberList": []},
+        war={},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.heartbeat.tick", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()),
+        patch("runtime.onboarding.remove_member_role_for_tag", new=AsyncMock(return_value=(True, "Removed"))) as mock_remove,
+    ):
+        asyncio.run(elixir._clan_awareness_tick())
+
+    mock_remove.assert_awaited_once()
+    assert mock_remove.await_args.args[0] == "#GONE"
+    assert "WhoDis" in mock_remove.await_args.kwargs["reason"]
+
+
+def test_clan_awareness_tick_swallows_revoke_exceptions():
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[{"type": "member_leave", "tag": "#GONE", "name": "WhoDis"}],
+        clan={"memberList": []},
+        war={},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.heartbeat.tick", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()),
+        patch("runtime.onboarding.remove_member_role_for_tag", new=AsyncMock(side_effect=RuntimeError("boom"))),
+        patch("runtime.jobs._core.runtime_status.mark_job_success") as mock_success,
+    ):
+        asyncio.run(elixir._clan_awareness_tick())
+
+    mock_success.assert_called_once()
+
+
 def test_clan_awareness_tick_reseeds_startup_system_signals_before_tick():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[],

@@ -270,7 +270,6 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
                 await message.reply(app._fallback_channel_response(ctx["raw_question"], "interactive"))
                 return True
 
-            result = await app._apply_member_refs_to_result(result)
             content = result.get("content") or result.get("summary") or ""
             if not content:
                 app._log_prompt_failure(
@@ -759,7 +758,6 @@ async def route_message(message):
                         await message.reply(app._fallback_channel_response(raw_question, workflow))
                     return
 
-                result = await app._apply_member_refs_to_result(result)
                 inline_memories = result.pop("memories", None) or []
                 if inline_memories:
                     try:

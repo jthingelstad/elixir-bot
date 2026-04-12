@@ -241,7 +241,6 @@ async def _ask_elixir_daily_insight():
         runtime_status.mark_job_success("daily_clan_insight", "no fresh insight")
         return
 
-    result = await _app._apply_member_refs_to_result(result)
     posts = _app._entry_posts(result)
     if not posts:
         runtime_status.mark_job_success("daily_clan_insight", "no fresh insight")
@@ -259,6 +258,26 @@ async def _ask_elixir_daily_insight():
             raw_json={"result": result, "context_kind": "daily_clan_insight"},
         )
     runtime_status.mark_job_success("daily_clan_insight", "daily insight published")
+
+async def _revoke_member_role_for_leavers(signals: list[dict]) -> None:
+    from runtime import onboarding
+
+    for signal in signals:
+        if signal.get("type") != "member_leave":
+            continue
+        tag = signal.get("tag")
+        if not tag:
+            continue
+        name = signal.get("name") or tag
+        try:
+            ok, detail = await onboarding.remove_member_role_for_tag(
+                tag, reason=f"Left clan: {name} ({tag})",
+            )
+        except Exception:
+            log.exception("member_role_revoke_failed tag=%s", tag)
+            continue
+        log.info("member_role_revoke tag=%s ok=%s detail=%s", tag, ok, detail)
+
 
 async def _clan_awareness_tick():
     """Recurring clan-awareness activity for non-war signals and routed clan-event outcomes."""
@@ -288,6 +307,8 @@ async def _clan_awareness_tick():
 
         for signal in signals:
             await _deliver_signal_group([signal], clan, war)
+
+        await _revoke_member_role_for_leavers(signals)
 
         runtime_status.mark_job_success("clan_awareness", f"{len(signals)} signal(s) processed")
 

@@ -16,8 +16,7 @@ from runtime.helpers._common import (  # noqa: F401
 # runtime.app — excluded to avoid recursion when accessed via the top-level
 # elixir module.
 from runtime.helpers._members import (  # noqa: F401
-    _pick_resolved_member, _rewrite_member_refs_in_text,
-    _apply_member_refs_to_result, _match_clan_member,
+    _pick_resolved_member, _match_clan_member,
     _resolve_member_candidate, _extract_member_deck_target,
     _build_member_deck_report,
 )
