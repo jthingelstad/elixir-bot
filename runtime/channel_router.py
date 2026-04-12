@@ -240,9 +240,11 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
         try:
             channel_config = app._get_channel_behavior(message.channel.id)
             conversation_scope = ctx["conversation_scope"]
-            conversation_history = await asyncio.to_thread(
-                db.list_thread_messages, conversation_scope, app.CHANNEL_CONVERSATION_LIMIT,
-            )
+            conversation_history = ctx.get("conversation_history")
+            if conversation_history is None:
+                conversation_history = await asyncio.to_thread(
+                    db.list_thread_messages, conversation_scope, app.CHANNEL_CONVERSATION_LIMIT,
+                )
             memory_context = await asyncio.to_thread(
                 db.build_memory_context,
                 discord_user_id=message.author.id,
@@ -538,6 +540,17 @@ async def route_message(message):
     # LLM intent classifier — only for interactive/clanops where the bot was
     # addressed. Reception has its own onboarding pipeline below.
     if workflow in {"interactive", "clanops"} and bot_should_consider:
+        # Load conversation history once; the router sees the last few turns
+        # for continuity ("lower the elixir cost" after a war-deck turn stays
+        # war), and the downstream channel handlers can reuse it too.
+        try:
+            conversation_history = await asyncio.to_thread(
+                db.list_thread_messages, conversation_scope, app.CHANNEL_CONVERSATION_LIMIT,
+            )
+        except Exception as exc:
+            app.log.warning("conversation_history_load_failed: %s", exc)
+            conversation_history = []
+        ctx["conversation_history"] = conversation_history
         try:
             intent = await asyncio.to_thread(
                 _intent_router.classify_intent,
@@ -545,6 +558,7 @@ async def route_message(message):
                 workflow=workflow,
                 mentioned=mentioned,
                 allows_open_channel_reply=allows_open_channel_reply,
+                conversation_history=conversation_history,
             )
         except Exception as exc:
             app.log.warning("intent_router_dispatch_failed: %s", exc, exc_info=True)
@@ -677,11 +691,15 @@ async def route_message(message):
             try:
                 clan, war = await app._load_live_clan_context()
                 question = raw_question
-                conversation_history = await asyncio.to_thread(
-                    db.list_thread_messages,
-                    conversation_scope,
-                    app.CHANNEL_CONVERSATION_LIMIT,
-                )
+                # Reuse the history loaded for the intent router when present,
+                # otherwise fetch fresh (router path skipped for this workflow).
+                conversation_history = ctx.get("conversation_history")
+                if conversation_history is None:
+                    conversation_history = await asyncio.to_thread(
+                        db.list_thread_messages,
+                        conversation_scope,
+                        app.CHANNEL_CONVERSATION_LIMIT,
+                    )
                 memory_context = await asyncio.to_thread(
                     db.build_memory_context,
                     discord_user_id=message.author.id,
