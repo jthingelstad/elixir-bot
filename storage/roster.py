@@ -2,8 +2,20 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+
+def _fold_for_search(value: str) -> str:
+    """Lowercase + strip diacritics so non-ASCII names match ASCII queries.
+
+    "José" and "jose" both fold to "jose"; "Pokémon" and "pokemon" both to
+    "pokemon". Used on both the query and the stored fields inside
+    resolve_member so searches are Unicode-tolerant.
+    """
+    nfd = unicodedata.normalize("NFD", value or "")
+    return "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn").lower()
 
 from db import (
     _canon_tag,
@@ -254,7 +266,7 @@ def resolve_member(query: str, status: Optional[str] = "active", limit: int = 5,
     query = (query or "").strip()
     if not query:
         return []
-    query_lower = query.lower()
+    query_lower = _fold_for_search(query)
     query_handle = query_lower.lstrip("@")
     query_tag = _canon_tag(query) if query.startswith("#") else ""
 
@@ -283,10 +295,10 @@ def resolve_member(query: str, status: Optional[str] = "active", limit: int = 5,
         score = 0
         source = None
 
-        name = (member.get("current_name") or "").lower()
-        discord_username = (member.get("discord_username") or "").lower()
-        discord_display = (member.get("discord_display_name") or "").lower()
-        alias_lowers = [a.lower() for a in member_aliases]
+        name = _fold_for_search(member.get("current_name") or "")
+        discord_username = _fold_for_search(member.get("discord_username") or "")
+        discord_display = _fold_for_search(member.get("discord_display_name") or "")
+        alias_lowers = [_fold_for_search(a) for a in member_aliases]
 
         if query_tag and member["player_tag"] == query_tag:
             score, source = 1000, "player_tag_exact"

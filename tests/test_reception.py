@@ -64,6 +64,12 @@ class TestMatchClanMember:
             result = elixir._match_clan_member("King Levy")
         assert result is None
 
+    def test_fallback_roster_map_folds_diacritics(self):
+        with patch("elixir.db.resolve_member", return_value=[]), \
+             patch("elixir.db.get_active_roster_map", return_value={"#ABC123": "José"}):
+            result = elixir._match_clan_member("jose")
+        assert result == ("#ABC123", "José")
+
 
 def test_send_onboarding_message_uses_shared_sender():
     channel = object()
