@@ -4,6 +4,47 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## v4.4 — Omnipresent
+
+**Date:** 2026-04-13
+
+Elixir's horizon expanded from "our clan" to "any clan, any player, any tournament on the live Clash Royale API." A single unified `cr_api` tool bridges the LLM to external lookups by tag, existing local tools now expose the tags the LLM needs to chain into scouting, and the scheduled Clan Wars Intel Report was rewired through the normal LLM+tool plumbing instead of bespoke orchestration.
+
+### Unified `cr_api` Tool
+
+- New LLM tool with 8 aspects: `player`, `player_battles`, `player_chests`, `clan`, `clan_members`, `clan_war`, `clan_war_log`, `tournament`.
+- Ask about any tag — "how strong is clan #QVJJL829", "scout player #P8JVG92U and show me their recent battles", "pull up top members of #G22GQVQR" — and Elixir fetches the answer live.
+- Aspect chaining works: `player` → `player_battles` → `lookup_cards` produces a full scouting report with opponent decks identified by name and elixir cost.
+- Strict tag validation (`_normalize_cr_tag`) rejects malformed tags with a clean envelope error instead of a 404 from the API.
+- Our-clan tags on clan aspects are rejected with a pointer to the richer local tools (`get_clan_health`, `get_clan_roster`).
+
+### Tag Exposure (LLM Chaining)
+
+- `get_member_recent_form` now emits `player_tag` so follow-up scouts can chain.
+- `get_member_war_status` now emits `player_tag`.
+- `get_member_recent_losses` now emits an `opponent_tags` aggregate so "who's been beating me" can chain into `cr_api(aspect='player')` to scout the opponent.
+- Before: the LLM knew *who* beat you but couldn't look them up. Now it can.
+
+### Clan Wars Intel Report — LLM-Driven
+
+- The scheduled Intel Report job (`#river-race`) no longer runs hardcoded orchestration. The LLM drives the fan-out across the four competing clans using `cr_api` and a new `get_clan_intel_report` tool that wraps the existing threat-scoring helpers.
+- New `intel_report` workflow with a 15-round tool budget and a narrow toolset — the threat scoring logic was kept, the orchestration and narrative code around it was deleted.
+- Same output quality, one consistent code path for conversational scouting and scheduled scouting.
+
+### Guardrails
+
+- Per-turn cap of 5 external lookups per LLM conversation (`EXTERNAL_LOOKUP_CAP`) prevents runaway chains.
+- In-module TTL cache (60–600s per endpoint) keeps conversational scouting cheap on the CR API.
+- External lookups are excluded from low-context workflows (`observe`, `channel_update`, `reception`, `roster_bios`) where they have no business firing.
+
+### Tests & Dev
+
+- 24 new tests covering tag normalization, cache TTL, dispatch guards, per-aspect whitelist filters, envelope budget, and cap constants.
+- New unified eval harness (`scripts/eval_all_requests.py`) runs regular, deck, and cr_api-tag buckets through the real pipeline in a single command.
+- Cleaned up the `scripts/` directory and added a README documenting every operational and eval utility.
+
+---
+
 ## v4.3 — Deck Review
 
 **Date:** 2026-04-12
