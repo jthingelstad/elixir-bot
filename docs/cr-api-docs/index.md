@@ -101,10 +101,11 @@ Examples of null-when-not-applicable (always present):
 ### Rate Limiting
 
 The API has aggressive rate limiting. Observed behavior:
-- No rate limit headers are returned in responses
+- No per-quota rate limit headers (no `X-RateLimit-*` style counters)
 - Exceeding limits results in 403 `accessDenied` (not always 429)
 - Adding ~2 second delays between requests helps avoid rate limit issues
 - Rate limits appear to be per-IP, not per-endpoint
+- When the API does return 429, a standard `Retry-After` header is included (seconds). Honour it before applying any local exponential backoff.
 
 ### Caching
 
