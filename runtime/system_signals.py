@@ -537,6 +537,41 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "race_command",
         },
     },
+    {
+        "signal_key": "capability_omnipresent_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Omnipresent",
+            "message": (
+                "Elixir's horizon just expanded from our clan to every clan, every player, and every tournament on the live Clash Royale API. "
+                "Drop a tag in chat and I can scout it — roster, river race standing, recent battles, opponent decks, and threat level."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Omnipresent** :elixir:\n\n"
+                "I used to only see our clan. Now I see every arena.\n\n"
+                "**Ask me about any tag:**\n"
+                "- `how strong is clan #QVJJL829` — full clan profile, trophy average, donations, top members.\n"
+                "- `scout #P8JVG92U and show me their recent battles` — player profile plus the decks they have been running, with each card named and costed.\n"
+                "- `what is clan #XYZ's current river race standing` — live fame, participants, war day state.\n"
+                "- `pull up top members of #XYZ` — ranked roster with roles, trophies, and last-seen.\n\n"
+                "**Chaining works:**\n"
+                "- When you ask about a clanmate's recent losses, I can now chain straight into scouting the opponents who beat them — "
+                "their deck, their level, their clan. The data was always close, but the bridge between \"who beat me\" and \"who are they\" was missing. It is there now.\n\n"
+                "**Clan Wars Intel Report:**\n"
+                "- The scheduled intel report in #river-race is fully rewired. Same threat ratings and roster analysis, but now driven by the same tool plumbing I use for conversational scouting — one brain, two surfaces.\n\n"
+                "This is **Elixir v4.4 \"Omnipresent\"** — wherever the tag is, I can be there too."
+            ),
+            "details": [
+                "New unified cr_api tool reaches any player, clan, or tournament on the live Clash Royale API by tag.",
+                "Aspect chaining lets Elixir scout opponents end-to-end: player profile → recent battles → opponent decks named and costed.",
+                "Local tools now expose player and opponent tags so conversational follow-ups can chain into external scouting without re-pasting the tag.",
+                "Clan Wars Intel Report is rewired onto the normal LLM+tool plumbing — same threat analysis, one consistent code path.",
+                "Guardrails: per-turn cap of 5 external lookups, in-module TTL cache, and external lookups excluded from low-context workflows.",
+            ],
+            "audience": "clan",
+            "capability_area": "omnipresent",
+        },
+    },
 ]
 
 

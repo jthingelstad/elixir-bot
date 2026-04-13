@@ -11,3 +11,5 @@ elixir.pid
 
 # Eval-script output artifacts (scripts themselves are committed; results aren't)
 scripts/deck_conversations_eval*.json
+scripts/eval_all_requests_results*.json
+scripts/intent_router_eval_results*.json
