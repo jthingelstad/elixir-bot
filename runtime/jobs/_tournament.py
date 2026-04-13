@@ -167,6 +167,7 @@ def start_tournament_watch():
         _job_runner,
         "interval",
         id=_TOURNAMENT_JOB_ID,
+        name="tournament-watch",
         minutes=TOURNAMENT_POLL_MINUTES,
         max_instances=1,
         coalesce=True,

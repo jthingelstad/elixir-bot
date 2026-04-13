@@ -37,6 +37,16 @@ from runtime.system_signals import queue_startup_system_signals
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+# Quiet noisy third-party loggers so operational signals stay readable.
+# discord.py installs its own handler via utils.setup_logging() in client.run();
+# we pass log_handler=None below to suppress it, and clear any handlers it may
+# have attached at import time so messages don't double-print.
+for _noisy in ("apscheduler", "apscheduler.scheduler", "apscheduler.executors.default", "httpx"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+for _discord_logger in ("discord", "discord.client", "discord.gateway", "discord.http"):
+    _dl = logging.getLogger(_discord_logger)
+    _dl.handlers.clear()
+    _dl.propagate = True
 log = logging.getLogger("elixir")
 
 CHICAGO = pytz.timezone("America/Chicago")
@@ -758,4 +768,4 @@ def main():
         raise ValueError("DISCORD_TOKEN not set in .env")
     _acquire_pid_file()
     atexit.register(_cleanup_pid_file)
-    bot.run(TOKEN)
+    bot.run(TOKEN, log_handler=None)

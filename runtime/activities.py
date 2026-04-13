@@ -415,6 +415,7 @@ def register_scheduled_activities(*, scheduler: Any, runtime_module: Any, create
             create_task(resolved["job_callable"]),
             resolved["schedule_kind"],
             id=resolved["job_id"],
+            name=resolved["activity_key"],
             **resolved["schedule_config"],
         )
         registered.append(resolved)
