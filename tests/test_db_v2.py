@@ -1094,6 +1094,8 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         assert form["wins"] == 1
         assert form["losses"] == 1
         assert form["sample_size"] == 2
+        # Tag exposure: LLM needs the player_tag to chain into cr_api.
+        assert form["player_tag"] == "#ABC123"
     finally:
         conn.close()
 
@@ -2441,6 +2443,8 @@ def test_war_status_queries_use_v2_tables():
         member_war = db.get_member_war_status("#ABC123", conn=conn)
         assert member_war["season"]["races_played"] == 1
         assert member_war["current_day"]["decks_left_today"] == 3
+        # Tag exposure: LLM needs the player_tag to chain into cr_api.
+        assert member_war["player_tag"] == "#ABC123"
     finally:
         conn.close()
 

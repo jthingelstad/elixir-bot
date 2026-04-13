@@ -8,6 +8,13 @@ import requests
 import cr_api
 
 
+@pytest.fixture(autouse=True)
+def _clear_cr_api_cache():
+    cr_api._cache_clear()
+    yield
+    cr_api._cache_clear()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

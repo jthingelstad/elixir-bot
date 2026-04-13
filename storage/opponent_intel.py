@@ -171,6 +171,35 @@ def compute_threat_rating(roster: dict | None, war: dict | None) -> int:
     return rating
 
 
+def build_clan_intel_entry(
+    clan_war_entry: dict,
+    clan_profile: dict | None,
+    *,
+    is_us: bool = False,
+    now: datetime | None = None,
+) -> dict:
+    """Build the intel analysis for ONE clan.
+
+    Wrapper around the roster/war/threat helpers so individual clans can be
+    scored outside the full-season loop (e.g. via the get_clan_intel_report
+    LLM tool).
+    """
+    tag = (clan_war_entry.get("tag") or "").lstrip("#").upper()
+    war_analysis = analyze_war_participants(clan_war_entry)
+    roster_analysis = analyze_clan_roster(clan_profile, now=now) if clan_profile else None
+    profile_available = clan_profile is not None
+    threat = compute_threat_rating(roster_analysis, war_analysis)
+    return {
+        "tag": f"#{tag}",
+        "name": (clan_profile or {}).get("name") or clan_war_entry.get("name") or "Unknown",
+        "is_us": is_us,
+        "roster": roster_analysis,
+        "war": war_analysis,
+        "threat_rating": threat,
+        "profile_available": profile_available,
+    }
+
+
 def build_intel_report(
     war_data: dict,
     clan_profiles: dict[str, dict | None],
@@ -190,7 +219,6 @@ def build_intel_report(
     """
     our_tag_clean = our_tag.lstrip("#").upper()
 
-    # Build war participant analysis from the war response
     war_clans = war_data.get("clans") or []
     our_war_entry = war_data.get("clan")
     if our_war_entry:
@@ -198,28 +226,15 @@ def build_intel_report(
     else:
         war_clans_all = war_clans
 
-    analyses = []
-    for clan_entry in war_clans_all:
-        tag = (clan_entry.get("tag") or "").lstrip("#").upper()
-        is_us = tag == our_tag_clean
-
-        war_analysis = analyze_war_participants(clan_entry)
-
-        profile = clan_profiles.get(tag)
-        roster_analysis = analyze_clan_roster(profile, now=now) if profile else None
-        profile_available = profile is not None
-
-        threat = compute_threat_rating(roster_analysis, war_analysis)
-
-        analyses.append({
-            "tag": f"#{tag}",
-            "name": (profile or {}).get("name") or clan_entry.get("name") or "Unknown",
-            "is_us": is_us,
-            "roster": roster_analysis,
-            "war": war_analysis,
-            "threat_rating": threat,
-            "profile_available": profile_available,
-        })
+    analyses = [
+        build_clan_intel_entry(
+            clan_entry,
+            clan_profiles.get((clan_entry.get("tag") or "").lstrip("#").upper()),
+            is_us=((clan_entry.get("tag") or "").lstrip("#").upper() == our_tag_clean),
+            now=now,
+        )
+        for clan_entry in war_clans_all
+    ]
 
     # Sort: our clan last, then by threat rating descending
     analyses.sort(key=lambda a: (a["is_us"], -a["threat_rating"]))
@@ -230,6 +245,7 @@ def build_intel_report(
 __all__ = [
     "analyze_clan_roster",
     "analyze_war_participants",
+    "build_clan_intel_entry",
     "build_intel_report",
     "compute_threat_rating",
 ]

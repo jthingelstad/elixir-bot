@@ -115,6 +115,11 @@ def test_get_member_recent_losses_aggregates_top_opponent_cards():
         mk = next(c for c in out["top_opponent_cards"] if c["name"] == "Mega Knight")
         assert mk["appearances"] == 3
         assert mk["pct_of_losses"] == 100
+        # Tag exposure: opponent_tags must surface the opponent's player tag so the
+        # LLM can chain into cr_api. All three losses shared #OPP.
+        assert len(out["opponent_tags"]) == 1
+        assert out["opponent_tags"][0]["tag"] == "#OPP"
+        assert out["opponent_tags"][0]["losses_count"] == 3
     finally:
         conn.close()
 

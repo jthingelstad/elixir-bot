@@ -41,6 +41,7 @@ def get_member_war_status(tag, season_id=None, conn=None):
 
     summary = {
         "season_id": season_id,
+        "player_tag": canon_tag,
         "member_ref": _format_member_reference(canon_tag, conn=conn),
         "current_day": current_day,
         "season": None,

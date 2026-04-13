@@ -2,6 +2,14 @@ from agent.tool_defs import TOOLS
 
 _WRITE_TOOL_NAMES = {"update_member", "save_clan_memory"}
 
+# Tools that hit external (CR) APIs and should be rate-capped per LLM turn.
+# Enforced by agent/chat.py::_chat_with_tools.
+EXTERNAL_LOOKUP_TOOL_NAMES = {"cr_api"}
+
+# Workflows that don't need the conversational CR bridge — they're one-shot
+# observation/formatting jobs with narrow, local-only scopes.
+_NO_EXTERNAL_LOOKUP_WORKFLOWS = {"observe", "channel_update", "reception", "roster_bios"}
+
 TOOL_DEFINITIONS = []
 for _tool in TOOLS:
     _name = _tool["name"]
@@ -20,20 +28,30 @@ READ_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "read"]
 WRITE_TOOLS = [d["tool"] for d in TOOL_DEFINITIONS if d["side_effect"] == "write"]
 ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
 
+READ_TOOLS_NO_EXTERNAL = [t for t in READ_TOOLS if t["name"] not in EXTERNAL_LOOKUP_TOOL_NAMES]
+
+# The scheduled Clan Wars Intel Report workflow uses a narrow read-only toolset:
+# the CR API bridge (to confirm current opponents and fetch profiles) and the
+# intel-scoring tool that wraps the threat analysis. The scheduled job handles
+# Discord posting and memory persistence outside the LLM loop.
+_INTEL_REPORT_TOOL_NAMES = {"cr_api", "get_clan_intel_report"}
+INTEL_REPORT_TOOLS = [t for t in READ_TOOLS if t["name"] in _INTEL_REPORT_TOOL_NAMES]
+
 # get_clan_health has sensitive aspects (at_risk, promotion_candidates) but
 # aspect-level gating is handled in tool_exec.py, so we keep it available
 # to all workflows. This avoids confusing the LLM by hiding the tool entirely.
 INTERACTIVE_READ_TOOLS = READ_TOOLS
 
 TOOLSETS_BY_WORKFLOW = {
-    "observe": INTERACTIVE_READ_TOOLS,
-    "channel_update": INTERACTIVE_READ_TOOLS,
+    "observe": READ_TOOLS_NO_EXTERNAL,
+    "channel_update": READ_TOOLS_NO_EXTERNAL,
     "channel_update_leadership": READ_TOOLS,
     "interactive": INTERACTIVE_READ_TOOLS,
     "clanops": ALL_TOOLS,
     "reception": [],
-    "roster_bios": READ_TOOLS,
+    "roster_bios": READ_TOOLS_NO_EXTERNAL,
     "deck_review": INTERACTIVE_READ_TOOLS,
+    "intel_report": INTEL_REPORT_TOOLS,
 }
 
 MAX_ROUNDS_BY_WORKFLOW = {
@@ -50,6 +68,9 @@ MAX_ROUNDS_BY_WORKFLOW = {
     # answer. Suggest mode adds a validator-driven revision turn. 10 rounds
     # leaves headroom without inviting runaway loops.
     "deck_review": 10,
+    # intel_report fans out across 4 opponents (~2 tool calls each) plus the
+    # initial clan_war confirmation; 15 leaves headroom for retries.
+    "intel_report": 15,
 }
 
 RESPONSE_SCHEMAS_BY_WORKFLOW = {
@@ -61,4 +82,5 @@ RESPONSE_SCHEMAS_BY_WORKFLOW = {
     "reception": {"required": ["event_type", "content"]},
     "roster_bios": {"required": ["intro", "members"]},
     "deck_review": {"required": ["event_type", "summary", "content"]},
+    "intel_report": {"required": ["event_type", "summary", "content"]},
 }

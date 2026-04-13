@@ -110,6 +110,43 @@ def _proactive_channel_system(channel_name: str, subagent_key: str, *, leadershi
     )
 
 
+def _intel_report_system():
+    """System prompt for the scheduled Clan Wars Intel Report workflow.
+
+    The LLM fetches intel on each current competitor via cr_api + get_clan_intel_report,
+    then composes a Discord-ready multi-message post for #river-race.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        prompts.channel_section("river-race"),
+        "You are writing the Clan Wars Intel Report for the start of a new river race season. "
+        "Your job: scout each of our current river race opponents and produce a Discord-ready report "
+        "posted to #river-race.\n\n"
+        "Tools:\n"
+        "- cr_api(aspect='clan_war', tag='<our tag>') — confirm the five clans in our current race.\n"
+        "- cr_api(aspect='clan', tag='#X') — quick profile look at an opponent clan.\n"
+        "- get_clan_intel_report(clan_tag='#X') — the main tool. Returns roster metrics, war engagement, "
+        "and a 1-5 threat rating per opponent. Call this once per opponent.\n\n"
+        "Structure the output as a multi-message Discord post:\n"
+        "- First message: a 2–4 sentence strategic assessment — which clans pose the biggest threats "
+        "and why, any notable weaknesses we could exploit. Be direct and actionable.\n"
+        "- One message per opponent (in descending threat-rating order): clan name + tag, threat "
+        "rating (e.g. `Threat 4/5`), key roster/war stats (war trophies, avg trophies, member count, "
+        "activity, engagement %), and a one-line snarky recap under 200 chars. Dry wit welcome, no emojis.\n\n"
+        "Omit our own clan from the per-opponent breakdown — only cover the four competitors.\n\n"
+        "Write specific, grounded prose from the tool results. Do not improvise numbers. If a clan's "
+        "profile was unavailable (profile_available: false), say so and keep that entry brief.\n\n"
+        f"{_discord_formatting_guidance()}"
+        f"{_discord_emoji_guidance()}"
+        "Respond with JSON only (no markdown wrapper):\n"
+        '{"event_type": "channel_update", "summary": "one sentence TL;DR", '
+        '"content": ["message 1", "message 2", ...], '
+        '"metadata": {"threat_order": ["#tag1", "#tag2", ...]}}\n\n'
+        "`content` MUST be an array of strings — one element per Discord message, in post order.",
+    )
+
+
 def _interactive_system(channel_name):
     subagent_key = prompts.subagent_key_for_channel(channel_name, "interactive")
     purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
@@ -130,6 +167,12 @@ def _interactive_system(channel_name):
         "Resolve members by name or Discord handle instead of guessing.\n\n"
         "When discussing card stats, elixir costs, rarity, card type, or card comparisons, use the lookup_cards tool for accurate data instead of relying on memory. "
         "This includes computing averages or totals across a deck — resolve each card's elixir cost via lookup_cards first. Memory is never the source for elixir costs.\n\n"
+        "The cr_api tool is your bridge to the live Clash Royale API for ANY external player, clan, or tournament by tag. "
+        "Reach for it when a user hands you a tag — e.g. 'tell me about player #ABC', 'how is clan #XYZ', 'scout the clan I just lost to'. "
+        "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, get_clan_health, get_river_race) — local data is deeper. "
+        "For card data, always use lookup_cards, not cr_api. "
+        "Chain aspect='player_battles' into aspect='player' or aspect='clan' to scout opponents. "
+        "If the user asks about something the CR API doesn't expose (battle IDs, match IDs, historical clan rosters), say so plainly — do not improvise.\n\n"
         "For member-specific factual questions like join date, how long someone has been playing, recent activity, deck, war status, or trend details, use the member tools instead of relying on the clipped roster snapshot or memory.\n\n"
         "If someone asks for deck advice based on their card levels or their whole collection, use the card-collection tool instead of only looking at their current deck.\n\n"
         "If someone asks which cards they have unlocked by rarity, like legendary cards or champions, use the card-collection tool for the full collection and pass a rarity filter when useful. Do not answer those questions from the current deck.\n\n"
@@ -186,6 +229,12 @@ def _clanops_system(channel_name):
         "If you want to include an image, give the card or item name in text and then the raw URL.\n\n"
         "Use tools to ground factual claims. Be direct, concrete, and operational. "
         "If a member is referenced by name or Discord handle, resolve them first instead of guessing.\n\n"
+        "The cr_api tool is your bridge to the live Clash Royale API for ANY external player, clan, or tournament by tag. "
+        "Reach for it when a user hands you a tag — e.g. 'tell me about player #ABC', 'how is clan #XYZ', 'scout the clan I just lost to'. "
+        "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, get_clan_health, get_river_race) — local data is deeper. "
+        "For card data, always use lookup_cards, not cr_api. "
+        "Chain aspect='player_battles' into aspect='player' or aspect='clan' to scout opponents. "
+        "If the user asks about something the CR API doesn't expose (battle IDs, match IDs, historical clan rosters), say so plainly — do not improvise.\n\n"
         "For member-specific factual questions like join date, how long someone has been playing, recent activity, deck, war status, or trend details, use the member tools instead of relying on clipped roster context or memory.\n\n"
         "If someone asks for deck advice based on their card levels or their whole collection, use the card-collection tool instead of only looking at their current deck.\n\n"
         "If someone asks which cards they have unlocked by rarity, like legendary cards or champions, use the card-collection tool for the full collection and pass a rarity filter when useful. Do not answer those questions from the current deck.\n\n"

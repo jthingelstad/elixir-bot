@@ -12,11 +12,14 @@ from agent.core import (
 )
 from agent.tool_policy import (
     ALL_TOOLS,
+    EXTERNAL_LOOKUP_TOOL_NAMES,
     MAX_ROUNDS_BY_WORKFLOW,
     RESPONSE_SCHEMAS_BY_WORKFLOW,
     TOOL_DEFINITIONS_BY_NAME,
     TOOLSETS_BY_WORKFLOW,
 )
+
+EXTERNAL_LOOKUP_CAP = 5
 from agent.tool_exec import _execute_tool
 from anthropic import APIError, APIConnectionError
 
@@ -310,6 +313,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     tools_called = []
     denied_tool_count = 0
     validation_failure_count = 0
+    external_lookup_calls = 0
     completion_latencies_ms = []
     completion_chars = 0
 
@@ -448,6 +452,18 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                     "tool": fn_name,
                     "workflow": workflow,
                 })
+            elif fn_name in EXTERNAL_LOOKUP_TOOL_NAMES and external_lookup_calls >= EXTERNAL_LOOKUP_CAP:
+                denied_tool_count += 1
+                log.warning(
+                    "tool_denied workflow=%s tool=%s reason=external_lookup_cap calls=%d",
+                    workflow, fn_name, external_lookup_calls,
+                )
+                result = json.dumps({
+                    "error": "external_lookup_cap_reached",
+                    "tool": fn_name,
+                    "cap": EXTERNAL_LOOKUP_CAP,
+                    "hint": "External CR API lookups are capped per turn. Summarize with what you already have.",
+                })
             else:
                 side_effect = TOOL_DEFINITIONS_BY_NAME.get(fn_name, {}).get("side_effect", "read")
                 if side_effect == "write" and not enable_write_tools:
@@ -464,6 +480,8 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                 else:
                     log.info("Tool call workflow=%s: %s(%s)", workflow, fn_name, fn_args)
                     tools_called.append(fn_name)
+                    if fn_name in EXTERNAL_LOOKUP_TOOL_NAMES:
+                        external_lookup_calls += 1
                     result = _build_tool_result_envelope(
                         fn_name,
                         _execute_tool(fn_name, fn_args, workflow=workflow),
