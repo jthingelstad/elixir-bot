@@ -407,6 +407,84 @@ TOOLS = [
         },
     },
     {
+        "name": "get_clan_intel_report",
+        "description": (
+            "Build a scouting/threat analysis for a competing clan in OUR current river race. "
+            "Returns roster metrics (trophies, activity, role breakdown), war engagement (fame, "
+            "deck usage, engagement %), and a 1-5 threat rating. Use this for the scheduled "
+            "Clan Wars Intel Report and for scouting questions like 'how dangerous is clan #X' "
+            "when #X is racing us.\n\n"
+            "Requires that clan_tag be one of our 4 opponents in the current river race. "
+            "For arbitrary external clans not in our current race, use cr_api(aspect='clan') instead."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "clan_tag": {
+                    "type": "string",
+                    "description": "CR clan tag (#-prefixed) of a competitor in our current river race.",
+                },
+            },
+            "required": ["clan_tag"],
+        },
+    },
+    {
+        "name": "cr_api",
+        "description": (
+            "Bridge to the live Clash Royale public API. Use when the user asks about ANY "
+            "player, clan, or tournament by CR tag — e.g. 'tell me about player #ABC', "
+            "'how is clan #XYZ', 'scout the clan I just lost to'.\n\n"
+            "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, "
+            "get_clan_health, get_river_race) — local data is deeper and covers longer history. "
+            "For CARD data, use lookup_cards, NOT this tool.\n\n"
+            "Aspects:\n"
+            "- player: profile, trophies, clan, current deck, favourite card\n"
+            "- player_battles: recent battle log with opponent tags preserved (chain into "
+            "aspect='player' or 'clan' to scout opponents). Optional mode filter: "
+            "ladder / war / tournament / challenge / path_of_legends\n"
+            "- player_chests: upcoming chest cycle\n"
+            "- clan: profile + member summary (counts, averages). Rejects OUR clan.\n"
+            "- clan_members: top-N members with tags, roles, trophies, donations\n"
+            "- clan_war: current river race for ANY clan (standings, top participants)\n"
+            "- clan_war_log: historical river race results\n"
+            "- tournament: profile + top members by score\n\n"
+            "If the user asks about something the CR API does not expose — battle IDs, match IDs, "
+            "historical clan rosters, deck tags — say so plainly. Do not improvise a workaround."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "aspect": {
+                    "type": "string",
+                    "enum": [
+                        "player", "player_battles", "player_chests",
+                        "clan", "clan_members", "clan_war", "clan_war_log",
+                        "tournament",
+                    ],
+                    "description": "Which CR API slice to fetch.",
+                },
+                "tag": {
+                    "type": "string",
+                    "description": "CR tag (#-prefixed, e.g. '#J2RGCRVG'). Required for every aspect.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        "Number of items to return for list-shaped aspects. "
+                        "player_battles: default 15, max 25. "
+                        "clan_members / tournament: default 15, max 30."
+                    ),
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["ladder", "war", "tournament", "challenge", "path_of_legends"],
+                    "description": "Optional client-side filter for aspect='player_battles'.",
+                },
+            },
+            "required": ["aspect", "tag"],
+        },
+    },
+    {
         "name": "update_member",
         "description": (
             "Set metadata for a clan member. Use 'field' to specify what to update.\n\n"

@@ -1,4 +1,4 @@
-"""Tests for storage/opponent_intel.py and runtime/helpers/_intel_report.py."""
+"""Tests for storage/opponent_intel.py."""
 
 from datetime import datetime
 
@@ -10,12 +10,6 @@ from storage.opponent_intel import (
     build_intel_report,
     compute_threat_rating,
 )
-from runtime.helpers._intel_report import (
-    format_intel_report,
-    format_intel_summary_for_memory,
-)
-
-DISCORD_MAX_MESSAGE_LEN = 2000
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -235,103 +229,3 @@ class TestBuildIntelReport:
         assert mystery["profile_available"] is False
         assert mystery["roster"] is None
         assert mystery["war"] is not None
-
-
-# ---------------------------------------------------------------------------
-# format_intel_report
-# ---------------------------------------------------------------------------
-
-class TestFormatIntelReport:
-    def _sample_analyses(self):
-        war_data = {
-            "clan": _make_war_clan_entry("OUR", "POAP KINGS"),
-            "clans": [
-                _make_war_clan_entry("A1", "Clan Alpha"),
-                _make_war_clan_entry("B2", "Clan Bravo"),
-                _make_war_clan_entry("C3", "Clan Charlie"),
-                _make_war_clan_entry("D4", "Clan Delta"),
-                _make_war_clan_entry("E5", "Clan Echo"),
-            ],
-        }
-        profiles = {
-            "OUR": _make_clan_profile("OUR", "POAP KINGS"),
-            "A1": _make_clan_profile("A1", "Clan Alpha"),
-            "B2": _make_clan_profile("B2", "Clan Bravo"),
-            "C3": _make_clan_profile("C3", "Clan Charlie"),
-            "D4": _make_clan_profile("D4", "Clan Delta"),
-            "E5": _make_clan_profile("E5", "Clan Echo"),
-        }
-        return build_intel_report(war_data, profiles, "OUR")
-
-    def test_six_messages_with_five_opponents(self):
-        analyses = self._sample_analyses()
-        messages = format_intel_report(analyses, season_id=131)
-        # 1 header + 5 opponent clans = 6 messages
-        assert len(messages) == 6
-
-    def test_header_contains_season(self):
-        analyses = self._sample_analyses()
-        messages = format_intel_report(analyses, season_id=131)
-        assert "Season 131" in messages[0]
-
-    def test_llm_summary_in_header(self):
-        analyses = self._sample_analyses()
-        messages = format_intel_report(
-            analyses, season_id=131,
-            llm_summary="Clan Alpha is the biggest threat due to high activity.",
-        )
-        assert "Clan Alpha is the biggest threat" in messages[0]
-        # Still 6 messages (summary merged into header, not separate)
-        assert len(messages) == 6
-
-    def test_all_messages_under_discord_limit(self):
-        analyses = self._sample_analyses()
-        messages = format_intel_report(analyses, season_id=131)
-        for i, msg in enumerate(messages):
-            assert len(msg) <= DISCORD_MAX_MESSAGE_LEN, f"Message {i} exceeds {DISCORD_MAX_MESSAGE_LEN} chars: {len(msg)}"
-
-    def test_no_markdown_tables(self):
-        analyses = self._sample_analyses()
-        messages = format_intel_report(analyses, season_id=131)
-        for msg in messages:
-            # Check for pipe-delimited table rows
-            lines = msg.split("\n")
-            for line in lines:
-                stripped = line.strip()
-                if stripped.startswith("|") and stripped.endswith("|"):
-                    pytest.fail(f"Found markdown table syntax: {line}")
-
-    def test_our_clan_excluded_from_messages(self):
-        analyses = self._sample_analyses()
-        messages = format_intel_report(analyses, season_id=131)
-        for msg in messages[1:]:  # skip header
-            assert "POAP KINGS" not in msg
-
-
-# ---------------------------------------------------------------------------
-# format_intel_summary_for_memory
-# ---------------------------------------------------------------------------
-
-class TestFormatIntelSummaryForMemory:
-    def test_excludes_our_clan(self):
-        analyses = [
-            {"name": "Rival", "tag": "#R1", "is_us": False, "threat_rating": 3,
-             "roster": {"member_count": 40, "avg_trophies": 6000, "war_trophies": 3000},
-             "war": {"engagement_pct": 70}},
-            {"name": "Us", "tag": "#US", "is_us": True, "threat_rating": 4,
-             "roster": {"member_count": 50, "avg_trophies": 7000, "war_trophies": 4000},
-             "war": {"engagement_pct": 90}},
-        ]
-        summary = format_intel_summary_for_memory(analyses)
-        assert "Rival" in summary
-        assert "Us" not in summary
-
-    def test_returns_string(self):
-        analyses = [
-            {"name": "Clan A", "tag": "#A", "is_us": False, "threat_rating": 2,
-             "roster": {"member_count": 30, "avg_trophies": 5000, "war_trophies": 1500},
-             "war": {"engagement_pct": 40}},
-        ]
-        result = format_intel_summary_for_memory(analyses)
-        assert isinstance(result, str)
-        assert "Clan A" in result

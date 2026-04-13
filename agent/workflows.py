@@ -20,6 +20,7 @@ from agent.prompts import (
     _event_system,
     _help_system,
     _home_message_system,
+    _intel_report_system,
     _interactive_system,
     _members_message_system,
     _observe_system,
@@ -843,9 +844,38 @@ def generate_tournament_recap(recap_context):
     )
 
 
+def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_context=None):
+    """Run the Clan Wars Intel Report workflow.
+
+    The LLM fetches intel on each competitor via cr_api + get_clan_intel_report,
+    then composes a Discord-ready multi-message post. Returns the parsed
+    response dict (with `content` as an array of message strings) or None.
+    """
+    season_line = f"Season {season_id} is beginning." if season_id is not None else "A new river race has started."
+    opponents_line = ", ".join(f"#{t.lstrip('#').upper()}" for t in competitor_tags) or "(none listed)"
+    user_msg = (
+        f"{season_line}\n"
+        f"Our clan: #{our_tag.lstrip('#').upper()}\n"
+        f"Current river race opponents: {opponents_line}\n\n"
+        "Use get_clan_intel_report on each opponent to gather threat analysis, "
+        "then compose the Clan Wars Intel Report for #river-race."
+    )
+    user_msg += _format_memory_context(memory_context)
+    return _chat_with_tools(
+        _intel_report_system(),
+        user_msg,
+        workflow="intel_report",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["intel_report"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["intel_report"],
+        strict_json=True,
+        max_tokens=4096,
+    )
+
+
 __all__ = [
     "observe_and_post",
     "generate_channel_update",
+    "generate_intel_report",
     "respond_in_reception",
     "respond_in_channel",
     "respond_in_deck_review",

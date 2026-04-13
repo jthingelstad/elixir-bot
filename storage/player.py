@@ -986,7 +986,8 @@ def get_member_recent_losses(
         return None
     member_id = member_row["member_id"]
     rows = conn.execute(
-        f"SELECT outcome, crowns_for, crowns_against, opponent_deck_json, battle_time, battle_type, game_mode_name "
+        f"SELECT outcome, crowns_for, crowns_against, opponent_deck_json, battle_time, battle_type, game_mode_name, "
+        f"opponent_tag, opponent_name, opponent_clan_tag "
         f"FROM member_battle_facts WHERE member_id = ? AND {predicate} "
         f"ORDER BY battle_time DESC LIMIT ?",
         (member_id, limit),
@@ -996,7 +997,20 @@ def get_member_recent_losses(
     losses_examined = len(losses)
     counts: dict[str, int] = {}
     icons: dict[str, str] = {}
+    opponent_agg: dict[str, dict] = {}
     for row in losses:
+        opp_tag = row["opponent_tag"]
+        if opp_tag:
+            entry = opponent_agg.get(opp_tag)
+            if entry is None:
+                entry = {
+                    "tag": opp_tag,
+                    "name": row["opponent_name"],
+                    "clan_tag": row["opponent_clan_tag"],
+                    "losses_count": 0,
+                }
+                opponent_agg[opp_tag] = entry
+            entry["losses_count"] += 1
         try:
             opp_cards = json.loads(row["opponent_deck_json"] or "[]")
         except (TypeError, ValueError):
@@ -1040,6 +1054,11 @@ def get_member_recent_losses(
             f"{losses_with_opponent_data}/{losses_examined} losses had opponent deck data captured "
             "(older battles may pre-date opponent-deck capture)."
         )
+    opponent_tags = sorted(
+        opponent_agg.values(),
+        key=lambda o: (o["losses_count"], o.get("name") or ""),
+        reverse=True,
+    )
     return {
         "member_tag": member_tag,
         "member_name": member_row["current_name"],
@@ -1050,10 +1069,13 @@ def get_member_recent_losses(
         "current_loss_streak": current_loss_streak,
         "avg_crown_deficit": avg_crown_deficit,
         "top_opponent_cards": top_opponent_cards,
+        "opponent_tags": opponent_tags,
         "coverage_note": coverage_note,
         "guidance": (
             "Use top_opponent_cards to ground swap suggestions: cite specific cards that have "
-            "appeared most often in this player's recent losses, then propose counters they own."
+            "appeared most often in this player's recent losses, then propose counters they own. "
+            "Use opponent_tags to chain into cr_api (aspect='player' / 'clan') if the user asks "
+            "to scout a specific opponent they lost to."
         ),
     }
 

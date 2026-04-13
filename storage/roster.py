@@ -804,7 +804,7 @@ def get_member_signature_cards(tag: str, mode_scope: str = "overall", conn: Opti
 @managed_connection
 def get_member_recent_form(tag: str, scope: str = "competitive_10", conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
-        "SELECT f.scope, f.sample_size, f.wins, f.losses, f.draws, f.current_streak, "
+        "SELECT m.player_tag, f.scope, f.sample_size, f.wins, f.losses, f.draws, f.current_streak, "
         "f.current_streak_type, f.win_rate, f.avg_crown_diff, f.avg_trophy_change, f.form_label, f.summary, f.computed_at "
         "FROM member_recent_form f "
         "JOIN members m ON m.member_id = f.member_id "
