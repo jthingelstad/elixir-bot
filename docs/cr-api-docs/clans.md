@@ -81,7 +81,7 @@ Get the clan's active river race state.
 | `state` | string | e.g. `full` |
 | `sectionIndex` | integer | Current section (week) |
 | `periodIndex` | integer | Current period within section |
-| `periodType` | string | Observed: `training`, `trainingDay`, `warDay`, `battleDay`, `colosseum` (see notes) |
+| `periodType` | string | Observed: `training`, `warDay`, `colosseum` (see notes) |
 | `clan` | RiverRaceClan | This clan's data (see below) |
 | `clans` | array | All 5 clans in the race |
 | `periodLogs` | array | Historical period data for current race |
@@ -251,7 +251,7 @@ Observed error bodies are usually `{ reason, message? }`. `type`/`detail` were n
 - `badgeUrls` is **not** present in responses — only `badgeId` (integer). Badge images must be resolved via the badge ID.
 - **Clan search:** `name` is not required — you can filter by `locationId`, `minScore`, `minMembers`, `maxMembers` alone. Search is case-insensitive.
 - **River race structure:** A season is mostly 4 weeks but sometimes 5 weeks (Supercell adjusts to align with Pass Royale seasons). Each section has multiple periods (days). The final section is always colosseum week with higher trophy stakes (±100 vs ±20). Do not hardcode which `sectionIndex` is colosseum — use `trophyChange` from the log or `periodType` from `currentriverrace` to identify it.
-- **`periodType` lifecycle:** Practice days emit `training` (also `trainingDay` in older payloads). Battle days emit `warDay` / `battleDay` on regular weeks and `colosseum` on the final week. The colosseum value only appears once battle days begin — practice days of colosseum week still report `training`, so a "this is colosseum week" determination cannot be made from `periodType` alone during practice days.
+- **`periodType` lifecycle:** In ~1,400 live captures over March–April 2026 only three values were observed: `training` on practice days, `warDay` on regular-week battle days, and `colosseum` on final-week battle days. Variants like `trainingDay` / `battleDay` appear in some clients' test fixtures but were not seen on the wire — treat them as defensive aliases, not documented values. The `colosseum` value only appears once battle days begin; practice days of colosseum week still report `training`, so a "this is colosseum week" determination cannot be made from `periodType` alone during practice days.
 - **Colosseum-week behavior:** The colosseum week has no boat battles and no boat defenses — only Colosseum duels and 1v1s. Participant fields like `boatAttacks` and `numOfDefensesRemaining` will not advance, and battlelog `boatBattle` entries do not occur during colosseum week. Avoid surfacing boat-defense or repair-point copy when `periodType=colosseum`.
 - **River race default limit:** `/riverracelog` returns 10 entries by default.
 - **Member roles observed:** `member`, `elder`, `coLeader`, `leader`
