@@ -66,6 +66,7 @@ ASK_ELIXIR_DAILY_INSIGHT_MINUTE = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_MINUTE
 ASK_ELIXIR_DAILY_INSIGHT_JITTER_SECONDS = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_JITTER_SECONDS", "1800"))
 PROMOTION_CONTENT_DAY = os.getenv("PROMOTION_CONTENT_DAY", "fri")
 PROMOTION_CONTENT_HOUR = int(os.getenv("PROMOTION_CONTENT_HOUR", "9"))
+ADMIN_DISCORD_ID = os.getenv("ADMIN_DISCORD_ID")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -74,8 +75,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 scheduler = AsyncIOScheduler(timezone=CHICAGO)
 APP_GUILD = discord.Object(id=GUILD_ID) if GUILD_ID else None
 SLASH_COMMANDS_SYNCED = False
-_CR_API_ALERT_SIGNATURE = None
-_CR_API_OUTAGE_ALERT_SIGNATURE = None
+_ALERT_SIGNATURES: dict[str, str | None] = {}
 
 def _member_role_grant_status() -> dict:
     status = {
@@ -122,12 +122,56 @@ def _member_role_grant_status() -> dict:
     return status
 
 
+def _admin_mention_ref() -> str:
+    """Return admin display name with Discord @mention when ADMIN_DISCORD_ID is set."""
+    name = db.format_member_reference("#20JJJ2CCRU")
+    if not name or name == "#20JJJ2CCRU":
+        name = "King Thing"
+    if ADMIN_DISCORD_ID:
+        return f"{name} (<@{ADMIN_DISCORD_ID}>)"
+    return name
+
+
+async def _alert_admin(content: str, event_type: str, signature: str) -> bool:
+    """Post a deduped alert to the clanops channel. Returns True if a message was sent."""
+    if _ALERT_SIGNATURES.get(event_type) == signature:
+        return False
+
+    channel_configs = prompts.discord_channels_by_workflow("clanops")
+    if not channel_configs:
+        log.warning("Admin alert skipped (%s): no clanops channel configured", event_type)
+        return False
+    channel = bot.get_channel(channel_configs[0]["id"])
+    if not channel:
+        log.warning("Admin alert skipped (%s): clanops channel not found", event_type)
+        return False
+
+    await _post_to_elixir(channel, {"content": content})
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(channel),
+        "assistant",
+        content,
+        **_channel_msg_kwargs(channel),
+        workflow="clanops",
+        event_type=event_type,
+    )
+    _ALERT_SIGNATURES[event_type] = signature
+    return True
+
+
+def _clear_alert(*event_types: str) -> None:
+    for et in event_types:
+        _ALERT_SIGNATURES.pop(et, None)
+
+
+# ── CR API alerts ─────────────────────────────────────────────────────────
+
+
 def _clear_cr_api_failure_alert_if_recovered() -> None:
-    global _CR_API_ALERT_SIGNATURE, _CR_API_OUTAGE_ALERT_SIGNATURE
     api = (runtime_status.snapshot().get("api") or {})
     if api.get("last_ok") is True:
-        _CR_API_ALERT_SIGNATURE = None
-        _CR_API_OUTAGE_ALERT_SIGNATURE = None
+        _clear_alert("cr_api_auth_failure", "cr_api_outage")
 
 
 def _cr_api_failure_signature() -> str | None:
@@ -157,71 +201,68 @@ def _cr_api_outage_signature() -> str | None:
 
 
 async def _maybe_alert_cr_api_failure(context: str) -> bool:
-    global _CR_API_ALERT_SIGNATURE, _CR_API_OUTAGE_ALERT_SIGNATURE
-
-    channel_configs = prompts.discord_channels_by_workflow("clanops")
-    if not channel_configs:
-        log.warning("CR API auth failure alert skipped: no leadership channel configured")
-        return False
-    channel = bot.get_channel(channel_configs[0]["id"])
-    if not channel:
-        log.warning("CR API auth failure alert skipped: leadership channel not found")
-        return False
-
     api = runtime_status.snapshot().get("api") or {}
-    king_thing_ref = await asyncio.to_thread(
-        db.format_member_reference,
-        "#20JJJ2CCRU",
-        "plain_name",
-    )
-    if not king_thing_ref or king_thing_ref == "#20JJJ2CCRU":
-        king_thing_ref = "King Thing"
+    admin_ref = await asyncio.to_thread(_admin_mention_ref)
     sent = False
 
-    auth_signature = _cr_api_failure_signature()
-    if auth_signature and auth_signature != _CR_API_ALERT_SIGNATURE:
+    auth_sig = _cr_api_failure_signature()
+    if auth_sig:
         content = (
-            f"{king_thing_ref} Clash Royale API access just failed during {context}.\n"
+            f"{admin_ref} Clash Royale API access just failed during {context}.\n"
             f"Last status: {api.get('last_status_code') or 'n/a'} on `{api.get('last_endpoint') or 'unknown'}` "
             f"for `{api.get('last_entity_key') or '-'}`.\n"
             "This usually means the CR API key or its IP allowlist needs to be updated."
         )
-        await _post_to_elixir(channel, {"content": content})
-        await asyncio.to_thread(
-            db.save_message,
-            _channel_scope(channel),
-            "assistant",
-            content,
-            **_channel_msg_kwargs(channel),
-            workflow="clanops",
-            event_type="cr_api_auth_failure",
-        )
-        _CR_API_ALERT_SIGNATURE = auth_signature
-        sent = True
+        sent = await _alert_admin(content, "cr_api_auth_failure", auth_sig) or sent
 
-    outage_signature = _cr_api_outage_signature()
-    if outage_signature and outage_signature != _CR_API_OUTAGE_ALERT_SIGNATURE:
+    outage_sig = _cr_api_outage_signature()
+    if outage_sig:
         consecutive_failures = int(api.get("consecutive_error_count") or 0)
         content = (
-            f"{king_thing_ref} Clash Royale API has failed {consecutive_failures} times in a row during {context}.\n"
+            f"{admin_ref} Clash Royale API has failed {consecutive_failures} times in a row during {context}.\n"
             f"Last status: {api.get('last_status_code') or 'n/a'} on `{api.get('last_endpoint') or 'unknown'}` "
             f"for `{api.get('last_entity_key') or '-'}`.\n"
             f"Last error: `{(api.get('last_error') or 'unknown error')[:180]}`"
         )
-        await _post_to_elixir(channel, {"content": content})
-        await asyncio.to_thread(
-            db.save_message,
-            _channel_scope(channel),
-            "assistant",
-            content,
-            **_channel_msg_kwargs(channel),
-            workflow="clanops",
-            event_type="cr_api_outage",
-        )
-        _CR_API_OUTAGE_ALERT_SIGNATURE = outage_signature
-        sent = True
+        sent = await _alert_admin(content, "cr_api_outage", outage_sig) or sent
 
     return sent
+
+
+# ── LLM alerts ────────────────────────────────────────────────────────────
+
+
+def _clear_llm_failure_alert_if_recovered() -> None:
+    llm = (runtime_status.snapshot().get("llm") or {})
+    if llm.get("last_ok") is True:
+        _clear_alert("llm_outage")
+
+
+def _llm_outage_signature() -> str | None:
+    llm = (runtime_status.snapshot().get("llm") or {})
+    if llm.get("last_ok") is not False:
+        return None
+    if int(llm.get("consecutive_error_count") or 0) < 3:
+        return None
+    last_error = (llm.get("last_error") or "").strip()
+    workflow = llm.get("last_workflow") or "unknown"
+    model = llm.get("last_model") or "unknown"
+    return f"{workflow}|{model}|{last_error[:160]}"
+
+
+async def _maybe_alert_llm_failure(context: str) -> bool:
+    sig = _llm_outage_signature()
+    if not sig:
+        return False
+    llm = runtime_status.snapshot().get("llm") or {}
+    admin_ref = await asyncio.to_thread(_admin_mention_ref)
+    consecutive = int(llm.get("consecutive_error_count") or 0)
+    content = (
+        f"{admin_ref} LLM API has failed {consecutive} times in a row during {context}.\n"
+        f"Workflow: `{llm.get('last_workflow') or 'unknown'}`, model: `{llm.get('last_model') or 'unknown'}`.\n"
+        f"Last error: `{(llm.get('last_error') or 'unknown error')[:180]}`"
+    )
+    return await _alert_admin(content, "llm_outage", sig)
 
 
 async def _resolve_runtime_channel(channel_id: int):

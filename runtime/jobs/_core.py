@@ -238,9 +238,11 @@ async def _ask_elixir_daily_insight():
         return
 
     if result is None:
+        await _app._maybe_alert_llm_failure("daily clan insight")
         runtime_status.mark_job_success("daily_clan_insight", "no fresh insight")
         return
 
+    _app._clear_llm_failure_alert_if_recovered()
     posts = _app._entry_posts(result)
     if not posts:
         runtime_status.mark_job_success("daily_clan_insight", "no fresh insight")
