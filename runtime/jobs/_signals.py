@@ -423,6 +423,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 leadership=(channel_config["memory_scope"] == "leadership"),
             )
         if result is None:
+            await _app._maybe_alert_llm_failure("channel update")
             status = "failed" if outcome.get("required", True) else "skipped"
             await asyncio.to_thread(
                 db.upsert_signal_outcome,
@@ -439,6 +440,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             )
             return status == "skipped"
 
+        _app._clear_llm_failure_alert_if_recovered()
         posts = _app._entry_posts(result)
         await _post_to_elixir(channel, result)
         summary = result.get("summary")

@@ -34,6 +34,7 @@ _LLM_STATUS = {
     "call_count": 0,
     "success_count": 0,
     "error_count": 0,
+    "consecutive_error_count": 0,
     "last_call_at": None,
     "last_workflow": None,
     "last_model": None,
@@ -143,8 +144,10 @@ def record_llm_call(workflow: str, *, ok: bool, model=None, error=None, duration
         _LLM_STATUS["call_count"] += 1
         if ok:
             _LLM_STATUS["success_count"] += 1
+            _LLM_STATUS["consecutive_error_count"] = 0
         else:
             _LLM_STATUS["error_count"] += 1
+            _LLM_STATUS["consecutive_error_count"] += 1
         _LLM_STATUS["last_call_at"] = now
         _LLM_STATUS["last_workflow"] = workflow
         _LLM_STATUS["last_model"] = model

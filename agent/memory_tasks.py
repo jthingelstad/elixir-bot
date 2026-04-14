@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime, timezone
 
@@ -106,6 +107,10 @@ def extract_inference_facts(content: str, context_label: str | None = None) -> l
             timeout=20,
         )
         raw = (resp.choices[0].message.content or "").strip()
+        if not raw:
+            return []
+        raw = re.sub(r"^```(?:json)?\s*\n?", "", raw)
+        raw = re.sub(r"\n?```\s*$", "", raw).strip()
         if not raw:
             return []
         facts = json.loads(raw)
