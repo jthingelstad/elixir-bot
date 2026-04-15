@@ -1279,7 +1279,41 @@ def _migration_25(conn: sqlite3.Connection) -> None:
         )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25]
+def _migration_26(conn: sqlite3.Connection) -> None:
+    """Create awareness_ticks for per-tick awareness-loop observability.
+
+    The v4.5 awareness loop emits one agent turn per tick that sees all signals
+    at once and decides what (if anything) to post. Previously only
+    ``signal_outcomes`` rows were written, and only for *covered* signals, so
+    admin reports under-counted ticks where the agent saw signals and chose
+    silence. This table records the per-tick decision so observability is
+    complete — including the skipped_reason the agent returned.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS awareness_ticks (
+            tick_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticked_at TEXT NOT NULL,
+            workflow TEXT,
+            signals_in INTEGER NOT NULL DEFAULT 0,
+            posts_delivered INTEGER NOT NULL DEFAULT 0,
+            posts_rejected INTEGER NOT NULL DEFAULT 0,
+            covered_keys INTEGER NOT NULL DEFAULT 0,
+            considered_skipped INTEGER NOT NULL DEFAULT 0,
+            hard_fallback INTEGER NOT NULL DEFAULT 0,
+            hard_fallback_failed INTEGER NOT NULL DEFAULT 0,
+            all_ok INTEGER NOT NULL DEFAULT 1,
+            skipped_reason TEXT,
+            signal_outcomes_json TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_awareness_ticks_ticked_at
+            ON awareness_ticks(ticked_at DESC);
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
