@@ -47,6 +47,7 @@ def detect_arena_changes(conn=None):
             "name": m["name"],
             "old_arena": m["old_value"],
             "new_arena": m["new_value"],
+            "signal_log_type": m.get("signal_log_type"),
         }
         for m in milestones
         if m["type"] == "arena_change"

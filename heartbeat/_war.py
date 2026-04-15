@@ -193,40 +193,20 @@ def _detect_war_rollovers_for_pair(current, previous, conn=None):
     current_season_id = current.get("season_id")
     previous_season_id = previous.get("season_id")
 
-    signals = [{
-        "type": "war_week_rollover",
-        "previous_section_index": previous_section_index,
-        "section_index": current_section_index,
-        "previous_week": previous.get("week"),
-        "week": current.get("week"),
-        "previous_season_id": previous_season_id,
-        "season_id": current_season_id,
-        "season_changed": current_season_id != previous_season_id,
-        "war_state": current["war_state"],
-        "period_type": current.get("period_type"),
-        "period_index": current.get("period_index"),
-        "observed_at": current["observed_at"],
-        "fame": current["fame"],
-        "repair_points": current["repair_points"],
-        "period_points": current["period_points"],
-        "clan_score": current["clan_score"],
-        "message": (
-            f"War week rollover detected: season {current_season_id if current_season_id is not None else '?'} "
-            f"week {current.get('week') if current.get('week') is not None else '?'} is now live."
-        ),
-    }]
-
-    if (
-        previous_season_id is not None
-        and current_season_id is not None
-        and current_season_id != previous_season_id
-    ) or current_section_index < previous_section_index:
+    season_token = current_season_id if current_season_id is not None else "live"
+    week_signal_log_type = f"war_week_rollover::s{season_token}:w{current_section_index}"
+    signals = []
+    if not db.was_signal_sent_any_date(week_signal_log_type, conn=conn):
         signals.append({
-            "type": "war_season_rollover",
-            "previous_season_id": previous_season_id,
-            "season_id": current_season_id,
+            "type": "war_week_rollover",
+            "signal_log_type": week_signal_log_type,
+            "previous_section_index": previous_section_index,
+            "section_index": current_section_index,
             "previous_week": previous.get("week"),
             "week": current.get("week"),
+            "previous_season_id": previous_season_id,
+            "season_id": current_season_id,
+            "season_changed": current_season_id != previous_season_id,
             "war_state": current["war_state"],
             "period_type": current.get("period_type"),
             "period_index": current.get("period_index"),
@@ -236,10 +216,38 @@ def _detect_war_rollovers_for_pair(current, previous, conn=None):
             "period_points": current["period_points"],
             "clan_score": current["clan_score"],
             "message": (
-                f"War season rollover detected: season "
-                f"{current_season_id if current_season_id is not None else '?'} has started."
+                f"War week rollover detected: season {current_season_id if current_season_id is not None else '?'} "
+                f"week {current.get('week') if current.get('week') is not None else '?'} is now live."
             ),
         })
+
+    if (
+        previous_season_id is not None
+        and current_season_id is not None
+        and current_season_id != previous_season_id
+    ) or current_section_index < previous_section_index:
+        season_signal_log_type = f"war_season_rollover::s{season_token}"
+        if not db.was_signal_sent_any_date(season_signal_log_type, conn=conn):
+            signals.append({
+                "type": "war_season_rollover",
+                "signal_log_type": season_signal_log_type,
+                "previous_season_id": previous_season_id,
+                "season_id": current_season_id,
+                "previous_week": previous.get("week"),
+                "week": current.get("week"),
+                "war_state": current["war_state"],
+                "period_type": current.get("period_type"),
+                "period_index": current.get("period_index"),
+                "observed_at": current["observed_at"],
+                "fame": current["fame"],
+                "repair_points": current["repair_points"],
+                "period_points": current["period_points"],
+                "clan_score": current["clan_score"],
+                "message": (
+                    f"War season rollover detected: season "
+                    f"{current_season_id if current_season_id is not None else '?'} has started."
+                ),
+            })
 
     return signals
 
