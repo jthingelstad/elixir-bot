@@ -42,7 +42,7 @@ Elixir's proactive posting flipped from "one LLM call per detected signal" to "o
 
 ### Rollout
 
-- Cutover gated by `ELIXIR_AWARENESS_LOOP=true` env flag for one war cycle. Legacy per-signal router stays as the always-available fallback path. Flag will be removed once a clean war week is in.
+- Cutover gated by `ELIXIR_AWARENESS_LOOP=true` env flag for one war cycle, with the legacy per-signal router kept as a fallback. The flag and the legacy router were retired after the cutover validation window; the awareness loop is now the only path.
 
 ---
 
