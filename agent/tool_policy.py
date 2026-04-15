@@ -7,8 +7,10 @@ _WRITE_TOOL_NAMES = {"update_member", "save_clan_memory"}
 EXTERNAL_LOOKUP_TOOL_NAMES = {"cr_api"}
 
 # Workflows that don't need the conversational CR bridge — they're one-shot
-# observation/formatting jobs with narrow, local-only scopes.
-_NO_EXTERNAL_LOOKUP_WORKFLOWS = {"observe", "channel_update", "reception", "roster_bios"}
+# observation/formatting jobs with narrow, local-only scopes. channel_update
+# is intentionally NOT here: as of v4.5 the proactive channel poster gets
+# cr_api so it can investigate (e.g. resolve streak opponents) before posting.
+_NO_EXTERNAL_LOOKUP_WORKFLOWS = {"observe", "reception", "roster_bios"}
 
 TOOL_DEFINITIONS = []
 for _tool in TOOLS:
@@ -44,7 +46,7 @@ INTERACTIVE_READ_TOOLS = READ_TOOLS
 
 TOOLSETS_BY_WORKFLOW = {
     "observe": READ_TOOLS_NO_EXTERNAL,
-    "channel_update": READ_TOOLS_NO_EXTERNAL,
+    "channel_update": READ_TOOLS,
     "channel_update_leadership": READ_TOOLS,
     "interactive": INTERACTIVE_READ_TOOLS,
     "clanops": ALL_TOOLS,
@@ -52,15 +54,22 @@ TOOLSETS_BY_WORKFLOW = {
     "roster_bios": READ_TOOLS_NO_EXTERNAL,
     "deck_review": INTERACTIVE_READ_TOOLS,
     "intel_report": INTEL_REPORT_TOOLS,
+    # Awareness loop (Phase 4): one agent turn per heartbeat that sees the full
+    # situation and emits a post plan. Gets the full read-tool set so it can
+    # investigate before posting.
+    "awareness": READ_TOOLS,
 }
 
 MAX_ROUNDS_BY_WORKFLOW = {
     "clanops": 5,
-    "channel_update_leadership": 5,
+    "channel_update_leadership": 6,
     "interactive": 3,
     "observation": 3,
     "observe": 3,
-    "channel_update": 3,
+    # channel_update gets real reach as of v4.5 — investigate streak opponents,
+    # scout rivals, check standings — before posting. 6 rounds buys ~5 tool
+    # calls plus the final answer turn.
+    "channel_update": 6,
     "reception": 0,
     "roster_bios": 3,
     # deck_review chains are unusually long: war reconstruction → losses
@@ -71,6 +80,10 @@ MAX_ROUNDS_BY_WORKFLOW = {
     # intel_report fans out across 4 opponents (~2 tool calls each) plus the
     # initial clan_war confirmation; 15 leaves headroom for retries.
     "intel_report": 15,
+    # awareness loop: one situation in, possibly N posts out. Budget for a
+    # couple of investigative tool calls (cr_api lookups for streak opponents,
+    # rival scouting) plus the final post-plan answer turn.
+    "awareness": 8,
 }
 
 RESPONSE_SCHEMAS_BY_WORKFLOW = {
@@ -83,4 +96,6 @@ RESPONSE_SCHEMAS_BY_WORKFLOW = {
     "roster_bios": {"required": ["intro", "members"]},
     "deck_review": {"required": ["event_type", "summary", "content"]},
     "intel_report": {"required": ["event_type", "summary", "content"]},
+    # awareness emits a post plan: zero or more posts, each routed to a channel.
+    "awareness": {"required": ["posts"]},
 }
