@@ -23,6 +23,7 @@ from runtime.channel_subagents import (
     BATTLE_MODE_SIGNAL_TYPES,
     CLAN_EVENT_SIGNAL_TYPES,
     LEADERSHIP_ONLY_SIGNAL_TYPES,
+    OPTIONAL_PROGRESSION_SIGNAL_TYPES,
     PROGRESSION_SIGNAL_TYPES,
     is_war_signal,
     signal_audience,
@@ -203,6 +204,13 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
     if channel_keys is None:
         channel_keys = list(CHANNEL_LANES.keys())
 
+    # Signals whose only presence is "optional progression" (badge milestones,
+    # etc.) should not force an LLM call — the agent almost always skips them.
+    noisy_signal_count = sum(
+        1 for sig in signals
+        if sig.get("type") not in OPTIONAL_PROGRESSION_SIGNAL_TYPES
+    )
+
     return {
         "time": build_situation_time(),
         "standing": _build_standing(war),
@@ -213,6 +221,7 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
         },
         "roster_vitals": _roster_vitals(),
         "_raw_signal_count": len(signals),
+        "_noisy_signal_count": noisy_signal_count,
         "_clan_tag": (clan.get("tag") or "").strip(),
     }
 
@@ -220,11 +229,18 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
 def situation_is_quiet(situation: dict) -> bool:
     """Fast-path: should the awareness agent call be skipped entirely?
 
-    Quiet means: no signals at all, no hard-post floors, and no time-boundary
-    pressure (>1h from any battle-day deadline). Mirrors the existing
-    ``_clan_awareness_tick`` early-return so quiet ticks keep costing nothing.
+    Quiet means: no *noisy* signals (optional-progression signals like badge
+    milestones don't count — the agent almost always skips them), no hard-post
+    floors, and no time-boundary pressure (>1h from any battle-day deadline).
+    Mirrors the existing ``_clan_awareness_tick`` early-return so quiet ticks
+    keep costing nothing.
     """
-    if situation.get("_raw_signal_count"):
+    # Fall back to _raw_signal_count for older callers that didn't annotate
+    # a situation with _noisy_signal_count (tests, legacy payloads).
+    noisy = situation.get("_noisy_signal_count")
+    if noisy is None:
+        noisy = situation.get("_raw_signal_count") or 0
+    if noisy:
         return False
     if situation.get("hard_post_signals"):
         return False
