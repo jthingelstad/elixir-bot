@@ -2228,6 +2228,45 @@ def test_detect_milestones_skips_already_logged_arena_change():
         conn.close()
 
 
+def test_record_awareness_tick_persists_row_and_signal_outcomes_json():
+    import json
+    conn = db.get_connection(":memory:")
+    try:
+        tick_id = db.record_awareness_tick(
+            workflow="clan_awareness",
+            signals_in=3,
+            posts_delivered=1,
+            posts_rejected=0,
+            covered_keys=1,
+            considered_skipped=2,
+            hard_fallback=0,
+            hard_fallback_failed=0,
+            all_ok=True,
+            skipped_reason=None,
+            signal_outcomes=[
+                {"signal_key": "join:#A", "signal_type": "member_join", "status": "covered"},
+                {"signal_key": "arena:#B", "signal_type": "arena_change", "status": "skipped"},
+                {"signal_key": "streak:#C", "signal_type": "battle_hot_streak", "status": "skipped"},
+            ],
+            conn=conn,
+        )
+        assert tick_id > 0
+        row = conn.execute(
+            "SELECT workflow, signals_in, posts_delivered, covered_keys, considered_skipped, all_ok, signal_outcomes_json FROM awareness_ticks WHERE tick_id = ?",
+            (tick_id,),
+        ).fetchone()
+        assert row["workflow"] == "clan_awareness"
+        assert row["signals_in"] == 3
+        assert row["posts_delivered"] == 1
+        assert row["covered_keys"] == 1
+        assert row["considered_skipped"] == 2
+        assert row["all_ok"] == 1
+        outcomes = json.loads(row["signal_outcomes_json"])
+        assert {o["status"] for o in outcomes} == {"covered", "skipped"}
+    finally:
+        conn.close()
+
+
 def test_detect_role_changes_skips_already_logged_role_change():
     conn = db.get_connection(":memory:")
     try:

@@ -745,7 +745,7 @@ async def _deliver_awareness_post_plan(plan: dict, signals: list[dict]) -> dict:
     }
 
 
-async def _deliver_signal_group_via_awareness(signals, clan, war) -> bool:
+async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: str | None = None) -> bool:
     """Awareness-loop replacement for ``_deliver_signal_group``.
 
     1. Build the situation from ``signals + clan + war``.
@@ -818,8 +818,9 @@ async def _deliver_signal_group_via_awareness(signals, clan, war) -> bool:
         await _mark_signal_group_completed(considered_skipped)
 
     log.info(
-        "awareness_tick_result delivered=%d rejected=%d covered=%d considered_skipped=%d "
+        "awareness_tick_result workflow=%r delivered=%d rejected=%d covered=%d considered_skipped=%d "
         "hard_fallback=%d hard_fallback_failed=%d signals_in=%d skipped_reason=%r",
+        workflow,
         report["delivered"],
         report["rejected"],
         len(covered_keys),
@@ -829,6 +830,43 @@ async def _deliver_signal_group_via_awareness(signals, clan, war) -> bool:
         len(signals or []),
         (plan or {}).get("skipped_reason"),
     )
+
+    # Persistent tick record for admin observability. Includes per-signal
+    # status so non-covered signals are no longer invisible in reports.
+    uncovered_keys = {signal_source_key(s) for s in uncovered}
+    signal_outcomes: list[dict] = []
+    for signal in (signals or []):
+        key = signal_source_key(signal)
+        if key in covered_keys:
+            status = "covered"
+        elif key in fallback_failed_keys:
+            status = "fallback_failed"
+        elif key in uncovered_keys:
+            status = "fallback"
+        else:
+            status = "skipped"
+        signal_outcomes.append({
+            "signal_key": key,
+            "signal_type": signal.get("type") or "",
+            "status": status,
+        })
+    try:
+        await asyncio.to_thread(
+            db.record_awareness_tick,
+            workflow=workflow,
+            signals_in=len(signals or []),
+            posts_delivered=report["delivered"],
+            posts_rejected=report["rejected"],
+            covered_keys=len(covered_keys),
+            considered_skipped=len(considered_skipped),
+            hard_fallback=len(uncovered),
+            hard_fallback_failed=len(fallback_failed_keys),
+            all_ok=all_ok,
+            skipped_reason=(plan or {}).get("skipped_reason"),
+            signal_outcomes=signal_outcomes,
+        )
+    except Exception:
+        log.warning("record_awareness_tick failed", exc_info=True)
 
     if not all_ok:
         return False

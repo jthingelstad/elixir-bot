@@ -355,6 +355,7 @@ _PURGE_TARGETS = [
     ("raw_api_payloads", "fetched_at", RAW_PAYLOAD_RETENTION_DAYS),
     ("messages", "created_at", CONVERSATION_RETENTION_DAYS),
     ("signal_outcomes", "created_at", SIGNAL_OUTCOME_RETENTION_DAYS),
+    ("awareness_ticks", "ticked_at", SIGNAL_OUTCOME_RETENTION_DAYS),
     ("tournaments", "watching_started_at", TOURNAMENT_RETENTION_DAYS),
 ]
 

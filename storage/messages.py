@@ -229,6 +229,59 @@ def upsert_signal_outcome(
 
 
 @managed_connection
+def record_awareness_tick(
+    *,
+    workflow: Optional[str] = None,
+    signals_in: int = 0,
+    posts_delivered: int = 0,
+    posts_rejected: int = 0,
+    covered_keys: int = 0,
+    considered_skipped: int = 0,
+    hard_fallback: int = 0,
+    hard_fallback_failed: int = 0,
+    all_ok: bool = True,
+    skipped_reason: Optional[str] = None,
+    signal_outcomes: Optional[list[dict]] = None,
+    ticked_at: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    """Record one awareness-loop tick for admin observability.
+
+    ``signal_outcomes`` is an optional list of per-signal decisions shaped as
+    ``[{"signal_key": str, "signal_type": str, "status": str}, ...]`` where
+    status is one of ``"covered"``, ``"skipped"``, ``"fallback"``, or
+    ``"fallback_failed"``. Stored as JSON for audit without requiring a child
+    table join. Returns the new ``tick_id``.
+    """
+    now = ticked_at or _utcnow()
+    cursor = conn.execute(
+        """
+        INSERT INTO awareness_ticks (
+            ticked_at, workflow, signals_in, posts_delivered, posts_rejected,
+            covered_keys, considered_skipped, hard_fallback, hard_fallback_failed,
+            all_ok, skipped_reason, signal_outcomes_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            now,
+            workflow,
+            signals_in,
+            posts_delivered,
+            posts_rejected,
+            covered_keys,
+            considered_skipped,
+            hard_fallback,
+            hard_fallback_failed,
+            1 if all_ok else 0,
+            skipped_reason,
+            _json_or_none(signal_outcomes),
+        ),
+    )
+    conn.commit()
+    return int(cursor.lastrowid or 0)
+
+
+@managed_connection
 def get_signal_outcome(source_signal_key: str, target_channel_key: str, intent: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
         """

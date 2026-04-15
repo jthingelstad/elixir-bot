@@ -320,7 +320,7 @@ async def _clan_awareness_tick():
             # Phase 4: one agent turn sees all signals together and emits a
             # post plan. Hard-post-floor signals fall back to per-signal on
             # omission so coverage is still guaranteed.
-            ok = await _deliver_signal_group_via_awareness(signals, clan, war)
+            ok = await _deliver_signal_group_via_awareness(signals, clan, war, workflow="clan_awareness")
             if not ok:
                 failed = len(signals)
         else:
@@ -390,7 +390,7 @@ async def _war_awareness_tick():
 
         delivered_ok = True
         if _awareness_loop_enabled():
-            delivered_ok = await _deliver_signal_group_via_awareness(signals, clan, war)
+            delivered_ok = await _deliver_signal_group_via_awareness(signals, clan, war, workflow="war_awareness")
         else:
             for signal_batch in _observation_signal_batches(signals):
                 batch_ok = await _deliver_signal_group(signal_batch, clan, war)
