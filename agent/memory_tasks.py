@@ -103,7 +103,7 @@ def extract_inference_facts(content: str, context_label: str | None = None) -> l
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.2,
-            max_tokens=500,
+            max_tokens=1500,
             timeout=20,
         )
         raw = (resp.choices[0].message.content or "").strip()

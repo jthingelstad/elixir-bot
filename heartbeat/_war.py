@@ -38,7 +38,7 @@ def _detect_war_day_transition_for_pair(current, previous=None, *, now=None, con
         previous is None or not previous.get("battle_phase_active")
     ):
         signal_log_type = _war_period_signal_log_type("war_battle_phase_active", current)
-        if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
+        if not db.was_signal_sent_any_date(signal_log_type, conn=conn):
             signals.append({
                 "type": "war_battle_phase_active",
                 "signal_log_type": signal_log_type,
@@ -55,7 +55,7 @@ def _detect_war_day_transition_for_pair(current, previous=None, *, now=None, con
         previous is None or not previous.get("practice_phase_active")
     ):
         signal_log_type = _war_period_signal_log_type("war_practice_phase_active", current)
-        if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
+        if not db.was_signal_sent_any_date(signal_log_type, conn=conn):
             practice_signal = {
                 "type": "war_practice_phase_active",
                 "signal_log_type": signal_log_type,
@@ -90,7 +90,7 @@ def _detect_war_day_transition_for_pair(current, previous=None, *, now=None, con
             signals.append(practice_signal)
     if current.get("final_practice_day_active"):
         signal_log_type = _war_period_signal_log_type("war_final_practice_day", current)
-        if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
+        if not db.was_signal_sent_any_date(signal_log_type, conn=conn):
             final_practice_signal = {
                 "type": "war_final_practice_day",
                 "signal_log_type": signal_log_type,
@@ -125,7 +125,7 @@ def _detect_war_day_transition_for_pair(current, previous=None, *, now=None, con
             signals.append(final_practice_signal)
     if current.get("final_battle_day_active"):
         signal_log_type = _war_period_signal_log_type("war_final_battle_day", current)
-        if not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
+        if not db.was_signal_sent_any_date(signal_log_type, conn=conn):
             signals.append({
                 "type": "war_final_battle_day",
                 "signal_log_type": signal_log_type,
@@ -143,7 +143,7 @@ def _detect_war_day_transition_for_pair(current, previous=None, *, now=None, con
         and not current.get("battle_phase_active")
     ):
         signal_log_type = _war_period_signal_log_type("war_battle_days_complete", previous)
-        if not db.was_signal_sent(signal_log_type, previous_signal_date, conn=conn):
+        if not db.was_signal_sent_any_date(signal_log_type, conn=conn):
             signals.append({
                 "type": "war_battle_days_complete",
                 "signal_log_type": signal_log_type,
@@ -269,7 +269,7 @@ def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
                     signal_log_type = None
                 else:
                     signal_log_type = _war_period_signal_log_type("war_practice_day_started", current)
-                if signal_log_type and not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
+                if signal_log_type and not db.was_signal_sent_any_date(signal_log_type, conn=conn):
                     signals.append({
                         "type": "war_practice_day_started",
                         "signal_log_type": signal_log_type,
@@ -288,7 +288,7 @@ def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
                     signal_log_type = None
                 else:
                     signal_log_type = _war_period_signal_log_type("war_battle_day_started", current)
-                if signal_log_type and not db.was_signal_sent(signal_log_type, current_signal_date, conn=conn):
+                if signal_log_type and not db.was_signal_sent_any_date(signal_log_type, conn=conn):
                     signals.append({
                         "type": "war_battle_day_started",
                         "signal_log_type": signal_log_type,
@@ -315,7 +315,7 @@ def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
             previous_signal_date = _war_signal_date_for_state(previous_day, previous, completed_at)
             if previous.get("phase") == "practice":
                 signal_log_type = _war_period_signal_log_type("war_practice_day_complete", previous)
-                if not db.was_signal_sent(signal_log_type, previous_signal_date, conn=conn):
+                if not db.was_signal_sent_any_date(signal_log_type, conn=conn):
                     signals.append({
                         "type": "war_practice_day_complete",
                         "signal_log_type": signal_log_type,
@@ -330,7 +330,7 @@ def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
                     })
             elif previous.get("phase") == "battle":
                 signal_log_type = _war_period_signal_log_type("war_battle_day_complete", previous)
-                if not db.was_signal_sent(signal_log_type, previous_signal_date, conn=conn):
+                if not db.was_signal_sent_any_date(signal_log_type, conn=conn):
                     signals.append({
                         "type": "war_battle_day_complete",
                         "signal_log_type": signal_log_type,
@@ -368,7 +368,7 @@ def detect_war_battle_final_hours(conn=None, threshold_hours=6):
         return []
     signal_log_type = _war_period_signal_log_type("war_battle_day_final_hours", current)
     signal_date = _war_signal_date_for_state(current)
-    if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
+    if db.was_signal_sent_any_date(signal_log_type, conn=conn):
         return []
     return [{
         "type": "war_battle_day_final_hours",
@@ -413,7 +413,7 @@ def _detect_war_rank_changes_for_pair(current, previous, conn=None):
     current_day = db.get_war_day_state(current.get("war_day_key"), observed_at=current.get("observed_at"), conn=conn)
     signal_log_type = f"{_war_period_signal_log_type('war_battle_rank_change', current)}::rank{current_rank}"
     signal_date = _war_signal_date_for_state(current_day, current)
-    if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
+    if db.was_signal_sent_any_date(signal_log_type, conn=conn):
         return []
     return [{
         "type": "war_battle_rank_change",
@@ -466,7 +466,7 @@ def detect_war_battle_checkpoints(conn=None):
             f"{_war_period_signal_log_type(checkpoint['signal_key'], war_state)}"
             f"::h{checkpoint['hour']}"
         )
-        if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
+        if db.was_signal_sent_any_date(signal_log_type, conn=conn):
             continue
         chosen_checkpoint = (checkpoint, signal_log_type)
         break
@@ -623,7 +623,7 @@ def _detect_war_season_completion_for_pair(current, previous, conn=None):
         return []
     signal_log_type = f"war_season_complete::{previous_season}"
     signal_date = _war_signal_date_for_state(previous, current)
-    if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
+    if db.was_signal_sent_any_date(signal_log_type, conn=conn):
         return []
     return [{
         "type": "war_season_complete",

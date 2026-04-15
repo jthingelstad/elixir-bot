@@ -33,6 +33,7 @@ from runtime.channel_subagents import (
     maybe_upsert_signal_memory,
     OPTIONAL_PROGRESSION_SIGNAL_TYPES,
     plan_signal_outcomes,
+    signal_source_key,
 )
 from runtime.app import (
     CHICAGO,
@@ -700,6 +701,18 @@ async def _deliver_awareness_post_plan(plan: dict, signals: list[dict]) -> dict:
                     covered.add(str(key))
         else:
             rejected += 1
+
+    # Mark covered signals as announced/delivered so detectors don't re-fire
+    # them on the next tick. The legacy per-signal path did this inside
+    # _deliver_signal_group; the awareness loop must do it explicitly.
+    if covered:
+        covered_signals = [
+            s for s in (signals or [])
+            if signal_source_key(s) in covered
+        ]
+        if covered_signals:
+            await _mark_signal_group_completed(covered_signals)
+
     return {
         "delivered": delivered,
         "rejected": rejected,

@@ -99,12 +99,15 @@ def detect_inactivity(current_members, now=None, conn=None):
     """Flag members not seen in 3+ days.
 
     Uses the lastSeen field from CR API (format: 20260304T120000.000Z).
-    Only fires once per day.
+    Fires only on Fridays, at most once per week — the inactive-player report
+    is a weekly clan-management tool for #leader-lounge, not a daily signal.
     """
-    today = (now or datetime.now()).strftime("%Y-%m-%d")
+    now = now or datetime.now()
+    if now.weekday() != 4:  # 0=Mon ... 4=Fri
+        return []
+    today = now.strftime("%Y-%m-%d")
     if db.was_signal_sent("inactive_members", today, conn=conn):
         return []
-    now = now or datetime.now()
     signals = []
     inactive = []
     threshold = cr_knowledge.INACTIVITY_DAYS
