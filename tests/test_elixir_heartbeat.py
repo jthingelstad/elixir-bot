@@ -40,11 +40,11 @@ def test_clan_awareness_tick_uses_bundle_without_refetch():
         patch("elixir.cr_api.get_clan") as mock_get_clan,
         patch("elixir.cr_api.get_current_war") as mock_get_war,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)) as mock_deliver,
     ):
         asyncio.run(elixir._clan_awareness_tick())
 
-    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war)
+    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="clan_awareness")
     mock_get_clan.assert_not_called()
     mock_get_war.assert_not_called()
 
@@ -65,7 +65,7 @@ def test_clan_awareness_tick_marks_failure_when_delivery_fails():
     with (
         patch("elixir.heartbeat.tick", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock(side_effect=[True, False])),
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=False)),
         patch("runtime.jobs._core.runtime_status.mark_job_failure") as mock_fail,
         patch("runtime.jobs._core.runtime_status.mark_job_success") as mock_success,
     ):
@@ -73,7 +73,7 @@ def test_clan_awareness_tick_marks_failure_when_delivery_fails():
 
     mock_success.assert_not_called()
     mock_fail.assert_called_once()
-    assert "1 of 2" in mock_fail.call_args.args[1]
+    assert "2 of 2" in mock_fail.call_args.args[1]
 
 
 def test_clan_awareness_tick_revokes_member_role_for_leavers():
@@ -92,7 +92,7 @@ def test_clan_awareness_tick_revokes_member_role_for_leavers():
     with (
         patch("elixir.heartbeat.tick", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()),
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)),
         patch("runtime.onboarding.remove_member_role_for_tag", new=AsyncMock(return_value=(True, "Removed"))) as mock_remove,
     ):
         asyncio.run(elixir._clan_awareness_tick())
@@ -115,7 +115,7 @@ def test_clan_awareness_tick_swallows_revoke_exceptions():
     with (
         patch("elixir.heartbeat.tick", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()),
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)),
         patch("runtime.onboarding.remove_member_role_for_tag", new=AsyncMock(side_effect=RuntimeError("boom"))),
         patch("runtime.jobs._core.runtime_status.mark_job_success") as mock_success,
     ):
@@ -222,13 +222,13 @@ def test_war_awareness_tick_uses_stored_war_detection_bundle():
     with (
         patch("elixir.heartbeat.detect_war_signals_from_storage", return_value=bundle) as mock_detect,
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock(return_value=True)) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)) as mock_deliver,
         patch("runtime.jobs._core._persist_signal_detector_cursors") as mock_persist,
     ):
         asyncio.run(elixir._war_awareness_tick())
 
     mock_detect.assert_called_once_with()
-    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war)
+    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="war_awareness")
     mock_persist.assert_called_once_with(bundle.cursor_updates)
 
 
@@ -268,7 +268,7 @@ def test_war_awareness_tick_does_not_advance_cursors_when_delivery_fails():
     with (
         patch("elixir.heartbeat.detect_war_signals_from_storage", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock(return_value=False)),
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=False)),
         patch("runtime.jobs._core._persist_signal_detector_cursors") as mock_persist,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
@@ -460,11 +460,11 @@ def test_clan_awareness_tick_posts_join_messages_through_shared_sender():
     with (
         patch("elixir.heartbeat.tick", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)) as mock_deliver,
     ):
         asyncio.run(elixir._clan_awareness_tick())
 
-    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war)
+    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="clan_awareness")
 
 
 def test_clan_awareness_tick_marks_non_system_signal_sent_after_successful_post():
@@ -617,16 +617,16 @@ def test_clan_awareness_tick_does_not_mark_system_signal_sent_before_success():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir.db.mark_signal_sent") as mock_mark_signal_sent,
         patch("elixir.db.mark_system_signal_announced") as mock_mark_announced,
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock(return_value=False)) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=False)) as mock_deliver,
     ):
         asyncio.run(elixir._clan_awareness_tick())
 
-    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war)
+    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="clan_awareness")
     mock_mark_signal_sent.assert_not_called()
     mock_mark_announced.assert_not_called()
 
 
-def test_clan_awareness_tick_routes_multiple_system_signals_independently():
+def test_clan_awareness_tick_hands_multiple_system_signals_to_awareness_loop():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[
             {
@@ -650,11 +650,11 @@ def test_clan_awareness_tick_routes_multiple_system_signals_independently():
     with (
         patch("elixir.heartbeat.tick", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)) as mock_deliver,
     ):
         asyncio.run(elixir._clan_awareness_tick())
 
-    assert mock_deliver.await_count == 2
+    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="clan_awareness")
 
 
 def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
@@ -1495,14 +1495,14 @@ def test_clan_awareness_tick_marks_cake_day_announcements_after_successful_post(
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    async def fake_deliver(signals, clan, war):
+    async def fake_deliver(signals, clan, war, workflow=None):
         _mark_delivered_signals(signals)
         return True
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
         patch("runtime.jobs._core.heartbeat.tick", return_value=bundle),
-        patch("runtime.jobs._core._deliver_signal_group", side_effect=fake_deliver),
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", side_effect=fake_deliver),
         patch("elixir.db.mark_signal_sent") as mock_mark_signal_sent,
         patch("elixir.db.mark_announcement_sent") as mock_mark_announcement_sent,
     ):
@@ -2819,80 +2819,3 @@ def test_detect_war_completion_retries_until_signal_is_marked():
         conn.close()
 
 
-def test_observation_signal_batches_group_completion_family_together():
-    batches = elixir._observation_signal_batches(
-        [
-            {"type": "war_completed", "season_id": 129, "section_index": 1},
-            {"type": "war_week_complete", "season_id": 129, "section_index": 1},
-            {"type": "war_champ_standings", "season_id": 129, "section_index": 1},
-            {"type": "war_battle_day_complete", "season_id": 129, "day_number": 1},
-        ]
-    )
-
-    assert len(batches) == 2
-    assert [signal["type"] for signal in batches[0]] == ["war_battle_day_complete"]
-    assert [signal["type"] for signal in batches[1]] == [
-        "war_completed",
-        "war_week_complete",
-        "war_champ_standings",
-    ]
-
-
-def test_observation_signal_batches_merge_day_transition():
-    """Complete + started signals with same season/week merge into one batch."""
-    batches = elixir._observation_signal_batches(
-        [
-            {"type": "war_battle_day_complete", "season_id": 131, "week": 3, "day_number": 2},
-            {"type": "war_battle_day_started", "season_id": 131, "week": 3, "day_number": 3},
-        ]
-    )
-    assert len(batches) == 1
-    assert [s["type"] for s in batches[0]] == [
-        "war_battle_day_complete",
-        "war_battle_day_started",
-    ]
-
-
-def test_observation_signal_batches_merge_phase_transition():
-    """Practice complete + battle started merge (phase transition within same week)."""
-    batches = elixir._observation_signal_batches(
-        [
-            {"type": "war_practice_day_complete", "season_id": 131, "week": 3, "day_number": 3},
-            {"type": "war_battle_day_started", "season_id": 131, "week": 3, "day_number": 1},
-        ]
-    )
-    assert len(batches) == 1
-    assert [s["type"] for s in batches[0]] == [
-        "war_practice_day_complete",
-        "war_battle_day_started",
-    ]
-
-
-def test_observation_signal_batches_no_merge_different_weeks():
-    """Complete and started from different weeks stay separate."""
-    batches = elixir._observation_signal_batches(
-        [
-            {"type": "war_battle_day_complete", "season_id": 131, "week": 2, "day_number": 4},
-            {"type": "war_battle_day_started", "season_id": 131, "week": 3, "day_number": 1},
-        ]
-    )
-    assert len(batches) == 2
-
-
-def test_observation_signal_batches_rank_change_stays_separate():
-    """Rank change signal is not merged with day transition."""
-    batches = elixir._observation_signal_batches(
-        [
-            {"type": "war_battle_day_complete", "season_id": 131, "week": 3, "day_number": 2},
-            {"type": "war_battle_day_started", "season_id": 131, "week": 3, "day_number": 3},
-            {"type": "war_battle_rank_change", "season_id": 131, "week": 3},
-        ]
-    )
-    assert len(batches) == 2
-    merged = [b for b in batches if len(b) == 2][0]
-    assert [s["type"] for s in merged] == [
-        "war_battle_day_complete",
-        "war_battle_day_started",
-    ]
-    solo = [b for b in batches if len(b) == 1][0]
-    assert solo[0]["type"] == "war_battle_rank_change"

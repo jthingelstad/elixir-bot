@@ -8,7 +8,7 @@ __all__ = [
     "_deliver_awareness_post", "_deliver_awareness_post_plan",
     "_deliver_signal_group_via_awareness",
     "_strip_weekly_recap_header", "_format_weekly_recap_post",
-    "_observation_signal_batches", "_progression_signal_batches",
+    "_progression_signal_batches",
     "_system_signal_updates", "_store_recap_memories_for_signal_batch",
     "_build_system_signal_context", "_preauthored_system_signal_result",
     "_post_system_signal_updates", "_publish_pending_system_signal_updates",
@@ -285,16 +285,6 @@ def _build_outcome_context(outcome, signals, clan, war):
             "=== BACKGROUND DATA (for reasoning, do not restate as-is) ===",
         ])
         lines.extend(_build_compact_war_context(war))
-        signal_types = {s.get("type") for s in (signals or [])}
-        has_complete = bool(signal_types & _DAY_COMPLETE_TYPES)
-        has_started = bool(signal_types & _DAY_STARTED_TYPES)
-        if has_complete and has_started:
-            lines.extend([
-                "",
-                "This batch covers a day transition — the previous day just ended and a new day has started. "
-                "Write ONE cohesive message that recaps the completed day and sets up the new one. "
-                "Do not write two separate posts.",
-            ])
     elif channel_key == "player-progress":
         lines.extend([
             "",
@@ -893,70 +883,6 @@ def _format_weekly_recap_post(recap_text: str, *, now: datetime | None = None) -
     if not body:
         return title
     return f"{title}\n\n{body}"
-
-
-_DAY_COMPLETE_TYPES = {
-    "war_battle_day_complete",
-    "war_practice_day_complete",
-}
-_DAY_STARTED_TYPES = {
-    "war_battle_day_started",
-    "war_practice_day_started",
-}
-
-
-def _merge_day_transition_batches(batches):
-    """Merge adjacent *_complete + *_started solo batches into single batches."""
-    # Index solo batches by type for matching
-    complete_indices = {}
-    started_indices = {}
-    for i, batch in enumerate(batches):
-        if len(batch) != 1:
-            continue
-        sig_type = batch[0].get("type") or ""
-        key = (batch[0].get("season_id"), batch[0].get("week"))
-        if sig_type in _DAY_COMPLETE_TYPES:
-            complete_indices.setdefault(key, []).append(i)
-        elif sig_type in _DAY_STARTED_TYPES:
-            started_indices.setdefault(key, []).append(i)
-
-    merged_indices = set()
-    for key, c_indices in complete_indices.items():
-        s_indices = started_indices.get(key, [])
-        for c_idx, s_idx in zip(c_indices, s_indices):
-            # Merge: complete first, then started
-            batches[c_idx] = [batches[c_idx][0], batches[s_idx][0]]
-            merged_indices.add(s_idx)
-
-    return [b for i, b in enumerate(batches) if i not in merged_indices]
-
-
-def _observation_signal_batches(signals):
-    if not signals:
-        return []
-    grouped = []
-    completion_batch = []
-    batches = []
-    completion_signal_types = {
-        "war_completed",
-        "war_week_complete",
-        "war_champ_standings",
-    }
-    for signal in signals:
-        signal_type = signal.get("type") or ""
-        if signal_type.startswith("war_"):
-            if signal_type in completion_signal_types:
-                completion_batch.append(signal)
-                continue
-            batches.append([signal])
-        else:
-            grouped.append(signal)
-    batches = _merge_day_transition_batches(batches)
-    if grouped:
-        batches.insert(0, grouped)
-    if completion_batch:
-        batches.append(completion_batch)
-    return batches
 
 
 def _progression_signal_batches(signals):

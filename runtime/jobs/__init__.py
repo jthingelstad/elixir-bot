@@ -23,7 +23,7 @@ from runtime.jobs._signals import (  # noqa: F401
     _build_outcome_context, _mark_signal_group_completed, _post_signal_memory,
     _deliver_signal_outcome, _deliver_signal_group,
     _strip_weekly_recap_header, _format_weekly_recap_post,
-    _observation_signal_batches, _progression_signal_batches,
+    _progression_signal_batches,
     _system_signal_updates, _store_recap_memories_for_signal_batch,
     _build_system_signal_context, _preauthored_system_signal_result,
     _post_system_signal_updates, _publish_pending_system_signal_updates,
