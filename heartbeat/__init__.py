@@ -52,6 +52,7 @@ from heartbeat._war import (
     _detect_war_rank_changes_for_pair,
     _detect_war_rollovers_for_pair,
     _detect_war_season_completion_for_pair,
+    build_situation_time,
     detect_war_battle_checkpoints,
     detect_war_battle_final_hours,
     detect_war_champ_update,
@@ -222,6 +223,8 @@ __all__ = [
     "detect_war_season_completion",
     "detect_war_completion",
     "detect_war_champ_update",
+    # Situation helpers
+    "build_situation_time",
     # Pipeline
     "ingest_live_war_state",
     "detect_war_signals_from_storage",

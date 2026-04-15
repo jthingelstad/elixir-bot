@@ -4,6 +4,48 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## v4.5 — Coherent
+
+**Date:** 2026-04-14
+
+Elixir's proactive posting flipped from "one LLM call per detected signal" to "one agent turn per heartbeat that sees the full situation and decides what to say." The agent now investigates before posting, collapses related signals into single coherent posts, and is allowed to choose silence when nothing material has changed. Time and standing context attach to every post by default, not just to checkpoint triggers.
+
+### Unified Awareness Loop
+
+- New `runtime/situation.py` assembler builds one `Situation` payload per tick: time/phase, clan standing, all signals grouped by lane, hard-post-floor list, channel memory, and roster vitals.
+- New `awareness` workflow with the full read toolset (including `cr_api`) and an 8-round tool budget. The agent investigates before posting — streak posts cite specific opponents, member-join posts name the new player's deck and trophy count, war recaps name the contributors who carried the week.
+- Coherent timing: when 5 war signals (battle-day complete, week rollover, war complete, next practice phase active, etc.) all hit one tick, the agent emits one sequenced post instead of 5 separate ones racing each other.
+- Genuine silence: stale signals get caught at the agent layer (e.g. a `battle_hot_streak` signal whose live battle log shows the streak has since broken) and skipped with a logged reason.
+- Hard-post-floor fallback: signals like `member_join`, `war_battle_rank_change`, and `capability_unlock` are guaranteed to produce a post — if the agent omits one, the legacy per-signal path delivers it.
+
+### Channel Reorganization — `#trophy-road`
+
+- New `#trophy-road` channel (id `1493787763538133204`) carries volatile non-war battle activity: hot streaks, trophy pushes, Path of Legends promotions, and future Classic/Grand Challenge / Global Tournament / Ultimate Champion finishes.
+- `#player-progress` narrowed to durable milestones — arena unlocks, level-ups, card unlocks, badges, achievements. The mixing problem is gone.
+- Routing in `plan_signal_outcomes` updated to split `BATTLE_MODE_SIGNAL_TYPES` from `PROGRESSION_SIGNAL_TYPES`. Mixed batches split between lanes.
+
+### Time-Aware Posts in Every Lane
+
+- New `build_situation_time()` helper lifts hours-remaining, day index, phase, and colosseum awareness out of war-checkpoint scope.
+- The `_build_outcome_context` envelope now carries a `TIME / PHASE` block on every channel post — river-race posts can reference "9 hours left in Practice Day 2" without waiting for a 6h checkpoint to fire.
+
+### `channel_update` Gets Real Reach
+
+- The proactive `channel_update` workflow moved from `READ_TOOLS_NO_EXTERNAL` to the full `READ_TOOLS` set (now includes `cr_api`) with rounds bumped from 3 to 6. The system prompt now directs the model to investigate before posting.
+- Streak posts and rank-change posts can resolve specific opponents instead of restating the signal dict.
+
+### Tests & Eval
+
+- 18 new tests in `tests/test_awareness_loop.py` covering lane classification, situation assembly, fast-path skip, lane validation, and hard-post-floor fallback.
+- New replay harness (`scripts/replay_awareness.py`) replays real signals from the local DB through the awareness loop and validates lane discipline + hard-floor coverage. Used to evaluate quality before shipping.
+- Test suite: 518 → 536 passing.
+
+### Rollout
+
+- Cutover gated by `ELIXIR_AWARENESS_LOOP=true` env flag for one war cycle. Legacy per-signal router stays as the always-available fallback path. Flag will be removed once a clean war week is in.
+
+---
+
 ## v4.4 — Omnipresent
 
 **Date:** 2026-04-13

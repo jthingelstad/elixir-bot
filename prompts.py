@@ -51,6 +51,14 @@ CHANNEL_SUBAGENT_CONFIG = {
         "memory_scope": "public",
         "durable_memory_enabled": True,
     },
+    "trophy-road": {
+        "workflow": "channel_update",
+        "tool_policy": "read_only",
+        "reply_policy": "disabled",
+        "singleton": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": True,
+    },
     "clan-events": {
         "workflow": "channel_update",
         "tool_policy": "read_only",
@@ -107,6 +115,7 @@ SUBAGENT_ALIASES = {
     "promotion": "promote-the-clan",
     "river_race": "river-race",
     "player_progress": "player-progress",
+    "trophy_road": "trophy-road",
     "clan_events": "clan-events",
     "clanops": "leader-lounge",
     "ask_elixir": "ask-elixir",

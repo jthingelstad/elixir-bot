@@ -1,0 +1,249 @@
+"""Awareness-loop situation assembler.
+
+Builds the single ``Situation`` payload handed to the awareness agent each
+heartbeat tick. The situation collapses what used to be N per-signal context
+envelopes into one end-to-end picture: time/phase, standing, all signals
+since the last tick grouped by lane, recent channel posts (memory), roster
+vitals, and an explicit list of hard-post-floor signals.
+
+The assembler is pure: it takes a heartbeat tick result + clan/war and
+queries the local DB for memory and form data. It does no Discord I/O and
+no LLM calls — that's the agent's job.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Iterable
+
+import db
+import prompts
+from heartbeat import build_situation_time
+from runtime.channel_subagents import (
+    BATTLE_MODE_SIGNAL_TYPES,
+    CLAN_EVENT_SIGNAL_TYPES,
+    LEADERSHIP_ONLY_SIGNAL_TYPES,
+    PROGRESSION_SIGNAL_TYPES,
+    is_war_signal,
+    signal_audience,
+    signal_source_key,
+)
+
+log = logging.getLogger("elixir")
+
+
+# Signals that the awareness loop is REQUIRED to address. The agent picks
+# tone, channel (within lane rules), and phrasing; existence is non-negotiable.
+HARD_POST_SIGNAL_TYPES = frozenset({
+    "war_battle_rank_change",
+    "war_week_complete",
+    "war_season_complete",
+    "war_completed",
+    "member_join",
+    "member_leave",
+    "capability_unlock",
+})
+
+
+# Channel allowlist used by post-plan validation. Each channel's lane keys
+# describe the signal-family hints (`leads_with`) that may legitimately ship
+# there.
+CHANNEL_LANES: dict[str, set[str]] = {
+    "river-race": {"war"},
+    "trophy-road": {"battle_mode"},
+    "player-progress": {"milestone"},
+    "clan-events": {"clan_event"},
+    "leader-lounge": {"war", "leadership", "clan_event"},
+    "announcements": {"system"},
+}
+
+
+def classify_signal_lane(signal: dict) -> str:
+    """Return the lane key for a signal: war / battle_mode / milestone /
+    clan_event / leadership / system / unknown."""
+    sig_type = (signal or {}).get("type") or ""
+    if is_war_signal(signal):
+        return "war"
+    if sig_type in BATTLE_MODE_SIGNAL_TYPES:
+        return "battle_mode"
+    if sig_type in PROGRESSION_SIGNAL_TYPES:
+        return "milestone"
+    if sig_type in CLAN_EVENT_SIGNAL_TYPES:
+        return "clan_event"
+    if sig_type in LEADERSHIP_ONLY_SIGNAL_TYPES or signal_audience(signal) == "leadership":
+        return "leadership"
+    if sig_type == "capability_unlock":
+        return "system"
+    return "unknown"
+
+
+def _annotate_signal(signal: dict) -> dict:
+    """Attach a stable signal_key + lane to each signal so the agent has a
+    deterministic identifier to echo back in `covers_signal_keys`."""
+    annotated = dict(signal or {})
+    if not annotated.get("signal_key"):
+        annotated["signal_key"] = signal_source_key(signal)
+    annotated["_lane"] = classify_signal_lane(signal)
+    return annotated
+
+
+def _group_signals_by_lane(signals: Iterable[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for signal in signals or []:
+        annotated = _annotate_signal(signal)
+        grouped.setdefault(annotated["_lane"], []).append(annotated)
+    return grouped
+
+
+def _hard_post_signals(signals: Iterable[dict]) -> list[dict]:
+    out = []
+    for signal in signals or []:
+        sig_type = signal.get("type") or ""
+        if sig_type in HARD_POST_SIGNAL_TYPES:
+            out.append({
+                "signal_key": signal_source_key(signal),
+                "type": sig_type,
+                "tag": signal.get("tag"),
+                "name": signal.get("name"),
+            })
+    return out
+
+
+def _build_standing(war: dict | None) -> dict | None:
+    """Compact standing summary — rank, fame, deficit-to-leader, engagement."""
+    war = war or {}
+    clans = war.get("clans") or []
+    clan_obj = war.get("clan") or {}
+    if not clan_obj.get("tag"):
+        return None
+    our_tag = clan_obj["tag"].strip("#").upper()
+    ranked = sorted(
+        clans,
+        key=lambda c: (c.get("fame") or 0, c.get("repairPoints") or 0),
+        reverse=True,
+    )
+    our_fame = None
+    our_rank = None
+    leader_fame = ranked[0].get("fame") if ranked else None
+    for rank, c in enumerate(ranked, start=1):
+        tag = (c.get("tag") or "").strip("#").upper()
+        if tag == our_tag:
+            our_fame = c.get("fame") or 0
+            our_rank = rank
+            break
+    if our_fame is None:
+        return None
+    return {
+        "rank": our_rank,
+        "fame": our_fame,
+        "leader_fame": leader_fame,
+        "deficit_to_leader": (leader_fame - our_fame) if (leader_fame is not None and our_rank != 1) else 0,
+        "field_size": len(ranked),
+    }
+
+
+def _channel_memory_for(subagent_key: str, *, recent_limit: int = 5) -> dict:
+    """Pull recent assistant posts for one channel so the agent knows what it
+    has already said. Pure DB read, no Discord call."""
+    try:
+        config = prompts.discord_singleton_subagent(subagent_key)
+    except (ValueError, KeyError):
+        return {"recent_posts": []}
+    try:
+        recent = db.list_channel_messages(config["id"], recent_limit, "assistant") or []
+    except Exception:
+        log.warning("channel_memory load failed for %s", subagent_key, exc_info=True)
+        recent = []
+    return {
+        "channel_id": config["id"],
+        "recent_posts": [
+            {
+                "summary": row.get("summary"),
+                "recorded_at": row.get("recorded_at"),
+                "event_type": row.get("event_type"),
+            }
+            for row in recent
+        ],
+    }
+
+
+def _roster_vitals(limit: int = 20) -> list[dict]:
+    """Compact roster anchor: hot-streak members + clan summary snippet.
+
+    Read-only scouting input. Not for verbatim posting — the agent uses it to
+    decide whether anyone is doing something noteworthy this tick.
+    """
+    out: list[dict] = []
+    try:
+        hot = db.get_members_on_hot_streak() or []
+        for entry in hot[:limit]:
+            out.append({
+                "kind": "hot_streak",
+                "tag": entry.get("tag"),
+                "name": entry.get("name") or entry.get("current_name"),
+                "streak": entry.get("current_streak"),
+            })
+    except Exception:
+        log.warning("roster_vitals: hot streak load failed", exc_info=True)
+    return out
+
+
+def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -> dict:
+    """Assemble the single Situation payload for one awareness tick.
+
+    ``tick_result`` is a ``HeartbeatTickResult`` (signals + clan + war).
+    Returns a dict whose top-level keys are stable for the agent's prompt:
+    ``time``, ``standing``, ``signals_by_lane``, ``hard_post_signals``,
+    ``channel_memory``, ``roster_vitals``.
+    """
+    signals = list(getattr(tick_result, "signals", None) or [])
+    clan = getattr(tick_result, "clan", None) or {}
+    war = getattr(tick_result, "war", None) or {}
+
+    if channel_keys is None:
+        channel_keys = list(CHANNEL_LANES.keys())
+
+    return {
+        "time": build_situation_time(),
+        "standing": _build_standing(war),
+        "signals_by_lane": _group_signals_by_lane(signals),
+        "hard_post_signals": _hard_post_signals(signals),
+        "channel_memory": {
+            key: _channel_memory_for(key) for key in channel_keys
+        },
+        "roster_vitals": _roster_vitals(),
+        "_raw_signal_count": len(signals),
+        "_clan_tag": (clan.get("tag") or "").strip(),
+    }
+
+
+def situation_is_quiet(situation: dict) -> bool:
+    """Fast-path: should the awareness agent call be skipped entirely?
+
+    Quiet means: no signals at all, no hard-post floors, and no time-boundary
+    pressure (>1h from any battle-day deadline). Mirrors the existing
+    ``_clan_awareness_tick`` early-return so quiet ticks keep costing nothing.
+    """
+    if situation.get("_raw_signal_count"):
+        return False
+    if situation.get("hard_post_signals"):
+        return False
+    time_block = situation.get("time") or {}
+    hours_remaining = time_block.get("hours_remaining_in_day")
+    # Within an hour of a battle-day deadline → not quiet, agent should look.
+    if (
+        time_block.get("phase") == "battle"
+        and hours_remaining is not None
+        and hours_remaining <= 1
+    ):
+        return False
+    return True
+
+
+__all__ = [
+    "CHANNEL_LANES",
+    "HARD_POST_SIGNAL_TYPES",
+    "build_situation",
+    "classify_signal_lane",
+    "situation_is_quiet",
+]
