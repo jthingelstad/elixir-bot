@@ -144,7 +144,7 @@ def _detect_war_race_finished_live_for_pair(current, previous=None, conn=None):
         current.get("race_completed_at"),
         current.get("observed_at"),
     )
-    if db.was_signal_sent(signal_log_type, signal_date, conn=conn):
+    if db.was_signal_sent_any_date(signal_log_type, conn=conn):
         return []
 
     return [{

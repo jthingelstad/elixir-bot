@@ -2028,7 +2028,7 @@ def test_detect_war_battle_checkpoints_emits_midday_update():
             "untouched_count": 1,
             "total_participants": 3,
         }),
-        patch("heartbeat.db.was_signal_sent", return_value=False),
+        patch("heartbeat.db.was_signal_sent_any_date", return_value=False),
     ):
         signals = heartbeat.detect_war_battle_checkpoints()
 
@@ -2044,8 +2044,8 @@ def test_detect_war_battle_checkpoints_emits_midday_update():
 
 
 def test_detect_war_battle_checkpoints_prefers_latest_reached_checkpoint():
-    def was_signal_sent(signal_type, date_str, conn=None):
-        del date_str, conn
+    def was_signal_sent_any_date(signal_type, conn=None):
+        del conn
         return signal_type.endswith("::h21")
 
     with (
@@ -2063,7 +2063,7 @@ def test_detect_war_battle_checkpoints_prefers_latest_reached_checkpoint():
             "time_left_seconds": 5 * 3600,
             "time_left_text": "5h 0m",
         }),
-        patch("heartbeat.db.was_signal_sent", side_effect=was_signal_sent),
+        patch("heartbeat.db.was_signal_sent_any_date", side_effect=was_signal_sent_any_date),
     ):
         signals = heartbeat.detect_war_battle_checkpoints()
 
@@ -2092,7 +2092,7 @@ def test_detect_war_deck_usage_compatibility_wrapper_emits_final_push_checkpoint
             "time_left_seconds": 3 * 3600,
             "time_left_text": "3h 0m",
         }),
-        patch("heartbeat.db.was_signal_sent", return_value=False),
+        patch("heartbeat.db.was_signal_sent_any_date", return_value=False),
     ):
         signals = heartbeat.detect_war_deck_usage({"state": "full"})
 
