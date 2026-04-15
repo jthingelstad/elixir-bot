@@ -294,6 +294,21 @@ A new clan forks elixir-bot and primarily rewrites `CLAN.md` and `DISCORD.md`, p
 
 - startup linting for subagent config, reply policy, and activity registry consistency outside the bot runtime
 
+## Work Tracking
+
+- **GitHub issues** are the canonical queue for discrete, trackable work. Use
+  `gh issue list` / `gh issue create` / `gh issue view`. Claude in any session
+  can read and write issues on `jthingelstad/elixir-bot`.
+- Use labels to cluster arcs: `persona` for work that closes the gap between
+  Elixir's articulated persona (`prompts/SOUL.md`, `prompts/PURPOSE.md`) and
+  the implementation. Add a tracking issue when an arc has 3+ child issues.
+- **`docs/tasks/*.md`** is for long-form design docs — the *why* behind an
+  arc, not the unit-of-work ledger. When a design doc exists, link it from
+  the tracking issue.
+- Default: create an issue before starting non-trivial work. Commit directly
+  to `main` — PRs are not required. Reference the issue number in commit
+  messages (e.g. `Closes #12`) so GitHub auto-closes on push.
+
 ## Key Conventions
 
 - All times in America/Chicago timezone
