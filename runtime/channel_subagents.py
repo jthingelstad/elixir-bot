@@ -8,19 +8,28 @@ import prompts
 from memory_store import list_memories
 from storage.contextual_memory import upsert_summary_memory
 
+# Durable milestones — celebratory and infrequent. Belong in the long-term
+# clan story. Routed to #player-progress.
 PROGRESSION_SIGNAL_TYPES = {
     "arena_change",
     "player_level_up",
     "career_wins_milestone",
-    "path_of_legend_promotion",
     "new_card_unlocked",
     "new_champion_unlocked",
     "card_level_milestone",
     "badge_earned",
     "badge_level_milestone",
     "achievement_star_milestone",
+}
+
+# Volatile battle-mode activity outside of war — hot streaks, trophy pushes,
+# Path of Legends promotions. Discardable tomorrow. Routed to #trophy-road.
+# Future Classic/Grand Challenge finishes, Global Tournament placements, and
+# evolution/Ultimate Champion unlocks join this set additively.
+BATTLE_MODE_SIGNAL_TYPES = {
     "battle_hot_streak",
     "battle_trophy_push",
+    "path_of_legend_promotion",
 }
 
 OPTIONAL_PROGRESSION_SIGNAL_TYPES = {
@@ -78,8 +87,15 @@ def signal_routing_summary() -> list[dict]:
             ],
         },
         {
+            "family": "battle_mode",
+            "match": "all signals in the batch are battle-mode signals (hot streak, trophy push, PoL promotion)",
+            "targets": [
+                {"subagent": "trophy-road", "intent": "battle_mode_update", "required": True},
+            ],
+        },
+        {
             "family": "progression",
-            "match": "all signals in the batch are non-optional progression signals",
+            "match": "all signals in the batch are non-optional durable milestones",
             "targets": [
                 {"subagent": "player-progress", "intent": "player_progress", "required": True},
             ],
@@ -166,6 +182,10 @@ def is_war_signal(signal: dict) -> bool:
 
 def is_progression_signal(signal: dict) -> bool:
     return (signal or {}).get("type") in PROGRESSION_SIGNAL_TYPES
+
+
+def is_battle_mode_signal(signal: dict) -> bool:
+    return (signal or {}).get("type") in BATTLE_MODE_SIGNAL_TYPES
 
 
 def is_tournament_signal(signal: dict) -> bool:
@@ -284,8 +304,23 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
         add("player-progress", "player_progress", required=False)
         return outcomes
 
+    if all(is_battle_mode_signal(signal) for signal in signals):
+        add("trophy-road", "battle_mode_update", required=True)
+        return outcomes
+
     if all(is_progression_signal(signal) for signal in signals):
         add("player-progress", "player_progress", required=True)
+        return outcomes
+
+    # Mixed durable + battle-mode batches: split so each lane gets only its kind.
+    if all(
+        is_progression_signal(signal) or is_battle_mode_signal(signal)
+        for signal in signals
+    ):
+        if any(is_progression_signal(signal) for signal in signals):
+            add("player-progress", "player_progress", required=True)
+        if any(is_battle_mode_signal(signal) for signal in signals):
+            add("trophy-road", "battle_mode_update", required=True)
         return outcomes
 
     if any((signal.get("type") == "member_join") for signal in signals):
@@ -354,7 +389,9 @@ def maybe_upsert_signal_memory(*, source_signal_key: str, signal_type: str, body
 
 
 __all__ = [
+    "BATTLE_MODE_SIGNAL_TYPES",
     "build_subagent_memory_context",
+    "is_battle_mode_signal",
     "is_progression_signal",
     "is_war_signal",
     "maybe_upsert_signal_memory",

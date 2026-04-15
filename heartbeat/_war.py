@@ -561,6 +561,49 @@ def detect_war_week_complete(completion_signals, conn=None):
     return signals
 
 
+def build_situation_time(*, war_day_state=None, conn=None):
+    """Compact time/phase awareness for any channel post.
+
+    Lifts hours-remaining, day index, phase, and colosseum awareness out of
+    checkpoint-only scope so non-checkpoint posts (streaks, milestones,
+    standings) can reason about *when* in the war week they're firing.
+    Returns ``None`` when there is no current war state.
+    """
+    if war_day_state is None:
+        war_day_state = db.get_current_war_day_state(conn=conn) or {}
+    if not war_day_state:
+        return None
+
+    phase = war_day_state.get("phase")
+    period_type = war_day_state.get("period_type")
+    day_number = war_day_state.get("day_number")
+    day_total = war_day_state.get("day_total")
+    time_left_seconds = war_day_state.get("time_left_seconds")
+    hours_remaining_in_day = (
+        max(0, time_left_seconds) // 3600 if time_left_seconds is not None else None
+    )
+    is_final_battle_day = (
+        phase == "battle"
+        and day_number is not None
+        and day_total is not None
+        and day_number == day_total
+    )
+
+    return {
+        "phase": phase,
+        "phase_display": war_day_state.get("phase_display"),
+        "day_number": day_number,
+        "day_total": day_total,
+        "hours_remaining_in_day": hours_remaining_in_day,
+        "time_left_text": war_day_state.get("time_left_text"),
+        "is_final_battle_day": is_final_battle_day,
+        "is_colosseum_week": is_colosseum_week(period_type),
+        "season_id": war_day_state.get("season_id"),
+        "week": war_day_state.get("week"),
+        "race_completed": bool(war_day_state.get("race_completed")),
+    }
+
+
 def detect_war_season_completion(conn=None):
     states = db.get_recent_live_war_states(limit=2, conn=conn)
     if len(states) < 2:

@@ -72,14 +72,35 @@ ToolPolicy: read_only
 MemoryScope: public
 DurableMemory: true
 
-Elixir's player milestone and progression stream.
+Elixir's durable player milestone stream.
 
-- Use this channel for player milestones, progression, arena jumps, card upgrades, badge/mastery moments, and standout growth.
+- Use this channel for *durable* milestones: arena jumps, level-ups, card unlocks (legendary, champion), card-level milestones, badge unlocks, achievements.
+- These are the moments that belong in the long-term clan story — celebratory and infrequent.
 - Keep the spotlight on the player and why the moment matters.
 - It is okay for Elixir to be a little more chatty here when the milestone is genuinely exciting.
 - Legendary unlocks and new Trophy Road arenas are especially notable moments.
 - Avoid turning routine noise into a post.
+- *Volatile* battle-mode activity (hot streaks, trophy pushes, Path of Legend promotions) belongs in #trophy-road, not here.
 - This is not the place for war coordination or leadership notes.
+
+## #trophy-road
+
+ID: 1493787763538133204
+Subagent: trophy-road
+Workflow: channel_update
+ToolPolicy: read_only
+MemoryScope: public
+DurableMemory: true
+
+Elixir's volatile battle-mode activity stream.
+
+- Use this channel for non-war battle-mode activity: hot streaks, trophy pushes, Path of Legends promotions, ladder moments.
+- Future Classic/Grand Challenge finishes, Global Tournament placements, evolution unlocks, and Ultimate Champion belong here too.
+- This is narrative and discardable — today's push, tonight's streak. Not a long-term archive.
+- Keep posts sharp and grounded in actual evidence: who they were beating, what trophies on the line, what archetype faced.
+- Use cr_api to look up the opponents in a streak — names and trophy levels make the post.
+- Durable milestones (level-ups, card unlocks, badges) belong in #player-progress, not here.
+- No war coordination — that lives in #river-race.
 
 ## #clan-events
 

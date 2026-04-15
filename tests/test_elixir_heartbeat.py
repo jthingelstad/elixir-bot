@@ -507,6 +507,69 @@ def test_plan_signal_outcomes_routes_leadership_audience_system_signal_to_leader
     assert outcomes[0]["target_channel_key"] == "leader-lounge"
 
 
+def test_plan_signal_outcomes_routes_battle_hot_streak_to_trophy_road():
+    outcomes = plan_signal_outcomes([{
+        "type": "battle_hot_streak",
+        "tag": "#ABC",
+        "name": "King Levy",
+        "streak": 8,
+    }])
+
+    assert len(outcomes) == 1
+    assert outcomes[0]["target_channel_key"] == "trophy-road"
+    assert outcomes[0]["intent"] == "battle_mode_update"
+    assert outcomes[0]["required"] is True
+
+
+def test_plan_signal_outcomes_routes_path_of_legend_promotion_to_trophy_road():
+    outcomes = plan_signal_outcomes([{
+        "type": "path_of_legend_promotion",
+        "tag": "#ABC",
+        "name": "King Levy",
+        "league": "Champion II",
+    }])
+
+    assert len(outcomes) == 1
+    assert outcomes[0]["target_channel_key"] == "trophy-road"
+
+
+def test_plan_signal_outcomes_routes_durable_milestone_to_player_progress():
+    outcomes = plan_signal_outcomes([{
+        "type": "new_card_unlocked",
+        "tag": "#ABC",
+        "name": "King Levy",
+        "card_name": "Mirror",
+        "rarity": "legendary",
+    }])
+
+    assert len(outcomes) == 1
+    assert outcomes[0]["target_channel_key"] == "player-progress"
+
+
+def test_plan_signal_outcomes_splits_mixed_durable_and_battle_mode_batch():
+    outcomes = plan_signal_outcomes([
+        {"type": "battle_hot_streak", "tag": "#ABC", "name": "King Levy", "streak": 6},
+        {"type": "arena_change", "tag": "#ABC", "name": "King Levy"},
+    ])
+
+    channels = [o["target_channel_key"] for o in outcomes]
+    assert "trophy-road" in channels
+    assert "player-progress" in channels
+
+
+def test_battle_mode_group_classifies_known_modes():
+    from storage.player import _battle_mode_group
+
+    assert _battle_mode_group(is_war=1) == "war"
+    assert _battle_mode_group(is_ranked=1) == "ranked"
+    assert _battle_mode_group(is_ladder=1) == "ladder"
+    assert _battle_mode_group(is_special_event=1) == "special_event"
+    assert _battle_mode_group(is_hosted_match=True) == "friendly"
+    assert _battle_mode_group() == "other"
+    # War wins the priority race over other flags
+    assert _battle_mode_group(is_war=1, is_ladder=1, is_ranked=1) == "war"
+
+
 def test_plan_signal_outcomes_makes_badge_level_only_batches_optional():
     outcomes = plan_signal_outcomes([{
         "type": "badge_level_milestone",

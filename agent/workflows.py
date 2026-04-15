@@ -14,6 +14,7 @@ from agent.core import (
 )
 from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_response
 from agent.prompts import (
+    _awareness_system,
     _channel_subagent_system,
     _clanops_system,
     _deck_review_system,
@@ -357,6 +358,31 @@ def generate_channel_update(channel_name, subagent_key, context, *,
         workflow=workflow,
         allowed_tools=TOOLSETS_BY_WORKFLOW[workflow],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW[workflow],
+        strict_json=True,
+    )
+
+
+def run_awareness_tick(situation: dict):
+    """Run one awareness-loop turn. Receives the assembled Situation, returns
+    a structured post plan: ``{"posts": [...], "skipped_reason": "..."}``.
+
+    Phase 4 of the unified agentic awareness loop. Replaces N per-signal
+    ``generate_channel_update`` calls with one agent turn that sees the full
+    situation and decides what (if anything) to say where.
+    """
+    user_msg = (
+        "Here is the current Situation. Decide what, if anything, to post and "
+        "where, following the lane rules in your system prompt. Silence is an "
+        "allowed outcome. Hard-post-floor signals (in `hard_post_signals`) "
+        "must be addressed.\n\n"
+        f"```json\n{json.dumps(situation, indent=2, default=str)}\n```\n"
+    )
+    return _chat_with_tools(
+        _awareness_system(),
+        user_msg,
+        workflow="awareness",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["awareness"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["awareness"],
         strict_json=True,
     )
 
@@ -876,6 +902,7 @@ __all__ = [
     "observe_and_post",
     "generate_channel_update",
     "generate_intel_report",
+    "run_awareness_tick",
     "respond_in_reception",
     "respond_in_channel",
     "respond_in_deck_review",
