@@ -30,6 +30,7 @@ from storage.contextual_memory import upsert_race_streak_memory, upsert_war_reca
 from runtime import app as _app
 from runtime.channel_subagents import (
     build_subagent_memory_context,
+    is_leadership_only_signal,
     maybe_upsert_signal_memory,
     OPTIONAL_PROGRESSION_SIGNAL_TYPES,
     plan_signal_outcomes,
@@ -585,6 +586,31 @@ async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
         )
         return False
 
+    # Reject posts with empty covers when the tick had signals to consider.
+    # Quiet-deadline ticks (no signals, near battle deadline) may legitimately
+    # produce a post that covers nothing.
+    covers = list(post.get("covers_signal_keys") or [])
+    if signals and not covers:
+        log.warning(
+            "awareness post rejected: empty covers_signal_keys channel=%r despite %d input signal(s)",
+            channel_key, len(signals),
+        )
+        return False
+
+    # Audience integrity: a post that covers a leadership-only signal must
+    # land in the leader-lounge channel, not a public channel.
+    if covers:
+        covers_set = set(covers)
+        for sig in signals or []:
+            if signal_source_key(sig) not in covers_set:
+                continue
+            if is_leadership_only_signal(sig) and channel_key != "leader-lounge":
+                log.warning(
+                    "awareness post rejected: leadership-only signal %s routed to public channel %s",
+                    signal_source_key(sig), channel_key,
+                )
+                return False
+
     try:
         channel_config = _channel_config_by_key(channel_key)
     except RuntimeError:
@@ -645,9 +671,8 @@ async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
 
     # Persist signal outcomes so the existing dedupe/stats path stays intact.
     body = "\n\n".join(posts)
-    covers = list(post.get("covers_signal_keys") or [])
     for signal in signals or []:
-        sig_key = signal.get("signal_key") or signal.get("signal_log_type")
+        sig_key = signal_source_key(signal)
         if not sig_key or sig_key not in covers:
             continue
         await asyncio.to_thread(
@@ -702,9 +727,9 @@ async def _deliver_awareness_post_plan(plan: dict, signals: list[dict]) -> dict:
         else:
             rejected += 1
 
-    # Mark covered signals as announced/delivered so detectors don't re-fire
-    # them on the next tick. The legacy per-signal path did this inside
-    # _deliver_signal_group; the awareness loop must do it explicitly.
+    # Mark covered signals immediately so a late partial failure (e.g., one of
+    # several hard-floor fallbacks) does not leave delivered posts un-marked
+    # and cause a duplicate on the next tick.
     if covered:
         covered_signals = [
             s for s in (signals or [])
@@ -755,34 +780,58 @@ async def _deliver_signal_group_via_awareness(signals, clan, war) -> bool:
         return await _deliver_signal_group(signals, clan, war)
 
     report = await _deliver_awareness_post_plan(plan, signals)
-    log.info(
-        "awareness loop: delivered=%d rejected=%d covered_keys=%d",
-        report["delivered"], report["rejected"], len(report["covered_signal_keys"]),
-    )
 
     # Hard-post-floor fallback: any required signal the agent omitted must
-    # still produce a post via the legacy per-signal path.
-    hard_required = situation.get("hard_post_signals") or []
+    # still produce a post via the legacy per-signal path. Key everything on
+    # signal_source_key so the comparison matches build_situation annotation.
+    hard_required_keys = {hp.get("signal_key") for hp in (situation.get("hard_post_signals") or [])}
+    covered_keys = report["covered_signal_keys"]
     uncovered = [
-        signal
-        for signal in (signals or [])
-        if any(
-            (signal.get("signal_key") or signal.get("signal_log_type")) == hp.get("signal_key")
-            for hp in hard_required
-        )
-        and (signal.get("signal_key") or signal.get("signal_log_type")) not in report["covered_signal_keys"]
+        signal for signal in (signals or [])
+        if signal_source_key(signal) in hard_required_keys
+        and signal_source_key(signal) not in covered_keys
     ]
+    fallback_failed_keys: set[str] = set()
+    all_ok = True
     if uncovered:
         log.warning(
             "awareness loop: %d hard-post-floor signal(s) uncovered; falling back per-signal",
             len(uncovered),
         )
-        all_ok = True
         for signal in uncovered:
             ok = await _deliver_signal_group([signal], clan, war)
+            if not ok:
+                fallback_failed_keys.add(signal_source_key(signal))
             all_ok = all_ok and ok
-        if not all_ok:
-            return False
+
+    # Mark non-covered signals the agent consciously skipped so they don't
+    # re-surface every tick. Exclude fallback-failed hard signals so they
+    # retry. Covered signals + fallback-succeeded hard signals are already
+    # marked by _deliver_awareness_post_plan and _deliver_signal_group.
+    considered_skipped = [
+        signal for signal in (signals or [])
+        if signal_source_key(signal) not in covered_keys
+        and signal_source_key(signal) not in fallback_failed_keys
+        and signal_source_key(signal) not in hard_required_keys
+    ]
+    if considered_skipped:
+        await _mark_signal_group_completed(considered_skipped)
+
+    log.info(
+        "awareness_tick_result delivered=%d rejected=%d covered=%d considered_skipped=%d "
+        "hard_fallback=%d hard_fallback_failed=%d signals_in=%d skipped_reason=%r",
+        report["delivered"],
+        report["rejected"],
+        len(covered_keys),
+        len(considered_skipped),
+        len(uncovered),
+        len(fallback_failed_keys),
+        len(signals or []),
+        (plan or {}).get("skipped_reason"),
+    )
+
+    if not all_ok:
+        return False
 
     return True
 

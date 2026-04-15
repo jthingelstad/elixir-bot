@@ -41,6 +41,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         schedule_config={
             "minutes": _attr("HEARTBEAT_INTERVAL_MINUTES", 30),
             "jitter": _attr("HEARTBEAT_JITTER_SECONDS", 900),
+            "max_instances": 1,
+            "coalesce": True,
         },
         delivery_targets=(
             "Discord routed outcomes: #clan-events, #leader-lounge",
