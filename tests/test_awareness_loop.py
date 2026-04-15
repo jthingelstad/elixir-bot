@@ -224,6 +224,85 @@ def test_deliver_signal_group_via_awareness_skips_quiet_tick():
     mock_agent.assert_not_called()
 
 
+def test_deliver_awareness_post_rejects_empty_covers_when_signals_present():
+    """Empty covers_signal_keys is illegal when the tick had signals — the
+    post must tie back to something the agent considered."""
+    post = {"channel": "clan-events", "leads_with": "clan_event", "content": "x",
+            "covers_signal_keys": []}
+    delivered = asyncio.run(
+        signals_module._deliver_awareness_post(post, [{"type": "member_join", "signal_key": "join:A"}])
+    )
+    assert delivered is False
+
+
+def test_deliver_awareness_post_allows_empty_covers_when_no_signals():
+    """Deadline-driven ticks with no signals may emit a post with empty covers."""
+    post = {"channel": "clan-events", "leads_with": "clan_event", "content": "x",
+            "covers_signal_keys": []}
+    # This should not be rejected by the covers/audience gate. It may still be
+    # rejected by later gates (channel not configured), but empty-covers alone
+    # isn't the reason.
+    with patch.object(signals_module, "_channel_config_by_key", side_effect=RuntimeError):
+        delivered = asyncio.run(signals_module._deliver_awareness_post(post, []))
+    assert delivered is False
+
+
+def test_deliver_awareness_post_rejects_leadership_signal_on_public_channel():
+    """A post that covers a leadership-only signal (e.g., inactive_members)
+    must not ship to a public channel."""
+    leadership_signal = {
+        "type": "inactive_members",
+        "signal_key": "inactive:2026-04-17",
+        "members": [],
+    }
+    post = {
+        "channel": "clan-events",
+        "leads_with": "clan_event",
+        "content": "leaking roster",
+        "covers_signal_keys": ["inactive:2026-04-17"],
+    }
+    delivered = asyncio.run(
+        signals_module._deliver_awareness_post(post, [leadership_signal])
+    )
+    assert delivered is False
+
+
+def test_deliver_signal_group_via_awareness_marks_considered_skipped_non_hard_signals():
+    """Non-hard signals the agent consciously skipped must be marked so they
+    don't re-fire every tick (C1 in the v4.5 review)."""
+    # arena_change is a non-hard milestone signal. The agent chooses silence.
+    arena_signal = {
+        "type": "arena_change",
+        "signal_key": "arena:#ABC",
+        "tag": "#ABC",
+    }
+    empty_plan = {"posts": [], "skipped_reason": "not worth a post"}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._signals.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.get_members_on_hot_streak", return_value=[]),
+        patch("runtime.jobs._signals.elixir_agent.run_awareness_tick", return_value=empty_plan),
+        patch(
+            "runtime.jobs._signals._mark_signal_group_completed",
+            new=AsyncMock(),
+        ) as mock_mark,
+    ):
+        ok = asyncio.run(
+            signals_module._deliver_signal_group_via_awareness([arena_signal], {}, {})
+        )
+
+    assert ok is True
+    # The arena_change signal should have been marked as considered-skipped.
+    mock_mark.assert_awaited()
+    marked_signals = mock_mark.await_args_list[-1].args[0]
+    assert arena_signal in marked_signals
+
+
 def test_hard_post_signal_types_includes_join_and_capability():
     # Sanity: the floor set the agent contract relies on actually contains
     # the signals the rest of the codebase considers "must-post."
