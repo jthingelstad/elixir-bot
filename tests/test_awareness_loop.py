@@ -124,10 +124,23 @@ def test_situation_is_quiet_when_no_signals_and_no_clock_pressure():
 def test_situation_is_not_quiet_when_signals_present():
     situation = {
         "_raw_signal_count": 1,
+        "_noisy_signal_count": 1,
         "hard_post_signals": [],
         "time": {"phase": "practice", "hours_remaining_in_day": 18},
     }
     assert situation_is_quiet(situation) is False
+
+
+def test_situation_is_quiet_when_only_optional_progression_signals():
+    """A tick with nothing but badge_level_milestone signals is quiet — the
+    agent virtually always skips them, so spending an LLM call is waste."""
+    situation = {
+        "_raw_signal_count": 3,
+        "_noisy_signal_count": 0,
+        "hard_post_signals": [],
+        "time": {"phase": "practice", "hours_remaining_in_day": 18},
+    }
+    assert situation_is_quiet(situation) is True
 
 
 def test_situation_is_not_quiet_with_hard_post_floor():

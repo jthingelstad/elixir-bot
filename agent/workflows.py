@@ -370,12 +370,15 @@ def run_awareness_tick(situation: dict):
     ``generate_channel_update`` calls with one agent turn that sees the full
     situation and decides what (if anything) to say where.
     """
+    # Strip `_`-prefixed internal fields (e.g., _raw_signal_count, _clan_tag)
+    # before serializing — the agent does not need runtime bookkeeping.
+    public_situation = {k: v for k, v in (situation or {}).items() if not k.startswith("_")}
     user_msg = (
         "Here is the current Situation. Decide what, if anything, to post and "
         "where, following the lane rules in your system prompt. Silence is an "
         "allowed outcome. Hard-post-floor signals (in `hard_post_signals`) "
         "must be addressed.\n\n"
-        f"```json\n{json.dumps(situation, indent=2, default=str)}\n```\n"
+        f"```json\n{json.dumps(public_situation, indent=2, default=str)}\n```\n"
     )
     return _chat_with_tools(
         _awareness_system(),
