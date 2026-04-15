@@ -13,3 +13,4 @@ elixir.pid
 scripts/deck_conversations_eval*.json
 scripts/eval_all_requests_results*.json
 scripts/intent_router_eval_results*.json
+scripts/replay_awareness_report.md

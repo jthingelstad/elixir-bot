@@ -87,8 +87,13 @@ def _proactive_channel_system(channel_name: str, subagent_key: str, *, leadershi
         purpose,
         knowledge,
         channel_context,
-        "You have tools available to look up the full roster, member profiles, recent form, deck data, war status, and long-term trend summaries. "
-        "Use them if you want more context before writing your post.\n\n"
+        "You have tools available to look up the full roster, member profiles, recent form, deck data, war status, and long-term trend summaries.\n\n"
+        "**Investigate before you post.** When a signal names a specific player and the post hinges on *who they were beating* or *what they were facing*, "
+        "use `cr_api(aspect='player_battles', tag='#TAG')` to pull their recent matches, then `cr_api(aspect='player', tag='#TAG')` on a notable opponent if it sharpens the post. "
+        "When a rank changes or a new rival appears, scout them with `cr_api(aspect='clan', tag='#TAG')` or `cr_api(aspect='clan_war', tag='#TAG')`. "
+        "External lookups are capped at 5 per turn — that is plenty for one streak post or one rivalry scout. "
+        "Posts that cite specific evidence (opponent trophies, opponent deck archetype, rival clan size) read sharper than posts that restate the signal dict. "
+        "Only skip the lookup when the signal is fully self-explanatory (e.g. a card unlock, a rank move you already have all the numbers for).\n\n"
         f"You are writing for the `{subagent_key}` channel subagent. "
         "Stay in that lane. Do not drift into unrelated channel jobs.\n\n"
         f"You may only use {memory_scope} durable memory context when it is provided. "
@@ -107,6 +112,22 @@ def _proactive_channel_system(channel_name: str, subagent_key: str, *, leadershi
         '"member_tags": [], "member_names": [], "summary": "one sentence", '
         '"content": "full Discord-ready markdown post OR [\"post 1\", \"post 2\"]", "metadata": {}}\n\n'
         "Or respond with exactly: null\n\nif the signals are genuinely not worth posting about.",
+    )
+
+
+def _awareness_system():
+    """System prompt for the per-tick awareness loop (Phase 4).
+
+    Loads the awareness subagent prompt that defines lane rules, output
+    schema, and the "decide what to say" framing. Identity + knowledge
+    blocks come along so the agent can reason in voice.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        prompts.subagent_prompt("awareness"),
+        _discord_formatting_guidance(),
+        _discord_emoji_guidance(),
     )
 
 
@@ -643,4 +664,5 @@ __all__ = [
     "_promote_system",
     "_weekly_digest_system",
     "_event_system",
+    "_awareness_system",
 ]

@@ -47,6 +47,7 @@ from runtime.system_signals import queue_startup_system_signals
 from runtime.jobs._signals import (
     _channel_config_by_key,
     _deliver_signal_group,
+    _deliver_signal_group_via_awareness,
     _format_weekly_recap_post,
     _load_live_clan_context,
     _mark_delivered_signals,
@@ -57,6 +58,13 @@ from runtime.jobs._signals import (
     _publish_pending_system_signal_updates,
     _strip_weekly_recap_header,
 )
+
+
+def _awareness_loop_enabled() -> bool:
+    """Phase 4 cutover gate. Default off; flip to ``true`` to route ticks
+    through the unified awareness agent. When false, the legacy per-signal
+    router runs unchanged."""
+    return os.environ.get("ELIXIR_AWARENESS_LOOP", "").strip().lower() in {"1", "true", "yes", "on"}
 from runtime.jobs._intel import _clan_wars_intel_report
 from runtime.jobs._site import (
     _normalize_poap_kings_publish_result,
@@ -308,13 +316,21 @@ async def _clan_awareness_tick():
         war = tick_result.war
 
         failed = 0
-        for signal in signals:
-            if not await _deliver_signal_group([signal], clan, war):
-                failed += 1
-                log.warning(
-                    "clan_awareness signal delivery failed type=%s tag=%s",
-                    signal.get("type"), signal.get("tag"),
-                )
+        if _awareness_loop_enabled():
+            # Phase 4: one agent turn sees all signals together and emits a
+            # post plan. Hard-post-floor signals fall back to per-signal on
+            # omission so coverage is still guaranteed.
+            ok = await _deliver_signal_group_via_awareness(signals, clan, war)
+            if not ok:
+                failed = len(signals)
+        else:
+            for signal in signals:
+                if not await _deliver_signal_group([signal], clan, war):
+                    failed += 1
+                    log.warning(
+                        "clan_awareness signal delivery failed type=%s tag=%s",
+                        signal.get("type"), signal.get("tag"),
+                    )
 
         await _revoke_member_role_for_leavers(signals)
 
@@ -373,9 +389,12 @@ async def _war_awareness_tick():
         war = detection_result.war
 
         delivered_ok = True
-        for signal_batch in _observation_signal_batches(signals):
-            batch_ok = await _deliver_signal_group(signal_batch, clan, war)
-            delivered_ok = delivered_ok and batch_ok
+        if _awareness_loop_enabled():
+            delivered_ok = await _deliver_signal_group_via_awareness(signals, clan, war)
+        else:
+            for signal_batch in _observation_signal_batches(signals):
+                batch_ok = await _deliver_signal_group(signal_batch, clan, war)
+                delivered_ok = delivered_ok and batch_ok
 
         if not delivered_ok:
             runtime_status.mark_job_failure("war_awareness", "one or more war signal batches failed")

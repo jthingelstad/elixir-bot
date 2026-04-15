@@ -5,6 +5,8 @@ __all__ = [
     "_channel_config_by_key", "_signal_group_needs_recap_memory",
     "_build_outcome_context", "_mark_signal_group_completed", "_post_signal_memory",
     "_deliver_signal_outcome", "_deliver_signal_group",
+    "_deliver_awareness_post", "_deliver_awareness_post_plan",
+    "_deliver_signal_group_via_awareness",
     "_strip_weekly_recap_header", "_format_weekly_recap_post",
     "_observation_signal_batches", "_progression_signal_batches",
     "_system_signal_updates", "_store_recap_memories_for_signal_batch",
@@ -247,6 +249,21 @@ def _build_outcome_context(outcome, signals, clan, war):
         "Signals:",
         json.dumps(signals or [], indent=2, default=str),
     ]
+    # Ambient time/phase awareness — available to every channel, not just war
+    # checkpoints. Lets non-checkpoint posts narrate "six hours left, 180 fame
+    # back" without waiting for a tripwire to fire.
+    try:
+        from heartbeat import build_situation_time
+        situation_time = build_situation_time()
+    except Exception:
+        log.warning("build_situation_time failed", exc_info=True)
+        situation_time = None
+    if situation_time:
+        lines.extend([
+            "",
+            "=== TIME / PHASE (current ambient context, use narratively) ===",
+            json.dumps(situation_time, indent=2, default=str),
+        ])
     if channel_key == "river-race":
         lines.extend([
             "",
@@ -287,6 +304,17 @@ def _build_outcome_context(outcome, signals, clan, war):
             insight_lines = _build_player_insight_context(tag)
             if insight_lines:
                 lines.extend(["", "=== PLAYER CONTEXT (use to interpret the achievement) ==="] + insight_lines)
+    elif channel_key == "trophy-road":
+        lines.extend([
+            "",
+            "Focus on the *push happening right now* — non-war battle activity. Investigate before you post: when a streak names a player, "
+            "use cr_api(aspect='player_battles') to see who they were beating, then cr_api(aspect='player') on a notable opponent if it sharpens the post.",
+        ])
+        tag = first.get("tag")
+        if tag:
+            insight_lines = _build_player_insight_context(tag)
+            if insight_lines:
+                lines.extend(["", "=== PLAYER CONTEXT (current form / streak / trend) ==="] + insight_lines)
     elif channel_key == "clan-events":
         has_likely_kick = any(s.get("likely_kicked") for s in (signals or []))
         if has_likely_kick:
@@ -530,6 +558,220 @@ async def _deliver_signal_group(signals, clan, war):
         await _mark_signal_group_completed(signals)
         return True
     return all(results)
+
+
+# ---------------------------------------------------------------------------
+# Awareness-loop delivery (Phase 4)
+# ---------------------------------------------------------------------------
+
+async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
+    """Deliver one post from an awareness post-plan to its target channel.
+
+    Reuses the existing Discord write path (`_post_to_elixir`) and message
+    log so downstream consumers (memory extraction, recap storage) keep
+    working unchanged.
+    """
+    from runtime.situation import CHANNEL_LANES
+    channel_key = (post.get("channel") or "").strip()
+    if channel_key not in CHANNEL_LANES:
+        log.warning("awareness post rejected: unknown channel %r", channel_key)
+        return False
+    leads_with = (post.get("leads_with") or "").strip()
+    if leads_with and leads_with not in CHANNEL_LANES[channel_key]:
+        log.warning(
+            "awareness post rejected: leads_with=%r not allowed on channel=%r (allowed=%s)",
+            leads_with, channel_key, sorted(CHANNEL_LANES[channel_key]),
+        )
+        return False
+
+    try:
+        channel_config = _channel_config_by_key(channel_key)
+    except RuntimeError:
+        log.warning("awareness post rejected: channel %r not configured", channel_key)
+        return False
+    channel = bot.get_channel(channel_config["id"])
+    if not channel:
+        log.warning("awareness post rejected: channel %r not found in Discord", channel_key)
+        return False
+
+    content = post.get("content")
+    if not content:
+        log.warning("awareness post on %r had empty content", channel_key)
+        return False
+
+    result = {
+        "event_type": post.get("event_type") or "awareness_update",
+        "summary": post.get("summary"),
+        "content": content,
+    }
+    try:
+        await _post_to_elixir(channel, result)
+    except Exception:
+        log.error("awareness post send failed channel=%r", channel_key, exc_info=True)
+        return False
+
+    posts = _app._entry_posts(result)
+    channel_id = channel_config["id"]
+    channel_name = getattr(channel, "name", None)
+    if not isinstance(channel_name, str):
+        channel_name = None
+    channel_kind = getattr(channel, "type", None)
+    if channel_kind is not None:
+        channel_kind = str(channel_kind)
+    summary = result.get("summary")
+    event_type = result.get("event_type")
+    for index, body_part in enumerate(posts):
+        post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
+        post_event_type = event_type if index == 0 else f"{event_type}_part"
+        await asyncio.to_thread(
+            db.save_message,
+            _channel_scope(channel),
+            "assistant",
+            body_part,
+            summary=post_summary,
+            channel_id=channel_id,
+            channel_name=channel_name,
+            channel_kind=channel_kind,
+            workflow=channel_config["subagent_key"],
+            event_type=post_event_type,
+            raw_json={
+                "source": "awareness_loop",
+                "leads_with": post.get("leads_with"),
+                "covers_signal_keys": post.get("covers_signal_keys") or [],
+                "result": result,
+            },
+        )
+
+    # Persist signal outcomes so the existing dedupe/stats path stays intact.
+    body = "\n\n".join(posts)
+    covers = list(post.get("covers_signal_keys") or [])
+    for signal in signals or []:
+        sig_key = signal.get("signal_key") or signal.get("signal_log_type")
+        if not sig_key or sig_key not in covers:
+            continue
+        await asyncio.to_thread(
+            db.upsert_signal_outcome,
+            sig_key,
+            signal.get("type") or "awareness_signal",
+            channel_key,
+            channel_id,
+            event_type,
+            required=True,
+            delivery_status="delivered",
+            payload={"result": result, "signals": [signal]},
+            mark_attempt=True,
+            delivered=True,
+        )
+
+    # Memory extraction — same fire-and-forget pattern as per-signal delivery.
+    from runtime.helpers._common import _safe_create_task
+    fake_outcome = {
+        "intent": event_type,
+        "target_channel_key": channel_key,
+        "target_channel_id": channel_id,
+        "source_signal_key": (covers[0] if covers else "awareness_loop"),
+    }
+    _safe_create_task(
+        _post_signal_memory(body, fake_outcome, signals or []),
+        name="awareness_signal_memory",
+    )
+    return True
+
+
+async def _deliver_awareness_post_plan(plan: dict, signals: list[dict]) -> dict:
+    """Deliver every valid post in an awareness post plan.
+
+    Returns a report dict: ``{"delivered": int, "rejected": int,
+    "covered_signal_keys": set[str]}``. The caller compares
+    ``covered_signal_keys`` against ``hard_post_signals`` and falls back to
+    the legacy per-signal delivery path for any uncovered hard-post-floor
+    signals.
+    """
+    posts = (plan or {}).get("posts") or []
+    delivered = 0
+    rejected = 0
+    covered: set[str] = set()
+    for post in posts:
+        ok = await _deliver_awareness_post(post, signals or [])
+        if ok:
+            delivered += 1
+            for key in post.get("covers_signal_keys") or []:
+                if key:
+                    covered.add(str(key))
+        else:
+            rejected += 1
+    return {
+        "delivered": delivered,
+        "rejected": rejected,
+        "covered_signal_keys": covered,
+    }
+
+
+async def _deliver_signal_group_via_awareness(signals, clan, war) -> bool:
+    """Awareness-loop replacement for ``_deliver_signal_group``.
+
+    1. Build the situation from ``signals + clan + war``.
+    2. Fast-path: if quiet (no signals, no hard floors, not near deadline),
+       return True without calling the LLM.
+    3. Run the awareness agent.
+    4. Validate + deliver the post plan.
+    5. For any hard-post-floor signal not covered by the plan, fall back to
+       the legacy per-signal ``_deliver_signal_group`` for *just that signal*
+       so coverage is guaranteed.
+
+    Returns True iff every required signal was delivered through some path.
+    """
+    from runtime.situation import build_situation, situation_is_quiet
+    from heartbeat import HeartbeatTickResult
+
+    bundle = HeartbeatTickResult(signals=signals or [], clan=clan or {}, war=war or {})
+    situation = build_situation(bundle)
+
+    if situation_is_quiet(situation):
+        log.info("awareness loop: quiet tick, skipping agent call")
+        return True
+
+    try:
+        plan = await asyncio.to_thread(elixir_agent.run_awareness_tick, situation)
+    except Exception as exc:
+        log.error("awareness loop run_awareness_tick failed: %s", exc, exc_info=True)
+        plan = None
+
+    if plan is None:
+        log.warning("awareness loop returned no plan; falling back to per-signal delivery")
+        return await _deliver_signal_group(signals, clan, war)
+
+    report = await _deliver_awareness_post_plan(plan, signals)
+    log.info(
+        "awareness loop: delivered=%d rejected=%d covered_keys=%d",
+        report["delivered"], report["rejected"], len(report["covered_signal_keys"]),
+    )
+
+    # Hard-post-floor fallback: any required signal the agent omitted must
+    # still produce a post via the legacy per-signal path.
+    hard_required = situation.get("hard_post_signals") or []
+    uncovered = [
+        signal
+        for signal in (signals or [])
+        if any(
+            (signal.get("signal_key") or signal.get("signal_log_type")) == hp.get("signal_key")
+            for hp in hard_required
+        )
+        and (signal.get("signal_key") or signal.get("signal_log_type")) not in report["covered_signal_keys"]
+    ]
+    if uncovered:
+        log.warning(
+            "awareness loop: %d hard-post-floor signal(s) uncovered; falling back per-signal",
+            len(uncovered),
+        )
+        all_ok = True
+        for signal in uncovered:
+            ok = await _deliver_signal_group([signal], clan, war)
+            all_ok = all_ok and ok
+        if not all_ok:
+            return False
+
+    return True
 
 
 def _strip_weekly_recap_header(text: str) -> str:

@@ -572,6 +572,41 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "omnipresent",
         },
     },
+    {
+        "signal_key": "capability_coherent_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Coherent",
+            "message": (
+                "Elixir's proactive posting flipped from one LLM call per signal to one agent turn per heartbeat. "
+                "I now see the full situation each tick — what's happened, where in the war week we are, what each channel has heard from me — and I decide what (if anything) is worth saying."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Coherent** :elixir:\n\n"
+                "I used to react to one signal at a time. Now I see the whole tick at once and decide what's worth saying.\n\n"
+                "**What's different:**\n"
+                "- **I investigate before I post.** When someone is on a streak, I pull their recent battles to see who they were beating before I write the callout. The post leads with what was actually faced, not just the streak count.\n"
+                "- **I collapse related signals.** When a battle day ends, the week rolls over, and the next practice phase starts in the same tick, that's now one post that recaps and pivots — not five posts racing each other into the channel.\n"
+                "- **I'm allowed to be silent.** When the data has already gone stale (a hot-streak signal whose live battle log shows the streak broke), I skip and log why. Silence is a real choice now.\n"
+                "- **I always know what time it is.** Hours-remaining, day index, war phase, and colosseum status attach to every post — no waiting for a checkpoint to fire to talk about the clock.\n\n"
+                "**New channel: #trophy-road**\n"
+                "- Volatile non-war battle activity moves here: hot streaks, trophy pushes, Path of Legends promotions, and future Challenge / Tournament finishes.\n"
+                "- **#player-progress** narrows to durable milestones — arena unlocks, level-ups, card unlocks, badges, achievements. The mixing problem is gone.\n\n"
+                "This is **Elixir v4.5 \"Coherent\"** — one mind per tick, watching the whole situation, deciding what's worth your attention."
+            ),
+            "details": [
+                "New per-tick awareness loop replaces per-signal LLM calls — one agent turn sees all signals together and emits a structured post plan.",
+                "Agent investigates before posting via cr_api (streak opponents, rival clans) so posts cite specific evidence instead of restating signal dicts.",
+                "Coherent timing: related signals (war cascade, mixed milestone+roster batches) collapse into one sequenced post per channel instead of N independent posts.",
+                "Genuine silence is allowed — stale signals get caught and skipped with a logged reason; quiet ticks fast-path skip the LLM call entirely.",
+                "Hard-post-floor fallback guarantees coverage for member_join, war_battle_rank_change, capability_unlock, and week/season completion signals.",
+                "New #trophy-road channel for volatile battle-mode activity; #player-progress narrowed to durable milestones.",
+                "Time/phase/standing context now attaches to every channel post, not just war checkpoints.",
+            ],
+            "audience": "clan",
+            "capability_area": "coherent",
+        },
+    },
 ]
 
 
