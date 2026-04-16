@@ -1542,6 +1542,79 @@ def test_snapshot_player_profile_emits_path_of_legend_promotion_signal():
     }]
 
 
+def test_snapshot_player_profile_emits_best_trophies_peak_signal():
+    """v4.7 #28: new personal-best trophies record fires a signal."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+             "bestTrophies": 8400, "trophies": 8400},
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+             "bestTrophies": 8460, "trophies": 8460},
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+    peaks = [s for s in signals if s["type"] == "best_trophies_peak"]
+    assert len(peaks) == 1
+    assert peaks[0]["old_best"] == 8400
+    assert peaks[0]["new_best"] == 8460
+
+
+def test_snapshot_player_profile_does_not_emit_peak_when_best_flat():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+             "bestTrophies": 8400, "trophies": 7900},
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+             "bestTrophies": 8400, "trophies": 7950},
+            conn=conn,
+        )
+    finally:
+        conn.close()
+    assert not any(s["type"] == "best_trophies_peak" for s in signals)
+
+
+def test_snapshot_player_profile_emits_challenge_milestone_signal():
+    """v4.7 #30: crossing a challenge-wins milestone (10, 11, ..., 20) fires."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+             "challengeMaxWins": 9},
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+             "challengeMaxWins": 12},
+            conn=conn,
+        )
+    finally:
+        conn.close()
+    milestones = sorted(s["milestone"] for s in signals if s["type"] == "challenge_performance_milestone")
+    assert milestones == [10, 11, 12]
+
+
 def test_snapshot_player_profile_emits_path_of_legend_demotion_signal():
     """v4.7 #23: parity with promotion — demotions fire too."""
     conn = db.get_connection(":memory:")

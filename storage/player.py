@@ -204,7 +204,8 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
     tag = _canon_tag(player_data.get("tag"))
     member_id = _ensure_member(conn, tag, player_data.get("name"), status=None)
     previous = conn.execute(
-        "SELECT exp_level, wins, cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json "
+        "SELECT exp_level, wins, best_trophies, challenge_max_wins, cards_json, badges_json, "
+        "achievements_json, current_path_of_legend_season_result_json "
         "FROM player_profile_snapshots WHERE member_id = ? "
         "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
         (member_id,),
@@ -263,6 +264,39 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
                 "name": player_data.get("name"),
                 "old_wins": old_wins,
                 "new_wins": new_wins,
+                "milestone": milestone,
+            })
+
+    # v4.7 #28: new personal-best trophies record. Peaks happen infrequently
+    # (once every few weeks per active player) and deserve a call-out the
+    # v4.5 awareness agent can frame appropriately.
+    old_best = previous["best_trophies"] if previous else None
+    new_best = player_data.get("bestTrophies")
+    if isinstance(old_best, int) and isinstance(new_best, int) and new_best > old_best:
+        signals.append({
+            "type": "best_trophies_peak",
+            "tag": tag,
+            "name": player_data.get("name"),
+            "old_best": old_best,
+            "new_best": new_best,
+            "current_trophies": player_data.get("trophies"),
+        })
+
+    # v4.7 #30: Challenge wins milestones. 10+ wins in a Classic or 15+/20 in
+    # a Grand Challenge are tournament-level performances; pre-v4.7 we stored
+    # them silently. Fire on crossing specific thresholds.
+    old_cmw = previous["challenge_max_wins"] if previous else None
+    new_cmw = player_data.get("challengeMaxWins")
+    _CHALLENGE_MILESTONES = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
+    if isinstance(old_cmw, int) and isinstance(new_cmw, int) and new_cmw > old_cmw:
+        crossed = sorted(m for m in _CHALLENGE_MILESTONES if old_cmw < m <= new_cmw)
+        for milestone in crossed:
+            signals.append({
+                "type": "challenge_performance_milestone",
+                "tag": tag,
+                "name": player_data.get("name"),
+                "old_best_wins": old_cmw,
+                "new_best_wins": new_cmw,
                 "milestone": milestone,
             })
 
