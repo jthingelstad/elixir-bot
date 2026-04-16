@@ -759,8 +759,11 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         log.info("awareness loop: quiet tick, skipping agent call")
         return True
 
+    tool_stats: dict = {}
     try:
-        plan = await asyncio.to_thread(elixir_agent.run_awareness_tick, situation)
+        plan = await asyncio.to_thread(
+            elixir_agent.run_awareness_tick, situation, tool_stats=tool_stats,
+        )
     except Exception as exc:
         log.error("awareness loop run_awareness_tick failed: %s", exc, exc_info=True)
         plan = None
@@ -854,6 +857,9 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
             all_ok=all_ok,
             skipped_reason=(plan or {}).get("skipped_reason"),
             signal_outcomes=signal_outcomes,
+            write_calls_issued=int(tool_stats.get("write_calls_issued", 0)),
+            write_calls_succeeded=int(tool_stats.get("write_calls_succeeded", 0)),
+            write_calls_denied=int(tool_stats.get("write_calls_denied", 0)),
         )
     except Exception:
         log.warning("record_awareness_tick failed", exc_info=True)

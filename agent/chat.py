@@ -12,6 +12,8 @@ from agent.core import (
 )
 from agent.tool_policy import (
     ALL_TOOLS,
+    AWARENESS_WRITE_BUDGET_PER_TICK,
+    AWARENESS_WRITE_TOOL_NAMES,
     EXTERNAL_LOOKUP_TOOL_NAMES,
     MAX_ROUNDS_BY_WORKFLOW,
     RESPONSE_SCHEMAS_BY_WORKFLOW,
@@ -283,14 +285,27 @@ def _build_tool_result_envelope(name, raw_result):
     return json.dumps(envelope, default=str)
 
 
+def _tool_result_succeeded(envelope_json: str) -> bool:
+    try:
+        envelope = json.loads(envelope_json)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return False
+    if not isinstance(envelope, dict):
+        return False
+    return bool(envelope.get("ok")) and envelope.get("error") is None
+
+
 def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                      temperature=0.7, max_tokens=4096, workflow="generic",
                      allowed_tools=None, response_schema=None, strict_json=True,
-                     return_errors=False):
+                     return_errors=False, tool_stats=None):
     """Run a chat completion with tool-calling loop.
 
     conversation_history: optional list of {role, content} dicts to inject
         between the system prompt and the current user message.
+    tool_stats: optional dict the caller provides; populated in-place with
+        ``write_calls_issued``, ``write_calls_succeeded``, ``write_calls_denied``
+        so the caller can persist the awareness-loop write budget usage.
     Returns the final parsed response dict, or None.
     """
     messages = [
@@ -306,7 +321,10 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         allowed_tools = TOOLSETS_BY_WORKFLOW.get(workflow, ALL_TOOLS)
     allowed_tool_names = _tool_names(allowed_tools)
 
-    enable_write_tools = workflow == "clanops" and CLANOPS_WRITE_TOOLS_ENABLED
+    # Clanops writes are gated by the long-standing env var. Awareness writes
+    # are gated by a per-tick budget enforced in the tool-call loop below.
+    is_clanops_write_ok = workflow == "clanops" and CLANOPS_WRITE_TOOLS_ENABLED
+    is_awareness_write_ok = workflow == "awareness"
 
     max_tool_rounds = MAX_ROUNDS_BY_WORKFLOW.get(workflow, MAX_TOOL_ROUNDS)
 
@@ -316,6 +334,14 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     external_lookup_calls = 0
     completion_latencies_ms = []
     completion_chars = 0
+
+    # Write-call tallies live on the caller-provided tool_stats dict so they
+    # survive every return path below without needing a finalizer.
+    if tool_stats is None:
+        tool_stats = {}
+    tool_stats.setdefault("write_calls_issued", 0)
+    tool_stats.setdefault("write_calls_succeeded", 0)
+    tool_stats.setdefault("write_calls_denied", 0)
 
     def _create_completion(call_messages):
         start = time.perf_counter()
@@ -466,7 +492,15 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                 })
             else:
                 side_effect = TOOL_DEFINITIONS_BY_NAME.get(fn_name, {}).get("side_effect", "read")
-                if side_effect == "write" and not enable_write_tools:
+                is_awareness_write = (
+                    is_awareness_write_ok and fn_name in AWARENESS_WRITE_TOOL_NAMES
+                )
+                write_allowed = (
+                    side_effect != "write"
+                    or is_clanops_write_ok
+                    or is_awareness_write
+                )
+                if not write_allowed:
                     denied_tool_count += 1
                     log.warning(
                         "tool_denied workflow=%s tool=%s reason=write_policy_disabled",
@@ -477,15 +511,35 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                         "tool": fn_name,
                         "workflow": workflow,
                     })
+                elif is_awareness_write and tool_stats["write_calls_issued"] >= AWARENESS_WRITE_BUDGET_PER_TICK:
+                    tool_stats["write_calls_denied"] += 1
+                    denied_tool_count += 1
+                    log.warning(
+                        "tool_denied workflow=%s tool=%s reason=awareness_write_budget issued=%d cap=%d",
+                        workflow, fn_name, tool_stats["write_calls_issued"], AWARENESS_WRITE_BUDGET_PER_TICK,
+                    )
+                    result = json.dumps({
+                        "error": "awareness_write_budget_reached",
+                        "tool": fn_name,
+                        "cap": AWARENESS_WRITE_BUDGET_PER_TICK,
+                        "hint": (
+                            "You have already used your write budget for this tick. "
+                            "Skip further writes and finalize your post plan."
+                        ),
+                    })
                 else:
                     log.info("Tool call workflow=%s: %s(%s)", workflow, fn_name, fn_args)
                     tools_called.append(fn_name)
                     if fn_name in EXTERNAL_LOOKUP_TOOL_NAMES:
                         external_lookup_calls += 1
+                    if is_awareness_write:
+                        tool_stats["write_calls_issued"] += 1
                     result = _build_tool_result_envelope(
                         fn_name,
                         _execute_tool(fn_name, fn_args, workflow=workflow),
                     )
+                    if is_awareness_write and _tool_result_succeeded(result):
+                        tool_stats["write_calls_succeeded"] += 1
             tool_result_blocks.append({
                 "type": "tool_result",
                 "tool_use_id": tool_call.id,

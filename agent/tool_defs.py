@@ -540,4 +540,60 @@ TOOLS = [
             "required": ["title", "body"],
         },
     },
+    {
+        "name": "flag_member_watch",
+        "description": (
+            "Flag a member for leadership attention with a short reason. Use when you notice a "
+            "pattern the next tick or a human leader should look at — extended silence, activity "
+            "drop-off, rank slide, war no-show. Persists as a leadership-scoped memory tagged "
+            "'watch-list'. Prefer this over save_clan_memory when the point is 'keep an eye on "
+            "this member'; use save_clan_memory when the point is durable knowledge."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_tag": {
+                    "type": "string",
+                    "description": "Player tag, in-game name, or Discord handle (e.g. '#ABC123', 'Vijay', '@jamie').",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "One-sentence reason for the flag. Factual and specific — cite what changed.",
+                },
+                "expires_at": {
+                    "type": "string",
+                    "description": "Optional ISO date or ISO datetime after which the flag should be ignored (e.g. '2026-04-30'). Omit for an open-ended flag.",
+                },
+            },
+            "required": ["member_tag", "reason"],
+        },
+    },
+    {
+        "name": "record_leadership_followup",
+        "description": (
+            "Queue an operational suggestion for the leadership channel. Use when you detect a "
+            "pattern that calls for a leader action — a rank swing, a recurring no-show, a "
+            "compliance gap. Persists as a leadership-scoped memory tagged 'followup'. Keep the "
+            "recommendation concrete (who, what, when) so a human can act on it without re-doing "
+            "the analysis."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "Short label for the followup (e.g. 'Week 3 no-shows', 'promotion review for Gareth').",
+                },
+                "recommendation": {
+                    "type": "string",
+                    "description": "Concrete leadership action to consider, with enough context to act on it.",
+                },
+                "member_tag": {
+                    "type": "string",
+                    "description": "Player tag, name, or Discord handle if the followup is scoped to a specific member. Optional.",
+                },
+            },
+            "required": ["topic", "recommendation"],
+        },
+    },
 ]

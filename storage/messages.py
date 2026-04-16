@@ -242,6 +242,9 @@ def record_awareness_tick(
     all_ok: bool = True,
     skipped_reason: Optional[str] = None,
     signal_outcomes: Optional[list[dict]] = None,
+    write_calls_issued: int = 0,
+    write_calls_succeeded: int = 0,
+    write_calls_denied: int = 0,
     ticked_at: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> int:
@@ -259,8 +262,9 @@ def record_awareness_tick(
         INSERT INTO awareness_ticks (
             ticked_at, workflow, signals_in, posts_delivered, posts_rejected,
             covered_keys, considered_skipped, hard_fallback, hard_fallback_failed,
-            all_ok, skipped_reason, signal_outcomes_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            all_ok, skipped_reason, signal_outcomes_json,
+            write_calls_issued, write_calls_succeeded, write_calls_denied
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             now,
@@ -275,6 +279,9 @@ def record_awareness_tick(
             1 if all_ok else 0,
             skipped_reason,
             _json_or_none(signal_outcomes),
+            write_calls_issued,
+            write_calls_succeeded,
+            write_calls_denied,
         ),
     )
     conn.commit()
