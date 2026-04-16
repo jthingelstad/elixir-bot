@@ -596,4 +596,33 @@ TOOLS = [
             "required": ["topic", "recommendation"],
         },
     },
+    {
+        "name": "schedule_revisit",
+        "description": (
+            "Tell your future self to look at this signal again at time `at`. Use when a "
+            "situation is mid-arc and a later tick should reconsider — watch a win streak "
+            "through battle day, check on a silent member by Friday, recheck race pace 6 hours "
+            "before reset. At the due time the revisit appears in a later Situation under "
+            "`due_revisits`; you decide then whether to post, flag, or let it expire. Not a "
+            "guaranteed post — just a reminder. Counts against the per-tick write budget."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "signal_key": {
+                    "type": "string",
+                    "description": "The `signal_key` of the signal this revisit tracks. Copy it verbatim from `signals_by_lane` or `hard_post_signals`.",
+                },
+                "at": {
+                    "type": "string",
+                    "description": "When to surface this revisit, as an ISO-8601 timestamp (e.g. '2026-04-18T18:00:00Z' or '2026-04-18T13:00:00-05:00').",
+                },
+                "rationale": {
+                    "type": "string",
+                    "description": "One-sentence reason for the revisit so future-you knows why it was scheduled.",
+                },
+            },
+            "required": ["signal_key", "at", "rationale"],
+        },
+    },
 ]
