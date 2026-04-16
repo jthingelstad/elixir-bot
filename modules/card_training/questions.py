@@ -221,9 +221,18 @@ def generate_cost_comparison_question(conn=None) -> dict | None:
         fallback=fallback,
     )
 
+    # Order the strip to match the choice order the player sees so the icons
+    # visually line up with the labeled buttons.
+    name_to_card = {c["name"]: c for c in selected}
+    strip_cards = [name_to_card[name] for name in choices]
+
     return {
         "question_text": f"Which of these **{type_plural}** costs the **{word}** elixir?",
         "image_url": None,
+        "card_icons": [
+            {"name": c["name"], "icon_url": c.get("icon_url")}
+            for c in strip_cards
+        ],
         "result_image_url": target.get("icon_url"),
         "choices": choices,
         "correct_index": correct_index,
