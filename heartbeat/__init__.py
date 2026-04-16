@@ -40,6 +40,7 @@ from heartbeat._pipeline import (
 from heartbeat._roster import (
     detect_arena_changes,
     detect_cake_days,
+    detect_clan_rank_top_spot,
     detect_returning_members,
     detect_donation_leaders,
     detect_inactivity,
@@ -162,6 +163,9 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         # Inverse of inactivity: members who went dark and are back.
         signals.extend(detect_returning_members(conn=conn))
 
+        # Leapfrogging into clan rank #1 is a durable #player-progress moment.
+        signals.extend(detect_clan_rank_top_spot(conn=conn))
+
         # Cake days — birthdays, join anniversaries, clan birthday
         signals.extend(detect_cake_days(conn=conn))
 
@@ -214,6 +218,7 @@ __all__ = [
     "detect_donation_leaders",
     "detect_inactivity",
     "detect_returning_members",
+    "detect_clan_rank_top_spot",
     "detect_cake_days",
     "detect_pending_system_signals",
     # War detectors

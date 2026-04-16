@@ -96,6 +96,59 @@ def detect_donation_leaders(current_members, conn=None):
     }]
 
 
+def detect_clan_rank_top_spot(conn=None):
+    """Emit clan_rank_top_spot when a member takes over the clan-level #1 slot.
+
+    v4.7 #29: clan_rank is already tracked on every snapshot but never
+    signaled. Someone leapfrogging into the clan-leaderboard #1 slot is
+    exactly the kind of durable #player-progress moment the awareness agent
+    can frame; previously it passed silently.
+
+    Compares the two most recent ``member_state_snapshots`` per active
+    member. Fires when clan_rank=1 now and the previous snapshot had
+    clan_rank>1 (or None). Dedups via ``signal_log_type`` keyed on tag +
+    observed_at.
+    """
+    close = conn is None
+    conn = conn or db.get_connection()
+    signals = []
+    try:
+        rows = conn.execute(
+            """
+            WITH ranked AS (
+                SELECT s.member_id, s.observed_at, s.clan_rank,
+                       m.player_tag AS tag, m.current_name AS name,
+                       ROW_NUMBER() OVER (PARTITION BY s.member_id ORDER BY s.observed_at DESC) AS rn
+                FROM member_state_snapshots s
+                JOIN members m ON m.member_id = s.member_id
+                WHERE m.status = 'active'
+            )
+            SELECT a.tag, a.name, a.observed_at, a.clan_rank AS new_rank,
+                   b.clan_rank AS prev_rank
+            FROM ranked a
+            JOIN ranked b ON a.member_id = b.member_id
+            WHERE a.rn = 1 AND b.rn = 2
+              AND a.clan_rank = 1
+              AND (b.clan_rank IS NULL OR b.clan_rank > 1)
+            """
+        ).fetchall()
+        for row in rows:
+            signal_log_type = f"clan_rank_top_spot:{row['tag']}:{row['observed_at']}"
+            if db.was_signal_sent_any_date(signal_log_type, conn=conn):
+                continue
+            signals.append({
+                "type": "clan_rank_top_spot",
+                "tag": row["tag"],
+                "name": row["name"],
+                "previous_rank": row["prev_rank"],
+                "signal_log_type": signal_log_type,
+            })
+    finally:
+        if close:
+            conn.close()
+    return signals
+
+
 def detect_returning_members(now=None, conn=None):
     """Emit member_active_again when a previously dormant member plays again.
 
