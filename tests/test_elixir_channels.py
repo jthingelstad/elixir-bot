@@ -1798,13 +1798,12 @@ def test_build_schedule_report_shows_47_minute_heartbeat():
     with (
         patch("elixir.scheduler", scheduler),
         patch.object(elixir, "HEARTBEAT_INTERVAL_MINUTES", 47),
-        patch.object(elixir, "HEARTBEAT_JITTER_SECONDS", 300),
     ):
         report = elixir._build_schedule_report()
 
     assert "clan-events" in report
     assert "clan-awareness" in report
-    assert "Every 47 minutes with up to 300s jitter." in report
+    assert "Every 47 minutes." in report
 
 
 def test_build_schedule_report_includes_promotion_content_sync():
@@ -1853,13 +1852,12 @@ def test_build_schedule_report_shows_30_minute_player_intel_refresh():
     with (
         patch("elixir.scheduler", scheduler),
         patch.object(elixir, "PLAYER_INTEL_REFRESH_MINUTES", 30),
-        patch.object(elixir, "PLAYER_INTEL_REFRESH_JITTER_SECONDS", 900),
     ):
         report = elixir._build_schedule_report()
 
     assert "player-progress" in report
     assert "player-progression" in report
-    assert "Every 30 minutes with up to 900s jitter." in report
+    assert "Every 30 minutes." in report
 
 
 def test_build_schedule_report_includes_clock_aligned_war_pipeline():
@@ -1909,8 +1907,7 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert "daily-clan-insight" in specs
     assert specs["daily-clan-insight"]["owner_subagent"] == "ask-elixir"
     assert "Discord: #ask-elixir" in specs["daily-clan-insight"]["delivery_targets"]
-    assert "Daily at 12:00 CT." in specs["daily-clan-insight"]["schedule"]
-    assert "30 minutes jitter" in specs["daily-clan-insight"]["schedule"]
+    assert specs["daily-clan-insight"]["schedule"] == "Daily at 12:00 CT."
     assert "promotion-content" in specs
     assert "Discord: #promote-the-clan" in specs["promotion-content"]["delivery_targets"]
     assert "POAP KINGS: promotion payloads" in specs["promotion-content"]["delivery_targets"]

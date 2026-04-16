@@ -40,7 +40,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         schedule_kind="interval",
         schedule_config={
             "minutes": _attr("HEARTBEAT_INTERVAL_MINUTES", 30),
-            "jitter": _attr("HEARTBEAT_JITTER_SECONDS", 900),
             "max_instances": 1,
             "coalesce": True,
         },
@@ -91,7 +90,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         schedule_kind="interval",
         schedule_config={
             "minutes": _attr("PLAYER_INTEL_REFRESH_MINUTES", 30),
-            "jitter": _attr("PLAYER_INTEL_REFRESH_JITTER_SECONDS", 900),
             "max_instances": 1,
             "coalesce": True,
         },
@@ -110,7 +108,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         schedule_config={
             "hour": _attr("ASK_ELIXIR_DAILY_INSIGHT_HOUR", 12),
             "minute": _attr("ASK_ELIXIR_DAILY_INSIGHT_MINUTE", 0),
-            "jitter": _attr("ASK_ELIXIR_DAILY_INSIGHT_JITTER_SECONDS", 1800),
         },
         delivery_targets=(
             "Discord: #ask-elixir",
@@ -344,20 +341,6 @@ def _format_hour(value: int) -> str:
     return f"{int(value):02d}:00 CT"
 
 
-def _format_human_jitter(value: Any) -> str:
-    try:
-        seconds = int(value or 0)
-    except (TypeError, ValueError):
-        return ""
-    if seconds <= 0:
-        return ""
-    if seconds % 60 == 0:
-        minutes = seconds // 60
-        unit = "minute" if minutes == 1 else "minutes"
-        return f" with up to {minutes} {unit} jitter."
-    return f" with up to {seconds}s jitter."
-
-
 def _format_schedule_description(resolved: dict[str, Any]) -> str:
     schedule_kind = resolved["schedule_kind"]
     schedule_config = resolved["schedule_config"]
@@ -365,9 +348,6 @@ def _format_schedule_description(resolved: dict[str, Any]) -> str:
     if schedule_kind == "interval":
         minutes = schedule_config.get("minutes")
         parts = [f"Every {minutes} minutes."]
-        jitter = schedule_config.get("jitter")
-        if jitter:
-            parts[0] = f"Every {minutes} minutes with up to {int(jitter)}s jitter."
         if active_window:
             parts.append(
                 "Active hours "
@@ -380,11 +360,11 @@ def _format_schedule_description(resolved: dict[str, Any]) -> str:
     minute = int(schedule_config.get("minute", 0))
     if day_of_week:
         hour = schedule_config.get("hour", 0)
-        return f"Every {_format_day(day_of_week)} at {hour:02d}:{minute:02d} CT.{_format_human_jitter(schedule_config.get('jitter'))}"
+        return f"Every {_format_day(day_of_week)} at {hour:02d}:{minute:02d} CT."
     if "hour" in schedule_config:
         hour = schedule_config.get("hour", 0)
-        return f"Daily at {hour:02d}:{minute:02d} CT.{_format_human_jitter(schedule_config.get('jitter'))}"
-    return f"Every hour at :{minute:02d} CT.{_format_human_jitter(schedule_config.get('jitter'))}"
+        return f"Daily at {hour:02d}:{minute:02d} CT."
+    return f"Every hour at :{minute:02d} CT."
 
 
 def schedule_specs_from_registry(runtime_module: Any) -> list[dict[str, Any]]:
