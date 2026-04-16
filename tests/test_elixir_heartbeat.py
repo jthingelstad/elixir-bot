@@ -634,6 +634,7 @@ def test_deliver_signal_group_saves_multipart_channel_update_as_separate_message
         }),
         patch("elixir._post_to_elixir", new=AsyncMock()),
         patch("runtime.jobs._signals.maybe_upsert_signal_memory"),
+        patch("runtime.jobs._signals._post_signal_memory", new=AsyncMock()),
     ):
         asyncio.run(elixir._deliver_signal_group(signals, clan, war))
 
@@ -691,6 +692,7 @@ def test_deliver_signal_group_posts_preauthored_system_signal_without_llm():
         patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("runtime.jobs._signals.maybe_upsert_signal_memory"),
+        patch("runtime.jobs._signals._post_signal_memory", new=AsyncMock()),
     ):
         asyncio.run(elixir._deliver_signal_group(signals, clan, war))
 
@@ -744,6 +746,7 @@ def test_deliver_signal_group_stores_war_recap_memory_for_river_race_batch():
         }),
         patch("elixir._post_to_elixir", new=AsyncMock()),
         patch("runtime.jobs._signals.maybe_upsert_signal_memory"),
+        patch("runtime.jobs._signals._post_signal_memory", new=AsyncMock()),
         patch("runtime.jobs._signals._store_recap_memories_for_signal_batch") as mock_memory,
     ):
         asyncio.run(elixir._deliver_signal_group(signals, clan, war))
@@ -981,6 +984,7 @@ def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
         patch("elixir.elixir_agent.generate_weekly_digest", return_value="This week POAP KINGS pushed hard."),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message"),
+        patch("runtime.jobs._core.upsert_weekly_summary_memory"),
         patch("runtime.jobs._site.poap_kings_site.publish_site_content", return_value=_publish_result("members")) as mock_publish,
         patch("runtime.jobs._core._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
     ):
