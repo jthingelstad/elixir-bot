@@ -251,10 +251,10 @@ def generate_positive_trade_question(conn=None) -> dict | None:
         f"elixir wins are what let you open a counter-push."
     )
 
-    question_text = (
-        f"**Trade math.** {scenario.scenario_text} Your cost: {your_total}. "
-        f"Opponent's cost: {opp_total}. Is this trade…"
-    )
+    # Question text omits costs so the player has to recall each card's
+    # cost from memory — that's the actual skill being tested. The costs
+    # appear in the explanation after they answer.
+    question_text = f"**Trade math.** {scenario.scenario_text} Is this trade…"
 
     explanation = explain_or_fallback(
         question_text=question_text,
@@ -300,23 +300,26 @@ def generate_cycle_total_question(conn=None) -> dict | None:
 
     choices, correct_index = _shuffle_choices(correct, distractors)
 
-    rotation_desc = ", ".join(f"{c['name']} ({c['elixir_cost']})" for c in rotation)
+    # Names without costs in the question — player must recall costs.
+    # Full card+cost detail shows up in the explanation after answering.
+    rotation_names = ", ".join(c["name"] for c in rotation)
+    rotation_detail = ", ".join(f"{c['name']} ({c['elixir_cost']})" for c in rotation)
     fallback = (
         f"{' + '.join(str(c['elixir_cost']) for c in rotation)} = {total}. "
         f"A rotation in the low-mid teens keeps you flexible; much more "
         f"and you'll lose cycle races against cheaper decks."
     )
     explanation = explain_or_fallback(
-        question_text=f"Total elixir to play all four: {rotation_desc}?",
+        question_text=f"Total elixir to play all four: {rotation_names}?",
         correct_answer=f"{total} elixir",
-        context=f"Cards: {rotation_desc}. Sum: {total}.",
+        context=f"Cards: {rotation_detail}. Sum: {total}.",
         fallback=fallback,
     )
 
     return {
         "question_text": (
             f"**Rotation cost.** You play all four of these in sequence: "
-            f"{rotation_desc}. What is the total elixir spent?"
+            f"{rotation_names}. What is the total elixir spent?"
         ),
         "image_url": None,
         "choices": choices,
@@ -360,7 +363,9 @@ def generate_cycle_back_question(conn=None) -> dict | None:
     choices, correct_index = _shuffle_choices(correct, distractors)
 
     key_card = rotation[key_index]
-    deck_desc = ", ".join(f"{c['name']} ({c['elixir_cost']})" for c in rotation)
+    # Names only in the question — costs appear in the explanation.
+    deck_names = ", ".join(c["name"] for c in rotation)
+    deck_detail = ", ".join(f"{c['name']} ({c['elixir_cost']})" for c in rotation)
     others_desc = " + ".join(str(c["elixir_cost"]) for c in others)
     fallback = (
         f"Cycling back to {key_card['name']} means playing the other three: "
@@ -368,10 +373,10 @@ def generate_cycle_back_question(conn=None) -> dict | None:
         f"win-condition pushes around the opponent's answers."
     )
     explanation = explain_or_fallback(
-        question_text=f"Cycle cost back to {key_card['name']} in {deck_desc}?",
+        question_text=f"Cycle cost back to {key_card['name']} in {deck_names}?",
         correct_answer=f"{cycle_cost} elixir",
         context=(
-            f"Deck rotation: {deck_desc}. Key card: {key_card['name']} "
+            f"Deck rotation: {deck_detail}. Key card: {key_card['name']} "
             f"(cost {key_card['elixir_cost']}). "
             f"To cycle back, play the other three: {others_desc} = {cycle_cost}."
         ),
@@ -380,7 +385,7 @@ def generate_cycle_back_question(conn=None) -> dict | None:
 
     return {
         "question_text": (
-            f"**Cycle math.** Your rotation is {deck_desc}. "
+            f"**Cycle math.** Your rotation is {deck_names}. "
             f"You just played **{key_card['name']}**. How much elixir do you "
             f"need to spend to cycle back to it?"
         ),
