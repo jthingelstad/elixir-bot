@@ -50,6 +50,7 @@ from heartbeat._roster import (
     detect_joins_leaves,
     detect_pending_system_signals,
     detect_role_changes,
+    detect_weekly_donation_leader,
 )
 from heartbeat._war import (
     _detect_war_day_markers_for_pair,
@@ -160,6 +161,9 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         if now.hour >= cr_knowledge.DONATION_HIGHLIGHT_HOUR:
             signals.extend(detect_donation_leaders(members, conn=conn))
 
+        # Weekly donation leader — Mondays, covers the prior CR week.
+        signals.extend(detect_weekly_donation_leader(conn=conn))
+
         # Inactivity
         signals.extend(detect_inactivity(members, conn=conn))
 
@@ -232,6 +236,7 @@ __all__ = [
     "detect_returning_members",
     "detect_clan_rank_top_spot",
     "detect_clan_score_records",
+    "detect_weekly_donation_leader",
     "detect_deck_archetype_changes",
     "detect_form_slumps",
     "detect_cake_days",

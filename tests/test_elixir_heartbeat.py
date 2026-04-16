@@ -342,6 +342,82 @@ def test_detect_clan_rank_top_spot_silent_when_already_at_top():
         conn.close()
 
 
+def _seed_weekly_donations(conn, *, metric_date, donations_by_name):
+    """Insert member_daily_metrics rows for a given date's weekly donations."""
+    now_iso = metric_date + "T23:00:00"
+    for name, donations in donations_by_name.items():
+        tag = f"#{name.upper()}"
+        existing = conn.execute("SELECT member_id FROM members WHERE player_tag = ?", (tag,)).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO members (player_tag, current_name, status, first_seen_at, last_seen_at) "
+                "VALUES (?, ?, 'active', ?, ?)",
+                (tag, name, now_iso, now_iso),
+            )
+            existing = conn.execute("SELECT member_id FROM members WHERE player_tag = ?", (tag,)).fetchone()
+        member_id = existing["member_id"]
+        conn.execute(
+            "INSERT INTO member_daily_metrics (member_id, metric_date, donations_week) "
+            "VALUES (?, ?, ?)",
+            (member_id, metric_date, donations),
+        )
+    conn.commit()
+
+
+def test_detect_weekly_donation_leader_fires_on_monday():
+    """v4.7 #33: Monday heartbeat emits weekly_donation_leader for the prior week."""
+    from datetime import datetime
+
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_weekly_donations(conn, metric_date="2026-04-12", donations_by_name={
+            "Gooba": 108,
+            "Shafith": 106,
+            "Chanco": 98,
+            "Quiet": 0,
+        })
+        monday = datetime(2026, 4, 13, 9, 0, 0)
+        signals = heartbeat.detect_weekly_donation_leader(now=monday, conn=conn)
+        assert len(signals) == 1
+        sig = signals[0]
+        assert sig["type"] == "weekly_donation_leader"
+        assert sig["week_ending"] == "2026-04-12"
+        assert len(sig["leaders"]) == 3
+        assert sig["leaders"][0]["name"] == "Gooba"
+        assert sig["leaders"][0]["donations"] == 108
+        assert sig["leaders"][0]["rank"] == 1
+        assert sig["signal_log_type"].startswith("weekly_donation_leader:")
+    finally:
+        conn.close()
+
+
+def test_detect_weekly_donation_leader_silent_on_non_monday():
+    from datetime import datetime
+
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_weekly_donations(conn, metric_date="2026-04-12", donations_by_name={"Gooba": 108})
+        tuesday = datetime(2026, 4, 14, 9, 0, 0)
+        assert heartbeat.detect_weekly_donation_leader(now=tuesday, conn=conn) == []
+    finally:
+        conn.close()
+
+
+def test_detect_weekly_donation_leader_dedups_same_week():
+    from datetime import datetime
+
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_weekly_donations(conn, metric_date="2026-04-12", donations_by_name={"Gooba": 108})
+        monday = datetime(2026, 4, 13, 9, 0, 0)
+        first = heartbeat.detect_weekly_donation_leader(now=monday, conn=conn)
+        assert len(first) == 1
+        db.mark_signal_sent(first[0]["signal_log_type"], "2026-04-13", conn=conn)
+        assert heartbeat.detect_weekly_donation_leader(now=monday, conn=conn) == []
+    finally:
+        conn.close()
+
+
 def _seed_clan_metric(conn, *, metric_date, clan_score=None, clan_war_trophies=None):
     """Insert a clan_daily_metrics row."""
     conn.execute(

@@ -52,6 +52,7 @@ CLAN_EVENT_SIGNAL_TYPES = {
     "member_birthday",
     "clan_birthday",
     "donation_leaders",
+    "weekly_donation_leader",
     "member_active_again",
 }
 

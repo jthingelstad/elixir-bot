@@ -155,6 +155,69 @@ def detect_clan_rank_top_spot(conn=None):
     return signals
 
 
+def detect_weekly_donation_leader(now=None, conn=None):
+    """Emit weekly_donation_leader on Mondays with last week's top-3 donors.
+
+    The existing ``detect_donation_leaders`` fires daily (top-3 daily donors)
+    and is discardable tomorrow. A *weekly* leader is a more durable moment
+    — the member who carried the donation load across the whole CR week.
+    Fires once per ISO week, only when today is Monday (the day after the
+    CR week closed). Uses ``member_daily_metrics`` frozen Sunday
+    ``donations_week`` values.
+    """
+    now = now or datetime.now()
+    if now.weekday() != 0:  # Monday only
+        return []
+
+    # Last Sunday's metric_date carries the final weekly donations total.
+    sunday = now - timedelta(days=1)
+    last_sunday = sunday.strftime("%Y-%m-%d")
+    iso_year, iso_week, _ = sunday.isocalendar()
+    week_key = f"{iso_year}W{iso_week:02d}"
+
+    signal_log_type = f"weekly_donation_leader:{week_key}"
+
+    close = conn is None
+    conn = conn or db.get_connection()
+    signals = []
+    try:
+        if db.was_signal_sent_any_date(signal_log_type, conn=conn):
+            return signals
+
+        rows = conn.execute(
+            """
+            SELECT m.player_tag AS tag, m.current_name AS name,
+                   d.donations_week AS donations
+            FROM member_daily_metrics d
+            JOIN members m ON m.member_id = d.member_id
+            WHERE d.metric_date = ? AND d.donations_week > 0
+              AND m.status = 'active'
+            ORDER BY d.donations_week DESC
+            LIMIT 3
+            """,
+            (last_sunday,),
+        ).fetchall()
+
+        if not rows or rows[0]["donations"] == 0:
+            return signals
+
+        leaders = [
+            {"name": r["name"], "tag": r["tag"], "donations": r["donations"], "rank": i + 1}
+            for i, r in enumerate(rows)
+        ]
+        signals.append({
+            "type": "weekly_donation_leader",
+            "week_key": week_key,
+            "week_ending": last_sunday,
+            "leaders": leaders,
+            "signal_log_type": signal_log_type,
+        })
+    finally:
+        if close:
+            conn.close()
+    return signals
+
+
 def detect_clan_score_records(conn=None):
     """Emit clan_score_record / clan_war_trophies_record when a new all-time
     high is set for either clan-level metric.
