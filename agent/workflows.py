@@ -362,13 +362,18 @@ def generate_channel_update(channel_name, subagent_key, context, *,
     )
 
 
-def run_awareness_tick(situation: dict):
+def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None):
     """Run one awareness-loop turn. Receives the assembled Situation, returns
     a structured post plan: ``{"posts": [...], "skipped_reason": "..."}``.
 
     Phase 4 of the unified agentic awareness loop. Replaces N per-signal
     ``generate_channel_update`` calls with one agent turn that sees the full
     situation and decides what (if anything) to say where.
+
+    ``tool_stats`` is optional; when provided, it is populated in-place with
+    ``write_calls_issued``, ``write_calls_succeeded``, and ``write_calls_denied``
+    so the caller can persist the awareness write budget usage in
+    ``awareness_ticks``.
     """
     # Strip `_`-prefixed internal fields (e.g., _raw_signal_count, _clan_tag)
     # before serializing — the agent does not need runtime bookkeeping.
@@ -387,6 +392,7 @@ def run_awareness_tick(situation: dict):
         allowed_tools=TOOLSETS_BY_WORKFLOW["awareness"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["awareness"],
         strict_json=True,
+        tool_stats=tool_stats,
     )
 
 

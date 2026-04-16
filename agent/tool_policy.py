@@ -1,6 +1,26 @@
 from agent.tool_defs import TOOLS
 
-_WRITE_TOOL_NAMES = {"update_member", "save_clan_memory"}
+_WRITE_TOOL_NAMES = {
+    "update_member",
+    "save_clan_memory",
+    "flag_member_watch",
+    "record_leadership_followup",
+}
+
+# Write tools the awareness loop is allowed to call per tick. Intentionally a
+# narrow subset of _WRITE_TOOL_NAMES: awareness can save memories + flag
+# members + queue followups, but cannot mutate member metadata (that stays a
+# human leadership action via the clanops path).
+AWARENESS_WRITE_TOOL_NAMES = {
+    "save_clan_memory",
+    "flag_member_watch",
+    "record_leadership_followup",
+}
+
+# Max write-tool calls the awareness loop may make per tick. The agent is
+# nudged by the system prompt to stay under this; chat.py enforces the cap and
+# records issued/succeeded/denied counts in awareness_ticks.
+AWARENESS_WRITE_BUDGET_PER_TICK = 3
 
 # Tools that hit external (CR) APIs and should be rate-capped per LLM turn.
 # Enforced by agent/chat.py::_chat_with_tools.
@@ -54,10 +74,15 @@ TOOLSETS_BY_WORKFLOW = {
     "roster_bios": READ_TOOLS_NO_EXTERNAL,
     "deck_review": INTERACTIVE_READ_TOOLS,
     "intel_report": INTEL_REPORT_TOOLS,
-    # Awareness loop (Phase 4): one agent turn per heartbeat that sees the full
+    # Awareness loop: one agent turn per heartbeat that sees the full
     # situation and emits a post plan. Gets the full read-tool set so it can
-    # investigate before posting.
-    "awareness": READ_TOOLS,
+    # investigate before posting, plus a narrow write surface (save_clan_memory,
+    # flag_member_watch, record_leadership_followup) capped at
+    # AWARENESS_WRITE_BUDGET_PER_TICK calls per tick.
+    "awareness": READ_TOOLS + [
+        d["tool"] for d in TOOL_DEFINITIONS
+        if d["name"] in AWARENESS_WRITE_TOOL_NAMES
+    ],
 }
 
 MAX_ROUNDS_BY_WORKFLOW = {

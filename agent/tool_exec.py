@@ -873,6 +873,95 @@ def _execute_cr_api(arguments):
     return {"error": f"Unknown aspect: {aspect}"}
 
 
+def _execute_flag_member_watch(arguments):
+    """Awareness-loop observation: flag a member for leadership attention.
+
+    Persists as a leadership-scoped, inference-typed memory with the
+    ``watch-list`` tag so downstream readers (next tick's memory context,
+    leadership digests) can filter.
+    """
+    from memory_store import attach_tags, create_memory
+
+    member_tag_input = arguments.get("member_tag")
+    reason = (arguments.get("reason") or "").strip()
+    expires_at = arguments.get("expires_at")
+
+    if not member_tag_input or not reason:
+        return {"error": "flag_member_watch requires member_tag and reason"}
+
+    resolved_tag = _resolve_member_tag(member_tag_input)
+    title = f"Watch: {resolved_tag}"
+    body = f"{reason}"
+    try:
+        memory = create_memory(
+            title=title,
+            body=body,
+            summary=body[:220],
+            source_type="elixir_inference",
+            is_inference=True,
+            confidence=0.7,
+            created_by="elixir:awareness-tool",
+            scope="leadership",
+            member_tag=resolved_tag,
+            expires_at=expires_at,
+        )
+    except Exception as exc:
+        log.warning("flag_member_watch failed: %s", exc)
+        return {"error": "flag_member_watch_failed", "detail": str(exc)}
+
+    attach_tags(memory["memory_id"], ["watch-list"], actor="elixir:awareness-tool")
+    return {
+        "success": True,
+        "memory_id": memory["memory_id"],
+        "member_tag": resolved_tag,
+        "type": "watch",
+    }
+
+
+def _execute_record_leadership_followup(arguments):
+    """Awareness-loop observation: queue an operational suggestion.
+
+    Persists as a leadership-scoped, inference-typed memory with the
+    ``followup`` tag. If ``member_tag`` is provided, the memory is scoped to
+    that member so the member-context view surfaces it.
+    """
+    from memory_store import attach_tags, create_memory
+
+    topic = (arguments.get("topic") or "").strip()
+    recommendation = (arguments.get("recommendation") or "").strip()
+    member_tag_input = arguments.get("member_tag")
+
+    if not topic or not recommendation:
+        return {"error": "record_leadership_followup requires topic and recommendation"}
+
+    resolved_tag = _resolve_member_tag(member_tag_input) if member_tag_input else None
+    title = f"Followup: {topic}"
+    body = recommendation
+    try:
+        memory = create_memory(
+            title=title,
+            body=body,
+            summary=body[:220],
+            source_type="elixir_inference",
+            is_inference=True,
+            confidence=0.7,
+            created_by="elixir:awareness-tool",
+            scope="leadership",
+            member_tag=resolved_tag,
+        )
+    except Exception as exc:
+        log.warning("record_leadership_followup failed: %s", exc)
+        return {"error": "record_leadership_followup_failed", "detail": str(exc)}
+
+    attach_tags(memory["memory_id"], ["followup"], actor="elixir:awareness-tool")
+    return {
+        "success": True,
+        "memory_id": memory["memory_id"],
+        "member_tag": resolved_tag,
+        "type": "followup",
+    }
+
+
 # ── Main dispatch ─────────────────────────────────────────────────────────
 
 def _execute_tool(name, arguments, workflow=None):
@@ -927,32 +1016,66 @@ def _execute_tool(name, arguments, workflow=None):
             tags = arguments.get("tags") or []
             member_tag_input = arguments.get("member_tag")
 
+            # Awareness-loop writes are observations, not leadership decisions.
+            # Tag them as elixir_inference with <1.0 confidence so memory
+            # readers can tell them apart from human leader notes.
+            from_awareness = workflow == "awareness"
+            actor = "elixir:awareness-tool" if from_awareness else "leader:elixir-tool"
+            source_type = "elixir_inference" if from_awareness else "leader_note"
+            is_inference = from_awareness
+            confidence = 0.7 if from_awareness else 1.0
+
             if member_tag_input:
                 resolved_tag = _resolve_member_tag(member_tag_input)
-                memory = upsert_member_note_memory(
-                    member_tag=resolved_tag,
-                    member_label=member_tag_input,
-                    note=body,
-                    created_by="leader:elixir-tool",
-                    metadata={"title": title, "tool": "save_clan_memory"},
-                )
+                if from_awareness:
+                    memory = create_memory(
+                        title=title,
+                        body=body,
+                        summary=body[:220],
+                        source_type=source_type,
+                        is_inference=is_inference,
+                        confidence=confidence,
+                        created_by=actor,
+                        scope="leadership",
+                        member_tag=resolved_tag,
+                    )
+                else:
+                    memory = upsert_member_note_memory(
+                        member_tag=resolved_tag,
+                        member_label=member_tag_input,
+                        note=body,
+                        created_by=actor,
+                        metadata={"title": title, "tool": "save_clan_memory"},
+                    )
                 if memory and tags:
-                    attach_tags(memory["memory_id"], tags, actor="leader:elixir-tool")
-                result = {"success": True, "memory_id": memory["memory_id"] if memory else None, "type": "member_note"}
+                    attach_tags(memory["memory_id"], tags, actor=actor)
+                result = {
+                    "success": True,
+                    "memory_id": memory["memory_id"] if memory else None,
+                    "type": "elixir_observation" if from_awareness else "member_note",
+                }
             else:
                 memory = create_memory(
                     title=title,
                     body=body,
                     summary=body[:220],
-                    source_type="leader_note",
-                    is_inference=False,
-                    confidence=1.0,
-                    created_by="leader:elixir-tool",
+                    source_type=source_type,
+                    is_inference=is_inference,
+                    confidence=confidence,
+                    created_by=actor,
                     scope="leadership",
                 )
                 if tags:
-                    attach_tags(memory["memory_id"], tags, actor="leader:elixir-tool")
-                result = {"success": True, "memory_id": memory["memory_id"], "type": "leader_note"}
+                    attach_tags(memory["memory_id"], tags, actor=actor)
+                result = {
+                    "success": True,
+                    "memory_id": memory["memory_id"],
+                    "type": source_type,
+                }
+        elif name == "flag_member_watch":
+            result = _execute_flag_member_watch(arguments)
+        elif name == "record_leadership_followup":
+            result = _execute_record_leadership_followup(arguments)
         else:
             result = {"error": f"Unknown tool: {name}"}
 

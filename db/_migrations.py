@@ -1313,7 +1313,24 @@ def _migration_26(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26]
+def _migration_27(conn: sqlite3.Connection) -> None:
+    """Add write-call counters to awareness_ticks so the awareness loop's new
+    write surface (flag_member_watch, record_leadership_followup, save_clan_memory)
+    is observable per tick alongside the existing signal-coverage metrics.
+
+    ``issued`` counts attempted writes, ``succeeded`` counts writes that returned
+    success, and ``denied`` counts writes the per-turn budget rejected.
+    """
+    conn.executescript(
+        """
+        ALTER TABLE awareness_ticks ADD COLUMN write_calls_issued INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE awareness_ticks ADD COLUMN write_calls_succeeded INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE awareness_ticks ADD COLUMN write_calls_denied INTEGER NOT NULL DEFAULT 0;
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
