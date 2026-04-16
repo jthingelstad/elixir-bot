@@ -1,5 +1,9 @@
-"""Tests for Discord message chunking (splits at paragraph/line/word boundaries)."""
+"""Tests for Discord message chunking (splits at paragraph/line/word boundaries)
+and custom-emoji shortcode resolution."""
 
+from types import SimpleNamespace
+
+from runtime.app import _resolve_custom_emoji
 from runtime.helpers._common import _chunk_for_discord
 
 
@@ -66,3 +70,55 @@ def test_never_exceeds_size_ceiling():
     text = "Some prose with occasional breaks.\n" + ("longwordwithoutspaces" * 20)
     chunks = _chunk_for_discord(text, size=100)
     assert all(len(c) <= 100 for c in chunks)
+
+
+def _guild(*emojis):
+    items = [
+        SimpleNamespace(name=name, id=emoji_id, animated=False)
+        for name, emoji_id in emojis
+    ]
+    return SimpleNamespace(emojis=items)
+
+
+def test_resolve_custom_emoji_rewrites_known_shortcodes():
+    guild = _guild(("elixir_trophy", 1001))
+    assert _resolve_custom_emoji(":elixir_trophy: win", guild) == "<:elixir_trophy:1001> win"
+
+
+def test_resolve_custom_emoji_strips_hallucinated_names():
+    # :poap: and :poap_kings: match neither guild custom emoji nor a Unicode
+    # shortcode — the model hallucinated them. Strip rather than leak raw text.
+    guild = _guild(("elixir_trophy", 1001))
+    result = _resolve_custom_emoji(
+        ":poap: Vijay moved up to :poap_kings: Spirit Square",
+        guild,
+    )
+    assert ":poap:" not in result
+    assert ":poap_kings:" not in result
+    assert "Vijay moved up" in result
+    assert "Spirit Square" in result
+
+
+def test_resolve_custom_emoji_keeps_unicode_shortcodes():
+    # :dragon:, :crossed_swords:, :trophy: are standard CLDR Unicode emoji
+    # shortcodes — the Discord client renders them on display. Don't strip.
+    guild = _guild(("elixir_trophy", 1001))
+    result = _resolve_custom_emoji(
+        "push :dragon: into Spirit Square :crossed_swords:",
+        guild,
+    )
+    assert ":dragon:" in result
+    assert ":crossed_swords:" in result
+
+
+def test_resolve_custom_emoji_leaves_timestamps_alone():
+    # Digit-led ":30:" is not an emoji name; must not be treated like one.
+    guild = _guild(("elixir_trophy", 1001))
+    assert _resolve_custom_emoji("kickoff at 10:30:45", guild) == "kickoff at 10:30:45"
+
+
+def test_resolve_custom_emoji_without_guild_keeps_unicode_and_strips_unknown():
+    # No guild context = no custom emojis, but Unicode shortcodes still render.
+    result = _resolve_custom_emoji("hello :poap: and :dragon: world", None)
+    assert ":poap:" not in result
+    assert ":dragon:" in result

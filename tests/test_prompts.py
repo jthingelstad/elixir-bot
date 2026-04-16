@@ -198,8 +198,8 @@ def test_observation_prompt_includes_custom_emoji_guidance():
     assert "Use readable Discord-native formatting." in system_prompt
     assert "Keep most messages compact unless the task genuinely calls for more structure." in system_prompt
     assert "Use occasional **bold** emphasis" in system_prompt
-    assert "Elixir has custom server emoji available in Discord-ready messages." in system_prompt
-    assert "If you use one, use the literal :emoji_name: shortcode syntax so it renders in Discord." in system_prompt
+    assert "Elixir server custom emoji" in system_prompt
+    assert "Do not invent custom emoji names" in system_prompt
     assert "channel subagent" in system_prompt
     assert "Default to one Discord message" in system_prompt
     assert "Do not split one update across multiple near-duplicate messages." in system_prompt

@@ -1,6 +1,7 @@
 """runtime.emoji — Idempotent guild emoji sync from assets/emoji/."""
 
 import logging
+from functools import cache
 from pathlib import Path
 
 import discord
@@ -8,6 +9,15 @@ import discord
 log = logging.getLogger(__name__)
 
 EMOJI_DIR = Path(__file__).resolve().parent.parent / "assets" / "emoji"
+
+
+@cache
+def available_emoji_names() -> tuple[str, ...]:
+    """Names of custom emojis Elixir ships — the source of truth is the asset dir,
+    which is sync'd one-way into the guild at startup."""
+    names = [p.stem for p in EMOJI_DIR.glob("*.png")]
+    names.extend(p.stem for p in EMOJI_DIR.glob("*.gif"))
+    return tuple(sorted(set(names)))
 
 
 async def sync_emoji(guild: discord.Guild) -> None:
