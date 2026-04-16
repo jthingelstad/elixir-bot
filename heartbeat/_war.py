@@ -1,7 +1,7 @@
 """heartbeat._war — War calendar event detectors."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 
@@ -569,6 +569,47 @@ def detect_war_week_complete(completion_signals, conn=None):
     return signals
 
 
+def _fresh_time_left_seconds(war_day_state: dict, *, now=None) -> int | None:
+    """Return the seconds remaining in the current war day, computed from
+    wall-clock time against the period's known end.
+
+    The CR API's ``time_left_seconds`` is only accurate at the moment we
+    polled — within minutes of a poll, it drifts. ``period_ends_at`` is
+    anchored on the per-season ``finishTime`` (see #20) so the true
+    remaining time is simply ``period_ends_at - now`` and is second-accurate
+    regardless of how stale the last poll is.
+
+    Falls back to the stored ``time_left_seconds`` when ``period_ends_at``
+    isn't available, preserving behavior for edge cases.
+    """
+    ends_at = war_day_state.get("period_ends_at")
+    if ends_at:
+        try:
+            ends_dt = datetime.fromisoformat(str(ends_at).replace("Z", "+00:00"))
+            if ends_dt.tzinfo is None:
+                ends_dt = ends_dt.replace(tzinfo=timezone.utc)
+            current = now or datetime.now(timezone.utc)
+            remaining = int((ends_dt - current).total_seconds())
+            return max(0, remaining)
+        except (ValueError, TypeError):
+            pass
+    stored = war_day_state.get("time_left_seconds")
+    if stored is None:
+        return None
+    return max(0, int(stored))
+
+
+def _format_remaining_short(total_seconds: int | None) -> str | None:
+    if total_seconds is None:
+        return None
+    seconds = max(0, int(total_seconds))
+    hours, rem = divmod(seconds, 3600)
+    minutes = rem // 60
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
 def build_situation_time(*, war_day_state=None, conn=None):
     """Compact time/phase awareness for any channel post.
 
@@ -576,6 +617,10 @@ def build_situation_time(*, war_day_state=None, conn=None):
     checkpoint-only scope so non-checkpoint posts (streaks, milestones,
     standings) can reason about *when* in the war week they're firing.
     Returns ``None`` when there is no current war state.
+
+    As of #20 the remaining-time fields are computed from ``period_ends_at``
+    against wall-clock time, so the values stay accurate between polls
+    instead of aging with the stored ``time_left_seconds``.
     """
     if war_day_state is None:
         war_day_state = db.get_current_war_day_state(conn=conn) or {}
@@ -586,10 +631,14 @@ def build_situation_time(*, war_day_state=None, conn=None):
     period_type = war_day_state.get("period_type")
     day_number = war_day_state.get("day_number")
     day_total = war_day_state.get("day_total")
-    time_left_seconds = war_day_state.get("time_left_seconds")
+    fresh_seconds = _fresh_time_left_seconds(war_day_state)
     hours_remaining_in_day = (
-        max(0, time_left_seconds) // 3600 if time_left_seconds is not None else None
+        max(0, fresh_seconds) // 3600 if fresh_seconds is not None else None
     )
+    minutes_remaining_in_day = (
+        max(0, fresh_seconds) // 60 if fresh_seconds is not None else None
+    )
+    time_left_text = _format_remaining_short(fresh_seconds) or war_day_state.get("time_left_text")
     is_final_battle_day = (
         phase == "battle"
         and day_number is not None
@@ -603,7 +652,9 @@ def build_situation_time(*, war_day_state=None, conn=None):
         "day_number": day_number,
         "day_total": day_total,
         "hours_remaining_in_day": hours_remaining_in_day,
-        "time_left_text": war_day_state.get("time_left_text"),
+        "minutes_remaining_in_day": minutes_remaining_in_day,
+        "time_left_seconds": fresh_seconds,
+        "time_left_text": time_left_text,
         "is_final_battle_day": is_final_battle_day,
         "is_colosseum_week": is_colosseum_week(period_type),
         "season_id": war_day_state.get("season_id"),
