@@ -342,6 +342,60 @@ def test_detect_clan_rank_top_spot_silent_when_already_at_top():
         conn.close()
 
 
+def _seed_clan_metric(conn, *, metric_date, clan_score=None, clan_war_trophies=None):
+    """Insert a clan_daily_metrics row."""
+    conn.execute(
+        "INSERT INTO clan_daily_metrics (metric_date, clan_tag, clan_name, clan_score, clan_war_trophies, observed_at) "
+        "VALUES (?, '#TEST', 'Test Clan', ?, ?, ?)",
+        (metric_date, clan_score, clan_war_trophies, metric_date + "T12:00:00"),
+    )
+    conn.commit()
+
+
+def test_detect_clan_score_records_fires_on_new_all_time_high():
+    """v4.7 #33: clan_score hitting a new high emits clan_score_record."""
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_clan_metric(conn, metric_date="2026-04-10", clan_score=95000, clan_war_trophies=200)
+        _seed_clan_metric(conn, metric_date="2026-04-11", clan_score=97000, clan_war_trophies=200)
+        _seed_clan_metric(conn, metric_date="2026-04-12", clan_score=99000, clan_war_trophies=200)
+        _seed_clan_metric(conn, metric_date="2026-04-13", clan_score=101500, clan_war_trophies=220)
+        signals = heartbeat.detect_clan_score_records(conn=conn)
+        types = {s["type"] for s in signals}
+        assert "clan_score_record" in types
+        assert "clan_war_trophies_record" in types
+        score = next(s for s in signals if s["type"] == "clan_score_record")
+        assert score["new_record"] == 101500
+        assert score["previous_record"] == 99000
+        assert score["metric_date"] == "2026-04-13"
+    finally:
+        conn.close()
+
+
+def test_detect_clan_score_records_silent_when_not_a_new_high():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_clan_metric(conn, metric_date="2026-04-10", clan_score=99000)
+        _seed_clan_metric(conn, metric_date="2026-04-11", clan_score=100000)
+        _seed_clan_metric(conn, metric_date="2026-04-12", clan_score=98000)  # dip
+        assert heartbeat.detect_clan_score_records(conn=conn) == []
+    finally:
+        conn.close()
+
+
+def test_detect_clan_score_records_dedups_same_day():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_clan_metric(conn, metric_date="2026-04-10", clan_score=99000)
+        _seed_clan_metric(conn, metric_date="2026-04-11", clan_score=100000)
+        first = heartbeat.detect_clan_score_records(conn=conn)
+        assert len(first) == 1
+        db.mark_signal_sent(first[0]["signal_log_type"], "2026-04-11", conn=conn)
+        assert heartbeat.detect_clan_score_records(conn=conn) == []
+    finally:
+        conn.close()
+
+
 def _seed_deck_snapshot(conn, *, tag, name, cards, fetched_at, mode_scope="overall"):
     """Insert a member_deck_snapshots row with the given card names."""
     import json

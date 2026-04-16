@@ -41,6 +41,7 @@ from heartbeat._roster import (
     detect_arena_changes,
     detect_cake_days,
     detect_clan_rank_top_spot,
+    detect_clan_score_records,
     detect_deck_archetype_changes,
     detect_form_slumps,
     detect_returning_members,
@@ -174,6 +175,9 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         # Deck archetype swap: deck now differs by 4+ cards from 24h ago.
         signals.extend(detect_deck_archetype_changes(conn=conn))
 
+        # Clan-level trophy / war-trophy records (new all-time high).
+        signals.extend(detect_clan_score_records(conn=conn))
+
         # Cake days — birthdays, join anniversaries, clan birthday
         signals.extend(detect_cake_days(conn=conn))
 
@@ -227,6 +231,7 @@ __all__ = [
     "detect_inactivity",
     "detect_returning_members",
     "detect_clan_rank_top_spot",
+    "detect_clan_score_records",
     "detect_deck_archetype_changes",
     "detect_form_slumps",
     "detect_cake_days",
