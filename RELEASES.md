@@ -4,6 +4,61 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## v4.7 — Elixir Counting
+
+**Date:** 2026-04-15
+
+The quiz module pivots from card trivia to tactical literacy. Every question now tests a real in-game decision — trade math, cycle cost, cost discipline — instead of "what rarity is this card." Correct answers ship with a short LLM-written explanation in Elixir's voice that ends with why the answer matters in play, and every multi-card question includes a side-by-side strip of the actual card icons.
+
+### Retired Questions
+
+- **Rarity**, **card type**, **evo/hero mode**, and **champion identification** are gone. They were trivia — obvious from the icon or irrelevant to play. Reading cost off a card is a one-time thing; knowing how to trade against one is forever.
+
+### New Question Types
+
+- **Positive trade.** Given a curated scenario — "You Fireball a Musketeer and an Ice Spirit" — is the trade +2 / +1 / Even / -1 / -2? Seeds live in `modules/card_training/trade_scenarios.py` with ~20 canonical Clash Royale situations across Fireball-value, small-spell, big-spell, even, and negative trades.
+- **Cycle total.** Sum the elixir cost of a 4-card rotation. Teaches what a cheap vs. heavy deck actually costs.
+- **Cycle back.** Given a rotation, how much elixir to cycle back to a specific card? This is the exact math every player does before committing a win-condition push.
+
+### Cost Comparison Upgraded
+
+- `generate_cost_comparison_question` now filters to four cards of the same `card_type` within a 3-elixir cost band — comparing four spells or four troops of similar cost, not a troop to a cheap spell. The question tests discrimination instead of the obvious.
+
+### LLM-Backed Explanations
+
+- Each generator produces the mechanics (math, correct option, choices) deterministically, then hands a compact context to a new `event:quiz_explain` workflow that writes a 1–2 sentence tactical narration in Elixir's voice. Routes to Haiku; ~$0.30/month at 5 questions/day.
+- Every explanation closes with "why it matters in play" — never trivia, never filler.
+- Deterministic templated fallback kicks in if the LLM call fails, so the quiz never breaks.
+
+### Visual: Card Icon Strips
+
+- Multi-card questions (cycle_total, cycle_back, positive_trade, cost_comparison) now render a composite PNG strip of the actual card icons with labels underneath, attached to the question embed. Built with Pillow at generation time; graceful placeholder tiles when an icon fails to fetch.
+- Cost comparison question strip respects the A/B/C/D button order so the visuals line up with the labels.
+
+### Fast-Start Defect Flight
+
+This release shipped six patches in an hour of live testing as real defects surfaced:
+
+- **#15** null-cost support cards crashed the cost-comparison sort.
+- **#16** `/quiz start` timed out Discord's 3-second interaction window because 5 LLM calls fired serially. Now deferred and answered via `followup.send`.
+- **#17** Haiku wrapped JSON in `\`\`\`json ... \`\`\`` fences, leaking the wrapper into user-visible text. Reused the existing `_parse_json_response` helper.
+- **#18** the question text spelled out each card's cost (`"Valkyrie (4), Clone (3)"`) which collapsed cost-literacy questions into grade-school arithmetic. Question text now shows names only; cost math lives in the explanation.
+
+### Files
+
+- `modules/card_training/questions.py` — 2 retired → 5 retired, 2 new, 3 new, 1 upgraded.
+- `modules/card_training/trade_scenarios.py` (new) — the curated seed list.
+- `modules/card_training/explanations.py` (new) — LLM-backed explanation helper with fallback.
+- `modules/card_training/images.py` (new) — card-icon strip composer.
+- `agent/workflows.py` — new `explain_quiz_answer` workflow routed to the lightweight model.
+- `agent/prompts.py` — new `_quiz_explain_system` prompt.
+
+### Tests
+
+- 575 tests passing (was 571). New tests cover type+cost-range filter, correct math for all three new generators, fallback path when LLM is absent or raises, and a regression test for the null-cost crash.
+
+---
+
 ## v4.6 — Clan Keep
 
 **Date:** 2026-04-15

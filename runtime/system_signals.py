@@ -646,6 +646,49 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "clan_keep",
         },
     },
+    {
+        "signal_key": "capability_elixir_counting_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Elixir Counting",
+            "message": (
+                "The quiz module is now about learning to play better, not learning card trivia. "
+                "Trade math, cycle cost, cost discipline — the skills that actually decide ladder matches. "
+                "Every question includes the card icons and every correct answer ends with why it matters in play."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Elixir Counting** :elixir:\n\n"
+                "The quiz used to ask what rarity a card was. Now it asks what the trade was worth. "
+                "That's the actual skill that separates ladder decisions from guesses.\n\n"
+                "**What's new in `/quiz start`:**\n"
+                "- **Trade math** — \"You Fireball a Musketeer and an Ice Spirit. Is this trade +1, even, or -1?\" "
+                "Real scenarios; the seed list is canonical Clash Royale value trades.\n"
+                "- **Cycle cost** — sum a 4-card rotation. Tells you what your deck actually costs to play.\n"
+                "- **Cycle back** — given your rotation, how much elixir to get your win condition back in hand? "
+                "This is the math you do before every big push.\n"
+                "- **Cost comparison** tightened — four cards of the same type within a narrow cost band. "
+                "Not \"is a Rocket more than a Goblin,\" but \"is a Fireball more than a Poison.\"\n\n"
+                "**What's gone:** rarity, card type, evo/hero mode, champion identification. "
+                "All trivia, all replaced with questions about how to play.\n\n"
+                "**Every answer now closes with why it matters in play.** "
+                "Explanations are written in voice, short, tactical. If an Archer Queen push costs 11 to cycle back to, "
+                "the explanation tells you what that means for your defense.\n\n"
+                "**Card icons appear in the question.** Cycle questions and trade scenarios ship a side-by-side "
+                "strip of the cards involved. No more reading names and guessing — see the card.\n\n"
+                "This is **Elixir v4.7 \"Elixir Counting\"** — /quiz start any time."
+            ),
+            "details": [
+                "Retired trivia questions: rarity, card type, evo/hero, champion ID — all obvious from the icon or irrelevant to play.",
+                "Added positive_trade (~20 curated canonical scenarios), cycle_total, cycle_back — all test real in-game decisions.",
+                "cost_comparison upgraded to filter to 4 cards of the same card_type within a 3-elixir cost band.",
+                "Every explanation is LLM-written via the new event:quiz_explain workflow (Haiku, ~$0.30/month), closing with why it matters in play. Deterministic fallback if the call fails.",
+                "Multi-card questions render a composite card-icon strip as an embed attachment — names with visuals.",
+                "Four rapid fixes landed during live testing: null-cost crash (#15), interaction timeout (#16), JSON fence leak (#17), cost-in-question giveaway (#18).",
+            ],
+            "audience": "clan",
+            "capability_area": "elixir_counting",
+        },
+    },
 ]
 
 
