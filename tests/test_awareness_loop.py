@@ -74,6 +74,10 @@ def test_classify_signal_lane_covers_all_v47_signal_types():
         # leadership — leader-lounge observations
         "recent_form_slump": "leadership",
         "deck_archetype_change": "leadership",
+        # clan_event — tournaments ship to #clan-events too
+        "tournament_started": "clan_event",
+        "tournament_lead_change": "clan_event",
+        "tournament_ended": "clan_event",
     }
     for sig_type, expected_lane in routing.items():
         assert classify_signal_lane({"type": sig_type}) == expected_lane, \

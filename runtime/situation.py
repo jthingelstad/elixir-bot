@@ -25,6 +25,7 @@ from runtime.channel_subagents import (
     LEADERSHIP_ONLY_SIGNAL_TYPES,
     OPTIONAL_PROGRESSION_SIGNAL_TYPES,
     PROGRESSION_SIGNAL_TYPES,
+    TOURNAMENT_SIGNAL_TYPES,
     is_war_signal,
     signal_audience,
     signal_source_key,
@@ -69,7 +70,7 @@ def classify_signal_lane(signal: dict) -> str:
         return "battle_mode"
     if sig_type in PROGRESSION_SIGNAL_TYPES:
         return "milestone"
-    if sig_type in CLAN_EVENT_SIGNAL_TYPES:
+    if sig_type in CLAN_EVENT_SIGNAL_TYPES or sig_type in TOURNAMENT_SIGNAL_TYPES:
         return "clan_event"
     if sig_type in LEADERSHIP_ONLY_SIGNAL_TYPES or signal_audience(signal) == "leadership":
         return "leadership"
