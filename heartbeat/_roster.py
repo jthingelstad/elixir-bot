@@ -96,6 +96,75 @@ def detect_donation_leaders(current_members, conn=None):
     }]
 
 
+def detect_returning_members(now=None, conn=None):
+    """Emit member_active_again when a previously dormant member plays again.
+
+    v4.7 #26: watch-list memories written by the v4.6 awareness loop never had
+    a natural "clear" signal. Now we emit when the most recent snapshot shows
+    ``last_seen_api`` became fresh after a prior period of staleness (>= the
+    inactivity threshold). The agent can then mark the watch resolved and,
+    optionally, welcome the returning member.
+
+    Uses the two most recent ``member_state_snapshots`` per active member.
+    Fires at most once per member per return — a signal_log_type keyed on
+    tag + the returning snapshot's observed_at.
+    """
+    now = now or datetime.now()
+    threshold = cr_knowledge.INACTIVITY_DAYS
+    close = conn is None
+    conn = conn or db.get_connection()
+    signals = []
+    try:
+        rows = conn.execute(
+            """
+            WITH ranked AS (
+                SELECT s.*, m.player_tag AS tag, m.current_name AS name,
+                       ROW_NUMBER() OVER (PARTITION BY s.member_id ORDER BY s.observed_at DESC) AS rn
+                FROM member_state_snapshots s
+                JOIN members m ON m.member_id = s.member_id
+                WHERE m.status = 'active'
+            )
+            SELECT a.tag, a.name, a.last_seen_api AS new_last_seen, a.observed_at,
+                   b.last_seen_api AS prev_last_seen
+            FROM ranked a
+            JOIN ranked b ON a.member_id = b.member_id
+            WHERE a.rn = 1 AND b.rn = 2
+              AND a.last_seen_api IS NOT NULL
+              AND b.last_seen_api IS NOT NULL
+            """
+        ).fetchall()
+        for row in rows:
+            try:
+                new_seen = datetime.strptime(row["new_last_seen"].split(".")[0], "%Y%m%dT%H%M%S")
+                prev_seen = datetime.strptime(row["prev_last_seen"].split(".")[0], "%Y%m%dT%H%M%S")
+            except (ValueError, TypeError, AttributeError):
+                continue
+            prev_gap_days = (now - prev_seen).days
+            current_gap_days = (now - new_seen).days
+            # Was stale (>= threshold), now fresh (< threshold), and last_seen
+            # advanced (a real new login, not a stale snapshot copy).
+            if prev_gap_days < threshold:
+                continue
+            if current_gap_days >= threshold:
+                continue
+            if new_seen <= prev_seen:
+                continue
+            signal_log_type = f"member_active_again:{row['tag']}:{row['observed_at']}"
+            if db.was_signal_sent_any_date(signal_log_type, conn=conn):
+                continue
+            signals.append({
+                "type": "member_active_again",
+                "tag": row["tag"],
+                "name": row["name"],
+                "days_away": prev_gap_days,
+                "signal_log_type": signal_log_type,
+            })
+    finally:
+        if close:
+            conn.close()
+    return signals
+
+
 def detect_inactivity(current_members, now=None, conn=None):
     """Flag members not seen in 3+ days.
 

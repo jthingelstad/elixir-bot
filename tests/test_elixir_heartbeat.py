@@ -215,6 +215,74 @@ def test_derive_war_anchor_minute_returns_none_when_no_log():
         assert _core._derive_war_anchor_minute() is None
 
 
+def test_detect_returning_members_emits_signal_when_member_comes_back():
+    """v4.7 #26: a previously stale member whose last_seen_api becomes fresh
+    again fires member_active_again."""
+    from datetime import datetime, timedelta
+
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Wanderer", "role": "member",
+              "lastSeen": "20260401T120000.000Z"}],
+            conn=conn,
+        )
+        # Set the old snapshot time to match its stale last_seen
+        conn.execute(
+            "UPDATE member_state_snapshots SET observed_at = ? WHERE member_id = "
+            "(SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-04-01T12:00:00",),
+        )
+        conn.commit()
+
+        # Fresh snapshot: last_seen advanced (member just played)
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Wanderer", "role": "member",
+              "lastSeen": "20260416T110000.000Z"}],
+            conn=conn,
+        )
+
+        # "now" is 2026-04-16 noon — previous gap = 15 days, current gap = 0
+        now = datetime(2026, 4, 16, 12, 0, 0)
+        signals = heartbeat.detect_returning_members(now=now, conn=conn)
+        assert len(signals) == 1
+        assert signals[0]["type"] == "member_active_again"
+        assert signals[0]["tag"] == "#ABC123"
+        assert signals[0]["days_away"] == 15
+        assert signals[0]["signal_log_type"].startswith("member_active_again:#ABC123")
+    finally:
+        conn.close()
+
+
+def test_detect_returning_members_silent_for_continuously_active():
+    from datetime import datetime
+
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Active", "role": "member",
+              "lastSeen": "20260415T120000.000Z"}],
+            conn=conn,
+        )
+        conn.execute(
+            "UPDATE member_state_snapshots SET observed_at = ? WHERE member_id = "
+            "(SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-04-15T12:00:00",),
+        )
+        conn.commit()
+
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Active", "role": "member",
+              "lastSeen": "20260416T110000.000Z"}],
+            conn=conn,
+        )
+        now = datetime(2026, 4, 16, 12, 0, 0)
+        signals = heartbeat.detect_returning_members(now=now, conn=conn)
+        assert signals == []
+    finally:
+        conn.close()
+
+
 def test_detect_role_changes_emits_elder_promotion_signal():
     conn = db.get_connection(":memory:")
     try:
