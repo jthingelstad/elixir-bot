@@ -1,12 +1,28 @@
 """Tests for the card training / quiz module."""
 
 import json
+from unittest.mock import patch
 
 import pytest
 
 import db
 from modules.card_training import questions, storage
 from storage.card_catalog import sync_card_catalog, lookup_cards, get_random_cards, _escape_like
+
+
+@pytest.fixture(autouse=True)
+def _stub_quiz_explanation(monkeypatch):
+    """Stub out the LLM explanation call inside the questions module so
+    scaffold tests don't hit the API.
+
+    We only patch the ``explain_or_fallback`` reference *inside questions*,
+    not the one exported from ``explanations``. TestExplanationLayer tests
+    exercise the real helper.
+    """
+    def _no_llm(**kwargs):
+        return kwargs["fallback"]
+
+    monkeypatch.setattr(questions, "explain_or_fallback", _no_llm)
 
 
 # ---------------------------------------------------------------------------
@@ -108,19 +124,9 @@ class TestQuestionGeneration:
         assert len(q["choices"]) == 4
         assert 0 <= q["correct_index"] <= 3
         assert q["card_ids"]
-
-    def test_generate_rarity_question(self, quiz_db):
-        _seed_catalog(quiz_db)
-        q = questions.generate_rarity_question(conn=quiz_db)
-        assert q is not None
-        assert q["question_type"] == "rarity"
-        assert len(q["choices"]) == 4
-
-    def test_generate_card_type_question(self, quiz_db):
-        _seed_catalog(quiz_db)
-        q = questions.generate_card_type_question(conn=quiz_db)
-        assert q is not None
-        assert q["question_type"] == "card_type"
+        # Every v4.7 generator uses explain_or_fallback — with the fixture
+        # stub, we should get the deterministic fallback text.
+        assert q["explanation"]
 
     def test_generate_cost_comparison_question(self, quiz_db):
         _seed_catalog(quiz_db)
@@ -128,18 +134,63 @@ class TestQuestionGeneration:
         assert q is not None
         assert q["question_type"] == "cost_comparison"
         assert len(q["choices"]) == 4
+        # All 4 options must be the same card_type — the upgraded filter
+        # compares apples to apples.
+        card_ids = q["card_ids"]
+        rows = quiz_db.execute(
+            f"SELECT card_type, elixir_cost FROM card_catalog WHERE card_id IN ({','.join('?' * len(card_ids))})",
+            card_ids,
+        ).fetchall()
+        types = {row["card_type"] for row in rows}
+        assert len(types) == 1, f"cost_comparison mixed card types: {types}"
+        costs = [row["elixir_cost"] for row in rows]
+        assert max(costs) - min(costs) <= 3, f"cost window too wide: {costs}"
 
-    def test_generate_evolution_question(self, quiz_db):
+    def test_generate_positive_trade_question(self, quiz_db):
         _seed_catalog(quiz_db)
-        q = questions.generate_evolution_question(conn=quiz_db)
+        q = questions.generate_positive_trade_question(conn=quiz_db)
         assert q is not None
-        assert q["question_type"] == "evolution_mode"
+        assert q["question_type"] == "positive_trade"
+        assert len(q["choices"]) == 4
+        # Correct answer is one of +2 / +1 / Even / -1 / -2
+        correct = q["choices"][q["correct_index"]]
+        assert correct in {"+2", "+1", "Even", "-1", "-2"}
 
-    def test_generate_champion_identification_question(self, quiz_db):
+    def test_generate_cycle_total_question(self, quiz_db):
         _seed_catalog(quiz_db)
-        q = questions.generate_champion_identification_question(conn=quiz_db)
+        q = questions.generate_cycle_total_question(conn=quiz_db)
         assert q is not None
-        assert q["question_type"] == "champion_id"
+        assert q["question_type"] == "cycle_total"
+        assert len(q["choices"]) == 4
+        # Correct answer = sum of card costs
+        card_ids = q["card_ids"]
+        rows = quiz_db.execute(
+            f"SELECT elixir_cost FROM card_catalog WHERE card_id IN ({','.join('?' * len(card_ids))})",
+            card_ids,
+        ).fetchall()
+        expected = sum(row["elixir_cost"] for row in rows)
+        assert q["choices"][q["correct_index"]] == str(expected)
+
+    def test_generate_cycle_back_question(self, quiz_db):
+        _seed_catalog(quiz_db)
+        q = questions.generate_cycle_back_question(conn=quiz_db)
+        assert q is not None
+        assert q["question_type"] == "cycle_back"
+        assert len(q["choices"]) == 4
+        # Correct answer = sum of 3 of the 4 cards (the non-key cards)
+        card_ids = q["card_ids"]
+        assert len(card_ids) == 4
+        rows = quiz_db.execute(
+            f"SELECT card_id, elixir_cost FROM card_catalog WHERE card_id IN ({','.join('?' * len(card_ids))})",
+            card_ids,
+        ).fetchall()
+        costs = {row["card_id"]: row["elixir_cost"] for row in rows}
+        total = sum(costs.values())
+        correct_value = int(q["choices"][q["correct_index"]])
+        # correct_value should equal total minus exactly one card's cost
+        assert any(correct_value == total - cost for cost in costs.values()), (
+            f"cycle_back answer {correct_value} doesn't match total {total} minus any single card"
+        )
 
     def test_generate_random_question(self, quiz_db):
         _seed_catalog(quiz_db)
@@ -153,9 +204,19 @@ class TestQuestionGeneration:
         qs = questions.generate_quiz_set(5, conn=quiz_db)
         assert len(qs) == 5
 
-    def test_generate_quiz_set_empty_catalog_returns_empty(self, quiz_db):
+    def test_generate_quiz_set_empty_catalog_still_generates_trade_question(self, quiz_db):
+        """positive_trade works without a card catalog — the seed list is self-contained."""
         qs = questions.generate_quiz_set(5, conn=quiz_db)
-        assert qs == []
+        # Every question should be positive_trade (the only type that doesn't
+        # need the catalog).
+        assert all(q["question_type"] == "positive_trade" for q in qs)
+
+    def test_retired_generators_are_gone(self):
+        """rarity / card_type / evolution / champion_id were retired in v4.7."""
+        assert not hasattr(questions, "generate_rarity_question")
+        assert not hasattr(questions, "generate_card_type_question")
+        assert not hasattr(questions, "generate_evolution_question")
+        assert not hasattr(questions, "generate_champion_identification_question")
 
     def test_elixir_cost_distractors_never_crash(self, quiz_db):
         """Even with a very constrained cost range, distractor generation should not crash."""
@@ -166,6 +227,60 @@ class TestQuestionGeneration:
         q = questions.generate_elixir_cost_question(conn=quiz_db)
         assert q is not None
         assert len(q["choices"]) >= 2
+
+
+# ---------------------------------------------------------------------------
+# Explanation layer
+# ---------------------------------------------------------------------------
+
+class TestExplanationLayer:
+    def test_fallback_returned_when_no_explainer(self, monkeypatch):
+        """If elixir_agent lacks explain_quiz_answer, we return the fallback."""
+        from modules.card_training import explanations
+
+        class _FakeAgent:
+            pass
+
+        monkeypatch.setitem(__import__('sys').modules, 'elixir_agent', _FakeAgent())
+        result = explanations.explain_or_fallback(
+            question_text="Q",
+            correct_answer="A",
+            context="ctx",
+            fallback="FALLBACK",
+        )
+        assert result == "FALLBACK"
+
+    def test_fallback_returned_when_explainer_raises(self, monkeypatch):
+        from modules.card_training import explanations
+
+        class _FakeAgent:
+            def explain_quiz_answer(self, **_):
+                raise RuntimeError("boom")
+
+        monkeypatch.setitem(__import__('sys').modules, 'elixir_agent', _FakeAgent())
+        result = explanations.explain_or_fallback(
+            question_text="Q",
+            correct_answer="A",
+            context="ctx",
+            fallback="FALLBACK",
+        )
+        assert result == "FALLBACK"
+
+    def test_llm_text_returned_when_available(self, monkeypatch):
+        from modules.card_training import explanations
+
+        class _FakeAgent:
+            def explain_quiz_answer(self, **kwargs):
+                return "Tactical insight about " + kwargs["correct_answer"]
+
+        monkeypatch.setitem(__import__('sys').modules, 'elixir_agent', _FakeAgent())
+        result = explanations.explain_or_fallback(
+            question_text="Q",
+            correct_answer="Fireball",
+            context="ctx",
+            fallback="FALLBACK",
+        )
+        assert "Tactical insight about Fireball" == result
 
 
 # ---------------------------------------------------------------------------
