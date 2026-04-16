@@ -24,6 +24,8 @@ PROGRESSION_SIGNAL_TYPES = {
     "best_trophies_peak",
     "challenge_performance_milestone",
     "clan_rank_top_spot",
+    "clan_score_record",
+    "clan_war_trophies_record",
 }
 
 # Volatile battle-mode activity outside of war — hot streaks, trophy pushes,

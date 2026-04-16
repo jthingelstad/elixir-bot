@@ -155,6 +155,70 @@ def detect_clan_rank_top_spot(conn=None):
     return signals
 
 
+def detect_clan_score_records(conn=None):
+    """Emit clan_score_record / clan_war_trophies_record when a new all-time
+    high is set for either clan-level metric.
+
+    ``clan_daily_metrics`` has been capturing daily observations since the
+    clan was founded; until now nothing diffed the series for records. Hitting
+    a new clan-score or war-trophies peak is exactly the kind of durable
+    moment worth posting — it happens roughly every 2-3 days at our current
+    trajectory and is unambiguously good news.
+
+    Dedup: ``signal_log_type`` keyed on ``<type>:<date>``, so each record
+    only ever fires once (even across restarts).
+    """
+    close = conn is None
+    conn = conn or db.get_connection()
+    signals = []
+    try:
+        rows = conn.execute(
+            """
+            SELECT metric_date, clan_score, clan_war_trophies
+            FROM clan_daily_metrics
+            WHERE clan_score IS NOT NULL OR clan_war_trophies IS NOT NULL
+            ORDER BY metric_date
+            """
+        ).fetchall()
+
+        if len(rows) < 2:
+            return signals
+
+        latest = rows[-1]
+        final_date = latest["metric_date"]
+        final_cs = latest["clan_score"] or 0
+        final_cwt = latest["clan_war_trophies"] or 0
+
+        prev_max_score = max((r["clan_score"] or 0) for r in rows[:-1])
+        prev_max_war = max((r["clan_war_trophies"] or 0) for r in rows[:-1])
+
+        if final_cs > prev_max_score > 0:
+            signal_log_type = f"clan_score_record:{final_date}"
+            if not db.was_signal_sent_any_date(signal_log_type, conn=conn):
+                signals.append({
+                    "type": "clan_score_record",
+                    "metric_date": final_date,
+                    "previous_record": prev_max_score,
+                    "new_record": final_cs,
+                    "signal_log_type": signal_log_type,
+                })
+
+        if final_cwt > prev_max_war > 0:
+            signal_log_type = f"clan_war_trophies_record:{final_date}"
+            if not db.was_signal_sent_any_date(signal_log_type, conn=conn):
+                signals.append({
+                    "type": "clan_war_trophies_record",
+                    "metric_date": final_date,
+                    "previous_record": prev_max_war,
+                    "new_record": final_cwt,
+                    "signal_log_type": signal_log_type,
+                })
+    finally:
+        if close:
+            conn.close()
+    return signals
+
+
 def detect_deck_archetype_changes(now=None, conn=None):
     """Emit deck_archetype_change when a member's deck differs by 4+ cards
     from the deck they were running 24+ hours ago.
