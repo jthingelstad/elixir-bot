@@ -527,13 +527,73 @@ def detect_war_battle_checkpoints(conn=None):
 
 
 def detect_war_deck_usage(war_data, conn=None):
-    """Compatibility wrapper for older callers.
-
-    Battle-day engagement updates are now time-based checkpoints, not first
-    activity detection. `war_data` is ignored.
-    """
+    """Compatibility wrapper for older callers."""
     del war_data
     return detect_war_battle_checkpoints(conn=conn)
+
+
+def detect_war_battle_activity(conn=None):
+    """Event-driven battle-day activity signals.
+
+    Fires when members COMPLETE their war attacks (all 4 decks used) — the
+    discrete event that matters, not a time checkpoint. Batches all new
+    completions into one signal per tick so the agent can frame them together.
+
+    Members who achieve 900 fame (4 wins, 0 losses) are flagged as
+    ``perfect: true`` in the payload — an exceptional accomplishment.
+
+    Runs in the war_awareness pipeline (hourly at :44) so it reacts to each
+    war-poll's fresh data. No activity → no signal. Burst → signal.
+    """
+    day_state = db.get_current_war_day_state(conn=conn) or {}
+    if day_state.get("phase") != "battle":
+        return []
+
+    battle_date = day_state.get("war_day_key")
+    if not battle_date:
+        return []
+
+    used_all = day_state.get("used_all_4") or []
+    if not used_all:
+        return []
+
+    new_completions = []
+    for member in used_all:
+        tag = member.get("tag")
+        if not tag:
+            continue
+        signal_log_type = f"war_attacks_complete:{tag}:{battle_date}"
+        if db.was_signal_sent_any_date(signal_log_type, conn=conn):
+            continue
+        new_completions.append({
+            "tag": tag,
+            "name": member.get("name") or member.get("member_ref") or "?",
+            "fame": member.get("fame") or member.get("fame_today") or 0,
+            "perfect": (member.get("fame") or member.get("fame_today") or 0) >= 900,
+            "signal_log_type": signal_log_type,
+        })
+
+    if not new_completions:
+        return []
+
+    signal_date = _war_signal_date_for_state(day_state)
+    return [{
+        "type": "war_attacks_complete",
+        "signal_date": signal_date,
+        "battle_date": battle_date,
+        "season_id": day_state.get("season_id"),
+        "week": day_state.get("week"),
+        "day_number": day_state.get("day_number"),
+        "day_total": day_state.get("day_total"),
+        "phase_display": day_state.get("phase_display"),
+        "members": new_completions,
+        "perfect_count": sum(1 for m in new_completions if m["perfect"]),
+        "total_finished": len(used_all),
+        "total_participants": day_state.get("total_participants"),
+        "engaged_count": day_state.get("engaged_count"),
+        "clan_fame": day_state.get("clan_fame"),
+        "race_rank": day_state.get("race_rank"),
+    }]
 
 
 def detect_war_week_complete(completion_signals, conn=None):

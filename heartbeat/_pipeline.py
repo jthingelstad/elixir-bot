@@ -18,6 +18,7 @@ from heartbeat._war import (
     _detect_war_rank_changes_for_pair,
     _detect_war_rollovers_for_pair,
     _detect_war_season_completion_for_pair,
+    detect_war_battle_activity,
     detect_war_battle_checkpoints,
     detect_war_champ_update,
     detect_war_completion,
@@ -179,6 +180,7 @@ def detect_war_signals_from_storage(conn=None):
     cursor_updates.extend(participant_updates)
 
     signals.extend(detect_war_battle_checkpoints(conn=conn))
+    signals.extend(detect_war_battle_activity(conn=conn))
 
     war_signals = detect_war_completion(conn=conn, refresh_log=False)
     signals.extend(war_signals)
