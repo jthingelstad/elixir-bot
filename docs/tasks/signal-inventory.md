@@ -23,6 +23,7 @@ refactor).
 | `member_active_again` | Previous snapshot stale (≥ threshold), current fresh, `last_seen_api` advanced. | `signal_log_type` keyed on `member_active_again:<tag>:<observed_at>`. |
 | `clan_rank_top_spot` | Current snapshot has `clan_rank = 1`, previous had `> 1` or NULL. | `signal_log_type` keyed on `clan_rank_top_spot:<tag>:<observed_at>`. |
 | `recent_form_slump` | Form crosses top-tier (`hot`/`strong`) → bottom-tier (`slumping`/`cold`). Per-(member,scope) cursor remembers last label. | `signal_log_type` weekly: `recent_form_slump:<tag>:<scope>:<isoweek>`. |
+| `deck_archetype_change` | Current deck differs by 4+ cards from the deck fetched 24+ hours ago (mode_scope='overall'). Natural de-flicker via the 24h window. | `signal_log_type` daily: `deck_archetype_change:<tag>:<YYYY-MM-DD>`. |
 | `clan_birthday` | Month-day of `clan_founded` matches today. | `cake_day_announcements` unique on (date, type, tag). |
 | `join_anniversary` | Members whose `joined_at` anniversary is today. | Same as above. |
 | `member_birthday` | Members whose birthday is today. | Same as above. |
@@ -49,6 +50,7 @@ row.
 | `new_card_unlocked` | New card ID in collection. |
 | `new_champion_unlocked` | New champion card. |
 | `card_level_milestone` | Card level crossed 10/14 threshold. |
+| `card_evolution_unlocked` | Card's `evolutionLevel` increased (evo 0→1 or hero 0→2/2→3). Payload carries `evolution_kind` ∈ {`evo`, `hero`}. |
 | `badge_earned` | New badge in profile. |
 | `badge_level_milestone` | Badge level milestone. |
 | `achievement_star_milestone` | Achievement stars crossed a threshold. |
@@ -147,12 +149,22 @@ Still open / future work:
 
 - **Donation leaders across a longer window.** Today's detector is one-day top-3;
   a weekly or seasonal leader could be more durable and less noisy.
-- **Card mastery / evolution unlocks.** The profile snapshot has evolution level
-  data that isn't diffed.
 - **Clan-level trophy records.** `clan_daily_metrics` stores totals but no
   "clan fame record" or "clan war-trophy record" signal exists.
-- **Member deck-style trends.** Deck usage is logged but there's no "member
-  changed deck archetype" signal, which leaders often ask about.
+
+Closed this sprint (v4.7 autonomous signal refactor):
+
+- **Card evolution unlocks.** Previously the card-diff loop tracked levels but
+  not `evolutionLevel`. **Closed** — now emits `card_evolution_unlocked` with
+  `evolution_kind` ∈ {`evo`, `hero`}.
+- **Member deck-style trends.** 18k `member_deck_snapshots` rows nobody read.
+  **Closed** — `deck_archetype_change` fires when the current deck differs by
+  4+ cards from the deck 24h ago.
+- **Silent lane routing bug.** All ten v4.7-added signal types were falling
+  into the "unknown" lane because none were added to `PROGRESSION_SIGNAL_TYPES`
+  / `BATTLE_MODE_SIGNAL_TYPES` / `CLAN_EVENT_SIGNAL_TYPES` /
+  `LEADERSHIP_ONLY_SIGNAL_TYPES`. **Closed** — all ten now route correctly
+  (locked down by a regression test in `test_awareness_loop.py`).
 
 ---
 
