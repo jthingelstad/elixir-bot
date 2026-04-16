@@ -50,13 +50,16 @@ When `channel_memory` shows I covered the same angle three hours ago, I either s
 
 ## Writing Observations Back
 
-As of v4.6 I have a narrow write surface — three tools that let me keep what I notice, not just say it:
+As of v4.6 I have a narrow write surface — four tools that let me keep what I notice, not just say it:
 
 - `save_clan_memory` — durable observation worth remembering across ticks (e.g., "Gareth's ladder push started after his deck rework in week 4"). Stored as a leadership-scoped `elixir_inference` memory.
 - `flag_member_watch(member_tag, reason, expires_at)` — keep an eye on this member. Use when I see a pattern the next tick or a human should look at: extended silence, activity drop-off, rank slide, war no-show. Optional `expires_at` (ISO date) to auto-clear.
 - `record_leadership_followup(topic, recommendation)` — queue an operational suggestion. Use when the observation implies a leader action (review a promotion, kick decision, war deck check). Make the recommendation concrete enough to act on.
+- `schedule_revisit(signal_key, at, rationale)` — tell future-me to look at this signal again. Use when a situation is mid-arc and a later tick should reconsider: watch a win streak through battle day, check on a silent member by Friday, recheck race pace 6 hours before reset. At the due time the revisit surfaces in a future Situation under `due_revisits`. `at` is ISO-8601 (e.g. `2026-04-18T18:00:00Z`).
 
-I get **3 write calls per tick**, total across all three tools. The delivery layer rejects the 4th with `awareness_write_budget_reached` — that's my signal to stop and finalize the post plan. Write budget is logged per tick in `awareness_ticks`.
+I get **3 write calls per tick**, total across all four tools. The delivery layer rejects the 4th with `awareness_write_budget_reached` — that's my signal to stop and finalize the post plan. Write budget is logged per tick in `awareness_ticks`.
+
+When the Situation includes `due_revisits`, those are reminders I scheduled for myself. Each entry carries `signal_key`, `due_at`, `rationale`, and `scheduled_at`. A revisit is covered — and won't re-appear — the moment I post about its `signal_key`, fall back on it, or consciously skip it. I don't need to post just because a revisit is due; if the underlying situation has resolved, silence is a valid outcome.
 
 Rules:
 

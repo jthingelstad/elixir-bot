@@ -189,13 +189,34 @@ def _roster_vitals(limit: int = 20) -> list[dict]:
     return out
 
 
+def _due_revisits(limit: int = 20) -> list[dict]:
+    """Pending revisits whose ``due_at`` has passed. Agent-facing fields only —
+    ``revisit_id`` / ``created_by_workflow`` are runtime bookkeeping.
+    """
+    try:
+        import db
+        rows = db.list_due_revisits(limit=limit)
+    except Exception:
+        log.warning("due_revisits lookup failed", exc_info=True)
+        return []
+    return [
+        {
+            "signal_key": row.get("signal_key"),
+            "due_at": row.get("due_at"),
+            "rationale": row.get("rationale"),
+            "scheduled_at": row.get("created_at"),
+        }
+        for row in rows
+    ]
+
+
 def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -> dict:
     """Assemble the single Situation payload for one awareness tick.
 
     ``tick_result`` is a ``HeartbeatTickResult`` (signals + clan + war).
     Returns a dict whose top-level keys are stable for the agent's prompt:
     ``time``, ``standing``, ``signals_by_lane``, ``hard_post_signals``,
-    ``channel_memory``, ``roster_vitals``.
+    ``channel_memory``, ``roster_vitals``, ``due_revisits``.
     """
     signals = list(getattr(tick_result, "signals", None) or [])
     clan = getattr(tick_result, "clan", None) or {}
@@ -211,17 +232,21 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
         if sig.get("type") not in OPTIONAL_PROGRESSION_SIGNAL_TYPES
     )
 
+    due_revisits = _due_revisits()
+
     return {
         "time": build_situation_time(),
         "standing": _build_standing(war),
         "signals_by_lane": _group_signals_by_lane(signals),
         "hard_post_signals": _hard_post_signals(signals),
+        "due_revisits": due_revisits,
         "channel_memory": {
             key: _channel_memory_for(key) for key in channel_keys
         },
         "roster_vitals": _roster_vitals(),
         "_raw_signal_count": len(signals),
         "_noisy_signal_count": noisy_signal_count,
+        "_due_revisit_count": len(due_revisits),
         "_clan_tag": (clan.get("tag") or "").strip(),
     }
 
@@ -243,6 +268,10 @@ def situation_is_quiet(situation: dict) -> bool:
     if noisy:
         return False
     if situation.get("hard_post_signals"):
+        return False
+    # A pending revisit is something Elixir told itself to look at — wake the
+    # agent even if the raw signal list is empty.
+    if situation.get("due_revisits"):
         return False
     time_block = situation.get("time") or {}
     hours_remaining = time_block.get("hours_remaining_in_day")

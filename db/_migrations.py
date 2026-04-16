@@ -1330,7 +1330,36 @@ def _migration_27(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27]
+def _migration_28(conn: sqlite3.Connection) -> None:
+    """Create the revisits table so the awareness loop can schedule reminders
+    for itself to look at a signal again at a later tick.
+
+    Pattern mirrors system_signals (``announced_at`` state) plus
+    cake_day_announcements (composite UNIQUE for dedup). A revisit is "due"
+    when ``due_at <= now`` and ``revisited_at IS NULL``. build_situation lifts
+    due rows into each tick's Situation under ``due_revisits``; the delivery
+    layer marks them revisited once the agent covers the underlying signal.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS revisits (
+            revisit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_key TEXT NOT NULL,
+            created_by_workflow TEXT NOT NULL,
+            due_at TEXT NOT NULL,
+            rationale TEXT,
+            revisited_at TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(signal_key, due_at)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_revisits_due
+            ON revisits(due_at ASC, revisited_at);
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

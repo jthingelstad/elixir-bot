@@ -918,6 +918,41 @@ def _execute_flag_member_watch(arguments):
     }
 
 
+def _execute_schedule_revisit(arguments):
+    """Awareness-loop self-scheduling: queue a reminder to look at a signal
+    again at a later tick. Persists to the ``revisits`` table; surfaces in
+    ``Situation.due_revisits`` when ``at`` has passed.
+    """
+    from storage.revisits import schedule_revisit
+
+    signal_key = (arguments.get("signal_key") or "").strip()
+    at = (arguments.get("at") or "").strip()
+    rationale = (arguments.get("rationale") or "").strip()
+
+    if not signal_key or not at or not rationale:
+        return {"error": "schedule_revisit requires signal_key, at, and rationale"}
+
+    try:
+        row = schedule_revisit(
+            signal_key=signal_key,
+            due_at=at,
+            rationale=rationale,
+            created_by_workflow="awareness",
+        )
+    except ValueError as exc:
+        return {"error": "invalid_revisit", "detail": str(exc)}
+    except Exception as exc:
+        log.warning("schedule_revisit failed: %s", exc)
+        return {"error": "schedule_revisit_failed", "detail": str(exc)}
+
+    return {
+        "success": True,
+        "revisit_id": row.get("revisit_id"),
+        "signal_key": row.get("signal_key"),
+        "due_at": row.get("due_at"),
+    }
+
+
 def _execute_record_leadership_followup(arguments):
     """Awareness-loop observation: queue an operational suggestion.
 
@@ -1076,6 +1111,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_flag_member_watch(arguments)
         elif name == "record_leadership_followup":
             result = _execute_record_leadership_followup(arguments)
+        elif name == "schedule_revisit":
+            result = _execute_schedule_revisit(arguments)
         else:
             result = {"error": f"Unknown tool: {name}"}
 

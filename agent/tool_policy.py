@@ -5,16 +5,18 @@ _WRITE_TOOL_NAMES = {
     "save_clan_memory",
     "flag_member_watch",
     "record_leadership_followup",
+    "schedule_revisit",
 }
 
 # Write tools the awareness loop is allowed to call per tick. Intentionally a
-# narrow subset of _WRITE_TOOL_NAMES: awareness can save memories + flag
-# members + queue followups, but cannot mutate member metadata (that stays a
-# human leadership action via the clanops path).
+# narrow subset of _WRITE_TOOL_NAMES: awareness can save memories, flag
+# members, queue followups, and schedule revisits, but cannot mutate member
+# metadata (that stays a human leadership action via the clanops path).
 AWARENESS_WRITE_TOOL_NAMES = {
     "save_clan_memory",
     "flag_member_watch",
     "record_leadership_followup",
+    "schedule_revisit",
 }
 
 # Max write-tool calls the awareness loop may make per tick. The agent is

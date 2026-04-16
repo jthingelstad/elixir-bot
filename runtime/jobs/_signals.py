@@ -810,6 +810,19 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
     if considered_skipped:
         await _mark_signal_group_completed(considered_skipped)
 
+    # Mark any revisits the agent covered as revisited so they don't re-fire
+    # on the next tick. A revisit is "covered" when its signal_key appears in
+    # any post's covers_signal_keys OR when it matches a signal the agent
+    # consciously skipped / fell back on — either way, the agent saw it.
+    revisit_keys_seen = set(covered_keys)
+    revisit_keys_seen.update(signal_source_key(s) for s in (considered_skipped or []))
+    revisit_keys_seen.update(signal_source_key(s) for s in (uncovered or []))
+    if revisit_keys_seen:
+        try:
+            await asyncio.to_thread(db.mark_revisited, sorted(revisit_keys_seen))
+        except Exception:
+            log.warning("mark_revisited failed", exc_info=True)
+
     log.info(
         "awareness_tick_result workflow=%r delivered=%d rejected=%d covered=%d considered_skipped=%d "
         "hard_fallback=%d hard_fallback_failed=%d signals_in=%d skipped_reason=%r",
