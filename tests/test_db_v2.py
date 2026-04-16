@@ -1500,6 +1500,103 @@ def test_trend_query_helpers_and_prompt_ready_summaries():
         conn.close()
 
 
+def test_snapshot_player_profile_emits_card_evolution_unlocked_signal():
+    """v4.7 #33: evolution unlock (evo or hero) fires card_evolution_unlocked."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        # Seed: Hunter owned but not evolved.
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy",
+                "currentDeck": [], "cards": [
+                    {"name": "Hunter", "level": 14, "rarity": "epic",
+                     "evolutionLevel": 0, "maxEvolutionLevel": 1}
+                ],
+            },
+            conn=conn,
+        )
+        # Now: Hunter evolved.
+        signals = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy",
+                "currentDeck": [], "cards": [
+                    {"name": "Hunter", "level": 14, "rarity": "epic",
+                     "evolutionLevel": 1, "maxEvolutionLevel": 1}
+                ],
+            },
+            conn=conn,
+        )
+
+        evo_signals = [s for s in signals if s["type"] == "card_evolution_unlocked"]
+        assert len(evo_signals) == 1
+        sig = evo_signals[0]
+        assert sig["tag"] == "#ABC123"
+        assert sig["card_name"] == "Hunter"
+        assert sig["old_evolution_level"] == 0
+        assert sig["new_evolution_level"] == 1
+        assert sig["evolution_kind"] == "evo"
+        assert sig["rarity"] == "epic"
+    finally:
+        conn.close()
+
+
+def test_snapshot_player_profile_does_not_refire_evolution_on_subsequent_snapshot():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [],
+             "cards": [{"name": "Hunter", "level": 14, "rarity": "epic",
+                        "evolutionLevel": 1, "maxEvolutionLevel": 1}]},
+            conn=conn,
+        )
+        # Next snapshot: evolution level unchanged.
+        signals = db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [],
+             "cards": [{"name": "Hunter", "level": 14, "rarity": "epic",
+                        "evolutionLevel": 1, "maxEvolutionLevel": 1}]},
+            conn=conn,
+        )
+        assert not any(s["type"] == "card_evolution_unlocked" for s in signals)
+    finally:
+        conn.close()
+
+
+def test_snapshot_player_profile_emits_hero_evolution_signal():
+    """Hero evolution (evolutionLevel 0 -> 2) fires with kind='hero'."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [],
+             "cards": [{"name": "Mega Knight", "level": 14, "rarity": "legendary",
+                        "evolutionLevel": 0, "maxEvolutionLevel": 3}]},
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [],
+             "cards": [{"name": "Mega Knight", "level": 14, "rarity": "legendary",
+                        "evolutionLevel": 2, "maxEvolutionLevel": 3}]},
+            conn=conn,
+        )
+        evo_signals = [s for s in signals if s["type"] == "card_evolution_unlocked"]
+        assert len(evo_signals) == 1
+        assert evo_signals[0]["evolution_kind"] == "hero"
+        assert evo_signals[0]["new_evolution_level"] == 2
+    finally:
+        conn.close()
+
+
 def test_snapshot_player_profile_emits_path_of_legend_promotion_signal():
     conn = db.get_connection(":memory:")
     try:

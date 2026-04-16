@@ -357,15 +357,32 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
     if previous and previous["cards_json"]:
         for card in json.loads(previous["cards_json"] or "[]"):
             if card.get("name"):
-                previous_cards[card["name"]] = _card_level(card)
+                previous_cards[card["name"]] = {
+                    "level": _card_level(card),
+                    "evolution_level": card.get("evolutionLevel") or 0,
+                }
     for card in cards:
         name = card.get("name")
         if not name:
             continue
-        old_card_level = previous_cards.get(name)
+        prev = previous_cards.get(name)
+        old_card_level = prev["level"] if prev else None
+        old_evo_level = prev["evolution_level"] if prev else 0
         new_card_level = _card_level(card)
+        new_evo_level = card.get("evolutionLevel") or 0
         rarity = str(card.get("rarity") or "").strip().lower() or None
         is_champion = _is_champion_card(card)
+        if new_evo_level > old_evo_level:
+            signals.append({
+                "type": "card_evolution_unlocked",
+                "tag": tag,
+                "name": player_data.get("name"),
+                "card_name": name,
+                "rarity": rarity,
+                "old_evolution_level": old_evo_level,
+                "new_evolution_level": new_evo_level,
+                "evolution_kind": "hero" if new_evo_level >= 2 else "evo",
+            })
         if old_card_level is None:
             if rarity in CARD_UNLOCK_SIGNAL_RARITIES or is_champion:
                 signals.append({
