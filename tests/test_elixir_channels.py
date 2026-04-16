@@ -579,6 +579,7 @@ def test_post_startup_message_posts_build_hash_to_clanops():
     assert posted.startswith("**Elixir Online**")
     assert 'Release: `v3.0 "Three-Lane Elixir"`' in posted
     assert "Build: `abc1234`" in posted
+    assert "Host: `" in posted
     assert "king tower is awake" in posted
     assert "Channel audit: 2/2 active channels reachable and writable." in posted
     assert mock_save.call_args.kwargs["workflow"] == "clanops"

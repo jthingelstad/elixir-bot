@@ -381,11 +381,13 @@ async def _post_startup_message() -> bool:
     if not fun_line:
         fun_line = ":elixir_hype: Elixir is in the arena and the decks are shuffled. Leadership view is live."
 
+    import platform
+    hostname = platform.node() or "unknown"
+
     channel_audit = await _startup_channel_audit_summary()
     content = (
         "**Elixir Online**\n"
-        f"Release: `{elixir_agent.RELEASE_LABEL}`\n"
-        f"Build: `{elixir_agent.BUILD_HASH}`\n"
+        f"Release: `{elixir_agent.RELEASE_LABEL}` · Build: `{elixir_agent.BUILD_HASH}` · Host: `{hostname}`\n"
         f"{fun_line.strip()}\n"
         f"{channel_audit}"
     )
