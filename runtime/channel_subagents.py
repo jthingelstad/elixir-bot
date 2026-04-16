@@ -42,6 +42,7 @@ BATTLE_MODE_SIGNAL_TYPES = {
 
 OPTIONAL_PROGRESSION_SIGNAL_TYPES = {
     "badge_level_milestone",
+    "card_evolution_unlocked",
 }
 
 CLAN_EVENT_SIGNAL_TYPES = {
@@ -64,8 +65,6 @@ TOURNAMENT_SIGNAL_TYPES = {
 
 LEADERSHIP_ONLY_SIGNAL_TYPES = {
     "inactive_members",
-    "recent_form_slump",
-    "deck_archetype_change",
 }
 
 DURABLE_EVENT_SIGNAL_TYPES = {

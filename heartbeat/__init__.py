@@ -173,11 +173,9 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         # Leapfrogging into clan rank #1 is a durable #player-progress moment.
         signals.extend(detect_clan_rank_top_spot(conn=conn))
 
-        # Form slumps: reliable player drops from strong/hot into slumping/cold.
-        signals.extend(detect_form_slumps(conn=conn))
-
-        # Deck archetype swap: deck now differs by 4+ cards from 24h ago.
-        signals.extend(detect_deck_archetype_changes(conn=conn))
+        # Form slumps: kept as background context data only — not emitted as
+        # signals per user feedback. Form labels enrich the Situation's
+        # roster_vitals; the agent uses them to frame OTHER posts.
 
         # Clan-level trophy / war-trophy records (new all-time high).
         signals.extend(detect_clan_score_records(conn=conn))

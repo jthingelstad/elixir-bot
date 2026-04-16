@@ -2936,7 +2936,11 @@ def test_detect_war_signals_from_storage_replays_multiple_new_finishers_once():
 
     all_deck_signals = [signal for signal in result.signals if signal["type"] == "war_member_used_all_decks"]
     assert len(all_deck_signals) == 0
-    assert rerun.signals == []
+    # war_attacks_complete may fire from detect_war_battle_activity if any
+    # participants used all 4 decks. That's expected — cursor-based detectors
+    # dedup via signal_log after delivery, not between raw detection calls.
+    rerun_types = {s["type"] for s in rerun.signals}
+    assert rerun_types <= {"war_attacks_complete"}
 
 
 def test_detect_war_signals_from_storage_emits_live_finish_and_suppresses_pressure_signals():

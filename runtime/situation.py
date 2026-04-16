@@ -112,7 +112,13 @@ def _hard_post_signals(signals: Iterable[dict]) -> list[dict]:
 
 
 def _build_standing(war: dict | None) -> dict | None:
-    """Compact standing summary — rank, fame, deficit-to-leader, engagement."""
+    """Compact standing summary — rank, fame, deficit-to-leader, engagement,
+    plus rival clan scoreboard so the agent can talk about the race state.
+
+    Ranks by ``periodPoints`` (cumulative war-week score) which is the actual
+    competitive metric. The clan-level ``fame`` field in the API is often 0
+    for all clans; ``periodPoints`` always reflects the real standings.
+    """
     war = war or {}
     clans = war.get("clans") or []
     clan_obj = war.get("clan") or {}
@@ -121,26 +127,32 @@ def _build_standing(war: dict | None) -> dict | None:
     our_tag = clan_obj["tag"].strip("#").upper()
     ranked = sorted(
         clans,
-        key=lambda c: (c.get("fame") or 0, c.get("repairPoints") or 0),
+        key=lambda c: (c.get("periodPoints") or 0, c.get("fame") or 0, c.get("clanScore") or 0),
         reverse=True,
     )
-    our_fame = None
+    our_points = None
     our_rank = None
-    leader_fame = ranked[0].get("fame") if ranked else None
+    leader_points = (ranked[0].get("periodPoints") or 0) if ranked else 0
     for rank, c in enumerate(ranked, start=1):
         tag = (c.get("tag") or "").strip("#").upper()
         if tag == our_tag:
-            our_fame = c.get("fame") or 0
+            our_points = c.get("periodPoints") or 0
             our_rank = rank
             break
-    if our_fame is None:
+    if our_points is None:
         return None
+    scoreboard = [
+        {"name": c.get("name"), "points": c.get("periodPoints") or 0, "fame": c.get("fame") or 0}
+        for c in ranked
+    ]
     return {
         "rank": our_rank,
-        "fame": our_fame,
-        "leader_fame": leader_fame,
-        "deficit_to_leader": (leader_fame - our_fame) if (leader_fame is not None and our_rank != 1) else 0,
+        "points": our_points,
+        "leader_points": leader_points,
+        "deficit_to_leader": (leader_points - our_points) if (our_rank != 1) else 0,
+        "lead_over_second": (our_points - (ranked[1].get("periodPoints") or 0)) if (our_rank == 1 and len(ranked) > 1) else 0,
         "field_size": len(ranked),
+        "scoreboard": scoreboard,
     }
 
 
