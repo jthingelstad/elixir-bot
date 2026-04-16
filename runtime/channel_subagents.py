@@ -17,19 +17,25 @@ PROGRESSION_SIGNAL_TYPES = {
     "new_card_unlocked",
     "new_champion_unlocked",
     "card_level_milestone",
+    "card_evolution_unlocked",
     "badge_earned",
     "badge_level_milestone",
     "achievement_star_milestone",
+    "best_trophies_peak",
+    "challenge_performance_milestone",
+    "clan_rank_top_spot",
 }
 
 # Volatile battle-mode activity outside of war — hot streaks, trophy pushes,
-# Path of Legends promotions. Discardable tomorrow. Routed to #trophy-road.
-# Future Classic/Grand Challenge finishes, Global Tournament placements, and
-# evolution/Ultimate Champion unlocks join this set additively.
+# Path of Legends promotions/demotions, Ultimate Champion reaches, global
+# rank attainments. Routed to #trophy-road.
 BATTLE_MODE_SIGNAL_TYPES = {
     "battle_hot_streak",
     "battle_trophy_push",
     "path_of_legend_promotion",
+    "path_of_legend_demotion",
+    "ultimate_champion_reached",
+    "path_of_legend_global_rank_attained",
 }
 
 OPTIONAL_PROGRESSION_SIGNAL_TYPES = {
@@ -44,6 +50,7 @@ CLAN_EVENT_SIGNAL_TYPES = {
     "member_birthday",
     "clan_birthday",
     "donation_leaders",
+    "member_active_again",
 }
 
 TOURNAMENT_SIGNAL_TYPES = {
@@ -54,6 +61,8 @@ TOURNAMENT_SIGNAL_TYPES = {
 
 LEADERSHIP_ONLY_SIGNAL_TYPES = {
     "inactive_members",
+    "recent_form_slump",
+    "deck_archetype_change",
 }
 
 DURABLE_EVENT_SIGNAL_TYPES = {
