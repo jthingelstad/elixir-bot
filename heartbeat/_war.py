@@ -596,6 +596,154 @@ def detect_war_battle_activity(conn=None):
     }]
 
 
+def detect_war_surprise_participants(conn=None):
+    """Emit war_surprise_participant when a 'never' or 'rare' war player attacks.
+
+    A member who historically doesn't participate in war suddenly playing is
+    a notable positive event — especially if it's their first war ever. Uses
+    the existing _war_player_type classification (regular/occasional/rare/never).
+    """
+    from storage.war_analytics import war_player_types_by_tag
+
+    day_state = db.get_current_war_day_state(conn=conn) or {}
+    if day_state.get("phase") != "battle":
+        return []
+
+    battle_date = day_state.get("war_day_key")
+    if not battle_date:
+        return []
+
+    engaged = (day_state.get("used_all_4") or []) + (day_state.get("used_some") or [])
+    if not engaged:
+        return []
+
+    tags = [m.get("tag") for m in engaged if m.get("tag")]
+    if not tags:
+        return []
+
+    type_map = war_player_types_by_tag(conn, tags)
+
+    surprises = []
+    for member in engaged:
+        tag = member.get("tag")
+        if not tag:
+            continue
+        player_type = type_map.get(tag, "unknown")
+        if player_type not in {"never", "rare"}:
+            continue
+        signal_log_type = f"war_surprise_participant:{tag}:{battle_date}"
+        if db.was_signal_sent_any_date(signal_log_type, conn=conn):
+            continue
+        surprises.append({
+            "tag": tag,
+            "name": member.get("name") or member.get("member_ref") or "?",
+            "fame": member.get("fame") or member.get("fame_today") or 0,
+            "decks_used": member.get("decks_used_today") or 0,
+            "war_player_type": player_type,
+            "first_war_ever": player_type == "never",
+            "signal_log_type": signal_log_type,
+        })
+
+    if not surprises:
+        return []
+
+    signal_date = _war_signal_date_for_state(day_state)
+    return [{
+        "type": "war_surprise_participant",
+        "signal_date": signal_date,
+        "battle_date": battle_date,
+        "season_id": day_state.get("season_id"),
+        "week": day_state.get("week"),
+        "day_number": day_state.get("day_number"),
+        "phase_display": day_state.get("phase_display"),
+        "members": surprises,
+    }]
+
+
+def detect_war_rival_activity(conn=None):
+    """Emit war_rival_woke_up when an opponent's periodPoints goes from 0 to >0,
+    and war_lead_change when our lead/deficit shifts significantly.
+
+    Both use signal_detector_cursors to compare the current race standings
+    against the last observed snapshot. Fires in the war_awareness pipeline.
+    """
+    DETECTOR_KEY = "war_standings"
+    import json
+
+    day_state = db.get_current_war_day_state(conn=conn) or {}
+    if day_state.get("phase") not in {"battle", "training"}:
+        return []
+
+    war_state = db.get_current_war_status(conn=conn) or {}
+    raw = json.loads(war_state.get("raw_json") or "{}") if isinstance(war_state.get("raw_json"), str) else (war_state.get("raw_json") or {})
+    clans = raw.get("clans") or []
+    our_tag = (raw.get("clan", {}).get("tag") or "").strip("#").upper()
+    if not our_tag or not clans:
+        return []
+
+    ranked = sorted(clans, key=lambda c: (c.get("periodPoints") or 0), reverse=True)
+    current = {(c.get("tag") or "").strip("#").upper(): c.get("periodPoints") or 0 for c in ranked}
+    our_points = current.get(our_tag, 0)
+
+    cursor = db.get_signal_detector_cursor(DETECTOR_KEY, conn=conn)
+    prev_data = json.loads((cursor or {}).get("cursor_text") or "{}") if cursor else {}
+    prev_standings = prev_data.get("standings", {})
+    prev_our_points = prev_data.get("our_points", 0)
+
+    db.upsert_signal_detector_cursor(
+        DETECTOR_KEY,
+        cursor_text=json.dumps({"standings": current, "our_points": our_points}),
+        conn=conn,
+    )
+
+    if not prev_standings:
+        return []
+
+    signals = []
+    signal_date = _war_signal_date_for_state(day_state)
+    battle_date = day_state.get("war_day_key") or ""
+
+    for clan in ranked:
+        tag = (clan.get("tag") or "").strip("#").upper()
+        if tag == our_tag:
+            continue
+        prev_pts = prev_standings.get(tag, 0)
+        curr_pts = clan.get("periodPoints") or 0
+        if prev_pts == 0 and curr_pts > 0:
+            sig_key = f"war_rival_woke_up:{tag}:{battle_date}"
+            if not db.was_signal_sent_any_date(sig_key, conn=conn):
+                signals.append({
+                    "type": "war_rival_woke_up",
+                    "signal_date": signal_date,
+                    "rival_name": clan.get("name"),
+                    "rival_tag": clan.get("tag"),
+                    "rival_points": curr_pts,
+                    "our_points": our_points,
+                    "signal_log_type": sig_key,
+                })
+
+    second_place_pts = ranked[1].get("periodPoints", 0) if len(ranked) > 1 else 0
+    prev_lead = prev_our_points - max((v for k, v in prev_standings.items() if k != our_tag), default=0) if prev_standings else 0
+    curr_lead = our_points - second_place_pts
+    lead_delta = curr_lead - prev_lead
+    if abs(lead_delta) >= 2000 and prev_lead != 0:
+        sig_key = f"war_lead_change:{battle_date}:{our_points}"
+        if not db.was_signal_sent_any_date(sig_key, conn=conn):
+            signals.append({
+                "type": "war_lead_change",
+                "signal_date": signal_date,
+                "our_points": our_points,
+                "second_place_points": second_place_pts,
+                "lead": curr_lead,
+                "previous_lead": prev_lead,
+                "lead_delta": lead_delta,
+                "direction": "growing" if lead_delta > 0 else "shrinking",
+                "signal_log_type": sig_key,
+            })
+
+    return signals
+
+
 def detect_war_week_complete(completion_signals, conn=None):
     signals = []
     for signal in completion_signals or []:
