@@ -211,6 +211,27 @@ class TestQuestionGeneration:
         # need the catalog).
         assert all(q["question_type"] == "positive_trade" for q in qs)
 
+    def test_null_cost_support_cards_do_not_crash_generators(self, quiz_db):
+        """Regression for #15: support cards with elixir_cost=None used to
+        crash generate_cost_comparison_question at the sort step. Now they
+        get filtered at the _random_playable_cards boundary."""
+        # Seed normal cards plus a support card with None cost.
+        _seed_catalog(quiz_db)
+        quiz_db.execute(
+            "INSERT INTO card_catalog (card_id, name, elixir_cost, rarity, max_level, "
+            "card_type, icon_url, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (38000001, "Battle Healer Support", None, "rare", 15, "troop",
+             "https://example.com/support.png", "2025-01-01T00:00:00"),
+        )
+        quiz_db.commit()
+        # Run each generator 20 times — with only ~13 normal cards, a null-cost
+        # support would eventually surface without the filter.
+        for _ in range(20):
+            assert questions.generate_cost_comparison_question(conn=quiz_db) is not None
+            assert questions.generate_elixir_cost_question(conn=quiz_db) is not None
+            assert questions.generate_cycle_total_question(conn=quiz_db) is not None
+            assert questions.generate_cycle_back_question(conn=quiz_db) is not None
+
     def test_retired_generators_are_gone(self):
         """rarity / card_type / evolution / champion_id were retired in v4.7."""
         assert not hasattr(questions, "generate_rarity_question")
