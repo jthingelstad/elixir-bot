@@ -197,8 +197,9 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         # Battle-day rank swings
         signals.extend(detect_war_rank_changes(conn=conn))
 
-        # Battle-day checkpoint updates
-        signals.extend(detect_war_battle_checkpoints(conn=conn))
+        # Battle-day time-based checkpoints removed — war activity is now
+        # event-driven via detect_war_battle_activity in the war_awareness
+        # pipeline. The agent gets time remaining via build_situation_time.
 
         # War completion + week/season summaries
         clan_tag = cr_api.CLAN_TAG

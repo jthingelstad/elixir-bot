@@ -2822,7 +2822,11 @@ def test_detect_war_signals_from_storage_seeds_forward_without_backfill():
     finally:
         conn.close()
 
-    assert result.signals == []
+    # Cursor-based detectors seed on first call with no prior state. Event-
+    # based detectors (war_attacks_complete, war_surprise_participant) may
+    # still fire if the fixture includes members with decks_used_today > 0.
+    cursor_types = {s["type"] for s in result.signals} - {"war_attacks_complete", "war_surprise_participant"}
+    assert cursor_types == set()
     assert {update["detector_key"] for update in result.cursor_updates} == {
         heartbeat.WAR_LIVE_STATE_CURSOR_KEY,
         heartbeat.WAR_PARTICIPANT_CURSOR_KEY,
@@ -2940,7 +2944,7 @@ def test_detect_war_signals_from_storage_replays_multiple_new_finishers_once():
     # participants used all 4 decks. That's expected — cursor-based detectors
     # dedup via signal_log after delivery, not between raw detection calls.
     rerun_types = {s["type"] for s in rerun.signals}
-    assert rerun_types <= {"war_attacks_complete"}
+    assert rerun_types <= {"war_attacks_complete", "war_surprise_participant"}
 
 
 def test_detect_war_signals_from_storage_emits_live_finish_and_suppresses_pressure_signals():
