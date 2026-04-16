@@ -385,7 +385,7 @@ async def _post_startup_message() -> bool:
     channel_audit = await _startup_channel_audit_summary()
     content = (
         "**Elixir Online**\n"
-        f"Release: `{elixir_agent.RELEASE_LABEL}` · Build: `{elixir_agent.BUILD_HASH}` · Host: `{hostname}`\n"
+        f"Release: **{elixir_agent.RELEASE_LABEL}** · Build: **{elixir_agent.BUILD_HASH}** · Host: **{hostname}**\n"
         f"{fun_line.strip()}\n"
         f"{channel_audit}"
     )
