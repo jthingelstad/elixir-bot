@@ -136,6 +136,22 @@ def _awareness_system():
     )
 
 
+def _memory_synthesis_system():
+    """System prompt for the weekly memory-synthesis job.
+
+    Loads the memory-synthesis subagent prompt that defines the arc-memory
+    output schema + decay + contradiction-flag rules. Identity + knowledge
+    blocks come along so the agent can reason in voice.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        prompts.subagent_prompt("memory-synthesis"),
+        _discord_formatting_guidance(),
+        _discord_emoji_guidance(allow_in_sensitive=True),
+    )
+
+
 def _intel_report_system():
     """System prompt for the scheduled Clan Wars Intel Report workflow.
 
@@ -670,4 +686,5 @@ __all__ = [
     "_weekly_digest_system",
     "_event_system",
     "_awareness_system",
+    "_memory_synthesis_system",
 ]

@@ -134,6 +134,22 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         legacy_commands=("clanops-review",),
     ),
     ActivityDefinition(
+        activity_key="memory-synthesis",
+        owner_subagent="leader-lounge",
+        purpose="Weekly pass that writes arc memories, retires stale entries, and flags contradictions against live state.",
+        job_id="memory-synthesis",
+        job_function="_memory_synthesis_cycle",
+        schedule_kind="cron",
+        schedule_config={
+            "day_of_week": _attr("MEMORY_SYNTHESIS_DAY", "sun"),
+            "hour": _attr("MEMORY_SYNTHESIS_HOUR", 22),
+            "minute": 0,
+        },
+        delivery_targets=(
+            "Discord: #leader-lounge",
+        ),
+    ),
+    ActivityDefinition(
         activity_key="weekly-recap",
         owner_subagent="announcements",
         purpose="Publish the public weekly clan recap and members-page payload.",

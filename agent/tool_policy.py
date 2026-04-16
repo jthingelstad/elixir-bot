@@ -85,6 +85,12 @@ TOOLSETS_BY_WORKFLOW = {
         d["tool"] for d in TOOL_DEFINITIONS
         if d["name"] in AWARENESS_WRITE_TOOL_NAMES
     ],
+    # Weekly memory synthesis: the LLM produces a structured plan (arc
+    # memories, stale IDs, contradictions, digest); the job function handles
+    # persistence. Tools are intentionally zero — the full week's context is
+    # assembled upfront by the job, so the agent reasons from the prompt
+    # payload rather than by chaining tool calls.
+    "memory_synthesis": [],
 }
 
 MAX_ROUNDS_BY_WORKFLOW = {
@@ -111,6 +117,9 @@ MAX_ROUNDS_BY_WORKFLOW = {
     # couple of investigative tool calls (cr_api lookups for streak opponents,
     # rival scouting) plus the final post-plan answer turn.
     "awareness": 8,
+    # memory synthesis: no tool calls expected (toolset is empty). Keep a
+    # tiny round budget so a stray repair loop still has headroom.
+    "memory_synthesis": 2,
 }
 
 RESPONSE_SCHEMAS_BY_WORKFLOW = {
@@ -125,4 +134,7 @@ RESPONSE_SCHEMAS_BY_WORKFLOW = {
     "intel_report": {"required": ["event_type", "summary", "content"]},
     # awareness emits a post plan: zero or more posts, each routed to a channel.
     "awareness": {"required": ["posts"]},
+    # memory_synthesis: arcs + stale list + contradictions + digest. Any field
+    # may be empty; the job checks each independently before acting.
+    "memory_synthesis": {"required": ["arc_memories", "stale_memory_ids", "contradictions", "digest"]},
 }

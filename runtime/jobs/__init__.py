@@ -7,10 +7,14 @@ from runtime.jobs._core import (  # noqa: F401
     PLAYER_INTEL_REQUEST_SPACING_SECONDS, PLAYER_INTEL_REFRESH_JITTER_SECONDS,
     CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR,
     WEEKLY_RECAP_DAY, WEEKLY_RECAP_HOUR,
+    MEMORY_SYNTHESIS_DAY, MEMORY_SYNTHESIS_HOUR,
+    MEMORY_SYNTHESIS_DRY_RUN, MEMORY_SYNTHESIS_POSTS_PER_CHANNEL,
     _query_or_default, _summarize_member_rows,
     _build_ask_elixir_daily_insight_context, _ask_elixir_daily_insight,
     _clan_awareness_tick, _war_poll_tick, _war_awareness_tick,
     _player_intel_refresh, _clanops_weekly_review, _weekly_clan_recap,
+    _memory_synthesis_cycle, _build_memory_synthesis_context,
+    _apply_memory_synthesis_plan,
     _clan_wars_intel_report,
 )
 # _build_weekly_clanops_review and _build_weekly_clan_recap_context are
