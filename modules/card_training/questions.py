@@ -62,6 +62,23 @@ def _shuffle_choices(correct: str, distractors: list[str]) -> tuple[list[str], i
     return shuffled, correct_index
 
 
+def _icons_for_names(names: list[str], *, conn=None) -> list[dict]:
+    """Resolve card names against the catalog and return name+icon dicts.
+
+    Used by generators that start from a seed list of card names (e.g., the
+    curated trade scenarios). Names that don't resolve return with
+    ``icon_url=None`` so the image helper can drop in a placeholder tile.
+    """
+    resolved: list[dict] = []
+    for name in names:
+        rows = lookup_cards(name=name, limit=1, conn=conn)
+        if rows:
+            resolved.append({"name": name, "icon_url": rows[0].get("icon_url")})
+        else:
+            resolved.append({"name": name, "icon_url": None})
+    return resolved
+
+
 def _type_display(card_type: str) -> str:
     return {
         "troop": "troop",
@@ -240,11 +257,23 @@ def generate_positive_trade_question(conn=None) -> dict | None:
     raw_value = scenario.trade_value
 
     if raw_value > 0:
-        fallback_reason = f"You spent {your_total} to answer {opp_total}, banking {raw_value} elixir"
+        fallback_reason = (
+            f"You: {your_desc} = {your_total}. "
+            f"Opponent: {opp_desc} = {opp_total}. "
+            f"You banked {raw_value} elixir"
+        )
     elif raw_value < 0:
-        fallback_reason = f"You spent {your_total} for only {opp_total} of value, losing {abs(raw_value)} elixir"
+        fallback_reason = (
+            f"You: {your_desc} = {your_total}. "
+            f"Opponent: {opp_desc} = {opp_total}. "
+            f"You lost {abs(raw_value)} elixir"
+        )
     else:
-        fallback_reason = f"You spent {your_total} to answer {opp_total} — a clean even trade"
+        fallback_reason = (
+            f"You: {your_desc} = {your_total}. "
+            f"Opponent: {opp_desc} = {opp_total}. "
+            f"A clean even trade"
+        )
 
     fallback = (
         f"{fallback_reason}. Good trade habits compound over a match — small "
@@ -260,16 +289,24 @@ def generate_positive_trade_question(conn=None) -> dict | None:
         question_text=question_text,
         correct_answer=correct,
         context=(
-            f"You: {your_desc} totaling {your_total}. "
-            f"Opponent: {opp_desc} totaling {opp_total}. "
-            f"Raw trade value: {raw_value:+d} (clamped to {display_value:+d} for the answer)."
+            f"Show each card's cost explicitly in your explanation. "
+            f"You played: {your_desc}, totaling {your_total}. "
+            f"Opponent dropped: {opp_desc}, totaling {opp_total}. "
+            f"Trade value: {raw_value:+d} (shown to the player as {display_value:+d})."
         ),
         fallback=fallback,
+    )
+
+    # Resolve icons from the live catalog for the composite image.
+    trade_icons = _icons_for_names(
+        [c.name for c in scenario.your_cards] + [c.name for c in scenario.opponent_cards],
+        conn=conn,
     )
 
     return {
         "question_text": question_text,
         "image_url": None,
+        "card_icons": trade_icons,
         "choices": choices,
         "correct_index": correct_index,
         "explanation": explanation,
@@ -304,15 +341,20 @@ def generate_cycle_total_question(conn=None) -> dict | None:
     # Full card+cost detail shows up in the explanation after answering.
     rotation_names = ", ".join(c["name"] for c in rotation)
     rotation_detail = ", ".join(f"{c['name']} ({c['elixir_cost']})" for c in rotation)
+    breakdown = " + ".join(f"{c['name']} ({c['elixir_cost']})" for c in rotation)
     fallback = (
-        f"{' + '.join(str(c['elixir_cost']) for c in rotation)} = {total}. "
+        f"{breakdown} = {total}. "
         f"A rotation in the low-mid teens keeps you flexible; much more "
         f"and you'll lose cycle races against cheaper decks."
     )
     explanation = explain_or_fallback(
         question_text=f"Total elixir to play all four: {rotation_names}?",
         correct_answer=f"{total} elixir",
-        context=f"Cards: {rotation_detail}. Sum: {total}.",
+        context=(
+            f"Show each card's cost explicitly in your explanation "
+            f"(e.g., 'Card A (3) + Card B (4) + Card C (2) + Card D (4) = 13'). "
+            f"Cards: {rotation_detail}. Per-card math: {breakdown} = {total}."
+        ),
         fallback=fallback,
     )
 
@@ -322,6 +364,10 @@ def generate_cycle_total_question(conn=None) -> dict | None:
             f"{rotation_names}. What is the total elixir spent?"
         ),
         "image_url": None,
+        "card_icons": [
+            {"name": c["name"], "icon_url": c.get("icon_url")}
+            for c in rotation
+        ],
         "choices": choices,
         "correct_index": correct_index,
         "explanation": explanation,
@@ -366,19 +412,21 @@ def generate_cycle_back_question(conn=None) -> dict | None:
     # Names only in the question — costs appear in the explanation.
     deck_names = ", ".join(c["name"] for c in rotation)
     deck_detail = ", ".join(f"{c['name']} ({c['elixir_cost']})" for c in rotation)
-    others_desc = " + ".join(str(c["elixir_cost"]) for c in others)
+    others_breakdown = " + ".join(f"{c['name']} ({c['elixir_cost']})" for c in others)
     fallback = (
         f"Cycling back to {key_card['name']} means playing the other three: "
-        f"{others_desc} = {cycle_cost}. Knowing this lets you time your "
+        f"{others_breakdown} = {cycle_cost}. Knowing this lets you time your "
         f"win-condition pushes around the opponent's answers."
     )
     explanation = explain_or_fallback(
         question_text=f"Cycle cost back to {key_card['name']} in {deck_names}?",
         correct_answer=f"{cycle_cost} elixir",
         context=(
+            f"Show each non-key card's cost explicitly in your explanation "
+            f"(e.g., 'Card A (3) + Card B (4) + Card C (2) = 9'). "
             f"Deck rotation: {deck_detail}. Key card: {key_card['name']} "
             f"(cost {key_card['elixir_cost']}). "
-            f"To cycle back, play the other three: {others_desc} = {cycle_cost}."
+            f"Per-card math to cycle back: {others_breakdown} = {cycle_cost}."
         ),
         fallback=fallback,
     )
@@ -390,6 +438,10 @@ def generate_cycle_back_question(conn=None) -> dict | None:
             f"need to spend to cycle back to it?"
         ),
         "image_url": None,
+        "card_icons": [
+            {"name": c["name"], "icon_url": c.get("icon_url")}
+            for c in rotation
+        ],
         "choices": choices,
         "correct_index": correct_index,
         "explanation": explanation,

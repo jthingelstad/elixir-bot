@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ import discord
 import pytz
 
 from modules.card_training import questions, storage
+from modules.card_training.images import CardArt, build_card_strip
 
 log = logging.getLogger("elixir.card_training")
 
@@ -37,8 +39,15 @@ def _build_question_embed(
     index: int | None = None,
     total: int | None = None,
     daily: bool = False,
-) -> discord.Embed:
-    """Build a Discord embed for a quiz question."""
+) -> tuple[discord.Embed, discord.File | None]:
+    """Build a Discord embed for a quiz question.
+
+    Returns ``(embed, file_or_none)``. When the question references multiple
+    cards (cycle_total, cycle_back, positive_trade), the file is a PNG
+    composite of their icons that the embed displays inline. Single-card
+    questions keep using the direct CDN ``image_url`` and return ``None``
+    for the file.
+    """
     title = "Elixir University"
     if daily:
         title += " | Daily Question"
@@ -49,7 +58,18 @@ def _build_question_embed(
         color=discord.Color.purple(),
     )
 
-    if question.get("image_url"):
+    attachment: discord.File | None = None
+    card_icons = question.get("card_icons") or []
+    if card_icons:
+        png = build_card_strip([
+            CardArt(name=c.get("name", ""), icon_url=c.get("icon_url"))
+            for c in card_icons
+        ])
+        if png:
+            filename = f"quiz_{question.get('question_type', 'cards')}.png"
+            attachment = discord.File(io.BytesIO(png), filename=filename)
+            embed.set_image(url=f"attachment://{filename}")
+    elif question.get("image_url"):
         embed.set_image(url=question["image_url"])
 
     if index is not None and total is not None:
@@ -58,7 +78,7 @@ def _build_question_embed(
         today = _today_chicago()
         embed.set_footer(text=f"Daily Question | {today}")
 
-    return embed
+    return embed, attachment
 
 
 def _build_result_embed(question: dict, user_choice: int, correct: bool) -> discord.Embed:
@@ -157,7 +177,7 @@ class QuizChoiceButton(discord.ui.Button):
         if view.session.current_index < len(view.session.questions):
             # Send result, then next question
             next_q = view.session.questions[view.session.current_index]
-            next_embed = _build_question_embed(
+            next_embed, next_attachment = _build_question_embed(
                 next_q,
                 index=view.session.current_index,
                 total=len(view.session.questions),
@@ -165,7 +185,10 @@ class QuizChoiceButton(discord.ui.Button):
             next_view = QuizQuestionView(next_q, session=view.session)
 
             await interaction.response.edit_message(embed=result_embed, view=None)
-            await interaction.followup.send(embed=next_embed, view=next_view, ephemeral=True)
+            kwargs = {"embed": next_embed, "view": next_view, "ephemeral": True}
+            if next_attachment is not None:
+                kwargs["file"] = next_attachment
+            await interaction.followup.send(**kwargs)
         else:
             # Quiz complete
             try:
@@ -349,10 +372,13 @@ async def start_interactive_quiz(
     session = QuizSession(session_id, quiz_questions)
     first_q = quiz_questions[0]
 
-    embed = _build_question_embed(first_q, index=0, total=len(quiz_questions))
+    embed, attachment = _build_question_embed(first_q, index=0, total=len(quiz_questions))
     view = QuizQuestionView(first_q, session=session)
 
-    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+    kwargs = {"embed": embed, "view": view, "ephemeral": True}
+    if attachment is not None:
+        kwargs["file"] = attachment
+    await interaction.followup.send(**kwargs)
 
 
 async def post_daily_question(channel: discord.TextChannel):
@@ -372,11 +398,14 @@ async def post_daily_question(channel: discord.TextChannel):
         question_json=question_json,
     )
 
-    embed = _build_question_embed(question, daily=True)
+    embed, attachment = _build_question_embed(question, daily=True)
     view = DailyQuestionView(question, session_id)
 
+    kwargs = {"embed": embed, "view": view}
+    if attachment is not None:
+        kwargs["file"] = attachment
     try:
-        message = await channel.send(embed=embed, view=view)
+        message = await channel.send(**kwargs)
     except discord.HTTPException:
         log.exception("Failed to send daily quiz to channel %s", channel.id)
         return None
