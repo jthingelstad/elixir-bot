@@ -311,13 +311,21 @@ async def start_interactive_quiz(
     interaction: discord.Interaction,
     question_count: int,
 ):
-    """Start an interactive quiz session for the user."""
+    """Start an interactive quiz session for the user.
+
+    Question generation runs an LLM call per question for the explanation
+    (see ``modules.card_training.explanations``), so 5 questions can take
+    10-25 seconds. That exceeds Discord's 3-second interaction window, so
+    we defer up front and reply via followup once the set is ready.
+    """
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
     quiz_questions = await asyncio.to_thread(
         questions.generate_quiz_set, question_count,
     )
 
     if not quiz_questions:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "The card catalog is empty. The quiz needs card data to generate questions. "
             "An admin can trigger a card catalog sync.",
             ephemeral=True,
@@ -344,7 +352,7 @@ async def start_interactive_quiz(
     embed = _build_question_embed(first_q, index=0, total=len(quiz_questions))
     view = QuizQuestionView(first_q, session=session)
 
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 async def post_daily_question(channel: discord.TextChannel):
