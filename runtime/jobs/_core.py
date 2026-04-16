@@ -82,8 +82,54 @@ def _player_intel_refresh_minutes() -> int:
 
 PLAYER_INTEL_REFRESH_MINUTES = _player_intel_refresh_minutes()
 PLAYER_INTEL_REFRESH_HOURS = PLAYER_INTEL_REFRESH_MINUTES / 60
-WAR_POLL_MINUTE = int(os.getenv("WAR_POLL_MINUTE", "0"))
-WAR_AWARENESS_MINUTE = int(os.getenv("WAR_AWARENESS_MINUTE", "5"))
+
+
+_FINISH_TIME_MINUTE_RE = re.compile(r"\d{8}T(\d{2})(\d{2})(\d{2})")
+
+
+def _derive_war_anchor_minute() -> int | None:
+    """Read the most recent non-sentinel finishTime from the race log and
+    return its minute-of-hour.
+
+    Supercell stages River Race matchmaking in batches at season roll; the
+    resulting "race close" moment is stable within a season and shifts when
+    seasons roll. The minute component of the latest finishTime is our best
+    proxy for the current season's anchor. Returns None if the log has no
+    completed wars yet (first boot or fresh clan).
+    """
+    try:
+        history = db.get_war_history(n=5)
+    except Exception:
+        log.warning("war-anchor derive: get_war_history failed", exc_info=True)
+        return None
+    for row in history or []:
+        finish = (row.get("finish_time") or "").strip()
+        if not finish or finish.startswith("19691231"):
+            continue
+        match = _FINISH_TIME_MINUTE_RE.match(finish)
+        if match:
+            return int(match.group(2))
+    return None
+
+
+_WAR_ANCHOR_MINUTE = _derive_war_anchor_minute()
+# War-poll fires a couple of minutes AFTER the anchor so the CR API has
+# flushed the state flip before we poll. War-awareness runs 5 min after
+# that, matching the historical :00/:05 cadence.
+_DEFAULT_WAR_POLL_MINUTE = (_WAR_ANCHOR_MINUTE + 2) % 60 if _WAR_ANCHOR_MINUTE is not None else 0
+_DEFAULT_WAR_AWARENESS_MINUTE = (_WAR_ANCHOR_MINUTE + 7) % 60 if _WAR_ANCHOR_MINUTE is not None else 5
+WAR_POLL_MINUTE = int(os.getenv("WAR_POLL_MINUTE", str(_DEFAULT_WAR_POLL_MINUTE)))
+WAR_AWARENESS_MINUTE = int(os.getenv("WAR_AWARENESS_MINUTE", str(_DEFAULT_WAR_AWARENESS_MINUTE)))
+if _WAR_ANCHOR_MINUTE is not None:
+    log.info(
+        "war schedule anchor: last finishTime minute=%02d → war-poll=:%02d war-awareness=:%02d",
+        _WAR_ANCHOR_MINUTE, WAR_POLL_MINUTE, WAR_AWARENESS_MINUTE,
+    )
+else:
+    log.info(
+        "war schedule anchor: no finishTime in race log yet → war-poll=:%02d war-awareness=:%02d (defaults)",
+        WAR_POLL_MINUTE, WAR_AWARENESS_MINUTE,
+    )
 PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "5"))
 PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "1"))
 PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))

@@ -1895,7 +1895,14 @@ def test_activity_registry_has_unique_keys_and_required_fields():
 
 
 def test_activity_registry_exposes_war_and_promotion_visibility():
-    specs = {spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)}
+    # Pin war schedule defaults so the test is stable regardless of what
+    # finishTime history the local DB happens to carry (anchor derivation
+    # now shifts these minutes per season — see #20).
+    with (
+        patch.object(elixir, "WAR_POLL_MINUTE", 0),
+        patch.object(elixir, "WAR_AWARENESS_MINUTE", 5),
+    ):
+        specs = {spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)}
 
     assert "war-poll" in specs
     assert specs["war-poll"]["owner_subagent"] == "river-race"
