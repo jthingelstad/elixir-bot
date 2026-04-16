@@ -1,15 +1,20 @@
 import prompts
 
 from agent.core import _build_system_prompt
+from runtime.emoji import available_emoji_names
 
 
 def _discord_emoji_guidance(*, allow_in_sensitive: bool = False) -> str:
+    names = available_emoji_names()
+    emoji_list = ", ".join(f":{name}:" for name in names) if names else "(none configured)"
     lines = [
-        "Elixir has custom server emoji available in Discord-ready messages.",
-        "If you use one, use the literal :emoji_name: shortcode syntax so it renders in Discord.",
+        "Emoji in Discord-ready messages — use the literal :name: shortcode syntax and only these sources:",
+        f"- Elixir server custom emoji: {emoji_list}. These are the only custom emoji that exist.",
+        "- Standard Unicode emoji shortcodes (e.g. :trophy:, :crossed_swords:, :dragon:) — Discord renders these on display. Or emit the Unicode character directly (🏆, ⚔️, 🐉).",
+        "Do not invent custom emoji names. Shortcodes that match neither list above (e.g. :poap:, :poap_kings:) are stripped before posting.",
     ]
     if not allow_in_sensitive:
-        lines.append("Avoid custom emoji in sensitive, corrective, or serious leadership messages.")
+        lines.append("Avoid emoji in sensitive, corrective, or serious leadership messages.")
     return "\n".join(lines) + "\n\n"
 
 

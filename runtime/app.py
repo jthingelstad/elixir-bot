@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 
 import discord
+import emoji
 from discord.ext import commands
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -423,18 +424,32 @@ def _chunk_discord_text(text: str, limit: int = 2000) -> list[str]:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _resolve_custom_emoji(text: str, guild) -> str:
-    """Replace :emoji_name: shortcodes with <:emoji_name:id> for guild custom emoji."""
-    if not guild or not guild.emojis:
-        return text
-    emoji_map = {e.name: e for e in guild.emojis}
+    """Rewrite custom-emoji shortcodes and strip ones that would leak as raw text.
+
+    Three classes of `:name:` shortcode in a Discord message sent via the API:
+      1. Matches a guild custom emoji → rewrite to ``<:name:id>`` so Discord renders it.
+      2. Matches a standard Unicode shortcode (CLDR) → leave alone; the client
+         renders `:dragon:` → 🐉 on display even though the stored message is literal.
+      3. Neither → strip, because the model hallucinated a name
+         (e.g. ``:poap:``, ``:poap_kings:``) and leaving it leaks raw markup.
+    """
+    emoji_map = {e.name: e for e in (guild.emojis if guild else [])}
+
     def _replace(m):
         name = m.group(1)
-        e = emoji_map.get(name)
-        if e:
-            prefix = "a" if e.animated else ""
-            return f"<{prefix}:{e.name}:{e.id}>"
-        return m.group(0)
-    return re.sub(r":([a-zA-Z0-9_]{2,32}):", _replace, text)
+        custom = emoji_map.get(name)
+        if custom:
+            prefix = "a" if custom.animated else ""
+            return f"<{prefix}:{custom.name}:{custom.id}>"
+        if emoji.emojize(f":{name}:", language="alias") != f":{name}:" \
+                or emoji.emojize(f":{name}:") != f":{name}:":
+            return m.group(0)
+        log.info("emoji shortcode stripped: :%s: is not a guild custom emoji or Unicode shortcode", name)
+        return ""
+
+    # Require the name to start with a letter so timestamps like "10:30:45" are untouched.
+    cleaned = re.sub(r":([a-zA-Z][a-zA-Z0-9_]{1,31}):", _replace, text)
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
 
 _POST_MERGE_STOPWORDS = {
