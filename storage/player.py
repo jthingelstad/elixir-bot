@@ -742,19 +742,31 @@ def _recompute_clan_daily_battle_rollups(battle_dates=None, conn=None):
             conn.close()
 
 
-def _latest_ladder_ranked_battle_time(member_id: int, conn=None):
+# Modes we signal on separately. ``ladder`` is Trophy Road (is_ladder=1),
+# ``ranked`` is Path of Legends (is_ranked=1). Combining them into one streak
+# signal (pre-v4.7) hid the mode from the awareness agent — "hot in ranked
+# climbing toward UC" reads nothing like "ladder push on Trophy Road." See #22.
+_BATTLE_MODE_PREDICATES = {
+    "ladder": "is_ladder = 1",
+    "ranked": "is_ranked = 1",
+}
+
+
+def _latest_battle_time_for_mode(member_id: int, mode: str, conn=None):
+    predicate = _BATTLE_MODE_PREDICATES[mode]
     row = conn.execute(
-        "SELECT MAX(battle_time) AS battle_time "
-        "FROM member_battle_facts WHERE member_id = ? AND (is_ladder = 1 OR is_ranked = 1)",
+        f"SELECT MAX(battle_time) AS battle_time "
+        f"FROM member_battle_facts WHERE member_id = ? AND {predicate}",
         (member_id,),
     ).fetchone()
     return row["battle_time"] if row else None
 
 
-def _current_ladder_ranked_streak(member_id: int, conn=None) -> dict:
+def _current_streak_for_mode(member_id: int, mode: str, conn=None) -> dict:
+    predicate = _BATTLE_MODE_PREDICATES[mode]
     rows = conn.execute(
-        "SELECT outcome FROM member_battle_facts "
-        "WHERE member_id = ? AND (is_ladder = 1 OR is_ranked = 1) "
+        f"SELECT outcome FROM member_battle_facts "
+        f"WHERE member_id = ? AND {predicate} "
         "ORDER BY battle_time DESC LIMIT 20",
         (member_id,),
     ).fetchall()
@@ -771,79 +783,95 @@ def _current_ladder_ranked_streak(member_id: int, conn=None) -> dict:
     }
 
 
-def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, previous_streak: dict, previous_latest_battle_time: str | None, conn=None) -> list[dict]:
-    if not previous_latest_battle_time:
-        return []
+def _capture_previous_battle_state(member_id: int, conn=None) -> dict:
+    """Snapshot each mode's latest battle_time + streak before we ingest a
+    fresh battle log. Used by _detect_battle_pulse_signals to avoid re-firing
+    on streaks that were already hot."""
+    return {
+        mode: {
+            "latest_battle_time": _latest_battle_time_for_mode(member_id, mode, conn=conn),
+            "streak": _current_streak_for_mode(member_id, mode, conn=conn),
+        }
+        for mode in _BATTLE_MODE_PREDICATES
+    }
 
-    current_form = conn.execute(
-        "SELECT wins, losses, draws, sample_size, current_streak, current_streak_type, "
-        "win_rate, avg_trophy_change, form_label, summary "
-        "FROM member_recent_form WHERE member_id = ? AND scope = 'ladder_ranked_10'",
-        (member_id,),
-    ).fetchone()
-    new_rows = conn.execute(
-        "SELECT battle_time, battle_type, game_mode_name, outcome, trophy_change, starting_trophies, is_ranked "
-        "FROM member_battle_facts "
-        "WHERE member_id = ? AND (is_ladder = 1 OR is_ranked = 1) AND battle_time > ? "
-        "ORDER BY battle_time DESC",
-        (member_id, previous_latest_battle_time),
-    ).fetchall()
-    if not new_rows:
-        return []
 
+def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, previous_state: dict, conn=None) -> list[dict]:
+    """Emit hot-streak and trophy-push signals per battle mode.
+
+    v4.7: split from a single ladder_ranked_10 scope into per-mode signals so
+    the awareness agent can post ranked (Path of Legends) and ladder (Trophy
+    Road) moments with the right voice. See #22.
+    """
     signals = []
-    current_streak = dict(current_form) if current_form else _current_ladder_ranked_streak(member_id, conn=conn)
-    previous_count = int(previous_streak.get("current_streak") or 0)
-    previous_type = previous_streak.get("current_streak_type")
-    if (
-        current_streak.get("current_streak_type") == "W"
-        and int(current_streak.get("current_streak") or 0) >= 4
-        and not (previous_type == "W" and previous_count >= 4)
-    ):
-        signals.append({
-            "type": "battle_hot_streak",
-            "tag": tag,
-            "name": name,
-            "streak": int(current_streak.get("current_streak") or 0),
-            "sample_size": current_streak.get("sample_size"),
-            "wins": current_streak.get("wins"),
-            "losses": current_streak.get("losses"),
-            "draws": current_streak.get("draws"),
-            "win_rate": current_streak.get("win_rate"),
-            "avg_trophy_change": current_streak.get("avg_trophy_change"),
-            "form_label": current_streak.get("form_label"),
-            "summary": current_streak.get("summary"),
-            "new_battle_count": len(new_rows),
-            "latest_battle_type": new_rows[0]["battle_type"],
-            "latest_mode_name": new_rows[0]["game_mode_name"],
-        })
+    for mode, predicate in _BATTLE_MODE_PREDICATES.items():
+        prev = previous_state.get(mode) or {}
+        previous_latest = prev.get("latest_battle_time")
+        previous_streak = prev.get("streak") or {}
+        if not previous_latest:
+            # No prior battles in this mode — skip. Signals require a baseline.
+            continue
 
-    trophy_rows = [row for row in new_rows if row["trophy_change"] is not None and row["starting_trophies"] is not None]
-    trophy_delta = int(sum((row["trophy_change"] or 0) for row in trophy_rows))
-    if len(trophy_rows) >= 3 and trophy_delta >= 100:
-        chronological = list(reversed(trophy_rows))
-        from_trophies = chronological[0]["starting_trophies"]
-        newest = trophy_rows[0]
-        to_trophies = int(newest["starting_trophies"] + newest["trophy_change"])
-        wins = sum(1 for row in new_rows if row["outcome"] == "W")
-        losses = sum(1 for row in new_rows if row["outcome"] == "L")
-        draws = sum(1 for row in new_rows if row["outcome"] == "D")
-        signals.append({
-            "type": "battle_trophy_push",
-            "tag": tag,
-            "name": name,
-            "battle_count": len(trophy_rows),
-            "wins": wins,
-            "losses": losses,
-            "draws": draws,
-            "trophy_delta": trophy_delta,
-            "from_trophies": from_trophies,
-            "to_trophies": to_trophies,
-            "ranked_battle_count": sum(1 for row in trophy_rows if row["is_ranked"]),
-            "trophies_per_battle": round(trophy_delta / max(1, len(trophy_rows)), 1),
-            "latest_battle_type": new_rows[0]["battle_type"],
-            "latest_mode_name": new_rows[0]["game_mode_name"],
-        })
+        new_rows = conn.execute(
+            f"SELECT battle_time, battle_type, game_mode_name, outcome, "
+            f"trophy_change, starting_trophies, is_ranked, is_ladder "
+            f"FROM member_battle_facts "
+            f"WHERE member_id = ? AND {predicate} AND battle_time > ? "
+            "ORDER BY battle_time DESC",
+            (member_id, previous_latest),
+        ).fetchall()
+        if not new_rows:
+            continue
+
+        current_streak = _current_streak_for_mode(member_id, mode, conn=conn)
+        previous_count = int(previous_streak.get("current_streak") or 0)
+        previous_type = previous_streak.get("current_streak_type")
+
+        if (
+            current_streak.get("current_streak_type") == "W"
+            and int(current_streak.get("current_streak") or 0) >= 4
+            and not (previous_type == "W" and previous_count >= 4)
+        ):
+            signals.append({
+                "type": "battle_hot_streak",
+                "mode": mode,
+                "tag": tag,
+                "name": name,
+                "streak": int(current_streak.get("current_streak") or 0),
+                "new_battle_count": len(new_rows),
+                "latest_battle_type": new_rows[0]["battle_type"],
+                "latest_mode_name": new_rows[0]["game_mode_name"],
+            })
+
+        trophy_rows = [
+            row for row in new_rows
+            if row["trophy_change"] is not None and row["starting_trophies"] is not None
+        ]
+        trophy_delta = int(sum((row["trophy_change"] or 0) for row in trophy_rows))
+        if len(trophy_rows) >= 3 and trophy_delta >= 100:
+            chronological = list(reversed(trophy_rows))
+            from_trophies = chronological[0]["starting_trophies"]
+            newest = trophy_rows[0]
+            to_trophies = int(newest["starting_trophies"] + newest["trophy_change"])
+            wins = sum(1 for row in new_rows if row["outcome"] == "W")
+            losses = sum(1 for row in new_rows if row["outcome"] == "L")
+            draws = sum(1 for row in new_rows if row["outcome"] == "D")
+            signals.append({
+                "type": "battle_trophy_push",
+                "mode": mode,
+                "tag": tag,
+                "name": name,
+                "battle_count": len(trophy_rows),
+                "wins": wins,
+                "losses": losses,
+                "draws": draws,
+                "trophy_delta": trophy_delta,
+                "from_trophies": from_trophies,
+                "to_trophies": to_trophies,
+                "trophies_per_battle": round(trophy_delta / max(1, len(trophy_rows)), 1),
+                "latest_battle_type": new_rows[0]["battle_type"],
+                "latest_mode_name": new_rows[0]["game_mode_name"],
+            })
     return signals
 
 
@@ -851,8 +879,10 @@ def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, pre
 def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     tag = _canon_tag(player_tag)
     member_id = _ensure_member(conn, tag, status=None)
-    previous_streak = _current_ladder_ranked_streak(member_id, conn=conn)
-    previous_latest_ladder_ranked_battle_time = _latest_ladder_ranked_battle_time(member_id, conn=conn)
+    # v4.7 (#22): capture per-mode state (ladder, ranked) so we can emit
+    # mode-specific streak / push signals and let the awareness agent post
+    # Trophy Road vs Path of Legends moments with the right voice.
+    previous_battle_state = _capture_previous_battle_state(member_id, conn=conn)
     _store_raw_payload(conn, "player_battlelog", _tag_key(tag), battle_log)
     latest_name = None
     affected_dates = set()
@@ -946,8 +976,7 @@ def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Opt
         member_id,
         tag,
         name,
-        previous_streak,
-        previous_latest_ladder_ranked_battle_time,
+        previous_battle_state,
         conn=conn,
     )
     conn.commit()
