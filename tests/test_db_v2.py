@@ -1513,7 +1513,7 @@ def test_snapshot_player_profile_emits_path_of_legend_promotion_signal():
                 "name": "King Levy",
                 "currentDeck": [],
                 "cards": [],
-                "currentPathOfLegendSeasonResult": {"leagueNumber": 7, "trophies": 1600, "rank": 9000},
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 7, "trophies": 1600, "rank": None},
             },
             conn=conn,
         )
@@ -1523,7 +1523,7 @@ def test_snapshot_player_profile_emits_path_of_legend_promotion_signal():
                 "name": "King Levy",
                 "currentDeck": [],
                 "cards": [],
-                "currentPathOfLegendSeasonResult": {"leagueNumber": 8, "trophies": 1800, "rank": 5000},
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 8, "trophies": 1800, "rank": None},
             },
             conn=conn,
         )
@@ -1538,8 +1538,140 @@ def test_snapshot_player_profile_emits_path_of_legend_promotion_signal():
         "old_league_number": 7,
         "new_league_number": 8,
         "trophies": 1800,
-        "rank": 5000,
+        "rank": None,
     }]
+
+
+def test_snapshot_player_profile_emits_path_of_legend_demotion_signal():
+    """v4.7 #23: parity with promotion — demotions fire too."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 8, "trophies": 1600, "rank": None},
+            },
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 7, "trophies": 1400, "rank": None},
+            },
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+    demotions = [s for s in signals if s["type"] == "path_of_legend_demotion"]
+    assert len(demotions) == 1
+    assert demotions[0]["old_league_number"] == 8
+    assert demotions[0]["new_league_number"] == 7
+
+
+def test_snapshot_player_profile_emits_ultimate_champion_reached_signal():
+    """v4.7 #24: league 10 (UC) is a distinct season-long milestone."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 9, "trophies": 2400, "rank": None},
+            },
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 10, "trophies": 50, "rank": None},
+            },
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+    types = [s["type"] for s in signals]
+    assert "path_of_legend_promotion" in types
+    assert "ultimate_champion_reached" in types
+
+
+def test_snapshot_player_profile_does_not_emit_uc_for_8_to_9():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 8, "trophies": 1600, "rank": None},
+            },
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 9, "trophies": 400, "rank": None},
+            },
+            conn=conn,
+        )
+    finally:
+        conn.close()
+    assert "ultimate_champion_reached" not in [s["type"] for s in signals]
+
+
+def test_snapshot_player_profile_emits_global_rank_attained_signal():
+    """v4.7 #25: breaking into top-1000 global rank is newsworthy."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 10, "trophies": 2400, "rank": None},
+            },
+            conn=conn,
+        )
+        first_break = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 10, "trophies": 2600, "rank": 742},
+            },
+            conn=conn,
+        )
+        improve = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 10, "trophies": 2800, "rank": 500},
+            },
+            conn=conn,
+        )
+        regress = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+                "currentPathOfLegendSeasonResult": {"leagueNumber": 10, "trophies": 2700, "rank": 800},
+            },
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+    assert any(s["type"] == "path_of_legend_global_rank_attained" for s in first_break)
+    assert any(s["type"] == "path_of_legend_global_rank_attained" for s in improve)
+    # Regression (rank got worse) — no signal
+    assert not any(s["type"] == "path_of_legend_global_rank_attained" for s in regress)
 
 
 def test_snapshot_player_profile_treats_first_load_as_baseline_discovery():
