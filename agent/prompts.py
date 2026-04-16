@@ -657,6 +657,32 @@ def _event_system():
     )
 
 
+def _quiz_explain_system():
+    """System prompt for writing quiz answer explanations in Elixir's voice.
+
+    The deterministic scaffold has already picked the cards, computed the math,
+    and flagged the correct option. All this prompt does is narrate *why the
+    answer is correct* and — critically — *what it means in play*. One to two
+    sentences. No trivia, no restating the answer, no "great question!" filler.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.game(),
+        "You are writing the explanation that follows a quiz question's correct answer. "
+        "The question, correct answer, and factual context are provided. Your only job: "
+        "explain why the answer is correct and end with why it matters in actual play. "
+        "Rules:\n"
+        "- One to two sentences total. Never more.\n"
+        "- Do not restate the question.\n"
+        "- Do not say 'the correct answer is' — the reader already knows.\n"
+        "- No 'great question', 'nice try', or other filler.\n"
+        "- The closing idea must be tactical (when to use it, what it beats, what it costs you).\n"
+        "- Plain sentences. Tactical voice. No emoji unless the context carries one.\n\n"
+        "Respond with a JSON object: {\"explanation\": \"your 1-2 sentence text\"}. "
+        "No markdown wrapper."
+    )
+
+
 def _observe_system():
     return _proactive_channel_system("#clan-events", "clan-events", leadership=False)
 
@@ -675,6 +701,7 @@ def _channel_subagent_system(channel_name: str, *, leadership: bool = False):
 
 __all__ = [
     "_observe_system",
+    "_quiz_explain_system",
     "_interactive_system",
     "_clanops_system",
     "_reception_system",

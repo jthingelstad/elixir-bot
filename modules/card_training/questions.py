@@ -10,11 +10,20 @@ All question types produce a standard dict:
     "question_type": str,
     "card_ids": [int],
 }
+
+v4.7: retired rarity / card_type / evo-mode / champion-ID questions (low
+tactical value). Kept elixir_cost + upgraded cost_comparison. Added three
+tactically meaningful generators: positive_trade (curated scenarios),
+cycle_total (4-card rotation cost), cycle_back (elixir to cycle).
+Explanations are rewritten through a small LLM call in Elixir's voice,
+with a deterministic fallback so the quiz never breaks.
 """
 
 import logging
 import random
 
+from modules.card_training.explanations import explain_or_fallback
+from modules.card_training.trade_scenarios import TRADE_SCENARIOS, TradeScenario
 from storage.card_catalog import get_random_cards, lookup_cards
 
 log = logging.getLogger("elixir.card_training.questions")
@@ -25,7 +34,6 @@ _PLAYABLE_TYPES = ("troop", "building", "spell")
 
 def _random_playable_cards(count: int, *, rarity=None, exclude_ids=None, conn=None) -> list[dict]:
     """Get random cards excluding tower troops."""
-    # Fetch extra to account for possible tower troop filtering
     cards = get_random_cards(count + 5, rarity=rarity, exclude_ids=exclude_ids, conn=conn)
     cards = [c for c in cards if c["card_type"] in _PLAYABLE_TYPES]
     return cards[:count]
@@ -45,21 +53,20 @@ def _shuffle_choices(correct: str, distractors: list[str]) -> tuple[list[str], i
     return shuffled, correct_index
 
 
-def _rarity_display(rarity: str) -> str:
-    return (rarity or "unknown").capitalize()
-
-
 def _type_display(card_type: str) -> str:
     return {
-        "troop": "Troop",
-        "building": "Building",
-        "spell": "Spell",
-        "tower_troop": "Tower Troop",
-    }.get(card_type, card_type.replace("_", " ").title())
+        "troop": "troop",
+        "building": "building",
+        "spell": "spell",
+    }.get(card_type, card_type.replace("_", " ").lower())
 
 
-def _mode_display(mode_label: str | None) -> str:
-    return mode_label or "Neither"
+def _format_trade_delta(value: int) -> str:
+    """Render a trade value as '+2', '+1', 'Even', '-1', '-2'."""
+    if value == 0:
+        return "Even"
+    sign = "+" if value > 0 else "-"
+    return f"{sign}{abs(value)}"
 
 
 # ---------------------------------------------------------------------------
@@ -67,20 +74,21 @@ def _mode_display(mode_label: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 def generate_elixir_cost_question(conn=None) -> dict | None:
-    """What is the elixir cost of this card? (show image)"""
+    """What is the elixir cost of this card? (show image)
+
+    Tactical value: cost literacy is the foundation of every other decision.
+    """
     cards = _random_playable_cards(5, conn=conn)
     if not cards:
         return None
 
     card = cards[0]
     correct = str(card["elixir_cost"])
-
-    # Build plausible distractors from nearby costs
     cost = card["elixir_cost"]
+
     possible = [str(c) for c in range(max(1, cost - 2), cost + 3) if c != cost and 1 <= c <= 10]
     random.shuffle(possible)
     distractors = possible[:3]
-    # Pad if needed
     while len(distractors) < 3:
         available = [str(c) for c in range(1, 11) if str(c) != correct and str(c) not in distractors]
         if not available:
@@ -89,181 +97,290 @@ def generate_elixir_cost_question(conn=None) -> dict | None:
 
     choices, correct_index = _shuffle_choices(correct, distractors)
 
+    fallback = (
+        f"{card['name']} costs {cost} elixir — remember this when you're deciding "
+        f"whether to answer it at the bridge or let it in for a defensive counter."
+    )
+    explanation = explain_or_fallback(
+        question_text=f"What is the elixir cost of {card['name']}?",
+        correct_answer=f"{cost} elixir",
+        context=(
+            f"Card: {card['name']} ({_type_display(card['card_type'])}, "
+            f"{card['rarity']}). Cost: {cost} elixir."
+        ),
+        fallback=fallback,
+    )
+
     return {
         "question_text": f"What is the elixir cost of **{card['name']}**?",
         "image_url": card.get("icon_url"),
         "choices": choices,
         "correct_index": correct_index,
-        "explanation": f"{card['name']} costs {cost} elixir. It's a {_rarity_display(card['rarity'])} {_type_display(card['card_type'])}.",
+        "explanation": explanation,
         "question_type": "elixir_cost",
         "card_ids": [card["card_id"]],
     }
 
 
 def generate_cost_comparison_question(conn=None) -> dict | None:
-    """Which of these cards costs the most (or least) elixir?"""
-    cards = _random_playable_cards(20, conn=conn)
+    """Which of these costs the most/least elixir?
+
+    v4.7: filters to 4 cards of the same type within a 3-elixir cost band so
+    choices are discriminating instead of trivially obvious. Compares apples
+    to apples (e.g. four spells in the 2–5 range).
+    """
+    pool_size = 40
+    cards = _random_playable_cards(pool_size, conn=conn)
     if len(cards) < 4:
         return None
 
-    # Pick 4 cards with different costs when possible
-    by_cost = {}
+    # Group by card_type, pick a type that has >=4 distinct-cost cards in some
+    # 3-elixir window.
+    by_type: dict[str, list[dict]] = {}
     for c in cards:
+        by_type.setdefault(c["card_type"], []).append(c)
+
+    candidates: list[tuple[str, list[dict]]] = []
+    for card_type, group in by_type.items():
+        if len(group) < 4:
+            continue
+        costs = sorted({c["elixir_cost"] for c in group})
+        # Find a 3-elixir window with >=4 distinct costs (4 real choices)
+        for window_start in costs:
+            window_costs = [c for c in costs if window_start <= c <= window_start + 3]
+            if len(window_costs) >= 4:
+                cards_in_window = [c for c in group if c["elixir_cost"] in window_costs]
+                if len({c["elixir_cost"] for c in cards_in_window}) >= 4:
+                    candidates.append((card_type, cards_in_window))
+                    break
+
+    if not candidates:
+        return None
+
+    card_type, pool = random.choice(candidates)
+
+    by_cost: dict[int, list[dict]] = {}
+    for c in pool:
         by_cost.setdefault(c["elixir_cost"], []).append(c)
 
-    selected = []
-    costs_used = set()
+    selected: list[dict] = []
     for cost in sorted(by_cost.keys()):
         if len(selected) >= 4:
             break
-        card = random.choice(by_cost[cost])
-        selected.append(card)
-        costs_used.add(cost)
-
-    # Fill remaining from leftovers if needed
-    if len(selected) < 4:
-        remaining = [c for c in cards if c["card_id"] not in {s["card_id"] for s in selected}]
-        random.shuffle(remaining)
-        selected.extend(remaining[: 4 - len(selected)])
+        selected.append(random.choice(by_cost[cost]))
 
     if len(selected) < 4:
         return None
-
     selected = selected[:4]
 
-    # Decide most or least
     ask_most = random.choice([True, False])
-    if ask_most:
-        target = max(selected, key=lambda c: c["elixir_cost"])
-        word = "most"
-    else:
-        target = min(selected, key=lambda c: c["elixir_cost"])
-        word = "least"
+    target = max(selected, key=lambda c: c["elixir_cost"]) if ask_most else min(selected, key=lambda c: c["elixir_cost"])
+    word = "most" if ask_most else "least"
 
     choices = [c["name"] for c in selected]
-    correct_name = target["name"]
     random.shuffle(choices)
-    correct_index = choices.index(correct_name)
+    correct_index = choices.index(target["name"])
+
+    type_plural = {"troop": "troops", "building": "buildings", "spell": "spells"}.get(card_type, card_type + "s")
+    fallback = (
+        f"{target['name']} costs {target['elixir_cost']} elixir — the {word} "
+        f"of the four. Cost discipline between {type_plural} shapes your cycle "
+        f"and your ability to answer pressure cheaply."
+    )
+    details = ", ".join(f"{c['name']} ({c['elixir_cost']})" for c in selected)
+    explanation = explain_or_fallback(
+        question_text=f"Which of these {type_plural} costs the {word} elixir?",
+        correct_answer=f"{target['name']} at {target['elixir_cost']} elixir",
+        context=f"Choices: {details}. Target: {target['name']} ({target['elixir_cost']}).",
+        fallback=fallback,
+    )
 
     return {
-        "question_text": f"Which of these cards costs the **{word}** elixir?",
+        "question_text": f"Which of these **{type_plural}** costs the **{word}** elixir?",
         "image_url": None,
         "result_image_url": target.get("icon_url"),
         "choices": choices,
         "correct_index": correct_index,
-        "explanation": f"{target['name']} costs {target['elixir_cost']} elixir — the {word} of these four.",
+        "explanation": explanation,
         "question_type": "cost_comparison",
         "card_ids": [c["card_id"] for c in selected],
     }
 
 
-def generate_rarity_question(conn=None) -> dict | None:
-    """What rarity is this card? (show image)"""
-    cards = _random_playable_cards(1, conn=conn)
-    if not cards:
-        return None
+def generate_positive_trade_question(conn=None) -> dict | None:
+    """Given a curated trade scenario, is it +2 / +1 / Even / -1 / -2?
 
-    card = cards[0]
-    correct = _rarity_display(card["rarity"])
+    The seed list lives in ``trade_scenarios.py``. Math is deterministic:
+    opponent elixir minus your elixir. The LLM only writes the explanation.
+    """
+    scenario: TradeScenario = random.choice(TRADE_SCENARIOS)
+    trade_value = scenario.trade_value  # int in range roughly -3..+3
+    # Clamp display to ±2 for a clean 5-option world; larger trades collapse.
+    display_value = max(-2, min(2, trade_value))
 
-    all_rarities = ["Common", "Rare", "Epic", "Legendary", "Champion"]
-    distractors = [r for r in all_rarities if r != correct]
-    random.shuffle(distractors)
-    distractors = distractors[:3]
-
-    choices, correct_index = _shuffle_choices(correct, distractors)
-
-    return {
-        "question_text": f"What rarity is **{card['name']}**?",
-        "image_url": card.get("icon_url"),
-        "choices": choices,
-        "correct_index": correct_index,
-        "explanation": f"{card['name']} is a {correct} {_type_display(card['card_type'])}.",
-        "question_type": "rarity",
-        "card_ids": [card["card_id"]],
-    }
-
-
-def generate_card_type_question(conn=None) -> dict | None:
-    """Is this card a troop, spell, or building? (show image)"""
-    cards = _random_playable_cards(5, conn=conn)
-    if not cards:
-        return None
-
-    card = cards[0]
-    correct = _type_display(card["card_type"])
-
-    all_types = ["Troop", "Building", "Spell"]
-    distractors = [t for t in all_types if t != correct]
-    random.shuffle(distractors)
-    distractors = distractors[:3]
+    all_options = ["+2", "+1", "Even", "-1", "-2"]
+    correct = _format_trade_delta(display_value)
+    distractors = [o for o in all_options if o != correct][:3]
 
     choices, correct_index = _shuffle_choices(correct, distractors)
 
-    return {
-        "question_text": f"What type of card is **{card['name']}**?",
-        "image_url": card.get("icon_url"),
-        "choices": choices,
-        "correct_index": correct_index,
-        "explanation": f"{card['name']} is a {_rarity_display(card['rarity'])} {correct}.",
-        "question_type": "card_type",
-        "card_ids": [card["card_id"]],
-    }
+    your_desc = " + ".join(f"{c.name} ({c.cost})" for c in scenario.your_cards)
+    opp_desc = " + ".join(f"{c.name} ({c.cost})" for c in scenario.opponent_cards)
+    your_total = scenario.your_total
+    opp_total = scenario.opponent_total
+    raw_value = scenario.trade_value
 
+    if raw_value > 0:
+        fallback_reason = f"You spent {your_total} to answer {opp_total}, banking {raw_value} elixir"
+    elif raw_value < 0:
+        fallback_reason = f"You spent {your_total} for only {opp_total} of value, losing {abs(raw_value)} elixir"
+    else:
+        fallback_reason = f"You spent {your_total} to answer {opp_total} — a clean even trade"
 
-def generate_evolution_question(conn=None) -> dict | None:
-    """Does this card support Evo, Hero, both, or neither?"""
-    cards = _random_playable_cards(5, conn=conn)
-    if not cards:
-        return None
+    fallback = (
+        f"{fallback_reason}. Good trade habits compound over a match — small "
+        f"elixir wins are what let you open a counter-push."
+    )
 
-    card = cards[0]
-    correct = _mode_display(card.get("mode_label"))
+    question_text = (
+        f"**Trade math.** {scenario.scenario_text} Your cost: {your_total}. "
+        f"Opponent's cost: {opp_total}. Is this trade…"
+    )
 
-    all_modes = ["Evo", "Hero", "Evo + Hero", "Neither"]
-    distractors = [m for m in all_modes if m != correct]
-    random.shuffle(distractors)
-    distractors = distractors[:3]
-
-    choices, correct_index = _shuffle_choices(correct, distractors)
-
-    return {
-        "question_text": f"Does **{card['name']}** support Evo, Hero, both, or neither?",
-        "image_url": card.get("icon_url"),
-        "choices": choices,
-        "correct_index": correct_index,
-        "explanation": f"{card['name']} supports: {correct}." if correct != "Neither" else f"{card['name']} does not have Evo or Hero capability.",
-        "question_type": "evolution_mode",
-        "card_ids": [card["card_id"]],
-    }
-
-
-def generate_champion_identification_question(conn=None) -> dict | None:
-    """Which of these is a Champion?"""
-    champions = lookup_cards(rarity="champion", limit=10, conn=conn)
-    non_champions = _random_playable_cards(10, conn=conn)
-    non_champions = [c for c in non_champions if c["rarity"] != "champion"]
-
-    if not champions or len(non_champions) < 3:
-        return None
-
-    champion = random.choice(champions)
-    random.shuffle(non_champions)
-    others = non_champions[:3]
-
-    choices = [champion["name"]] + [c["name"] for c in others]
-    random.shuffle(choices)
-    correct_index = choices.index(champion["name"])
+    explanation = explain_or_fallback(
+        question_text=question_text,
+        correct_answer=correct,
+        context=(
+            f"You: {your_desc} totaling {your_total}. "
+            f"Opponent: {opp_desc} totaling {opp_total}. "
+            f"Raw trade value: {raw_value:+d} (clamped to {display_value:+d} for the answer)."
+        ),
+        fallback=fallback,
+    )
 
     return {
-        "question_text": "Which of these cards is a **Champion**?",
+        "question_text": question_text,
         "image_url": None,
-        "result_image_url": champion.get("icon_url"),
         "choices": choices,
         "correct_index": correct_index,
-        "explanation": f"{champion['name']} is a Champion — Champions are the rarest cards and have unique abilities that activate during battle.",
-        "question_type": "champion_id",
-        "card_ids": [champion["card_id"]] + [c["card_id"] for c in others],
+        "explanation": explanation,
+        "question_type": "positive_trade",
+        "card_ids": [],
+    }
+
+
+def generate_cycle_total_question(conn=None) -> dict | None:
+    """Cost total for a 4-card rotation.
+
+    Tactical value: knowing your deck's average cycle cost tells you
+    whether you can match opponent pressure without bleeding towers.
+    """
+    cards = _random_playable_cards(10, conn=conn)
+    if len(cards) < 4:
+        return None
+
+    rotation = random.sample(cards, 4)
+    total = sum(c["elixir_cost"] for c in rotation)
+    correct = str(total)
+
+    distractors_pool = {total - 2, total - 1, total + 1, total + 2}
+    distractors_pool.discard(total)
+    distractors = [str(d) for d in distractors_pool if d > 0]
+    random.shuffle(distractors)
+    distractors = distractors[:3]
+
+    choices, correct_index = _shuffle_choices(correct, distractors)
+
+    rotation_desc = ", ".join(f"{c['name']} ({c['elixir_cost']})" for c in rotation)
+    fallback = (
+        f"{' + '.join(str(c['elixir_cost']) for c in rotation)} = {total}. "
+        f"A rotation in the low-mid teens keeps you flexible; much more "
+        f"and you'll lose cycle races against cheaper decks."
+    )
+    explanation = explain_or_fallback(
+        question_text=f"Total elixir to play all four: {rotation_desc}?",
+        correct_answer=f"{total} elixir",
+        context=f"Cards: {rotation_desc}. Sum: {total}.",
+        fallback=fallback,
+    )
+
+    return {
+        "question_text": (
+            f"**Rotation cost.** You play all four of these in sequence: "
+            f"{rotation_desc}. What is the total elixir spent?"
+        ),
+        "image_url": None,
+        "choices": choices,
+        "correct_index": correct_index,
+        "explanation": explanation,
+        "question_type": "cycle_total",
+        "card_ids": [c["card_id"] for c in rotation],
+    }
+
+
+def generate_cycle_back_question(conn=None) -> dict | None:
+    """Cycle math: given a 4-card rotation A-B-C-D, how much elixir to
+    cycle back to A? (Answer: B + C + D.)
+
+    Tactical value: this is the exact math every player does before
+    committing to a big win-condition push.
+    """
+    cards = _random_playable_cards(10, conn=conn)
+    if len(cards) < 4:
+        return None
+
+    # Randomize which card is the "key" (the one you want to cycle back to)
+    rotation = random.sample(cards, 4)
+    key_index = random.randrange(4)
+    others = [c for i, c in enumerate(rotation) if i != key_index]
+    cycle_cost = sum(c["elixir_cost"] for c in others)
+    correct = str(cycle_cost)
+
+    distractors_pool = {
+        cycle_cost - 2,
+        cycle_cost - 1,
+        cycle_cost + 1,
+        cycle_cost + 2,
+        sum(c["elixir_cost"] for c in rotation),  # includes the key itself — tempting wrong
+    }
+    distractors_pool.discard(cycle_cost)
+    distractors = [str(d) for d in distractors_pool if d > 0]
+    random.shuffle(distractors)
+    distractors = distractors[:3]
+
+    choices, correct_index = _shuffle_choices(correct, distractors)
+
+    key_card = rotation[key_index]
+    deck_desc = ", ".join(f"{c['name']} ({c['elixir_cost']})" for c in rotation)
+    others_desc = " + ".join(str(c["elixir_cost"]) for c in others)
+    fallback = (
+        f"Cycling back to {key_card['name']} means playing the other three: "
+        f"{others_desc} = {cycle_cost}. Knowing this lets you time your "
+        f"win-condition pushes around the opponent's answers."
+    )
+    explanation = explain_or_fallback(
+        question_text=f"Cycle cost back to {key_card['name']} in {deck_desc}?",
+        correct_answer=f"{cycle_cost} elixir",
+        context=(
+            f"Deck rotation: {deck_desc}. Key card: {key_card['name']} "
+            f"(cost {key_card['elixir_cost']}). "
+            f"To cycle back, play the other three: {others_desc} = {cycle_cost}."
+        ),
+        fallback=fallback,
+    )
+
+    return {
+        "question_text": (
+            f"**Cycle math.** Your rotation is {deck_desc}. "
+            f"You just played **{key_card['name']}**. How much elixir do you "
+            f"need to spend to cycle back to it?"
+        ),
+        "image_url": None,
+        "choices": choices,
+        "correct_index": correct_index,
+        "explanation": explanation,
+        "question_type": "cycle_back",
+        "card_ids": [c["card_id"] for c in rotation],
     }
 
 
@@ -274,10 +391,9 @@ def generate_champion_identification_question(conn=None) -> dict | None:
 _GENERATORS = [
     generate_elixir_cost_question,
     generate_cost_comparison_question,
-    generate_rarity_question,
-    generate_card_type_question,
-    generate_evolution_question,
-    generate_champion_identification_question,
+    generate_positive_trade_question,
+    generate_cycle_total_question,
+    generate_cycle_back_question,
 ]
 
 
@@ -299,7 +415,6 @@ def generate_quiz_set(count: int, conn=None) -> list[dict]:
     used_card_ids = set()
 
     for _ in range(count):
-        # Prefer question types not yet used
         generators = list(_GENERATORS)
         unused_types = [g for g in generators if g.__name__ not in used_types]
         if unused_types:
@@ -312,10 +427,8 @@ def generate_quiz_set(count: int, conn=None) -> list[dict]:
         for gen in order:
             q = gen(conn=conn)
             if q:
-                # Mild dedup: skip if the exact same primary card was already used
                 primary_card = q["card_ids"][0] if q["card_ids"] else None
                 if primary_card and primary_card in used_card_ids and len(questions) < count:
-                    # Try once more with the same generator
                     q2 = gen(conn=conn)
                     if q2:
                         primary2 = q2["card_ids"][0] if q2["card_ids"] else None
