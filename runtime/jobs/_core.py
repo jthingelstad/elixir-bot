@@ -735,15 +735,15 @@ def _build_memory_synthesis_context():
         posts_by_channel[key] = [_compact_post_row(r) for r in rows or []]
 
     # Live clan state for contradiction checking.
+    clan_state = {}
     try:
-        clan, war = None, None
+        clan_state["roster"] = db.get_clan_roster_summary()
     except Exception:
-        clan, war = None, None
+        log.warning("memory synthesis: roster summary load failed", exc_info=True)
     try:
-        clan_state = db.get_clan_health() if hasattr(db, "get_clan_health") else None
+        clan_state["war"] = db.get_current_war_status()
     except Exception:
-        log.warning("memory synthesis: clan state load failed", exc_info=True)
-        clan_state = None
+        log.warning("memory synthesis: war status load failed", exc_info=True)
 
     return {
         "week_window": {"start": week_ago, "end": now.strftime("%Y-%m-%dT%H:%M:%S"), "war_week_id": week_id},
