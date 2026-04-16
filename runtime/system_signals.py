@@ -607,6 +607,45 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "coherent",
         },
     },
+    {
+        "signal_key": "capability_clan_keep_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Clan Keep",
+            "message": (
+                "Elixir can now act on what it observes, schedule its own follow-ups, "
+                "and synthesize clan memory at the end of each week. The awareness loop "
+                "gained write tools, a revisit scheduler, and a weekly memory-synthesis job."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Clan Keep** :elixir:\n\n"
+                "I used to observe and report. Now I can remember, flag, and follow up on my own.\n\n"
+                "**What's new:**\n"
+                "- **I keep watch.** When I notice a member going quiet, sliding in trophies, or missing war days, "
+                "I can flag them for leadership — a durable note that persists across ticks so the pattern doesn't get lost in the scroll.\n"
+                "- **I queue follow-ups.** When the data suggests a leadership action (promotion review, kick conversation, "
+                "deck check), I write a concrete recommendation to #leader-lounge instead of hoping someone notices.\n"
+                "- **I schedule revisits.** Mid-arc situations — a win streak during battle day, a silent member before Friday — "
+                "I can tell my future self to check back. The revisit surfaces in a later tick and I decide then whether to act.\n"
+                "- **I synthesize the week.** Every Sunday night I read back through the week's signals, posts, and memories, "
+                "write canonical arc memories (\"Week 5 colosseum: the Gareth push\"), retire entries that no longer match "
+                "reality, and flag contradictions for leadership.\n\n"
+                "All writes are leadership-scoped and budget-capped at 3 per tick. The weekly synthesis digest lands in "
+                "#leader-lounge.\n\n"
+                "This is **Elixir v4.6 \"Clan Keep\"** — the keep at the center of the castle, holding what matters."
+            ),
+            "details": [
+                "Awareness write surface: save_clan_memory, flag_member_watch, record_leadership_followup — all leadership-scoped, capped at 3 per tick.",
+                "Self-scheduled revisits: schedule_revisit(signal_key, at, rationale) persists to a revisits table and surfaces in future Situations.",
+                "Weekly memory synthesis: Sunday job writes elixir_synthesis arc memories, expires stale entries, flags contradictions, posts digest to #leader-lounge.",
+                "Emoji fix: agent prompts enumerate real custom emoji; hallucinated shortcodes stripped before posting.",
+                "Feature flag cleanup: ELIXIR_AWARENESS_LOOP retired; awareness loop is the only path.",
+                "Signal dedup fix: arena_change and war_rollover signals no longer re-fire across ticks.",
+            ],
+            "audience": "clan",
+            "capability_area": "clan_keep",
+        },
+    },
 ]
 
 
