@@ -33,9 +33,18 @@ _PLAYABLE_TYPES = ("troop", "building", "spell")
 
 
 def _random_playable_cards(count: int, *, rarity=None, exclude_ids=None, conn=None) -> list[dict]:
-    """Get random cards excluding tower troops."""
-    cards = get_random_cards(count + 5, rarity=rarity, exclude_ids=exclude_ids, conn=conn)
-    cards = [c for c in cards if c["card_type"] in _PLAYABLE_TYPES]
+    """Get random cards excluding tower troops and null-cost support cards.
+
+    Support cards have ``elixir_cost = None`` in the catalog, which would
+    crash every cost-touching generator. Filter them out here so callers
+    never see them.
+    """
+    cards = get_random_cards(count + 10, rarity=rarity, exclude_ids=exclude_ids, conn=conn)
+    cards = [
+        c for c in cards
+        if c["card_type"] in _PLAYABLE_TYPES
+        and c.get("elixir_cost") is not None
+    ]
     return cards[:count]
 
 
