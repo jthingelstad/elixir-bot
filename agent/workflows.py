@@ -942,6 +942,7 @@ __all__ = [
     "observe_and_post",
     "generate_channel_update",
     "generate_intel_report",
+    "run_memory_synthesis",
     "run_awareness_tick",
     "respond_in_reception",
     "respond_in_channel",
