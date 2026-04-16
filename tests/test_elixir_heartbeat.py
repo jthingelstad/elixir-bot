@@ -145,6 +145,43 @@ def test_clan_awareness_tick_reseeds_startup_system_signals_before_tick():
     mock_queue.assert_called_once_with()
 
 
+def test_derive_war_anchor_minute_reads_latest_finish_time():
+    """Anchor derivation pulls the minute from the newest non-sentinel finishTime."""
+    from unittest.mock import patch
+
+    from runtime.jobs import _core
+
+    history = [
+        {"finish_time": "20260412T093703.000Z"},  # 09:37 — current
+        {"finish_time": "20260329T095604.000Z"},  # 09:56 — previous season
+    ]
+    with patch("runtime.jobs._core.db.get_war_history", return_value=history):
+        assert _core._derive_war_anchor_minute() == 37
+
+
+def test_derive_war_anchor_minute_skips_sentinel_values():
+    """Sentinel 19691231 finishTimes (non-rank-1 clans) are skipped."""
+    from unittest.mock import patch
+
+    from runtime.jobs import _core
+
+    history = [
+        {"finish_time": "19691231T235959.000Z"},  # sentinel — skip
+        {"finish_time": "20260412T093703.000Z"},  # real
+    ]
+    with patch("runtime.jobs._core.db.get_war_history", return_value=history):
+        assert _core._derive_war_anchor_minute() == 37
+
+
+def test_derive_war_anchor_minute_returns_none_when_no_log():
+    from unittest.mock import patch
+
+    from runtime.jobs import _core
+
+    with patch("runtime.jobs._core.db.get_war_history", return_value=[]):
+        assert _core._derive_war_anchor_minute() is None
+
+
 def test_detect_role_changes_emits_elder_promotion_signal():
     conn = db.get_connection(":memory:")
     try:
