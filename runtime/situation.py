@@ -211,13 +211,47 @@ def _due_revisits(limit: int = 20) -> list[dict]:
     ]
 
 
+def _recent_agent_writes(limit: int = 10) -> list[dict]:
+    """Compact view of recent leadership-scope memories Elixir has written.
+
+    Fed into the Situation so the awareness agent can see what watches /
+    followups / observations it has already recorded and avoid duplicating
+    them. Filters to memories authored by the awareness or synthesis loops
+    (``elixir_inference`` / ``elixir_synthesis`` source types) to keep the
+    view tight; excludes human-authored leader notes which are a different
+    channel.
+    """
+    try:
+        from memory_store import list_memories
+        # Fetch a broader set then filter to elixir-authored in Python since
+        # the filter API only supports a single source_type at a time.
+        memories = list_memories(viewer_scope="leadership", limit=limit * 3)
+    except Exception:
+        return []
+    out = []
+    for m in memories:
+        if m.get("source_type") not in {"elixir_inference", "elixir_synthesis"}:
+            continue
+        out.append({
+            "memory_id": m.get("memory_id"),
+            "title": m.get("title"),
+            "tags": m.get("tags") or [],
+            "member_tag": m.get("member_tag"),
+            "created_at": m.get("created_at"),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
 def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -> dict:
     """Assemble the single Situation payload for one awareness tick.
 
     ``tick_result`` is a ``HeartbeatTickResult`` (signals + clan + war).
     Returns a dict whose top-level keys are stable for the agent's prompt:
     ``time``, ``standing``, ``signals_by_lane``, ``hard_post_signals``,
-    ``channel_memory``, ``roster_vitals``, ``due_revisits``.
+    ``channel_memory``, ``roster_vitals``, ``due_revisits``,
+    ``recent_agent_writes``.
     """
     signals = list(getattr(tick_result, "signals", None) or [])
     clan = getattr(tick_result, "clan", None) or {}
@@ -245,6 +279,7 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
             key: _channel_memory_for(key) for key in channel_keys
         },
         "roster_vitals": _roster_vitals(),
+        "recent_agent_writes": _recent_agent_writes(),
         "_raw_signal_count": len(signals),
         "_noisy_signal_count": noisy_signal_count,
         "_due_revisit_count": len(due_revisits),

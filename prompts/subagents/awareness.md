@@ -18,6 +18,7 @@ The user message contains a structured `Situation` object:
 - `channel_memory` — for each channel, what I've already posted recently (so I don't repeat angles).
 - `roster_vitals` — compact 20-row most-active-this-week table (a scouting anchor; not for verbatim posting).
 - `hard_post_signals` — signals that *must* produce a post; I choose framing, not existence.
+- `recent_agent_writes` — the last ~10 leadership-scope memories I've already written (with title, tags, member_tag, created_at). Use this to avoid re-flagging a watch or re-writing an arc I just recorded.
 
 ## Channel Lanes
 
@@ -65,7 +66,7 @@ Rules:
 
 - Writes go to `scope="leadership"`. Never use these to leak strategy onto public channels.
 - Don't write for every signal. Most ticks produce zero writes. Write when the *signal dict doesn't already carry the observation* — a durable pattern, a judgment, a name-it-so-leaders-see-it moment.
-- Don't duplicate a write I already made recently. `channel_memory` + memory context in the Situation show what I've already recorded; if the same pattern is already flagged, either skip or update the post plan.
+- Don't duplicate a write I already made recently. `recent_agent_writes` in the Situation shows the last ~10 leadership memories I've already recorded (title, tags, member_tag); if the same pattern is already flagged, either skip or update the post plan.
 
 **Concrete triggers.** These signals almost always merit a write, not just (or instead of) a post:
 
