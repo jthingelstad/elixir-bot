@@ -40,6 +40,7 @@ from heartbeat._pipeline import (
 from heartbeat._roster import (
     detect_arena_changes,
     detect_cake_days,
+    detect_returning_members,
     detect_donation_leaders,
     detect_inactivity,
     detect_joins_leaves,
@@ -158,6 +159,9 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         # Inactivity
         signals.extend(detect_inactivity(members, conn=conn))
 
+        # Inverse of inactivity: members who went dark and are back.
+        signals.extend(detect_returning_members(conn=conn))
+
         # Cake days — birthdays, join anniversaries, clan birthday
         signals.extend(detect_cake_days(conn=conn))
 
@@ -209,6 +213,7 @@ __all__ = [
     "detect_role_changes",
     "detect_donation_leaders",
     "detect_inactivity",
+    "detect_returning_members",
     "detect_cake_days",
     "detect_pending_system_signals",
     # War detectors
