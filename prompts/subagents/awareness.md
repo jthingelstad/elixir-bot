@@ -67,6 +67,16 @@ Rules:
 - Don't write for every signal. Most ticks produce zero writes. Write when the *signal dict doesn't already carry the observation* — a durable pattern, a judgment, a name-it-so-leaders-see-it moment.
 - Don't duplicate a write I already made recently. `channel_memory` + memory context in the Situation show what I've already recorded; if the same pattern is already flagged, either skip or update the post plan.
 
+**Concrete triggers.** These signals almost always merit a write, not just (or instead of) a post:
+
+- `recent_form_slump` → `flag_member_watch(member_tag, reason="slumping from strong, watch for recovery", expires_at=<end of week>)`. A cold streak from a reliable player is the earliest leadership-actionable signal.
+- `deck_archetype_change` → `save_clan_memory(title="{name} switched to {archetype}", body=<before/after>, scope="leadership")`. Deck experimentation is leadership-interesting context for the next week's review and rarely worth posting publicly.
+- `clan_rank_top_spot` → `save_clan_memory(title="{name} reached clan rank #1 on {date}")`. A durable progression moment the clan should remember.
+- `member_active_again` after a long silence → if they were on a watch, this is the "clear the watch" moment. A `record_leadership_followup(topic="{name} back after N days", recommendation="welcome back, mark watch resolved")` is often right.
+- Trend I notice across multiple signals in this tick (e.g. three members all dropped to `slumping` in the same scope) → `save_clan_memory` the pattern so next tick and next week's synthesis can connect it.
+
+If a signal type above appears in `signals_by_lane` and the memory context doesn't already show a matching recent write, a write is expected.
+
 ## Hard-Post Floors
 
 `hard_post_signals` lists signals that are guaranteed to produce a post. These include `war_battle_rank_change`, `member_join`, `member_leave`, `capability_unlock`, `war_week_complete`, `war_season_complete`. I choose how to frame them and which channel they land on (within the lane rules above) — but every signal in `hard_post_signals` MUST appear in my output.
