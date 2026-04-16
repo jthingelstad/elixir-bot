@@ -342,6 +342,117 @@ def test_detect_clan_rank_top_spot_silent_when_already_at_top():
         conn.close()
 
 
+def _seed_deck_snapshot(conn, *, tag, name, cards, fetched_at, mode_scope="overall"):
+    """Insert a member_deck_snapshots row with the given card names."""
+    import json
+    row = conn.execute("SELECT member_id FROM members WHERE player_tag = ?", (tag,)).fetchone()
+    if row is None:
+        now = "2026-04-16T12:00:00"
+        conn.execute(
+            "INSERT INTO members (player_tag, current_name, status, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, 'active', ?, ?)",
+            (tag, name, now, now),
+        )
+        row = conn.execute("SELECT member_id FROM members WHERE player_tag = ?", (tag,)).fetchone()
+    member_id = row["member_id"]
+    deck_json = json.dumps([{"name": c, "elixirCost": 3} for c in cards])
+    conn.execute(
+        "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, sample_size) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (member_id, fetched_at, "battle_log", mode_scope, fetched_at, deck_json, 1),
+    )
+    conn.commit()
+
+
+def test_detect_deck_archetype_changes_fires_on_major_swap():
+    """v4.7 #33: 4+ card difference from 24h ago emits the signal."""
+    from datetime import datetime
+
+    conn = db.get_connection(":memory:")
+    try:
+        x_bow_deck = ["Ice Wizard", "Knight", "Rocket", "Skeletons", "Tesla", "The Log", "Tornado", "X-Bow"]
+        bridge_spam = ["Bandit", "Battle Ram", "Electro Wizard", "Magic Archer", "The Log", "Poison", "Royal Ghost", "Lumberjack"]
+        # 48h ago: X-Bow deck
+        _seed_deck_snapshot(conn, tag="#ABC123", name="Swapper", cards=x_bow_deck,
+                            fetched_at="2026-04-14T12:00:00")
+        # Now: bridge spam (7 cards different, only The Log in common)
+        _seed_deck_snapshot(conn, tag="#ABC123", name="Swapper", cards=bridge_spam,
+                            fetched_at="2026-04-16T11:55:00")
+
+        now = datetime(2026, 4, 16, 12, 0, 0)
+        signals = heartbeat.detect_deck_archetype_changes(now=now, conn=conn)
+        assert len(signals) == 1
+        sig = signals[0]
+        assert sig["type"] == "deck_archetype_change"
+        assert sig["tag"] == "#ABC123"
+        assert sig["changed_count"] == 7
+        assert "X-Bow" in sig["removed_cards"]
+        assert "Bandit" in sig["added_cards"]
+        assert sig["signal_log_type"] == "deck_archetype_change:#ABC123:2026-04-16"
+    finally:
+        conn.close()
+
+
+def test_detect_deck_archetype_changes_silent_for_small_tweak():
+    """Swapping one card (log -> zap) is tinkering, not an archetype change."""
+    from datetime import datetime
+
+    conn = db.get_connection(":memory:")
+    try:
+        old = ["Bats", "Goblin Gang", "Inferno Dragon", "Mega Knight", "Miner", "Skeleton Barrel", "Spear Goblins", "The Log"]
+        new = ["Bats", "Goblin Gang", "Inferno Dragon", "Mega Knight", "Miner", "Skeleton Barrel", "Spear Goblins", "Zap"]
+        _seed_deck_snapshot(conn, tag="#ABC123", name="Tinkerer", cards=old,
+                            fetched_at="2026-04-14T12:00:00")
+        _seed_deck_snapshot(conn, tag="#ABC123", name="Tinkerer", cards=new,
+                            fetched_at="2026-04-16T11:55:00")
+
+        now = datetime(2026, 4, 16, 12, 0, 0)
+        assert heartbeat.detect_deck_archetype_changes(now=now, conn=conn) == []
+    finally:
+        conn.close()
+
+
+def test_detect_deck_archetype_changes_needs_24h_baseline():
+    """If no snapshot is 24h old, no signal — prevents firing on fresh joins."""
+    from datetime import datetime
+
+    conn = db.get_connection(":memory:")
+    try:
+        # Only a 1-hour-old snapshot and a current one, both different decks.
+        _seed_deck_snapshot(conn, tag="#ABC123", name="NewJoin",
+                            cards=["A", "B", "C", "D", "E", "F", "G", "H"],
+                            fetched_at="2026-04-16T11:00:00")
+        _seed_deck_snapshot(conn, tag="#ABC123", name="NewJoin",
+                            cards=["M", "N", "O", "P", "Q", "R", "S", "T"],
+                            fetched_at="2026-04-16T11:55:00")
+
+        now = datetime(2026, 4, 16, 12, 0, 0)
+        assert heartbeat.detect_deck_archetype_changes(now=now, conn=conn) == []
+    finally:
+        conn.close()
+
+
+def test_detect_deck_archetype_changes_dedups_same_day():
+    from datetime import datetime
+
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_deck_snapshot(conn, tag="#ABC123", name="Swapper",
+                            cards=["A", "B", "C", "D", "E", "F", "G", "H"],
+                            fetched_at="2026-04-14T12:00:00")
+        _seed_deck_snapshot(conn, tag="#ABC123", name="Swapper",
+                            cards=["M", "N", "O", "P", "Q", "R", "S", "T"],
+                            fetched_at="2026-04-16T11:55:00")
+
+        now = datetime(2026, 4, 16, 12, 0, 0)
+        first = heartbeat.detect_deck_archetype_changes(now=now, conn=conn)
+        assert len(first) == 1
+        db.mark_signal_sent(first[0]["signal_log_type"], "2026-04-16", conn=conn)
+        assert heartbeat.detect_deck_archetype_changes(now=now, conn=conn) == []
+    finally:
+        conn.close()
+
+
 def _seed_form_row(conn, *, tag, name, scope, label, computed_at="2026-04-16T12:00:00"):
     """Insert or update a member + their member_recent_form row for tests."""
     now = "2026-04-16T12:00:00"

@@ -41,6 +41,7 @@ from heartbeat._roster import (
     detect_arena_changes,
     detect_cake_days,
     detect_clan_rank_top_spot,
+    detect_deck_archetype_changes,
     detect_form_slumps,
     detect_returning_members,
     detect_donation_leaders,
@@ -170,6 +171,9 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         # Form slumps: reliable player drops from strong/hot into slumping/cold.
         signals.extend(detect_form_slumps(conn=conn))
 
+        # Deck archetype swap: deck now differs by 4+ cards from 24h ago.
+        signals.extend(detect_deck_archetype_changes(conn=conn))
+
         # Cake days — birthdays, join anniversaries, clan birthday
         signals.extend(detect_cake_days(conn=conn))
 
@@ -223,6 +227,7 @@ __all__ = [
     "detect_inactivity",
     "detect_returning_members",
     "detect_clan_rank_top_spot",
+    "detect_deck_archetype_changes",
     "detect_form_slumps",
     "detect_cake_days",
     "detect_pending_system_signals",

@@ -1,7 +1,8 @@
 """heartbeat._roster — Non-war member detectors."""
 
+import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import cr_knowledge
 import db
@@ -9,6 +10,11 @@ import prompts
 from heartbeat._helpers import _enrich_leave_signal
 
 log = logging.getLogger("elixir_heartbeat")
+
+# A deck swap of at least this many cards is "meaningful." Smaller tweaks
+# (swap the log for zap) show up constantly and aren't worth surfacing; four
+# or more cards changing is typically an archetype shift.
+DECK_SWAP_CARD_THRESHOLD = 4
 
 
 def detect_joins_leaves(current_members, known_snapshot, conn=None):
@@ -141,6 +147,92 @@ def detect_clan_rank_top_spot(conn=None):
                 "tag": row["tag"],
                 "name": row["name"],
                 "previous_rank": row["prev_rank"],
+                "signal_log_type": signal_log_type,
+            })
+    finally:
+        if close:
+            conn.close()
+    return signals
+
+
+def detect_deck_archetype_changes(now=None, conn=None):
+    """Emit deck_archetype_change when a member's deck differs by 4+ cards
+    from the deck they were running 24+ hours ago.
+
+    ``member_deck_snapshots`` is populated on every battle log ingest (18k+
+    rows and climbing) but nothing reads it. Leaders frequently ask "when
+    did X switch decks?" — this signal answers that without them having to
+    dig. The 24-hour comparison window naturally de-flickers: if a member
+    swaps mid-session and swaps back, the endpoints match and no signal
+    fires. Only meaningful, durable changes land.
+
+    Uses ``mode_scope='overall'`` snapshots (stable longer window). Dedups
+    via ``signal_log_type`` keyed on ``<tag>:<YYYY-MM-DD>`` so at most one
+    signal per member per day.
+    """
+    now = now or datetime.now()
+    cutoff = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
+    today = now.strftime("%Y-%m-%d")
+
+    close = conn is None
+    conn = conn or db.get_connection()
+    signals = []
+    try:
+        rows = conn.execute(
+            """
+            WITH latest AS (
+                SELECT s.member_id, s.deck_json, s.fetched_at,
+                       ROW_NUMBER() OVER (PARTITION BY s.member_id ORDER BY s.fetched_at DESC) AS rn
+                FROM member_deck_snapshots s
+                JOIN members m ON m.member_id = s.member_id
+                WHERE s.mode_scope = 'overall' AND m.status = 'active'
+            ),
+            baseline AS (
+                SELECT s.member_id, s.deck_json, s.fetched_at,
+                       ROW_NUMBER() OVER (PARTITION BY s.member_id ORDER BY s.fetched_at DESC) AS rn
+                FROM member_deck_snapshots s
+                JOIN members m ON m.member_id = s.member_id
+                WHERE s.mode_scope = 'overall' AND m.status = 'active'
+                  AND s.fetched_at <= ?
+            )
+            SELECT m.player_tag AS tag, m.current_name AS name,
+                   l.deck_json AS latest_deck, l.fetched_at AS latest_at,
+                   b.deck_json AS baseline_deck, b.fetched_at AS baseline_at
+            FROM latest l
+            JOIN baseline b ON b.member_id = l.member_id AND b.rn = 1
+            JOIN members m ON m.member_id = l.member_id
+            WHERE l.rn = 1
+            """,
+            (cutoff,),
+        ).fetchall()
+
+        for row in rows:
+            try:
+                latest = {c["name"] for c in json.loads(row["latest_deck"])}
+                baseline = {c["name"] for c in json.loads(row["baseline_deck"])}
+            except (TypeError, ValueError, KeyError):
+                continue
+            if not latest or not baseline:
+                continue
+
+            added = sorted(latest - baseline)
+            removed = sorted(baseline - latest)
+            if len(added) < DECK_SWAP_CARD_THRESHOLD:
+                continue
+
+            signal_log_type = f"deck_archetype_change:{row['tag']}:{today}"
+            if db.was_signal_sent_any_date(signal_log_type, conn=conn):
+                continue
+
+            signals.append({
+                "type": "deck_archetype_change",
+                "tag": row["tag"],
+                "name": row["name"],
+                "added_cards": added,
+                "removed_cards": removed,
+                "changed_count": len(added),
+                "latest_fetched_at": row["latest_at"],
+                "baseline_fetched_at": row["baseline_at"],
                 "signal_log_type": signal_log_type,
             })
     finally:
