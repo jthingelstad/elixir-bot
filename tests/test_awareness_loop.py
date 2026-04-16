@@ -137,6 +137,28 @@ def test_build_situation_includes_channel_memory_for_each_lane_channel():
     assert set(situation["channel_memory"].keys()) >= set(CHANNEL_LANES.keys())
 
 
+def test_build_situation_surfaces_recent_agent_writes_for_dedup():
+    """The Situation includes a compact view of recent agent-authored
+    leadership memories so the awareness loop can avoid duplicate writes."""
+    fake_writes = [
+        {
+            "memory_id": 501,
+            "title": "Watch Vijay's form",
+            "tags": ["watch-list", "form"],
+            "member_tag": "#VIJAY",
+            "created_at": "2026-04-16T08:00:00Z",
+        }
+    ]
+    bundle = _bundle(signals=[])
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation._recent_agent_writes", return_value=fake_writes),
+    ):
+        situation = build_situation(bundle)
+    assert situation["recent_agent_writes"] == fake_writes
+
+
 # ---------------------------------------------------------------------------
 # Quiet-tick fast path
 # ---------------------------------------------------------------------------
