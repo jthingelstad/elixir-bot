@@ -342,6 +342,83 @@ def test_detect_clan_rank_top_spot_silent_when_already_at_top():
         conn.close()
 
 
+def _seed_form_row(conn, *, tag, name, scope, label, computed_at="2026-04-16T12:00:00"):
+    """Insert or update a member + their member_recent_form row for tests."""
+    now = "2026-04-16T12:00:00"
+    row = conn.execute("SELECT member_id FROM members WHERE player_tag = ?", (tag,)).fetchone()
+    if row is None:
+        conn.execute(
+            "INSERT INTO members (player_tag, current_name, status, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, 'active', ?, ?)",
+            (tag, name, now, now),
+        )
+        row = conn.execute("SELECT member_id FROM members WHERE player_tag = ?", (tag,)).fetchone()
+    member_id = row["member_id"]
+    conn.execute(
+        "INSERT INTO member_recent_form (member_id, computed_at, scope, sample_size, wins, losses, draws, "
+        "current_streak, current_streak_type, win_rate, avg_crown_diff, avg_trophy_change, form_label, summary) "
+        "VALUES (?, ?, ?, 10, 5, 5, 0, 0, NULL, 0.5, 0, 0, ?, ?) "
+        "ON CONFLICT(member_id, scope) DO UPDATE SET computed_at = excluded.computed_at, "
+        "form_label = excluded.form_label",
+        (member_id, computed_at, scope, label, f"{label} form"),
+    )
+    conn.commit()
+
+
+def test_detect_form_slumps_fires_on_strong_to_slumping_transition():
+    """v4.7 #27: form crossing from top-tier to bottom-tier emits a signal."""
+    conn = db.get_connection(":memory:")
+    try:
+        # First observation: strong — cursor seeds, no signal.
+        _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="strong")
+        first = heartbeat.detect_form_slumps(conn=conn)
+        assert first == []
+
+        # Second observation: slumping — crossing fires the signal.
+        _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="slumping",
+                       computed_at="2026-04-17T12:00:00")
+        signals = heartbeat.detect_form_slumps(conn=conn)
+        assert len(signals) == 1
+        sig = signals[0]
+        assert sig["type"] == "recent_form_slump"
+        assert sig["tag"] == "#ABC123"
+        assert sig["scope"] == "competitive_10"
+        assert sig["previous_label"] == "strong"
+        assert sig["new_label"] == "slumping"
+        assert sig["signal_log_type"].startswith("recent_form_slump:#ABC123:competitive_10")
+    finally:
+        conn.close()
+
+
+def test_detect_form_slumps_silent_for_top_to_top_change():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="hot")
+        assert heartbeat.detect_form_slumps(conn=conn) == []
+        _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="strong",
+                       computed_at="2026-04-17T12:00:00")
+        assert heartbeat.detect_form_slumps(conn=conn) == []
+    finally:
+        conn.close()
+
+
+def test_detect_form_slumps_weekly_dedup():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="strong")
+        heartbeat.detect_form_slumps(conn=conn)  # seed cursor
+        _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="cold",
+                       computed_at="2026-04-17T12:00:00")
+        first = heartbeat.detect_form_slumps(conn=conn)
+        assert len(first) == 1
+        # Mark the signal sent and replay — cursor was updated to 'cold', so a
+        # re-run in the same week should not re-emit.
+        db.mark_signal_sent(first[0]["signal_log_type"], "2026-04-17", conn=conn)
+        assert heartbeat.detect_form_slumps(conn=conn) == []
+    finally:
+        conn.close()
+
+
 def test_detect_clan_rank_top_spot_dedups_same_observation():
     conn = db.get_connection(":memory:")
     try:

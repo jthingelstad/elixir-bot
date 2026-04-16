@@ -149,6 +149,86 @@ def detect_clan_rank_top_spot(conn=None):
     return signals
 
 
+def detect_form_slumps(conn=None):
+    """Emit recent_form_slump when a member's form crosses top-tier → bottom-tier.
+
+    v4.7 #27: ``member_recent_form`` computes nightly form labels across four
+    scopes; until now only upward streaks (``battle_hot_streak``) were
+    surfaced. Leaders want early notice when a reliable player goes cold —
+    it's the first signal of frustration or meta drift. The agent usually
+    won't post these publicly and will instead flag a leadership watch.
+
+    Transition rule: previous label in {hot, strong} AND current label in
+    {slumping, cold}. Per-(member,scope) cursor via
+    ``signal_detector_cursors`` remembers the last-observed label so the
+    emit fires exactly on the crossing. Weekly dedup via ``signal_log_type``
+    keyed on tag + scope + isoweek.
+    """
+    TOP = {"hot", "strong"}
+    BOTTOM = {"slumping", "cold"}
+    DETECTOR_KEY = "form_slump"
+
+    close = conn is None
+    conn = conn or db.get_connection()
+    signals = []
+    try:
+        rows = conn.execute(
+            """
+            SELECT m.player_tag AS tag, m.current_name AS name, f.scope,
+                   f.form_label, f.sample_size, f.computed_at, f.summary
+            FROM member_recent_form f
+            JOIN members m ON m.member_id = f.member_id
+            WHERE m.status = 'active'
+              AND f.form_label IS NOT NULL
+            """
+        ).fetchall()
+
+        for row in rows:
+            tag = row["tag"]
+            scope = row["scope"]
+            new_label = row["form_label"]
+            scope_key = f"{tag}:{scope}"
+            cursor = db.get_signal_detector_cursor(DETECTOR_KEY, scope_key, conn=conn)
+            prev_label = cursor.get("cursor_text") if cursor else None
+
+            if prev_label != new_label:
+                db.upsert_signal_detector_cursor(
+                    DETECTOR_KEY, scope_key, cursor_text=new_label, conn=conn
+                )
+
+            if prev_label not in TOP or new_label not in BOTTOM:
+                continue
+
+            try:
+                computed_dt = datetime.fromisoformat(
+                    (row["computed_at"] or "").replace("Z", "+00:00")
+                )
+                year, week, _ = computed_dt.isocalendar()
+                week_key = f"{year}W{week:02d}"
+            except (ValueError, AttributeError):
+                week_key = "unknown"
+
+            signal_log_type = f"recent_form_slump:{tag}:{scope}:{week_key}"
+            if db.was_signal_sent_any_date(signal_log_type, conn=conn):
+                continue
+
+            signals.append({
+                "type": "recent_form_slump",
+                "tag": tag,
+                "name": row["name"],
+                "scope": scope,
+                "previous_label": prev_label,
+                "new_label": new_label,
+                "sample_size": row["sample_size"],
+                "summary": row["summary"],
+                "signal_log_type": signal_log_type,
+            })
+    finally:
+        if close:
+            conn.close()
+    return signals
+
+
 def detect_returning_members(now=None, conn=None):
     """Emit member_active_again when a previously dormant member plays again.
 

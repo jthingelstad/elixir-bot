@@ -41,6 +41,7 @@ from heartbeat._roster import (
     detect_arena_changes,
     detect_cake_days,
     detect_clan_rank_top_spot,
+    detect_form_slumps,
     detect_returning_members,
     detect_donation_leaders,
     detect_inactivity,
@@ -166,6 +167,9 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         # Leapfrogging into clan rank #1 is a durable #player-progress moment.
         signals.extend(detect_clan_rank_top_spot(conn=conn))
 
+        # Form slumps: reliable player drops from strong/hot into slumping/cold.
+        signals.extend(detect_form_slumps(conn=conn))
+
         # Cake days — birthdays, join anniversaries, clan birthday
         signals.extend(detect_cake_days(conn=conn))
 
@@ -219,6 +223,7 @@ __all__ = [
     "detect_inactivity",
     "detect_returning_members",
     "detect_clan_rank_top_spot",
+    "detect_form_slumps",
     "detect_cake_days",
     "detect_pending_system_signals",
     # War detectors
