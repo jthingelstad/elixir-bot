@@ -55,6 +55,31 @@ def test_classify_signal_lane_unknown_falls_through():
     assert classify_signal_lane({"type": "thoroughly_unknown"}) == "unknown"
 
 
+def test_classify_signal_lane_covers_all_v47_signal_types():
+    """Regression guard: every v4.7 signal type must route to a real lane,
+    never fall through to 'unknown'. This caught a real bug where all ten
+    new signals were invisible to the awareness agent."""
+    routing = {
+        # milestone — durable progression
+        "clan_rank_top_spot": "milestone",
+        "card_evolution_unlocked": "milestone",
+        "best_trophies_peak": "milestone",
+        "challenge_performance_milestone": "milestone",
+        # battle_mode — volatile non-war battle activity
+        "path_of_legend_demotion": "battle_mode",
+        "ultimate_champion_reached": "battle_mode",
+        "path_of_legend_global_rank_attained": "battle_mode",
+        # clan_event — roster lifecycle
+        "member_active_again": "clan_event",
+        # leadership — leader-lounge observations
+        "recent_form_slump": "leadership",
+        "deck_archetype_change": "leadership",
+    }
+    for sig_type, expected_lane in routing.items():
+        assert classify_signal_lane({"type": sig_type}) == expected_lane, \
+            f"{sig_type} should route to {expected_lane}"
+
+
 # ---------------------------------------------------------------------------
 # Situation assembler
 # ---------------------------------------------------------------------------
