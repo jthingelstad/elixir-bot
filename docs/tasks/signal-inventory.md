@@ -19,6 +19,7 @@ refactor).
 | `arena_change` | DB milestone diff on `arena_id`. | `signal_log_type` from `detect_milestones`. |
 | `elder_promotion` | Role change from `member` → `elder`. | `signal_log_type` from `detect_role_changes`. |
 | `donation_leaders` | Top 3 daily donors, once per day after `DONATION_HIGHLIGHT_HOUR`. | `signal_log` keyed on `donation_leaders:<date>`. |
+| `weekly_donation_leader` | Top 3 donors of the prior CR week, emitted Mondays off frozen Sunday `member_daily_metrics.donations_week`. | `signal_log_type` weekly: `weekly_donation_leader:<isoweek>`. |
 | `inactive_members` | Members past `INACTIVITY_DAYS` threshold; Fridays only, once per week. | `signal_log` keyed on `inactive_members:<date>`. |
 | `member_active_again` | Previous snapshot stale (≥ threshold), current fresh, `last_seen_api` advanced. | `signal_log_type` keyed on `member_active_again:<tag>:<observed_at>`. |
 | `clan_rank_top_spot` | Current snapshot has `clan_rank = 1`, previous had `> 1` or NULL. | `signal_log_type` keyed on `clan_rank_top_spot:<tag>:<observed_at>`. |
@@ -147,10 +148,7 @@ that remain unsurfaced:
 
 Still open / future work:
 
-- **Donation leaders across a longer window.** Today's detector is one-day top-3;
-  a weekly or seasonal leader could be more durable and less noisy.
-- **Clan-level trophy records.** `clan_daily_metrics` stores totals but no
-  "clan fame record" or "clan war-trophy record" signal exists.
+- None at the moment. Signal-flow backlog is cleared.
 
 Closed this sprint (v4.7 autonomous signal refactor):
 
@@ -165,6 +163,13 @@ Closed this sprint (v4.7 autonomous signal refactor):
   / `BATTLE_MODE_SIGNAL_TYPES` / `CLAN_EVENT_SIGNAL_TYPES` /
   `LEADERSHIP_ONLY_SIGNAL_TYPES`. **Closed** — all ten now route correctly
   (locked down by a regression test in `test_awareness_loop.py`).
+- **Clan-level trophy records.** `clan_daily_metrics` had totals but no
+  "new clan-score high" or "new clan-war-trophy high" signal. **Closed** —
+  `clan_score_record` / `clan_war_trophies_record` fire once per new
+  all-time high (roughly every 2-3 days at current trajectory).
+- **Longer-window donation leaders.** Only daily top-3; nothing captured
+  the weekly carriage. **Closed** — `weekly_donation_leader` fires on
+  Mondays with the prior CR week's top-3.
 
 ---
 
