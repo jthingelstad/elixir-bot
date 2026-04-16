@@ -78,6 +78,11 @@ def test_classify_signal_lane_covers_all_v47_signal_types():
         "tournament_started": "clan_event",
         "tournament_lead_change": "clan_event",
         "tournament_ended": "clan_event",
+        # clan_event — donation leaders (daily + weekly)
+        "weekly_donation_leader": "clan_event",
+        # milestone — clan-level records
+        "clan_score_record": "milestone",
+        "clan_war_trophies_record": "milestone",
     }
     for sig_type, expected_lane in routing.items():
         assert classify_signal_lane({"type": sig_type}) == expected_lane, \
