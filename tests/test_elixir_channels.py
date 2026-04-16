@@ -938,6 +938,10 @@ def test_on_message_handles_explicit_member_deck_request_without_llm():
             "match_score": 850,
             "match_source": "discord_display_exact",
         }]) as mock_resolve,
+        patch(
+            "agent.intent_router.classify_intent",
+            return_value={"route": "deck_display", "confidence": 1.0, "rationale": "test"},
+        ),
         patch("elixir.db.get_member_current_deck", return_value={
             "fetched_at": "2026-03-07T12:00:00",
             "cards": [
