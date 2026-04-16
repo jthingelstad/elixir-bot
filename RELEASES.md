@@ -4,6 +4,54 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## v4.6 — Clan Keep
+
+**Date:** 2026-04-15
+
+Elixir can now act on what it sees. v4.5 gave the awareness loop perception — one agent turn that reads the full situation and decides what to say. v4.6 gives it hands and a calendar: write tools to flag members and queue leadership follow-ups, a revisit scheduler so the agent can tell its future self "check on this later," and a weekly synthesis job that writes canonical arc memories and retires stale ones. The persona finally matches the implementation.
+
+### Awareness Write Surface (#8)
+
+- The `awareness` workflow now carries three write tools: `save_clan_memory`, `flag_member_watch(member_tag, reason, expires_at)`, and `record_leadership_followup(topic, recommendation)`.
+- All three persist as leadership-scoped memories — `flag_member_watch` writes tag `watch-list`, `record_leadership_followup` writes tag `followup`. `save_clan_memory` from awareness uses `source_type=elixir_inference` with `confidence<1.0` (vs `leader_note/1.0` from clanops).
+- Per-tick write budget capped at 3 calls; enforced in `agent/chat.py`'s tool loop. The 4th call returns a structured `awareness_write_budget_reached` error.
+- Write counts logged in `awareness_ticks` via migration 27 (`write_calls_issued`, `write_calls_succeeded`, `write_calls_denied`).
+- `update_member` stays clanops-only — member metadata mutations are a leadership action, not an awareness observation.
+
+### Self-Scheduled Revisits (#9)
+
+- New `schedule_revisit(signal_key, at, rationale)` tool lets the awareness agent schedule a reminder for a later tick. Stored in a new `revisits` table (migration 28) with `UNIQUE(signal_key, due_at)` for idempotent scheduling.
+- `build_situation` surfaces due revisits under a `due_revisits` top-level key. `situation_is_quiet` wakes the agent when revisits are due even with zero raw signals.
+- Covered revisits are marked `revisited_at` after each tick so they don't re-surface.
+
+### Weekly Memory Synthesis (#10)
+
+- New `memory-synthesis` activity runs Sunday 22:00 Chicago. An LLM turn receives the week's memories, posts from leadership/war/clan channels, live clan state, and prior synthesis arcs, then returns a structured plan.
+- Arc memories persist with `source_type=elixir_synthesis`, `confidence=1.0`, scoped to leadership by default. Stale memory IDs are expired via `clan_memories.expires_at`. Contradictions between stored memory and live state are flagged in the digest.
+- Migration 29 widens the `clan_memories.source_type` CHECK to include `elixir_synthesis` via a full table rewrite (FTS + triggers + indices rebuilt).
+- `MEMORY_SYNTHESIS_DRY_RUN=true` logs the plan without persisting — safe for first-run validation.
+- Digest and contradiction list post to `#leader-lounge`.
+
+### Feature Flag Cleanup (#11)
+
+- `ELIXIR_AWARENESS_LOOP` env flag and the legacy per-signal router retired. The awareness loop is now the only path. `_observation_signal_batches`, `_merge_day_transition_batches`, and the conftest leak-guard removed.
+
+### Emoji Fix
+
+- Agent prompts now enumerate the 19 real custom emoji names and permit standard Unicode shortcodes.
+- `_resolve_custom_emoji` strips hallucinated shortcodes (e.g. `:poap:`, `:poap_kings:`) via the `emoji` CLDR package while preserving valid Unicode shortcodes (`:dragon:`, `:trophy:`).
+
+### Signal Dedup Fix
+
+- `detect_arena_changes` and `_detect_war_rollovers_for_pair` now propagate `signal_log_type` so `_mark_delivered_signals` writes the specific dedup key. Fixes repeated arena-change posts (6x Vijay) and a latent war-rollover re-fire risk.
+
+### Operational
+
+- Startup message in `#leader-lounge` now shows Release, Build, and Host on one line.
+- Test suite: 543 → 571 passing.
+
+---
+
 ## v4.5 — Coherent
 
 **Date:** 2026-04-14

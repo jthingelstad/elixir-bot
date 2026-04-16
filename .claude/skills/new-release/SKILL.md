@@ -9,7 +9,15 @@ Use this skill when the user has shipped a meaningful new feature set and wants 
 
 ## What to do
 
-The user will tell you the version number, the codename, and what shipped. If any of those are missing, ask before touching files.
+The user will tell you the version number and what shipped. If the version number is missing, ask before touching files.
+
+**You choose the codename.** Pick a two-word name that:
+- Captures the *theme* of what shipped (e.g., if the release adds memory and self-scheduling, lean into persistence/continuity)
+- Draws from Clash Royale concepts, lore, or vocabulary — arenas, card names, mechanics, in-game phrases, troop abilities
+- Sounds like a title, not a sentence — two words, title case, evocative (e.g., "Royal Ghost", "Mirror Match", "Elixir Golem", "Battle Ram")
+- Previous codenames: "Coherent" (v4.5, unified awareness), "Omnipresent" (v4.4, CR API bridge). Keep the same energy.
+
+Present the chosen codename when you report the changes. The user can override if they don't like it.
 
 Do all three steps. A release is not complete until all three land in one commit.
 
@@ -80,9 +88,25 @@ venv/bin/python -m pytest tests/ -x -q
 
 The system-signal test checks the new signal structurally and will catch schema drift. If any release-label mock tests fail, update the mocks (see note in step 1).
 
-### 5. Report back
+### 5. Create a GitHub Release
 
-Summarize what was changed (version bump old → new, new RELEASES.md section title, new signal_key) and remind the user to commit. Do not commit unless the user asks.
+After all files are ready and tests pass, commit, push, and create a GitHub Release using `gh`:
+
+```bash
+gh release create vX.Y --title 'vX.Y "Codename"' --notes "$(cat <<'EOF'
+<Paste the prose intro from the RELEASES.md entry — the 1-3 sentence summary,
+not the full bullet list. Keep it short for the GitHub release card.>
+
+See [RELEASES.md](RELEASES.md) for the full changelog.
+EOF
+)"
+```
+
+This tags HEAD with the version number and publishes a release card visible on the repo's Releases page.
+
+### 6. Report back
+
+Summarize what was changed (version bump old → new, new RELEASES.md section title, new signal_key, GitHub Release URL) and confirm the release is live.
 
 ## Arguments
 
