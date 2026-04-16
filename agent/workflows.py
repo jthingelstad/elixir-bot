@@ -24,6 +24,7 @@ from agent.prompts import (
     _intel_report_system,
     _interactive_system,
     _members_message_system,
+    _memory_synthesis_system,
     _observe_system,
     _promote_system,
     _reception_system,
@@ -358,6 +359,36 @@ def generate_channel_update(channel_name, subagent_key, context, *,
         workflow=workflow,
         allowed_tools=TOOLSETS_BY_WORKFLOW[workflow],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW[workflow],
+        strict_json=True,
+    )
+
+
+def run_memory_synthesis(context: dict):
+    """Run one weekly memory-synthesis agent turn.
+
+    ``context`` carries the week's memories, posts, live clan state, and
+    prior synthesis arcs. The agent returns a structured plan:
+    ``{"arc_memories": [...], "stale_memory_ids": [...], "contradictions": [...], "digest": "..."}``.
+
+    The job function (``_memory_synthesis_cycle``) is responsible for
+    persisting arc memories, marking stale entries expired, and posting the
+    digest to #leader-lounge. This agent call just produces the plan.
+    """
+    public_context = {k: v for k, v in (context or {}).items() if not k.startswith("_")}
+    user_msg = (
+        "Here is the week's memory context. Decide which arcs belong in the "
+        "clan's long-term memory, which stored memories are stale, which "
+        "stored memories contradict the live clan state, and write a short "
+        "digest for #leader-lounge. Follow the output schema in your system "
+        "prompt exactly.\n\n"
+        f"```json\n{json.dumps(public_context, indent=2, default=str)}\n```\n"
+    )
+    return _chat_with_tools(
+        _memory_synthesis_system(),
+        user_msg,
+        workflow="memory_synthesis",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["memory_synthesis"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["memory_synthesis"],
         strict_json=True,
     )
 

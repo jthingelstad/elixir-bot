@@ -1359,7 +1359,120 @@ def _migration_28(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28]
+def _migration_29(conn: sqlite3.Connection) -> None:
+    """Widen the clan_memories.source_type CHECK to accept ``elixir_synthesis``.
+
+    SQLite can't ALTER a CHECK in place. Sequence:
+
+    1. Drop the FTS5 virtual table + its sync triggers (they're content-linked
+       to clan_memories, so they must go before we rename).
+    2. Rename clan_memories to a stash name.
+    3. Create clan_memories with the new CHECK.
+    4. Copy rows from the stash.
+    5. Drop the stash.
+    6. Recreate the FTS5 table + triggers + indices.
+    7. Re-populate the FTS index from the restored data.
+
+    Child tables (tags, links, embeddings, audit log, versions) reference
+    clan_memories by name and ride along untouched.
+    """
+    conn.executescript(
+        """
+        PRAGMA foreign_keys=OFF;
+        PRAGMA legacy_alter_table=ON;
+
+        DROP TRIGGER IF EXISTS clan_memories_ai;
+        DROP TRIGGER IF EXISTS clan_memories_ad;
+        DROP TRIGGER IF EXISTS clan_memories_au;
+        DROP TABLE IF EXISTS clan_memories_fts;
+
+        ALTER TABLE clan_memories RENAME TO clan_memories__pre_v29;
+
+        CREATE TABLE clan_memories (
+            memory_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            updated_by TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            is_inference INTEGER NOT NULL,
+            confidence REAL NOT NULL,
+            scope TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            title TEXT,
+            body TEXT NOT NULL,
+            summary TEXT,
+            member_id INTEGER,
+            member_tag TEXT,
+            role TEXT,
+            channel_id TEXT,
+            war_season_id TEXT,
+            war_week_id TEXT,
+            event_type TEXT,
+            event_id TEXT,
+            retention_class TEXT NOT NULL DEFAULT 'standard',
+            expires_at TEXT,
+            metadata_json TEXT,
+            embedding_model TEXT,
+            embedding_created_at TEXT,
+            FOREIGN KEY(member_id) REFERENCES members(member_id) ON DELETE SET NULL,
+            CHECK(source_type IN ('leader_note', 'elixir_inference', 'elixir_synthesis', 'system')),
+            CHECK(scope IN ('public', 'leadership', 'system_internal')),
+            CHECK(status IN ('active', 'archived', 'deleted')),
+            CHECK(is_inference IN (0, 1)),
+            CHECK(confidence >= 0.0 AND confidence <= 1.0),
+            CHECK(source_type != 'elixir_inference' OR (is_inference = 1 AND confidence < 1.0))
+        );
+
+        INSERT INTO clan_memories SELECT * FROM clan_memories__pre_v29;
+        DROP TABLE clan_memories__pre_v29;
+
+        CREATE VIRTUAL TABLE clan_memories_fts USING fts5(
+            title,
+            summary,
+            body,
+            content='clan_memories',
+            content_rowid='memory_id'
+        );
+
+        CREATE TRIGGER clan_memories_ai AFTER INSERT ON clan_memories BEGIN
+            INSERT INTO clan_memories_fts(rowid, title, summary, body)
+            VALUES (new.memory_id, new.title, new.summary, new.body);
+        END;
+
+        CREATE TRIGGER clan_memories_ad AFTER DELETE ON clan_memories BEGIN
+            INSERT INTO clan_memories_fts(clan_memories_fts, rowid, title, summary, body)
+            VALUES('delete', old.memory_id, old.title, old.summary, old.body);
+        END;
+
+        CREATE TRIGGER clan_memories_au AFTER UPDATE ON clan_memories BEGIN
+            INSERT INTO clan_memories_fts(clan_memories_fts, rowid, title, summary, body)
+            VALUES('delete', old.memory_id, old.title, old.summary, old.body);
+            INSERT INTO clan_memories_fts(rowid, title, summary, body)
+            VALUES (new.memory_id, new.title, new.summary, new.body);
+        END;
+
+        INSERT INTO clan_memories_fts(rowid, title, summary, body)
+            SELECT memory_id, title, summary, body FROM clan_memories;
+
+        CREATE INDEX IF NOT EXISTS idx_clan_memories_scope_status_created
+            ON clan_memories(scope, status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clan_memories_member
+            ON clan_memories(member_id, member_tag, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clan_memories_war
+            ON clan_memories(war_season_id, war_week_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clan_memories_event
+            ON clan_memories(event_type, event_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clan_memories_source
+            ON clan_memories(source_type, is_inference, confidence, created_at DESC);
+
+        PRAGMA legacy_alter_table=OFF;
+        PRAGMA foreign_keys=ON;
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

@@ -1936,6 +1936,7 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
         "player-progression",
         "daily-clan-insight",
         "leadership-review",
+        "memory-synthesis",
         "weekly-recap",
         "site-content",
         "promotion-content",

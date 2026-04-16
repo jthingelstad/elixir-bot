@@ -9,7 +9,7 @@ from typing import Callable, Iterable, Optional
 
 from db import _canon_tag, _json_or_none, _rowdicts, _utcnow, get_connection, managed_connection
 
-SOURCE_TYPES = {"leader_note", "elixir_inference", "system"}
+SOURCE_TYPES = {"leader_note", "elixir_inference", "elixir_synthesis", "system"}
 SCOPES = {"public", "leadership", "system_internal"}
 STATUSES = {"active", "archived", "deleted"}
 
@@ -36,6 +36,9 @@ def _validate_provenance(source_type: str, is_inference: bool, confidence: float
         raise MemoryValidationError("elixir_inference memories must set is_inference=true")
     if source_type == "elixir_inference" and float(confidence) >= 1.0:
         raise MemoryValidationError("elixir_inference confidence must be less than 1.0")
+    # elixir_synthesis: arc memories written by the weekly synthesis job.
+    # These are canonical, cross-referenced, human-digestible summaries — not
+    # hedged inferences — so they can carry confidence=1.0 and is_inference=0.
 
 
 def _allowed_scopes(viewer_scope: str, include_system_internal: bool = False) -> tuple[str, ...]:
