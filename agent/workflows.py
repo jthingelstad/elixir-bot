@@ -12,7 +12,7 @@ from agent.core import (
     _create_chat_completion,
     log,
 )
-from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_response
+from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_json_response, _parse_response
 from agent.prompts import (
     _awareness_system,
     _channel_subagent_system,
@@ -806,10 +806,12 @@ def explain_quiz_answer(*, question_text: str, correct_answer: str, context: str
         return None
     if not raw:
         return None
-    # The prompt asks for JSON. Accept either JSON with "explanation"
-    # or plain text as a fallback.
+    # The prompt asks for JSON with an "explanation" key. Haiku sometimes
+    # wraps its answer in ```json ... ``` fences — use the shared parser
+    # that already handles that case, falling through to raw text if all
+    # else fails.
     try:
-        parsed = json.loads(raw)
+        parsed = _parse_json_response(raw)
         if isinstance(parsed, dict):
             text = (parsed.get("explanation") or "").strip()
             if text:
