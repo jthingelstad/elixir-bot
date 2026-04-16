@@ -200,6 +200,7 @@ def test_deliver_signal_group_via_awareness_falls_back_for_uncovered_hard_floor(
         patch("runtime.situation.build_situation_time", return_value=None),
         patch("runtime.situation.db.get_members_on_hot_streak", return_value=[]),
         patch("runtime.jobs._signals.elixir_agent.run_awareness_tick", return_value=empty_plan),
+        patch("runtime.jobs._signals.db.record_awareness_tick"),
         patch(
             "runtime.jobs._signals._deliver_signal_group",
             new=AsyncMock(return_value=True),
@@ -300,6 +301,7 @@ def test_deliver_signal_group_via_awareness_marks_considered_skipped_non_hard_si
         patch("runtime.situation.build_situation_time", return_value=None),
         patch("runtime.situation.db.get_members_on_hot_streak", return_value=[]),
         patch("runtime.jobs._signals.elixir_agent.run_awareness_tick", return_value=empty_plan),
+        patch("runtime.jobs._signals.db.record_awareness_tick"),
         patch(
             "runtime.jobs._signals._mark_signal_group_completed",
             new=AsyncMock(),
