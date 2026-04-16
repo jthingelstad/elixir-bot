@@ -283,6 +283,95 @@ def test_detect_returning_members_silent_for_continuously_active():
         conn.close()
 
 
+def test_detect_clan_rank_top_spot_fires_when_member_takes_number_one():
+    """v4.7 #29: leapfrogging into clan rank #1 emits a durable signal."""
+    conn = db.get_connection(":memory:")
+    try:
+        # First snapshot: member sits at rank 3.
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Climber", "role": "member",
+              "clanRank": 3}],
+            conn=conn,
+        )
+        conn.execute(
+            "UPDATE member_state_snapshots SET observed_at = ? WHERE member_id = "
+            "(SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-04-15T10:00:00",),
+        )
+        conn.commit()
+
+        # Second snapshot: member leapfrogs into #1.
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Climber", "role": "member",
+              "clanRank": 1}],
+            conn=conn,
+        )
+
+        signals = heartbeat.detect_clan_rank_top_spot(conn=conn)
+        assert len(signals) == 1
+        assert signals[0]["type"] == "clan_rank_top_spot"
+        assert signals[0]["tag"] == "#ABC123"
+        assert signals[0]["previous_rank"] == 3
+        assert signals[0]["signal_log_type"].startswith("clan_rank_top_spot:#ABC123")
+    finally:
+        conn.close()
+
+
+def test_detect_clan_rank_top_spot_silent_when_already_at_top():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Leader", "role": "coLeader",
+              "clanRank": 1}],
+            conn=conn,
+        )
+        conn.execute(
+            "UPDATE member_state_snapshots SET observed_at = ? WHERE member_id = "
+            "(SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-04-15T10:00:00",),
+        )
+        conn.commit()
+
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Leader", "role": "coLeader",
+              "clanRank": 1}],
+            conn=conn,
+        )
+        assert heartbeat.detect_clan_rank_top_spot(conn=conn) == []
+    finally:
+        conn.close()
+
+
+def test_detect_clan_rank_top_spot_dedups_same_observation():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Climber", "role": "member",
+              "clanRank": 2}],
+            conn=conn,
+        )
+        conn.execute(
+            "UPDATE member_state_snapshots SET observed_at = ? WHERE member_id = "
+            "(SELECT member_id FROM members WHERE player_tag = '#ABC123')",
+            ("2026-04-15T10:00:00",),
+        )
+        conn.commit()
+
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Climber", "role": "member",
+              "clanRank": 1}],
+            conn=conn,
+        )
+
+        first = heartbeat.detect_clan_rank_top_spot(conn=conn)
+        assert len(first) == 1
+        # Simulate signal-log write and confirm the second call is silent.
+        db.mark_signal_sent(first[0]["signal_log_type"], "2026-04-16", conn=conn)
+        assert heartbeat.detect_clan_rank_top_spot(conn=conn) == []
+    finally:
+        conn.close()
+
+
 def test_detect_role_changes_emits_elder_promotion_signal():
     conn = db.get_connection(":memory:")
     try:
