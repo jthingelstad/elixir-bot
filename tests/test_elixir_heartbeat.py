@@ -145,6 +145,39 @@ def test_clan_awareness_tick_reseeds_startup_system_signals_before_tick():
     mock_queue.assert_called_once_with()
 
 
+def test_fresh_time_left_computes_from_period_ends_at():
+    """time_left_seconds should be derived from period_ends_at - now, not the
+    stored (poll-time) value — otherwise it ages between polls (see #20)."""
+    from datetime import datetime, timezone
+    from heartbeat._war import _fresh_time_left_seconds
+
+    frozen_now = datetime(2026, 4, 17, 5, 37, 0, tzinfo=timezone.utc)
+    state = {
+        "period_ends_at": "2026-04-17T08:37:00+00:00",  # 3 hours from now
+        "time_left_seconds": 60 * 60,  # 1h stale — should be ignored
+    }
+    assert _fresh_time_left_seconds(state, now=frozen_now) == 3 * 60 * 60
+
+
+def test_fresh_time_left_clamps_negative_to_zero():
+    from datetime import datetime, timezone
+    from heartbeat._war import _fresh_time_left_seconds
+
+    frozen_now = datetime(2026, 4, 17, 10, 0, 0, tzinfo=timezone.utc)
+    state = {
+        "period_ends_at": "2026-04-17T09:00:00+00:00",  # an hour in the past
+        "time_left_seconds": 3600,
+    }
+    assert _fresh_time_left_seconds(state, now=frozen_now) == 0
+
+
+def test_fresh_time_left_falls_back_to_stored_when_no_ends_at():
+    from heartbeat._war import _fresh_time_left_seconds
+
+    state = {"time_left_seconds": 7200}
+    assert _fresh_time_left_seconds(state) == 7200
+
+
 def test_derive_war_anchor_minute_reads_latest_finish_time():
     """Anchor derivation pulls the minute from the newest non-sentinel finishTime."""
     from unittest.mock import patch
