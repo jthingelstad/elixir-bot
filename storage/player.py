@@ -272,6 +272,8 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
     new_pol = player_data.get("currentPathOfLegendSeasonResult") or {}
     old_league = old_pol.get("leagueNumber")
     new_league = new_pol.get("leagueNumber")
+    old_rank = old_pol.get("rank")
+    new_rank = new_pol.get("rank")
     if isinstance(old_league, int) and isinstance(new_league, int) and new_league > old_league:
         signals.append({
             "type": "path_of_legend_promotion",
@@ -280,7 +282,41 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
             "old_league_number": old_league,
             "new_league_number": new_league,
             "trophies": new_pol.get("trophies"),
-            "rank": new_pol.get("rank"),
+            "rank": new_rank,
+        })
+        # v4.7 #24: Ultimate Champion (league 10) is a season-long
+        # milestone worth a distinct callout on top of the generic promotion.
+        if new_league == 10 and old_league < 10:
+            signals.append({
+                "type": "ultimate_champion_reached",
+                "tag": tag,
+                "name": player_data.get("name"),
+                "trophies": new_pol.get("trophies"),
+                "rank": new_rank,
+            })
+    # v4.7 #23: parity signal for demotions — leaders often want the
+    # early-warning, and the v4.5 awareness loop can choose silence per tick.
+    if isinstance(old_league, int) and isinstance(new_league, int) and new_league < old_league:
+        signals.append({
+            "type": "path_of_legend_demotion",
+            "tag": tag,
+            "name": player_data.get("name"),
+            "old_league_number": old_league,
+            "new_league_number": new_league,
+            "trophies": new_pol.get("trophies"),
+            "rank": new_rank,
+        })
+    # v4.7 #25: top-1000 global rank is rare and newsworthy. Fires both
+    # when rank first becomes non-null and when it improves (lower is better).
+    if isinstance(new_rank, int) and (old_rank is None or (isinstance(old_rank, int) and new_rank < old_rank)):
+        signals.append({
+            "type": "path_of_legend_global_rank_attained",
+            "tag": tag,
+            "name": player_data.get("name"),
+            "old_rank": old_rank,
+            "new_rank": new_rank,
+            "league_number": new_league,
+            "trophies": new_pol.get("trophies"),
         })
 
     previous_cards = {}
