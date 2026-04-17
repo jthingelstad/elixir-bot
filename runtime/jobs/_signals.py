@@ -739,11 +739,17 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
     """Awareness-loop replacement for ``_deliver_signal_group``.
 
     1. Build the situation from ``signals + clan + war``.
-    2. Fast-path: if quiet (no signals, no hard floors, not near deadline),
+    2. Mark every input signal as sent on intake — the awareness tick owns
+       these signals from this point on. If the agent skips them, the post is
+       rejected, or the run crashes, they will not re-fire next tick. This is
+       intentional: rejections are structural (empty covers, audience gates),
+       not transient. Retries are reserved for hard-post-floor signals that
+       take the explicit fallback path below.
+    3. Fast-path: if quiet (no signals, no hard floors, not near deadline),
        return True without calling the LLM.
-    3. Run the awareness agent.
-    4. Validate + deliver the post plan.
-    5. For any hard-post-floor signal not covered by the plan, fall back to
+    4. Run the awareness agent.
+    5. Validate + deliver the post plan.
+    6. For any hard-post-floor signal not covered by the plan, fall back to
        the legacy per-signal ``_deliver_signal_group`` for *just that signal*
        so coverage is guaranteed.
 
@@ -754,6 +760,9 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
 
     bundle = HeartbeatTickResult(signals=signals or [], clan=clan or {}, war=war or {})
     situation = build_situation(bundle)
+
+    if signals:
+        await _mark_signal_group_completed(signals)
 
     if situation_is_quiet(situation):
         log.info("awareness loop: quiet tick, skipping agent call")

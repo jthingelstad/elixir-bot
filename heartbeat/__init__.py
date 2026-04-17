@@ -42,8 +42,6 @@ from heartbeat._roster import (
     detect_cake_days,
     detect_clan_rank_top_spot,
     detect_clan_score_records,
-    detect_deck_archetype_changes,
-    detect_form_slumps,
     detect_returning_members,
     detect_donation_leaders,
     detect_inactivity,
@@ -244,8 +242,6 @@ __all__ = [
     "detect_clan_rank_top_spot",
     "detect_clan_score_records",
     "detect_weekly_donation_leader",
-    "detect_deck_archetype_changes",
-    "detect_form_slumps",
     "detect_cake_days",
     "detect_pending_system_signals",
     # War detectors
