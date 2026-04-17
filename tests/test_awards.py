@@ -192,15 +192,21 @@ def test_iron_king_requires_all_battle_days_at_four_decks():
         alice = _seed_member(conn, "#AAA", "Alice")
         bob = _seed_member(conn, "#BBB", "Bob")
         # Two battle days observed for the season. Alice hits 4/4 on both,
-        # Bob hits 4/4 only on one.
+        # Bob hits 4/4 only on one. Snapshots dated before the seeded
+        # finish_time so both days count as required.
+        _seed_war_race(conn, season_id=131, section_index=0)
         _seed_snapshot(conn, season_id=131, section_index=0, period_index=3,
-                       member_id=alice, tag="#AAA", decks_used_today=4)
+                       member_id=alice, tag="#AAA", decks_used_today=4,
+                       observed_at="2026-01-01T05:00:00")
         _seed_snapshot(conn, season_id=131, section_index=0, period_index=4,
-                       member_id=alice, tag="#AAA", decks_used_today=4)
+                       member_id=alice, tag="#AAA", decks_used_today=4,
+                       observed_at="2026-01-01T06:00:00")
         _seed_snapshot(conn, season_id=131, section_index=0, period_index=3,
-                       member_id=bob, tag="#BBB", decks_used_today=4)
+                       member_id=bob, tag="#BBB", decks_used_today=4,
+                       observed_at="2026-01-01T05:00:00")
         _seed_snapshot(conn, season_id=131, section_index=0, period_index=4,
-                       member_id=bob, tag="#BBB", decks_used_today=3)
+                       member_id=bob, tag="#BBB", decks_used_today=3,
+                       observed_at="2026-01-01T06:00:00")
 
         candidates = db.get_iron_king_candidates(season_id=131, conn=conn)
         tags = {c["tag"] for c in candidates}
@@ -266,6 +272,138 @@ def test_perfect_week_legacy_fallback_reconstructs_from_war_participation():
             season_id=129, section_index=1, conn=conn
         )
         assert {c["tag"] for c in candidates} == {"#AAA"}
+    finally:
+        conn.close()
+
+
+def test_iron_king_excludes_members_who_missed_any_week():
+    """Even a perfect record in weeks played fails if the member missed a week."""
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        bob = _seed_member(conn, "#BBB", "Bob")
+        # Two weeks. Alice plays both perfectly; Bob only plays the second week.
+        for section in (0, 1):
+            race_id = _seed_war_race(conn, season_id=131, section_index=section)
+            _seed_participation(conn, race_id, alice, "#AAA", fame=3000, decks=16)
+            if section == 1:
+                _seed_participation(conn, race_id, bob, "#BBB", fame=3000, decks=16)
+            pre_finish = f"2026-01-0{section + 1}T05:00:00"
+            _seed_snapshot(conn, season_id=131, section_index=section,
+                           period_index=3, member_id=alice, tag="#AAA",
+                           decks_used_today=4, observed_at=pre_finish)
+            if section == 1:
+                _seed_snapshot(conn, season_id=131, section_index=section,
+                               period_index=3, member_id=bob, tag="#BBB",
+                               decks_used_today=4, observed_at=pre_finish)
+
+        tags = {c["tag"] for c in db.get_iron_king_candidates(season_id=131, conn=conn)}
+        assert tags == {"#AAA"}
+    finally:
+        conn.close()
+
+
+def test_perfect_week_falls_back_for_section_without_snapshots():
+    """A season with snapshots in some weeks still uses legacy data where snapshots are missing."""
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        # Week 0 has participation but no snapshots — legacy fallback.
+        race0 = _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_participation(conn, race0, alice, "#AAA", fame=3000, decks=16)
+        # Week 1 has a snapshot (pre-finish).
+        _seed_war_race(conn, season_id=131, section_index=1)
+        _seed_snapshot(conn, season_id=131, section_index=1, period_index=3,
+                       member_id=alice, tag="#AAA", decks_used_today=4,
+                       observed_at="2026-01-02T05:00:00")
+
+        w0 = db.get_perfect_week_candidates(season_id=131, section_index=0, conn=conn)
+        w1 = db.get_perfect_week_candidates(season_id=131, section_index=1, conn=conn)
+        assert {c["tag"] for c in w0} == {"#AAA"}
+        assert {c["tag"] for c in w1} == {"#AAA"}
+    finally:
+        conn.close()
+
+
+def test_perfect_week_boundary_snapshot_does_not_fail_otherwise_perfect_day():
+    """A reset-to-zero snapshot at the war-day boundary must not trump in-day peaks."""
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        _seed_war_race(conn, season_id=131, section_index=0)
+        # Two in-day snapshots showing 4 decks, plus a boundary snapshot at
+        # the reset that landed at 0 — simulating the 10:00 UTC rollover bug.
+        _seed_snapshot(conn, season_id=131, section_index=0, period_index=3,
+                       member_id=alice, tag="#AAA", decks_used_today=4,
+                       observed_at="2026-01-01T04:00:00")
+        _seed_snapshot(conn, season_id=131, section_index=0, period_index=3,
+                       member_id=alice, tag="#AAA", decks_used_today=4,
+                       observed_at="2026-01-01T05:00:00")
+        _seed_snapshot(conn, season_id=131, section_index=0, period_index=3,
+                       member_id=alice, tag="#AAA", decks_used_today=0,
+                       observed_at="2026-01-01T09:59:59")
+
+        tags = {c["tag"] for c in db.get_perfect_week_candidates(
+            season_id=131, section_index=0, conn=conn)}
+        assert tags == {"#AAA"}
+    finally:
+        conn.close()
+
+
+def test_backfill_season_revokes_stale_grants():
+    """A hand-inserted award that no longer matches the candidate query is swept."""
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        bob = _seed_member(conn, "#BBB", "Bob")
+        # Two weeks; Alice played both perfectly, Bob only one.
+        for section in (0, 1):
+            race_id = _seed_war_race(conn, season_id=131, section_index=section)
+            _seed_participation(conn, race_id, alice, "#AAA", fame=3000, decks=16)
+            if section == 1:
+                _seed_participation(conn, race_id, bob, "#BBB", fame=3000, decks=16)
+            pre_finish = f"2026-01-0{section + 1}T05:00:00"
+            _seed_snapshot(conn, season_id=131, section_index=section,
+                           period_index=3, member_id=alice, tag="#AAA",
+                           decks_used_today=4, observed_at=pre_finish)
+            if section == 1:
+                _seed_snapshot(conn, season_id=131, section_index=section,
+                               period_index=3, member_id=bob, tag="#BBB",
+                               decks_used_today=4, observed_at=pre_finish)
+        # Next season present → 131 is closed.
+        _seed_war_race(conn, season_id=132, section_index=0)
+
+        # Manually insert a stale Iron King grant for Bob (who missed a week).
+        db.insert_award("iron_king", 131, bob, "#BBB", conn=conn)
+
+        summary = _awards.backfill_season(131, conn=conn)
+        revoked = summary["_revoked"].get("iron_king") or []
+        assert [r["player_tag"] for r in revoked] == ["#BBB"]
+        remaining = conn.execute(
+            "SELECT player_tag FROM awards WHERE award_type='iron_king' AND season_id=131"
+        ).fetchall()
+        assert [r["player_tag"] for r in remaining] == ["#AAA"]
+    finally:
+        conn.close()
+
+
+def test_grant_week_awards_is_idempotent():
+    """Re-running grant_week_awards on the same week produces zero new signals."""
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_snapshot(conn, season_id=131, section_index=0, period_index=3,
+                       member_id=alice, tag="#AAA", decks_used_today=4,
+                       observed_at="2026-01-01T05:00:00")
+        _seed_snapshot(conn, season_id=131, section_index=0, period_index=4,
+                       member_id=alice, tag="#AAA", decks_used_today=2,
+                       observed_at="2026-01-01T20:00:00")
+
+        first = _awards.grant_week_awards(131, 0, conn)
+        assert len(first) == 2  # perfect_week + victory_lap
+        second = _awards.grant_week_awards(131, 0, conn)
+        assert second == []
     finally:
         conn.close()
 
@@ -460,18 +598,21 @@ def test_backfill_season_closed_grants_all_award_types():
     try:
         m1 = _seed_member(conn, "#AAA", "Alice")
         m2 = _seed_member(conn, "#BBB", "Bob")
-        # Closed season 131 with fame + perfect deck usage
+        # Closed season 131 with fame + perfect deck usage.
+        # Snapshots dated before the seeded finish_time so each battle day
+        # counts as required.
         for section in range(3):
             race_id = _seed_war_race(conn, season_id=131, section_index=section)
             _seed_participation(conn, race_id, m1, "#AAA", fame=3500)
             _seed_participation(conn, race_id, m2, "#BBB", fame=2000)
+            pre_finish = f"2026-01-0{section + 1}T05:00:00"
             for period in (3, 4):
                 _seed_snapshot(conn, season_id=131, section_index=section,
                                period_index=period, member_id=m1, tag="#AAA",
-                               decks_used_today=4)
+                               decks_used_today=4, observed_at=pre_finish)
                 _seed_snapshot(conn, season_id=131, section_index=section,
                                period_index=period, member_id=m2, tag="#BBB",
-                               decks_used_today=3)
+                               decks_used_today=3, observed_at=pre_finish)
         # Next season present → 131 is closed
         _seed_war_race(conn, season_id=132, section_index=0)
 
@@ -480,9 +621,10 @@ def test_backfill_season_closed_grants_all_award_types():
         # Alice hit 4/4 on every battle day — qualifies for Iron King
         iron_tags = [s["tag"] for s in summary["iron_king"]]
         assert iron_tags == ["#AAA"]
-        # Re-run is idempotent
+        # Re-run is idempotent (ignoring the revoked report key)
         again = _awards.backfill_season(131, conn=conn)
-        assert all(not sigs for sigs in again.values())
+        assert all(not v for k, v in again.items() if k != "_revoked")
+        assert not again["_revoked"]
     finally:
         conn.close()
 

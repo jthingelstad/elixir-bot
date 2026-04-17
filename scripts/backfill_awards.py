@@ -61,6 +61,14 @@ def _format_row(signal: dict) -> str:
     return f"  {medal} [{scope:>6}] {name:<20} {tag:<10} {metric_text}"
 
 
+def _format_revoked(row: dict) -> str:
+    section = row.get("section_index")
+    scope = f"w{section}" if section is not None else "season"
+    name = row.get("player_name") or "?"
+    tag = row.get("player_tag") or "?"
+    return f"  ❌ [{scope:>6}] {name:<20} {tag}"
+
+
 def _print_summary(season_id: int, summary: dict[str, list[dict]]):
     header = f"\n=== Season {season_id} "
     header += "=" * (70 - len(header))
@@ -75,7 +83,18 @@ def _print_summary(season_id: int, summary: dict[str, list[dict]]):
         for signal in signals:
             print(_format_row(signal))
         total += len(signals)
-    print(f"\nSeason {season_id} total: {total} new award rows")
+    revoked = summary.get("_revoked") or {}
+    total_revoked = sum(len(v) for v in revoked.values())
+    if total_revoked:
+        print(f"\nrevoked (no longer qualifying): {total_revoked} row{'s' if total_revoked != 1 else ''}")
+        for award_type in AWARD_ORDER:
+            rows = revoked.get(award_type) or []
+            if not rows:
+                continue
+            print(f"\n  {award_type}:")
+            for row in rows:
+                print(_format_revoked(row))
+    print(f"\nSeason {season_id} total: {total} new award rows, {total_revoked} revoked")
 
 
 def main() -> int:
@@ -115,6 +134,7 @@ def main() -> int:
             season_ids = list(args.season)
 
         grand_total = 0
+        grand_revoked = 0
         for season_id in season_ids:
             race_count = conn.execute(
                 "SELECT COUNT(*) AS c FROM war_races WHERE season_id = ?",
@@ -130,9 +150,16 @@ def main() -> int:
 
             summary = backfill_season(season_id, conn=conn)
             _print_summary(season_id, summary)
-            grand_total += sum(len(v) for v in summary.values())
+            grand_total += sum(
+                len(v) for k, v in summary.items() if k != "_revoked"
+            )
+            revoked = summary.get("_revoked") or {}
+            grand_revoked += sum(len(v) for v in revoked.values())
 
-        print(f"\n{grand_total} new award rows committed across {len(season_ids)} season(s). Re-run is safe (INSERT OR IGNORE).")
+        print(
+            f"\n{grand_total} new award rows committed, {grand_revoked} revoked "
+            f"across {len(season_ids)} season(s). Re-run is safe (INSERT OR IGNORE)."
+        )
     finally:
         conn.close()
     return 0
