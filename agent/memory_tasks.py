@@ -372,6 +372,41 @@ def _achievement_star_fact(signal: dict) -> dict | None:
     }
 
 
+def _award_earned_fact(signal: dict) -> dict | None:
+    tag = signal.get("tag") or (signal.get("member") or {}).get("tag")
+    if not tag:
+        return None
+    name = signal.get("name") or (signal.get("member") or {}).get("name") or "Unknown"
+    award_type = signal.get("award_type")
+    if not award_type:
+        return None
+    display = signal.get("award_display_name") or award_type.replace("_", " ").title()
+    season_id = signal.get("season_id")
+    section_index = signal.get("section_index")
+    rank = signal.get("rank") or 1
+    metric_value = signal.get("metric_value")
+    metric_unit = signal.get("metric_unit")
+
+    scope_label = "season" if section_index is None else f"week {section_index + 1}"
+    medal = {1: "gold", 2: "silver", 3: "bronze"}.get(rank)
+    medal_suffix = f" ({medal})" if medal and rank in (2, 3) else ""
+    body = f"{name} earned {display}{medal_suffix} for season {season_id} {scope_label}"
+    if metric_value is not None and metric_unit:
+        body += f" \u2014 {int(metric_value) if float(metric_value).is_integer() else metric_value} {metric_unit}"
+
+    scope_token = "season" if section_index is None else f"w{section_index}"
+    event_id = f"award:{award_type}:{tag}:{season_id}:{scope_token}:r{rank}"
+
+    return {
+        "title": f"{name}: {display}{medal_suffix}",
+        "body": body,
+        "event_type": "award_earned",
+        "event_id": event_id,
+        "scope": "public",
+        "tags": [award_type, "award", f"season_{season_id}"],
+    }
+
+
 # signal_type → fact mapper
 _SIGNAL_FACT_MAP = {
     "card_level_milestone": _card_level_fact,
@@ -385,6 +420,7 @@ _SIGNAL_FACT_MAP = {
     "battle_trophy_push": _trophy_push_fact,
     "career_wins_milestone": _career_wins_fact,
     "achievement_star_milestone": _achievement_star_fact,
+    "award_earned": _award_earned_fact,
 }
 
 

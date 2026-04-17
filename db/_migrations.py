@@ -1472,7 +1472,40 @@ def _migration_29(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29]
+def _migration_30(conn: sqlite3.Connection) -> None:
+    """Create awards — durable, season-scoped recognition records.
+
+    Prior to this migration, awards like War Champ were recomputed from
+    war_participation each time a recap signal fired, and lived only in Discord
+    posts. The awards table persists each granted award as a first-class row
+    keyed by (award_type, season_id, section_index, member_id, rank), enabling
+    trophy-case rendering on the site, memory-backed agent reasoning about
+    award history, and idempotent re-grants via INSERT OR IGNORE.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS awards (
+            award_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            award_type     TEXT NOT NULL,
+            season_id      INTEGER NOT NULL,
+            section_index  INTEGER NOT NULL DEFAULT -1,
+            member_id      INTEGER NOT NULL REFERENCES members(member_id) ON DELETE CASCADE,
+            player_tag     TEXT NOT NULL,
+            rank           INTEGER NOT NULL DEFAULT 1,
+            metric_value   REAL,
+            metric_unit    TEXT,
+            metadata_json  TEXT,
+            awarded_at     TEXT NOT NULL,
+            UNIQUE(award_type, season_id, section_index, member_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_awards_season ON awards(season_id, award_type);
+        CREATE INDEX IF NOT EXISTS idx_awards_member ON awards(member_id, award_type);
+        """
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
