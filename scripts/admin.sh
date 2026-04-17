@@ -90,6 +90,12 @@ backup_db() {
     python "$PROJECT_DIR/scripts/backup_db.py"
 }
 
+update_awards() {
+    echo "==> Updating awards across every season in war_races..."
+    source "$PROJECT_DIR/venv/bin/activate"
+    python "$PROJECT_DIR/scripts/backfill_awards.py" --all
+}
+
 case "${1:-}" in
     stop)     stop_bot ;;
     start)    start_bot ;;
@@ -98,8 +104,9 @@ case "${1:-}" in
     install)  install_bot ;;
     status)   status ;;
     backup)   backup_db ;;
+    awards)   update_awards ;;
     *)
-        echo "Usage: $0 {start|stop|restart|upgrade|install|status|backup}"
+        echo "Usage: $0 {start|stop|restart|upgrade|install|status|backup|awards}"
         exit 1
         ;;
 esac
