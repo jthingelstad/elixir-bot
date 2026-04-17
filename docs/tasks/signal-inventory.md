@@ -88,6 +88,31 @@ the time-based thresholds; wall-clock computation in `build_situation_time`.
 
 ---
 
+## Awards — `heartbeat/_awards.py`
+
+Durable, season-scoped recognition records. Each new award row fires one
+`award_earned` signal so the announcement pipeline and memory store pick it
+up automatically. Grants are idempotent (INSERT OR IGNORE) so detectors can
+run every heartbeat.
+
+| Type | Trigger | Scope |
+|---|---|---|
+| `award_earned` (`war_champ`) | `detect_season_awards` — any season with a newer season in `war_races` and no existing `war_champ` row. Grants rank 1/2/3. | Season |
+| `award_earned` (`iron_king`) | Same trigger as `war_champ`. Grants to any active member with `decks_used_today=4` on every battle day of the season. | Season |
+| `award_earned` (`donation_champ`) | Same trigger. Ranks the top-3 season donation totals. | Season |
+| `award_earned` (`rookie_mvp`) | Same trigger. Top-3 fame among members whose `clan_memberships.joined_at` falls inside the season window. | Season |
+| `award_earned` (`war_participant`) | `detect_war_participant_awards` — any active member with fame > 0 in the current season and no existing row. Fires mid-season. | Season |
+| `award_earned` (`perfect_week`) | `detect_weekly_awards` — hooks on each `war_completed`; grants to members with `decks_used_today=4` on every battle day of that week. | Week |
+| `award_earned` (`donation_champ_weekly`) | `detect_weekly_donation_awards` — hooks on `weekly_donation_leader`. Persists the top-3 donors of the prior CR week as rank 1/2/3 rows. | Week |
+
+**Dedup**: Unique constraint on `awards(award_type, season_id, section_index,
+member_id)` plus `signal_log_type` per (award_type, season_id, scope, player_tag,
+rank). Detectors are safe to run every tick. Rows feed the `trophy_case` array
+on the roster site and a new `elixirAwards.json` payload for the
+`/members/trophy` page.
+
+---
+
 ## Tournament — `storage/tournament.py`
 
 Fires inside the tournament poller; surfaced into `#tournaments` via

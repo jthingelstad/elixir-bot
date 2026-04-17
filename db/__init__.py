@@ -594,6 +594,7 @@ from storage import metadata as _metadata_module
 from storage import tournament as _tournament_module
 from storage import card_catalog as _card_catalog_module
 from storage import revisits as _revisits_module
+from storage import awards as _awards_module
 
 __all__ = [name for name in globals() if not name.startswith("__")]
 for _module in (
@@ -607,6 +608,7 @@ for _module in (
     _tournament_module,
     _card_catalog_module,
     _revisits_module,
+    _awards_module,
 ):
     __export_public(_module)
 

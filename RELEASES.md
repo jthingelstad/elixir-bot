@@ -4,6 +4,55 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## v4.8 — Trophy Hall
+
+**Date:** 2026-04-16
+
+Awards become first-class. Until now, War Champ, Iron King, and friends were recomputed from `war_participation` at announcement time and lived only in Discord posts and Elixir's conversational memory. v4.8 adds a durable `awards` table, seven award types across season and weekly scopes, and a `trophy_case` on every member — rendered inline on the POAP KINGS roster and published as its own `elixirAwards.json` for the new `/members/trophy/<season>` page.
+
+### New Award Catalog
+
+- **War Champ** — top-3 fame for the season (gold / silver / bronze). Granted on season close.
+- **Iron King** — 4/4 decks on every battle day of every battle week. Pass/fail.
+- **Donation Champ** — top-3 donation totals for the season.
+- **Donation Champ Weekly** — top-3 for each CR week. Piggybacks on the existing `weekly_donation_leader` detector, so the weekly podium now persists to the trophy case automatically.
+- **War Participant** — any fame > 0 in any race of the season. Granted mid-season the first heartbeat after a member contributes.
+- **Perfect Week** — 4/4 decks every battle day of a single week. Earnable up to 4× per season.
+- **Rookie MVP** — top-3 fame among members whose `clan_memberships.joined_at` falls inside the season window.
+
+### Schema & Grants
+
+- `awards` table (migration 30) keys on `(award_type, season_id, section_index, member_id)` — one row per member per scope — with rank stored as data. All grants are idempotent via `INSERT OR IGNORE` so detectors are safe to run every heartbeat.
+- `storage/awards.py` hosts the grant queries — Iron King and Perfect Week use `war_participant_snapshots` (final `decks_used_today` per battle day); Donation Champ sums the MAX weekly `donations_week` across the season window; Rookie MVP joins to `clan_memberships.joined_at` inside the season bounds.
+- Season detection: a season is "closed" once a newer `season_id` appears in `war_races`, so `detect_season_awards` back-fills on its own without a timing-sensitive trigger.
+
+### Signal & Memory
+
+- New `award_earned` signal type routed to `clan-events` alongside `war_champ_standings` and `weekly_donation_leader`. Dedup key `award_earned::<type>::<season>::<scope>::<tag>::r<rank>`.
+- `_award_earned_fact` mapper in `agent/memory_tasks.py` stores every grant as a public `clan_memories` row tagged `<award_type>`, `award`, `season_<N>` — so future conversations can ask "who won Iron King last season?" and get a durable answer.
+
+### POAP KINGS Site
+
+- Each member object in `elixirRoster.json` and `elixirMembers.json` now carries a `trophy_case` array — same row shape as the underlying awards table, ordered newest-season-first. No icon keys, medal labels, or display strings; the site derives rendering from `award_type` + `rank`.
+- New top-level `elixirAwards.json` — all seasons, all awards, grouped by `season_id` with `season_start` / `season_end` dates — feeds the `/members/trophy/<season>` page.
+
+### Files
+
+- `storage/awards.py` (new) — grant queries, insert helper, trophy-case reads.
+- `heartbeat/_awards.py` (new) — `detect_season_awards`, `detect_weekly_awards`, `detect_weekly_donation_awards`, `detect_war_participant_awards`.
+- `db/_migrations.py` — migration 30.
+- `heartbeat/__init__.py`, `heartbeat/_pipeline.py` — wire detectors into both tick and the storage-backed war path.
+- `runtime/channel_subagents.py` — route `award_earned` to clan-events + durable memory.
+- `agent/memory_tasks.py` — award-earned fact mapper.
+- `modules/poap_kings/site.py` — `build_trophy_case`, `build_awards_data`, new `awards` content type.
+- `runtime/jobs/_site.py` — publish `elixirAwards.json` alongside `roster` and `clan`.
+
+### Tests
+
+- 622 tests passing (was 612). New `tests/test_awards.py` covers idempotent grants, Iron King's all-battle-days rule, season-close detection (no grants mid-season, all ranks on close), weekly donation persistence from signal payload, and the trophy-case site payloads.
+
+---
+
 ## v4.7 — Elixir Counting
 
 **Date:** 2026-04-15

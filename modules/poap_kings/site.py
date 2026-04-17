@@ -42,6 +42,7 @@ CONTENT_FILES = {
     "members": "elixirMembers.json",
     "roster": "elixirRoster.json",
     "promote": "elixirPromote.json",
+    "awards": "elixirAwards.json",
 }
 
 ROLE_MAP = {
@@ -856,6 +857,44 @@ def build_card_stats(members):
     ]
 
 
+def build_trophy_case(player_tag: str, conn) -> list[dict]:
+    """Return the award rows for one member, shaped for site consumption.
+
+    ``player_tag`` is the CR tag with or without the leading #. The returned
+    list preserves DB ordering (season_id DESC, award_type, rank, section_index)
+    — the site repo is responsible for grouping, icon selection, and display.
+    """
+    canon = "#" + player_tag.lstrip("#").upper()
+    row = conn.execute(
+        "SELECT member_id FROM members WHERE player_tag = ?",
+        (canon,),
+    ).fetchone()
+    if not row:
+        return []
+    return db.get_member_trophy_case(row["member_id"], conn=conn)
+
+
+def build_awards_data(conn=None) -> dict:
+    """Build the elixirAwards.json payload — all seasons, all awards.
+
+    Each award row carries ``player_tag``, ``player_name``, ``award_type``,
+    ``rank``, ``section_index``, and the metric metadata. Season entries
+    include ``season_start`` / ``season_end`` (YYYY-MM-DD) for the site to
+    label tabs.
+    """
+    close = conn is None
+    conn = conn or db.get_connection()
+    try:
+        seasons = db.get_awards_by_season(conn=conn)
+        return {
+            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "seasons": seasons,
+        }
+    finally:
+        if close:
+            conn.close()
+
+
 def build_roster_data(clan_data, include_cards=False, conn=None):
     """Build roster data from CR API plus Elixir's stored member metadata.
 
@@ -915,6 +954,7 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                 "achievement_progress": showcase.get("achievement_progress", []),
                 "bio": extra.get("bio", ""),
                 "highlight": extra.get("highlight", ""),
+                "trophy_case": build_trophy_case(tag, conn),
             }
             members.append(member)
 
@@ -1008,6 +1048,8 @@ __all__ = [
     "build_card_stats",
     "build_clan_data",
     "build_roster_data",
+    "build_awards_data",
+    "build_trophy_case",
     "commit_and_push",
     "extract_current_deck",
     "extract_current_deck_icons",

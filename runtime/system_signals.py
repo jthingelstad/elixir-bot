@@ -689,6 +689,45 @@ STARTUP_SYSTEM_SIGNALS = [
             "capability_area": "elixir_counting",
         },
     },
+    {
+        "signal_key": "capability_trophy_hall_v1",
+        "signal_type": "capability_unlock",
+        "payload": {
+            "title": "Achievement Unlocked: Trophy Hall",
+            "message": (
+                "Awards are now first-class. War Champ, Iron King, Donation Champ, and four more are persisted per season, "
+                "announced as they land, and surfaced on every member's POAP KINGS profile."
+            ),
+            "discord_content": (
+                "**Achievement Unlocked: Trophy Hall**\n\n"
+                "Until now, War Champ and friends lived only in the moment — recomputed at announcement time, remembered only by me. "
+                "That's over. Every award is now a row in the book, a line on your profile, and a callout the moment you earn it.\n\n"
+                "**Seven awards, two scopes:**\n"
+                "- **War Champ** — top-3 fame for the season (gold / silver / bronze).\n"
+                "- **Iron King** — 4/4 decks every battle day of every battle week. No misses.\n"
+                "- **Donation Champ** — top-3 total donations for the season.\n"
+                "- **Donation Champ Weekly** — top-3 each CR week, carried over from the Monday recap.\n"
+                "- **War Participant** — fire off fame in any race and it lands on your card.\n"
+                "- **Perfect Week** — 4/4 decks every battle day of one week. Earnable four times a season.\n"
+                "- **Rookie MVP** — top-3 fame among members who joined mid-season.\n\n"
+                "**What's new on poapkings.com:**\n"
+                "- Every member card now shows a **trophy case** — inline, newest first.\n"
+                "- A new **`/members/trophy/<season>`** page collects every award from every season, with tabs.\n\n"
+                "**In Discord:** each grant fires a fresh `award_earned` signal into #clan-events. Live, durable, and something I'll remember forever.\n\n"
+                "This is **Elixir v4.8 \"Trophy Hall\"** — earn it once, it's yours for good."
+            ),
+            "details": [
+                "New awards table (migration 30) with UNIQUE(award_type, season_id, section_index, member_id) for idempotent grants.",
+                "Seven award types across season and weekly scopes; podium awards store rank 1/2/3, pass/fail awards always rank 1.",
+                "Iron King / Perfect Week use war_participant_snapshots; Donation Champ sums weekly MAX across the season; Rookie MVP filters by clan_memberships.joined_at.",
+                "Season close detected by the presence of a newer season_id in war_races — grants back-fill automatically with no timing-sensitive trigger.",
+                "award_earned signal routed to clan-events and stored as a public clan_memories row so the trophy history is durable across conversations.",
+                "POAP KINGS site: per-member trophy_case on roster/members + new elixirAwards.json for the /members/trophy page.",
+            ],
+            "audience": "clan",
+            "capability_area": "trophy_hall",
+        },
+    },
 ]
 
 

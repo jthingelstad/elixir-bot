@@ -371,14 +371,16 @@ async def _site_data_refresh():
 
         roster_data = await asyncio.to_thread(poap_kings_site.build_roster_data, clan)
         clan_stats = await asyncio.to_thread(poap_kings_site.build_clan_data, clan)
+        awards_data = await asyncio.to_thread(poap_kings_site.build_awards_data)
+        payloads = {"roster": roster_data, "clan": clan_stats, "awards": awards_data}
         publish_result = await asyncio.to_thread(
             _publish_poap_kings_site_or_raise,
-            {"roster": roster_data, "clan": clan_stats},
+            payloads,
             "Elixir POAP KINGS site data refresh",
         )
         publish_result = _normalize_poap_kings_publish_result(
             publish_result,
-            {"roster": roster_data, "clan": clan_stats},
+            payloads,
         )
         await _notify_poapkings_publish("site-data-refresh", publish_result=publish_result)
         log.info("Site data refresh complete: %d members", len(roster_data.get("members", [])))
@@ -418,8 +420,10 @@ async def _site_content_cycle():
                 include_cards=True,
             )
             clan_stats = await asyncio.to_thread(poap_kings_site.build_clan_data, clan)
+            awards_data = await asyncio.to_thread(poap_kings_site.build_awards_data)
             payloads["roster"] = roster_data
             payloads["clan"] = clan_stats
+            payloads["awards"] = awards_data
 
         # Generate home message
         try:

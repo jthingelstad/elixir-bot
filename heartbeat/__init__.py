@@ -71,6 +71,12 @@ from heartbeat._war import (
     detect_war_season_completion,
     detect_war_week_complete,
 )
+from heartbeat._awards import (
+    detect_season_awards,
+    detect_war_participant_awards,
+    detect_weekly_awards,
+    detect_weekly_donation_awards,
+)
 
 log = logging.getLogger("elixir_heartbeat")
 
@@ -162,7 +168,10 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
             signals.extend(detect_donation_leaders(members, conn=conn))
 
         # Weekly donation leader — Mondays, covers the prior CR week.
-        signals.extend(detect_weekly_donation_leader(conn=conn))
+        weekly_donation_signals = detect_weekly_donation_leader(conn=conn)
+        signals.extend(weekly_donation_signals)
+        # Persist weekly donation champs as durable award rows.
+        signals.extend(detect_weekly_donation_awards(weekly_donation_signals, conn=conn))
 
         # Inactivity
         signals.extend(detect_inactivity(members, conn=conn))
@@ -212,6 +221,12 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         if war_signals:
             signals.extend(detect_war_champ_update(war_signals, conn=conn))
 
+        # Awards — idempotent durable grants. Week-scoped awards ride on
+        # war_completed signals; season awards back-fill any fully-ended season.
+        signals.extend(detect_weekly_awards(war_signals, conn=conn))
+        signals.extend(detect_season_awards(conn=conn))
+        signals.extend(detect_war_participant_awards(conn=conn))
+
     log.info("Heartbeat: %d signals detected", len(signals))
     return HeartbeatTickResult(signals=signals, clan=clan, war=war)
 
@@ -252,6 +267,11 @@ __all__ = [
     "detect_war_season_completion",
     "detect_war_completion",
     "detect_war_champ_update",
+    # Awards detectors
+    "detect_season_awards",
+    "detect_weekly_awards",
+    "detect_weekly_donation_awards",
+    "detect_war_participant_awards",
     # Situation helpers
     "build_situation_time",
     # Pipeline

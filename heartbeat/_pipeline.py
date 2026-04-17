@@ -25,6 +25,11 @@ from heartbeat._war import (
     detect_war_surprise_participants,
     detect_war_week_complete,
 )
+from heartbeat._awards import (
+    detect_season_awards,
+    detect_war_participant_awards,
+    detect_weekly_awards,
+)
 
 log = logging.getLogger("elixir_heartbeat")
 
@@ -189,6 +194,11 @@ def detect_war_signals_from_storage(conn=None):
     signals.extend(detect_war_week_complete(war_signals, conn=conn))
     if war_signals:
         signals.extend(detect_war_champ_update(war_signals, conn=conn))
+
+    # Awards — durable grants. Run every war-awareness tick (idempotent).
+    signals.extend(detect_weekly_awards(war_signals, conn=conn))
+    signals.extend(detect_season_awards(conn=conn))
+    signals.extend(detect_war_participant_awards(conn=conn))
 
     war = db.get_current_war_status(conn=conn) or {}
     clan = _build_stored_clan_context(war)

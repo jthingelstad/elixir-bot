@@ -55,6 +55,7 @@ CLAN_EVENT_SIGNAL_TYPES = {
     "donation_leaders",
     "weekly_donation_leader",
     "member_active_again",
+    "award_earned",
 }
 
 TOURNAMENT_SIGNAL_TYPES = {
@@ -77,6 +78,7 @@ DURABLE_EVENT_SIGNAL_TYPES = {
     "war_week_complete",
     "war_season_complete",
     "weekly_clan_recap",
+    "award_earned",
 }
 
 

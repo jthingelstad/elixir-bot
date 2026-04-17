@@ -1781,11 +1781,13 @@ def test_site_data_refresh_fails_when_poap_kings_publish_raises():
         "memberList": [{"name": "King Levy", "tag": "#ABC"}],
     }
 
+    awards_payload = {"generated_at": "2026-04-16T00:00:00Z", "seasons": []}
     with (
         patch("runtime.jobs._site.poap_kings_site.site_enabled", return_value=True),
         patch("elixir.cr_api.get_clan", return_value=clan),
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy"}]}),
         patch("elixir.poap_kings_site.build_clan_data", return_value={"memberCount": 1}),
+        patch("elixir.poap_kings_site.build_awards_data", return_value=awards_payload),
         patch("runtime.jobs._site.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
         patch("runtime.jobs._site._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
@@ -1793,7 +1795,11 @@ def test_site_data_refresh_fails_when_poap_kings_publish_raises():
         asyncio.run(elixir._site_data_refresh())
 
     mock_publish.assert_called_once_with(
-        {"roster": {"members": [{"name": "King Levy"}]}, "clan": {"memberCount": 1}},
+        {
+            "roster": {"members": [{"name": "King Levy"}]},
+            "clan": {"memberCount": 1},
+            "awards": awards_payload,
+        },
         "Elixir POAP KINGS site data refresh",
     )
     mock_notify.assert_awaited_once_with("site-data-refresh", error_detail="GitHub publish failed")
@@ -1807,12 +1813,14 @@ def test_site_content_cycle_fails_when_daily_site_publish_raises():
         "memberList": [{"name": "King Levy", "tag": "#ABC"}],
     }
 
+    awards_payload = {"generated_at": "2026-04-16T00:00:00Z", "seasons": []}
     with (
         patch("runtime.jobs._site.poap_kings_site.site_enabled", return_value=True),
         patch("elixir.cr_api.get_clan", return_value=clan),
         patch("elixir.cr_api.get_current_war", return_value={"state": "warDay"}),
         patch("elixir.poap_kings_site.build_roster_data", return_value={"members": [{"name": "King Levy", "tag": "ABC"}]}),
         patch("elixir.poap_kings_site.build_clan_data", return_value={"memberCount": 1}),
+        patch("elixir.poap_kings_site.build_awards_data", return_value=awards_payload),
         patch("elixir.elixir_agent.generate_home_message", return_value="Home message"),
         patch("runtime.jobs._site.poap_kings_site.load_published", return_value=None),
         patch("runtime.jobs._site.poap_kings_site.publish_site_content", side_effect=RuntimeError("GitHub publish failed")) as mock_publish,
@@ -1825,6 +1833,7 @@ def test_site_content_cycle_fails_when_daily_site_publish_raises():
         {
             "roster": {"members": [{"name": "King Levy", "tag": "ABC"}]},
             "clan": {"memberCount": 1},
+            "awards": awards_payload,
             "home": {"message": "Home message", "generated": mock_publish.call_args.args[0]["home"]["generated"]},
         },
         "Elixir POAP KINGS daily site sync",
