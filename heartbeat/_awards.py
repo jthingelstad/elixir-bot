@@ -524,6 +524,102 @@ def grant_weekly_donation_for_season(
     return signals
 
 
+def _sweep_stale_award_rows(
+    conn: sqlite3.Connection,
+    season_id: int,
+    *,
+    include_season_wide: bool,
+) -> dict[str, list[dict]]:
+    """Delete awards in this season that no longer match the candidate query.
+
+    Returns ``{award_type: [deleted_rows, ...]}`` keyed by award type for the
+    rows that were removed. Each deleted row carries
+    ``{member_id, player_tag, player_name, section_index}``.
+
+    Skips season-wide award types when ``include_season_wide`` is False — the
+    candidate queries for in-progress seasons aren't meaningful yet.
+    """
+    from storage.awards import (
+        SEASON_WIDE_SECTION,
+        get_iron_king_candidates,
+        get_perfect_week_candidates,
+        get_victory_lap_candidates,
+    )
+    from db import get_rookie_mvp_candidates, get_season_donation_leaderboard, get_war_champ_standings
+
+    deletions: dict[str, list[dict]] = {}
+
+    def _sweep(award_type: str, section_index: Optional[int], live_member_ids: set[int]):
+        section_sql = SEASON_WIDE_SECTION if section_index is None else int(section_index)
+        rows = conn.execute(
+            "SELECT a.award_id, a.member_id, a.player_tag, m.current_name "
+            "FROM awards a LEFT JOIN members m ON m.member_id = a.member_id "
+            "WHERE a.award_type = ? AND a.season_id = ? AND a.section_index = ?",
+            (award_type, int(season_id), section_sql),
+        ).fetchall()
+        removed = []
+        for row in rows:
+            if row["member_id"] in live_member_ids:
+                continue
+            conn.execute("DELETE FROM awards WHERE award_id = ?", (row["award_id"],))
+            removed.append({
+                "member_id": row["member_id"],
+                "player_tag": row["player_tag"],
+                "player_name": row["current_name"],
+                "section_index": section_index,
+            })
+        if removed:
+            deletions.setdefault(award_type, []).extend(removed)
+
+    # Weekly awards — always swept.
+    section_rows = conn.execute(
+        "SELECT section_index FROM war_races WHERE season_id = ? ORDER BY section_index",
+        (int(season_id),),
+    ).fetchall()
+    for r in section_rows:
+        section = r["section_index"]
+        _sweep(
+            "perfect_week", section,
+            {c["member_id"] for c in get_perfect_week_candidates(
+                season_id=season_id, section_index=section, conn=conn)},
+        )
+        _sweep(
+            "victory_lap", section,
+            {c["member_id"] for c in get_victory_lap_candidates(
+                season_id=season_id, section_index=section, conn=conn)},
+        )
+
+    # Season-wide awards — only swept when the season is closed, since those
+    # candidate queries only produce a stable answer after season close.
+    if include_season_wide:
+        _sweep(
+            "iron_king", None,
+            {c["member_id"] for c in get_iron_king_candidates(
+                season_id=season_id, conn=conn)},
+        )
+        war_champ_member_ids: set[int] = set()
+        for entry in get_war_champ_standings(season_id=season_id, conn=conn)[:3]:
+            row = conn.execute(
+                "SELECT member_id FROM members WHERE player_tag = ?",
+                (entry["tag"],),
+            ).fetchone()
+            if row:
+                war_champ_member_ids.add(row["member_id"])
+        _sweep("war_champ", None, war_champ_member_ids)
+        _sweep(
+            "donation_champ", None,
+            {c["member_id"] for c in get_season_donation_leaderboard(
+                season_id=season_id, conn=conn)},
+        )
+        _sweep(
+            "rookie_mvp", None,
+            {c["member_id"] for c in get_rookie_mvp_candidates(season_id=season_id, conn=conn)},
+        )
+
+    conn.commit()
+    return deletions
+
+
 @managed_connection
 def backfill_season(
     season_id: int,
@@ -538,8 +634,10 @@ def backfill_season(
     backfill cover weekly awards for the current season without granting
     season-wide podiums before the season has ended.
 
-    Returns ``{award_type: [signal_dicts, ...]}`` keyed by award type for the
-    newly-inserted rows only. Existing rows are ignored via INSERT OR IGNORE.
+    Returns ``{award_type: [signal_dicts, ...]}`` keyed by award type for
+    newly-inserted rows, plus ``_revoked`` — a dict of the same shape holding
+    rows that were removed because the current candidate query no longer
+    includes them. Existing rows that still qualify are left alone.
     """
     if include_season_wide is None:
         include_season_wide = db.season_is_complete(season_id, conn=conn)
@@ -581,4 +679,7 @@ def backfill_season(
         summary["donation_champ"] = []
         summary["rookie_mvp"] = []
 
+    summary["_revoked"] = _sweep_stale_award_rows(
+        conn, season_id, include_season_wide=include_season_wide,
+    )
     return summary
