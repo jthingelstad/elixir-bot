@@ -271,6 +271,88 @@ def test_build_trophy_case_returns_member_awards():
         conn.close()
 
 
+def test_backfill_season_closed_grants_all_award_types():
+    conn = db.get_connection(":memory:")
+    try:
+        m1 = _seed_member(conn, "#AAA", "Alice")
+        m2 = _seed_member(conn, "#BBB", "Bob")
+        # Closed season 131 with fame + perfect deck usage
+        for section in range(3):
+            race_id = _seed_war_race(conn, season_id=131, section_index=section)
+            _seed_participation(conn, race_id, m1, "#AAA", fame=3500)
+            _seed_participation(conn, race_id, m2, "#BBB", fame=2000)
+            for period in (3, 4):
+                _seed_snapshot(conn, season_id=131, section_index=section,
+                               period_index=period, member_id=m1, tag="#AAA",
+                               decks_used_today=4)
+                _seed_snapshot(conn, season_id=131, section_index=section,
+                               period_index=period, member_id=m2, tag="#BBB",
+                               decks_used_today=3)
+        # Next season present → 131 is closed
+        _seed_war_race(conn, season_id=132, section_index=0)
+
+        summary = _awards.backfill_season(131, conn=conn)
+        assert len(summary["war_champ"]) == 2
+        # Alice hit 4/4 on every battle day — qualifies for Iron King
+        iron_tags = [s["tag"] for s in summary["iron_king"]]
+        assert iron_tags == ["#AAA"]
+        # Re-run is idempotent
+        again = _awards.backfill_season(131, conn=conn)
+        assert all(not sigs for sigs in again.values())
+    finally:
+        conn.close()
+
+
+def test_backfill_season_in_progress_skips_season_wide_awards():
+    conn = db.get_connection(":memory:")
+    try:
+        m1 = _seed_member(conn, "#AAA", "Alice")
+        race_id = _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_participation(conn, race_id, m1, "#AAA", fame=3500)
+        _seed_current_war(conn, season_id=131)
+
+        summary = _awards.backfill_season(131, conn=conn)
+        # In-progress season: season-wide awards held back, but participant
+        # and weekly paths still run.
+        assert summary["war_champ"] == []
+        assert summary["iron_king"] == []
+        assert summary["donation_champ"] == []
+        assert summary["rookie_mvp"] == []
+        assert len(summary["war_participant"]) == 1
+    finally:
+        conn.close()
+
+
+def test_grant_weekly_donation_for_season_reconstructs_from_metrics():
+    conn = db.get_connection(":memory:")
+    try:
+        m1 = _seed_member(conn, "#AAA", "Alice")
+        m2 = _seed_member(conn, "#BBB", "Bob")
+        m3 = _seed_member(conn, "#CCC", "Cat")
+        # Season race created 2026-01-01; _season_bounds returns [01-01, 01-08].
+        # 2026-01-04 is a Sunday inside that window.
+        _seed_war_race(conn, season_id=131, section_index=0)
+        conn.execute(
+            "INSERT INTO member_daily_metrics (member_id, metric_date, donations_week) VALUES (?, ?, ?)",
+            (m1, "2026-01-04", 1200),
+        )
+        conn.execute(
+            "INSERT INTO member_daily_metrics (member_id, metric_date, donations_week) VALUES (?, ?, ?)",
+            (m2, "2026-01-04", 900),
+        )
+        conn.execute(
+            "INSERT INTO member_daily_metrics (member_id, metric_date, donations_week) VALUES (?, ?, ?)",
+            (m3, "2026-01-04", 700),
+        )
+
+        signals = _awards.grant_weekly_donation_for_season(131, conn)
+        assert len(signals) == 3
+        assert [s["rank"] for s in signals] == [1, 2, 3]
+        assert signals[0]["tag"] == "#AAA"
+    finally:
+        conn.close()
+
+
 def test_build_awards_data_groups_by_season():
     conn = db.get_connection(":memory:")
     try:
