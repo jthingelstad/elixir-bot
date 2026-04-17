@@ -1942,6 +1942,7 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
         "clan-awareness",
         "war-poll",
         "war-awareness",
+        "award-detection",
         "player-progression",
         "daily-clan-insight",
         "leadership-review",

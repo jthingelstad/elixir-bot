@@ -443,6 +443,49 @@ async def _war_awareness_tick():
         runtime_status.mark_job_failure("war_awareness", str(e))
 
 
+async def _award_detection_tick():
+    """Daily pass that grants season-wide clan awards.
+
+    Season awards only land when a war season closes (every ~4-5 weeks), and
+    War Participant accumulates at most once per battle day — so a daily
+    check is more than enough. Runs the same detectors the war-awareness
+    pipeline used to fire hourly, now isolated to its own activity and
+    routed through the normal signal delivery path so new grants still
+    surface in #clan-events.
+    """
+    from heartbeat._awards import (
+        detect_season_awards,
+        detect_war_participant_awards,
+    )
+
+    runtime_status.mark_job_start("award_detection")
+    try:
+        def _detect_all():
+            signals = []
+            signals.extend(detect_season_awards())
+            signals.extend(detect_war_participant_awards())
+            return signals
+
+        signals = await asyncio.to_thread(_detect_all)
+        if not signals:
+            runtime_status.mark_job_success("award_detection", "no new awards")
+            return
+
+        clan, war = await _app._load_live_clan_context()
+        delivered_ok = await _deliver_signal_group_via_awareness(
+            signals, clan, war, workflow="award_detection",
+        )
+        if not delivered_ok:
+            runtime_status.mark_job_failure("award_detection", "award signal delivery failed")
+            return
+        runtime_status.mark_job_success(
+            "award_detection", f"{len(signals)} new award signal(s)",
+        )
+    except Exception as e:
+        log.error("Award detection error: %s", e, exc_info=True)
+        runtime_status.mark_job_failure("award_detection", str(e))
+
+
 async def _player_intel_refresh():
     """Refresh stored player profile and battle intelligence for a subset of active members."""
     runtime_status.mark_job_start("player_intel_refresh")
