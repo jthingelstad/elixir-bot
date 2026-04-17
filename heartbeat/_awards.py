@@ -20,9 +20,10 @@ AWARD_DISPLAY_NAMES = {
     "war_champ": "War Champ",
     "iron_king": "Iron King",
     "donation_champ": "Donation Champ",
-    "donation_champ_weekly": "Weekly Donation Champ",
+    "donation_champ_weekly": "Donation Hero",
     "war_participant": "War Participant",
     "perfect_week": "Perfect Week",
+    "victory_lap": "Victory Lap",
     "rookie_mvp": "Rookie MVP",
 }
 
@@ -254,13 +255,12 @@ def grant_season_awards(season_id: int, conn: sqlite3.Connection) -> list[dict]:
 # -- week-scoped awards -----------------------------------------------------
 
 def grant_week_awards(season_id: int, section_index: int, conn: sqlite3.Connection) -> list[dict]:
-    """Grant Perfect Week to every qualifying player for a completed week."""
-    candidates = db.get_perfect_week_candidates(
-        season_id=season_id, section_index=section_index, conn=conn
-    )
+    """Grant Perfect Week and Victory Lap for every qualifying player in a week."""
     signal_date = _signal_date_for_season(conn, season_id)
-    signals = []
-    for c in candidates:
+    signals: list[dict] = []
+    for c in db.get_perfect_week_candidates(
+        season_id=season_id, section_index=section_index, conn=conn
+    ):
         metadata = {"total_battle_days": c.get("total_battle_days")}
         signal = _grant(
             conn,
@@ -273,6 +273,29 @@ def grant_week_awards(season_id: int, section_index: int, conn: sqlite3.Connecti
             rank=1,
             metric_value=c.get("total_battle_days"),
             metric_unit="battle_days",
+            metadata=metadata,
+            signal_date=signal_date,
+        )
+        if signal:
+            signals.append(signal)
+    for c in db.get_victory_lap_candidates(
+        season_id=season_id, section_index=section_index, conn=conn
+    ):
+        metadata = {
+            "post_victory_days": c.get("post_victory_days"),
+            "peak_decks": c.get("peak_decks"),
+        }
+        signal = _grant(
+            conn,
+            award_type="victory_lap",
+            season_id=season_id,
+            section_index=section_index,
+            member_id=c["member_id"],
+            player_tag=c["tag"],
+            player_name=c.get("name"),
+            rank=1,
+            metric_value=c.get("peak_decks"),
+            metric_unit="decks",
             metadata=metadata,
             signal_date=signal_date,
         )
@@ -526,15 +549,21 @@ def backfill_season(
     # War Participant — runs for any season (in-progress or closed).
     summary["war_participant"] = grant_war_participant_for_season(season_id, conn)
 
-    # Perfect Week — for every section_index in war_races where battle days are observed.
+    # Perfect Week + Victory Lap — for every section_index in war_races.
     rows = conn.execute(
         "SELECT section_index FROM war_races WHERE season_id = ? ORDER BY section_index",
         (season_id,),
     ).fetchall()
-    perfect_week_signals = []
+    perfect_week_signals: list[dict] = []
+    victory_lap_signals: list[dict] = []
     for r in rows:
-        perfect_week_signals.extend(grant_week_awards(season_id, r["section_index"], conn))
+        for s in grant_week_awards(season_id, r["section_index"], conn):
+            if s.get("award_type") == "victory_lap":
+                victory_lap_signals.append(s)
+            else:
+                perfect_week_signals.append(s)
     summary["perfect_week"] = perfect_week_signals
+    summary["victory_lap"] = victory_lap_signals
 
     # Weekly Donation Champ — reconstructed from member_daily_metrics.
     summary["donation_champ_weekly"] = grant_weekly_donation_for_season(season_id, conn)

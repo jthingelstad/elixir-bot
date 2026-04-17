@@ -19,6 +19,7 @@ place. That idempotency is what makes a "preview" flag unnecessary.
 Usage:
     python scripts/backfill_awards.py --season 130
     python scripts/backfill_awards.py --season 130 --season 131
+    python scripts/backfill_awards.py --all
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ AWARD_ORDER = [
     "rookie_mvp",
     "war_participant",
     "perfect_week",
+    "victory_lap",
     "donation_champ_weekly",
 ]
 
@@ -82,15 +84,38 @@ def main() -> int:
         "--season",
         action="append",
         type=int,
-        required=True,
         help="Season ID to backfill. Repeat the flag to backfill multiple seasons.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Backfill every season present in war_races (oldest first).",
     )
     args = parser.parse_args()
 
+    if not args.season and not args.all:
+        parser.error("pass --season <id> (repeatable) or --all")
+    if args.season and args.all:
+        parser.error("--season and --all are mutually exclusive")
+
     conn = db.get_connection()
-    grand_total = 0
     try:
-        for season_id in args.season:
+        if args.all:
+            season_ids = [
+                row["season_id"]
+                for row in conn.execute(
+                    "SELECT DISTINCT season_id FROM war_races ORDER BY season_id"
+                ).fetchall()
+            ]
+            if not season_ids:
+                print("No seasons found in war_races.")
+                return 0
+            print(f"Backfilling {len(season_ids)} season(s): {', '.join(str(s) for s in season_ids)}")
+        else:
+            season_ids = list(args.season)
+
+        grand_total = 0
+        for season_id in season_ids:
             race_count = conn.execute(
                 "SELECT COUNT(*) AS c FROM war_races WHERE season_id = ?",
                 (season_id,),
@@ -107,7 +132,7 @@ def main() -> int:
             _print_summary(season_id, summary)
             grand_total += sum(len(v) for v in summary.values())
 
-        print(f"\n{grand_total} new award rows committed across {len(args.season)} season(s). Re-run is safe (INSERT OR IGNORE).")
+        print(f"\n{grand_total} new award rows committed across {len(season_ids)} season(s). Re-run is safe (INSERT OR IGNORE).")
     finally:
         conn.close()
     return 0
