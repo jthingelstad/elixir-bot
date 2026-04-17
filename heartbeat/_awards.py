@@ -8,6 +8,7 @@ award so the existing announcement / memory pipelines pick them up.
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta
 from typing import Iterable, Optional
 
 import db
@@ -396,6 +397,14 @@ def detect_war_participant_awards(
     season_id = db.get_current_season_id(conn=conn)
     if season_id is None:
         return []
+    return grant_war_participant_for_season(season_id, conn)
+
+
+def grant_war_participant_for_season(
+    season_id: int,
+    conn: sqlite3.Connection,
+) -> list[dict]:
+    """Grant War Participant for one specific season (callable for backfill)."""
     candidates = db.get_war_participant_candidates(season_id=season_id, conn=conn)
     signal_date = _signal_date_for_season(conn, season_id)
     signals = []
@@ -417,3 +426,130 @@ def detect_war_participant_awards(
         if signal:
             signals.append(signal)
     return signals
+
+
+# -- backfill ---------------------------------------------------------------
+
+def grant_weekly_donation_for_season(
+    season_id: int,
+    conn: sqlite3.Connection,
+) -> list[dict]:
+    """Reconstruct weekly donation podiums for a season from member_daily_metrics.
+
+    Finds every Sunday inside the season's date window and, for each, grants
+    donation_champ_weekly rank 1/2/3 to the top-3 ``donations_week`` values.
+    The ``section_index`` is set to the ordinal of each Sunday (0, 1, 2, ...)
+    matching the war-week cadence. Returns the list of newly-granted signals.
+
+    Used by the backfill script for historical seasons where the live
+    ``weekly_donation_leader`` detector never fired.
+    """
+    from storage.awards import _season_metric_date_bounds
+
+    start, end = _season_metric_date_bounds(conn, season_id)
+    if not start or not end:
+        return []
+    start_dt = datetime.strptime(start, "%Y-%m-%d").date()
+    end_dt = datetime.strptime(end, "%Y-%m-%d").date()
+
+    # Enumerate Sundays within [start, end]. A Sunday is weekday()==6 in Python.
+    sundays: list[str] = []
+    cursor = start_dt
+    while cursor <= end_dt:
+        if cursor.weekday() == 6:
+            sundays.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+    if not sundays:
+        return []
+
+    signals = []
+    for section_ordinal, sunday in enumerate(sundays):
+        rows = conn.execute(
+            """
+            SELECT m.player_tag AS tag, m.current_name AS name, m.member_id,
+                   d.donations_week AS donations
+            FROM member_daily_metrics d
+            JOIN members m ON m.member_id = d.member_id
+            WHERE d.metric_date = ? AND d.donations_week > 0
+              AND m.status = 'active'
+            ORDER BY d.donations_week DESC
+            LIMIT 3
+            """,
+            (sunday,),
+        ).fetchall()
+        if not rows:
+            continue
+        week_key = datetime.strptime(sunday, "%Y-%m-%d").strftime("%GW%V")
+        for i, r in enumerate(rows):
+            rank = i + 1
+            signal = _grant(
+                conn,
+                award_type="donation_champ_weekly",
+                season_id=season_id,
+                section_index=section_ordinal,
+                member_id=r["member_id"],
+                player_tag=r["tag"],
+                player_name=r["name"],
+                rank=rank,
+                metric_value=r["donations"],
+                metric_unit="donations",
+                metadata={"week_key": week_key, "week_ending": sunday},
+                signal_date=sunday,
+            )
+            if signal:
+                signals.append(signal)
+    return signals
+
+
+@managed_connection
+def backfill_season(
+    season_id: int,
+    *,
+    include_season_wide: Optional[bool] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Grant every award type for one season; return a summary of new rows.
+
+    ``include_season_wide`` defaults to True when the season has closed
+    (a newer season exists in ``war_races``) and False otherwise — this lets
+    backfill cover weekly awards for the current season without granting
+    season-wide podiums before the season has ended.
+
+    Returns ``{award_type: [signal_dicts, ...]}`` keyed by award type for the
+    newly-inserted rows only. Existing rows are ignored via INSERT OR IGNORE.
+    """
+    if include_season_wide is None:
+        include_season_wide = db.season_is_complete(season_id, conn=conn)
+
+    summary: dict[str, list[dict]] = {}
+
+    # War Participant — runs for any season (in-progress or closed).
+    summary["war_participant"] = grant_war_participant_for_season(season_id, conn)
+
+    # Perfect Week — for every section_index in war_races where battle days are observed.
+    rows = conn.execute(
+        "SELECT section_index FROM war_races WHERE season_id = ? ORDER BY section_index",
+        (season_id,),
+    ).fetchall()
+    perfect_week_signals = []
+    for r in rows:
+        perfect_week_signals.extend(grant_week_awards(season_id, r["section_index"], conn))
+    summary["perfect_week"] = perfect_week_signals
+
+    # Weekly Donation Champ — reconstructed from member_daily_metrics.
+    summary["donation_champ_weekly"] = grant_weekly_donation_for_season(season_id, conn)
+
+    # Season-wide awards only when the season has closed.
+    if include_season_wide:
+        signal_date = _signal_date_for_season(conn, season_id)
+        summary["war_champ"] = _grant_war_champ(conn, season_id, signal_date)
+        summary["iron_king"] = _grant_iron_king(conn, season_id, signal_date)
+        summary["donation_champ"] = _grant_donation_champ(conn, season_id, signal_date)
+        summary["rookie_mvp"] = _grant_rookie_mvp(conn, season_id, signal_date)
+    else:
+        summary["war_champ"] = []
+        summary["iron_king"] = []
+        summary["donation_champ"] = []
+        summary["rookie_mvp"] = []
+
+    return summary
