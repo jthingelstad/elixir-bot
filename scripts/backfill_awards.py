@@ -48,55 +48,75 @@ AWARD_ORDER = [
 DEPRECATED_AWARD_ORDER = ("perfect_week", "victory_lap", "donation_champ_weekly")
 
 
-def _format_row(signal: dict) -> str:
-    member = signal.get("member", {}) or {}
+def _fmt_metric(signal: dict) -> str:
+    metric = signal.get("metric_value")
+    if metric is None:
+        return ""
+    unit = signal.get("metric_unit") or ""
+    value = int(metric) if float(metric).is_integer() else metric
+    return f"{value} {unit}".strip()
+
+
+def _fmt_scope(section_index) -> str:
+    return "season" if section_index is None else f"w{section_index}"
+
+
+def _fmt_grant(signal: dict) -> str:
+    member = signal.get("member") or {}
     tag = member.get("tag") or signal.get("tag") or "?"
     name = member.get("name") or signal.get("name") or "?"
-    rank = signal.get("rank")
-    section = signal.get("section_index")
-    metric = signal.get("metric_value")
-    unit = signal.get("metric_unit") or ""
-    medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, "  ")
-    scope = f"w{section}" if section is not None else "season"
-    metric_text = f"{int(metric) if metric is not None and float(metric).is_integer() else metric} {unit}".strip() if metric is not None else ""
-    return f"  {medal} [{scope:>6}] {name:<20} {tag:<10} {metric_text}"
+    medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(signal.get("rank"), "  ")
+    metric = _fmt_metric(signal)
+    suffix = f" — {metric}" if metric else ""
+    return f"      {medal} {name:<22} {tag}{suffix}"
 
 
-def _format_revoked(row: dict) -> str:
-    section = row.get("section_index")
-    scope = f"w{section}" if section is not None else "season"
+def _fmt_stale(row: dict) -> str:
     name = row.get("player_name") or "?"
     tag = row.get("player_tag") or "?"
-    return f"  ❌ [{scope:>6}] {name:<20} {tag}"
+    scope = _fmt_scope(row.get("section_index"))
+    return f"      · {name:<22} {tag}  [{scope}]"
 
 
-def _print_summary(season_id: int, summary: dict[str, list[dict]]):
-    header = f"\n=== Season {season_id} "
-    header += "=" * (70 - len(header))
-    print(header)
-    total = 0
+def _print_season(season_id: int, race_count: int, is_complete: bool, summary: dict) -> tuple[int, int]:
+    """Render one season's summary; return (granted, revoked) counts."""
+    mode = "closed" if is_complete else "in-progress"
+    weeks_label = f"{race_count} week{'s' if race_count != 1 else ''}"
+
+    granted_lines: list[str] = []
+    granted_total = 0
     for award_type in AWARD_ORDER:
-        signals = summary.get(award_type, [])
+        signals = summary.get(award_type) or []
         if not signals:
-            print(f"\n{award_type}: (no new grants)")
             continue
-        print(f"\n{award_type}: {len(signals)} new grant{'s' if len(signals) != 1 else ''}")
-        for signal in signals:
-            print(_format_row(signal))
-        total += len(signals)
+        granted_total += len(signals)
+        granted_lines.append(f"  + {award_type} ({len(signals)})")
+        granted_lines.extend(_fmt_grant(s) for s in signals)
+
+    revoked_lines: list[str] = []
+    revoked_total = 0
     revoked = summary.get("_revoked") or {}
-    total_revoked = sum(len(v) for v in revoked.values())
-    if total_revoked:
-        print(f"\nrevoked: {total_revoked} row{'s' if total_revoked != 1 else ''}")
-        for award_type in (*AWARD_ORDER, *DEPRECATED_AWARD_ORDER):
-            rows = revoked.get(award_type) or []
-            if not rows:
-                continue
-            suffix = " (deprecated)" if award_type in DEPRECATED_AWARD_ORDER else ""
-            print(f"\n  {award_type}{suffix}:")
-            for row in rows:
-                print(_format_revoked(row))
-    print(f"\nSeason {season_id} total: {total} new award rows, {total_revoked} revoked")
+    for award_type in (*AWARD_ORDER, *DEPRECATED_AWARD_ORDER):
+        rows = revoked.get(award_type) or []
+        if not rows:
+            continue
+        revoked_total += len(rows)
+        if award_type in DEPRECATED_AWARD_ORDER:
+            revoked_lines.append(f"  - {award_type} ({len(rows)}, deprecated)")
+        else:
+            revoked_lines.append(f"  - {award_type} ({len(rows)})")
+            revoked_lines.extend(_fmt_stale(r) for r in rows)
+
+    if granted_lines or revoked_lines:
+        print(f"\nSeason {season_id} · {weeks_label} · {mode}")
+        for line in granted_lines:
+            print(line)
+        for line in revoked_lines:
+            print(line)
+    else:
+        print(f"\nSeason {season_id} · {weeks_label} · {mode} — no changes")
+
+    return granted_total, revoked_total
 
 
 def main() -> int:
@@ -135,7 +155,7 @@ def main() -> int:
         else:
             season_ids = list(args.season)
 
-        grand_total = 0
+        grand_granted = 0
         grand_revoked = 0
         for season_id in season_ids:
             race_count = conn.execute(
@@ -143,24 +163,18 @@ def main() -> int:
                 (season_id,),
             ).fetchone()["c"]
             if race_count == 0:
-                print(f"Season {season_id}: no war_races rows, skipping.")
+                print(f"\nSeason {season_id} · no war_races rows, skipping")
                 continue
 
             is_complete = db.season_is_complete(season_id, conn=conn)
-            mode = "closed — full backfill" if is_complete else "in-progress — weekly awards + participants only"
-            print(f"\nSeason {season_id}: {race_count} weeks in war_races; {mode}.")
-
             summary = backfill_season(season_id, conn=conn)
-            _print_summary(season_id, summary)
-            grand_total += sum(
-                len(v) for k, v in summary.items() if k != "_revoked"
-            )
-            revoked = summary.get("_revoked") or {}
-            grand_revoked += sum(len(v) for v in revoked.values())
+            granted, revoked = _print_season(season_id, race_count, is_complete, summary)
+            grand_granted += granted
+            grand_revoked += revoked
 
         print(
-            f"\n{grand_total} new award rows committed, {grand_revoked} revoked "
-            f"across {len(season_ids)} season(s). Re-run is safe (INSERT OR IGNORE)."
+            f"\n{len(season_ids)} season{'s' if len(season_ids) != 1 else ''} · "
+            f"{grand_granted} granted · {grand_revoked} revoked · re-run is idempotent"
         )
     finally:
         conn.close()
