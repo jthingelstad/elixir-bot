@@ -256,6 +256,24 @@ def _recent_agent_writes(limit: int = 10) -> list[dict]:
     return out
 
 
+def _already_delivered(signal: dict) -> bool:
+    """True iff the signal's log key is already in ``signal_log``.
+
+    Belt-and-suspenders: each detector self-checks before emitting, but if a
+    detector-level check is missed (restart, cursor reset, concurrent tick),
+    this filter drops the signal before the agent can re-cover it. Safer than
+    relying on the agent to read channel_memory and self-skip.
+    """
+    log_type = (signal or {}).get("signal_log_type")
+    if not log_type:
+        return False
+    try:
+        return db.was_signal_sent_any_date(log_type)
+    except Exception:
+        log.warning("_already_delivered lookup failed for %s", log_type, exc_info=True)
+        return False
+
+
 def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -> dict:
     """Assemble the single Situation payload for one awareness tick.
 
@@ -264,8 +282,16 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
     ``time``, ``standing``, ``signals_by_lane``, ``hard_post_signals``,
     ``channel_memory``, ``roster_vitals``, ``due_revisits``,
     ``recent_agent_writes``.
+
+    Signals whose ``signal_log_type`` is already in ``signal_log`` are dropped
+    before assembly — preventing the agent from re-covering a signal that was
+    already announced.
     """
-    signals = list(getattr(tick_result, "signals", None) or [])
+    all_signals = list(getattr(tick_result, "signals", None) or [])
+    signals = [s for s in all_signals if not _already_delivered(s)]
+    dropped = len(all_signals) - len(signals)
+    if dropped:
+        log.info("build_situation: dropped %d already-delivered signal(s)", dropped)
     clan = getattr(tick_result, "clan", None) or {}
     war = getattr(tick_result, "war", None) or {}
 

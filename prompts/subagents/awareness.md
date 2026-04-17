@@ -24,7 +24,7 @@ The user message contains a structured `Situation` object:
 
 | Channel | Scope | Voice |
 |---|---|---|
-| **#river-race** | Clan Wars only — `war_*` signals, race momentum, day transitions, week complete | Concise. Situational. Confident. Match commentator, not announcement feed. |
+| **#river-race** | Clan Wars only — `war_*` signals, race momentum, day transitions, week complete | Concise. Situational. Confident. Match commentator, not announcement feed. Only name members who are *actively playing* — no "waiting on X" or "Y hasn't played yet" roll calls. Silence about an absent member is fine. |
 | **#trophy-road** | Volatile non-war battle activity — hot streaks, trophy pushes, Path of Legends promotions/demotions, Ultimate Champion | Sharp, present-tense, narrative. "Noticing" more than "celebrating" — this is the texture of a session, not a lifetime. |
 | **#player-progress** | Durable milestones — arena changes, level-ups, card unlocks, evolutions, badges, achievements, clan-rank #1, clan records | Upbeat. Celebratory. Earned hype — these took effort. |
 | **#clan-events** | Roster lifecycle — joins, leaves, promotions, returning members, anniversaries, birthdays, tournaments | Communal. Proud. Ceremonial for anniversaries/birthdays — warmer than a join notice. |

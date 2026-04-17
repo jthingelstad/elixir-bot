@@ -357,7 +357,6 @@ def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
                         "untouched_count": previous_day.get("untouched_count"),
                         "used_all_4": previous_day.get("used_all_4") or [],
                         "used_some": previous_day.get("used_some") or [],
-                        "used_none": previous_day.get("used_none") or [],
                         "top_fame_today": previous_day.get("top_fame_today") or [],
                         "top_fame_total": previous_day.get("top_fame_total") or [],
                         **_battle_lead_payload(previous_day.get("race_rank"), war_state=previous_day),
@@ -392,7 +391,6 @@ def detect_war_battle_final_hours(conn=None, threshold_hours=6):
         "time_left_text": current.get("time_left_text"),
         "used_all_4": current.get("used_all_4") or [],
         "used_some": current.get("used_some") or [],
-        "used_none": current.get("used_none") or [],
         "top_fame_today": current.get("top_fame_today") or [],
         **_battle_lead_payload(current.get("race_rank"), war_state=current),
     }]
@@ -500,7 +498,6 @@ def detect_war_battle_checkpoints(conn=None):
         "time_left_text": day_state.get("time_left_text"),
         "used_all_4": day_state.get("used_all_4") or [],
         "used_some": day_state.get("used_some") or [],
-        "used_none": day_state.get("used_none") or [],
         "top_fame_today": day_state.get("top_fame_today") or [],
         "top_fame_total": day_state.get("top_fame_total") or [],
         "engaged_count": day_state.get("engaged_count") or 0,

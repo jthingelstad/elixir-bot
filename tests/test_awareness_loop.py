@@ -139,6 +139,39 @@ def test_build_situation_includes_channel_memory_for_each_lane_channel():
     assert set(situation["channel_memory"].keys()) >= set(CHANNEL_LANES.keys())
 
 
+def test_build_situation_drops_already_delivered_signals():
+    """Belt-and-suspenders: signals whose signal_log_type is already in
+    signal_log must be filtered before the agent sees them — preventing
+    repeat coverage when detector dedup misses."""
+    bundle = _bundle(signals=[
+        {
+            "type": "war_final_practice_day",
+            "signal_log_type": "war_final_practice_day::s00131-w01-p009",
+        },
+        {
+            "type": "war_battle_rank_change",
+            "signal_log_type": "war_battle_rank_change::s00131-w01-p010::rank1",
+        },
+    ])
+
+    def _already_sent(signal_type):
+        return signal_type == "war_final_practice_day::s00131-w01-p009"
+
+    with patch("runtime.situation.db.was_signal_sent_any_date", side_effect=_already_sent), \
+         patch("runtime.situation.db.list_channel_messages", return_value=[]), \
+         patch("runtime.situation.build_situation_time", return_value=None):
+        situation = build_situation(bundle)
+
+    all_types = [
+        s["type"]
+        for lane in situation["signals_by_lane"].values()
+        for s in lane
+    ]
+    # The already-delivered signal is dropped; the un-delivered one remains.
+    assert all_types == ["war_battle_rank_change"]
+    assert situation["_raw_signal_count"] == 1
+
+
 def test_build_situation_surfaces_recent_agent_writes_for_dedup():
     """The Situation includes a compact view of recent agent-authored
     leadership memories so the awareness loop can avoid duplicate writes."""
