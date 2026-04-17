@@ -30,10 +30,8 @@ __all__ = [
     "get_member_trophy_case",
     "get_awards_by_season",
     "get_iron_king_candidates",
-    "get_perfect_week_candidates",
     "get_season_donation_leaderboard",
     "get_rookie_mvp_candidates",
-    "get_victory_lap_candidates",
     "get_war_participant_candidates",
     "season_final_section_index",
     "season_is_complete",
@@ -211,54 +209,90 @@ def _has_snapshots_for_section(
     return row is not None
 
 
-def _legacy_perfect_week_candidates(
+def _section_iron_king_member_ids(
     conn: sqlite3.Connection,
     season_id: int,
     section_index: int,
-) -> list[dict]:
-    """Reconstruct Perfect Week from war_participation.decks_used for one week."""
-    row = conn.execute(
+) -> tuple[set[int], int, dict[int, dict]]:
+    """Return (member_ids, battle_days, member_details) for one section.
+
+    ``member_ids`` qualify as "perfect in this section" — 4/4 on every
+    required battle day, or (for seasons without snapshots) hit the
+    war_participation deck ceiling that section. ``member_details`` maps
+    member_id → {tag, name}.
+    """
+    details: dict[int, dict] = {}
+
+    if _has_snapshots_for_section(conn, season_id, section_index):
+        required_days = _required_battle_days(conn, season_id, section_index)
+        total_days = len(required_days)
+        if total_days == 0:
+            return set(), 0, details
+        placeholders = ",".join(["?"] * total_days)
+        rows = conn.execute(
+            f"""
+            WITH per_day_peaks AS (
+                SELECT player_tag, member_id, war_day_key,
+                       MAX(decks_used_today) AS peak_decks
+                FROM war_participant_snapshots
+                WHERE season_id = ? AND section_index = ? AND phase = 'battle'
+                  AND war_day_key IN ({placeholders})
+                GROUP BY player_tag, member_id, war_day_key
+            )
+            SELECT p.player_tag AS tag,
+                   m.current_name AS name,
+                   p.member_id,
+                   COUNT(*) AS days_played,
+                   SUM(CASE WHEN p.peak_decks = 4 THEN 1 ELSE 0 END) AS perfect_days
+            FROM per_day_peaks p
+            JOIN members m ON m.member_id = p.member_id
+            WHERE m.status = 'active'
+            GROUP BY p.player_tag, p.member_id
+            HAVING days_played = ? AND perfect_days = ?
+            """,
+            (season_id, section_index, *required_days, total_days, total_days),
+        ).fetchall()
+        member_ids: set[int] = set()
+        for r in rows:
+            details[r["member_id"]] = {"tag": r["tag"], "name": r["name"]}
+            member_ids.add(r["member_id"])
+        return member_ids, total_days, details
+
+    # Legacy fallback: no snapshots — reconstruct from war_participation.
+    ceiling_row = conn.execute(
         """
-        SELECT wr.war_race_id, MAX(wp.decks_used) AS ceiling
+        SELECT MAX(wp.decks_used) AS ceiling
         FROM war_races wr
         JOIN war_participation wp ON wp.war_race_id = wr.war_race_id
         WHERE wr.season_id = ? AND wr.section_index = ?
-        GROUP BY wr.war_race_id
         """,
         (int(season_id), int(section_index)),
     ).fetchone()
-    if not row or not row["ceiling"]:
-        return []
-    ceiling = row["ceiling"]
+    if not ceiling_row or not ceiling_row["ceiling"]:
+        return set(), 0, details
+    ceiling = ceiling_row["ceiling"]
     rows = conn.execute(
         """
         SELECT wp.player_tag AS tag,
                m.current_name AS name,
-               wp.member_id,
-               wp.decks_used
+               wp.member_id
         FROM war_participation wp
         JOIN war_races wr ON wr.war_race_id = wp.war_race_id
         JOIN members m ON m.member_id = wp.member_id
         WHERE wr.season_id = ? AND wr.section_index = ?
           AND m.status = 'active'
           AND wp.decks_used = ?
-        ORDER BY wp.player_tag
         """,
         (int(season_id), int(section_index), ceiling),
     ).fetchall()
-    # A ceiling of 16 means 4 decks × 4 battle days; smaller ceilings imply
-    # the clan had a shorter week (colosseum) or the whole clan rested early.
-    battle_days = ceiling // 4 if ceiling % 4 == 0 else None
-    return [
-        {
-            "tag": r["tag"],
-            "name": r["name"],
-            "member_id": r["member_id"],
-            "section_index": section_index,
-            "total_battle_days": battle_days,
-        }
-        for r in rows
-    ]
+    member_ids = set()
+    for r in rows:
+        details[r["member_id"]] = {"tag": r["tag"], "name": r["name"]}
+        member_ids.add(r["member_id"])
+    # A ceiling of 16 means 4 decks × 4 battle days; colosseum weeks may be
+    # shorter. If ceiling isn't a multiple of 4, surface as None.
+    battle_days = ceiling // 4 if ceiling % 4 == 0 else 0
+    return member_ids, battle_days, details
 
 
 @managed_connection
@@ -266,13 +300,16 @@ def get_iron_king_candidates(
     season_id: Optional[int] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
-    """Members who earned Perfect Week in every logged week of the season.
+    """Members who played 4/4 on every required battle day of every logged week.
 
-    Iron King is the intersection of Perfect Week candidates across every
-    week present in ``war_races``. If a member joined mid-season and missed
-    any week (no participation row), they are excluded — Iron King requires
-    every logged week. Post-victory days are already exempted by Perfect
-    Week's logic, so resting after clan victory doesn't cost the award.
+    A member qualifies only if they were present and perfect in every
+    section of the season (no mid-season joiners). Post-victory battle
+    days — those that began after the clan reached 10000 fame — don't
+    count toward the requirement.
+
+    Seasons without ``war_participant_snapshots`` fall back to
+    ``war_participation.decks_used``: a member qualifies for a section if
+    they hit the max decks any member reached that week.
     """
     season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
     if season_id is None:
@@ -285,156 +322,29 @@ def get_iron_king_candidates(
     sections = [r["section_index"] for r in section_rows]
     if not sections:
         return []
+
     qualifying: Optional[set[int]] = None
     member_details: dict[int, dict] = {}
-    member_battle_days: dict[int, int] = {}
+    total_battle_days = 0
     for section in sections:
-        candidates = get_perfect_week_candidates(
-            season_id=season_id, section_index=section, conn=conn
+        section_ids, section_days, section_details = _section_iron_king_member_ids(
+            conn, season_id, section,
         )
-        week_member_ids = {c["member_id"] for c in candidates}
-        for c in candidates:
-            member_details.setdefault(c["member_id"], {
-                "tag": c["tag"],
-                "name": c["name"],
-            })
-            member_battle_days[c["member_id"]] = (
-                member_battle_days.get(c["member_id"], 0)
-                + (c.get("total_battle_days") or 0)
-            )
-        qualifying = week_member_ids if qualifying is None else qualifying & week_member_ids
+        total_battle_days += section_days
+        for mid, det in section_details.items():
+            member_details.setdefault(mid, det)
+        qualifying = section_ids if qualifying is None else qualifying & section_ids
         if not qualifying:
             return []
+
     return [
         {
             "tag": member_details[mid]["tag"],
             "name": member_details[mid]["name"],
             "member_id": mid,
-            "days_played": None,
-            "perfect_days": None,
-            "total_battle_days": member_battle_days.get(mid) or None,
+            "total_battle_days": total_battle_days or None,
         }
         for mid in sorted(qualifying)
-    ]
-
-
-@managed_connection
-def get_perfect_week_candidates(
-    season_id: Optional[int],
-    section_index: int,
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    """Members who used 4/4 decks on every required battle day of a war week.
-
-    "Required" battle days are those that began at or before the clan's
-    finish_time; days that started after clan victory (when no further play
-    was needed to win) don't count against the award.
-    """
-    if season_id is None:
-        season_id = get_current_season_id(conn=conn)
-    if season_id is None:
-        return []
-    if not _has_snapshots_for_section(conn, season_id, section_index):
-        return _legacy_perfect_week_candidates(conn, season_id, section_index)
-    required_days = _required_battle_days(conn, season_id, section_index)
-    total_days = len(required_days)
-    if total_days == 0:
-        return []
-    placeholders = ",".join(["?"] * total_days)
-    rows = conn.execute(
-        f"""
-        WITH per_day_peaks AS (
-            SELECT player_tag, member_id, war_day_key,
-                   MAX(decks_used_today) AS peak_decks
-            FROM war_participant_snapshots
-            WHERE season_id = ? AND section_index = ? AND phase = 'battle'
-              AND war_day_key IN ({placeholders})
-            GROUP BY player_tag, member_id, war_day_key
-        )
-        SELECT p.player_tag AS tag,
-               m.current_name AS name,
-               p.member_id,
-               COUNT(*) AS days_played,
-               SUM(CASE WHEN p.peak_decks = 4 THEN 1 ELSE 0 END) AS perfect_days
-        FROM per_day_peaks p
-        JOIN members m ON m.member_id = p.member_id
-        WHERE m.status = 'active'
-        GROUP BY p.player_tag, p.member_id
-        HAVING days_played = ? AND perfect_days = ?
-        ORDER BY p.player_tag
-        """,
-        (season_id, section_index, *required_days, total_days, total_days),
-    ).fetchall()
-    return [
-        {
-            "tag": r["tag"],
-            "name": r["name"],
-            "member_id": r["member_id"],
-            "section_index": section_index,
-            "total_battle_days": total_days,
-        }
-        for r in rows
-    ]
-
-
-@managed_connection
-def get_victory_lap_candidates(
-    season_id: Optional[int],
-    section_index: int,
-    conn: Optional[sqlite3.Connection] = None,
-) -> list[dict]:
-    """Members who used war decks on a battle day after the clan had won.
-
-    Victory Lap celebrates players who kept racking up war battles after the
-    clan had already crossed 10000 fame — the bonus laps no one had to run.
-    """
-    if season_id is None:
-        season_id = get_current_season_id(conn=conn)
-    if season_id is None:
-        return []
-    finish_iso = _section_finish_iso(conn, season_id, section_index)
-    if finish_iso is None:
-        return []
-    day_rows = conn.execute(
-        """
-        SELECT war_day_key, MIN(observed_at) AS day_start_at
-        FROM war_participant_snapshots
-        WHERE season_id = ? AND section_index = ? AND phase = 'battle'
-        GROUP BY war_day_key
-        """,
-        (int(season_id), int(section_index)),
-    ).fetchall()
-    post_victory_days = [r["war_day_key"] for r in day_rows if r["day_start_at"] > finish_iso]
-    if not post_victory_days:
-        return []
-    placeholders = ",".join(["?"] * len(post_victory_days))
-    rows = conn.execute(
-        f"""
-        SELECT wps.player_tag AS tag,
-               m.current_name AS name,
-               wps.member_id,
-               MAX(wps.decks_used_today) AS peak_decks
-        FROM war_participant_snapshots wps
-        JOIN members m ON m.member_id = wps.member_id
-        WHERE wps.season_id = ? AND wps.section_index = ? AND wps.phase = 'battle'
-          AND wps.war_day_key IN ({placeholders})
-          AND m.status = 'active'
-        GROUP BY wps.player_tag, wps.member_id
-        HAVING peak_decks > 0
-        ORDER BY peak_decks DESC, wps.player_tag
-        """,
-        (int(season_id), int(section_index), *post_victory_days),
-    ).fetchall()
-    return [
-        {
-            "tag": r["tag"],
-            "name": r["name"],
-            "member_id": r["member_id"],
-            "section_index": section_index,
-            "post_victory_days": len(post_victory_days),
-            "peak_decks": r["peak_decks"],
-        }
-        for r in rows
     ]
 
 

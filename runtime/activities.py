@@ -99,6 +99,24 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         legacy_commands=("player-intel",),
     ),
     ActivityDefinition(
+        activity_key="award-detection",
+        owner_subagent="river-race",
+        purpose="Detect and grant season-wide clan awards (idempotent). Runs daily — season close and War Participant accumulation only need a daily pass.",
+        job_id="award-detection",
+        job_function="_award_detection_tick",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": _attr("AWARD_DETECTION_HOUR", 10),
+            "minute": _attr("AWARD_DETECTION_MINUTE", 10),
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Storage: durable awards rows",
+            "Discord routed outcomes: #clan-events on new grants",
+        ),
+    ),
+    ActivityDefinition(
         activity_key="daily-clan-insight",
         owner_subagent="ask-elixir",
         purpose="Share one playful, data-driven hidden fact in the dedicated Elixir conversation channel.",

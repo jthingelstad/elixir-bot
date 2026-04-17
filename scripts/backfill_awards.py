@@ -41,10 +41,11 @@ AWARD_ORDER = [
     "donation_champ",
     "rookie_mvp",
     "war_participant",
-    "perfect_week",
-    "victory_lap",
-    "donation_champ_weekly",
 ]
+
+# Historical award types that still appear in _revoked summaries when the
+# backfill sweep prunes leftover rows from an older release.
+DEPRECATED_AWARD_ORDER = ("perfect_week", "victory_lap", "donation_champ_weekly")
 
 
 def _format_row(signal: dict) -> str:
@@ -86,12 +87,13 @@ def _print_summary(season_id: int, summary: dict[str, list[dict]]):
     revoked = summary.get("_revoked") or {}
     total_revoked = sum(len(v) for v in revoked.values())
     if total_revoked:
-        print(f"\nrevoked (no longer qualifying): {total_revoked} row{'s' if total_revoked != 1 else ''}")
-        for award_type in AWARD_ORDER:
+        print(f"\nrevoked: {total_revoked} row{'s' if total_revoked != 1 else ''}")
+        for award_type in (*AWARD_ORDER, *DEPRECATED_AWARD_ORDER):
             rows = revoked.get(award_type) or []
             if not rows:
                 continue
-            print(f"\n  {award_type}:")
+            suffix = " (deprecated)" if award_type in DEPRECATED_AWARD_ORDER else ""
+            print(f"\n  {award_type}{suffix}:")
             for row in rows:
                 print(_format_revoked(row))
     print(f"\nSeason {season_id} total: {total} new award rows, {total_revoked} revoked")
