@@ -202,7 +202,12 @@ def _cursor_update(detector_key, scope_key="", *, cursor_text=None, cursor_int=N
 
 def _enrich_leave_signal(tag, name, conn):
     """Add last-known activity context to a leave signal."""
-    signal = {"type": "member_leave", "tag": tag, "name": name}
+    signal = {
+        "type": "member_leave",
+        "tag": tag,
+        "name": name,
+        "signal_log_type": f"member_leave:{tag}:{db.chicago_today()}",
+    }
     if conn is None:
         return signal
     row = conn.execute(

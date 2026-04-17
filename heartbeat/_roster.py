@@ -34,6 +34,7 @@ def detect_joins_leaves(current_members, known_snapshot, conn=None):
                 "type": "member_join",
                 "tag": tag,
                 "name": name,
+                "signal_log_type": f"member_join:{tag}",
             })
 
     for tag, name in known_snapshot.items():

@@ -554,12 +554,16 @@ def detect_war_battle_activity(conn=None):
     if not used_all:
         return []
 
+    season_id = day_state.get("season_id")
+    week = day_state.get("week")
+    week_key = f"s{season_id}:w{week}"
+
     new_completions = []
     for member in used_all:
         tag = member.get("tag")
         if not tag:
             continue
-        signal_log_type = f"war_attacks_complete:{tag}:{battle_date}"
+        signal_log_type = f"war_attacks_complete:{tag}:{week_key}"
         if db.was_signal_sent_any_date(signal_log_type, conn=conn):
             continue
         new_completions.append({
@@ -584,10 +588,6 @@ def detect_war_battle_activity(conn=None):
         "day_total": day_state.get("day_total"),
         "phase_display": day_state.get("phase_display"),
         "members": new_completions,
-        "perfect_count": sum(1 for m in new_completions if m["perfect"]),
-        "total_finished": len(used_all),
-        "total_participants": day_state.get("total_participants"),
-        "engaged_count": day_state.get("engaged_count"),
         "clan_fame": day_state.get("clan_fame"),
         "race_rank": day_state.get("race_rank"),
     }]
@@ -620,6 +620,8 @@ def detect_war_surprise_participants(conn=None):
 
     type_map = war_player_types_by_tag(conn, tags)
 
+    week_key = f"s{day_state.get('season_id')}:w{day_state.get('week')}"
+
     surprises = []
     for member in engaged:
         tag = member.get("tag")
@@ -628,7 +630,7 @@ def detect_war_surprise_participants(conn=None):
         player_type = type_map.get(tag, "unknown")
         if player_type not in {"never", "rare"}:
             continue
-        signal_log_type = f"war_surprise_participant:{tag}:{battle_date}"
+        signal_log_type = f"war_surprise_participant:{tag}:{week_key}"
         if db.was_signal_sent_any_date(signal_log_type, conn=conn):
             continue
         surprises.append({

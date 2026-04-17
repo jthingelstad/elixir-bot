@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import db
 import heartbeat
+from heartbeat._roster import detect_deck_archetype_changes, detect_form_slumps
 import discord
 import elixir
 from runtime.channel_subagents import plan_signal_outcomes
@@ -510,7 +511,7 @@ def test_detect_deck_archetype_changes_fires_on_major_swap():
                             fetched_at="2026-04-16T11:55:00")
 
         now = datetime(2026, 4, 16, 12, 0, 0)
-        signals = heartbeat.detect_deck_archetype_changes(now=now, conn=conn)
+        signals = detect_deck_archetype_changes(now=now, conn=conn)
         assert len(signals) == 1
         sig = signals[0]
         assert sig["type"] == "deck_archetype_change"
@@ -537,7 +538,7 @@ def test_detect_deck_archetype_changes_silent_for_small_tweak():
                             fetched_at="2026-04-16T11:55:00")
 
         now = datetime(2026, 4, 16, 12, 0, 0)
-        assert heartbeat.detect_deck_archetype_changes(now=now, conn=conn) == []
+        assert detect_deck_archetype_changes(now=now, conn=conn) == []
     finally:
         conn.close()
 
@@ -557,7 +558,7 @@ def test_detect_deck_archetype_changes_needs_24h_baseline():
                             fetched_at="2026-04-16T11:55:00")
 
         now = datetime(2026, 4, 16, 12, 0, 0)
-        assert heartbeat.detect_deck_archetype_changes(now=now, conn=conn) == []
+        assert detect_deck_archetype_changes(now=now, conn=conn) == []
     finally:
         conn.close()
 
@@ -575,10 +576,10 @@ def test_detect_deck_archetype_changes_dedups_same_day():
                             fetched_at="2026-04-16T11:55:00")
 
         now = datetime(2026, 4, 16, 12, 0, 0)
-        first = heartbeat.detect_deck_archetype_changes(now=now, conn=conn)
+        first = detect_deck_archetype_changes(now=now, conn=conn)
         assert len(first) == 1
         db.mark_signal_sent(first[0]["signal_log_type"], "2026-04-16", conn=conn)
-        assert heartbeat.detect_deck_archetype_changes(now=now, conn=conn) == []
+        assert detect_deck_archetype_changes(now=now, conn=conn) == []
     finally:
         conn.close()
 
@@ -612,13 +613,13 @@ def test_detect_form_slumps_fires_on_strong_to_slumping_transition():
     try:
         # First observation: strong — cursor seeds, no signal.
         _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="strong")
-        first = heartbeat.detect_form_slumps(conn=conn)
+        first = detect_form_slumps(conn=conn)
         assert first == []
 
         # Second observation: slumping — crossing fires the signal.
         _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="slumping",
                        computed_at="2026-04-17T12:00:00")
-        signals = heartbeat.detect_form_slumps(conn=conn)
+        signals = detect_form_slumps(conn=conn)
         assert len(signals) == 1
         sig = signals[0]
         assert sig["type"] == "recent_form_slump"
@@ -635,10 +636,10 @@ def test_detect_form_slumps_silent_for_top_to_top_change():
     conn = db.get_connection(":memory:")
     try:
         _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="hot")
-        assert heartbeat.detect_form_slumps(conn=conn) == []
+        assert detect_form_slumps(conn=conn) == []
         _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="strong",
                        computed_at="2026-04-17T12:00:00")
-        assert heartbeat.detect_form_slumps(conn=conn) == []
+        assert detect_form_slumps(conn=conn) == []
     finally:
         conn.close()
 
@@ -647,15 +648,15 @@ def test_detect_form_slumps_weekly_dedup():
     conn = db.get_connection(":memory:")
     try:
         _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="strong")
-        heartbeat.detect_form_slumps(conn=conn)  # seed cursor
+        detect_form_slumps(conn=conn)  # seed cursor
         _seed_form_row(conn, tag="#ABC123", name="Ace", scope="competitive_10", label="cold",
                        computed_at="2026-04-17T12:00:00")
-        first = heartbeat.detect_form_slumps(conn=conn)
+        first = detect_form_slumps(conn=conn)
         assert len(first) == 1
         # Mark the signal sent and replay — cursor was updated to 'cold', so a
         # re-run in the same week should not re-emit.
         db.mark_signal_sent(first[0]["signal_log_type"], "2026-04-17", conn=conn)
-        assert heartbeat.detect_form_slumps(conn=conn) == []
+        assert detect_form_slumps(conn=conn) == []
     finally:
         conn.close()
 
