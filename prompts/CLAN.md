@@ -165,6 +165,7 @@ Elder is earned, not automatic.
 Notes on thresholds:
 - `inactivity_days` is an early attention signal, not an automatic removal rule.
 - Members usually become clear removal candidates closer to 14 days of no login and no real activity.
+- For removal-candidate flagging (the at-risk list), inactivity is trophy-scaled: the per-member threshold is `max(7 days, trophies/1000 × 1.4 days)`. So a 5k-trophy member is flagged after 7d, a 10k-trophy member after 14d, a 12.5k-trophy member after 17.5d. Higher-trophy members have earned more rope.
 
 ## Cake Days
 

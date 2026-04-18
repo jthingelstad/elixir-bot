@@ -259,6 +259,23 @@ def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None
         },
     }
 
+INACTIVITY_DAYS_PER_1K_TROPHIES = 1.4
+
+
+def _effective_inactivity_threshold(trophies: Optional[int], floor_days: int) -> float:
+    """Per-member inactivity threshold, in days.
+
+    Higher-trophy members are given more rope before they show up as a
+    removal candidate. Formula: ``max(floor_days, trophies/1000 * 1.4)``.
+    A 5k-trophy player keeps the floor (7d). A 10k-trophy player gets 14d.
+    A 12.5k-trophy player gets 17.5d. The floor protects the floor.
+    """
+    if not isinstance(trophies, int) or trophies <= 0:
+        return float(floor_days)
+    scaled = (trophies / 1000.0) * INACTIVITY_DAYS_PER_1K_TROPHIES
+    return max(float(floor_days), scaled)
+
+
 @managed_connection
 def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, require_war_participation: bool = False,
                         min_war_races: int = 1, tenure_grace_days: int = 14, include_leadership: bool = False,
@@ -294,11 +311,16 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
         last_seen_dt = _parse_cr_time(row["last_seen_api"])
         if last_seen_dt is not None:
             days_inactive = (today - last_seen_dt.date()).days
-            if days_inactive >= inactivity_days:
+            threshold_days = _effective_inactivity_threshold(row["trophies"], inactivity_days)
+            if days_inactive >= threshold_days:
                 reasons.append({
                     "type": "inactive",
-                    "detail": f"last seen {days_inactive} days ago",
+                    "detail": (
+                        f"last seen {days_inactive} days ago "
+                        f"(threshold {threshold_days:.1f}d at {row['trophies'] or 0} trophies)"
+                    ),
                     "value": days_inactive,
+                    "threshold_days": threshold_days,
                 })
 
         donations_week = row["donations_week"] or 0
@@ -346,7 +368,9 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
     return {
         "season_id": season_id,
         "criteria": {
-            "inactivity_days": inactivity_days,
+            "inactivity_days_floor": inactivity_days,
+            "inactivity_days_per_1k_trophies": INACTIVITY_DAYS_PER_1K_TROPHIES,
+            "inactivity_threshold_formula": "max(floor, trophies/1000 * 1.4)",
             "min_donations_week": min_donations_week,
             "require_war_participation": require_war_participation,
             "min_war_races": min_war_races,

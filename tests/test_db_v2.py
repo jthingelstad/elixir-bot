@@ -3794,7 +3794,10 @@ def test_risk_and_trending_war_queries_use_v2_rollups():
                     "trophies": 9020,
                     "clanRank": 2,
                     "donations": 10,
-                    "lastSeen": "20260226T120000.000Z",
+                    # 20 days before activity anchor (2026-03-07). At 9020
+                    # trophies the trophy-scaled threshold is ~12.6d, so
+                    # this comfortably trips the inactive flag.
+                    "lastSeen": "20260215T120000.000Z",
                 },
             ],
             conn=conn,
