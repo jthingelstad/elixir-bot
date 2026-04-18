@@ -485,14 +485,23 @@ def get_war_day_state(war_day_key: Optional[str] = None, observed_at: Optional[s
         key=lambda item: (-(item.get("fame") or 0), -(item.get("decks_used_total") or 0), (item.get("name") or "").lower())
     )
 
-    reset_anchor = (
-        (current_state or {}).get("observed_at")
-        or (first_state or {}).get("observed_at")
-        or first_observed_at
-        or last_observed_at
-    )
-    started_at, ends_at = war_reset_window_utc(reset_anchor)
     observed_at = coerce_utc_datetime((current_state or {}).get("observed_at") or last_observed_at)
+    # The first time we observed this (season, section, period) triple is the
+    # most accurate anchor for the 24h period window. CR River Race seasons
+    # can skew off the nominal 10:00 UTC reset, so trusting the observed
+    # period-start beats the hardcoded hour. Fall back to war_reset_window_utc
+    # only when we have no snapshot yet for this period.
+    first_observed_dt = coerce_utc_datetime(first_observed_at)
+    if first_observed_dt is not None:
+        started_at = first_observed_dt
+        ends_at = first_observed_dt + timedelta(days=1)
+    else:
+        reset_anchor = (
+            (current_state or {}).get("observed_at")
+            or (first_state or {}).get("observed_at")
+            or last_observed_at
+        )
+        started_at, ends_at = war_reset_window_utc(reset_anchor)
     time_left_seconds = int((ends_at - observed_at).total_seconds()) if ends_at and observed_at else None
     if time_left_seconds is not None:
         time_left_seconds = max(0, time_left_seconds)
