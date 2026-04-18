@@ -291,12 +291,19 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
 
     if old_status != new_status:
         if new_status == "in_progress":
+            max_capacity = api_data.get("maxCapacity")
+            spots_remaining = (
+                max(0, max_capacity - participant_count)
+                if isinstance(max_capacity, int) else None
+            )
             live_signals.append({
                 "type": "tournament_started",
                 "signal_key": f"tournament_started|{tag}",
                 "tournament_tag": tag,
                 "tournament_name": tournament_name,
                 "participant_count": participant_count,
+                "max_capacity": max_capacity,
+                "spots_remaining": spots_remaining,
                 "game_mode_id": (api_data.get("gameMode") or {}).get("id"),
                 "deck_selection": api_data.get("deckSelection"),
                 **timing_fields,
