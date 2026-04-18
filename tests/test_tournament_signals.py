@@ -252,6 +252,88 @@ def test_tournament_system_prompt_excludes_clan_events_prose():
     assert "Communal. Proud." not in prompt
 
 
+def test_build_tournament_recap_context_enriches_decks_and_audience():
+    """End-of-tournament recap context must include the audience tag, card
+    elixir/rarity on head-to-head decks, shared-cards per match, and per-player
+    context extras. This is what the recap prompt leans on for richer prose."""
+    from storage.tournament import build_tournament_recap_context, finalize_tournament
+
+    conn = db.get_connection(":memory:")
+    try:
+        # Seed card catalog
+        for cid, name, cost, rarity in [
+            (1, "Hog Rider", 4, "rare"),
+            (2, "Ice Spirit", 1, "common"),
+            (3, "Mega Knight", 7, "legendary"),
+        ]:
+            conn.execute(
+                "INSERT INTO card_catalog (card_id, name, elixir_cost, rarity, max_level, card_type, synced_at) "
+                "VALUES (?, ?, ?, ?, 15, 'troop', '2026-04-18T00:00:00')",
+                (cid, name, cost, rarity),
+            )
+        # Both players are clan members → audience clan_internal
+        db.snapshot_members([
+            {"tag": "#ABC123", "name": "King Thing", "role": "leader", "expLevel": 66, "trophies": 11000, "clanRank": 1},
+            {"tag": "#DEF456", "name": "King Levy", "role": "member", "expLevel": 60, "trophies": 8000, "clanRank": 2},
+        ], conn=conn)
+        # Seed a profile snapshot so the recap enrichment surfaces trophies.
+        for ptag, trophies in [("#ABC123", 11000), ("#DEF456", 8000)]:
+            mid = conn.execute(
+                "SELECT member_id FROM members WHERE player_tag = ?", (ptag,)
+            ).fetchone()["member_id"]
+            conn.execute(
+                "INSERT INTO player_profile_snapshots (member_id, fetched_at, exp_level, trophies, best_trophies) "
+                "VALUES (?, '2026-04-18T10:00:00', 66, ?, ?)",
+                (mid, trophies, trophies),
+            )
+        conn.commit()
+
+        register_tournament("#2QG9Y9UR", _api_payload(members=[
+            {"tag": "#ABC123", "name": "King Thing", "score": 0, "rank": 1},
+            {"tag": "#DEF456", "name": "King Levy", "score": 0, "rank": 1},
+        ]), conn=conn)
+        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()["tournament_id"]
+
+        battle = {
+            "battleTime": "20260418T150000.000Z",
+            "tournamentTag": "#2QG9Y9UR",
+            "type": "challenge",
+            "deckSelection": "draftCompetitive",
+            "gameMode": {"id": 72000001, "name": "CW_Duel_1v1"},
+            "arena": {"name": "Legendary Arena"},
+            "team": [{"tag": "#ABC123", "name": "King Thing", "crowns": 3,
+                      "cards": [{"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
+                                {"name": "Ice Spirit", "id": 2, "level": 14, "maxLevel": 15}]}],
+            "opponent": [{"tag": "#DEF456", "name": "King Levy", "crowns": 0,
+                          "cards": [{"name": "Mega Knight", "id": 3, "level": 14, "maxLevel": 15},
+                                    {"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15}]}],
+        }
+        store_tournament_battle(tid, battle, conn=conn)
+
+        # Finalize so the recap sees ended state with final ranks
+        finalize_tournament("#2QG9Y9UR", {
+            "status": "ended",
+            "endedTime": "20260418T153000.000Z",
+            "membersList": [
+                {"tag": "#ABC123", "name": "King Thing", "score": 1, "rank": 1},
+                {"tag": "#DEF456", "name": "King Levy", "score": 0, "rank": 2},
+            ],
+        }, conn=conn)
+
+        context = build_tournament_recap_context("#2QG9Y9UR", conn=conn)
+
+        assert "Audience: clan_internal" in context
+        # Enriched decks carry elixir + legendary marker
+        assert "Hog Rider 4e" in context
+        assert "Mega Knight 7e (L)" in context
+        # Shared-cards line is present on the battle
+        assert "shared: Hog Rider" in context
+        # Standings carry player context extras
+        assert "11000 trophies" in context
+    finally:
+        conn.close()
+
+
 def test_build_battle_played_signal_audience_classification():
     base_info = {
         "battle_time": "20260418T141500.000Z",
