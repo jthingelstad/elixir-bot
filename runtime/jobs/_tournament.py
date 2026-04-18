@@ -8,6 +8,7 @@ __all__ = [
 
 import asyncio
 import os
+from typing import Optional
 
 import cr_api
 import db
@@ -24,7 +25,13 @@ TOURNAMENT_BATTLE_LOG_SPACING_SECONDS = 0.5
 _TOURNAMENT_JOB_ID = "tournament-watch"
 
 
-def _build_battle_played_signal(tournament_tag: str, tournament_name: str, battle_info: dict) -> dict:
+def _build_battle_played_signal(
+    tournament_tag: str,
+    tournament_name: str,
+    battle_info: dict,
+    *,
+    tournament_timing: Optional[dict] = None,
+) -> dict:
     """Shape a tournament_battle_played signal payload for awareness delivery.
 
     The audience framing (supportive clan commentary vs. neutral observation)
@@ -33,6 +40,10 @@ def _build_battle_played_signal(tournament_tag: str, tournament_name: str, battl
     by store_tournament_battle's INSERT OR IGNORE on the canonicalized
     (p1_tag, p2_tag, battle_time) triple, so the signal fires exactly once
     per match even though we see it in both players' battle logs.
+
+    ``tournament_timing`` carries the tournament's own clock (started_time,
+    duration_minutes, ends_time) so the awareness prompt does not reach for
+    war/river-race state to time the match.
     """
     p1_is_member = battle_info.get("player1_is_clan_member")
     p2_is_member = battle_info.get("player2_is_clan_member")
@@ -90,6 +101,7 @@ def _build_battle_played_signal(tournament_tag: str, tournament_name: str, battl
         "deck_selection": battle_info.get("deck_selection"),
         "game_mode_name": battle_info.get("game_mode_name"),
         "arena_name": battle_info.get("arena_name"),
+        "tournament_timing": tournament_timing or {},
     }
 
 
@@ -119,6 +131,19 @@ async def _tournament_watch_tick():
         api_status = api_data.get("status") or ""
         battles_captured = 0
         tournament_name = api_data.get("name") or tag
+
+        # Tournament-own timing, so battle-played signals can cite the
+        # tournament's clock instead of the war/river-race clock.
+        from storage.tournament import _compute_ends_time
+        _duration_s = api_data.get("duration")
+        _started_time = api_data.get("startedTime") or tournament.get("started_time")
+        tournament_timing = {
+            "duration_seconds": _duration_s,
+            "duration_minutes": (_duration_s // 60) if isinstance(_duration_s, int) else None,
+            "started_time": _started_time,
+            "ends_time": _compute_ends_time(_started_time, _duration_s),
+        }
+
         if api_status in ("inProgress", "ended"):
             tournament_tag_with_hash = f"#{tag.lstrip('#')}"
             for p in participants:
@@ -135,7 +160,8 @@ async def _tournament_watch_tick():
                                 if battle_info:
                                     battles_captured += 1
                                     live_signals.append(_build_battle_played_signal(
-                                        tag, tournament_name, battle_info
+                                        tag, tournament_name, battle_info,
+                                        tournament_timing=tournament_timing,
                                     ))
                         # Also feed through existing battle log pipeline
                         await asyncio.to_thread(db.snapshot_player_battlelog, p_tag, battle_log)
