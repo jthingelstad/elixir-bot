@@ -315,24 +315,34 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
 # Battle capture
 # ---------------------------------------------------------------------------
 
+def _card_names_from_deck(cards: list[dict] | None) -> list[str]:
+    names = []
+    for c in cards or []:
+        if isinstance(c, dict) and c.get("name"):
+            names.append(c["name"])
+    return names
+
+
 @managed_connection
-def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sqlite3.Connection] = None) -> bool:
+def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     """Store a single tournament battle with dedup.
 
     Canonicalizes player order (player1_tag < player2_tag lexicographically)
     so the same match stored from either player's log deduplicates.
 
-    Returns True if a new battle was inserted, False if it was a duplicate.
+    Returns a dict with signal-ready battle metadata on insert, or None on
+    duplicate / malformed input. The returned dict is truthy, so the previous
+    ``if inserted:`` usage is preserved.
     """
     team = (battle.get("team") or [{}])[0]
     opp = (battle.get("opponent") or [{}])[0]
     if not team or not opp:
-        return False
+        return None
 
     tag_a = _canon_tag(team.get("tag") or "")
     tag_b = _canon_tag(opp.get("tag") or "")
     if not tag_a or not tag_b:
-        return False
+        return None
 
     # Determine winner from crowns
     crowns_a = team.get("crowns")
@@ -344,16 +354,20 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
         elif crowns_b > crowns_a:
             winner_tag = tag_b
 
-    deck_a = _json_or_none(_normalize_cards_for_storage(team.get("cards") or []))
-    deck_b = _json_or_none(_normalize_cards_for_storage(opp.get("cards") or []))
+    cards_a = _normalize_cards_for_storage(team.get("cards") or [])
+    cards_b = _normalize_cards_for_storage(opp.get("cards") or [])
+    deck_a = _json_or_none(cards_a)
+    deck_b = _json_or_none(cards_b)
+    card_names_a = _card_names_from_deck(cards_a)
+    card_names_b = _card_names_from_deck(cards_b)
 
     # Canonicalize order: player1_tag is always the lexicographically smaller tag
     if tag_a <= tag_b:
-        p1_tag, p1_name, p1_mid, p1_crowns, p1_deck = tag_a, team.get("name"), _member_id_for_tag(conn, tag_a), crowns_a, deck_a
-        p2_tag, p2_name, p2_mid, p2_crowns, p2_deck = tag_b, opp.get("name"), _member_id_for_tag(conn, tag_b), crowns_b, deck_b
+        p1_tag, p1_name, p1_mid, p1_crowns, p1_deck, p1_card_names = tag_a, team.get("name"), _member_id_for_tag(conn, tag_a), crowns_a, deck_a, card_names_a
+        p2_tag, p2_name, p2_mid, p2_crowns, p2_deck, p2_card_names = tag_b, opp.get("name"), _member_id_for_tag(conn, tag_b), crowns_b, deck_b, card_names_b
     else:
-        p1_tag, p1_name, p1_mid, p1_crowns, p1_deck = tag_b, opp.get("name"), _member_id_for_tag(conn, tag_b), crowns_b, deck_b
-        p2_tag, p2_name, p2_mid, p2_crowns, p2_deck = tag_a, team.get("name"), _member_id_for_tag(conn, tag_a), crowns_a, deck_a
+        p1_tag, p1_name, p1_mid, p1_crowns, p1_deck, p1_card_names = tag_b, opp.get("name"), _member_id_for_tag(conn, tag_b), crowns_b, deck_b, card_names_b
+        p2_tag, p2_name, p2_mid, p2_crowns, p2_deck, p2_card_names = tag_a, team.get("name"), _member_id_for_tag(conn, tag_a), crowns_a, deck_a, card_names_a
 
     arena = battle.get("arena") or {}
     game_mode = battle.get("gameMode") or {}
@@ -378,22 +392,41 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
         ),
     )
 
-    inserted = cursor.rowcount > 0
-    if inserted:
+    if cursor.rowcount == 0:
+        return None
+
+    conn.execute(
+        "UPDATE tournaments SET battles_captured = battles_captured + 1 WHERE tournament_id = ?",
+        (tournament_id,),
+    )
+    # Set deck_selection on tournament if not yet known
+    deck_sel = battle.get("deckSelection")
+    if deck_sel:
         conn.execute(
-            "UPDATE tournaments SET battles_captured = battles_captured + 1 WHERE tournament_id = ?",
-            (tournament_id,),
+            "UPDATE tournaments SET deck_selection = COALESCE(deck_selection, ?) WHERE tournament_id = ?",
+            (deck_sel, tournament_id),
         )
-        # Set deck_selection on tournament if not yet known
-        deck_sel = battle.get("deckSelection")
-        if deck_sel:
-            conn.execute(
-                "UPDATE tournaments SET deck_selection = COALESCE(deck_selection, ?) WHERE tournament_id = ?",
-                (deck_sel, tournament_id),
-            )
 
     conn.commit()
-    return inserted
+
+    return {
+        "battle_time": battle.get("battleTime"),
+        "player1_tag": p1_tag,
+        "player1_name": p1_name,
+        "player1_is_clan_member": bool(p1_mid),
+        "player1_crowns": p1_crowns,
+        "player1_deck": p1_card_names,
+        "player2_tag": p2_tag,
+        "player2_name": p2_name,
+        "player2_is_clan_member": bool(p2_mid),
+        "player2_crowns": p2_crowns,
+        "player2_deck": p2_card_names,
+        "winner_tag": winner_tag,
+        "deck_selection": battle.get("deckSelection"),
+        "game_mode_id": game_mode.get("id"),
+        "game_mode_name": game_mode.get("name"),
+        "arena_name": arena.get("name") if isinstance(arena, dict) else None,
+    }
 
 
 # ---------------------------------------------------------------------------

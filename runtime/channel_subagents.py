@@ -64,6 +64,7 @@ TOURNAMENT_SIGNAL_TYPES = {
     "tournament_lead_change",
     "tournament_ended",
     "tournament_participant_joined",
+    "tournament_battle_played",
 }
 
 LEADERSHIP_ONLY_SIGNAL_TYPES = {
