@@ -3652,7 +3652,7 @@ def test_current_war_day_state_tracks_engagement_points_and_time_left():
         conn.close()
 
 
-def test_current_war_day_state_uses_fixed_utc_reset_when_first_seen_late():
+def test_current_war_day_state_anchors_to_first_observed_period():
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members(
@@ -3689,10 +3689,10 @@ def test_current_war_day_state_uses_fixed_utc_reset_when_first_seen_late():
 
         state = db.get_current_war_day_state(conn=conn)
 
-        assert state["period_started_at"] == "2026-03-14T10:00:00"
-        assert state["period_ends_at"] == "2026-03-15T10:00:00"
-        assert state["time_left_seconds"] == 15 * 3600
-        assert state["time_left_text"] == "15h 0m"
+        assert state["period_started_at"] == "2026-03-14T18:00:00"
+        assert state["period_ends_at"] == "2026-03-15T18:00:00"
+        assert state["time_left_seconds"] == 23 * 3600
+        assert state["time_left_text"] == "23h 0m"
         assert state["first_observed_at"] == "2026-03-14T18:00:00"
     finally:
         conn.close()
