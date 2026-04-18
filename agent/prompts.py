@@ -625,6 +625,14 @@ def _tournament_recap_system():
         "Your job: write a tournament recap for the clan's private tournament.\n\n"
         "This is a celebration post that tells the story of the event — who won, how they got there, "
         "and what made the tournament memorable.\n\n"
+        "Tools:\n"
+        "- cr_api(aspect='player', tag='#X') — look up a player's current profile if you want to "
+        "reference something beyond what the recap context provides (trophies, clan, level).\n"
+        "- cr_api(aspect='player_battles', tag='#X', limit=N) — pull a participant's recent battle log "
+        "if you want to color in a specific matchup.\n"
+        "The recap context already contains the standings, battles, participants, and final ranks, so "
+        "most recaps will not need tools. Only reach for them when a specific detail would genuinely "
+        "strengthen the narrative.\n\n"
         "Content priorities:\n"
         "- Lead with the winner and the path to victory.\n"
         "- Highlight standout card picks — which cards dominated, which were surprising or avoided.\n"
@@ -641,7 +649,8 @@ def _tournament_recap_system():
         "- Avoid bullet lists, tables, or newsletter formatting. Flow naturally.\n"
         "- The runtime adds the bold title line, so do not add your own title.\n"
         "- End with a short note looking forward to the next tournament when it feels natural.\n\n"
-        "Respond with the recap text only. No JSON.",
+        "Respond with JSON only (no markdown wrapper):\n"
+        '{"content": "<the full recap text as a single string>"}',
     )
 
 

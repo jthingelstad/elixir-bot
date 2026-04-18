@@ -651,6 +651,36 @@ def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
             assert create.call_args.kwargs["model"] == "claude-sonnet-4-6", workflow
 
 
+def test_generate_tournament_recap_uses_agent_loop_with_cr_api():
+    captured = {}
+
+    def fake_chat_with_tools(system_prompt, user_message, **kwargs):
+        captured["system_prompt"] = system_prompt
+        captured["user_message"] = user_message
+        captured["kwargs"] = kwargs
+        return {"content": "The winner stood alone.  "}
+
+    with patch("agent.workflows._chat_with_tools", side_effect=fake_chat_with_tools):
+        text = elixir_agent.generate_tournament_recap("tournament context goes here")
+
+    assert text == "The winner stood alone."
+    assert captured["kwargs"]["workflow"] == "tournament_recap"
+    tool_names = {t["name"] for t in captured["kwargs"]["allowed_tools"]}
+    assert tool_names == {"cr_api"}
+    assert captured["kwargs"]["response_schema"] == {"required": ["content"]}
+    assert captured["kwargs"]["strict_json"] is True
+    assert "tournament context goes here" in captured["user_message"]
+
+
+def test_generate_tournament_recap_returns_none_on_empty_parse():
+    with patch("agent.workflows._chat_with_tools", return_value=None):
+        assert elixir_agent.generate_tournament_recap("ctx") is None
+    with patch("agent.workflows._chat_with_tools", return_value={"content": ""}):
+        assert elixir_agent.generate_tournament_recap("ctx") is None
+    with patch("agent.workflows._chat_with_tools", return_value={"content": 123}):
+        assert elixir_agent.generate_tournament_recap("ctx") is None
+
+
 def test_create_chat_completion_uses_content_model_for_site_workflows():
     response = _mock_anthropic_response()
     create = Mock(return_value=response)
