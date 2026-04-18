@@ -334,6 +334,49 @@ def test_build_tournament_recap_context_enriches_decks_and_audience():
         conn.close()
 
 
+def test_format_tournament_close_post_is_facts_only():
+    from runtime.jobs._tournament import _format_tournament_close_post
+
+    api_data = {
+        "name": "PK Cup",
+        "deckSelection": "draftCompetitive",
+        "membersList": [
+            {"tag": "#A", "name": "Alpha", "score": 4, "rank": 1},
+            {"tag": "#B", "name": "Bravo", "score": 3, "rank": 2},
+            {"tag": "#C", "name": "Cheng", "score": 2, "rank": 3},
+        ],
+    }
+    text = _format_tournament_close_post("PK Cup", api_data)
+    assert text.startswith("**Tournament Complete | PK Cup**")
+    # Triple Draft label translated from the API code
+    assert "Triple Draft" in text
+    assert "Final leaderboard:" in text
+    # Each player listed in rank order
+    assert "1. **Alpha** — 4 wins" in text
+    assert "2. **Bravo** — 3 wins" in text
+    assert "3. **Cheng** — 2 wins" in text
+    # No narrative — no "great", no "kept it close" filler
+    for filler in ("great", "narrative", "story", "story of"):
+        assert filler.lower() not in text.lower()
+
+
+def test_format_tournament_close_post_truncates_to_top_n():
+    from runtime.jobs._tournament import _format_tournament_close_post
+
+    api_data = {
+        "name": "Big Tourney",
+        "membersList": [
+            {"tag": f"#P{i}", "name": f"P{i}", "score": 50 - i, "rank": i + 1}
+            for i in range(15)
+        ],
+    }
+    text = _format_tournament_close_post("Big Tourney", api_data, top_n=10)
+    assert "1. **P0**" in text
+    assert "10. **P9**" in text
+    assert "11. **P10**" not in text
+    assert "…and 5 more" in text
+
+
 def test_game_mode_label_translates_known_ids_and_falls_back():
     from storage.tournament import game_mode_label
 

@@ -22,6 +22,7 @@ from runtime.jobs._signals import _deliver_signal_group, _post_to_elixir
 
 TOURNAMENT_POLL_MINUTES = int(os.getenv("TOURNAMENT_POLL_MINUTES", "5"))
 TOURNAMENT_BATTLE_LOG_SPACING_SECONDS = 0.5
+TOURNAMENT_RECAP_DELAY_SECONDS = int(os.getenv("TOURNAMENT_RECAP_DELAY_SECONDS", "120"))
 _TOURNAMENT_JOB_ID = "tournament-watch"
 
 
@@ -219,8 +220,14 @@ async def _tournament_watch_tick():
         # Handle tournament end
         if api_status == "ended" and tournament["status"] != "ended":
             await asyncio.to_thread(db.finalize_tournament, tag, api_data)
-            log.info("Tournament %s ended — generating recap", tag)
-            await _tournament_recap(tag)
+            log.info("Tournament %s ended — posting close, deferring recap %ds", tag, TOURNAMENT_RECAP_DELAY_SECONDS)
+            # The "tournament_ended" signal in live_signals would otherwise
+            # generate a chatty narrative post via tournament_update.
+            # Replace it with a deterministic facts + leaderboard post and
+            # defer the LLM recap so the two don't land on top of each other.
+            live_signals = [s for s in live_signals if s.get("type") != "tournament_ended"]
+            await _post_tournament_close(tag, api_data)
+            _schedule_tournament_recap(tag, delay_seconds=TOURNAMENT_RECAP_DELAY_SECONDS)
             stop_tournament_watch()
 
         # Deliver live signals
@@ -238,6 +245,103 @@ async def _tournament_watch_tick():
     except Exception as exc:
         log.error("Tournament watch failed: %s", exc, exc_info=True)
         runtime_status.mark_job_failure("tournament_watch", str(exc))
+
+
+def _format_tournament_close_post(tournament_name: str, api_data: dict, *, top_n: int = 10) -> str:
+    """Deterministic close-out post for a tournament.
+
+    Facts only — final leaderboard, deck format, total participants. The
+    narrative recap fires separately a couple minutes later.
+    """
+    members = api_data.get("membersList") or []
+    top = sorted(members, key=lambda m: m.get("rank") or 999)[:top_n]
+    deck_label = (
+        {
+            "draftCompetitive": "Triple Draft",
+            "collection": "Bring Your Own Deck",
+            "draft": "Draft",
+        }.get(api_data.get("deckSelection") or "", api_data.get("deckSelection") or "")
+    )
+    header_bits = [f"{len(members)} players"]
+    if deck_label:
+        header_bits.append(deck_label)
+    lines = [
+        f"**Tournament Complete | {tournament_name}**",
+        " · ".join(header_bits),
+        "",
+        "Final leaderboard:",
+    ]
+    for m in top:
+        rank = m.get("rank", "?")
+        name = m.get("name", "?")
+        score = m.get("score", 0)
+        lines.append(f"{rank}. **{name}** — {score} wins")
+    if len(members) > top_n:
+        lines.append(f"…and {len(members) - top_n} more")
+    return "\n".join(lines)
+
+
+async def _post_tournament_close(tournament_tag: str, api_data: dict) -> None:
+    """Post the deterministic close-out (facts + leaderboard) to #clan-events."""
+    try:
+        tournament = await asyncio.to_thread(db.get_tournament_by_tag, tournament_tag)
+        tournament_name = (tournament or {}).get("name") or api_data.get("name") or tournament_tag
+        text = _format_tournament_close_post(tournament_name, api_data)
+        channel_id = _get_singleton_channel_id("clan-events")
+        if not channel_id:
+            log.error("Tournament close: #clan-events channel not configured")
+            return
+        channel = bot.get_channel(channel_id)
+        if not channel:
+            log.error("Tournament close: could not resolve channel %s", channel_id)
+            return
+        await _post_to_elixir(channel, {"content": text})
+        await asyncio.to_thread(
+            db.save_message,
+            _channel_scope(channel),
+            "assistant",
+            text,
+            **_channel_msg_kwargs(channel),
+            workflow="channel_update",
+            event_type="tournament_complete",
+        )
+        log.info("Tournament close posted for %s", tournament_tag)
+    except Exception as exc:
+        log.error("Tournament close post failed: %s", exc, exc_info=True)
+
+
+def _schedule_tournament_recap(tournament_tag: str, *, delay_seconds: int) -> None:
+    """Defer the LLM recap so the close-out post lands first.
+
+    Uses the bot event loop directly (no scheduler entry) so the delay
+    survives the tick returning. If Elixir restarts during the delay
+    window, the boot-time check in resume_pending_tournament_recaps()
+    picks up the recap so it isn't lost.
+    """
+    def _kick():
+        bot.loop.create_task(_tournament_recap(tournament_tag))
+
+    bot.loop.call_soon_threadsafe(
+        lambda: bot.loop.call_later(max(0, delay_seconds), _kick)
+    )
+
+
+async def resume_pending_tournament_recaps() -> None:
+    """On boot, fire any recap that was deferred but never posted before
+    a restart. Catches the gap between the deterministic close post and
+    the delayed LLM recap.
+    """
+    try:
+        rows = await asyncio.to_thread(db.list_pending_tournament_recaps)
+    except Exception as exc:
+        log.warning("Pending tournament recap check failed: %s", exc)
+        return
+    for row in rows or []:
+        tag = row.get("tournament_tag")
+        if not tag:
+            continue
+        log.info("Resuming pending tournament recap for %s", tag)
+        await _tournament_recap(tag)
 
 
 async def _tournament_recap(tournament_tag: str):
