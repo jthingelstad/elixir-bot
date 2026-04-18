@@ -52,6 +52,7 @@ _DECK_SELECTION_LABELS = {
 # See docs/cr-api-docs/tournaments.md for the full set of player-facing
 # names and the rationale for keeping the mapping at this seam.
 _GAME_MODE_LABELS = {
+    72000009: "Normal Battle",
     72000194: "Triple Draft",
 }
 
