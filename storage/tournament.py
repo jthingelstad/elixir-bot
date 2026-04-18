@@ -41,6 +41,25 @@ def _compute_ends_time(started_time: Optional[str], duration_seconds) -> Optiona
     return ends_dt.strftime("%Y%m%dT%H%M%S.000Z")
 
 
+_DECK_SELECTION_LABELS = {
+    "draftCompetitive": "Triple Draft",
+    "collection": "Bring Your Own Deck",
+    "draft": "Draft",
+}
+
+
+def deck_selection_label(deck_selection: Optional[str]) -> Optional[str]:
+    """Translate the CR API's ``deckSelection`` code to the player-facing
+    name shown in-game. ``draftCompetitive`` → ``Triple Draft``, etc.
+
+    Unknown codes fall through unchanged so we still pass *something*
+    rather than hiding the raw value.
+    """
+    if not deck_selection:
+        return deck_selection
+    return _DECK_SELECTION_LABELS.get(deck_selection, deck_selection)
+
+
 def _api_status_to_internal(api_status: str) -> str:
     return {
         "inPreparation": "in_preparation",
@@ -305,7 +324,7 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
                 "max_capacity": max_capacity,
                 "spots_remaining": spots_remaining,
                 "game_mode_id": (api_data.get("gameMode") or {}).get("id"),
-                "deck_selection": api_data.get("deckSelection"),
+                "deck_selection": deck_selection_label(api_data.get("deckSelection")),
                 **timing_fields,
             })
         elif new_status == "ended":
@@ -547,7 +566,7 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
         "player2_context": _player_enrichment(conn, p2_tag),
         "shared_cards": shared_card_names,
         "winner_tag": winner_tag,
-        "deck_selection": battle.get("deckSelection"),
+        "deck_selection": deck_selection_label(battle.get("deckSelection")),
         "game_mode_id": game_mode.get("id"),
         "game_mode_name": game_mode.get("name"),
         "arena_name": arena.get("name") if isinstance(arena, dict) else None,
@@ -763,12 +782,27 @@ def get_tournament_card_stats(tournament_id: int, conn: Optional[sqlite3.Connect
 # Recap context
 # ---------------------------------------------------------------------------
 
+def _recap_audience(participants: list[dict]) -> str:
+    """Tournament-level audience tag for recap tone selection."""
+    total = len(participants or [])
+    if total == 0:
+        return "external_observed"
+    clan_members = sum(1 for p in participants if p.get("member_id"))
+    if clan_members == 0:
+        return "external_observed"
+    if clan_members == total:
+        return "clan_internal"
+    return "clan_mixed"
+
+
 @managed_connection
 def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.Connection] = None) -> str:
     """Build structured text context for LLM recap generation.
 
-    Returns a multi-section string with tournament metadata, standings,
-    card analysis, head-to-head matchups, and notable moments.
+    Returns a multi-section string with tournament metadata, audience tag,
+    standings (with per-player context), card analysis, head-to-head
+    matchups with deck detail (elixir cost, rarity, shared cards), and
+    notable moments.
     """
     tournament = get_tournament_by_tag(tournament_tag, conn=conn)
     if not tournament:
@@ -778,15 +812,12 @@ def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.C
     participants = get_tournament_participants(tid, conn=conn)
     battles = get_tournament_battles(tid, conn=conn)
     card_stats = get_tournament_card_stats(tid, conn=conn)
+    audience = _recap_audience(participants)
 
     sections = []
 
     # --- Tournament metadata ---
-    deck_label = {
-        "draftCompetitive": "Triple Draft",
-        "collection": "Bring Your Own Deck",
-        "draft": "Draft",
-    }.get(tournament.get("deck_selection") or "", tournament.get("deck_selection") or "Unknown")
+    deck_label = deck_selection_label(tournament.get("deck_selection")) or "Unknown"
 
     duration_hrs = (tournament.get("duration_seconds") or 0) / 3600
     sections.append(
@@ -796,15 +827,31 @@ def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.C
         f"Duration: {duration_hrs:.0f} hours\n"
         f"Participants: {len(participants)}\n"
         f"Total battles captured: {len(battles)}\n"
-        f"Creator: {tournament.get('creator_name') or tournament.get('creator_tag')}"
+        f"Creator: {tournament.get('creator_name') or tournament.get('creator_tag')}\n"
+        f"Audience: {audience}"
     )
 
     # --- Final standings ---
     standings_lines = []
     for p in participants:
         clan_member = " (clan)" if p.get("member_id") else ""
+        enrichment = _player_enrichment(conn, p.get("player_tag") or "")
+        extras = []
+        if enrichment.get("trophies") is not None:
+            extras.append(f"{enrichment['trophies']} trophies")
+        if enrichment.get("clan_tenure_days") is not None:
+            tenure = enrichment["clan_tenure_days"]
+            if tenure >= 365:
+                extras.append(f"{tenure // 365}y in clan")
+            elif tenure >= 30:
+                extras.append(f"{tenure // 30}mo in clan")
+            else:
+                extras.append(f"{tenure}d in clan")
+        if enrichment.get("cr_account_age_years") is not None:
+            extras.append(f"{enrichment['cr_account_age_years']}y CR account")
+        extras_str = f" [{', '.join(extras)}]" if extras else ""
         standings_lines.append(
-            f"{p.get('final_rank', '?')}. {p['player_name']} — {p.get('final_score', 0)} wins{clan_member}"
+            f"{p.get('final_rank', '?')}. {p['player_name']} — {p.get('final_score', 0)} wins{clan_member}{extras_str}"
         )
     sections.append("=== FINAL STANDINGS ===\n" + "\n".join(standings_lines))
 
@@ -844,8 +891,11 @@ def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.C
             h2h[key]["p2_wins"] += 1
 
         # Extract card names for battle summary
-        p1_cards = [c.get("name") for c in json.loads(b["player1_deck_json"] or "[]")]
-        p2_cards = [c.get("name") for c in json.loads(b["player2_deck_json"] or "[]")]
+        p1_cards = [c.get("name") for c in json.loads(b["player1_deck_json"] or "[]") if c.get("name")]
+        p2_cards = [c.get("name") for c in json.loads(b["player2_deck_json"] or "[]") if c.get("name")]
+        p1_enriched, p1_avg = _enrich_deck_from_catalog(conn, p1_cards)
+        p2_enriched, p2_avg = _enrich_deck_from_catalog(conn, p2_cards)
+        shared = sorted(set(p1_cards) & set(p2_cards))
         winner_name = None
         if b["winner_tag"] == b["player1_tag"]:
             winner_name = p1
@@ -856,9 +906,25 @@ def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.C
             "p1_crowns": b["player1_crowns"],
             "p2_crowns": b["player2_crowns"],
             "winner": winner_name,
-            "p1_cards": p1_cards,
-            "p2_cards": p2_cards,
+            "p1_deck": p1_enriched,
+            "p2_deck": p2_enriched,
+            "p1_avg": p1_avg,
+            "p2_avg": p2_avg,
+            "shared_cards": shared,
         })
+
+    def _format_deck(enriched):
+        if not enriched:
+            return "(no deck data)"
+        parts = []
+        for c in enriched:
+            entry = c["name"]
+            if c.get("elixir_cost") is not None:
+                entry += f" {c['elixir_cost']}e"
+            if c.get("rarity") == "legendary":
+                entry += " (L)"
+            parts.append(entry)
+        return ", ".join(parts)
 
     if h2h:
         h2h_lines = []
@@ -866,11 +932,13 @@ def build_tournament_recap_context(tournament_tag: str, conn: Optional[sqlite3.C
             h2h_lines.append(f"\n{p1} vs {p2}: {record['p1_wins']}-{record['p2_wins']}")
             for b in record["battles"]:
                 winner = b["winner"] or "Draw"
-                p1_deck = ", ".join(b["p1_cards"][:4]) + "..." if len(b["p1_cards"]) > 4 else ", ".join(b["p1_cards"])
-                p2_deck = ", ".join(b["p2_cards"][:4]) + "..." if len(b["p2_cards"]) > 4 else ", ".join(b["p2_cards"])
+                p1_avg = f" avg {b['p1_avg']}e" if b.get("p1_avg") is not None else ""
+                p2_avg = f" avg {b['p2_avg']}e" if b.get("p2_avg") is not None else ""
+                shared_note = f" | shared: {', '.join(b['shared_cards'])}" if b["shared_cards"] else ""
                 h2h_lines.append(
-                    f"  {b['p1_crowns']}-{b['p2_crowns']} ({winner} wins) | "
-                    f"{p1}: [{p1_deck}] vs {p2}: [{p2_deck}]"
+                    f"  {b['p1_crowns']}-{b['p2_crowns']} ({winner} wins){shared_note}\n"
+                    f"    {p1}{p1_avg}: {_format_deck(b['p1_deck'])}\n"
+                    f"    {p2}{p2_avg}: {_format_deck(b['p2_deck'])}"
                 )
         sections.append("=== HEAD-TO-HEAD MATCHUPS ===" + "\n".join(h2h_lines))
 

@@ -633,40 +633,40 @@ def _tournament_update_system():
 
 
 def _tournament_recap_system():
-    """System prompt for generating a tournament recap for #clan-events."""
-    clan_events = prompts.discord_singleton_subagent("clan-events")
-    purpose, knowledge, channel_context = _subagent_base(clan_events["name"], clan_events["subagent_key"])
+    """System prompt for the end-of-tournament recap.
+
+    Loads the dedicated tournament lane (same self-contained context the live
+    commentary path uses — identity + game knowledge + tournament.md, no
+    clan-events lifecycle prose, no war state). A recap-shape addendum is
+    layered on top to pivot the voice from per-match commentary to full-
+    tournament narrative.
+    """
     return _build_system_prompt(
-        purpose,
-        knowledge,
-        channel_context,
-        "Your job: write a tournament recap for the clan's private tournament.\n\n"
-        "This is a celebration post that tells the story of the event — who won, how they got there, "
-        "and what made the tournament memorable.\n\n"
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        prompts.subagent_prompt("tournament"),
+        "**You are writing the end-of-tournament recap.** The tournament is "
+        "complete. Use the pre-materialized recap context the user message "
+        "provides — it carries the standings, card analysis, head-to-head "
+        "series, per-battle deck detail (with elixir cost and rarity), "
+        "per-player context, and an `audience` field at the tournament level "
+        "(clan_internal / clan_mixed / external_observed). Pick the voice "
+        "from that audience field exactly as the live-match rules describe.\n\n"
         "Tools:\n"
-        "- cr_api(aspect='player', tag='#X') — look up a player's current profile if you want to "
-        "reference something beyond what the recap context provides (trophies, clan, level).\n"
-        "- cr_api(aspect='player_battles', tag='#X', limit=N) — pull a participant's recent battle log "
-        "if you want to color in a specific matchup.\n"
-        "The recap context already contains the standings, battles, participants, and final ranks, so "
-        "most recaps will not need tools. Only reach for them when a specific detail would genuinely "
-        "strengthen the narrative.\n\n"
-        "Content priorities:\n"
-        "- Lead with the winner and the path to victory.\n"
-        "- Highlight standout card picks — which cards dominated, which were surprising or avoided.\n"
-        "- For draft tournaments (Triple Draft), the draft meta is the story: who picked what, and did it work?\n"
-        "- Name specific players and specific cards. 'King Thing drafted Witch in every match' is better than 'players made interesting choices'.\n"
-        "- Include head-to-head rivalry moments when the data supports it.\n"
-        "- Give the runner-up and notable performances their due.\n"
-        "- If card win rates are available, weave them in naturally — 'Hog Rider appeared 10 times with a 70% win rate' tells a story.\n\n"
-        "Style guidance:\n"
-        "- Write in first person as Elixir.\n"
-        "- Sound like a sports journalist covering a friendly community event — warm but informed.\n"
-        "- 3-5 paragraphs, under 2000 characters total.\n"
-        "- Use light Discord markdown: **bold** for player names and card names to help them pop.\n"
-        "- Avoid bullet lists, tables, or newsletter formatting. Flow naturally.\n"
-        "- The runtime adds the bold title line, so do not add your own title.\n"
-        "- End with a short note looking forward to the next tournament when it feels natural.\n\n"
+        "- cr_api(aspect='player', tag='#X') — look up a player's current profile if a detail would strengthen the narrative.\n"
+        "- cr_api(aspect='player_battles', tag='#X', limit=N) — pull recent battles only if the matchup story genuinely calls for it.\n"
+        "The recap context already carries the bulk of what you need. Most recaps will not require tool calls.\n\n"
+        "Recap shape:\n"
+        "- Lead with the winner and the path to victory. Name one or two specific moments that got them there.\n"
+        "- Standout cards: reach for the most-picked + highest-win-rate cards, and name legendaries or low-elixir cycle staples by elixir cost when it colors the story.\n"
+        "- Draft reading: for triple draft, the draft META is a story — which cards got drafted repeatedly, which were avoided, shared-card patterns across battles.\n"
+        "- Head-to-head: when the data shows a genuine rivalry (a series that went 2-1 or a 3-crown match), name it.\n"
+        "- Runner-up and third: give them due credit with a sentence or two of their own.\n"
+        "- Close: one forward-looking note — we learned something, we'll run it again, or a small callout to a player worth watching next time.\n\n"
+        "Style:\n"
+        "- First person as Elixir. Fan-and-coach voice when audience is clan_internal; neutral analytical color commentator when external_observed; warm about our player and neutral elsewhere for clan_mixed.\n"
+        "- 3-5 paragraphs, under 2000 characters total. Flowing prose, not bullet lists. Light **bold** on player names and card names.\n"
+        "- The runtime adds the bold title line — do not add your own title.\n\n"
         "Respond with JSON only (no markdown wrapper):\n"
         '{"content": "<the full recap text as a single string>"}',
     )
