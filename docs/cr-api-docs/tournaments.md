@@ -107,7 +107,7 @@ like `CW_Duel_1v1`, not the player-facing name below).
 
 | Player-facing name | API id (when known) | Notes |
 |---|---|---|
-| Normal Battle | — | |
+| Normal Battle | 72000009 | Confirmed April 2026 — POAP KINGS hosted tournament `#2JCCR0QG` (2026-04-04). Battle-log payloads carry `gameMode.name: "Tournament"`. |
 | Double Elixir Battle | — | |
 | Triple Elixir Battle | — | |
 | Sudden Death Battle | — | |
