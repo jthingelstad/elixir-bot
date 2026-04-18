@@ -382,14 +382,17 @@ async def _tournament_recap(tournament_tag: str):
             event_type="tournament_recap",
         )
 
-        # Update recap_posted_at
-        from db import get_connection, _utcnow
+        # Update recap_posted_at. Use _canon_tag — tournaments are stored
+        # WITH the leading "#", so a bare lstrip+upper on the input would
+        # never match.
+        from db import get_connection, _utcnow, _canon_tag
+        canon_tag = _canon_tag(tournament_tag)
         def _mark_recap_posted():
             conn = get_connection()
             try:
                 conn.execute(
                     "UPDATE tournaments SET recap_posted_at = ? WHERE tournament_tag = ?",
-                    (_utcnow(), tournament_tag.lstrip("#").upper()),
+                    (_utcnow(), canon_tag),
                 )
                 conn.commit()
             finally:
