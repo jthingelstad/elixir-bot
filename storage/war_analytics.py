@@ -735,8 +735,88 @@ def compare_fame_per_member_to_previous_season(season_id: Optional[str] = None, 
         "delta": round(delta, 2),
     }
 
+def _donations_peaks_in_window(conn, member_id: int, today, *, days_back_start: int, days_back_end: int) -> Optional[int]:
+    """Peak ``donations_week`` snapshot value over a date window.
+
+    `donations_week` is a running weekly tally that resets Mondays, so the
+    *peak* observed during a week approximates that week's final total
+    even if we sampled mid-day. Returns None when no snapshots in window.
+    """
+    start = (today - timedelta(days=days_back_start)).isoformat()
+    end = (today - timedelta(days=days_back_end)).isoformat()
+    row = conn.execute(
+        "SELECT MAX(donations_week) AS peak FROM member_daily_metrics "
+        "WHERE member_id = ? AND metric_date BETWEEN ? AND ?",
+        (member_id, start, end),
+    ).fetchone()
+    if not row or row["peak"] is None:
+        return None
+    return int(row["peak"])
+
+
 @managed_connection
-def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int = 14, active_within_days: int = 7,
+def get_demotion_candidates(min_donations_week: int = 50, conn: Optional[sqlite3.Connection] = None) -> dict:
+    """Active elders whose donations have been below the meaningful threshold
+    for two consecutive weeks. Leaders demote based on this list.
+
+    Two-week test approximated from member_daily_metrics:
+      - last week peak: highest donations_week observed in days [-14, -7]
+      - this week peak: highest donations_week observed in days [-7, today]
+    Both must be < min_donations_week to count as a sustained dip.
+
+    Members without enough history (less than ~14 days of snapshots) are
+    skipped so we don't demote brand-new elders on insufficient data.
+    """
+    today = _member_activity_anchor(conn).date()
+    rows = conn.execute(
+        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
+        "cs.role, cs.trophies, cs.donations_week, cs.last_seen_api "
+        "FROM members m JOIN member_current_state cs ON cs.member_id = m.member_id "
+        "WHERE m.status = 'active' AND cs.role = 'elder' "
+        "ORDER BY cs.donations_week ASC, m.current_name COLLATE NOCASE"
+    ).fetchall()
+    flagged = []
+    for row in rows:
+        last_week_peak = _donations_peaks_in_window(
+            conn, row["member_id"], today, days_back_start=14, days_back_end=8
+        )
+        this_week_peak = _donations_peaks_in_window(
+            conn, row["member_id"], today, days_back_start=7, days_back_end=0
+        )
+        # Skip if we don't have at least two weeks of data — don't demote on
+        # insufficient evidence.
+        if last_week_peak is None or this_week_peak is None:
+            continue
+        if last_week_peak >= min_donations_week or this_week_peak >= min_donations_week:
+            continue
+        joined_date = _current_joined_at(conn, row["member_id"])
+        item = {
+            "tag": row["tag"],
+            "name": row["name"],
+            "trophies": row["trophies"],
+            "donations_this_week": this_week_peak,
+            "donations_last_week": last_week_peak,
+            "threshold": min_donations_week,
+            "joined_date": joined_date,
+            "reason": (
+                f"two-week donation dip: last week {last_week_peak}, "
+                f"this week {this_week_peak} (threshold {min_donations_week})"
+            ),
+        }
+        flagged.append(_member_reference_fields(conn, row["member_id"], item))
+
+    flagged.sort(key=lambda item: (item["donations_this_week"] + item["donations_last_week"], (item.get("name") or "").lower()))
+    return {
+        "criteria": {
+            "min_donations_week": min_donations_week,
+            "consecutive_weeks_below_threshold": 2,
+        },
+        "members": flagged,
+    }
+
+
+@managed_connection
+def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int = 21, active_within_days: int = 7,
                              min_war_races: int = 1, conn: Optional[sqlite3.Connection] = None) -> dict:
     season_id = get_current_season_id(conn=conn)
     counts = conn.execute(
@@ -750,7 +830,13 @@ def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int 
     ).fetchone()
     active_members = counts["active_members"] or 0
     target_elder_min = max(0, round(active_members * 0.2))
+    # Hard cap: 3 elders per 10 active members. Promotion recommendations
+    # respect this — leaders may exceed it, but the tool does not nudge
+    # toward exceeding it.
     target_elder_max = max(target_elder_min, round(active_members * 0.3))
+    current_elders = counts["elders"] or 0
+    elder_capacity_remaining = max(0, target_elder_max - current_elders)
+    elder_cap_reached = elder_capacity_remaining == 0
 
     rows = conn.execute(
         "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.role, cs.exp_level, cs.trophies, cs.best_trophies, "
@@ -820,12 +906,17 @@ def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int 
     composition = {
         "active_members": active_members,
         "leaders": counts["leaders"] or 0,
-        "elders": counts["elders"] or 0,
+        "elders": current_elders,
         "members": counts["members"] or 0,
         "target_elder_min": target_elder_min,
         "target_elder_max": target_elder_max,
-        "elder_capacity_remaining": max(0, target_elder_max - (counts["elders"] or 0)),
+        "elder_capacity_remaining": elder_capacity_remaining,
+        "elder_cap_reached": elder_cap_reached,
+        "elder_cap_rule": "no more than 3 elders per 10 active members",
     }
+    # Pull demotion candidates in the same response so leaders see both sides
+    # of the elder roster in one tool call.
+    demotion = get_demotion_candidates(min_donations_week=min_donations_week, conn=conn)
     return {
         "season_id": season_id,
         "criteria": {
@@ -837,6 +928,7 @@ def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int 
         "composition": composition,
         "recommended": recommended,
         "borderline": borderline,
+        "demotion_candidates": demotion["members"],
     }
 
 

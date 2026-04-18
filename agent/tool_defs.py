@@ -279,7 +279,7 @@ TOOLS = [
             "- hot_streaks: members on a current winning streak\n"
             "- losing_streaks: members on a current losing streak\n"
             "- trophy_drops: members with notable trophy drops\n"
-            "- promotion_candidates: members with 'member' role who meet Elder promotion criteria"
+            "- promotion_candidates: members eligible for Elder promotion (tenure >= 21d, meaningful donations, active in last 7d, war participation), plus current elders who have dropped below the donation threshold for two consecutive weeks (`demotion_candidates`). Composition includes the 3-per-10 elder cap and `elder_cap_reached` so the agent does not nudge promotions past the cap."
         ),
         "input_schema": {
             "type": "object",

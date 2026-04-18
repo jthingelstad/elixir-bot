@@ -110,19 +110,23 @@ Elder is earned, not automatic.
 - If several members are strong donators, war participation can be used as a tiebreaker.
 - Tenure matters, but behavior matters more.
 - Promotions should preserve role balance and meaning.
+- **Members are not eligible for Elder until they have been in the clan for 21 days.** This is a hard floor, not a guideline.
+- **Donations have to be meaningful.** Do not recommend a promotion just because there is open Elder capacity — only recommend members who have actually earned it.
 
 ## Clan Composition
 
 - For every 10 members: about 1 leader or co-leader, 2-3 elders, and the rest members.
+- **Hard cap: no more than 3 elders per 10 active members.** When `elder_cap_reached` is true on the promotion-candidates tool, do not recommend new promotions; flag stronger demotion or weaker-elder review instead.
 - Not everyone should be Elder.
 - The role should retain meaning and trust.
 
 ## Demotion and Removal
 
-- Elder demotion risk is primarily tied to donations stopping for a week or two.
-- If an Elder stops donating, their Elder status is at risk.
+- Elder demotion risk is primarily tied to donations stopping.
+- **If an Elder's donations drop below the meaningful threshold for two consecutive weeks, recommend demotion.** A single off week is not enough; the pattern is what matters.
+- The promotion-candidates tool returns `demotion_candidates` alongside promotion recommendations — leaders should review both together.
 - Removal is primarily about inactivity and absence.
-- No logins and no meaningful activity for about 2 weeks puts a member clearly at risk of removal.
+- For removal-candidate flagging, inactivity is trophy-scaled: per-member threshold is `max(7 days, trophies/1000 × 1.4 days)`.
 - Because the clan is still relatively early and not full, leaders can be more flexible right now.
 - Elixir should only discuss promotions, demotions, and kicks in private clan leadership channels.
 
