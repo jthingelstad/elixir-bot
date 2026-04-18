@@ -632,7 +632,23 @@ def test_create_chat_completion_records_llm_telemetry():
     assert mock_record.call_args.args[0] == "interactive"
     assert mock_record.call_args.kwargs["ok"] is True
     assert mock_record.call_args.kwargs["total_tokens"] == 30
-    assert create.call_args.kwargs["model"] == "claude-sonnet-4-6"
+    assert create.call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
+
+
+def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
+    response = _mock_anthropic_response()
+    create = Mock(return_value=response)
+    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    with (
+        patch("agent.core._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_llm_call"),
+    ):
+        for workflow in ("weekly_digest", "tournament_recap", "intel_report", "memory_synthesis"):
+            elixir_agent._create_chat_completion(
+                workflow=workflow,
+                messages=[{"role": "user", "content": "status"}],
+            )
+            assert create.call_args.kwargs["model"] == "claude-sonnet-4-6", workflow
 
 
 def test_create_chat_completion_uses_content_model_for_site_workflows():
@@ -662,19 +678,19 @@ def test_create_chat_completion_respects_model_env_overrides():
     with (
         patch("agent.core._get_client", return_value=mock_client),
         patch("elixir_agent.runtime_status.record_llm_call"),
-        patch.dict(os.environ, {"ELIXIR_CHAT_MODEL": "claude-test-chat", "ELIXIR_CONTENT_MODEL": "claude-test-content"}),
+        patch.dict(os.environ, {"ELIXIR_CHAT_MODEL": "claude-test-chat", "ELIXIR_LIGHTWEIGHT_MODEL": "claude-test-lightweight"}),
     ):
         elixir_agent._create_chat_completion(
-            workflow="clanops",
+            workflow="weekly_digest",
             messages=[{"role": "user", "content": "status"}],
         )
         assert create.call_args.kwargs["model"] == "claude-test-chat"
 
         elixir_agent._create_chat_completion(
-            workflow="site_members_message",
+            workflow="clanops",
             messages=[{"role": "user", "content": "status"}],
         )
-        assert create.call_args.kwargs["model"] == "claude-test-content"
+        assert create.call_args.kwargs["model"] == "claude-test-lightweight"
 
 
 def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
