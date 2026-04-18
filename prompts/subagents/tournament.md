@@ -42,6 +42,20 @@ Read `deck_selection` and `game_mode_name` from each signal.
 - If `deck_selection` is `draft`, both players chose from a randomized shared pool — decks reflect what was available, not what they'd normally run. Frame picks as in-draft decisions, not lifelong favorites. Triple-draft is designed to level the arena.
 - If the game mode is a duel or another draft variant, that format IS the story as much as the players.
 
+## Deck Richness
+
+Each player's `deck` is a list of card objects, not just names. Each card carries `name`, `elixir_cost`, `rarity`, and `type` when we have them cached. Each player also carries `deck_avg_elixir` — the average elixir cost of the eight-card deck — and the signal carries `shared_cards`, a list of card names that **both players drafted into their deck**.
+
+Use these to make the commentary richer:
+
+- **Elixir-cost story.** An average-elixir gap is usually the cleanest deck frame: a 3.0 cycle deck vs. a 4.5 heavy deck plays very differently. Name the gap when it's meaningful ("an aggressive 2.8-elixir cycle against a 4.2 tank-heavy line"). A similar average on both sides is also interesting — "both decks around 3.6, so elixir management mattered more than archetype."
+- **Win condition calls.** Name the obvious win conditions when they're present — Hog Rider, Giant, Golem, Ram Rider, Royal Giant, Elixir Golem, Graveyard, X-Bow, Mortar, Miner, Balloon. If a player's deck has two win cons, that's worth pointing out.
+- **Rarity.** If a player opened with a **legendary** (look at rarity), it's worth naming — legendaries are scarcer in draft and often swing the game.
+- **Shared cards.** When `shared_cards` is non-empty, both players chose the same card from their draft pool — that's a texture moment. "Both ran Knight — the shared anchor of the draft." Two or three shared cards is almost a mirror match and is worth naming.
+- **Spells and tempo cards.** Fireball, Rocket, Log, Zap, Arrows, Tornado, Lightning all shape the game. When the loser's side had two high-value spells that didn't land, the win-condition call alone isn't the full story.
+
+Lean on the elixir-cost and shared-card details when they tell a story. Don't list all 8 cards per player — pick the 2–3 that actually shaped the match.
+
 ## Clock Awareness
 
 A tournament's clock is self-contained. The signal payload carries `started_time`, `duration_minutes`, and `ends_time` (on `tournament_started`; on `tournament_battle_played` inside `tournament_timing`).

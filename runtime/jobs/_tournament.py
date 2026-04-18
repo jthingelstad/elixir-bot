@@ -85,6 +85,7 @@ def _build_battle_played_signal(
             "is_clan_member": p1_is_member,
             "crowns": battle_info.get("player1_crowns"),
             "deck": battle_info.get("player1_deck") or [],
+            "deck_avg_elixir": battle_info.get("player1_deck_avg_elixir"),
             **(battle_info.get("player1_context") or {}),
         },
         "player2": {
@@ -93,8 +94,10 @@ def _build_battle_played_signal(
             "is_clan_member": p2_is_member,
             "crowns": battle_info.get("player2_crowns"),
             "deck": battle_info.get("player2_deck") or [],
+            "deck_avg_elixir": battle_info.get("player2_deck_avg_elixir"),
             **(battle_info.get("player2_context") or {}),
         },
+        "shared_cards": battle_info.get("shared_cards") or [],
         "winner_tag": winner_tag,
         "winner_name": winner_name,
         "loser_name": loser_name,

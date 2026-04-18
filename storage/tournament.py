@@ -356,6 +356,40 @@ def _card_names_from_deck(cards: list[dict] | None) -> list[str]:
     return names
 
 
+def _enrich_deck_from_catalog(conn, card_names: list[str]) -> tuple[list[dict], Optional[float]]:
+    """Join card names against card_catalog to get elixir cost, rarity, and
+    type per card. Returns (enriched_list, avg_elixir_or_None).
+
+    Cards not in the catalog (newly released, renamed) are kept with name
+    only so the commentary still has the name — they just miss the elixir
+    annotation. The average is computed across cards we have costs for.
+    """
+    if not card_names:
+        return [], None
+    placeholders = ",".join("?" * len(card_names))
+    rows = conn.execute(
+        f"SELECT name, elixir_cost, rarity, card_type FROM card_catalog WHERE name IN ({placeholders})",
+        tuple(card_names),
+    ).fetchall()
+    by_name = {r["name"]: dict(r) for r in rows}
+    enriched = []
+    elixir_values = []
+    for name in card_names:
+        entry = {"name": name}
+        row = by_name.get(name)
+        if row:
+            if row.get("elixir_cost") is not None:
+                entry["elixir_cost"] = row["elixir_cost"]
+                elixir_values.append(row["elixir_cost"])
+            if row.get("rarity"):
+                entry["rarity"] = row["rarity"]
+            if row.get("card_type"):
+                entry["type"] = row["card_type"]
+        enriched.append(entry)
+    avg = round(sum(elixir_values) / len(elixir_values), 2) if elixir_values else None
+    return enriched, avg
+
+
 def _player_enrichment(conn, player_tag: str) -> dict:
     """Pull cached player context for commentary — trophies, king level,
     clan tenure, account age. Returns only fields we actually have; the
@@ -491,20 +525,27 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
 
     conn.commit()
 
+    p1_deck_enriched, p1_avg_elixir = _enrich_deck_from_catalog(conn, p1_card_names)
+    p2_deck_enriched, p2_avg_elixir = _enrich_deck_from_catalog(conn, p2_card_names)
+    shared_card_names = sorted(set(p1_card_names) & set(p2_card_names))
+
     return {
         "battle_time": battle.get("battleTime"),
         "player1_tag": p1_tag,
         "player1_name": p1_name,
         "player1_is_clan_member": bool(p1_mid),
         "player1_crowns": p1_crowns,
-        "player1_deck": p1_card_names,
+        "player1_deck": p1_deck_enriched,
+        "player1_deck_avg_elixir": p1_avg_elixir,
         "player1_context": _player_enrichment(conn, p1_tag),
         "player2_tag": p2_tag,
         "player2_name": p2_name,
         "player2_is_clan_member": bool(p2_mid),
         "player2_crowns": p2_crowns,
-        "player2_deck": p2_card_names,
+        "player2_deck": p2_deck_enriched,
+        "player2_deck_avg_elixir": p2_avg_elixir,
         "player2_context": _player_enrichment(conn, p2_tag),
+        "shared_cards": shared_card_names,
         "winner_tag": winner_tag,
         "deck_selection": battle.get("deckSelection"),
         "game_mode_id": game_mode.get("id"),
