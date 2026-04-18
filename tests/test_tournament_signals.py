@@ -334,6 +334,21 @@ def test_build_tournament_recap_context_enriches_decks_and_audience():
         conn.close()
 
 
+def test_game_mode_label_translates_known_ids_and_falls_back():
+    from storage.tournament import game_mode_label
+
+    # Known mapping wins.
+    assert game_mode_label(72000194, "ignore_me") == "Triple Draft"
+    # Unknown id falls back to API name.
+    assert game_mode_label(99999999, "CW_Duel_1v1") == "CW_Duel_1v1"
+    # Unknown id with no api name returns None.
+    assert game_mode_label(99999999, None) is None
+    # No id, with api name, returns api name.
+    assert game_mode_label(None, "CW_Duel_1v1") == "CW_Duel_1v1"
+    # No id, no name → None.
+    assert game_mode_label(None, None) is None
+
+
 def test_build_battle_played_signal_match_shape():
     base = {
         "battle_time": "20260418T141500.000Z",
