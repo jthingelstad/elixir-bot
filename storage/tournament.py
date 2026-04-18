@@ -323,6 +323,55 @@ def _card_names_from_deck(cards: list[dict] | None) -> list[str]:
     return names
 
 
+def _player_enrichment(conn, player_tag: str) -> dict:
+    """Pull cached player context for commentary — trophies, king level,
+    clan tenure, account age. Returns only fields we actually have; the
+    prompt is told to skip anything missing.
+    """
+    out = {}
+    tag = _canon_tag(player_tag)
+    if not tag:
+        return out
+    member_row = conn.execute(
+        "SELECT member_id FROM members WHERE player_tag = ?", (tag,),
+    ).fetchone()
+    if not member_row:
+        return out
+    member_id = member_row["member_id"]
+
+    profile = conn.execute(
+        "SELECT exp_level, trophies, best_trophies FROM player_profile_snapshots "
+        "WHERE member_id = ? ORDER BY fetched_at DESC LIMIT 1",
+        (member_id,),
+    ).fetchone()
+    if profile:
+        if profile["exp_level"] is not None:
+            out["king_level"] = profile["exp_level"]
+        if profile["trophies"] is not None:
+            out["trophies"] = profile["trophies"]
+        if profile["best_trophies"] is not None:
+            out["best_trophies"] = profile["best_trophies"]
+
+    meta = conn.execute(
+        "SELECT joined_at, cr_account_age_years FROM member_metadata WHERE member_id = ?",
+        (member_id,),
+    ).fetchone()
+    if meta:
+        joined_at = meta["joined_at"]
+        if joined_at:
+            try:
+                joined_dt = datetime.strptime(joined_at[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                tenure_days = (datetime.now(timezone.utc) - joined_dt).days
+                if tenure_days >= 0:
+                    out["clan_tenure_days"] = tenure_days
+            except ValueError:
+                pass
+        if meta["cr_account_age_years"] is not None:
+            out["cr_account_age_years"] = meta["cr_account_age_years"]
+
+    return out
+
+
 @managed_connection
 def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     """Store a single tournament battle with dedup.
@@ -416,11 +465,13 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
         "player1_is_clan_member": bool(p1_mid),
         "player1_crowns": p1_crowns,
         "player1_deck": p1_card_names,
+        "player1_context": _player_enrichment(conn, p1_tag),
         "player2_tag": p2_tag,
         "player2_name": p2_name,
         "player2_is_clan_member": bool(p2_mid),
         "player2_crowns": p2_crowns,
         "player2_deck": p2_card_names,
+        "player2_context": _player_enrichment(conn, p2_tag),
         "winner_tag": winner_tag,
         "deck_selection": battle.get("deckSelection"),
         "game_mode_id": game_mode.get("id"),
