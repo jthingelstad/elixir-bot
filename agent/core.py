@@ -50,24 +50,20 @@ def _chat_model_name():
     return os.getenv("ELIXIR_CHAT_MODEL", "claude-sonnet-4-6")
 
 
-def _content_model_name():
-    return os.getenv("ELIXIR_CONTENT_MODEL", "claude-haiku-4-5-20251001")
-
-
 def _promotion_model_name():
     return os.getenv("ELIXIR_PROMOTION_MODEL", "claude-sonnet-4-6")
 
 
-def _observation_model_name():
-    return os.getenv("ELIXIR_OBSERVATION_MODEL", "claude-haiku-4-5-20251001")
-
-
-def _interactive_model_name():
-    return os.getenv("ELIXIR_INTERACTIVE_MODEL", "claude-sonnet-4-6")
-
-
 def _lightweight_model_name():
     return os.getenv("ELIXIR_LIGHTWEIGHT_MODEL", "claude-haiku-4-5-20251001")
+
+
+SONNET_RETAINED_WORKFLOWS = frozenset({
+    "weekly_digest",
+    "tournament_recap",
+    "intel_report",
+    "memory_synthesis",
+})
 
 
 def _model_for_workflow(workflow, model=None):
@@ -76,17 +72,9 @@ def _model_for_workflow(workflow, model=None):
     workflow = workflow or ""
     if workflow == "site_promote_content":
         return _promotion_model_name()
-    if workflow == "weekly_digest":
+    if workflow in SONNET_RETAINED_WORKFLOWS:
         return _chat_model_name()
-    if workflow.startswith("site_") or workflow in {"roster_bios"}:
-        return _content_model_name()
-    if workflow in {"observation", "memory_inference", "memory_distill"}:
-        return _observation_model_name()
-    if workflow in {"interactive", "reception"}:
-        return _interactive_model_name()
-    if workflow.startswith("event:"):
-        return _lightweight_model_name()
-    return _chat_model_name()
+    return _lightweight_model_name()
 
 
 MAX_TOOL_ROUNDS = 3
