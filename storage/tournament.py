@@ -25,6 +25,22 @@ from storage.player import _normalize_cards_for_storage
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _compute_ends_time(started_time: Optional[str], duration_seconds) -> Optional[str]:
+    """Return the UTC ISO end time for a tournament given CR-format
+    startedTime (e.g. ``20260418T141500.000Z``) and duration in seconds.
+    None if either input is missing or unparseable.
+    """
+    if not started_time or not isinstance(duration_seconds, int):
+        return None
+    try:
+        clean = started_time.split(".")[0]
+        started_dt = datetime.strptime(clean, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    ends_dt = started_dt + timedelta(seconds=duration_seconds)
+    return ends_dt.strftime("%Y%m%dT%H%M%S.000Z")
+
+
 def _api_status_to_internal(api_status: str) -> str:
     return {
         "inPreparation": "in_preparation",
@@ -243,6 +259,15 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
 
     tournament_name = api_data.get("name") or tag
     participant_count = len(members_list)
+    duration_seconds = api_data.get("duration")
+    started_time = api_data.get("startedTime")
+    ends_time = _compute_ends_time(started_time, duration_seconds)
+    timing_fields = {
+        "duration_seconds": duration_seconds,
+        "duration_minutes": (duration_seconds // 60) if isinstance(duration_seconds, int) else None,
+        "started_time": started_time,
+        "ends_time": ends_time,
+    }
 
     # Per-player join signals. `register_tournament` seeds the initial
     # roster, so the first poll after registration naturally produces no
@@ -274,6 +299,7 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
                 "participant_count": participant_count,
                 "game_mode_id": (api_data.get("gameMode") or {}).get("id"),
                 "deck_selection": api_data.get("deckSelection"),
+                **timing_fields,
             })
         elif new_status == "ended":
             top3 = sorted(members_list, key=lambda m: m.get("rank") or 999)[:3]
