@@ -61,6 +61,13 @@ READ_TOOLS_NO_EXTERNAL = [t for t in READ_TOOLS if t["name"] not in EXTERNAL_LOO
 _INTEL_REPORT_TOOL_NAMES = {"cr_api", "get_clan_intel_report"}
 INTEL_REPORT_TOOLS = [t for t in READ_TOOLS if t["name"] in _INTEL_REPORT_TOOL_NAMES]
 
+# Tournament recap writes the end-of-tournament celebration post. Recap context
+# is pre-materialized by db.build_tournament_recap_context, but the LLM often
+# wants to look up a player's current profile or a card's stats to enrich the
+# narrative. cr_api is read-only and all the reach the recap needs.
+_TOURNAMENT_RECAP_TOOL_NAMES = {"cr_api"}
+TOURNAMENT_RECAP_TOOLS = [t for t in READ_TOOLS if t["name"] in _TOURNAMENT_RECAP_TOOL_NAMES]
+
 # get_clan_health has sensitive aspects (at_risk, promotion_candidates) but
 # aspect-level gating is handled in tool_exec.py, so we keep it available
 # to all workflows. This avoids confusing the LLM by hiding the tool entirely.
@@ -76,6 +83,7 @@ TOOLSETS_BY_WORKFLOW = {
     "roster_bios": READ_TOOLS_NO_EXTERNAL,
     "deck_review": INTERACTIVE_READ_TOOLS,
     "intel_report": INTEL_REPORT_TOOLS,
+    "tournament_recap": TOURNAMENT_RECAP_TOOLS,
     # Awareness loop: one agent turn per heartbeat that sees the full
     # situation and emits a post plan. Gets the full read-tool set so it can
     # investigate before posting, plus a narrow write surface (save_clan_memory,
@@ -113,6 +121,9 @@ MAX_ROUNDS_BY_WORKFLOW = {
     # intel_report fans out across 4 opponents (~2 tool calls each) plus the
     # initial clan_war confirmation; 15 leaves headroom for retries.
     "intel_report": 15,
+    # tournament_recap may look up a few player profiles or card stats to
+    # enrich the narrative. 8 rounds is plenty for a small tournament.
+    "tournament_recap": 8,
     # awareness loop: one situation in, possibly N posts out. Budget for a
     # couple of investigative tool calls (cr_api lookups for streak opponents,
     # rival scouting) plus the final post-plan answer turn.
@@ -132,6 +143,9 @@ RESPONSE_SCHEMAS_BY_WORKFLOW = {
     "roster_bios": {"required": ["intro", "members"]},
     "deck_review": {"required": ["event_type", "summary", "content"]},
     "intel_report": {"required": ["event_type", "summary", "content"]},
+    # tournament_recap emits a single recap string; the runtime wraps it with
+    # a bold title and posts it to #clan-events.
+    "tournament_recap": {"required": ["content"]},
     # awareness emits a post plan: zero or more posts, each routed to a channel.
     "awareness": {"required": ["posts"]},
     # memory_synthesis: arcs + stale list + contradictions + digest. Any field

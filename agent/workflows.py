@@ -950,13 +950,31 @@ def generate_weekly_digest(summary_context, previous_message=""):
 
 
 def generate_tournament_recap(recap_context):
-    """Generate a narrative tournament recap for Discord. Returns text or None."""
+    """Generate a narrative tournament recap for Discord. Returns text or None.
+
+    Uses the agent-loop pattern so the LLM can enrich the recap with cr_api
+    lookups when needed (player profiles, recent battles). Recap context is
+    pre-materialized by db.build_tournament_recap_context, so most recaps will
+    not need tool calls at all.
+    """
     user_msg = f"{recap_context}\n\nWrite this tournament's recap."
-    return _generate_simple_message(
-        _tournament_recap_system(), user_msg,
-        workflow="tournament_recap", temperature=0.8, max_tokens=1200,
-        error_label="Tournament recap",
+    parsed = _chat_with_tools(
+        _tournament_recap_system(),
+        user_msg,
+        workflow="tournament_recap",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["tournament_recap"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["tournament_recap"],
+        strict_json=True,
+        temperature=0.8,
+        max_tokens=1200,
     )
+    if not parsed:
+        return None
+    content = parsed.get("content")
+    if not isinstance(content, str):
+        return None
+    text = content.strip()
+    return text or None
 
 
 def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_context=None):
