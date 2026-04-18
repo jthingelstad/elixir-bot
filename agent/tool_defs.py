@@ -292,7 +292,11 @@ TOOLS = [
                 },
                 "inactivity_days": {
                     "type": "integer",
-                    "description": "Flag members inactive for at least this many days (at_risk). Default 7.",
+                    "description": (
+                        "Floor (in days) for the inactivity flag (at_risk). Per-member threshold is "
+                        "max(this floor, trophies/1000 * 1.4) — a 5k-trophy player keeps the floor, a "
+                        "10k-trophy player gets 14d, a 12.5k-trophy player gets 17.5d. Default 7."
+                    ),
                     "default": 7,
                 },
                 "min_donations_week": {
