@@ -157,6 +157,16 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
     old_status = row["status"]
     poll_count = row["poll_count"]
 
+    # Snapshot the set of participant tags seen before this poll. Any tag in
+    # this poll's api_data that is not already in this set is a new join.
+    prev_participant_tags = {
+        r["player_tag"]
+        for r in conn.execute(
+            "SELECT player_tag FROM tournament_participants WHERE tournament_id = ?",
+            (tournament_id,),
+        ).fetchall()
+    }
+
     # Track previous leader for lead-change detection
     prev_leader = conn.execute(
         "SELECT player_tag, player_name, final_score FROM tournament_participants WHERE tournament_id = ? ORDER BY final_rank ASC LIMIT 1",
@@ -233,6 +243,26 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
 
     tournament_name = api_data.get("name") or tag
     participant_count = len(members_list)
+
+    # Per-player join signals. `register_tournament` seeds the initial
+    # roster, so the first poll after registration naturally produces no
+    # joins (every tag is already known). Subsequent polls surface only
+    # genuinely new entrants during the preparation window.
+    for m in members_list:
+        p_tag = _canon_tag(m.get("tag") or "")
+        if not p_tag or p_tag in prev_participant_tags:
+            continue
+        live_signals.append({
+            "type": "tournament_participant_joined",
+            "signal_key": f"tournament_participant_joined|{tag}|{p_tag}",
+            "tournament_tag": tag,
+            "tournament_name": tournament_name,
+            "player_tag": p_tag,
+            "player_name": m.get("name"),
+            "clan_tag": (m.get("clan") or {}).get("tag"),
+            "clan_name": (m.get("clan") or {}).get("name"),
+            "participant_count": participant_count,
+        })
 
     if old_status != new_status:
         if new_status == "in_progress":

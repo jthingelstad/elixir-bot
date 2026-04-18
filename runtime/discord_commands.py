@@ -438,6 +438,34 @@ def register_elixir_app_commands(bot) -> None:
         members = api_data.get("membersList") or []
         game_mode = api_data.get("gameMode") or {}
         status_label = {"inPreparation": "In Preparation", "inProgress": "In Progress"}.get(api_status, api_status)
+
+        # Announce the watch to the clan via the awareness pipeline.
+        from runtime.jobs._signals import _deliver_signal_group
+        watching_signal = {
+            "type": "tournament_watching_started",
+            "signal_key": f"tournament_watching_started|{clean_tag}",
+            "tournament_tag": clean_tag,
+            "tournament_name": api_data.get("name"),
+            "tournament_description": api_data.get("description"),
+            "tournament_type": api_data.get("type"),
+            "api_status": api_status,
+            "status_label": status_label,
+            "participant_count": len(members),
+            "max_capacity": api_data.get("maxCapacity"),
+            "game_mode_id": game_mode.get("id"),
+            "game_mode_name": game_mode.get("name"),
+            "level_cap": api_data.get("levelCap"),
+            "preparation_duration_seconds": api_data.get("preparationDuration"),
+            "duration_seconds": api_data.get("duration"),
+            "created_time": api_data.get("createdTime"),
+            "started_time": api_data.get("startedTime"),
+            "poll_interval_minutes": jobs.TOURNAMENT_POLL_MINUTES,
+        }
+        try:
+            await _deliver_signal_group([watching_signal], {}, {})
+        except Exception as exc:
+            app.log.warning("tournament_watching_started delivery failed: %s", exc)
+
         lines = [
             f"Watching **{api_data.get('name')}** (`#{clean_tag}`)",
             f"Status: {status_label}",
