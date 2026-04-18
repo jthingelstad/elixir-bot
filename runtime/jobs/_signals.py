@@ -418,7 +418,17 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         channel_config,
         signals=signals,
     )
-    context = _build_outcome_context(outcome, signals, clan, war)
+    # Tournament signals get a dedicated generator + self-contained context
+    # (no war state, no river-race context). Destination still #clan-events.
+    from runtime.channel_subagents import TOURNAMENT_SIGNAL_TYPES
+    is_tournament_batch = bool(signals) and all(
+        (s or {}).get("type") in TOURNAMENT_SIGNAL_TYPES for s in signals
+    )
+    if not is_tournament_batch:
+        context = _build_outcome_context(outcome, signals, clan, war)
+    else:
+        context = None  # unused; tournament path builds its own user message
+
     preauthored_result = None
     if len(signals) == 1 and signals[0].get("signal_key"):
         preauthored_result = _preauthored_system_signal_result(signals[0])
@@ -432,6 +442,13 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             channel_kind = str(channel_kind)
         if preauthored_result is not None:
             result = preauthored_result
+        elif is_tournament_batch:
+            result = await asyncio.to_thread(
+                elixir_agent.generate_tournament_update,
+                signals,
+                recent_posts=recent_posts,
+                memory_context=memory_context,
+            )
         else:
             result = await asyncio.to_thread(
                 elixir_agent.generate_channel_update,

@@ -68,6 +68,13 @@ INTEL_REPORT_TOOLS = [t for t in READ_TOOLS if t["name"] in _INTEL_REPORT_TOOL_N
 _TOURNAMENT_RECAP_TOOL_NAMES = {"cr_api"}
 TOURNAMENT_RECAP_TOOLS = [t for t in READ_TOOLS if t["name"] in _TOURNAMENT_RECAP_TOOL_NAMES]
 
+# Tournament update handles live per-signal tournament commentary (battle
+# played, participant joined, lead change, started, ended). Same narrow
+# cr_api toolset so the model can enrich a match post with a player's current
+# profile when the data would sharpen the narrative.
+_TOURNAMENT_UPDATE_TOOL_NAMES = {"cr_api"}
+TOURNAMENT_UPDATE_TOOLS = [t for t in READ_TOOLS if t["name"] in _TOURNAMENT_UPDATE_TOOL_NAMES]
+
 # get_clan_health has sensitive aspects (at_risk, promotion_candidates) but
 # aspect-level gating is handled in tool_exec.py, so we keep it available
 # to all workflows. This avoids confusing the LLM by hiding the tool entirely.
@@ -84,6 +91,7 @@ TOOLSETS_BY_WORKFLOW = {
     "deck_review": INTERACTIVE_READ_TOOLS,
     "intel_report": INTEL_REPORT_TOOLS,
     "tournament_recap": TOURNAMENT_RECAP_TOOLS,
+    "tournament_update": TOURNAMENT_UPDATE_TOOLS,
     # Awareness loop: one agent turn per heartbeat that sees the full
     # situation and emits a post plan. Gets the full read-tool set so it can
     # investigate before posting, plus a narrow write surface (save_clan_memory,
@@ -124,6 +132,9 @@ MAX_ROUNDS_BY_WORKFLOW = {
     # tournament_recap may look up a few player profiles or card stats to
     # enrich the narrative. 8 rounds is plenty for a small tournament.
     "tournament_recap": 8,
+    # tournament_update is a single-post-per-signal workflow. A couple of
+    # tool rounds is plenty to grab a player profile when needed.
+    "tournament_update": 4,
     # awareness loop: one situation in, possibly N posts out. Budget for a
     # couple of investigative tool calls (cr_api lookups for streak opponents,
     # rival scouting) plus the final post-plan answer turn.
@@ -146,6 +157,10 @@ RESPONSE_SCHEMAS_BY_WORKFLOW = {
     # tournament_recap emits a single recap string; the runtime wraps it with
     # a bold title and posts it to #clan-events.
     "tournament_recap": {"required": ["content"]},
+    # tournament_update emits a single Discord-ready post for one tournament
+    # signal batch. Matches the generic channel_update shape so the delivery
+    # layer can treat the result the same way.
+    "tournament_update": {"required": ["event_type", "summary", "content"]},
     # awareness emits a post plan: zero or more posts, each routed to a channel.
     "awareness": {"required": ["posts"]},
     # memory_synthesis: arcs + stale list + contradictions + digest. Any field

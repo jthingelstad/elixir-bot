@@ -148,6 +148,59 @@ def test_store_tournament_battle_returns_none_on_duplicate():
         conn.close()
 
 
+def test_generate_tournament_update_uses_dedicated_prompt_and_tools():
+    """The tournament update path must use cr_api, the tournament schema, and
+    feed only the signal list into the user message (no war state injection).
+    """
+    import elixir_agent
+    from unittest.mock import patch
+
+    captured = {}
+
+    def fake_chat_with_tools(system_prompt, user_message, **kwargs):
+        captured["system_prompt"] = system_prompt
+        captured["user_message"] = user_message
+        captured["kwargs"] = kwargs
+        return {"event_type": "tournament_update", "summary": "test", "content": "A match played."}
+
+    signals = [{
+        "type": "tournament_battle_played",
+        "signal_key": "tournament_battle_played|#2QG9Y9UR|20260418T141500.000Z|#ABC|#DEF",
+        "tournament_tag": "#2QG9Y9UR",
+        "audience": "clan_internal",
+    }]
+    with patch("agent.workflows._chat_with_tools", side_effect=fake_chat_with_tools):
+        result = elixir_agent.generate_tournament_update(signals)
+
+    assert result["content"] == "A match played."
+    assert captured["kwargs"]["workflow"] == "tournament_update"
+    tool_names = {t["name"] for t in captured["kwargs"]["allowed_tools"]}
+    assert tool_names == {"cr_api"}
+    # The user message must carry the signal JSON and not contain war-state
+    # fragments that the main channel_update path layers in.
+    assert "tournament_battle_played" in captured["user_message"]
+    # The data injected into the user message must not contain actual war
+    # state values — the old path leaked TIME / PHASE blocks with hours
+    # remaining and day numbers. Those blocks should be entirely absent.
+    assert "TIME / PHASE" not in captured["user_message"]
+    assert "hours_remaining_in_day" not in captured["user_message"]
+    assert "RACE STANDINGS" not in captured["user_message"]
+
+
+def test_tournament_system_prompt_excludes_clan_events_prose():
+    """The tournament system prompt loads its own subagent file — it must not
+    drag in clan-events.md content (that's the channel whose prompt caused
+    the war-context confusion we're fixing)."""
+    from agent.prompts import _tournament_update_system
+
+    prompt = _tournament_update_system()
+    # Positive signal: tournament-specific content is present.
+    assert "Tournament Lane" in prompt or "tournament" in prompt.lower()
+    # Negative signal: clan-events voice prose should not be in here.
+    assert "Roster lifecycle" not in prompt
+    assert "Communal. Proud." not in prompt
+
+
 def test_build_battle_played_signal_audience_classification():
     base_info = {
         "battle_time": "20260418T141500.000Z",
