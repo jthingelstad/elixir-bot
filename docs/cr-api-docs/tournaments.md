@@ -113,7 +113,7 @@ like `CW_Duel_1v1`, not the player-facing name below).
 | Sudden Death Battle | — | |
 | Draft Battle | — | |
 | Double Elixir Draft | — | |
-| Triple Draft | 72000194 | Confirmed April 2026 — POAP KINGS Clan Tourney |
+| Triple Draft | 72000194 | Confirmed April 2026 — POAP KINGS Clan Tourney. Battle-log payloads carry `gameMode.name: "Draft_Competitive"`. |
 | Heist Draft | — | |
 | Hog Race | — | |
 | Lumberjack Rush | — | |
