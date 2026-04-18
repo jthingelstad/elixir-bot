@@ -31,6 +31,7 @@ from agent.prompts import (
     _reception_system,
     _roster_bios_system,
     _tournament_recap_system,
+    _tournament_update_system,
     _weekly_digest_system,
 )
 from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
@@ -949,6 +950,36 @@ def generate_weekly_digest(summary_context, previous_message=""):
     )
 
 
+def generate_tournament_update(signals, *, recent_posts=None, memory_context=None):
+    """Generate a live tournament post for a batch of tournament_* signals.
+
+    Runs with a dedicated tournament prompt and a self-contained context —
+    just the signals themselves and recent posts in #clan-events, no war
+    state and no river-race context. The clan-events channel is still the
+    destination, but the prompt and inputs are tournament-only.
+
+    Returns the parsed response dict (with ``content`` as a string) or None.
+    """
+    user_msg = (
+        "Write a tournament post for #clan-events. Base the post on the "
+        "signals below — their payload is the only ground truth. Do not "
+        "reference war/river-race state, Battle Day N, or any clock outside "
+        "the tournament's own start/end times.\n\n"
+        "Signals:\n"
+        f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```\n"
+    )
+    user_msg += _format_recent_posts(recent_posts, channel_label="#clan-events")
+    user_msg += _format_memory_context(memory_context)
+    return _chat_with_tools(
+        _tournament_update_system(),
+        user_msg,
+        workflow="tournament_update",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["tournament_update"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["tournament_update"],
+        strict_json=True,
+    )
+
+
 def generate_tournament_recap(recap_context):
     """Generate a narrative tournament recap for Discord. Returns text or None.
 
@@ -1022,5 +1053,6 @@ __all__ = [
     "generate_roster_bios",
     "generate_promote_content",
     "generate_tournament_recap",
+    "generate_tournament_update",
     "generate_weekly_digest",
 ]

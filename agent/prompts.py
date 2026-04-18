@@ -614,6 +614,24 @@ def _weekly_digest_system():
     )
 
 
+def _tournament_update_system():
+    """System prompt for live tournament commentary posts.
+
+    This is a self-contained lane: identity, game knowledge, and the
+    tournament.md subagent. No channel_section (no clan-events prose), no
+    war/river-race context. The goal is to keep the model's attention on
+    the tournament signal in front of it, not on the unrelated war state
+    the main clan-events path layers in.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        prompts.subagent_prompt("tournament"),
+        f"{_discord_formatting_guidance()}"
+        f"{_discord_emoji_guidance()}",
+    )
+
+
 def _tournament_recap_system():
     """System prompt for generating a tournament recap for #clan-events."""
     clan_events = prompts.discord_singleton_subagent("clan-events")
