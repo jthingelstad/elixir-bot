@@ -997,7 +997,7 @@ def generate_tournament_recap(recap_context):
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["tournament_recap"],
         strict_json=True,
         temperature=0.8,
-        max_tokens=1200,
+        max_tokens=2500,
     )
     if not parsed:
         return None
