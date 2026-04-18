@@ -664,6 +664,12 @@ async def on_ready():
                 )
         except Exception as exc:
             log.warning("Tournament watch resume check failed: %s", exc)
+        # Recover any deferred recap that didn't post before this restart.
+        try:
+            from runtime.jobs._tournament import resume_pending_tournament_recaps
+            await resume_pending_tournament_recaps()
+        except Exception as exc:
+            log.warning("Pending tournament recap resume failed: %s", exc)
         # Best-effort startup card catalog sync
         try:
             from runtime.jobs import _card_catalog_sync

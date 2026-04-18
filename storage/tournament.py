@@ -646,6 +646,25 @@ def get_active_tournament(conn: Optional[sqlite3.Connection] = None) -> Optional
 
 
 @managed_connection
+def list_pending_tournament_recaps(conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    """Tournaments that finalized but never posted their recap.
+
+    Used at boot to recover from a restart that landed in the gap between
+    the deterministic close post and the deferred LLM recap. Filters to
+    recently-ended tournaments (within ~24h) to avoid re-recapping
+    ancient history if recap_posted_at was somehow nulled.
+    """
+    rows = conn.execute(
+        """SELECT * FROM tournaments
+           WHERE status = 'ended'
+             AND recap_posted_at IS NULL
+             AND watching_ended_at >= datetime('now', '-1 day')
+           ORDER BY watching_ended_at DESC"""
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@managed_connection
 def get_tournament_by_tag(tournament_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     """Return a tournament row by tag or None."""
     tag = _canon_tag(tournament_tag)
@@ -988,6 +1007,9 @@ __all__ = [
     "store_tournament_battle",
     "finalize_tournament",
     "get_active_tournament",
+    "list_pending_tournament_recaps",
+    "deck_selection_label",
+    "game_mode_label",
     "get_tournament_by_tag",
     "get_tournament_participants",
     "get_tournament_battles",
