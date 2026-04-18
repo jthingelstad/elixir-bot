@@ -24,6 +24,73 @@ TOURNAMENT_BATTLE_LOG_SPACING_SECONDS = 0.5
 _TOURNAMENT_JOB_ID = "tournament-watch"
 
 
+def _build_battle_played_signal(tournament_tag: str, tournament_name: str, battle_info: dict) -> dict:
+    """Shape a tournament_battle_played signal payload for awareness delivery.
+
+    The audience framing (supportive clan commentary vs. neutral observation)
+    is encoded as an explicit payload flag so the prompt can pick tone
+    without re-deriving it from member metadata. Dedup is already guaranteed
+    by store_tournament_battle's INSERT OR IGNORE on the canonicalized
+    (p1_tag, p2_tag, battle_time) triple, so the signal fires exactly once
+    per match even though we see it in both players' battle logs.
+    """
+    p1_is_member = battle_info.get("player1_is_clan_member")
+    p2_is_member = battle_info.get("player2_is_clan_member")
+    both_members = bool(p1_is_member and p2_is_member)
+    one_member = bool(p1_is_member) ^ bool(p2_is_member)
+    if both_members:
+        audience = "clan_internal"
+    elif one_member:
+        audience = "clan_one_side"
+    else:
+        audience = "external_observed"
+
+    winner_tag = battle_info.get("winner_tag")
+    p1_tag = battle_info.get("player1_tag")
+    p2_tag = battle_info.get("player2_tag")
+    if winner_tag and winner_tag == p1_tag:
+        winner_name = battle_info.get("player1_name")
+        loser_name = battle_info.get("player2_name")
+    elif winner_tag and winner_tag == p2_tag:
+        winner_name = battle_info.get("player2_name")
+        loser_name = battle_info.get("player1_name")
+    else:
+        winner_name = None
+        loser_name = None
+
+    return {
+        "type": "tournament_battle_played",
+        "signal_key": (
+            f"tournament_battle_played|{tournament_tag}"
+            f"|{battle_info.get('battle_time')}|{p1_tag}|{p2_tag}"
+        ),
+        "tournament_tag": tournament_tag,
+        "tournament_name": tournament_name,
+        "battle_time": battle_info.get("battle_time"),
+        "audience": audience,
+        "player1": {
+            "tag": p1_tag,
+            "name": battle_info.get("player1_name"),
+            "is_clan_member": p1_is_member,
+            "crowns": battle_info.get("player1_crowns"),
+            "deck": battle_info.get("player1_deck") or [],
+        },
+        "player2": {
+            "tag": p2_tag,
+            "name": battle_info.get("player2_name"),
+            "is_clan_member": p2_is_member,
+            "crowns": battle_info.get("player2_crowns"),
+            "deck": battle_info.get("player2_deck") or [],
+        },
+        "winner_tag": winner_tag,
+        "winner_name": winner_name,
+        "loser_name": loser_name,
+        "deck_selection": battle_info.get("deck_selection"),
+        "game_mode_name": battle_info.get("game_mode_name"),
+        "arena_name": battle_info.get("arena_name"),
+    }
+
+
 async def _tournament_watch_tick():
     """Poll the active tournament for standings and capture participant battle logs."""
     tournament = await asyncio.to_thread(db.get_active_tournament)
@@ -49,6 +116,7 @@ async def _tournament_watch_tick():
         # Capture battle logs when tournament is active or just ended
         api_status = api_data.get("status") or ""
         battles_captured = 0
+        tournament_name = api_data.get("name") or tag
         if api_status in ("inProgress", "ended"):
             tournament_tag_with_hash = f"#{tag.lstrip('#')}"
             for p in participants:
@@ -59,11 +127,14 @@ async def _tournament_watch_tick():
                         # Store tournament battles in dedicated table
                         for battle in battle_log:
                             if battle.get("tournamentTag") == tournament_tag_with_hash:
-                                inserted = await asyncio.to_thread(
+                                battle_info = await asyncio.to_thread(
                                     db.store_tournament_battle, tournament_id, battle
                                 )
-                                if inserted:
+                                if battle_info:
                                     battles_captured += 1
+                                    live_signals.append(_build_battle_played_signal(
+                                        tag, tournament_name, battle_info
+                                    ))
                         # Also feed through existing battle log pipeline
                         await asyncio.to_thread(db.snapshot_player_battlelog, p_tag, battle_log)
                 except Exception as e:
