@@ -48,6 +48,35 @@ def _war_player_type(conn, member_id):
     return _classify_war_player_rate(row["total_races"] or 0, row["races_played"] or 0)
 
 
+def has_played_earlier_this_week(
+    conn,
+    player_tag: str,
+    season_id: Optional[int],
+    section_index: Optional[int],
+    period_index: Optional[int],
+) -> bool:
+    """Did this member already play (decks_used_total > 0) on an earlier
+    period in the same race week? Backfills the gap that ``war_participation``
+    only contains *closed* races, so the war-player-type classifier can
+    treat someone like a "never" player even after they've already taken
+    swings in the current open race.
+    """
+    if not player_tag or season_id is None or section_index is None or period_index is None:
+        return False
+    canon_tag = player_tag if player_tag.startswith("#") else f"#{player_tag}"
+    row = conn.execute(
+        "SELECT 1 FROM war_day_status wds "
+        "JOIN members m ON m.member_id = wds.member_id "
+        "WHERE m.player_tag = ? "
+        "  AND wds.season_id = ? AND wds.section_index = ? "
+        "  AND wds.period_index < ? "
+        "  AND COALESCE(wds.decks_used_total, 0) > 0 "
+        "LIMIT 1",
+        (canon_tag, season_id, section_index, period_index),
+    ).fetchone()
+    return row is not None
+
+
 def war_player_types_by_tag(conn, player_tags: list[str]) -> dict[str, str]:
     """Batch-classify war player types for a list of player tags.
 

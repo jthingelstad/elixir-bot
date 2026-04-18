@@ -1063,6 +1063,15 @@ def _mark_delivered_signals(signals, *, today: str | None = None):
         signal_type = signal.get("signal_log_type") or signal.get("type")
         if signal_type:
             db.mark_signal_sent(signal_type, signal_date)
+        # Group signals (e.g. war_surprise_participant) carry per-member
+        # signal_log_type values for finer-grained dedup. Detector code
+        # checks those keys directly via was_signal_sent_any_date, so we
+        # have to log each one — otherwise the detector re-fires the same
+        # member every tick because the per-member key is never written.
+        for member in signal.get("members") or []:
+            member_log_type = (member or {}).get("signal_log_type")
+            if member_log_type:
+                db.mark_signal_sent(member_log_type, signal_date)
         if signal.get("type") == "clan_birthday":
             db.mark_announcement_sent(signal_date, "clan_birthday", None)
         elif signal.get("type") == "join_anniversary":

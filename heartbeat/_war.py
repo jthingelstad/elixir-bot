@@ -600,7 +600,7 @@ def detect_war_surprise_participants(conn=None):
     a notable positive event — especially if it's their first war ever. Uses
     the existing _war_player_type classification (regular/occasional/rare/never).
     """
-    from storage.war_analytics import war_player_types_by_tag
+    from storage.war_analytics import war_player_types_by_tag, has_played_earlier_this_week
 
     day_state = db.get_current_war_day_state(conn=conn) or {}
     if day_state.get("phase") != "battle":
@@ -621,6 +621,9 @@ def detect_war_surprise_participants(conn=None):
     type_map = war_player_types_by_tag(conn, tags)
 
     week_key = f"s{day_state.get('season_id')}:w{day_state.get('week')}"
+    season_id = day_state.get("season_id")
+    section_index = day_state.get("section_index")
+    period_index = day_state.get("period_index")
 
     surprises = []
     for member in engaged:
@@ -629,6 +632,13 @@ def detect_war_surprise_participants(conn=None):
             continue
         player_type = type_map.get(tag, "unknown")
         if player_type not in {"never", "rare"}:
+            continue
+        # The "never"/"rare" classification only counts *closed* races
+        # (war_participation), so a brand-new clan member who has been
+        # playing every battle day of the current open race still classifies
+        # as "never" until the race finalizes. Treat any in-progress-week
+        # play as evidence they're not actually a surprise this week.
+        if has_played_earlier_this_week(conn, tag, season_id, section_index, period_index):
             continue
         signal_log_type = f"war_surprise_participant:{tag}:{week_key}"
         if db.was_signal_sent_any_date(signal_log_type, conn=conn):
