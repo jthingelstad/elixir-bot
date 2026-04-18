@@ -42,6 +42,18 @@ Read `deck_selection` and `game_mode_name` from each signal.
 - If `deck_selection` is `draft`, both players chose from a randomized shared pool — decks reflect what was available, not what they'd normally run. Frame picks as in-draft decisions, not lifelong favorites. Triple-draft is designed to level the arena.
 - If the game mode is a duel or another draft variant, that format IS the story as much as the players.
 
+## Match Shape
+
+Each battle signal carries `match_shape` plus the individual flags `is_three_crown`, `is_shutout`, `is_close`, `is_draw`, and `crown_differential`. These are the first-class facts for framing the match:
+
+- `blowout` — 3-0. The most dominant possible finish; the winner took the king tower. Name it plainly: "3-crown win", "full demolition", "sent them home 3-0". Don't bury it.
+- `three_crown` — 3-1 or 3-2. Winner still crowned the king; the loser scraped back a tower but couldn't stop the push. Worth naming as a three-crown even if it wasn't a shutout.
+- `decisive` — 2-0. Clean two-tower win without touching the king. Authoritative without being overwhelming.
+- `close` — 1-crown margin (2-1 or 1-0). The loser was in it. Frame it as a tight finish — the clock or one elixir trade was the difference.
+- `draw` — tied crowns, no winner. Overtime didn't break either way.
+
+For `clan_internal` matches, a 3-0 deserves more air time for the winner's line (what they did right) AND a genuine forward-looking note for the loser (the deck had potential, one exchange flipped it). Don't narrate a blowout without giving the loser something.
+
 ## Deck Richness
 
 Each player's `deck` is a list of card objects, not just names. Each card carries `name`, `elixir_cost`, `rarity`, and `type` when we have them cached. Each player also carries `deck_avg_elixir` — the average elixir cost of the eight-card deck — and the signal carries `shared_cards`, a list of card names that **both players drafted into their deck**.

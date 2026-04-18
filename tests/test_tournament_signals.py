@@ -334,6 +334,46 @@ def test_build_tournament_recap_context_enriches_decks_and_audience():
         conn.close()
 
 
+def test_build_battle_played_signal_match_shape():
+    base = {
+        "battle_time": "20260418T141500.000Z",
+        "player1_tag": "#ABC", "player1_name": "A", "player1_is_clan_member": True,
+        "player1_deck": [],
+        "player2_tag": "#DEF", "player2_name": "B", "player2_is_clan_member": True,
+        "player2_deck": [],
+    }
+
+    def sig(p1c, p2c, winner):
+        return _build_battle_played_signal("#T", "T", {
+            **base, "player1_crowns": p1c, "player2_crowns": p2c, "winner_tag": winner,
+        })
+
+    blowout = sig(3, 0, "#ABC")
+    assert blowout["match_shape"] == "blowout"
+    assert blowout["is_three_crown"] is True
+    assert blowout["is_shutout"] is True
+    assert blowout["crown_differential"] == 3
+
+    three_crown = sig(3, 1, "#ABC")
+    assert three_crown["match_shape"] == "three_crown"
+    assert three_crown["is_three_crown"] is True
+    assert three_crown["is_shutout"] is False
+
+    decisive = sig(2, 0, "#ABC")
+    assert decisive["match_shape"] == "decisive"
+    assert decisive["is_three_crown"] is False
+    assert decisive["is_shutout"] is True
+
+    close = sig(2, 1, "#ABC")
+    assert close["match_shape"] == "close"
+    assert close["is_close"] is True
+
+    draw = sig(1, 1, None)
+    assert draw["match_shape"] == "draw"
+    assert draw["is_draw"] is True
+    assert draw["winner_crowns"] is None
+
+
 def test_build_battle_played_signal_audience_classification():
     base_info = {
         "battle_time": "20260418T141500.000Z",

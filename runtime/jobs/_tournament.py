@@ -59,15 +59,51 @@ def _build_battle_played_signal(
     winner_tag = battle_info.get("winner_tag")
     p1_tag = battle_info.get("player1_tag")
     p2_tag = battle_info.get("player2_tag")
+    p1_crowns = battle_info.get("player1_crowns")
+    p2_crowns = battle_info.get("player2_crowns")
     if winner_tag and winner_tag == p1_tag:
         winner_name = battle_info.get("player1_name")
         loser_name = battle_info.get("player2_name")
+        winner_crowns, loser_crowns = p1_crowns, p2_crowns
     elif winner_tag and winner_tag == p2_tag:
         winner_name = battle_info.get("player2_name")
         loser_name = battle_info.get("player1_name")
+        winner_crowns, loser_crowns = p2_crowns, p1_crowns
     else:
         winner_name = None
         loser_name = None
+        winner_crowns = None
+        loser_crowns = None
+
+    # Crown-shape facts. Surfaced explicitly so the LLM doesn't have to infer
+    # "3-crown" / "shutout" / "close game" from the raw crowns each time.
+    if isinstance(p1_crowns, int) and isinstance(p2_crowns, int):
+        crown_differential = abs(p1_crowns - p2_crowns)
+        is_draw = p1_crowns == p2_crowns
+        is_three_crown = (winner_crowns == 3) if winner_crowns is not None else False
+        is_shutout = (loser_crowns == 0) if loser_crowns is not None else False
+        is_close = crown_differential == 1
+        # match_shape: "blowout" 3-0 | "three_crown" 3-1/3-2 | "decisive" 2-0 |
+        # "close" 1-crown margin | "draw" tied
+        if is_draw:
+            match_shape = "draw"
+        elif is_three_crown and is_shutout:
+            match_shape = "blowout"
+        elif is_three_crown:
+            match_shape = "three_crown"
+        elif is_shutout:
+            match_shape = "decisive"
+        elif is_close:
+            match_shape = "close"
+        else:
+            match_shape = "standard"
+    else:
+        crown_differential = None
+        is_draw = False
+        is_three_crown = False
+        is_shutout = False
+        is_close = False
+        match_shape = "unknown"
 
     return {
         "type": "tournament_battle_played",
@@ -101,6 +137,14 @@ def _build_battle_played_signal(
         "winner_tag": winner_tag,
         "winner_name": winner_name,
         "loser_name": loser_name,
+        "winner_crowns": winner_crowns,
+        "loser_crowns": loser_crowns,
+        "crown_differential": crown_differential,
+        "is_three_crown": is_three_crown,
+        "is_shutout": is_shutout,
+        "is_close": is_close,
+        "is_draw": is_draw,
+        "match_shape": match_shape,
         "deck_selection": battle_info.get("deck_selection"),
         "game_mode_name": battle_info.get("game_mode_name"),
         "arena_name": battle_info.get("arena_name"),
