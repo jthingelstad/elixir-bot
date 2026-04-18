@@ -503,9 +503,25 @@ def register_elixir_app_commands(bot) -> None:
                 await send_interaction_text(interaction, "No tournaments tracked yet.", ephemeral=True)
             return
 
+        from db import get_connection
+        def _participant_count(tid):
+            conn = get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS n FROM tournament_participants WHERE tournament_id = ?",
+                    (tid,),
+                ).fetchone()
+                return row["n"] if row else 0
+            finally:
+                conn.close()
+        player_count = await asyncio.to_thread(_participant_count, tournament["tournament_id"])
+        max_capacity = tournament.get("max_capacity")
+        players_line = f"Players: {player_count}" + (f" / {max_capacity}" if max_capacity else "")
+
         lines = [
             f"**{tournament.get('name', tournament['tournament_tag'])}** (`{tournament['tournament_tag']}`)",
             f"Status: {tournament['status']}",
+            players_line,
             f"Polls: {tournament.get('poll_count', 0)}",
             f"Battles captured: {tournament.get('battles_captured', 0)}",
             f"Last poll: {tournament.get('last_poll_at') or 'never'}",
