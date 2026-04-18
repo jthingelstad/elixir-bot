@@ -97,6 +97,48 @@ Note: No separate `private` type was observed — in-game "private" tournaments 
 
 ---
 
+## Game Modes (player-facing names)
+
+In-game UI exposes 16 tournament game modes. The API returns only
+`gameMode.id` (an integer) in tournament context — `name` is typically
+absent in the `Tournament` payload (it *is* present in
+`/players/{tag}/battlelog` battle entries, but as an internal CR code
+like `CW_Duel_1v1`, not the player-facing name below).
+
+| Player-facing name | API id (when known) | Notes |
+|---|---|---|
+| Normal Battle | — | |
+| Double Elixir Battle | — | |
+| Triple Elixir Battle | — | |
+| Sudden Death Battle | — | |
+| Draft Battle | — | |
+| Double Elixir Draft | — | |
+| Triple Draft | 72000194 | Confirmed April 2026 — POAP KINGS Clan Tourney |
+| Heist Draft | — | |
+| Hog Race | — | |
+| Lumberjack Rush | — | |
+| Wall Breaker Party | — | |
+| Ghost Parade | — | |
+| Elixir Capture | — | |
+| Dragon Hunt | — | |
+| Duel | — | |
+| Mega Draft Challenge | — | |
+
+Mapping is empirical: observed ids carry over but the API does not
+publish a stable public mapping. Build the table opportunistically as we
+host or observe each mode. The `tournaments.deckSelection` field
+sometimes hints at format — `draftCompetitive` corresponds to "Triple
+Draft" in the in-game UI; `collection` is "Bring Your Own Deck"; plain
+`draft` is "Draft" — but `deckSelection` does not distinguish between
+the elixir-rate variants (Normal vs. Double vs. Triple Elixir Battle).
+
+For Elixir-side mapping, the lookup belongs at the signal-emission
+boundary (next to `deck_selection_label` in `storage/tournament.py`) so
+all signals carry the player-facing name regardless of whether the LLM
+ever sees the raw id.
+
+---
+
 ## Error Codes
 
 | Code | Meaning |

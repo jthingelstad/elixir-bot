@@ -47,6 +47,26 @@ _DECK_SELECTION_LABELS = {
     "draft": "Draft",
 }
 
+# Player-facing CR tournament game-mode names by API id. Build this table
+# opportunistically — the API does not publish a stable public mapping.
+# See docs/cr-api-docs/tournaments.md for the full set of player-facing
+# names and the rationale for keeping the mapping at this seam.
+_GAME_MODE_LABELS = {
+    72000194: "Triple Draft",
+}
+
+
+def game_mode_label(game_mode_id: Optional[int], api_name: Optional[str] = None) -> Optional[str]:
+    """Translate a CR ``gameMode.id`` to the in-game player-facing name.
+
+    Falls back to the raw API ``name`` (an internal code like
+    ``CW_Duel_1v1``) when we don't have a mapping yet, so the LLM still
+    has *something* rather than nothing. Returns None if neither is known.
+    """
+    if game_mode_id is not None and game_mode_id in _GAME_MODE_LABELS:
+        return _GAME_MODE_LABELS[game_mode_id]
+    return api_name or None
+
 
 def deck_selection_label(deck_selection: Optional[str]) -> Optional[str]:
     """Translate the CR API's ``deckSelection`` code to the player-facing
@@ -117,7 +137,7 @@ def register_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqli
             creator_tag,
             creator_name,
             game_mode.get("id"),
-            game_mode.get("name"),
+            game_mode_label(game_mode.get("id"), game_mode.get("name")),
             None,  # deck_selection filled on first battle
             api_data.get("levelCap"),
             api_data.get("maxCapacity"),
@@ -324,6 +344,10 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
                 "max_capacity": max_capacity,
                 "spots_remaining": spots_remaining,
                 "game_mode_id": (api_data.get("gameMode") or {}).get("id"),
+                "game_mode_name": game_mode_label(
+                    (api_data.get("gameMode") or {}).get("id"),
+                    (api_data.get("gameMode") or {}).get("name"),
+                ),
                 "deck_selection": deck_selection_label(api_data.get("deckSelection")),
                 **timing_fields,
             })
@@ -568,7 +592,7 @@ def store_tournament_battle(tournament_id: int, battle: dict, conn: Optional[sql
         "winner_tag": winner_tag,
         "deck_selection": deck_selection_label(battle.get("deckSelection")),
         "game_mode_id": game_mode.get("id"),
-        "game_mode_name": game_mode.get("name"),
+        "game_mode_name": game_mode_label(game_mode.get("id"), game_mode.get("name")),
         "arena_name": arena.get("name") if isinstance(arena, dict) else None,
     }
 
