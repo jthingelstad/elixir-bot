@@ -74,6 +74,7 @@ def _build_battle_played_signal(tournament_tag: str, tournament_name: str, battl
             "is_clan_member": p1_is_member,
             "crowns": battle_info.get("player1_crowns"),
             "deck": battle_info.get("player1_deck") or [],
+            **(battle_info.get("player1_context") or {}),
         },
         "player2": {
             "tag": p2_tag,
@@ -81,6 +82,7 @@ def _build_battle_played_signal(tournament_tag: str, tournament_name: str, battl
             "is_clan_member": p2_is_member,
             "crowns": battle_info.get("player2_crowns"),
             "deck": battle_info.get("player2_deck") or [],
+            **(battle_info.get("player2_context") or {}),
         },
         "winner_tag": winner_tag,
         "winner_name": winner_name,
