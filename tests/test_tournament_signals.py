@@ -125,8 +125,59 @@ def test_store_tournament_battle_returns_signal_ready_dict_on_insert():
         assert info["winner_tag"] == "#ABC123"
         assert info["player1_crowns"] == 3
         assert info["player2_crowns"] == 1
-        assert "Hog Rider" in info["player1_deck"]
+        deck_names = {c["name"] for c in info["player1_deck"]}
+        assert "Hog Rider" in deck_names
         assert info["game_mode_name"] == "CW_Duel_1v1"
+    finally:
+        conn.close()
+
+
+def test_store_tournament_battle_enriches_deck_and_computes_shared_cards():
+    conn = db.get_connection(":memory:")
+    try:
+        # Seed the card catalog so enrichment has data to pull from.
+        for cid, name, cost, rarity in [
+            (1, "Hog Rider", 4, "rare"),
+            (2, "Ice Spirit", 1, "common"),
+            (3, "Golem", 8, "epic"),
+        ]:
+            conn.execute(
+                "INSERT INTO card_catalog (card_id, name, elixir_cost, rarity, max_level, card_type, synced_at) "
+                "VALUES (?, ?, ?, ?, 15, 'troop', '2026-04-18T00:00:00')",
+                (cid, name, cost, rarity),
+            )
+        conn.commit()
+        register_tournament("#2QG9Y9UR", _api_payload(members=[
+            {"tag": "#ABC123", "name": "King Thing"},
+            {"tag": "#DEF456", "name": "King Levy"},
+        ]), conn=conn)
+        tid = conn.execute("SELECT tournament_id FROM tournaments").fetchone()["tournament_id"]
+        # Both players share Hog Rider; p1 runs cheap cycle, p2 runs heavy.
+        battle = {
+            "battleTime": "20260418T150000.000Z",
+            "tournamentTag": "#2QG9Y9UR",
+            "type": "challenge",
+            "deckSelection": "draft",
+            "gameMode": {"id": 72000001, "name": "CW_Duel_1v1"},
+            "arena": {"name": "Legendary Arena"},
+            "team": [{"tag": "#ABC123", "name": "King Thing", "crowns": 2,
+                      "cards": [{"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
+                                {"name": "Ice Spirit", "id": 2, "level": 14, "maxLevel": 15}]}],
+            "opponent": [{"tag": "#DEF456", "name": "King Levy", "crowns": 1,
+                          "cards": [{"name": "Hog Rider", "id": 1, "level": 14, "maxLevel": 15},
+                                    {"name": "Golem", "id": 3, "level": 14, "maxLevel": 15}]}],
+        }
+        info = store_tournament_battle(tid, battle, conn=conn)
+        assert info is not None
+        # Decks are lists of dicts with elixir/rarity/type pulled from catalog
+        p1_hog = next(c for c in info["player1_deck"] if c["name"] == "Hog Rider")
+        assert p1_hog["elixir_cost"] == 4
+        assert p1_hog["rarity"] == "rare"
+        # Avg elixir: player 1 = (4+1)/2 = 2.5; player 2 = (4+8)/2 = 6.0
+        assert info["player1_deck_avg_elixir"] == 2.5
+        assert info["player2_deck_avg_elixir"] == 6.0
+        # Shared card present
+        assert info["shared_cards"] == ["Hog Rider"]
     finally:
         conn.close()
 
