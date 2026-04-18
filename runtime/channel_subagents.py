@@ -59,9 +59,11 @@ CLAN_EVENT_SIGNAL_TYPES = {
 }
 
 TOURNAMENT_SIGNAL_TYPES = {
+    "tournament_watching_started",
     "tournament_started",
     "tournament_lead_change",
     "tournament_ended",
+    "tournament_participant_joined",
 }
 
 LEADERSHIP_ONLY_SIGNAL_TYPES = {
