@@ -30,6 +30,7 @@ from agent.prompts import (
     _promote_system,
     _reception_system,
     _roster_bios_system,
+    _season_awards_system,
     _tournament_recap_system,
     _tournament_update_system,
     _war_recap_system,
@@ -951,6 +952,37 @@ def generate_weekly_digest(summary_context, previous_message=""):
     )
 
 
+def generate_season_awards_post(signals, *, recent_posts=None, memory_context=None):
+    """Generate the consolidated season-awards post for a
+    ``season_awards_granted`` signal batch.
+
+    Self-contained context — signal payload only, no clan context, no
+    ambient time block. The payload is the authoritative record for
+    names, fame totals, ranks, and battle days, so the prompt forbids
+    the LLM from drawing award-fact details from RAG memory or recent
+    posts.
+    """
+    user_msg = (
+        "Write the Season Awards post for #clan-events. Base the post on "
+        "the signal payload below — the war_champ / iron_kings / "
+        "donation_champs / rookie_mvps arrays are the only source of "
+        "truth for names, ranks, and metrics. Do not fill in facts from "
+        "memory or recent posts.\n\n"
+        "Signal:\n"
+        f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```\n"
+    )
+    user_msg += _format_recent_posts(recent_posts, channel_label="#clan-events")
+    user_msg += _format_memory_context(memory_context)
+    return _chat_with_tools(
+        _season_awards_system(),
+        user_msg,
+        workflow="season_awards",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["season_awards"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["season_awards"],
+        strict_json=True,
+    )
+
+
 def generate_war_recap_update(signals, *, recent_posts=None, memory_context=None):
     """Generate a war-recap post for a batch of war_completed /
     war_champ_standings / war_season_complete signals.
@@ -1092,6 +1124,7 @@ __all__ = [
     "generate_members_message",
     "generate_roster_bios",
     "generate_promote_content",
+    "generate_season_awards_post",
     "generate_tournament_recap",
     "generate_tournament_update",
     "generate_war_recap_update",

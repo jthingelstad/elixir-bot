@@ -51,11 +51,15 @@ TOOLS = [
             "- losses: top opponent cards seen in recent losses + crown deficit + loss-streak context (uses scope param to pick mode: war_10/ladder_ranked_10/competitive_10/overall_10)\n"
             "- history: trophy and donation history from snapshots\n"
             "- memories: stored memories/observations about this member\n"
-            "- chests: upcoming chest cycle (live API)\n\n"
+            "- chests: upcoming chest cycle (live API)\n"
+            "- awards: the member's trophy case — every season-wide award they've earned "
+            "(War Champ, Iron King, Donation Champ, Rookie MVP, War Participant), with rank, "
+            "season, and metric. The awards table is the authoritative record of clan achievements.\n\n"
             "For 'tell me about X', use default includes. "
             "For 'what deck does X use', include=['deck']. "
             "For deck-review work, include=['deck','cards','losses']. "
-            "For leadership evaluation, include=['profile', 'war', 'history', 'memories']."
+            "For leadership evaluation, include=['profile', 'war', 'history', 'memories']. "
+            "For 'has X won anything' / 'what has X earned', include=['profile', 'awards']."
         ),
         "input_schema": {
             "type": "object",
@@ -69,7 +73,7 @@ TOOLS = [
                     "items": {"type": "string"},
                     "description": (
                         "Which aspects to include. Options: profile, form, war, trend, deck, "
-                        "cards, losses, history, memories, chests. Default: ['profile', 'form']."
+                        "cards, losses, history, memories, chests, awards. Default: ['profile', 'form']."
                     ),
                     "default": ["profile", "form"],
                 },
@@ -627,6 +631,54 @@ TOOLS = [
                 },
             },
             "required": ["signal_key", "at", "rationale"],
+        },
+    },
+    {
+        "name": "get_awards",
+        "description": (
+            "Query the clan awards record — the authoritative history of every "
+            "season-wide clan accomplishment. Award types: war_champ, iron_king, "
+            "donation_champ, rookie_mvp, war_participant.\n\n"
+            "Modes:\n"
+            "- list (default): filtered list of matching award grants. Combine any "
+            "of member_tag, award_type, season_id, rank. Use for 'who won S130 War "
+            "Champ?', 'list all iron kings this year', 'show S131 awards'.\n"
+            "- leaderboard: aggregate count per member for a given award_type + "
+            "rank. Use for 'who has won X the most' questions. Requires award_type.\n\n"
+            "For a single player's full trophy case prefer get_member with "
+            "include=['awards']."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["list", "leaderboard"],
+                    "default": "list",
+                    "description": "Query mode. Default: list.",
+                },
+                "member_tag": {
+                    "type": "string",
+                    "description": "Optional player tag / name / alias / Discord handle filter (list mode).",
+                },
+                "award_type": {
+                    "type": "string",
+                    "description": "Optional award type filter. Required for leaderboard mode. One of: war_champ, iron_king, donation_champ, rookie_mvp, war_participant.",
+                },
+                "season_id": {
+                    "type": "integer",
+                    "description": "Optional season filter (list mode).",
+                },
+                "rank": {
+                    "type": "integer",
+                    "description": "Optional rank filter (1/2/3). Default for leaderboard mode is 1.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max rows to return. Default 100 for list, 20 for leaderboard.",
+                    "default": 100,
+                },
+            },
         },
     },
 ]
