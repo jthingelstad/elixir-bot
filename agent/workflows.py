@@ -32,6 +32,7 @@ from agent.prompts import (
     _roster_bios_system,
     _tournament_recap_system,
     _tournament_update_system,
+    _war_recap_system,
     _weekly_digest_system,
 )
 from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
@@ -950,6 +951,45 @@ def generate_weekly_digest(summary_context, previous_message=""):
     )
 
 
+def generate_war_recap_update(signals, *, recent_posts=None, memory_context=None):
+    """Generate a war-recap post for a batch of war_completed /
+    war_champ_standings / war_season_complete signals.
+
+    Runs with a dedicated system prompt and a self-contained user context
+    — only the signal payload (+ recent posts for tone continuity). No
+    _clan_context dump, no ambient time/phase block, no river-race
+    standings. The signal payload is the only ground truth. This exists
+    to prevent the LLM from confabulating season numbers or fame totals
+    from RAG memory (the root cause of the 04-19 'Season 130 closes'
+    misfire, which happened even though the signal payload itself was for
+    an old season because a corrupted finish_time slipped through the
+    detector).
+
+    Returns the parsed response dict (with ``content`` as a string) or
+    None. An empty ``content`` string is a valid self-suppression
+    response — the delivery layer will skip posting but still mark the
+    outcome delivered.
+    """
+    user_msg = (
+        "Write a war-recap post for the target channel named in the first "
+        "signal's routing. Base the post on the signals below — their "
+        "payload is the only ground truth. Do not add facts that are not "
+        "in the payload.\n\n"
+        "Signals:\n"
+        f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```\n"
+    )
+    user_msg += _format_recent_posts(recent_posts, channel_label="this channel")
+    user_msg += _format_memory_context(memory_context)
+    return _chat_with_tools(
+        _war_recap_system(),
+        user_msg,
+        workflow="war_recap",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["war_recap"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["war_recap"],
+        strict_json=True,
+    )
+
+
 def generate_tournament_update(signals, *, recent_posts=None, memory_context=None):
     """Generate a live tournament post for a batch of tournament_* signals.
 
@@ -1054,5 +1094,6 @@ __all__ = [
     "generate_promote_content",
     "generate_tournament_recap",
     "generate_tournament_update",
+    "generate_war_recap_update",
     "generate_weekly_digest",
 ]

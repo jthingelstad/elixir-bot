@@ -92,6 +92,9 @@ TOOLSETS_BY_WORKFLOW = {
     "intel_report": INTEL_REPORT_TOOLS,
     "tournament_recap": TOURNAMENT_RECAP_TOOLS,
     "tournament_update": TOURNAMENT_UPDATE_TOOLS,
+    # war_recap: no tools. The signal payload is ground truth; we explicitly
+    # don't want the model looking things up and importing drift.
+    "war_recap": [],
     # Awareness loop: one agent turn per heartbeat that sees the full
     # situation and emits a post plan. Gets the full read-tool set so it can
     # investigate before posting, plus a narrow write surface (save_clan_memory,
@@ -135,6 +138,8 @@ MAX_ROUNDS_BY_WORKFLOW = {
     # tournament_update is a single-post-per-signal workflow. A couple of
     # tool rounds is plenty to grab a player profile when needed.
     "tournament_update": 4,
+    # war_recap has zero tools — one round for the final answer.
+    "war_recap": 1,
     # awareness loop: one situation in, possibly N posts out. Budget for a
     # couple of investigative tool calls (cr_api lookups for streak opponents,
     # rival scouting) plus the final post-plan answer turn.
@@ -161,6 +166,9 @@ RESPONSE_SCHEMAS_BY_WORKFLOW = {
     # signal batch. Matches the generic channel_update shape so the delivery
     # layer can treat the result the same way.
     "tournament_update": {"required": ["event_type", "summary", "content"]},
+    # war_recap mirrors the channel_update shape. Empty content is a valid
+    # self-suppression response (see _war_recap_system prompt).
+    "war_recap": {"required": ["event_type", "summary", "content"]},
     # awareness emits a post plan: zero or more posts, each routed to a channel.
     "awareness": {"required": ["posts"]},
     # memory_synthesis: arcs + stale list + contradictions + digest. Any field

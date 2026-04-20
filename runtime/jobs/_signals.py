@@ -32,6 +32,7 @@ from runtime.channel_subagents import (
     build_subagent_memory_context,
     is_leadership_only_signal,
     maybe_upsert_signal_memory,
+    CLAN_RECORD_SIGNAL_TYPES,
     OPTIONAL_PROGRESSION_SIGNAL_TYPES,
     plan_signal_outcomes,
     signal_source_key,
@@ -309,12 +310,23 @@ def _build_outcome_context(outcome, signals, clan, war):
                 lines.extend(["", "=== PLAYER CONTEXT (current form / streak / trend) ==="] + insight_lines)
     elif channel_key == "clan-events":
         has_likely_kick = any(s.get("likely_kicked") for s in (signals or []))
+        is_clan_record = any(
+            (s.get("type") in CLAN_RECORD_SIGNAL_TYPES) for s in (signals or [])
+        )
         if has_likely_kick:
             lines.extend([
                 "",
                 "This member was likely removed from the clan due to inactivity.",
                 "Keep the message brief and neutral. Do not write a warm farewell or thank them for contributions.",
                 "A simple factual note that the member is no longer with the clan is enough.",
+            ])
+        elif is_clan_record:
+            lines.extend([
+                "",
+                "This is an all-time clan record — the highest the metric has ever been since records began, not a seasonal peak.",
+                "Do NOT call it a 'season high', 'season record', 'weekly high', or any other time-windowed framing. It is a lifetime clan high.",
+                "Do NOT frame this as a personal achievement — the metric belongs to the clan, not any player.",
+                "Report what the metric is, the previous record, the new record, and the date. Keep it short and celebratory.",
             ])
         else:
             lines.extend([
@@ -418,16 +430,19 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         channel_config,
         signals=signals,
     )
-    # Tournament signals get a dedicated generator + self-contained context
-    # (no war state, no river-race context). Destination still #clan-events.
-    from runtime.channel_subagents import TOURNAMENT_SIGNAL_TYPES
+    # Tournament and war-recap signals get dedicated generators +
+    # self-contained context (no war state, no river-race context).
+    from runtime.channel_subagents import TOURNAMENT_SIGNAL_TYPES, WAR_RECAP_SIGNAL_TYPES
     is_tournament_batch = bool(signals) and all(
         (s or {}).get("type") in TOURNAMENT_SIGNAL_TYPES for s in signals
     )
-    if not is_tournament_batch:
-        context = _build_outcome_context(outcome, signals, clan, war)
+    is_war_recap_batch = bool(signals) and all(
+        (s or {}).get("type") in WAR_RECAP_SIGNAL_TYPES for s in signals
+    )
+    if is_tournament_batch or is_war_recap_batch:
+        context = None  # unused; dedicated path builds its own user message
     else:
-        context = None  # unused; tournament path builds its own user message
+        context = _build_outcome_context(outcome, signals, clan, war)
 
     preauthored_result = None
     if len(signals) == 1 and signals[0].get("signal_key"):
@@ -445,6 +460,13 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         elif is_tournament_batch:
             result = await asyncio.to_thread(
                 elixir_agent.generate_tournament_update,
+                signals,
+                recent_posts=recent_posts,
+                memory_context=memory_context,
+            )
+        elif is_war_recap_batch:
+            result = await asyncio.to_thread(
+                elixir_agent.generate_war_recap_update,
                 signals,
                 recent_posts=recent_posts,
                 memory_context=memory_context,
