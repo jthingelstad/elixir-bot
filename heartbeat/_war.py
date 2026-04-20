@@ -911,6 +911,29 @@ def _detect_war_season_completion_for_pair(current, previous, conn=None):
     }]
 
 
+_WAR_COMPLETION_MAX_AGE_DAYS = 7
+
+
+def _is_stale_war_race_timestamp(value) -> bool:
+    """True when a CR-format timestamp is missing, unparseable, epoch-sentinel,
+    or older than _WAR_COMPLETION_MAX_AGE_DAYS. Used to reject war_races rows
+    whose finish_time/created_date came back corrupted — otherwise a late-
+    arriving bad row fires a 'this war just finished' signal for a race
+    that ended weeks ago.
+    """
+    if not value:
+        return True
+    parsed = db._parse_cr_time(value)
+    if parsed is None:
+        return True
+    if parsed.year < 2000:
+        return True
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if (now - parsed).total_seconds() > _WAR_COMPLETION_MAX_AGE_DAYS * 86400:
+        return True
+    return False
+
+
 @db.managed_connection
 def detect_war_completion(clan_tag=None, conn=None, *, refresh_log=True):
     """Emit any unannounced completed wars, optionally refreshing the race log first."""
@@ -929,18 +952,26 @@ def detect_war_completion(clan_tag=None, conn=None, *, refresh_log=True):
         signal_log_type = f"war_completed::{row.get('season_id')}:{row.get('section_index')}"
         if db.was_signal_sent_any_date(signal_log_type, conn=conn):
             continue
+        finish_time = row.get("finish_time")
+        created_date = row.get("created_date")
+        if _is_stale_war_race_timestamp(finish_time) and _is_stale_war_race_timestamp(created_date):
+            log.warning(
+                "war_completion_skipped_stale_finish_time season=%s section=%s finish_time=%r created_date=%r",
+                row.get("season_id"), row.get("section_index"), finish_time, created_date,
+            )
+            continue
         signals.append({
             "type": "war_completed",
             "signal_log_type": signal_log_type,
-            "signal_date": _war_signal_date_for_values(row.get("finish_time"), row.get("created_date")),
+            "signal_date": _war_signal_date_for_values(finish_time, created_date),
             "season_id": row.get("season_id"),
             "section_index": row.get("section_index"),
             "our_rank": row.get("our_rank"),
             "our_fame": row.get("our_fame") or 0,
             "total_clans": row.get("total_clans"),
             "won": row.get("our_rank") == 1,
-            "finish_time": row.get("finish_time"),
-            "created_date": row.get("created_date"),
+            "finish_time": finish_time,
+            "created_date": created_date,
             "trophy_change": row.get("trophy_change"),
         })
 

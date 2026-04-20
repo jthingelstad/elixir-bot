@@ -8,8 +8,10 @@ import prompts
 from memory_store import list_memories
 from storage.contextual_memory import upsert_summary_memory
 
-# Durable milestones — celebratory and infrequent. Belong in the long-term
-# clan story. Routed to #player-progress.
+# Durable milestones — celebratory and infrequent, per-player. Routed to
+# #player-progress. Clan-aggregate records (clan_score_record,
+# clan_war_trophies_record) live in CLAN_EVENT_SIGNAL_TYPES instead — they
+# are not personal achievements and do not belong on the player track.
 PROGRESSION_SIGNAL_TYPES = {
     "arena_change",
     "player_level_up",
@@ -24,8 +26,6 @@ PROGRESSION_SIGNAL_TYPES = {
     "best_trophies_peak",
     "challenge_performance_milestone",
     "clan_rank_top_spot",
-    "clan_score_record",
-    "clan_war_trophies_record",
 }
 
 # Volatile battle-mode activity outside of war — hot streaks, trophy pushes,
@@ -56,6 +56,15 @@ CLAN_EVENT_SIGNAL_TYPES = {
     "weekly_donation_leader",
     "member_active_again",
     "award_earned",
+    "clan_score_record",
+    "clan_war_trophies_record",
+}
+
+# Clan-aggregate records — same lane as CLAN_EVENT_SIGNAL_TYPES but tagged
+# separately so the post path can apply the no-"season high" framing.
+CLAN_RECORD_SIGNAL_TYPES = {
+    "clan_score_record",
+    "clan_war_trophies_record",
 }
 
 TOURNAMENT_SIGNAL_TYPES = {
@@ -65,6 +74,17 @@ TOURNAMENT_SIGNAL_TYPES = {
     "tournament_ended",
     "tournament_participant_joined",
     "tournament_battle_played",
+}
+
+# War-recap signals — routed through a dedicated clean-context generator to
+# keep the LLM from confabulating season/standings details from RAG memory
+# or stale clan context (the 04-19 "Season 130 closes" misfire). Channels
+# stay as normal (#river-race, #announcements, #leader-lounge) via the
+# existing war routing rule; only the generator changes.
+WAR_RECAP_SIGNAL_TYPES = {
+    "war_completed",
+    "war_champ_standings",
+    "war_season_complete",
 }
 
 LEADERSHIP_ONLY_SIGNAL_TYPES = {

@@ -3344,12 +3344,16 @@ def test_detect_war_week_complete_enriches_completion_signal():
 def test_detect_war_completion_retries_until_signal_is_marked():
     conn = db.get_connection(":memory:")
     try:
+        # Use yesterday's timestamp so the stale-finish_time guard in
+        # detect_war_completion does not reject this row.
+        yesterday = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
+        fresh_ts = yesterday.strftime("%Y%m%dT%H%M%S") + ".000Z"
         race_log = {
             "items": [
                 {
                     "seasonId": 129,
                     "sectionIndex": 1,
-                    "createdDate": "20260308T120000.000Z",
+                    "createdDate": fresh_ts,
                     "standings": [
                         {
                             "rank": 1,
@@ -3358,7 +3362,7 @@ def test_detect_war_completion_retries_until_signal_is_marked():
                                 "tag": "#J2RGCRVG",
                                 "name": "POAP KINGS",
                                 "fame": 14000,
-                                "finishTime": "20260308T180000.000Z",
+                                "finishTime": fresh_ts,
                                 "participants": [],
                             },
                         }

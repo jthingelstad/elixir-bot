@@ -85,8 +85,18 @@ def detect_role_changes(conn=None):
 def detect_donation_leaders(current_members, conn=None):
     """Identify the top 3 donors from the current roster.
 
-    Only fires once per day.
+    Gated on war-week day >= 3 so the ranking isn't posted right after the
+    weekly donation reset when the board is near-empty. Also fires at most
+    once per day.
     """
+    from storage.war_calendar import war_week_day
+
+    live_states = db.get_recent_live_war_states(limit=1, conn=conn)
+    current_state = live_states[0] if live_states else None
+    day = war_week_day(current_state.get("period_index")) if current_state else None
+    if day is None or day < 3:
+        return []
+
     today = datetime.now().strftime("%Y-%m-%d")
     if db.was_signal_sent("donation_leaders", today, conn=conn):
         return []

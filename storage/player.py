@@ -267,20 +267,42 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
                 "milestone": milestone,
             })
 
-    # v4.7 #28: new personal-best trophies record. Peaks happen infrequently
-    # (once every few weeks per active player) and deserve a call-out the
-    # v4.5 awareness agent can frame appropriately.
+    # Per-player 4-week cooldown: active pushers set PBs repeatedly and the
+    # signal becomes noise. Skip if we fired for this tag within 28 days.
     old_best = previous["best_trophies"] if previous else None
     new_best = player_data.get("bestTrophies")
     if isinstance(old_best, int) and isinstance(new_best, int) and new_best > old_best:
-        signals.append({
-            "type": "best_trophies_peak",
-            "tag": tag,
-            "name": player_data.get("name"),
-            "old_best": old_best,
-            "new_best": new_best,
-            "current_trophies": player_data.get("trophies"),
-        })
+        # Lazy import: storage.player is imported by db/__init__.py, so a
+        # module-level `import db` creates a circular-init failure via
+        # storage.tournament → storage.player.
+        import db as _db
+        now = datetime.now(timezone.utc)
+        cursor = _db.get_signal_detector_cursor(
+            "best_trophies_peak_cooldown", scope_key=tag, conn=conn
+        )
+        last_fire = None
+        if cursor and cursor.get("cursor_text"):
+            try:
+                last_fire = datetime.fromisoformat(cursor["cursor_text"])
+                if last_fire.tzinfo is None:
+                    last_fire = last_fire.replace(tzinfo=timezone.utc)
+            except ValueError:
+                last_fire = None
+        if last_fire is None or (now - last_fire) >= timedelta(days=28):
+            signals.append({
+                "type": "best_trophies_peak",
+                "tag": tag,
+                "name": player_data.get("name"),
+                "old_best": old_best,
+                "new_best": new_best,
+                "current_trophies": player_data.get("trophies"),
+            })
+            _db.upsert_signal_detector_cursor(
+                "best_trophies_peak_cooldown",
+                scope_key=tag,
+                cursor_text=now.isoformat(),
+                conn=conn,
+            )
 
     # v4.7 #30: Challenge wins milestones. 10+ wins in a Classic or 15+/20 in
     # a Grand Challenge are tournament-level performances; pre-v4.7 we stored
