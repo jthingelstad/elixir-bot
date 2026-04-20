@@ -230,6 +230,31 @@ async def _maybe_alert_cr_api_failure(context: str) -> bool:
 
 # ── LLM alerts ────────────────────────────────────────────────────────────
 
+# Error text markers that indicate a permanent / quota / auth failure — these
+# won't clear on the next request, so waiting for 3 consecutive failures before
+# alerting is pointless. The 2026-04-19 Anthropic monthly-budget trip would
+# have paged immediately under this classifier.
+_HARD_FAIL_LLM_MARKERS = (
+    "usage limits",
+    "usage limit",
+    "invalid_request_error",
+    "authentication_error",
+    "permission_error",
+    "not_found_error",
+    "billing",
+    "quota",
+    "credit",
+    " 401",
+    " 403",
+)
+
+
+def _is_hard_fail_llm_error(error_text: str | None) -> bool:
+    if not error_text:
+        return False
+    lowered = error_text.lower()
+    return any(marker in lowered for marker in _HARD_FAIL_LLM_MARKERS)
+
 
 def _clear_llm_failure_alert_if_recovered() -> None:
     llm = (runtime_status.snapshot().get("llm") or {})
@@ -241,9 +266,14 @@ def _llm_outage_signature() -> str | None:
     llm = (runtime_status.snapshot().get("llm") or {})
     if llm.get("last_ok") is not False:
         return None
-    if int(llm.get("consecutive_error_count") or 0) < 3:
-        return None
+    consecutive = int(llm.get("consecutive_error_count") or 0)
     last_error = (llm.get("last_error") or "").strip()
+    # Hard-fail errors (quota, auth, billing) don't clear on retry — alert on
+    # the first hit. Transient errors (timeouts, 5xx) wait for three
+    # consecutive failures to avoid spam from flaky connectivity.
+    threshold = 1 if _is_hard_fail_llm_error(last_error) else 3
+    if consecutive < threshold:
+        return None
     workflow = llm.get("last_workflow") or "unknown"
     model = llm.get("last_model") or "unknown"
     return f"{workflow}|{model}|{last_error[:160]}"
@@ -257,11 +287,29 @@ async def _maybe_alert_llm_failure(context: str) -> bool:
     admin_ref = await asyncio.to_thread(_admin_mention_ref)
     consecutive = int(llm.get("consecutive_error_count") or 0)
     content = (
-        f"{admin_ref} LLM API has failed {consecutive} times in a row during {context}.\n"
+        f"{admin_ref} LLM API has failed {consecutive} time(s) in a row during {context}.\n"
         f"Workflow: `{llm.get('last_workflow') or 'unknown'}`, model: `{llm.get('last_model') or 'unknown'}`.\n"
         f"Last error: `{(llm.get('last_error') or 'unknown error')[:180]}`"
     )
     return await _alert_admin(content, "llm_outage", sig)
+
+
+def schedule_llm_failure_alert(context: str) -> None:
+    """Sync-safe scheduler for LLM failure alerts.
+
+    ``agent/core.py`` records LLM failures from sync code (often inside
+    ``asyncio.to_thread`` workers with no running loop). This helper marshals
+    the async alert back onto the bot's event loop so every failing LLM call
+    gets a chance to page the admin — instead of only the two call sites that
+    historically wired the alert check in by hand.
+    """
+    loop = getattr(bot, "loop", None)
+    if loop is None or loop.is_closed() or not loop.is_running():
+        return
+    try:
+        asyncio.run_coroutine_threadsafe(_maybe_alert_llm_failure(context), loop)
+    except Exception:
+        log.warning("schedule_llm_failure_alert failed", exc_info=True)
 
 
 async def _resolve_runtime_channel(channel_id: int):
