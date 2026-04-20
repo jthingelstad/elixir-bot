@@ -116,7 +116,10 @@ def _proactive_channel_system(channel_name: str, subagent_key: str, *, leadershi
         '{"event_type": "channel_update", '
         '"member_tags": [], "member_names": [], "summary": "one sentence", '
         '"content": "full Discord-ready markdown post OR [\"post 1\", \"post 2\"]", "metadata": {}}\n\n'
-        "Or respond with exactly: null\n\nif the signals are genuinely not worth posting about.",
+        "If the signals are genuinely not worth posting about, abstain. Two ways to abstain:\n"
+        "- Return exactly: null\n"
+        '- Or return: {"event_type": "channel_update", "summary": "why skipping", "content": "", "metadata": {"decision": "no_post", "reason": "short tag"}}\n\n'
+        "Never put a refusal explanation in `content` — whatever is in `content` is posted to Discord verbatim.",
     )
 
 

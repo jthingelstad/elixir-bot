@@ -891,6 +891,65 @@ def test_deliver_signal_group_saves_multipart_channel_update_as_separate_message
     assert observation_saves[1].kwargs["event_type"] == "channel_update_part"
 
 
+def test_deliver_signal_group_skips_post_when_llm_returns_no_post_decision():
+    """Backstop for the #player-progress 2026-04-20 incidents: when the LLM
+    returns metadata.decision == "no_post", the pipeline must not post the
+    refusal text to Discord and must mark the outcome as skipped."""
+    signals = [{"type": "best_trophies_peak", "tag": "#ABC123", "old_best": 6560, "new_best": 6593}]
+    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC123"}]}
+    war = {"state": "training"}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.name = "player-progress"
+    channel.type = "text"
+
+    refusal_result = {
+        "event_type": "channel_update",
+        "summary": "PB bump does not meet durable-milestone bar",
+        "content": "This signal does not warrant a post in #player-progress...",
+        "metadata": {"decision": "no_post", "reason": "routine_ladder_movement"},
+    }
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals.plan_signal_outcomes", return_value=[{
+            "source_signal_key": "best_trophies_peak||#ABC123||||||",
+            "source_signal_type": "best_trophies_peak",
+            "target_channel_key": "player-progress",
+            "target_channel_id": "1482352147029950474",
+            "intent": "player_progress",
+            "required": False,
+            "payload": {"signals": signals},
+            "delivery_status": "planned",
+        }]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.db.get_signal_outcome", return_value=None),
+        patch("elixir.db.upsert_signal_outcome") as mock_upsert,
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "skipped"}]),
+        patch("elixir.db.mark_signal_sent"),
+        patch("elixir.elixir_agent.generate_channel_update", return_value=refusal_result),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("runtime.jobs._signals.maybe_upsert_signal_memory"),
+        patch("runtime.jobs._signals._post_signal_memory", new=AsyncMock()),
+    ):
+        asyncio.run(elixir._deliver_signal_group(signals, clan, war))
+
+    assert mock_post.await_count == 0, "refusal text must not be posted to Discord"
+    assert mock_save.call_count == 0, "refusal must not be saved as an assistant message"
+
+    skip_calls = [
+        call for call in mock_upsert.call_args_list
+        if call.kwargs.get("delivery_status") == "skipped"
+    ]
+    assert skip_calls, "signal outcome must be marked skipped"
+    assert "llm_no_post" in (skip_calls[0].kwargs.get("error_detail") or "")
+
+
 def test_deliver_signal_group_posts_preauthored_system_signal_without_llm():
     signals = [{
         "type": "capability_unlock",

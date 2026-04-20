@@ -513,6 +513,36 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             return status == "skipped"
 
         _app._clear_llm_failure_alert_if_recovered()
+
+        # Backstop: the LLM can opt out of posting by returning
+        # metadata.decision == "no_post". Without this, the refusal text ends
+        # up in `content` and gets posted verbatim (see #player-progress
+        # incidents 2026-04-20 17:26 / 18:56).
+        metadata = result.get("metadata") if isinstance(result, dict) else None
+        if isinstance(metadata, dict) and metadata.get("decision") == "no_post":
+            reason = metadata.get("reason") or "unspecified"
+            log.info(
+                "channel_update no_post: channel=%s signal_type=%s signal_key=%s reason=%s",
+                outcome["target_channel_key"],
+                outcome["source_signal_type"],
+                outcome["source_signal_key"],
+                reason,
+            )
+            await asyncio.to_thread(
+                db.upsert_signal_outcome,
+                outcome["source_signal_key"],
+                outcome["source_signal_type"],
+                outcome["target_channel_key"],
+                outcome["target_channel_id"],
+                outcome["intent"],
+                required=outcome.get("required", True),
+                delivery_status="skipped",
+                payload={"result": result, "signals": signals},
+                error_detail=f"llm_no_post: {reason}",
+                mark_attempt=True,
+            )
+            return True
+
         posts = _app._entry_posts(result)
         await _post_to_elixir(channel, result)
         summary = result.get("summary")
