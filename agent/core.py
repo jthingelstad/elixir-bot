@@ -347,6 +347,14 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
             )
         except (OSError, sqlite3.Error):
             log.warning("llm_call_persist_failed workflow=%s", workflow, exc_info=True)
+        # Central alert trigger: runs for every failing LLM call regardless of
+        # which workflow / caller ran. Lazy import to dodge the runtime.app →
+        # elixir_agent → agent.core → runtime.app cycle.
+        try:
+            from runtime.app import schedule_llm_failure_alert
+            schedule_llm_failure_alert(workflow)
+        except Exception:
+            log.warning("schedule_llm_failure_alert_import_failed", exc_info=True)
         raise
 
 

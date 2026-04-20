@@ -1793,6 +1793,135 @@ def test_cr_api_outage_alert_posts_after_consecutive_failures():
         elixir._CR_API_OUTAGE_ALERT_SIGNATURE = None
 
 
+def test_llm_outage_alert_fires_on_first_hard_fail_error():
+    """Hard-fail LLM errors (quota, auth, billing) don't clear on retry, so
+    the alert must fire on the first occurrence rather than waiting for three
+    consecutive failures — that's what made the 2026-04-19 Anthropic monthly-
+    budget trip slip past the admin."""
+    from runtime import app as runtime_app
+
+    channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
+
+    with (
+        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "subagent": "leader-lounge", "workflow": "clanops"}]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
+        patch("elixir.db.save_message") as mock_save,
+        patch("runtime.app.runtime_status.snapshot", return_value={
+            "llm": {
+                "last_ok": False,
+                "last_error": "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-05-01 at 00:00 UTC.'}}",
+                "last_workflow": "channel_update",
+                "last_model": "claude-haiku-4-5-20251001",
+                "consecutive_error_count": 1,
+            }
+        }),
+    ):
+        runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
+        sent = asyncio.run(runtime_app._maybe_alert_llm_failure("channel update"))
+
+    try:
+        assert sent is True, "hard-fail error should alert on first occurrence"
+        mock_post.assert_awaited_once()
+        posted = mock_post.await_args.args[1]["content"]
+        assert "704062105258557511" in posted, "admin must be @mentioned"
+        assert "channel update" in posted
+        assert "usage limits" in posted.lower()
+        assert mock_save.call_args.kwargs["event_type"] == "llm_outage"
+    finally:
+        runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
+
+
+def test_llm_outage_alert_waits_for_three_consecutive_soft_errors():
+    """Transient errors (timeouts, 5xx) still use the 3-consecutive threshold
+    so a flaky connection doesn't spam the admin channel."""
+    from runtime import app as runtime_app
+
+    channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
+
+    def snapshot_with_count(count):
+        return {
+            "llm": {
+                "last_ok": False,
+                "last_error": "Connection timeout after 60s",
+                "last_workflow": "channel_update",
+                "last_model": "claude-haiku-4-5-20251001",
+                "consecutive_error_count": count,
+            }
+        }
+
+    with (
+        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "subagent": "leader-lounge", "workflow": "clanops"}]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
+        patch("elixir.db.save_message"),
+    ):
+        runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
+        try:
+            with patch("runtime.app.runtime_status.snapshot", return_value=snapshot_with_count(2)):
+                early = asyncio.run(runtime_app._maybe_alert_llm_failure("channel update"))
+            with patch("runtime.app.runtime_status.snapshot", return_value=snapshot_with_count(3)):
+                third = asyncio.run(runtime_app._maybe_alert_llm_failure("channel update"))
+        finally:
+            runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
+
+    assert early is False, "soft errors must not alert on 2nd failure"
+    assert third is True, "soft errors alert on 3rd consecutive failure"
+    mock_post.assert_awaited_once()
+
+
+def test_schedule_llm_failure_alert_is_noop_when_loop_unavailable():
+    """schedule_llm_failure_alert is called from sync code (agent/core.py).
+    When the bot's loop is not running (tests, scripts, shutdown), it must
+    silently no-op instead of raising."""
+    from runtime import app as runtime_app
+
+    fake_bot = SimpleNamespace(loop=None)
+    with patch.object(runtime_app, "bot", fake_bot):
+        runtime_app.schedule_llm_failure_alert("channel update")
+
+    stopped_loop = SimpleNamespace(is_closed=lambda: True, is_running=lambda: False)
+    fake_bot = SimpleNamespace(loop=stopped_loop)
+    with patch.object(runtime_app, "bot", fake_bot):
+        runtime_app.schedule_llm_failure_alert("channel update")
+
+
+def test_llm_outage_alert_dedupes_on_signature():
+    """Same error signature on repeat calls must not re-post."""
+    from runtime import app as runtime_app
+
+    channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
+
+    with (
+        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "subagent": "leader-lounge", "workflow": "clanops"}]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
+        patch("elixir.db.save_message"),
+        patch("runtime.app.runtime_status.snapshot", return_value={
+            "llm": {
+                "last_ok": False,
+                "last_error": "invalid_request_error: usage limits reached",
+                "last_workflow": "site_home_message",
+                "last_model": "claude-haiku-4-5-20251001",
+                "consecutive_error_count": 1,
+            }
+        }),
+    ):
+        runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
+        try:
+            first = asyncio.run(runtime_app._maybe_alert_llm_failure("home message"))
+            second = asyncio.run(runtime_app._maybe_alert_llm_failure("home message"))
+        finally:
+            runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
+
+    assert first is True
+    assert second is False, "second call with same signature must not re-post"
+    mock_post.assert_awaited_once()
+
+
 def test_build_schedule_report_shows_47_minute_heartbeat():
     scheduler = SimpleNamespace(
         running=True,
