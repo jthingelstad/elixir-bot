@@ -127,14 +127,23 @@ def test_detect_war_participant_awards_grants_once_per_member():
         # Seed live war state so get_current_season_id returns 131
         _seed_current_war(conn, season_id=131)
 
+        # detect_war_participant_awards is silent in Discord (returns [])
+        # but still writes grants to the awards table.
         first_pass = _awards.detect_war_participant_awards(conn=conn)
-        assert len(first_pass) == 1
-        assert first_pass[0]["tag"] == "#AAA"
-        assert first_pass[0]["award_type"] == "war_participant"
+        assert first_pass == []
+        row = conn.execute(
+            "SELECT player_tag FROM awards WHERE award_type='war_participant' AND season_id=131"
+        ).fetchone()
+        assert row is not None
+        assert row["player_tag"] == "#AAA"
 
-        # Running again should not double-grant
+        # Running again is idempotent — no duplicate rows.
         second_pass = _awards.detect_war_participant_awards(conn=conn)
         assert second_pass == []
+        count = conn.execute(
+            "SELECT COUNT(*) AS c FROM awards WHERE award_type='war_participant' AND season_id=131"
+        ).fetchone()["c"]
+        assert count == 1
     finally:
         conn.close()
 
@@ -170,12 +179,27 @@ def test_detect_season_awards_grants_when_season_ended():
         _seed_war_race(conn, season_id=132, section_index=0)
 
         signals = _awards.detect_season_awards(conn=conn)
-        types = [(s["award_type"], s["rank"]) for s in signals]
-        # Expect: war_champ rank 1/2, donation_champ ranks would be empty (no
-        # donations seeded), iron_king empty (no snapshots seeded), rookie_mvp
-        # empty (no clan_memberships seeded). So only war_champ entries.
-        assert ("war_champ", 1) in types
-        assert ("war_champ", 2) in types
+        # detect_season_awards collapses the per-award grants into a single
+        # season_awards_granted signal per newly-closed season. The per-award
+        # rows still land in the awards table (source of truth for tools).
+        assert len(signals) == 1
+        s = signals[0]
+        assert s["type"] == "season_awards_granted"
+        assert s["season_id"] == 131
+        # Podium buckets carry War Champ ranks 1 and 2.
+        champ_ranks = [e["rank"] for e in s["war_champ"]]
+        assert 1 in champ_ranks
+        assert 2 in champ_ranks
+        # Iron King legacy fallback (decks_used / 4 across 4 sections) sees
+        # Alice and Bob as qualifiers too; we just assert the bucket exists.
+        assert isinstance(s["iron_kings"], list)
+        assert s["donation_champs"] == []
+        assert s["rookie_mvps"] == []
+        # DB-level grants still happened.
+        count = conn.execute(
+            "SELECT COUNT(*) AS c FROM awards WHERE award_type='war_champ' AND season_id=131"
+        ).fetchone()["c"]
+        assert count >= 2
 
         # Re-running is idempotent
         again = _awards.detect_season_awards(conn=conn)
@@ -494,3 +518,140 @@ def test_build_awards_data_groups_by_season():
         assert all(s["awards"] for s in data["seasons"])
     finally:
         conn.close()
+
+
+# -- season_awards_granted consolidated signal -------------------------------
+
+def test_season_awards_granted_signal_excludes_war_participant():
+    """The consolidated podium signal omits war_participant entries."""
+    from heartbeat._awards import _build_season_awards_signal
+    per_award = [
+        {"award_type": "war_champ", "rank": 1, "tag": "#A", "name": "Alice",
+         "metric_value": 4500, "metric_unit": "fame", "metadata": {}},
+        {"award_type": "war_participant", "rank": 1, "tag": "#C", "name": "Cam",
+         "metric_value": 500, "metric_unit": "fame", "metadata": {}},
+        {"award_type": "iron_king", "rank": 1, "tag": "#B", "name": "Bob",
+         "metric_value": 12, "metric_unit": "battle_days", "metadata": {}},
+    ]
+    signal = _build_season_awards_signal(131, per_award, "2026-04-06")
+    assert signal is not None
+    assert signal["type"] == "season_awards_granted"
+    assert signal["signal_log_type"] == "season_awards_granted::131"
+    assert signal["season_id"] == 131
+    assert [e["tag"] for e in signal["war_champ"]] == ["#A"]
+    assert [e["tag"] for e in signal["iron_kings"]] == ["#B"]
+    # war_participant should not appear anywhere in the payload buckets.
+    all_tags = (
+        [e["tag"] for e in signal["war_champ"]]
+        + [e["tag"] for e in signal["iron_kings"]]
+        + [e["tag"] for e in signal["donation_champs"]]
+        + [e["tag"] for e in signal["rookie_mvps"]]
+    )
+    assert "#C" not in all_tags
+
+
+def test_season_awards_granted_returns_none_when_only_participants():
+    """If only war_participant grants are in the list, no signal fires."""
+    from heartbeat._awards import _build_season_awards_signal
+    per_award = [
+        {"award_type": "war_participant", "rank": 1, "tag": "#A", "name": "Alice",
+         "metric_value": 500, "metric_unit": "fame", "metadata": {}},
+    ]
+    assert _build_season_awards_signal(131, per_award, "2026-04-06") is None
+
+
+def test_season_awards_signal_routes_to_clan_events():
+    """plan_signal_outcomes sends season_awards_granted to #clan-events."""
+    from runtime.channel_subagents import plan_signal_outcomes
+    signal = {"type": "season_awards_granted", "season_id": 131}
+    outcomes = plan_signal_outcomes([signal])
+    assert len(outcomes) == 1
+    assert outcomes[0]["target_channel_key"] == "clan-events"
+    assert outcomes[0]["intent"] == "season_awards_post"
+    assert outcomes[0]["required"] is True
+
+
+# -- list_awards + award_leaderboard helpers ---------------------------------
+
+def test_list_awards_filters_by_season_and_type():
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        bob = _seed_member(conn, "#BBB", "Bob")
+        _seed_war_race(conn, season_id=130, section_index=0)
+        _seed_war_race(conn, season_id=131, section_index=0)
+        db.insert_award("war_champ", 130, alice, "#AAA", rank=1, conn=conn)
+        db.insert_award("war_champ", 130, bob, "#BBB", rank=2, conn=conn)
+        db.insert_award("iron_king", 130, alice, "#AAA", rank=1, conn=conn)
+        db.insert_award("war_champ", 131, alice, "#AAA", rank=1, conn=conn)
+
+        s130 = db.list_awards(season_id=130, conn=conn)
+        assert len(s130) == 3
+        assert all(a["season_id"] == 130 for a in s130)
+
+        alice_war_champs = db.list_awards(member_tag="#AAA", award_type="war_champ", conn=conn)
+        assert len(alice_war_champs) == 2
+
+        rank1 = db.list_awards(rank=1, conn=conn)
+        assert all(a["rank"] == 1 for a in rank1)
+    finally:
+        conn.close()
+
+
+def test_award_leaderboard_counts_per_member():
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        bob = _seed_member(conn, "#BBB", "Bob")
+        cam = _seed_member(conn, "#CCC", "Cam")
+        for season in (128, 129, 130):
+            _seed_war_race(conn, season_id=season, section_index=0)
+            db.insert_award("war_champ", season, alice, "#AAA", rank=1, conn=conn)
+        _seed_war_race(conn, season_id=131, section_index=0)
+        db.insert_award("war_champ", 131, bob, "#BBB", rank=1, conn=conn)
+        db.insert_award("war_champ", 131, cam, "#CCC", rank=2, conn=conn)  # rank-2, ignored
+
+        board = db.award_leaderboard(award_type="war_champ", rank=1, conn=conn)
+        assert board[0]["player_tag"] == "#AAA"
+        assert board[0]["count"] == 3
+        assert board[1]["player_tag"] == "#BBB"
+        assert board[1]["count"] == 1
+        tags = [r["player_tag"] for r in board]
+        assert "#CCC" not in tags  # rank-2 win filtered out
+    finally:
+        conn.close()
+
+
+# -- get_awards tool executor ------------------------------------------------
+
+def test_get_awards_tool_list_mode():
+    import agent.app  # warms up the full module graph, avoids circular init
+    from agent.tool_exec import _execute_get_awards
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        _seed_war_race(conn, season_id=131, section_index=0)
+        db.insert_award("war_champ", 131, alice, "#AAA", rank=1, conn=conn)
+
+        # Force the helpers to use our in-memory conn by patching
+        # managed_connection default — simplest: use a managed_connection
+        # override via monkey-patching isn't available here, so just assert
+        # shape via the real DB. The conn we seeded won't be visible to
+        # managed_connection (which opens its own); instead we test the
+        # shape of the tool's output via a minimal real call.
+    finally:
+        conn.close()
+
+    out = _execute_get_awards({"mode": "list", "season_id": -1, "limit": 5})
+    assert out["mode"] == "list"
+    assert out["count"] == 0
+    assert out["results"] == []
+    assert out["filters"]["season_id"] == -1
+
+
+def test_get_awards_tool_leaderboard_requires_award_type():
+    import agent.app
+    from agent.tool_exec import _execute_get_awards
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        _execute_get_awards({"mode": "leaderboard"})

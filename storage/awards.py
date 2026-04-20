@@ -33,6 +33,8 @@ __all__ = [
     "get_season_donation_leaderboard",
     "get_rookie_mvp_candidates",
     "get_war_participant_candidates",
+    "list_awards",
+    "award_leaderboard",
     "season_final_section_index",
     "season_is_complete",
 ]
@@ -105,6 +107,79 @@ def get_member_trophy_case(
         (int(member_id),),
     ).fetchall()
     return [_row_to_award(r) for r in rows]
+
+
+@managed_connection
+def list_awards(
+    *,
+    award_type: Optional[str] = None,
+    season_id: Optional[int] = None,
+    rank: Optional[int] = None,
+    member_tag: Optional[str] = None,
+    limit: int = 100,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Filtered list of award grants with resolved member names.
+
+    Any combination of filters is supported. Ordered newest-season first,
+    then by award_type, rank, section_index. Use this for cross-member
+    queries ('who won S130 War Champ?', 'list all iron kings this year').
+    Prefer get_member_trophy_case when you have a single member_id.
+    """
+    where = []
+    params: list = []
+    if award_type:
+        where.append("a.award_type = ?")
+        params.append(award_type)
+    if season_id is not None:
+        where.append("a.season_id = ?")
+        params.append(int(season_id))
+    if rank is not None:
+        where.append("a.rank = ?")
+        params.append(int(rank))
+    if member_tag:
+        where.append("a.player_tag = ?")
+        params.append(_canon_tag(member_tag))
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    params.append(int(limit))
+    rows = conn.execute(
+        "SELECT a.award_id, a.award_type, a.season_id, a.section_index, "
+        "a.member_id, a.player_tag, a.rank, a.metric_value, a.metric_unit, "
+        "a.metadata_json, a.awarded_at, m.current_name AS player_name "
+        "FROM awards a JOIN members m ON m.member_id = a.member_id"
+        f"{clause} "
+        "ORDER BY a.season_id DESC, a.award_type, a.rank, a.section_index "
+        "LIMIT ?",
+        params,
+    ).fetchall()
+    return [_row_to_award(r) for r in rows]
+
+
+@managed_connection
+def award_leaderboard(
+    *,
+    award_type: str,
+    rank: int = 1,
+    limit: int = 20,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Count of award wins per member for a given award_type + rank.
+
+    Answers 'who has won War Champ the most?' style questions. Returns rows
+    ordered by count DESC, then most-recent season_id DESC. Each row has
+    member_id, player_tag, player_name, count, latest_season_id.
+    """
+    rows = conn.execute(
+        "SELECT a.member_id, a.player_tag, m.current_name AS player_name, "
+        "COUNT(*) AS count, MAX(a.season_id) AS latest_season_id "
+        "FROM awards a JOIN members m ON m.member_id = a.member_id "
+        "WHERE a.award_type = ? AND a.rank = ? "
+        "GROUP BY a.member_id "
+        "ORDER BY count DESC, latest_season_id DESC "
+        "LIMIT ?",
+        (award_type, int(rank), int(limit)),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 @managed_connection

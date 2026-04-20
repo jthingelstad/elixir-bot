@@ -34,6 +34,7 @@ from runtime.channel_subagents import (
     maybe_upsert_signal_memory,
     CLAN_RECORD_SIGNAL_TYPES,
     OPTIONAL_PROGRESSION_SIGNAL_TYPES,
+    SEASON_AWARDS_SIGNAL_TYPES,
     plan_signal_outcomes,
     signal_source_key,
 )
@@ -430,8 +431,10 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         channel_config,
         signals=signals,
     )
-    # Tournament and war-recap signals get dedicated generators +
-    # self-contained context (no war state, no river-race context).
+    # Tournament, war-recap, and season-awards signals get dedicated
+    # generators + self-contained context (no war state, no river-race
+    # context, no clan dump). Keeps the LLM from confabulating ground-
+    # truth details from RAG memory or ambient context.
     from runtime.channel_subagents import TOURNAMENT_SIGNAL_TYPES, WAR_RECAP_SIGNAL_TYPES
     is_tournament_batch = bool(signals) and all(
         (s or {}).get("type") in TOURNAMENT_SIGNAL_TYPES for s in signals
@@ -439,7 +442,10 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
     is_war_recap_batch = bool(signals) and all(
         (s or {}).get("type") in WAR_RECAP_SIGNAL_TYPES for s in signals
     )
-    if is_tournament_batch or is_war_recap_batch:
+    is_season_awards_batch = bool(signals) and all(
+        (s or {}).get("type") in SEASON_AWARDS_SIGNAL_TYPES for s in signals
+    )
+    if is_tournament_batch or is_war_recap_batch or is_season_awards_batch:
         context = None  # unused; dedicated path builds its own user message
     else:
         context = _build_outcome_context(outcome, signals, clan, war)
@@ -467,6 +473,13 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         elif is_war_recap_batch:
             result = await asyncio.to_thread(
                 elixir_agent.generate_war_recap_update,
+                signals,
+                recent_posts=recent_posts,
+                memory_context=memory_context,
+            )
+        elif is_season_awards_batch:
+            result = await asyncio.to_thread(
+                elixir_agent.generate_season_awards_post,
                 signals,
                 recent_posts=recent_posts,
                 memory_context=memory_context,

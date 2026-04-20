@@ -251,7 +251,65 @@ def _execute_get_member(arguments):
     if "chests" in include:
         result["chests"] = cr_api.get_player_chests(member_tag)
 
+    if "awards" in include:
+        profile = result.get("profile") or _enrich_member_profile(
+            db.get_member_profile(member_tag)
+        )
+        member_id = profile.get("member_id") if profile else None
+        result["awards"] = (
+            db.get_member_trophy_case(int(member_id)) if member_id is not None else []
+        )
+
     return result
+
+
+def _execute_get_awards(arguments):
+    """Execute the get_awards tool — filtered list or per-member leaderboard
+    across the awards table."""
+    mode = (arguments.get("mode") or "list").strip().lower()
+    award_type = arguments.get("award_type")
+    season_id = arguments.get("season_id")
+    rank = arguments.get("rank")
+    limit = arguments.get("limit")
+
+    if mode == "leaderboard":
+        if not award_type:
+            raise ValueError("get_awards(mode='leaderboard') requires award_type")
+        results = db.award_leaderboard(
+            award_type=award_type,
+            rank=int(rank) if rank is not None else 1,
+            limit=int(limit) if limit is not None else 20,
+        )
+        return {
+            "mode": "leaderboard",
+            "filters": {
+                "award_type": award_type,
+                "rank": int(rank) if rank is not None else 1,
+            },
+            "count": len(results),
+            "results": results,
+        }
+
+    member_tag = arguments.get("member_tag")
+    resolved_tag = _resolve_member_tag(member_tag) if member_tag else None
+    results = db.list_awards(
+        award_type=award_type,
+        season_id=int(season_id) if season_id is not None else None,
+        rank=int(rank) if rank is not None else None,
+        member_tag=resolved_tag,
+        limit=int(limit) if limit is not None else 100,
+    )
+    return {
+        "mode": "list",
+        "filters": {
+            "member_tag": resolved_tag,
+            "award_type": award_type,
+            "season_id": int(season_id) if season_id is not None else None,
+            "rank": int(rank) if rank is not None else None,
+        },
+        "count": len(results),
+        "results": results,
+    }
 
 
 def _execute_get_member_war_detail(arguments):
@@ -1011,6 +1069,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_member(arguments)
         elif name == "get_member_war_detail":
             result = _execute_get_member_war_detail(arguments)
+        elif name == "get_awards":
+            result = _execute_get_awards(arguments)
         elif name == "get_river_race":
             result = _execute_get_river_race(arguments)
         elif name == "get_war_season":

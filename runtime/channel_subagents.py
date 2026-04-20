@@ -56,6 +56,7 @@ CLAN_EVENT_SIGNAL_TYPES = {
     "weekly_donation_leader",
     "member_active_again",
     "award_earned",
+    "season_awards_granted",
     "clan_score_record",
     "clan_war_trophies_record",
 }
@@ -85,6 +86,14 @@ WAR_RECAP_SIGNAL_TYPES = {
     "war_completed",
     "war_champ_standings",
     "war_season_complete",
+}
+
+# Season awards — one aggregated post to #clan-events when a season's
+# podium grants land. Replaces the old per-award Discord spam (~12 fires).
+# Uses a dedicated clean-context generator so the signal payload is the
+# only ground truth for names, fame, and ranks.
+SEASON_AWARDS_SIGNAL_TYPES = {
+    "season_awards_granted",
 }
 
 LEADERSHIP_ONLY_SIGNAL_TYPES = {
@@ -374,6 +383,10 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
 
     if any(is_tournament_signal(signal) for signal in signals):
         add("clan-events", "tournament_live_update", required=True)
+        return outcomes
+
+    if any(signal.get("type") in SEASON_AWARDS_SIGNAL_TYPES for signal in signals):
+        add("clan-events", "season_awards_post", required=True)
         return outcomes
 
     if any(is_clan_event_signal(signal) for signal in signals):

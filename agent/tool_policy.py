@@ -95,6 +95,9 @@ TOOLSETS_BY_WORKFLOW = {
     # war_recap: no tools. The signal payload is ground truth; we explicitly
     # don't want the model looking things up and importing drift.
     "war_recap": [],
+    # season_awards: no tools. Payload carries the podium — lookup is
+    # forbidden so we don't re-introduce RAG-sourced name drift.
+    "season_awards": [],
     # Awareness loop: one agent turn per heartbeat that sees the full
     # situation and emits a post plan. Gets the full read-tool set so it can
     # investigate before posting, plus a narrow write surface (save_clan_memory,
@@ -140,6 +143,8 @@ MAX_ROUNDS_BY_WORKFLOW = {
     "tournament_update": 4,
     # war_recap has zero tools — one round for the final answer.
     "war_recap": 1,
+    # season_awards has zero tools — one round for the final answer.
+    "season_awards": 1,
     # awareness loop: one situation in, possibly N posts out. Budget for a
     # couple of investigative tool calls (cr_api lookups for streak opponents,
     # rival scouting) plus the final post-plan answer turn.
@@ -169,6 +174,8 @@ RESPONSE_SCHEMAS_BY_WORKFLOW = {
     # war_recap mirrors the channel_update shape. Empty content is a valid
     # self-suppression response (see _war_recap_system prompt).
     "war_recap": {"required": ["event_type", "summary", "content"]},
+    # season_awards also mirrors the channel_update shape.
+    "season_awards": {"required": ["event_type", "summary", "content"]},
     # awareness emits a post plan: zero or more posts, each routed to a channel.
     "awareness": {"required": ["posts"]},
     # memory_synthesis: arcs + stale list + contradictions + digest. Any field

@@ -614,6 +614,46 @@ def _weekly_digest_system():
     )
 
 
+def _season_awards_system():
+    """System prompt for the consolidated season-awards post to #clan-events.
+
+    Ground-truth contract: the signal payload is the only source for names,
+    fame totals, ranks, and donation counts. No RAG memory, no clan context,
+    no ambient time — the awards table is authoritative and a misnamed
+    champ would be embarrassing. Same clean-context model as the tournament
+    and war-recap lanes.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        "**You are writing the Season Awards post for #clan-events.**\n\n"
+        "Ground truth: the signal payload in the user message. The "
+        "`season_id`, `war_champ`, `iron_kings`, `donation_champs`, and "
+        "`rookie_mvps` fields are authoritative — use names, ranks, fame "
+        "totals, donation counts, and battle-days from them and nothing else.\n\n"
+        "Hard constraints:\n"
+        "- Do NOT use recent-posts or memory context to fill in details. Those are tone reference only.\n"
+        "- Do NOT invent or guess at metrics. If a field isn't in the payload, omit it.\n"
+        "- Do NOT list War Participant — it's intentionally excluded from this post.\n"
+        "- If a bucket (e.g. iron_kings) is empty, skip that section quietly; don't announce 'no one won'.\n"
+        "- Reference only the season named in `season_id`.\n\n"
+        "Post shape:\n"
+        "- Lead with a bold headline naming the season (e.g. '**Season 131 Awards are in.**').\n"
+        "- War Champ next — rank-1 gets the spotlight with fame total; mention rank-2 and rank-3 by name with their fame.\n"
+        "- Iron King(s) — bold every name. If multiple, list them together as a small honor roll.\n"
+        "- Donation Champ — rank-1 with count; briefly mention rank-2 / rank-3 if present.\n"
+        "- Rookie MVP — rank-1 highlight; mention the other ranks if they exist.\n"
+        "- Close with one short forward-looking beat toward the new season.\n\n"
+        "Style:\n"
+        "- First person as Elixir. Celebratory but not gushing. 3-5 paragraphs, flowing prose with a few bulleted lines where a list reads better.\n"
+        "- Under 2000 characters total. Light **bold** on player names and the headline.\n"
+        f"{_discord_formatting_guidance()}"
+        f"{_discord_emoji_guidance()}"
+        "Respond with JSON only (no markdown wrapper):\n"
+        '{"event_type": "season_awards_post", "summary": "<one-line summary>", "content": "<the full post>"}',
+    )
+
+
 def _war_recap_system():
     """System prompt for war-recap posts (war_completed, war_champ_standings,
     war_season_complete).

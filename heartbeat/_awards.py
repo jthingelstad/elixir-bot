@@ -258,13 +258,67 @@ def grant_season_awards(season_id: int, conn: sqlite3.Connection) -> list[dict]:
 
 # -- detectors --------------------------------------------------------------
 
+def _build_season_awards_signal(
+    season_id: int,
+    per_award_signals: list[dict],
+    signal_date: Optional[str],
+) -> Optional[dict]:
+    """Collapse the per-award grant signals for one season into a single
+    ``season_awards_granted`` payload. War Participant grants are omitted —
+    they land in the DB but don't belong on the podium post (20+ names is
+    noise; the per-member tools surface them).
+
+    Returns None when the season has no podium grants (all entries were
+    war_participant or empty).
+    """
+    if not per_award_signals:
+        return None
+    buckets = {
+        "war_champ": [],
+        "iron_king": [],
+        "donation_champ": [],
+        "rookie_mvp": [],
+    }
+    for signal in per_award_signals:
+        award_type = signal.get("award_type")
+        if award_type == "war_participant" or award_type not in buckets:
+            continue
+        buckets[award_type].append({
+            "rank": signal.get("rank"),
+            "tag": signal.get("tag"),
+            "name": signal.get("name"),
+            "metric_value": signal.get("metric_value"),
+            "metric_unit": signal.get("metric_unit"),
+            "metadata": signal.get("metadata") or {},
+        })
+    if not any(buckets.values()):
+        return None
+    for key in buckets:
+        buckets[key].sort(key=lambda e: (e.get("rank") or 99, e.get("name") or ""))
+    return {
+        "type": "season_awards_granted",
+        "signal_log_type": f"season_awards_granted::{season_id}",
+        "signal_date": signal_date,
+        "season_id": season_id,
+        "war_champ": buckets["war_champ"],
+        "iron_kings": buckets["iron_king"],
+        "donation_champs": buckets["donation_champ"],
+        "rookie_mvps": buckets["rookie_mvp"],
+    }
+
+
 @managed_connection
 def detect_season_awards(conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    """Grant season-wide awards for any season that has ended and isn't yet awarded.
+    """Grant season-wide awards for any season that has ended and isn't yet
+    awarded, and emit one consolidated ``season_awards_granted`` signal per
+    newly-granted season.
 
     A season is considered ended once a newer season has appeared in
     ``war_races``. We skip seasons that already have at least one ``war_champ``
-    row so the detector is safe to run every heartbeat tick.
+    row so the detector is safe to run every heartbeat tick — and because that
+    guard prevents re-granting, historical seasons (whose awards were already
+    emitted under the old per-award signal pattern) will never re-fire under
+    the new aggregated pattern either.
     """
     rows = conn.execute(
         "SELECT DISTINCT season_id FROM war_races ORDER BY season_id DESC LIMIT 20"
@@ -280,7 +334,12 @@ def detect_season_awards(conn: Optional[sqlite3.Connection] = None) -> list[dict
         ).fetchone()
         if already:
             continue
-        signals.extend(grant_season_awards(season_id, conn))
+        per_award = grant_season_awards(season_id, conn)
+        aggregated = _build_season_awards_signal(
+            season_id, per_award, _signal_date_for_season(conn, season_id),
+        )
+        if aggregated:
+            signals.append(aggregated)
     return signals
 
 
@@ -288,11 +347,17 @@ def detect_season_awards(conn: Optional[sqlite3.Connection] = None) -> list[dict
 def detect_war_participant_awards(
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
-    """Grant War Participant to every active member with fame > 0 this season."""
+    """Grant War Participant to every active member with fame > 0 this season.
+
+    Silent in Discord: the grants land in the awards table (where tools and
+    the site can read them) but no signal is returned. Naming 20+ participants
+    on a post isn't useful; the per-member trophy case is.
+    """
     season_id = db.get_current_season_id(conn=conn)
     if season_id is None:
         return []
-    return grant_war_participant_for_season(season_id, conn)
+    grant_war_participant_for_season(season_id, conn)
+    return []
 
 
 def grant_war_participant_for_season(
