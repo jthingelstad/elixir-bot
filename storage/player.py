@@ -269,9 +269,17 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
 
     # Per-player 4-week cooldown: active pushers set PBs repeatedly and the
     # signal becomes noise. Skip if we fired for this tag within 28 days.
+    # Also require crossing a 100-trophy boundary so routine +30/+60 PB ticks
+    # don't reach the LLM — the channel is for durable milestones, not every
+    # incremental ladder bump.
     old_best = previous["best_trophies"] if previous else None
     new_best = player_data.get("bestTrophies")
-    if isinstance(old_best, int) and isinstance(new_best, int) and new_best > old_best:
+    if (
+        isinstance(old_best, int)
+        and isinstance(new_best, int)
+        and new_best > old_best
+        and (new_best // 100) > (old_best // 100)
+    ):
         # Lazy import: storage.player is imported by db/__init__.py, so a
         # module-level `import db` creates a circular-init failure via
         # storage.tournament → storage.player.

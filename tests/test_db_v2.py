@@ -1640,7 +1640,8 @@ def test_snapshot_player_profile_emits_path_of_legend_promotion_signal():
 
 
 def test_snapshot_player_profile_emits_best_trophies_peak_signal():
-    """v4.7 #28: new personal-best trophies record fires a signal."""
+    """v4.7 #28: new personal-best trophies record fires a signal when the PB
+    crosses a 100-trophy boundary."""
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members(
@@ -1649,12 +1650,12 @@ def test_snapshot_player_profile_emits_best_trophies_peak_signal():
         )
         db.snapshot_player_profile(
             {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
-             "bestTrophies": 8400, "trophies": 8400},
+             "bestTrophies": 8460, "trophies": 8460},
             conn=conn,
         )
         signals = db.snapshot_player_profile(
             {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
-             "bestTrophies": 8460, "trophies": 8460},
+             "bestTrophies": 8520, "trophies": 8520},
             conn=conn,
         )
     finally:
@@ -1662,8 +1663,32 @@ def test_snapshot_player_profile_emits_best_trophies_peak_signal():
 
     peaks = [s for s in signals if s["type"] == "best_trophies_peak"]
     assert len(peaks) == 1
-    assert peaks[0]["old_best"] == 8400
-    assert peaks[0]["new_best"] == 8460
+    assert peaks[0]["old_best"] == 8460
+    assert peaks[0]["new_best"] == 8520
+
+
+def test_snapshot_player_profile_skips_peak_below_100_trophy_boundary():
+    """Routine +30/+60 PB ticks that stay inside the same 100-trophy bucket
+    must not fire — the channel is for durable milestones."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+             "bestTrophies": 8410, "trophies": 8410},
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+             "bestTrophies": 8475, "trophies": 8475},
+            conn=conn,
+        )
+    finally:
+        conn.close()
+    assert not any(s["type"] == "best_trophies_peak" for s in signals)
 
 
 def test_snapshot_player_profile_does_not_emit_peak_when_best_flat():
