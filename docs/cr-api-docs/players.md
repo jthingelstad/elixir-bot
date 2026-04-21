@@ -64,12 +64,20 @@ Get full player profile.
 }
 ```
 - `currentSeason` has no `id` or `rank`
+- `currentSeason.bestTrophies` is optional — absent early in a season until the player exceeds their current trophies. `currentSeason.trophies` is always present when `leagueStatistics` exists. In April 2026 sampling, 7 of 17 players with `leagueStatistics` lacked `currentSeason.bestTrophies`.
 - `previousSeason` and `bestSeason` include `id` (YYYY-MM format) and optional `rank`
+- `previousSeason.bestTrophies` is also optional (observed absent on some early-previous-season carryovers)
 
-**badge shape:**
+**badge shape (progress badge):**
 ```json
 { "name": "Classic12Wins", "level": 1, "maxLevel": 8, "progress": 2, "target": 10, "iconUrls": { "large": "..." } }
 ```
+
+**badge shape (one-time badge):**
+```json
+{ "name": "BeatingDeathBadge", "progress": 1, "iconUrls": { "large": "..." } }
+```
+One-time badges **omit** `level`, `maxLevel`, and `target` entirely (they are not present as `null`). Only `name`, `progress`, and `iconUrls` are guaranteed. Example names observed April 2026: `CrazyArenaBadge1/2/3`, `EasterEgg`, `2025YearBadge`, `BeatingDeathBadge`, `CrlSpectator2024`, `CrlSpectator2022`.
 
 **achievement shape:**
 ```json
@@ -166,36 +174,48 @@ Observed: returns ~30-40 battles (most commonly 30).
 | `pick` | pick-mode friendlies |
 | `draftCompetitive` | competitive draft friendlies, Triple Draft tournaments |
 | `predefined` | preset-deck friendlies (e.g. Mirror Deck) |
+| `quadDeckPick` | 1v1 Duel friendlies (`72000314 Duel_1v1_Friendly`) — 4 decks brought per match |
 
 **Known game mode IDs:**
 
 | ID | Name |
 |----|------|
+| 72000005 | DraftMode |
 | 72000006 | Ladder |
 | 72000007 | Friendly |
-| 72000005 | DraftMode |
-| 72000009 | (tournament mode) |
-| 72000013 | (tournament mode) |
+| 72000009 | Tournament |
+| 72000013 | (tournament mode — listed by Supercell, not observed on the wire March–April 2026) |
 | 72000014 | TeamVsTeam |
 | 72000032 | TripleElixir_Friendly |
 | 72000042 | PickMode |
 | 72000050 | Touchdown_Draft |
-| 72000051 | TeamVsTeam_Touchdown_Draft |
+| 72000051 | TeamVsTeam_Touchdown_Draft (listed, not observed March–April 2026) |
 | 72000060 | Overtime_Ladder |
+| 72000062 | TripleElixir_Ladder |
+| 72000065 | Showdown_Friendly |
+| 72000070 | RampUpElixir_Ladder |
+| 72000071 | Rage_Friendly |
+| 72000073 | Rage_Ladder |
+| 72000087 | ClassicDecks_Friendly |
+| 72000091 | Heist_Friendly |
 | 72000194 | Draft_Competitive |
 | 72000232 | 7xElixir_Friendly |
 | 72000254 | MirrorDeck_Friendly |
+| 72000261 | 7xElixir_Ladder |
 | 72000266 | ClanWar_BoatBattle |
 | 72000267 | CW_Duel_1v1 |
 | 72000268 | CW_Battle_1v1 |
+| 72000314 | Duel_1v1_Friendly |
+| 72000321 | Touchdown_ClanWar |
+| 72000450 | Ranked1v1_NewArena (pre-v2 PoL arena) |
 | 72000464 | Ranked1v1_NewArena2 |
 | 72000469 | DraftMode_Princess |
 | 72000474 | Challenge_AllCards_EventDeck_NoSet |
 | 72000486 | Touchdown_Event |
-| 72000500 | RampUp_Friendly_EventDeck_4Card |
+| 72000500 | RampUp_Friendly_EventDeck_4Card (listed, not observed March–April 2026) |
 | 72000502 | Crazy_Arena |
 
-Note: `gameMode.name` may be absent — tournament game modes often only have `id`.
+Note: `gameMode.name` was observed on 100% of battles across March–April 2026 sampling (all tournament battles included). Earlier notes suggesting `name` might be absent on some tournament modes no longer apply — treat `name` as reliably present.
 
 **Determining battle winner:** There is no explicit `winner` field. Use this order:
 1. If `boatBattleWon` exists, use it.
@@ -307,5 +327,5 @@ Observed error bodies are usually `{ reason, message? }`. `message` may be absen
 - **Tournament battles:** `type=tournament` battles include a `tournamentTag` field that links back to `/tournaments/{tag}`. This allows matching battles to specific tournaments. The `gameMode` distinguishes tournament format: `72000009`/`Tournament` for bring-your-own-deck, `72000194`/`Draft_Competitive` for Triple Draft. In draft tournaments, each battle has different cards (drafted per match); in standard tournaments, players use their `collection` deck.
 - **Tournament battle dedup:** Both players in a match see the same `battleTime`. Dedup key: `battleTime` + sorted pair of `(team[0].tag, opponent[0].tag)`. For tournament winner detection, use crowns comparison (no `trophyChange` field on tournament battles). The `startingTrophies` field on tournament battles reflects tournament score, not ladder trophies.
 - **Tournament battle log retention:** Battle logs are not permanent (~30-40 battles). Tournament battles will rotate out as players play more games. To capture tournament battle data reliably, poll player battle logs shortly after the tournament ends. Battles from a 13-player tournament were partially lost within ~24h due to active players' logs rotating.
-- **Badges:** Two categories — progress badges (with `level`/`maxLevel`/`progress`/`target`) and one-time badges (level=null, just `progress` and `iconUrls`). Mastery badges are per-card (e.g. `MasteryKnight`).
+- **Badges:** Two categories — progress badges (with `level`/`maxLevel`/`progress`/`target`) and one-time badges (`level`, `maxLevel`, and `target` are **absent** — not present as `null` — only `name`, `progress`, and `iconUrls` are guaranteed). Mastery badges are per-card (e.g. `MasteryKnight`).
 - **Achievements:** Fixed set of 12 achievements. `stars` (0-3) indicates completion tier. `completionInfo` is typically null.
