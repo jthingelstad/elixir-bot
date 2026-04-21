@@ -158,12 +158,16 @@ Historical river race results (paginated).
         "fame": 10000,
         "repairPoints": 0,
         "finishTime": "20260309T095604.000Z",
+        "periodPoints": 0,
+        "clanScore": 340,
         "participants": [ /* RiverRaceParticipant array */ ]
       }
     }
   ]
 }
 ```
+
+The embedded clan object is the full `RiverRaceClan` shape (see `models.md`): `periodPoints` and `clanScore` are always present on every standings entry. Both were observed on 200 of 200 standings across 40 log entries sampled April 2026.
 
 - `seasonId` is a sequential integer (e.g. 127, 128, 129, 130) — NOT the YYYY-MM format used for league seasons
 - `sectionIndex` = week within the season. Most seasons are 4 weeks (sections 0-3) but some are 5 weeks (sections 0-4). Supercell varies the war season length to keep it roughly aligned with Pass Royale seasons.
