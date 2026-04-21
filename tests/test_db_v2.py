@@ -3451,6 +3451,125 @@ def test_war_rollup_queries_cover_nonparticipants_and_member_vs_average():
         conn.close()
 
 
+def test_store_war_log_captures_our_clan_score_on_each_race():
+    """riverracelog always carries clanScore on every standing — we want it
+    indexed on war_races for historical war-trophy trending, not buried in
+    raw_json."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "leader", "trophies": 11000, "clanRank": 1}],
+            conn=conn,
+        )
+        db.store_war_log(
+            {
+                "items": [
+                    {
+                        "seasonId": 131,
+                        "sectionIndex": 0,
+                        "createdDate": "20260406T095600.000Z",
+                        "standings": [
+                            {
+                                "rank": 1,
+                                "trophyChange": 20,
+                                "clan": {
+                                    "tag": "#J2RGCRVG",
+                                    "name": "POAP KINGS",
+                                    "badgeId": 16000107,
+                                    "fame": 10000,
+                                    "repairPoints": 0,
+                                    "finishTime": "20260406T095600.000Z",
+                                    "periodPoints": 0,
+                                    "clanScore": 340,
+                                    "participants": [
+                                        {"tag": "#ABC123", "name": "King Levy", "fame": 3600, "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4, "decksUsedToday": 0},
+                                    ],
+                                },
+                            },
+                            {
+                                "rank": 2,
+                                "trophyChange": 10,
+                                "clan": {"tag": "#RIVAL", "name": "Rivals", "fame": 1800, "clanScore": 339, "participants": []},
+                            },
+                        ],
+                    },
+                    {
+                        "seasonId": 131,
+                        "sectionIndex": 1,
+                        "createdDate": "20260413T095600.000Z",
+                        "standings": [
+                            {
+                                "rank": 1,
+                                "trophyChange": 20,
+                                "clan": {
+                                    "tag": "#J2RGCRVG",
+                                    "name": "POAP KINGS",
+                                    "badgeId": 16000107,
+                                    "fame": 10000,
+                                    "repairPoints": 0,
+                                    "finishTime": "20260413T095600.000Z",
+                                    "periodPoints": 0,
+                                    "clanScore": 360,
+                                    "participants": [],
+                                },
+                            }
+                        ],
+                    },
+                ]
+            },
+            "J2RGCRVG",
+            conn=conn,
+        )
+
+        rows = conn.execute(
+            "SELECT section_index, our_clan_score FROM war_races "
+            "WHERE season_id = 131 ORDER BY section_index"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert [r["our_clan_score"] for r in rows] == [340, 360], (
+        "our_clan_score should be captured from the rank-1 standing's clan.clanScore"
+    )
+
+
+def test_migration_31_backfills_our_clan_score_from_raw_json():
+    """Existing war_races rows from before the column existed should be
+    backfilled from raw_json. Simulates a DB where the column was added
+    after ingest by clearing our_clan_score and re-running the migration."""
+    import db._migrations as migrations
+
+    conn = db.get_connection(":memory:")
+    try:
+        conn.execute(
+            "INSERT INTO war_races (season_id, section_index, created_date, our_rank, trophy_change, our_fame, total_clans, finish_time, raw_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                130, 3, "20260401T095600.000Z", 2, -20, 8500, 5, "20260401T095600.000Z",
+                json.dumps({
+                    "seasonId": 130, "sectionIndex": 3, "createdDate": "20260401T095600.000Z",
+                    "standings": [
+                        {"rank": 1, "trophyChange": 100, "clan": {"tag": "#OTHER", "clanScore": 401}},
+                        {"rank": 2, "trophyChange": -20, "clan": {"tag": "#J2RGCRVG", "clanScore": 321}},
+                    ],
+                }),
+            ),
+        )
+        conn.execute("UPDATE war_races SET our_clan_score = NULL WHERE season_id = 130")
+        conn.execute("ALTER TABLE war_races RENAME COLUMN our_clan_score TO _doomed")
+        conn.execute("ALTER TABLE war_races DROP COLUMN _doomed")
+        conn.commit()
+
+        migrations._migration_31(conn)
+
+        row = conn.execute(
+            "SELECT our_clan_score FROM war_races WHERE season_id = 130 AND section_index = 3"
+        ).fetchone()
+        assert row["our_clan_score"] == 321, "backfill should match our rank-2 standing"
+    finally:
+        conn.close()
+
+
 def test_historical_war_log_members_do_not_become_active_roster_members():
     conn = db.get_connection(":memory:")
     try:
