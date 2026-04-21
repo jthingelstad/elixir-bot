@@ -23,6 +23,7 @@ from storage.war_calendar import is_colosseum_week
 from storage.war_status import (
     _format_duration_short as _format_remaining_short,
     _fresh_time_left_seconds,
+    is_colosseum_week_confirmed,
 )
 
 log = logging.getLogger("elixir_heartbeat")
@@ -819,12 +820,13 @@ def build_situation_time(*, war_day_state=None, conn=None):
         max(0, fresh_seconds) // 60 if fresh_seconds is not None else None
     )
     time_left_text = _format_remaining_short(fresh_seconds) or war_day_state.get("time_left_text")
-    is_final_battle_day = (
-        phase == "battle"
-        and day_number is not None
+    final_day_matches_total = (
+        day_number is not None
         and day_total is not None
         and day_number == day_total
     )
+    is_final_battle_day = phase == "battle" and final_day_matches_total
+    is_final_practice_day = phase == "practice" and final_day_matches_total
 
     return {
         "phase": phase,
@@ -836,7 +838,12 @@ def build_situation_time(*, war_day_state=None, conn=None):
         "time_left_seconds": fresh_seconds,
         "time_left_text": time_left_text,
         "is_final_battle_day": is_final_battle_day,
-        "is_colosseum_week": is_colosseum_week(period_type),
+        "is_final_practice_day": is_final_practice_day,
+        "is_colosseum_week": is_colosseum_week_confirmed(
+            period_type,
+            war_day_state.get("trophy_change"),
+            trophy_stakes_known=bool(war_day_state.get("trophy_stakes_known")),
+        ),
         "season_id": war_day_state.get("season_id"),
         "week": war_day_state.get("week"),
         "race_completed": bool(war_day_state.get("race_completed")),

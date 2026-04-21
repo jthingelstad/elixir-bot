@@ -379,6 +379,30 @@ def _fresh_time_left_seconds(war_day_state: dict, *, now=None) -> Optional[int]:
     return max(0, int(stored))
 
 
+def is_colosseum_week_confirmed(
+    period_type: Optional[str],
+    trophy_change: Optional[int] = None,
+    *,
+    trophy_stakes_known: bool = False,
+) -> bool:
+    """True when we have positive evidence the current week is the colosseum
+    (final) week of the season.
+
+    Broader than ``storage.war_calendar.is_colosseum_week``, which only returns
+    True on battle days (``periodType == "colosseum"``). This helper also
+    catches colosseum-week practice days by cross-referencing the logged
+    trophy stakes (±100 only occurs on the colosseum week).
+
+    Kept permissive on inputs so both ``build_situation_time`` and
+    ``build_war_now_context`` can share it.
+    """
+    if period_type == "colosseum":
+        return True
+    if trophy_stakes_known and abs(trophy_change or 0) == 100:
+        return True
+    return False
+
+
 def _format_war_now_text(data: dict) -> str:
     parts = [f"Season {data['season_id']} · Week {data['week']}"]
     phase_with_total = data.get("phase_display")
@@ -386,11 +410,11 @@ def _format_war_now_text(data: dict) -> str:
         phase_with_total = f"{phase_with_total} of {data['day_total']}"
     if phase_with_total:
         parts.append(phase_with_total)
-    if data.get("colosseum_confirmed"):
+    if data.get("is_colosseum_week"):
         parts.append("Colosseum (final week, 100 trophy stakes)")
-    if data.get("final_battle_day_active"):
+    if data.get("is_final_battle_day"):
         parts.append("Final battle day")
-    elif data.get("final_practice_day_active"):
+    elif data.get("is_final_practice_day"):
         parts.append("Final practice day")
 
     lines = ["=== RIVER RACE — CURRENT MOMENT ===", " · ".join(parts)]
@@ -415,7 +439,10 @@ def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> tuple[Op
     Returns (data, text). Returns (None, "") when there is no active war.
 
     The prompt builder and the get_river_race(engagement) tool both call this
-    so the LLM sees identical, fresh time-left values on both surfaces.
+    so the LLM sees identical, fresh time-left values on both surfaces. Field
+    names align with ``build_situation_time`` (``is_colosseum_week``,
+    ``is_final_battle_day``, ``is_final_practice_day``) so both LLM-facing
+    blocks can be referenced by the same field list in subagent prompts.
     """
     status = get_current_war_status(conn=conn) or {}
     if not status or (status.get("war_state") or "").strip() == "notInWar":
@@ -436,13 +463,10 @@ def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> tuple[Op
     fresh_seconds = _fresh_time_left_seconds(day_state) if day_state else None
     time_left_text = _format_duration_short(fresh_seconds)
 
-    trophy_change = status.get("trophy_change")
-    colosseum_confirmed = (
-        period_type == "colosseum"
-        or (
-            status.get("trophy_stakes_known")
-            and abs(trophy_change or 0) == 100
-        )
+    colosseum_week = is_colosseum_week_confirmed(
+        period_type,
+        status.get("trophy_change"),
+        trophy_stakes_known=bool(status.get("trophy_stakes_known")),
     )
 
     data = {
@@ -457,9 +481,9 @@ def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> tuple[Op
         "time_left_text": time_left_text,
         "period_started_at": day_state.get("period_started_at"),
         "period_ends_at": day_state.get("period_ends_at"),
-        "colosseum_confirmed": bool(colosseum_confirmed),
-        "final_battle_day_active": status.get("final_battle_day_active", False),
-        "final_practice_day_active": status.get("final_practice_day_active", False),
+        "is_colosseum_week": bool(colosseum_week),
+        "is_final_battle_day": bool(status.get("final_battle_day_active", False)),
+        "is_final_practice_day": bool(status.get("final_practice_day_active", False)),
         "race_standings": status.get("race_standings") or [],
     }
     data["now_text"] = _format_war_now_text(data)

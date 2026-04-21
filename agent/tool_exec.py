@@ -356,9 +356,13 @@ def _execute_get_river_race(arguments):
             "race_standings": war_status.get("race_standings", []),
             "race_rank": war_status.get("race_rank"),
             "season_week_label": war_status.get("season_week_label"),
-            "colosseum_week": war_status.get("colosseum_week"),
-            "final_battle_day_active": war_status.get("final_battle_day_active"),
-            "final_practice_day_active": war_status.get("final_practice_day_active"),
+            "is_colosseum_week": db.is_colosseum_week_confirmed(
+                war_status.get("period_type"),
+                war_status.get("trophy_change"),
+                trophy_stakes_known=bool(war_status.get("trophy_stakes_known")),
+            ),
+            "is_final_battle_day": bool(war_status.get("final_battle_day_active")),
+            "is_final_practice_day": bool(war_status.get("final_practice_day_active")),
             "trophy_stakes_text": war_status.get("trophy_stakes_text"),
         }
 
