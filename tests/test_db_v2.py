@@ -3143,7 +3143,7 @@ def test_build_war_now_context_battle_day_regular_week():
         assert data["phase_display"] == "Battle Day 2"
         assert data["day_number"] == 2
         assert data["day_total"] == 4
-        assert data["colosseum_confirmed"] is False
+        assert data["is_colosseum_week"] is False
         assert "RIVER RACE — CURRENT MOMENT" in text
         assert "Battle Day 2 of 4" in text
         assert "Colosseum" not in text
@@ -3170,7 +3170,7 @@ def test_build_war_now_context_confirms_colosseum_on_live_period_type():
     try:
         _seed_active_war(conn, section_index=4, period_index=31, period_type="colosseum")
         data, text = db.build_war_now_context(conn=conn)
-        assert data["colosseum_confirmed"] is True
+        assert data["is_colosseum_week"] is True
         assert "Colosseum (final week, 100 trophy stakes)" in text
     finally:
         conn.close()
@@ -3248,7 +3248,7 @@ def test_build_war_now_context_confirms_colosseum_from_logged_trophy_stakes():
         data, text = db.build_war_now_context(conn=conn)
         assert data["period_type"] == "training"
         assert data["phase"] == "practice"
-        assert data["colosseum_confirmed"] is True
+        assert data["is_colosseum_week"] is True
         assert "Colosseum (final week, 100 trophy stakes)" in text
     finally:
         conn.close()

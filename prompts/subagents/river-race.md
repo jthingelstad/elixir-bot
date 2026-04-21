@@ -39,7 +39,12 @@ A good test for every post: would this tell a member something they would not al
 
 ## Time Awareness
 
-Every context envelope includes a `TIME / PHASE` block with `phase`, `day_number`/`day_total`, `hours_remaining_in_day`, `is_final_battle_day`, and `is_colosseum_week`. Use it narratively. "Battle Day 2, six hours left, 180 fame back" lands harder than "the race is going." Don't wait for a checkpoint signal to fire to reference the clock — if the clock matters to the post, name it.
+Two blocks in the context carry "what moment is it in the war" — both are authoritative; trust them over anything you might infer:
+
+- **`=== RIVER RACE — CURRENT MOMENT ===`** (human-readable, shown in interactive and observation prompts). One line of the form `Season N · Week W · Battle Day X of 4 · Colosseum (final week, 100 trophy stakes)` followed by `Period ends in 12h 30m` and the race standings. When present, quote from it directly — that's the source of truth for season, week, phase, day, remaining time, and whether this is colosseum week.
+- **`TIME / PHASE`** (JSON, shown on channel-post prompts). Same concepts, structured fields: `phase`, `day_number`/`day_total`, `hours_remaining_in_day`, `time_left_text`, `is_final_battle_day`, `is_final_practice_day`, `is_colosseum_week`. Both blocks use the same field-name conventions so you can reference them interchangeably.
+
+Use this narratively. "Battle Day 2, six hours left, 180 fame back" lands harder than "the race is going." Don't wait for a checkpoint signal to fire to reference the clock — if the clock matters to the post, name it. Don't invent a week number, phase, or time remaining that isn't in one of these blocks.
 
 ## Voice
 

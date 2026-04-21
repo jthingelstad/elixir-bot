@@ -379,15 +379,21 @@ def test_execute_tool_get_river_race_standings():
             "race_rank": 1,
             "race_standings": [{"rank": 1, "clan_name": "POAP KINGS", "fame": 5000, "is_us": True}],
             "season_week_label": "Season 129 Week 1",
-            "colosseum_week": False,
+            "period_type": "warDay",
+            "trophy_change": -20,
+            "trophy_stakes_known": True,
             "final_battle_day_active": False,
             "final_practice_day_active": False,
             "trophy_stakes_text": "20 trophies",
         }
+        mock_db.is_colosseum_week_confirmed.return_value = False
         result = json.loads(elixir_agent._execute_tool("get_river_race", {}))
         assert result["race_standings"][0]["clan_name"] == "POAP KINGS"
         assert result["race_rank"] == 1
         assert result["trophy_stakes_text"] == "20 trophies"
+        assert result["is_colosseum_week"] is False
+        assert result["is_final_battle_day"] is False
+        assert result["is_final_practice_day"] is False
         mock_db.get_current_war_status.assert_called_once()
 
 
@@ -406,9 +412,9 @@ def test_execute_tool_get_river_race_engagement():
                 "time_left_text": "3h 20m",
                 "period_started_at": "2026-03-05T10:00:00Z",
                 "period_ends_at": "2026-03-06T10:00:00Z",
-                "colosseum_confirmed": False,
-                "final_battle_day_active": False,
-                "final_practice_day_active": False,
+                "is_colosseum_week": False,
+                "is_final_battle_day": False,
+                "is_final_practice_day": False,
                 "race_standings": [],
                 "now_text": "=== RIVER RACE — CURRENT MOMENT ===\nSeason 129 · Week 1 · Battle Day 1 of 4\nPeriod ends in 3h 20m",
             },
@@ -577,9 +583,9 @@ def test_respond_in_channel_injects_war_context_for_war_talk():
                 "day_number": 2,
                 "day_total": 4,
                 "time_left_text": "12h 30m",
-                "colosseum_confirmed": False,
-                "final_battle_day_active": False,
-                "final_practice_day_active": False,
+                "is_colosseum_week": False,
+                "is_final_battle_day": False,
+                "is_final_practice_day": False,
                 "race_standings": [
                     {"rank": 1, "clan_name": "POAP KINGS", "fame": 12000, "is_us": True},
                     {"rank": 2, "clan_name": "Dragon Riders", "fame": 11000, "is_us": False},
