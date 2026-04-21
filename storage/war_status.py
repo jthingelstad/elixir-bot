@@ -352,6 +352,120 @@ def _format_duration_short(total_seconds: Optional[int]) -> Optional[str]:
     return f"{minutes}m"
 
 
+def _fresh_time_left_seconds(war_day_state: dict, *, now=None) -> Optional[int]:
+    """Seconds remaining in the current war day, re-anchored against wall clock.
+
+    The CR API's stored ``time_left_seconds`` is only accurate at the moment we
+    polled — it drifts within minutes. ``period_ends_at`` is anchored on the
+    per-season ``finishTime`` so the true remaining time is
+    ``period_ends_at - now`` regardless of how stale the last poll is.
+    Falls back to the stored ``time_left_seconds`` when ``period_ends_at`` is
+    unavailable.
+    """
+    ends_at = war_day_state.get("period_ends_at")
+    if ends_at:
+        try:
+            ends_dt = datetime.fromisoformat(str(ends_at).replace("Z", "+00:00"))
+            if ends_dt.tzinfo is None:
+                ends_dt = ends_dt.replace(tzinfo=timezone.utc)
+            current = now or datetime.now(timezone.utc)
+            remaining = int((ends_dt - current).total_seconds())
+            return max(0, remaining)
+        except (ValueError, TypeError):
+            pass
+    stored = war_day_state.get("time_left_seconds")
+    if stored is None:
+        return None
+    return max(0, int(stored))
+
+
+def _format_war_now_text(data: dict) -> str:
+    parts = [f"Season {data['season_id']} · Week {data['week']}"]
+    phase_with_total = data.get("phase_display")
+    if phase_with_total and data.get("day_total"):
+        phase_with_total = f"{phase_with_total} of {data['day_total']}"
+    if phase_with_total:
+        parts.append(phase_with_total)
+    if data.get("colosseum_confirmed"):
+        parts.append("Colosseum (final week, 100 trophy stakes)")
+    if data.get("final_battle_day_active"):
+        parts.append("Final battle day")
+    elif data.get("final_practice_day_active"):
+        parts.append("Final practice day")
+
+    lines = ["=== RIVER RACE — CURRENT MOMENT ===", " · ".join(parts)]
+    if data.get("time_left_text"):
+        lines.append(f"Period ends in {data['time_left_text']}")
+
+    standings = data.get("race_standings") or []
+    if standings:
+        lines.append("Race standings:")
+        for clan in standings:
+            marker = " (us)" if clan.get("is_us") else ""
+            lines.append(
+                f"  {clan['rank']}. {clan.get('clan_name', '?')}{marker} | "
+                f"{clan.get('fame', 0):,} fame"
+            )
+    return "\n".join(lines)
+
+
+def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> tuple[Optional[dict], str]:
+    """Single source of truth for 'what moment is it in the war' for LLM consumption.
+
+    Returns (data, text). Returns (None, "") when there is no active war.
+
+    The prompt builder and the get_river_race(engagement) tool both call this
+    so the LLM sees identical, fresh time-left values on both surfaces.
+    """
+    status = get_current_war_status(conn=conn) or {}
+    if not status or (status.get("war_state") or "").strip() == "notInWar":
+        return None, ""
+    # Day-state carries the period_ends_at anchor + fresh time fields; it
+    # requires war_participant_snapshots, so it may be None early in a week.
+    day_state = get_current_war_day_state(conn=conn) or {}
+
+    period_type = status.get("period_type")
+    phase = status.get("phase")
+    if phase == "battle":
+        day_number = status.get("battle_day_number")
+        day_total = status.get("battle_day_total")
+    else:
+        day_number = status.get("practice_day_number")
+        day_total = status.get("practice_day_total")
+
+    fresh_seconds = _fresh_time_left_seconds(day_state) if day_state else None
+    time_left_text = _format_duration_short(fresh_seconds)
+
+    trophy_change = status.get("trophy_change")
+    colosseum_confirmed = (
+        period_type == "colosseum"
+        or (
+            status.get("trophy_stakes_known")
+            and abs(trophy_change or 0) == 100
+        )
+    )
+
+    data = {
+        "season_id": status.get("season_id"),
+        "week": status.get("week"),
+        "phase": phase,
+        "phase_display": status.get("phase_display"),
+        "day_number": day_number,
+        "day_total": day_total,
+        "period_type": period_type,
+        "time_left_seconds": fresh_seconds,
+        "time_left_text": time_left_text,
+        "period_started_at": day_state.get("period_started_at"),
+        "period_ends_at": day_state.get("period_ends_at"),
+        "colosseum_confirmed": bool(colosseum_confirmed),
+        "final_battle_day_active": status.get("final_battle_day_active", False),
+        "final_practice_day_active": status.get("final_practice_day_active", False),
+        "race_standings": status.get("race_standings") or [],
+    }
+    data["now_text"] = _format_war_now_text(data)
+    return data, data["now_text"]
+
+
 def _decorate_participant(conn, row: dict, *, fame_today: Optional[int] = None) -> dict:
     item = {
         "tag": row.get("player_tag") or row.get("tag"),

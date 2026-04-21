@@ -363,19 +363,13 @@ def _execute_get_river_race(arguments):
         }
 
     if aspect == "engagement":
-        day_state = db.get_current_war_day_state()
-        if not isinstance(day_state, dict):
+        data, _text = db.build_war_now_context()
+        if not data:
             return {"error": "No active war data available."}
-        return {
+        day_state = db.get_current_war_day_state() or {}
+        data.update({
             "war_day_key": day_state.get("war_day_key"),
-            "phase": day_state.get("phase"),
-            "phase_display": day_state.get("phase_display"),
-            "day_number": day_state.get("day_number"),
-            "day_total": day_state.get("day_total"),
             "clan_fame": day_state.get("clan_fame"),
-            "period_started_at": day_state.get("period_started_at"),
-            "period_ends_at": day_state.get("period_ends_at"),
-            "time_left_text": day_state.get("time_left_text"),
             "total_participants": day_state.get("total_participants"),
             "engaged_count": day_state.get("engaged_count"),
             "finished_count": day_state.get("finished_count"),
@@ -385,7 +379,8 @@ def _execute_get_river_race(arguments):
             "used_all_4": day_state.get("used_all_4"),
             "used_some": day_state.get("used_some"),
             "used_none": day_state.get("used_none"),
-        }
+        })
+        return data
 
     return {"error": f"Unknown aspect: {aspect}"}
 

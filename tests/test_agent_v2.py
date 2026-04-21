@@ -393,12 +393,29 @@ def test_execute_tool_get_river_race_standings():
 
 def test_execute_tool_get_river_race_engagement():
     with patch("elixir_agent.db") as mock_db:
+        mock_db.build_war_now_context.return_value = (
+            {
+                "season_id": 129,
+                "week": 1,
+                "phase": "battle",
+                "phase_display": "Battle Day 1",
+                "day_number": 1,
+                "day_total": 4,
+                "period_type": "warDay",
+                "time_left_seconds": 12000,
+                "time_left_text": "3h 20m",
+                "period_started_at": "2026-03-05T10:00:00Z",
+                "period_ends_at": "2026-03-06T10:00:00Z",
+                "colosseum_confirmed": False,
+                "final_battle_day_active": False,
+                "final_practice_day_active": False,
+                "race_standings": [],
+                "now_text": "=== RIVER RACE — CURRENT MOMENT ===\nSeason 129 · Week 1 · Battle Day 1 of 4\nPeriod ends in 3h 20m",
+            },
+            "=== RIVER RACE — CURRENT MOMENT ===\nSeason 129 · Week 1 · Battle Day 1 of 4\nPeriod ends in 3h 20m",
+        )
         mock_db.get_current_war_day_state.return_value = {
             "war_day_key": "s00129-w01-p010",
-            "phase": "battle",
-            "phase_display": "Battle Day 1",
-            "day_number": 1,
-            "day_total": 4,
             "clan_fame": 5000,
             "total_participants": 40,
             "engaged_count": 30,
@@ -407,9 +424,11 @@ def test_execute_tool_get_river_race_engagement():
         }
         result = json.loads(elixir_agent._execute_tool("get_river_race", {"aspect": "engagement"}))
         assert result["phase_display"] == "Battle Day 1"
+        assert result["time_left_text"] == "3h 20m"
         assert result["engaged_count"] == 30
         assert result["untouched_count"] == 10
-        mock_db.get_current_war_day_state.assert_called_once()
+        assert "RIVER RACE — CURRENT MOMENT" in result["now_text"]
+        mock_db.build_war_now_context.assert_called_once()
 
 
 def test_execute_tool_get_member_war_detail_attendance_resolves_member():
@@ -527,7 +546,7 @@ def test_respond_in_channel_keeps_ask_elixir_lightweight_followups_focused():
 def test_respond_in_channel_uses_clanops_workflow():
     with (
         patch("elixir_agent._chat_with_tools", return_value=None) as mock_chat,
-        patch("agent.workflows.db.get_current_war_status", return_value=None),
+        patch("agent.workflows.db.build_war_now_context", return_value=(None, "")),
     ):
         result = elixir_agent.respond_in_channel(
             question="We should review promotions this week.",
@@ -549,18 +568,30 @@ def test_respond_in_channel_injects_war_context_for_war_talk():
     with (
         patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "ok"}) as mock_chat,
         patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
-        patch("agent.workflows.db.get_current_war_status", return_value={
-            "state": "warDay",
-            "phase_display": "Battle Day 2",
-            "season_week_label": "Season 129 Week 3",
-            "colosseum_week": False,
-            "final_battle_day_active": False,
-            "final_practice_day_active": False,
-            "race_standings": [
-                {"rank": 1, "clan_name": "POAP KINGS", "fame": 12000, "is_us": True},
-                {"rank": 2, "clan_name": "Dragon Riders", "fame": 11000, "is_us": False},
-            ],
-        }),
+        patch("agent.workflows.db.build_war_now_context", return_value=(
+            {
+                "season_id": 129,
+                "week": 3,
+                "phase": "battle",
+                "phase_display": "Battle Day 2",
+                "day_number": 2,
+                "day_total": 4,
+                "time_left_text": "12h 30m",
+                "colosseum_confirmed": False,
+                "final_battle_day_active": False,
+                "final_practice_day_active": False,
+                "race_standings": [
+                    {"rank": 1, "clan_name": "POAP KINGS", "fame": 12000, "is_us": True},
+                    {"rank": 2, "clan_name": "Dragon Riders", "fame": 11000, "is_us": False},
+                ],
+            },
+            "=== RIVER RACE — CURRENT MOMENT ===\n"
+            "Season 129 · Week 3 · Battle Day 2 of 4\n"
+            "Period ends in 12h 30m\n"
+            "Race standings:\n"
+            "  1. POAP KINGS (us) | 12,000 fame\n"
+            "  2. Dragon Riders | 11,000 fame",
+        )),
     ):
         elixir_agent.respond_in_channel(
             question="How's the race going?",
@@ -573,7 +604,7 @@ def test_respond_in_channel_injects_war_context_for_war_talk():
             memory_context={},
         )
         user_msg = mock_chat.call_args.args[1]
-        assert "RIVER RACE STATUS" in user_msg
+        assert "RIVER RACE — CURRENT MOMENT" in user_msg
         assert "POAP KINGS" in user_msg
         assert "Dragon Riders" in user_msg
 
@@ -595,8 +626,8 @@ def test_respond_in_channel_omits_war_context_for_non_war_question():
             memory_context={},
         )
         user_msg = mock_chat.call_args.args[1]
-        assert "RIVER RACE STATUS" not in user_msg
-        assert "=== WAR STATUS ===" not in user_msg
+        assert "RIVER RACE — CURRENT MOMENT" not in user_msg
+        assert "=== WAR DECKS TODAY ===" not in user_msg
 
 
 def _mock_anthropic_response(text="ok", input_tokens=10, output_tokens=20):
