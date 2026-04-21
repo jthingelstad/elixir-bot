@@ -3077,6 +3077,192 @@ def test_current_war_status_supports_absolute_training_period_index_and_period_l
         conn.close()
 
 
+def _seed_active_war(conn, *, section_index=1, period_index=10, period_type="warDay"):
+    """Seed a minimal current-war-state row so build_war_now_context() has data."""
+    db.store_war_log(
+        {
+            "items": [
+                {
+                    "seasonId": 130,
+                    "sectionIndex": 0,
+                    "createdDate": "20260301T120000.000Z",
+                    "standings": [
+                        {
+                            "rank": 1,
+                            "clan": {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 10000},
+                        }
+                    ],
+                }
+            ]
+        },
+        "J2RGCRVG",
+        conn=conn,
+    )
+    db.upsert_war_current_state(
+        {
+            "state": "full",
+            "sectionIndex": section_index,
+            "periodIndex": period_index,
+            "periodType": period_type,
+            "clan": {
+                "tag": "#J2RGCRVG",
+                "name": "POAP KINGS",
+                "fame": 0,
+                "repairPoints": 0,
+                "periodPoints": 0,
+                "clanScore": 140,
+                "participants": [],
+            },
+            "clans": [
+                {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 0, "repairPoints": 0, "periodPoints": 0},
+                {"tag": "#OTHER1", "name": "Dragon Riders", "fame": 3950, "repairPoints": 0, "periodPoints": 0},
+            ],
+            "periodLogs": [],
+        },
+        conn=conn,
+    )
+
+
+def test_build_war_now_context_returns_none_when_no_war():
+    conn = db.get_connection(":memory:")
+    try:
+        data, text = db.build_war_now_context(conn=conn)
+        assert data is None
+        assert text == ""
+    finally:
+        conn.close()
+
+
+def test_build_war_now_context_battle_day_regular_week():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_active_war(conn, section_index=1, period_index=11, period_type="warDay")
+        data, text = db.build_war_now_context(conn=conn)
+        assert data is not None
+        assert data["phase"] == "battle"
+        assert data["phase_display"] == "Battle Day 2"
+        assert data["day_number"] == 2
+        assert data["day_total"] == 4
+        assert data["colosseum_confirmed"] is False
+        assert "RIVER RACE — CURRENT MOMENT" in text
+        assert "Battle Day 2 of 4" in text
+        assert "Colosseum" not in text
+    finally:
+        conn.close()
+
+
+def test_build_war_now_context_practice_day():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_active_war(conn, section_index=1, period_index=8, period_type="training")
+        data, text = db.build_war_now_context(conn=conn)
+        assert data["phase"] == "practice"
+        assert data["phase_display"] == "Practice Day 2"
+        assert data["day_total"] == 3
+        assert "Practice Day 2 of 3" in text
+        assert "Colosseum" not in text
+    finally:
+        conn.close()
+
+
+def test_build_war_now_context_confirms_colosseum_on_live_period_type():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_active_war(conn, section_index=4, period_index=31, period_type="colosseum")
+        data, text = db.build_war_now_context(conn=conn)
+        assert data["colosseum_confirmed"] is True
+        assert "Colosseum (final week, 100 trophy stakes)" in text
+    finally:
+        conn.close()
+
+
+def test_build_war_now_context_confirms_colosseum_from_logged_trophy_stakes():
+    """During colosseum-week practice days periodType is 'training'; we still
+    confirm Colosseum when the /riverracelog entry for this section shows
+    trophy_change == ±100."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.store_war_log(
+            {
+                "items": [
+                    {
+                        "seasonId": 130,
+                        "sectionIndex": 4,
+                        "createdDate": "20260401T120000.000Z",
+                        "standings": [
+                            {
+                                "rank": 1,
+                                "clan": {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 10000},
+                                "trophyChange": 100,
+                            },
+                            {
+                                "rank": 2,
+                                "clan": {"tag": "#OTHER1", "name": "Dragon Riders", "fame": 9500},
+                                "trophyChange": 40,
+                            },
+                            {
+                                "rank": 3,
+                                "clan": {"tag": "#OTHER2", "name": "Flame", "fame": 9000},
+                                "trophyChange": -20,
+                            },
+                            {
+                                "rank": 4,
+                                "clan": {"tag": "#OTHER3", "name": "Rivals", "fame": 8500},
+                                "trophyChange": -60,
+                            },
+                            {
+                                "rank": 5,
+                                "clan": {"tag": "#OTHER4", "name": "Bottom", "fame": 8000},
+                                "trophyChange": -100,
+                            },
+                        ],
+                    }
+                ]
+            },
+            "J2RGCRVG",
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "sectionIndex": 4,
+                "periodIndex": 30,
+                "periodType": "training",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 0,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 140,
+                    "participants": [],
+                },
+                "clans": [
+                    {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 0},
+                ],
+                "periodLogs": [],
+            },
+            conn=conn,
+        )
+
+        data, text = db.build_war_now_context(conn=conn)
+        assert data["period_type"] == "training"
+        assert data["phase"] == "practice"
+        assert data["colosseum_confirmed"] is True
+        assert "Colosseum (final week, 100 trophy stakes)" in text
+    finally:
+        conn.close()
+
+
+def test_fresh_time_left_seconds_uses_now_anchor():
+    from datetime import datetime, timezone
+    from storage.war_status import _fresh_time_left_seconds
+
+    state = {"period_ends_at": "2026-04-21T10:00:00Z"}
+    frozen_now = datetime(2026, 4, 21, 7, 0, tzinfo=timezone.utc)
+    assert _fresh_time_left_seconds(state, now=frozen_now) == 3 * 60 * 60
+
+
 def test_resolution_and_roster_summary_queries_use_v2_identity_data():
     conn = db.get_connection(":memory:")
     try:

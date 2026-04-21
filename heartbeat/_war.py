@@ -20,6 +20,10 @@ from heartbeat._helpers import (
     _war_signal_date_for_values,
 )
 from storage.war_calendar import is_colosseum_week
+from storage.war_status import (
+    _format_duration_short as _format_remaining_short,
+    _fresh_time_left_seconds,
+)
 
 log = logging.getLogger("elixir_heartbeat")
 
@@ -784,47 +788,6 @@ def detect_war_week_complete(completion_signals, conn=None):
             "week_summary": week_summary,
         })
     return signals
-
-
-def _fresh_time_left_seconds(war_day_state: dict, *, now=None) -> int | None:
-    """Return the seconds remaining in the current war day, computed from
-    wall-clock time against the period's known end.
-
-    The CR API's ``time_left_seconds`` is only accurate at the moment we
-    polled — within minutes of a poll, it drifts. ``period_ends_at`` is
-    anchored on the per-season ``finishTime`` (see #20) so the true
-    remaining time is simply ``period_ends_at - now`` and is second-accurate
-    regardless of how stale the last poll is.
-
-    Falls back to the stored ``time_left_seconds`` when ``period_ends_at``
-    isn't available, preserving behavior for edge cases.
-    """
-    ends_at = war_day_state.get("period_ends_at")
-    if ends_at:
-        try:
-            ends_dt = datetime.fromisoformat(str(ends_at).replace("Z", "+00:00"))
-            if ends_dt.tzinfo is None:
-                ends_dt = ends_dt.replace(tzinfo=timezone.utc)
-            current = now or datetime.now(timezone.utc)
-            remaining = int((ends_dt - current).total_seconds())
-            return max(0, remaining)
-        except (ValueError, TypeError):
-            pass
-    stored = war_day_state.get("time_left_seconds")
-    if stored is None:
-        return None
-    return max(0, int(stored))
-
-
-def _format_remaining_short(total_seconds: int | None) -> str | None:
-    if total_seconds is None:
-        return None
-    seconds = max(0, int(total_seconds))
-    hours, rem = divmod(seconds, 3600)
-    minutes = rem // 60
-    if hours:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m"
 
 
 def build_situation_time(*, war_day_state=None, conn=None):

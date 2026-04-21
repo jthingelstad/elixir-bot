@@ -52,37 +52,13 @@ def _clan_trend_prompt_context(days=30, window_days=7):
 
 
 def _war_status_prompt_context():
-    """Build a compact war status context string with competing clan standings."""
+    """Return the single 'war now' block shared with the get_river_race tool."""
     try:
-        status = db.get_current_war_status()
+        _, text = db.build_war_now_context()
     except Exception as exc:
         log.warning("War status context unavailable: %s", exc)
         return ""
-    if not status or status.get("state") in (None, "notInWar"):
-        return ""
-    lines = ["=== RIVER RACE STATUS ==="]
-    phase_display = status.get("phase_display") or status.get("phase", "unknown")
-    season_week = status.get("season_week_label") or ""
-    if season_week:
-        lines.append(f"{season_week} | {phase_display}")
-    else:
-        lines.append(phase_display)
-    if status.get("colosseum_week"):
-        lines.append("Colosseum week (100 trophy stakes)")
-    if status.get("final_battle_day_active"):
-        lines.append("FINAL BATTLE DAY")
-    elif status.get("final_practice_day_active"):
-        lines.append("Final practice day")
-    standings = status.get("race_standings") or []
-    if standings:
-        lines.append("Race standings:")
-        for clan in standings:
-            marker = " (us)" if clan.get("is_us") else ""
-            lines.append(
-                f"  {clan['rank']}. {clan.get('clan_name', '?')}{marker} | "
-                f"{clan.get('fame', 0):,} fame"
-            )
-    return "\n".join(lines)
+    return text or ""
 
 
 _WAR_MENTION_PATTERNS = tuple(re.compile(pat, re.IGNORECASE) for pat in (

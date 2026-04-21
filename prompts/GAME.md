@@ -76,7 +76,7 @@ Prioritize clear guidance, not wiki-style completeness.
 - `Duel`: best-of-3 using up to 3 war decks; often a strong value play.
 - `Rotating Game Mode`: special limited-time battle mode for war.
 - `Boat Battle`: attack enemy boat defenses to slow another clan.
-- `Colosseum`: the battle mode used during the final week of a 5-week season. There are no boat battles and no boat defenses during Colosseum week. Only Colosseum duels and 1v1s are available for war attacks.
+- `Colosseum`: the battle mode used during the final week of a River Race season. There are no boat battles and no boat defenses during Colosseum week. Only Colosseum duels and 1v1s are available for war attacks.
 
 ## Colosseum Week
 

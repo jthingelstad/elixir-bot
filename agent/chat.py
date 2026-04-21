@@ -630,18 +630,16 @@ def _clan_context(clan_data, war_data, roster_data=None, max_members=MAX_CONTEXT
     result = f"=== CLAN ROSTER ===\n" + "\n".join(member_summary)
 
     if include_war:
-        war_summary = "No active war data."
+        deck_summary = "No active war data."
         if war_data and war_data.get("state") not in (None, "notInWar"):
             parts = war_data.get("clan", {}).get("participants", [])
-            fame = war_data.get("clan", {}).get("fame", 0)
             used = [p["name"] for p in parts if p.get("decksUsedToday", 0) > 0]
             unused = [p["name"] for p in parts if p.get("decksUsedToday", 0) == 0]
-            war_summary = (
-                f"River Race state: {war_data.get('state')} | fame: {fame:,} | "
+            deck_summary = (
                 f"battled today: {', '.join(used) or 'nobody'} | "
                 f"not yet: {', '.join(unused) or 'everyone done'}"
             )
-        result += f"\n\n=== WAR STATUS ===\n{war_summary}"
+        result += f"\n\n=== WAR DECKS TODAY ===\n{deck_summary}"
 
     return result
 
