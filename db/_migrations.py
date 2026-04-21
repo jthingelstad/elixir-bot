@@ -346,6 +346,7 @@ def _migration_0(conn: sqlite3.Connection) -> None:
             our_rank INTEGER,
             trophy_change INTEGER,
             our_fame INTEGER,
+            our_clan_score INTEGER,
             total_clans INTEGER,
             finish_time TEXT,
             raw_json TEXT,
@@ -1505,7 +1506,39 @@ def _migration_30(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30]
+def _migration_31(conn: sqlite3.Connection) -> None:
+    """Capture our clan's war-trophy count (clanScore) per historical river-race
+    week. The value was always present on every riverracelog standing but
+    store_war_log never extracted it, leaving it only in raw_json. Backfill
+    from raw_json by matching our standings entry via the existing our_rank.
+    """
+    columns = _table_columns(conn, "war_races")
+    if "our_clan_score" in columns:
+        return
+    conn.execute("ALTER TABLE war_races ADD COLUMN our_clan_score INTEGER")
+    rows = conn.execute(
+        "SELECT war_race_id, our_rank, raw_json FROM war_races "
+        "WHERE raw_json IS NOT NULL AND our_rank IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        try:
+            entry = json.loads(row["raw_json"])
+        except (TypeError, ValueError):
+            continue
+        for standing in (entry or {}).get("standings") or []:
+            if standing.get("rank") != row["our_rank"]:
+                continue
+            clan_score = (standing.get("clan") or {}).get("clanScore")
+            if clan_score is None:
+                break
+            conn.execute(
+                "UPDATE war_races SET our_clan_score = ? WHERE war_race_id = ?",
+                (clan_score, row["war_race_id"]),
+            )
+            break
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

@@ -144,8 +144,8 @@ def store_war_log(race_log, clan_tag, conn=None):
         our_rank = our.get("rank") if our else None
         clan = (our or {}).get("clan", {})
         cur = conn.execute(
-            "INSERT OR IGNORE INTO war_races (season_id, section_index, created_date, our_rank, trophy_change, our_fame, total_clans, finish_time, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (season_id, section_index, entry.get("createdDate"), our_rank, trophy_change, clan.get("fame"), total_clans, clan.get("finishTime"), _json_or_none(entry)),
+            "INSERT OR IGNORE INTO war_races (season_id, section_index, created_date, our_rank, trophy_change, our_fame, our_clan_score, total_clans, finish_time, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (season_id, section_index, entry.get("createdDate"), our_rank, trophy_change, clan.get("fame"), clan.get("clanScore"), total_clans, clan.get("finishTime"), _json_or_none(entry)),
         )
         if cur.rowcount == 0:
             race_row = conn.execute("SELECT war_race_id FROM war_races WHERE season_id = ? AND section_index = ?", (season_id, section_index)).fetchone()
