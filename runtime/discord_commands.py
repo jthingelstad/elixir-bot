@@ -298,6 +298,17 @@ def register_elixir_app_commands(bot) -> None:
             write=True,
         )
 
+    @signal_commands.command(name="backfill-joins", description=COMMAND_SPECS["signal.backfill-joins"].description)
+    @app_commands.describe(preview="Preview which members would be welcomed without sending anything.")
+    async def slash_signal_backfill_joins(interaction: discord.Interaction, preview: bool = False):
+        await run_admin_interaction(
+            interaction,
+            command_name="signal.backfill-joins",
+            preview=preview,
+            event_type=COMMAND_SPECS["signal.backfill-joins"].event_type,
+            write=True,
+        )
+
     ACTIVITY_CHOICES = [
         app_commands.Choice(name=label, value=value)
         for label, value in manual_activity_choices()
