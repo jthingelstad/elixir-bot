@@ -465,18 +465,51 @@ async def _site_content_cycle():
         runtime_status.mark_job_failure("site_content_cycle", str(e))
 
 
+def _strip_leading_bold_header(text: str) -> str:
+    """Remove a standalone **bold line** at the start of text (LLM sub-headers)."""
+    import re as _re
+    lines = text.splitlines()
+    while lines and _re.match(r"^\*{1,3}[^*\n]+\*{1,3}\s*$", (lines[0] or "").strip()):
+        lines = lines[1:]
+        while lines and not (lines[0] or "").strip():
+            lines = lines[1:]
+    return "\n".join(lines)
+
+
+def _plain_description(text: str, fallback: str | None = None, max_len: int = 160) -> str:
+    """Extract a single-line plain-text description from markdown body text.
+
+    Fills as much of max_len as possible with complete sentences from the first
+    paragraph. Strips markdown bold/italic markers and collapses whitespace.
+    """
+    import re as _re
+    source = (fallback or text or "").strip()
+    # Use only the first paragraph to avoid grabbing across paragraph breaks
+    first_para = source.split("\n\n")[0].replace("\n", " ").strip()
+    # Strip bold/italic markers (**x**, *x*, __x__, _x_)
+    plain = _re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", first_para)
+    plain = _re.sub(r"_{1,2}([^_\n]+)_{1,2}", r"\1", plain)
+    plain = " ".join(plain.split())
+    if len(plain) <= max_len:
+        return plain
+    # Truncate at the last sentence boundary before max_len
+    truncated = plain[:max_len]
+    m = list(_re.finditer(r"\.\s", truncated))
+    if m:
+        return truncated[: m[-1].end()].strip()
+    # No sentence boundary — truncate at word boundary
+    word_end = truncated.rfind(" ")
+    return (truncated[:word_end] if word_end > 0 else truncated).rstrip(".,;:") + "..."
+
+
 def _publish_weekly_recap_blog_post(recap_text: str, *, now: datetime | None = None) -> dict[str, object]:
     from runtime.app import CHICAGO
     from runtime.jobs._signals import _strip_weekly_recap_header
     current = (now or datetime.now(timezone.utc)).astimezone(CHICAGO)
     date_str = current.strftime("%Y-%m-%d")
-    body = _strip_weekly_recap_header(recap_text).strip()
+    body = _strip_leading_bold_header(_strip_weekly_recap_header(recap_text).strip())
 
-    first_sentence = (body.split(".")[0] + ".").strip()
-    if len(first_sentence) > 140:
-        first_sentence = first_sentence[:137] + "..."
-    description = first_sentence
-
+    description = _plain_description(body)
     title = f"Weekly Clan Recap — {current.strftime('%B')} {current.day}, {current.year}"
     frontmatter = (
         f"---\n"
@@ -518,9 +551,7 @@ def _publish_member_join_blog_post(
         title = "New Members Join POAP KINGS"
         slug = "new-members"
 
-    description = (summary or (body.split(".")[0] + ".").strip())
-    if len(description) > 140:
-        description = description[:137] + "..."
+    description = _plain_description(body, fallback=summary)
     frontmatter = (
         f"---\n"
         f'title: "{title}"\n'
