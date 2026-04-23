@@ -932,7 +932,7 @@ async def _load_live_clan_context():
                     live_recent_joins,
                     key=lambda item: (item.get("current_name") or "").lower(),
                 )
-        await asyncio.to_thread(db.snapshot_members, member_list)
+        await asyncio.to_thread(db.snapshot_members, member_list, create_if_missing=False)
         await asyncio.to_thread(db.snapshot_clan_daily_metrics, clan)
     try:
         war = await asyncio.to_thread(cr_api.get_current_war)

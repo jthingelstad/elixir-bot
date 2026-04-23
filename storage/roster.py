@@ -89,7 +89,7 @@ def _card_mode_fields(card: dict) -> dict:
 
 
 @managed_connection
-def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection] = None) -> int:
+def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection] = None, *, create_if_missing: bool = True) -> int:
     observed_at = _utcnow()
     today = chicago_date_for_utc_timestamp(observed_at) or chicago_today()
     bootstrap_snapshot = conn.execute(
@@ -102,6 +102,10 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
             continue
         seen_tags.add(tag)
         name = member.get("name") or ""
+        if not create_if_missing:
+            existing = conn.execute("SELECT member_id FROM members WHERE player_tag = ?", (tag,)).fetchone()
+            if not existing:
+                continue
         member_id = _ensure_member(conn, tag, name=name, status="active")
         previous = conn.execute(
             "SELECT role, exp_level, trophies, best_trophies, clan_rank, previous_clan_rank, donations_week, donations_received_week, arena_id, arena_name, arena_raw_name, last_seen_api "
