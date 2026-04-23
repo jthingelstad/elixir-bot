@@ -115,7 +115,7 @@ async def refresh_clan_roster_from_clan_data(clan_data: dict | None, *, reason: 
     if not member_list:
         return False
     try:
-        await asyncio.to_thread(db.snapshot_members, member_list)
+        await asyncio.to_thread(db.snapshot_members, member_list, create_if_missing=False)
         return True
     except Exception as exc:
         import runtime.app as app

@@ -504,7 +504,6 @@ async def _player_intel_refresh():
         runtime_status.mark_job_success("player_intel_refresh", "no member data")
         return
 
-    await asyncio.to_thread(db.snapshot_members, members)
     war = await asyncio.to_thread(db.get_current_war_status) or {}
 
     targets = await asyncio.to_thread(
