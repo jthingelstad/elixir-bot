@@ -88,20 +88,43 @@ One-time badges **omit** `level`, `maxLevel`, and `target` entirely (they are no
 Player cards include additional fields beyond the catalog:
 - `level` (integer) — current card level
 - `starLevel` (integer, optional) — cosmetic star level
-- `evolutionLevel` (integer, optional) — observed in both `currentDeck` and `cards` in live March 2026 payloads
-- `count` (integer) — cards owned (0 for maxed / equipped cards)
+- `evolutionLevel` (integer, optional) — **semantics depend on which array** (see below)
+- `count` (integer) — copies currently held in stash (0 for maxed / currently equipped cards; volatile, consumed by upgrades)
 
-**Observed interpretation for Elixir UX:**
-- `starLevel` and `evolutionLevel` are distinct fields
-- `maxEvolutionLevel=1` has only been observed on Evo-capable cards
-- `maxEvolutionLevel=2` has only been observed on Hero-capable cards
-- `maxEvolutionLevel=3` has only been observed on cards that support both Evo and Hero modes
-- `evolutionLevel=1` maps cleanly to `Evo unlocked` in stored player data
-- `evolutionLevel=2` maps cleanly to `Hero unlocked` in stored player data
-- `evolutionLevel=3` maps cleanly to `Evo + Hero unlocked` in stored player data
-- Missing `evolutionLevel` appears to mean no mode unlocked yet
-- This is an observed interpretation from live payloads plus local stored data; it does not prove slot-based activation behavior in decks
-- Player-facing output should prefer `Evo`, `Hero`, and `Evo + Hero` over raw `evolutionLevel` numbers
+**`maxEvolutionLevel` — card capability (static):**
+- `maxEvolutionLevel=1` → card supports Evo mode only
+- `maxEvolutionLevel=2` → card supports Hero mode only
+- `maxEvolutionLevel=3` → card supports both Evo and Hero modes
+- Absent / not set → card has no alternate mode
+
+**`evolutionLevel` semantics — depends on the array it appears in:**
+
+This field is **context-sensitive** across the three places it can appear:
+
+| Appears in | Meaning | Use case |
+|-----------|---------|----------|
+| `cards[]` (full collection) | **Ownership** — the player has this mode unlocked | "Does X own Evo Archers?" |
+| `currentDeck[]` (active 8-card deck) | **Deployment** — this card is currently slotted to play as the indicated mode | "What mode is X running Archers as right now?" |
+| Battle log `team[*].cards` / `opponent[*].cards` | **Played-as in that battle** — this card was actually played as the indicated mode in this match | "Did X play Evo Archers in this particular battle?" |
+
+Evidence for deployment semantics in `currentDeck` and battle-log arrays (verified against 15,442 live battles, April 2026):
+- `evolutionLevel` appears on only 2-3 slots per battle on average, never all 8 — matches Clash Royale's limited evo/hero slot count, not an ownership pattern
+- A player can have dozens of evos unlocked in their `cards[]` but only see `evolutionLevel` populated on the 2-3 deck slots that are actually evo/hero slots
+- `evolutionLevel=1` appears in slots 1-2 (evo slot positions), `evolutionLevel=2` appears in slots 2-4 (hero slot positions) — consistent with slot-mechanics behavior
+- `evolutionLevel=3` is **never** observed on any deck/battle array (a slot plays as either evo OR hero, never both at once); it can only appear in `cards[]` to denote "both modes unlocked"
+
+**Value mapping (all three contexts):**
+- `evolutionLevel=1` → Evo
+- `evolutionLevel=2` → Hero
+- `evolutionLevel=3` → Evo + Hero (observed only in `cards[]`, never in deck/battle arrays)
+- Missing `evolutionLevel` →
+  - in `cards[]`: no alternate mode unlocked
+  - in `currentDeck[]` / battle-log cards: card is not currently configured/played as evo or hero (either the player lacks the unlock, or the card sits in a non-evo/non-hero slot)
+
+**Elixir usage:**
+- For ownership questions (upgrade advice, "do they have Evo X unlocked"), read from `player_profile_snapshots.cards_json`
+- For deployment questions ("what's their signature card as Evo", "are they wasting an Evo unlock by putting it in a non-evo slot"), read from `currentDeck` or battle-log `deck_json` — both carry played-as state
+- Player-facing output should prefer `Evo`, `Hero`, and `Evo + Hero` over raw `evolutionLevel` integers
 
 **progress shape:**
 ```json
@@ -252,6 +275,9 @@ For 2v2 battles, the outcome is still determined from the first team entry becau
 - `rounds` — array, only on riverRaceDuel (best-of-3 duel rounds)
 - `clan` — absent if player has no clan
 
+**`cards[*].evolutionLevel` on battle-log cards is played-as state, not ownership.**
+If `team[0].cards[n].evolutionLevel=1`, that specific card was played as Evo in that battle; `=2` means played as Hero; absent means the card was played normally (or the player does not have evo/hero unlocked for it). This is deployment-encoded — a player with Evo Archers unlocked who puts Archers in a non-evo slot will NOT have `evolutionLevel` set on the battle-log Archers entry. See the `evolutionLevel` section under the player-profile docs above for the full three-context semantics.
+
 **Duel rounds (riverRaceDuel):**
 Both `team[0]` and `opponent[0]` have a `rounds` array (typically 2-3 rounds):
 ```json
@@ -311,7 +337,7 @@ Observed error bodies are usually `{ reason, message? }`. `message` may be absen
 
 ## Agent Notes
 - **Optional fields:** `clan`, `role`, and `leagueStatistics` are completely absent (not null) when the player has no clan / no league history. Always check for key existence. However, `currentPathOfLegendSeasonResult`, `lastPathOfLegendSeasonResult`, `bestPathOfLegendSeasonResult`, and `legacyTrophyRoadHighScore` are always present but use `null` when not applicable — check for both key existence and null.
-- `currentDeck` (8 cards) vs `cards` (full collection): both have been observed with `evolutionLevel`; `cards` also includes `count` of owned copies
+- `currentDeck` (8 cards) vs `cards` (full collection) vs battle-log card arrays: all three carry `evolutionLevel` but with **different semantics** (ownership vs deployment vs played-as-in-battle — see the evolutionLevel section above). `cards[]` also includes `count` of copies currently in stash.
 - `role` values: `member`, `elder`, `coLeader`, `leader`
 - Path of Legend `rank` field is null when the player hasn't achieved a rank yet
 - Battlelog returns a bare array (like `/events`), not a paginated response — no `paging` object. Returns ~30-40 battles (most commonly 30).

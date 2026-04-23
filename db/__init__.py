@@ -238,9 +238,23 @@ def _card_level(card: dict) -> Optional[int]:
     return level + max(0, 16 - max_level)
 
 
+def _played_as(card: dict) -> Optional[str]:
+    """Translate the deployment-encoded `evolutionLevel` on a battle-log or
+    `currentDeck` card to a stable string: 'evo', 'hero', or None when the
+    card was not played as an alternate mode. Not applicable to full-collection
+    `cards[]` arrays where evolutionLevel means ownership, not deployment.
+    """
+    ev = card.get("evolutionLevel")
+    if ev == 1:
+        return "evo"
+    if ev == 2:
+        return "hero"
+    return None
+
+
 def _aggregate_card_usage_from_battle_facts(rows: Iterable[sqlite3.Row]) -> tuple[int, list[dict]]:
-    counts = {}
-    icons = {}
+    counts: dict[tuple[str, Optional[str]], int] = {}
+    icons: dict[str, str] = {}
     total = 0
     for row in rows:
         cards = json.loads(row["deck_json"] or "[]")
@@ -251,19 +265,22 @@ def _aggregate_card_usage_from_battle_facts(rows: Iterable[sqlite3.Row]) -> tupl
             name = card.get("name")
             if not name:
                 continue
-            counts[name] = counts.get(name, 0) + 1
+            played_as = _played_as(card)
+            counts[(name, played_as)] = counts.get((name, played_as), 0) + 1
             icon = (card.get("iconUrls") or {}).get("medium")
-            if icon:
+            if icon and name not in icons:
                 icons[name] = icon
     ordered = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:8]
-    summary = [
-        {
+    summary = []
+    for (name, played_as), count in ordered:
+        entry = {
             "name": name,
             "icon_url": icons.get(name, ""),
             "usage_pct": round(count / total * 100) if total else 0,
         }
-        for name, count in ordered
-    ]
+        if played_as:
+            entry["played_as"] = played_as
+        summary.append(entry)
     return total, summary
 
 

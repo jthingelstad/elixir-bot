@@ -7,8 +7,8 @@ import json
 import db
 
 
-def _make_card(name, level=14, max_level=14, elixir=3, rarity="common"):
-    return {
+def _make_card(name, level=14, max_level=14, elixir=3, rarity="common", evolution_level=None):
+    card = {
         "name": name,
         "id": hash(name) & 0xFFFFFFF,
         "level": level,
@@ -17,6 +17,9 @@ def _make_card(name, level=14, max_level=14, elixir=3, rarity="common"):
         "rarity": rarity,
         "iconUrls": {"medium": f"https://example.test/{name}.png"},
     }
+    if evolution_level is not None:
+        card["evolutionLevel"] = evolution_level
+    return card
 
 
 def _deck(*names):
@@ -131,6 +134,111 @@ def test_get_member_recent_losses_returns_empty_when_no_battles():
         out = db.get_member_recent_losses("#PLAYER", scope="war_10", conn=conn)
         assert out["losses_examined"] == 0
         assert out["top_opponent_cards"] == []
+    finally:
+        conn.close()
+
+
+def test_get_member_recent_losses_splits_by_played_as_mode():
+    """Opponent cards played as Evo/Hero aggregate separately from the same card played vanilla."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
+        # Two losses where the opponent played Evo Knight, one loss where Knight was vanilla
+        evo_knight = _make_card("Knight", evolution_level=1)
+        plain_knight = _make_card("Knight")
+        battles = [
+            _battle("20260410T120000.000Z", battle_type="PvP", outcome_crowns=(0, 2),
+                    team_cards=_deck("Archers"),
+                    opp_cards=[evo_knight] + _deck("Bats", "Skeletons", "Zap", "Arrows", "Fireball", "Tornado", "Log"),
+                    deck_selection="collection"),
+            _battle("20260410T120001.000Z", battle_type="PvP", outcome_crowns=(0, 2),
+                    team_cards=_deck("Archers"),
+                    opp_cards=[evo_knight] + _deck("Bats", "Skeletons", "Zap", "Arrows", "Fireball", "Tornado", "Log"),
+                    deck_selection="collection"),
+            _battle("20260410T120002.000Z", battle_type="PvP", outcome_crowns=(0, 2),
+                    team_cards=_deck("Archers"),
+                    opp_cards=[plain_knight] + _deck("Bats", "Skeletons", "Zap", "Arrows", "Fireball", "Tornado", "Log"),
+                    deck_selection="collection"),
+        ]
+        db.snapshot_player_battlelog("#PLAYER", battles, conn=conn)
+
+        out = db.get_member_recent_losses("#PLAYER", scope="ladder_ranked_10", limit=10, conn=conn)
+        knights = [c for c in out["top_opponent_cards"] if c["name"] == "Knight"]
+        assert len(knights) == 2, "Knight should split into evo and vanilla buckets"
+        evo_entry = next(c for c in knights if c.get("played_as") == "evo")
+        plain_entry = next(c for c in knights if "played_as" not in c)
+        assert evo_entry["appearances"] == 2
+        assert plain_entry["appearances"] == 1
+    finally:
+        conn.close()
+
+
+def test_signature_cards_split_by_played_as_mode():
+    """signature_cards aggregation tags the dominant played-as mode per card so
+    the LLM can say 'Evo Archers is X's signature card' specifically."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
+        evo_archers = _make_card("Archers", evolution_level=1)
+        battles = [
+            _battle("20260410T12000{}.000Z".format(i), battle_type="PvP",
+                    outcome_crowns=(2, 0),
+                    team_cards=[evo_archers] + _deck("Hog Rider", "Skeletons", "Zap", "Arrows", "Fireball", "Tornado", "Log"),
+                    opp_cards=_deck("Knight"),
+                    deck_selection="collection")
+            for i in range(4)
+        ]
+        db.snapshot_player_battlelog("#PLAYER", battles, conn=conn)
+
+        sig = db.get_member_signature_cards("#PLAYER", mode_scope="overall", conn=conn)
+        archers = next(c for c in sig["cards"] if c["name"] == "Archers")
+        # The aggregation tags Archers with played_as='evo' because every play was as evo
+        assert archers.get("played_as") == "evo"
+        assert archers["usage_pct"] == 100
+        # Non-evo cards do not carry a played_as field
+        hog = next(c for c in sig["cards"] if c["name"] == "Hog Rider")
+        assert "played_as" not in hog
+    finally:
+        conn.close()
+
+
+def test_signature_cards_mixed_evo_and_vanilla_dominant_bucket_wins():
+    """When a card is sometimes played as evo and sometimes vanilla, the top-N surfaces
+    each variant separately by play count — a player running Evo X 80% of the time shows
+    up with played_as='evo' while the vanilla bucket is a different entry with lower usage."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
+        evo_archers = _make_card("Archers", evolution_level=1)
+        plain_archers = _make_card("Archers")
+        # 5 battles evo Archers, 5 battles vanilla Archers — both variants should survive top-8
+        # since the team deck only has one other repeating card (Log)
+        battles = []
+        for i in range(5):
+            battles.append(_battle(f"20260410T12{i:02d}00.000Z", battle_type="PvP",
+                outcome_crowns=(2,0),
+                team_cards=[evo_archers, _make_card("Log"), _make_card(f"Filler{i}A"), _make_card(f"Filler{i}B"),
+                            _make_card(f"Filler{i}C"), _make_card(f"Filler{i}D"), _make_card(f"Filler{i}E"),
+                            _make_card(f"Filler{i}F")],
+                opp_cards=_deck("Knight"),
+                deck_selection="collection"))
+        for i in range(5):
+            battles.append(_battle(f"20260410T13{i:02d}00.000Z", battle_type="PvP",
+                outcome_crowns=(2,0),
+                team_cards=[plain_archers, _make_card("Log"), _make_card(f"Other{i}A"), _make_card(f"Other{i}B"),
+                            _make_card(f"Other{i}C"), _make_card(f"Other{i}D"), _make_card(f"Other{i}E"),
+                            _make_card(f"Other{i}F")],
+                opp_cards=_deck("Knight"),
+                deck_selection="collection"))
+        db.snapshot_player_battlelog("#PLAYER", battles, conn=conn)
+
+        sig = db.get_member_signature_cards("#PLAYER", mode_scope="overall", conn=conn)
+        archers_entries = [c for c in sig["cards"] if c["name"] == "Archers"]
+        assert len(archers_entries) == 2, "Archers should split into evo and vanilla buckets"
+        evo = next(c for c in archers_entries if c.get("played_as") == "evo")
+        plain = next(c for c in archers_entries if "played_as" not in c)
+        assert evo["usage_pct"] == 50
+        assert plain["usage_pct"] == 50
     finally:
         conn.close()
 
