@@ -109,7 +109,7 @@ def test_execute_tool_get_member_card_collection_uses_db():
         mock_db.snapshot_player_profile.assert_called_once()
         mock_db.get_member_card_collection.assert_called_once_with(
             "#ABC123",
-            limit=60,
+            limit=100,
             min_level=14,
             include_support=True,
             rarity=None,
@@ -191,7 +191,7 @@ def test_execute_tool_get_member_cards_accepts_bare_player_tag():
         mock_db.resolve_member.assert_not_called()
         mock_db.get_member_card_collection.assert_called_once_with(
             "#20JJJ2CCRU",
-            limit=60,
+            limit=100,
             min_level=None,
             include_support=True,
             rarity=None,
@@ -221,7 +221,7 @@ def test_execute_tool_get_member_cards_passes_rarity_filter():
         assert "Royal Ghost" in result["card_collection"]["cards_by_rarity"]["legendary"]
         mock_db.get_member_card_collection.assert_called_once_with(
             "#20JJJ2CCRU",
-            limit=60,
+            limit=100,
             min_level=None,
             include_support=True,
             rarity="legendary",

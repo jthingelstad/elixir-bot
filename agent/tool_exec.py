@@ -78,6 +78,40 @@ def _enrich_member_card_collection(result):
     return enriched
 
 
+def _slim_card_for_llm(card):
+    """Project a normalized card dict down to the fields the LLM actually uses.
+
+    Drops CR-internal IDs, image URLs, duplicate api_* fields, redundant
+    evolution numbers, and no-op false/null booleans. Keeps elixirCost inline
+    so the LLM doesn't need a second lookup_cards round-trip for swap math.
+    """
+    if not isinstance(card, dict):
+        return card
+    slim = {}
+    for field in ("name", "level", "maxLevel", "rarity", "elixirCost", "levels_to_max"):
+        value = card.get(field)
+        if value is not None:
+            slim[field] = value
+    if card.get("is_max_level"):
+        slim["is_max_level"] = True
+    mode_label = card.get("mode_label")
+    if mode_label:
+        slim["mode_label"] = mode_label
+    mode_status_label = card.get("mode_status_label")
+    if mode_status_label:
+        slim["mode_status_label"] = mode_status_label
+    for flag in ("supports_evo", "supports_hero", "evo_unlocked", "hero_unlocked"):
+        if card.get(flag):
+            slim[flag] = True
+    return slim
+
+
+def _slim_card_list(cards):
+    if not isinstance(cards, list):
+        return cards
+    return [_slim_card_for_llm(card) for card in cards]
+
+
 def _enrich_war_player_type(result, tag):
     """Add war_player_type classification to a result dict by player tag."""
     from storage.war_analytics import _war_player_type
@@ -195,21 +229,39 @@ def _execute_get_member(arguments):
         )
 
     if "deck" in include:
-        result["current_deck"] = db.get_member_current_deck(member_tag)
+        current_deck = db.get_member_current_deck(member_tag)
+        if isinstance(current_deck, dict):
+            current_deck = dict(current_deck)
+            current_deck["cards"] = _slim_card_list(current_deck.get("cards"))
+            current_deck["support_cards"] = _slim_card_list(current_deck.get("support_cards"))
+        result["current_deck"] = current_deck
         result["signature_cards"] = db.get_member_signature_cards(
             member_tag, mode_scope="overall",
         )
 
     if "cards" in include:
-        result["card_collection"] = _enrich_member_card_collection(
-            db.get_member_card_collection(
-                member_tag,
-                limit=arguments.get("limit", 60),
-                min_level=arguments.get("min_level"),
-                include_support=True,
-                rarity=arguments.get("rarity"),
-            )
+        collection = db.get_member_card_collection(
+            member_tag,
+            limit=arguments.get("limit", 100),
+            min_level=arguments.get("min_level"),
+            include_support=True,
+            rarity=arguments.get("rarity"),
         )
+        if isinstance(collection, dict):
+            collection = dict(collection)
+            collection["cards"] = _slim_card_list(collection.get("cards"))
+            collection["support_cards"] = _slim_card_list(collection.get("support_cards"))
+            summary = collection.get("summary")
+            if isinstance(summary, dict) and "strongest_cards" in summary:
+                summary = dict(summary)
+                summary["strongest_cards"] = _slim_card_list(summary.get("strongest_cards"))
+                collection["summary"] = summary
+            collection_summary = collection.get("collection_summary")
+            if isinstance(collection_summary, dict) and "strongest_cards" in collection_summary:
+                collection_summary = dict(collection_summary)
+                collection_summary["strongest_cards"] = _slim_card_list(collection_summary.get("strongest_cards"))
+                collection["collection_summary"] = collection_summary
+        result["card_collection"] = _enrich_member_card_collection(collection)
 
     if "losses" in include:
         result["losses"] = db.get_member_recent_losses(
