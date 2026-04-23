@@ -531,6 +531,57 @@ def publish_site_content(payloads: dict[str, object], message: str = "Elixir POA
     }
 
 
+def publish_blog_post(path: str, content: str, message: str = "Elixir blog post") -> dict[str, object]:
+    """Commit a single file at *path* with raw *content* to the POAP KINGS site repo."""
+    if not site_enabled():
+        raise RuntimeError("POAP KINGS site integration is disabled or missing GitHub configuration")
+
+    repo = _site_repo()
+    branch = _site_branch()
+
+    blob = _github_request(
+        "POST",
+        "/git/blobs",
+        payload={"content": content, "encoding": "utf-8"},
+        expected=(201,),
+    )
+    ref = _github_request("GET", f"/git/ref/heads/{branch}")
+    parent_commit_sha = ((ref or {}).get("object") or {}).get("sha")
+    if not parent_commit_sha:
+        raise RuntimeError(f"Could not resolve branch head for {branch}")
+    parent_commit = _github_request("GET", f"/git/commits/{parent_commit_sha}")
+    base_tree_sha = ((parent_commit or {}).get("tree") or {}).get("sha")
+    if not base_tree_sha:
+        raise RuntimeError("Could not resolve base tree for blog post publish")
+    tree = _github_request(
+        "POST",
+        "/git/trees",
+        payload={
+            "base_tree": base_tree_sha,
+            "tree": [{"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]}],
+        },
+        expected=(201,),
+    )
+    commit = _github_request(
+        "POST",
+        "/git/commits",
+        payload={"message": message, "tree": tree["sha"], "parents": [parent_commit_sha]},
+        expected=(201,),
+    )
+    _github_request("PATCH", f"/git/refs/heads/{branch}", payload={"sha": commit["sha"]}, expected=(200,))
+    commit_sha = commit["sha"]
+    log.info("Published blog post to %s@%s: %s", repo, branch, path)
+    return {
+        "changed": True,
+        "commit_sha": commit_sha,
+        "commit_url": f"https://github.com/{repo}/commit/{commit_sha}",
+        "repo": repo,
+        "branch": branch,
+        "changed_content_types": ["blog_post"],
+        "changed_paths": [path],
+    }
+
+
 def validate_against_schema(content_type, data):
     """Validate data against its JSON schema. Returns True if valid, raises on error."""
     # Schema filename matches the data filename (camelCase) minus .json + .schema.json

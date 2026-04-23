@@ -545,6 +545,25 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
 
         posts = _app._entry_posts(result)
         await _post_to_elixir(channel, result)
+        if (
+            channel_config["subagent_key"] == "clan-events"
+            and any(s.get("type") == "member_join" for s in signals)
+        ):
+            from modules.poap_kings import site as _pk_site
+            if _pk_site.site_enabled():
+                from runtime.jobs._site import _publish_member_join_blog_post, _notify_poapkings_publish
+                _join_body = "\n\n".join(posts)
+                try:
+                    _blog_result = await asyncio.to_thread(
+                        _publish_member_join_blog_post,
+                        signals,
+                        _join_body,
+                        result.get("summary"),
+                    )
+                    await _notify_poapkings_publish("member-join-blog", publish_result=_blog_result)
+                except Exception as _exc:
+                    log.error("Member join blog post publish failed: %s", _exc, exc_info=True)
+                    await _notify_poapkings_publish("member-join-blog", error_detail=str(_exc))
         summary = result.get("summary")
         event_type = result.get("event_type") or outcome["intent"]
         for index, post in enumerate(posts):
