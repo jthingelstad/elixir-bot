@@ -2747,7 +2747,6 @@ def test_build_kick_risk_report_uses_inactivity_only():
         inactivity_days=7,
         min_donations_week=0,
         require_war_participation=False,
-        tenure_grace_days=0,
     )
     assert report == "**Kick Risk (Inactive 7+ Days)**\n- Vijay — last seen 8 days ago"
 

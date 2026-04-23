@@ -529,48 +529,45 @@ def detect_returning_members(now=None, conn=None):
 
 
 def detect_inactivity(current_members, now=None, conn=None):
-    """Flag members not seen in 3+ days.
+    """Flag members past the trophy-scaled battle-inactivity threshold.
 
-    Uses the lastSeen field from CR API (format: 20260304T120000.000Z).
-    Fires only on Fridays, at most once per week — the inactive-player report
-    is a weekly clan-management tool for #leader-lounge, not a daily signal.
+    Uses ``flag_inactive_members`` — days since last PvP or war battle
+    (whichever is more recent) compared to ``max(7, trophies/1000 × 1.4)``.
+    Login freshness is context; battles drive the flag. Fires only on
+    Fridays, at most once per week, for the #leader-lounge report.
     """
+    from storage.war_analytics import flag_inactive_members
+
     now = now or datetime.now()
     if now.weekday() != 4:  # 0=Mon ... 4=Fri
         return []
-    today = now.strftime("%Y-%m-%d")
-    if db.was_signal_sent("inactive_members", today, conn=conn):
+    today_str = now.strftime("%Y-%m-%d")
+    if db.was_signal_sent("inactive_members", today_str, conn=conn):
         return []
-    signals = []
-    inactive = []
-    threshold = cr_knowledge.INACTIVITY_DAYS
 
-    for m in current_members:
-        last_seen = m.get("lastSeen", m.get("last_seen", ""))
-        if not last_seen:
-            continue
-        try:
-            # Parse CR API date format: 20260304T120000.000Z
-            clean = last_seen.split(".")[0]  # Remove .000Z
-            seen_dt = datetime.strptime(clean, "%Y%m%dT%H%M%S")
-            days_away = (now - seen_dt).days
-            if days_away >= threshold:
-                inactive.append({
-                    "name": m.get("name", "?"),
-                    "tag": m.get("tag", ""),
-                    "days_inactive": days_away,
-                    "role": m.get("role", "member"),
-                })
-        except (ValueError, TypeError):
-            continue
+    flagged = flag_inactive_members(today=now.date(), include_leadership=True, conn=conn)
+    if not flagged:
+        return []
 
-    if inactive:
-        signals.append({
-            "type": "inactive_members",
-            "members": sorted(inactive, key=lambda x: x["days_inactive"], reverse=True),
-        })
-
-    return signals
+    members = [
+        {
+            "name": m["name"] or "?",
+            "tag": m["tag"] or "",
+            "days_inactive": m["days_inactive"],
+            "battle_days_ago": m["battle_days_ago"],
+            "login_days_ago": m["login_days_ago"],
+            "pvp_days_ago": m["pvp_days_ago"],
+            "war_days_ago": m["war_days_ago"],
+            "threshold_days": m["threshold_days"],
+            "role": m.get("role") or "member",
+            "hint": m["hint"],
+        }
+        for m in flagged
+    ]
+    return [{
+        "type": "inactive_members",
+        "members": members,
+    }]
 
 
 @db.managed_connection

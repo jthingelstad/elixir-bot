@@ -354,7 +354,6 @@ def test_execute_tool_get_clan_health_at_risk_uses_db():
             min_donations_week=20,
             require_war_participation=False,
             min_war_races=1,
-            tenure_grace_days=14,
             season_id=129,
         )
 

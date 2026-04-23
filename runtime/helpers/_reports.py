@@ -56,7 +56,6 @@ def _build_kick_risk_report():
         inactivity_days=7,
         min_donations_week=0,
         require_war_participation=False,
-        tenure_grace_days=0,
     )
     members = (risk or {}).get("members") or []
     lines = ["**Kick Risk (Inactive 7+ Days)**"]

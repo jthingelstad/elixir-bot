@@ -259,26 +259,210 @@ def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None
         },
     }
 
-INACTIVITY_DAYS_PER_1K_TROPHIES = 1.4
+# Trophy-scaling multiplier anchors. At or below LOOSE_MEMBER_COUNT active
+# members we're lenient (high-trophy players get weeks of rope); at or above
+# TIGHT_MEMBER_COUNT (the 50-cap) we tighten to match the floor for a 10k
+# player. Between the two anchors we interpolate linearly.
+INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE = 1.4
+INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT = 0.7
+LOOSE_MEMBER_COUNT = 40
+TIGHT_MEMBER_COUNT = 50
+
+# Back-compat alias for external callers/tests that imported the original
+# scalar. Always the lenient end; the active value is chosen per-query.
+INACTIVITY_DAYS_PER_1K_TROPHIES = INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE
+
+# member_battle_facts retention; anyone with no battle in this window is
+# treated as "at least this many days inactive" when scoring.
+BATTLE_RETENTION_DAYS = 90
 
 
-def _effective_inactivity_threshold(trophies: Optional[int], floor_days: int) -> float:
+def _inactivity_multiplier(active_member_count: Optional[int]) -> float:
+    """Roster-size-adaptive trophy-scaling multiplier (days per 1k trophies).
+
+    Linearly interpolates between the two anchors:
+    ``LOOSE_MEMBER_COUNT`` → ``_LOOSE`` multiplier, ``TIGHT_MEMBER_COUNT``
+    → ``_TIGHT`` multiplier, clamped outside that range. A clan with empty
+    slots stays lenient; a near-full clan tightens the inactivity bar so
+    the bottom of the roster clears faster.
+    """
+    if active_member_count is None:
+        return INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE
+    if active_member_count <= LOOSE_MEMBER_COUNT:
+        return INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE
+    if active_member_count >= TIGHT_MEMBER_COUNT:
+        return INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT
+    span_members = TIGHT_MEMBER_COUNT - LOOSE_MEMBER_COUNT
+    span_days = INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE - INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT
+    slope = span_days / span_members
+    return INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE - (active_member_count - LOOSE_MEMBER_COUNT) * slope
+
+
+def _count_active_members(conn) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM members WHERE status = 'active'"
+    ).fetchone()
+    return row["cnt"] if row else 0
+
+
+def _effective_inactivity_threshold(trophies: Optional[int], floor_days: int,
+                                    per_1k_days: Optional[float] = None) -> float:
     """Per-member inactivity threshold, in days.
 
     Higher-trophy members are given more rope before they show up as a
-    removal candidate. Formula: ``max(floor_days, trophies/1000 * 1.4)``.
-    A 5k-trophy player keeps the floor (7d). A 10k-trophy player gets 14d.
-    A 12.5k-trophy player gets 17.5d. The floor protects the floor.
+    removal candidate. Formula: ``max(floor_days, trophies/1000 * per_1k)``
+    where ``per_1k`` defaults to the lenient (empty-roster) multiplier but
+    is typically passed in based on current roster size via
+    ``_inactivity_multiplier``. A 10k-trophy player at 1.4 gets 14d of rope;
+    at 0.7 (roster full) that same player is held to the 7d floor.
     """
+    if per_1k_days is None:
+        per_1k_days = INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE
     if not isinstance(trophies, int) or trophies <= 0:
         return float(floor_days)
-    scaled = (trophies / 1000.0) * INACTIVITY_DAYS_PER_1K_TROPHIES
+    scaled = (trophies / 1000.0) * per_1k_days
     return max(float(floor_days), scaled)
+
+
+def _member_activity_timestamps(conn, member_ids):
+    """Batch-fetch last PvP and last war battle timestamps per member.
+
+    Returns ``{member_id: {"pvp": datetime|None, "war": datetime|None}}``.
+    Missing entries mean no battle of that kind in the retention window.
+    """
+    result = {mid: {"pvp": None, "war": None} for mid in member_ids}
+    if not member_ids:
+        return result
+    placeholders = ",".join("?" * len(member_ids))
+    rows = conn.execute(
+        f"SELECT member_id, "
+        f"       MAX(CASE WHEN is_war = 0 THEN battle_time END) AS last_pvp, "
+        f"       MAX(CASE WHEN is_war = 1 THEN battle_time END) AS last_war "
+        f"FROM member_battle_facts "
+        f"WHERE member_id IN ({placeholders}) "
+        f"GROUP BY member_id",
+        tuple(member_ids),
+    ).fetchall()
+    for row in rows:
+        result[row["member_id"]] = {
+            "pvp": _parse_cr_time(row["last_pvp"]),
+            "war": _parse_cr_time(row["last_war"]),
+        }
+    return result
+
+
+def _activity_breakdown(activity, today):
+    """Resolve {login, pvp, war} datetimes into a days-ago summary.
+
+    ``battle_days_ago`` is the days since whichever of PvP or war is more
+    recent. If the member has no battle in the retention window it is set
+    to ``BATTLE_RETENTION_DAYS`` so the threshold comparison works cleanly.
+    Login stays separate context; it does not drive ``battle_days_ago``.
+    """
+    def _days_ago(dt):
+        return (today - dt.date()).days if dt else None
+
+    pvp_dt = activity.get("pvp")
+    war_dt = activity.get("war")
+    login_dt = activity.get("login")
+    pvp_days = _days_ago(pvp_dt)
+    war_days = _days_ago(war_dt)
+    login_days = _days_ago(login_dt)
+
+    battle_candidates = [d for d in (pvp_days, war_days) if d is not None]
+    if battle_candidates:
+        battle_days = min(battle_candidates)
+        last_battle_dt = max(dt for dt in (pvp_dt, war_dt) if dt is not None)
+        last_battle_at = last_battle_dt.strftime("%Y-%m-%dT%H:%M:%S")
+    else:
+        battle_days = BATTLE_RETENTION_DAYS
+        last_battle_at = None
+
+    if battle_days >= BATTLE_RETENTION_DAYS:
+        hint = f"no battles in {BATTLE_RETENTION_DAYS}+ days"
+    elif login_days is not None and login_days <= 1 and battle_days >= 7:
+        hint = f"logs in but hasn't battled in {battle_days} days"
+    elif login_days is None:
+        hint = f"no battle in {battle_days} days"
+    else:
+        hint = f"no battle in {battle_days} days, last login {login_days} days ago"
+
+    return {
+        "battle_days_ago": battle_days,
+        "login_days_ago": login_days,
+        "pvp_days_ago": pvp_days,
+        "war_days_ago": war_days,
+        "last_battle_at": last_battle_at,
+        "hint": hint,
+    }
+
+
+@managed_connection
+def flag_inactive_members(today=None, include_leadership: bool = True,
+                          floor_days: int = 7,
+                          conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    """Return active members whose most-recent battle exceeds the threshold.
+
+    The primary signal is days since the member's last PvP or war battle
+    (whichever is more recent). The trophy-scaled formula
+    ``max(floor_days, trophies/1000 * per_1k)`` is applied to that number,
+    where ``per_1k`` tightens as the roster fills (1.4 at ≤40 members, 0.7
+    at the 50-cap). Login freshness is included as context but does not
+    drive the flag.
+
+    Shared by ``get_members_at_risk`` and the weekly inactive_members
+    heartbeat signal so both surfaces use the same rule.
+    """
+    if today is None:
+        today = _member_activity_anchor(conn).date()
+
+    rows = conn.execute(
+        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
+        "cs.role, cs.trophies, cs.clan_rank, cs.last_seen_api "
+        "FROM members m "
+        "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
+        "WHERE m.status = 'active' "
+        "ORDER BY COALESCE(cs.clan_rank, 999), m.current_name COLLATE NOCASE"
+    ).fetchall()
+
+    active_count = len(rows)
+    per_1k_days = _inactivity_multiplier(active_count)
+
+    member_ids = [row["member_id"] for row in rows]
+    battle_map = _member_activity_timestamps(conn, member_ids)
+
+    flagged = []
+    for row in rows:
+        role = (row["role"] or "").strip()
+        if not include_leadership and role in {"leader", "coLeader"}:
+            continue
+        activity = dict(battle_map.get(row["member_id"], {"pvp": None, "war": None}))
+        activity["login"] = _parse_cr_time(row["last_seen_api"])
+        breakdown = _activity_breakdown(activity, today)
+        threshold = _effective_inactivity_threshold(row["trophies"], floor_days,
+                                                   per_1k_days=per_1k_days)
+        if breakdown["battle_days_ago"] < threshold:
+            continue
+        flagged.append({
+            "member_id": row["member_id"],
+            "tag": row["tag"],
+            "name": row["name"],
+            "role": row["role"] or "member",
+            "trophies": row["trophies"],
+            "clan_rank": row["clan_rank"],
+            "days_inactive": breakdown["battle_days_ago"],
+            "threshold_days": threshold,
+            "active_member_count": active_count,
+            "per_1k_days": per_1k_days,
+            **breakdown,
+        })
+    flagged.sort(key=lambda m: m["days_inactive"], reverse=True)
+    return flagged
 
 
 @managed_connection
 def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, require_war_participation: bool = False,
-                        min_war_races: int = 1, tenure_grace_days: int = 14, include_leadership: bool = False,
+                        min_war_races: int = 1, include_leadership: bool = False,
                         season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> dict:
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
@@ -292,6 +476,11 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
         "ORDER BY COALESCE(cs.clan_rank, 999), m.current_name COLLATE NOCASE"
     ).fetchall()
 
+    active_count = len(rows)
+    per_1k_days = _inactivity_multiplier(active_count)
+    member_ids = [row["member_id"] for row in rows]
+    battle_map = _member_activity_timestamps(conn, member_ids)
+
     flagged = []
     for row in rows:
         role = (row["role"] or "").strip()
@@ -304,24 +493,28 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
                 tenure_days = (today - datetime.strptime(joined_date[:10], "%Y-%m-%d").date()).days
             except ValueError:
                 tenure_days = None
-        if tenure_days is not None and tenure_days < tenure_grace_days:
-            continue
 
         reasons = []
-        last_seen_dt = _parse_cr_time(row["last_seen_api"])
-        if last_seen_dt is not None:
-            days_inactive = (today - last_seen_dt.date()).days
-            threshold_days = _effective_inactivity_threshold(row["trophies"], inactivity_days)
-            if days_inactive >= threshold_days:
-                reasons.append({
-                    "type": "inactive",
-                    "detail": (
-                        f"last seen {days_inactive} days ago "
-                        f"(threshold {threshold_days:.1f}d at {row['trophies'] or 0} trophies)"
-                    ),
-                    "value": days_inactive,
-                    "threshold_days": threshold_days,
-                })
+        activity = dict(battle_map.get(row["member_id"], {"pvp": None, "war": None}))
+        activity["login"] = _parse_cr_time(row["last_seen_api"])
+        breakdown = _activity_breakdown(activity, today)
+        threshold_days = _effective_inactivity_threshold(row["trophies"], inactivity_days,
+                                                        per_1k_days=per_1k_days)
+        if breakdown["battle_days_ago"] >= threshold_days:
+            reasons.append({
+                "type": "inactive",
+                "detail": (
+                    f"{breakdown['hint']} "
+                    f"(threshold {threshold_days:.1f}d at {row['trophies'] or 0} trophies)"
+                ),
+                "value": breakdown["battle_days_ago"],
+                "threshold_days": threshold_days,
+                "battle_days_ago": breakdown["battle_days_ago"],
+                "login_days_ago": breakdown["login_days_ago"],
+                "pvp_days_ago": breakdown["pvp_days_ago"],
+                "war_days_ago": breakdown["war_days_ago"],
+                "last_battle_at": breakdown["last_battle_at"],
+            })
 
         donations_week = row["donations_week"] or 0
         if donations_week < min_donations_week:
@@ -369,12 +562,20 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
         "season_id": season_id,
         "criteria": {
             "inactivity_days_floor": inactivity_days,
-            "inactivity_days_per_1k_trophies": INACTIVITY_DAYS_PER_1K_TROPHIES,
-            "inactivity_threshold_formula": "max(floor, trophies/1000 * 1.4)",
+            "inactivity_days_per_1k_trophies": per_1k_days,
+            "inactivity_threshold_formula": (
+                f"max(floor, trophies/1000 * {per_1k_days:.2f})"
+            ),
+            "active_member_count": active_count,
+            "multiplier_anchors": {
+                "loose_members": LOOSE_MEMBER_COUNT,
+                "loose_per_1k": INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE,
+                "tight_members": TIGHT_MEMBER_COUNT,
+                "tight_per_1k": INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT,
+            },
             "min_donations_week": min_donations_week,
             "require_war_participation": require_war_participation,
             "min_war_races": min_war_races,
-            "tenure_grace_days": tenure_grace_days,
             "include_leadership": include_leadership,
         },
         "members": flagged,
