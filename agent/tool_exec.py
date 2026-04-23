@@ -485,7 +485,6 @@ def _execute_get_clan_health(arguments, workflow=None):
             min_donations_week=arguments.get("min_donations_week", 20),
             require_war_participation=False,
             min_war_races=1,
-            tenure_grace_days=14,
             season_id=arguments.get("season_id"),
         )
     elif aspect == "hot_streaks":
