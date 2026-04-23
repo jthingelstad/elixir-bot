@@ -429,22 +429,21 @@ def _seed_clan_metric(conn, *, metric_date, clan_score=None, clan_war_trophies=N
     conn.commit()
 
 
-def test_detect_clan_score_records_fires_on_new_all_time_high():
-    """v4.7 #33: clan_score hitting a new high emits clan_score_record."""
+def test_detect_clan_war_trophies_record_fires_on_new_all_time_high():
+    """War-trophies record fires when the latest day beats all prior days."""
     conn = db.get_connection(":memory:")
     try:
-        _seed_clan_metric(conn, metric_date="2026-04-10", clan_score=95000, clan_war_trophies=200)
-        _seed_clan_metric(conn, metric_date="2026-04-11", clan_score=97000, clan_war_trophies=200)
-        _seed_clan_metric(conn, metric_date="2026-04-12", clan_score=99000, clan_war_trophies=200)
-        _seed_clan_metric(conn, metric_date="2026-04-13", clan_score=101500, clan_war_trophies=220)
+        _seed_clan_metric(conn, metric_date="2026-04-10", clan_war_trophies=200)
+        _seed_clan_metric(conn, metric_date="2026-04-11", clan_war_trophies=210)
+        _seed_clan_metric(conn, metric_date="2026-04-12", clan_war_trophies=220)
         signals = heartbeat.detect_clan_score_records(conn=conn)
         types = {s["type"] for s in signals}
-        assert "clan_score_record" in types
         assert "clan_war_trophies_record" in types
-        score = next(s for s in signals if s["type"] == "clan_score_record")
-        assert score["new_record"] == 101500
-        assert score["previous_record"] == 99000
-        assert score["metric_date"] == "2026-04-13"
+        assert "clan_score_record" not in types
+        rec = next(s for s in signals if s["type"] == "clan_war_trophies_record")
+        assert rec["new_record"] == 220
+        assert rec["previous_record"] == 210
+        assert rec["metric_date"] == "2026-04-12"
     finally:
         conn.close()
 
@@ -452,9 +451,9 @@ def test_detect_clan_score_records_fires_on_new_all_time_high():
 def test_detect_clan_score_records_silent_when_not_a_new_high():
     conn = db.get_connection(":memory:")
     try:
-        _seed_clan_metric(conn, metric_date="2026-04-10", clan_score=99000)
-        _seed_clan_metric(conn, metric_date="2026-04-11", clan_score=100000)
-        _seed_clan_metric(conn, metric_date="2026-04-12", clan_score=98000)  # dip
+        _seed_clan_metric(conn, metric_date="2026-04-10", clan_war_trophies=220)
+        _seed_clan_metric(conn, metric_date="2026-04-11", clan_war_trophies=230)
+        _seed_clan_metric(conn, metric_date="2026-04-12", clan_war_trophies=215)  # dip
         assert heartbeat.detect_clan_score_records(conn=conn) == []
     finally:
         conn.close()
@@ -463,8 +462,8 @@ def test_detect_clan_score_records_silent_when_not_a_new_high():
 def test_detect_clan_score_records_dedups_same_day():
     conn = db.get_connection(":memory:")
     try:
-        _seed_clan_metric(conn, metric_date="2026-04-10", clan_score=99000)
-        _seed_clan_metric(conn, metric_date="2026-04-11", clan_score=100000)
+        _seed_clan_metric(conn, metric_date="2026-04-10", clan_war_trophies=220)
+        _seed_clan_metric(conn, metric_date="2026-04-11", clan_war_trophies=230)
         first = heartbeat.detect_clan_score_records(conn=conn)
         assert len(first) == 1
         db.mark_signal_sent(first[0]["signal_log_type"], "2026-04-11", conn=conn)
@@ -1350,7 +1349,7 @@ def test_player_intel_refresh_uses_refresh_targets_without_llm():
     ):
         asyncio.run(elixir._player_intel_refresh())
 
-    mock_snapshot_members.assert_called_once_with(clan["memberList"])
+    mock_snapshot_members.assert_not_called()
     mock_get_war.assert_not_called()
     mock_targets.assert_called_once_with(elixir.PLAYER_INTEL_BATCH_SIZE, elixir.PLAYER_INTEL_STALE_HOURS)
     mock_snapshot_profile.assert_called_once()

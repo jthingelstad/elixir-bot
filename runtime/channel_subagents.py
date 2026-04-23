@@ -9,9 +9,8 @@ from memory_store import list_memories
 from storage.contextual_memory import upsert_summary_memory
 
 # Durable milestones — celebratory and infrequent, per-player. Routed to
-# #player-progress. Clan-aggregate records (clan_score_record,
-# clan_war_trophies_record) live in CLAN_EVENT_SIGNAL_TYPES instead — they
-# are not personal achievements and do not belong on the player track.
+# #player-progress. Clan-aggregate records (clan_war_trophies_record) live
+# in CLAN_EVENT_SIGNAL_TYPES instead — not a personal achievement.
 PROGRESSION_SIGNAL_TYPES = {
     "arena_change",
     "player_level_up",
@@ -57,14 +56,12 @@ CLAN_EVENT_SIGNAL_TYPES = {
     "member_active_again",
     "award_earned",
     "season_awards_granted",
-    "clan_score_record",
     "clan_war_trophies_record",
 }
 
 # Clan-aggregate records — same lane as CLAN_EVENT_SIGNAL_TYPES but tagged
 # separately so the post path can apply the no-"season high" framing.
 CLAN_RECORD_SIGNAL_TYPES = {
-    "clan_score_record",
     "clan_war_trophies_record",
 }
 
