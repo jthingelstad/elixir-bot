@@ -12,6 +12,7 @@ from db import (
     _build_form_summary,
     _canon_tag,
     _card_level,
+    _played_as,
     _rowdicts,
     _ensure_member,
     _hash_payload,
@@ -1141,7 +1142,7 @@ def get_member_recent_losses(
     sample_battles = len(rows)
     losses = [r for r in rows if r["outcome"] == "L"]
     losses_examined = len(losses)
-    counts: dict[str, int] = {}
+    counts: dict[tuple[str, Optional[str]], int] = {}
     icons: dict[str, str] = {}
     opponent_agg: dict[str, dict] = {}
     for row in losses:
@@ -1165,20 +1166,23 @@ def get_member_recent_losses(
             name = card.get("name")
             if not name:
                 continue
-            counts[name] = counts.get(name, 0) + 1
+            played_as = _played_as(card)
+            counts[(name, played_as)] = counts.get((name, played_as), 0) + 1
             icon = (card.get("iconUrls") or {}).get("medium") if isinstance(card.get("iconUrls"), dict) else None
             if icon and name not in icons:
                 icons[name] = icon
     ordered = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:top_cards]
-    top_opponent_cards = [
-        {
+    top_opponent_cards = []
+    for (name, played_as), count in ordered:
+        entry = {
             "name": name,
             "icon_url": icons.get(name, ""),
             "appearances": count,
             "pct_of_losses": round(count / losses_examined * 100) if losses_examined else 0,
         }
-        for name, count in ordered
-    ]
+        if played_as:
+            entry["played_as"] = played_as
+        top_opponent_cards.append(entry)
     crown_diffs = [
         (r["crowns_for"] or 0) - (r["crowns_against"] or 0)
         for r in losses

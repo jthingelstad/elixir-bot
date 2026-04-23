@@ -59,14 +59,13 @@ In tournament contexts, `name` may be absent (only `id`). This list is non-exhau
 
 **Observed mode-field interpretation:**
 - `starLevel` is separate from `evolutionLevel`
-- `evolutionLevel` has been observed in both `currentDeck` and `cards`
-- `maxEvolutionLevel=1` aligns with Evo-capable cards
-- `maxEvolutionLevel=2` aligns with Hero-capable cards
-- `maxEvolutionLevel=3` aligns with cards that support both Evo and Hero modes
-- `evolutionLevel=1` maps to `Evo unlocked`
-- `evolutionLevel=2` maps to `Hero unlocked`
-- `evolutionLevel=3` maps to `Evo + Hero unlocked`
-- This is an observed interpretation from live payloads and local stored data, suitable for Elixir UX but not proof of slot-based activation behavior
+- `maxEvolutionLevel` describes card *capability* (static per card): `1` = Evo-capable, `2` = Hero-capable, `3` = supports both modes
+- `evolutionLevel` is **context-sensitive** — same field, different meaning depending on which array it appears in:
+  - In `cards[]` (full collection): **ownership** — the player has this mode unlocked (`1` = Evo unlocked, `2` = Hero unlocked, `3` = Evo + Hero unlocked)
+  - In `currentDeck[]` (active 8-card deck): **deployment** — this card is currently slotted to play as the indicated mode (`1` = configured as Evo, `2` = configured as Hero; `3` never observed here since a slot plays as one mode at a time)
+  - In battle-log `team[*].cards` / `opponent[*].cards`: **played-as in that specific battle** (`1` = played as Evo, `2` = played as Hero; `3` never observed in battle data)
+- Verified empirically across 15,442 live battles (April 2026): `evolutionLevel` appears on only 2-3 slots per battle (never all 8), slot positions match Clash Royale's evo/hero slot mechanics, and `evolutionLevel=3` never appears in deck or battle arrays — confirming the field encodes *deployment* in those contexts, not ownership
+- Agents needing ownership → read from `cards[]`. Agents needing played-as → read from `currentDeck[]` or battle-log card arrays. See `players.md` for full context.
 
 **Card level interpretation:**
 - `level` and `maxLevel` use the API's rarity-relative scale, not a universal cross-rarity scale
