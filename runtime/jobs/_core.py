@@ -67,6 +67,7 @@ from runtime.jobs._site import (
     _normalize_poap_kings_publish_result,
     _notify_poapkings_publish,
     _publish_poap_kings_site_or_raise,
+    _publish_weekly_recap_blog_post,
 )
 
 
@@ -718,6 +719,16 @@ async def _weekly_clan_recap():
             await _notify_poapkings_publish("weekly-recap", error_detail=str(exc))
             runtime_status.mark_job_failure("weekly_clan_recap", f"site sync failed: {exc}")
             return
+    if poap_kings_site.site_enabled():
+        try:
+            blog_result = await asyncio.to_thread(
+                _publish_weekly_recap_blog_post,
+                recap_text,
+            )
+            await _notify_poapkings_publish("weekly-recap-blog", publish_result=blog_result)
+        except Exception as exc:
+            log.error("Weekly recap blog post publish failed: %s", exc, exc_info=True)
+            await _notify_poapkings_publish("weekly-recap-blog", error_detail=str(exc))
     runtime_status.mark_job_success("weekly_clan_recap", "weekly recap posted")
 
 

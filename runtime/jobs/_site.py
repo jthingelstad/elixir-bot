@@ -9,6 +9,8 @@ __all__ = [
     "_normalize_poap_kings_publish_result", "_poapkings_publish_context",
     "_poapkings_publish_fallback", "_notify_poapkings_publish",
     "_promotion_content_cycle", "_site_data_refresh", "_site_content_cycle",
+    "_publish_weekly_recap_blog_post",
+    "_publish_member_join_blog_post",
 ]
 
 import asyncio
@@ -461,3 +463,73 @@ async def _site_content_cycle():
         log.error("Site content cycle error: %s", e, exc_info=True)
         await _notify_poapkings_publish("site-content", error_detail=str(e))
         runtime_status.mark_job_failure("site_content_cycle", str(e))
+
+
+def _publish_weekly_recap_blog_post(recap_text: str, *, now: datetime | None = None) -> dict[str, object]:
+    from runtime.app import CHICAGO
+    from runtime.jobs._signals import _strip_weekly_recap_header
+    current = (now or datetime.now(timezone.utc)).astimezone(CHICAGO)
+    date_str = current.strftime("%Y-%m-%d")
+    body = _strip_weekly_recap_header(recap_text).strip()
+
+    first_sentence = (body.split(".")[0] + ".").strip()
+    if len(first_sentence) > 140:
+        first_sentence = first_sentence[:137] + "..."
+    description = first_sentence
+
+    title = f"Weekly Clan Recap — {current.strftime('%B')} {current.day}, {current.year}"
+    frontmatter = (
+        f"---\n"
+        f'title: "{title}"\n'
+        f"date: {date_str}\n"
+        f"author: Elixir\n"
+        f'description: "{description}"\n'
+        f"tags: [recap]\n"
+        f"---\n\n"
+    )
+    content = frontmatter + body + "\n"
+    path = f"src/blog/posts/{date_str}-weekly-recap.md"
+    return poap_kings_site.publish_blog_post(path, content, f"Elixir weekly recap blog post {date_str}")
+
+
+def _publish_member_join_blog_post(
+    signals: list[dict],
+    body: str,
+    summary: str | None = None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    import re as _re
+    from runtime.app import CHICAGO
+    current = (now or datetime.now(timezone.utc)).astimezone(CHICAGO)
+    date_str = current.strftime("%Y-%m-%d")
+    time_slug = current.strftime("%H%M")
+
+    join_signals = [s for s in signals if s.get("type") == "member_join"]
+    if not join_signals:
+        raise ValueError("No member_join signals in batch")
+
+    if len(join_signals) == 1:
+        name = join_signals[0].get("name", "New Member")
+        slug_name = _re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+        title = f"Welcome to POAP KINGS, {name}!"
+        slug = f"welcome-{slug_name}"
+    else:
+        title = "New Members Join POAP KINGS"
+        slug = "new-members"
+
+    description = (summary or (body.split(".")[0] + ".").strip())
+    if len(description) > 140:
+        description = description[:137] + "..."
+    frontmatter = (
+        f"---\n"
+        f'title: "{title}"\n'
+        f"date: {date_str}\n"
+        f"author: Elixir\n"
+        f'description: "{description}"\n'
+        f"tags: [welcome, members]\n"
+        f"---\n\n"
+    )
+    content = frontmatter + body + "\n"
+    path = f"src/blog/posts/{date_str}-{time_slug}-{slug}.md"
+    return poap_kings_site.publish_blog_post(path, content, f"Elixir member join blog post {date_str}")

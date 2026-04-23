@@ -1286,6 +1286,7 @@ def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
         patch("elixir.db.save_message"),
         patch("runtime.jobs._core.upsert_weekly_summary_memory"),
         patch("runtime.jobs._site.poap_kings_site.publish_site_content", return_value=_publish_result("members")) as mock_publish,
+        patch("runtime.jobs._site.poap_kings_site.publish_blog_post", return_value=_publish_result("blog_post")),
         patch("runtime.jobs._core._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
     ):
         asyncio.run(elixir._weekly_clan_recap())
@@ -1302,9 +1303,12 @@ def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
         },
         "Elixir POAP KINGS weekly recap sync",
     )
-    mock_notify.assert_awaited_once()
-    assert mock_notify.await_args.args[0] == "weekly-recap"
-    assert mock_notify.await_args.kwargs["publish_result"]["commit_url"].startswith("https://github.com/")
+    assert mock_notify.await_count == 2
+    notify_keys = [c.args[0] for c in mock_notify.await_args_list]
+    assert "weekly-recap" in notify_keys
+    assert "weekly-recap-blog" in notify_keys
+    recap_call = next(c for c in mock_notify.await_args_list if c.args[0] == "weekly-recap")
+    assert recap_call.kwargs["publish_result"]["commit_url"].startswith("https://github.com/")
 
 
 def test_detect_pending_system_signals_retries_until_announced():
