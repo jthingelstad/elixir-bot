@@ -44,6 +44,7 @@ COMMAND_SPECS = {
     "memory.show": AdminCommandSpec("memory.show", ("memory", "show"), "Inspect stored conversation and contextual memory.", leader_only=True, event_type="memory_report"),
     "signal.show": AdminCommandSpec("signal.show", ("signal", "show"), "Show signal routing, recent routed signals, and pending system signals.", event_type="signals_report"),
     "signal.publish-pending": AdminCommandSpec("signal.publish-pending", ("signal", "publish-pending"), "Queue missing startup signals and publish pending system announcements.", leader_only=True, write=True, event_type="signal_publish_pending"),
+    "signal.backfill-joins": AdminCommandSpec("signal.backfill-joins", ("signal", "backfill-joins"), "Send belated welcome messages for members who joined without an announcement.", leader_only=True, write=True, event_type="signal_backfill_joins"),
     "activity.list": AdminCommandSpec("activity.list", ("activity", "list"), "List registered recurring activities.", event_type="activity_list"),
     "activity.show": AdminCommandSpec("activity.show", ("activity", "show"), "Show one recurring activity in detail.", event_type="activity_show"),
     "activity.run": AdminCommandSpec("activity.run", ("activity", "run"), "Run one registered activity now.", leader_only=True, write=True, event_type="activity_run"),
@@ -698,6 +699,54 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
     return f"Ran `{display_name}`."
 
 
+async def _run_backfill_joins(*, preview: bool) -> str:
+    import db
+    import elixir
+    from runtime.jobs._signals import _deliver_signal_group_via_awareness
+
+    conn = db.get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT m.player_tag, m.current_name, m.first_seen_at
+            FROM members m
+            WHERE m.status = 'active'
+              AND m.first_seen_at > '2026-04-14'
+              AND NOT EXISTS (
+                SELECT 1 FROM signal_log sl
+                WHERE sl.signal_type = 'member_join:' || m.player_tag
+              )
+            ORDER BY m.first_seen_at
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return "No unannounced members found — everyone has been welcomed."
+
+    signals = [
+        {
+            "type": "member_join",
+            "tag": row["player_tag"],
+            "name": row["current_name"] or row["player_tag"],
+            "signal_log_type": f"member_join:{row['player_tag']}",
+        }
+        for row in rows
+    ]
+    names = ", ".join(s["name"] for s in signals)
+
+    if preview:
+        return f"Would send belated welcome for {len(signals)} member(s): {names}"
+
+    clan, war = await elixir._load_live_clan_context()
+    ok = await _deliver_signal_group_via_awareness(signals, clan, war, workflow="backfill_joins")
+
+    if ok:
+        return f"Backfill complete — sent belated welcome for {len(signals)} member(s): {names}"
+    return f"Backfill partially failed for {len(signals)} member(s): {names}"
+
+
 async def _run_system_signals(preview: bool) -> str:
     import elixir
 
@@ -1197,6 +1246,8 @@ async def dispatch_admin_command(command: str | dict, *, preview: bool = False, 
         return await _run_member_field_command("clear", preview=preview, args=args)
     if key == "signal.publish-pending":
         return await _run_system_signals(preview=preview)
+    if key == "signal.backfill-joins":
+        return await _run_backfill_joins(preview=preview)
     if key == "activity.list":
         return await asyncio.to_thread(_build_activity_list_report)
     if key == "activity.show":
