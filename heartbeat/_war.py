@@ -828,6 +828,14 @@ def build_situation_time(*, war_day_state=None, conn=None):
     is_final_battle_day = phase == "battle" and final_day_matches_total
     is_final_practice_day = phase == "practice" and final_day_matches_total
 
+    days_after_today = (
+        max(0, day_total - day_number)
+        if day_number is not None and day_total is not None
+        else None
+    )
+    battle_days_after_today = days_after_today if phase == "battle" else None
+    practice_days_after_today = days_after_today if phase == "practice" else None
+
     return {
         "phase": phase,
         "phase_display": war_day_state.get("phase_display"),
@@ -839,6 +847,8 @@ def build_situation_time(*, war_day_state=None, conn=None):
         "time_left_text": time_left_text,
         "is_final_battle_day": is_final_battle_day,
         "is_final_practice_day": is_final_practice_day,
+        "battle_days_after_today": battle_days_after_today,
+        "practice_days_after_today": practice_days_after_today,
         "is_colosseum_week": is_colosseum_week_confirmed(
             period_type,
             war_day_state.get("trophy_change"),

@@ -3146,7 +3146,28 @@ def test_build_war_now_context_battle_day_regular_week():
         assert data["is_colosseum_week"] is False
         assert "RIVER RACE — CURRENT MOMENT" in text
         assert "Battle Day 2 of 4" in text
+        # Precomputed "days left" phrasing — on day 2 of 4, 2 battle days remain
+        # after today. Never "4 more days" (which was observed 2026-04-24 in
+        # #river-race when the LLM miscounted `day_total`).
+        assert "today + 2 more battle days" in text
         assert "Colosseum" not in text
+    finally:
+        conn.close()
+
+
+def test_build_war_now_context_final_battle_day_omits_after_today_parenthetical():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_active_war(conn, section_index=1, period_index=13, period_type="warDay")
+        data, text = db.build_war_now_context(conn=conn)
+        assert data["phase"] == "battle"
+        assert data["day_number"] == 4
+        assert data["day_total"] == 4
+        assert data["is_final_battle_day"] is True
+        # On the final battle day there is no "today + N more" parenthetical —
+        # the existing "Final battle day" marker already covers it.
+        assert "today +" not in text
+        assert "Final battle day" in text
     finally:
         conn.close()
 
@@ -3160,6 +3181,8 @@ def test_build_war_now_context_practice_day():
         assert data["phase_display"] == "Practice Day 2"
         assert data["day_total"] == 3
         assert "Practice Day 2 of 3" in text
+        # On practice day 2 of 3, one practice day remains after today.
+        assert "today + 1 more practice day" in text
         assert "Colosseum" not in text
     finally:
         conn.close()
