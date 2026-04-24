@@ -1231,6 +1231,66 @@ def get_member_recent_losses(
 
 
 @managed_connection
+def get_member_recent_battles(
+    tag: str,
+    scope: str = "overall_10",
+    limit: int = 10,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """Chronological list of this member's most recent individual battles.
+
+    Returns per-battle rows from member_battle_facts: outcome, crowns, trophy
+    change, opponent name/tag/clan, and slim own/opponent deck previews.
+    Powers the `battles` include on get_member.
+    """
+    member_tag = _canon_tag(tag)
+    predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["overall_10"])
+    member_row = conn.execute(
+        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        (member_tag,),
+    ).fetchone()
+    if not member_row:
+        return None
+    capped_limit = max(1, min(int(limit or 10), 30))
+    rows = conn.execute(
+        f"SELECT battle_time, battle_type, game_mode_name, outcome, crowns_for, crowns_against, "
+        f"trophy_change, deck_json, opponent_deck_json, opponent_name, opponent_tag, opponent_clan_tag "
+        f"FROM member_battle_facts WHERE member_id = ? AND {predicate} "
+        f"ORDER BY battle_time DESC LIMIT ?",
+        (member_row["member_id"], capped_limit),
+    ).fetchall()
+    battles = []
+    for row in rows:
+        entry = {
+            "battle_time": row["battle_time"],
+            "battle_type": row["battle_type"],
+            "game_mode_name": row["game_mode_name"],
+            "outcome": row["outcome"],
+            "crowns_for": row["crowns_for"],
+            "crowns_against": row["crowns_against"],
+            "trophy_change": row["trophy_change"],
+            "opponent_name": row["opponent_name"],
+            "opponent_tag": row["opponent_tag"],
+            "opponent_clan_tag": row["opponent_clan_tag"],
+        }
+        for field, raw in (("own_deck", row["deck_json"]), ("opponent_deck", row["opponent_deck_json"])):
+            try:
+                cards = json.loads(raw or "[]")
+            except (TypeError, ValueError):
+                cards = []
+            if isinstance(cards, list) and cards:
+                entry[field] = [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
+        battles.append(entry)
+    return {
+        "member_tag": member_tag,
+        "member_name": member_row["current_name"],
+        "scope": scope,
+        "count": len(battles),
+        "battles": battles,
+    }
+
+
+@managed_connection
 def list_member_daily_battle_rollups(tag: str, days: int = 30, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     member_tag = _canon_tag(tag)
     cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()

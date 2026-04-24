@@ -209,7 +209,7 @@ def _execute_get_member(arguments):
     scope = arguments.get("scope", "competitive_10")
     days = arguments.get("days", 30)
 
-    needs_battles = any(a in include for a in ("form", "deck", "war"))
+    needs_battles = any(a in include for a in ("form", "deck", "war", "battles"))
     _refresh_member_cache(member_tag, include_battles=needs_battles)
 
     result = {}
@@ -268,6 +268,13 @@ def _execute_get_member(arguments):
             member_tag,
             scope=scope,
             limit=arguments.get("losses_limit", 30),
+        )
+
+    if "battles" in include:
+        result["battles"] = db.get_member_recent_battles(
+            member_tag,
+            scope=arguments.get("battles_scope", "overall_10"),
+            limit=arguments.get("battles_limit", 10),
         )
 
     if "history" in include:
@@ -1143,9 +1150,6 @@ def _execute_tool(name, arguments, workflow=None):
                 has_evolution=arguments.get("has_evolution"),
                 limit=arguments.get("limit", 25),
             )
-        elif name == "get_player_details":
-            player_tag = _resolve_member_tag(arguments["player_tag"])
-            result = cr_api.get_player(player_tag)
         elif name == "cr_api":
             result = _execute_cr_api(arguments)
         elif name == "get_clan_intel_report":

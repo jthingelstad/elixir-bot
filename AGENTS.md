@@ -276,7 +276,7 @@ Elixir’s core member/leader questions should be answered from structured query
 - **Member domain**: `resolve_member`, `get_member` (include: profile, form, war, trend, deck, cards, history, memories, chests), `get_member_war_detail` (aspect: summary, attendance, battles, missed_days, vs_clan_avg)
 - **River Race domain**: `get_river_race` (live race state + competing clan standings), `get_war_season` (aspect: summary, standings, win_rates, boat_battles, score_trend, season_comparison, trending, perfect_attendance, no_participation), `get_war_member_standings` (metric: fame, win_rate, attendance)
 - **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards), `get_clan_health` (aspect: at_risk, hot_streaks, losing_streaks, trophy_drops, promotion_candidates), `get_clan_trends`
-- **Utility**: `lookup_cards`, `get_player_details`, `update_member`, `save_clan_memory`
+- **Utility**: `lookup_cards`, `cr_api` (live Clash Royale API bridge for any external player/clan/tournament), `update_member`, `save_clan_memory`
 
 War tools include `war_player_type` (regular/occasional/rare/never) per member. Leadership evaluations include CR account age. Sensitive aspects (at_risk, promotion_candidates) are gated to leadership workflows at execution time.
 

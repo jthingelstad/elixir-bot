@@ -406,8 +406,16 @@ def is_colosseum_week_confirmed(
 def _format_war_now_text(data: dict) -> str:
     parts = [f"Season {data['season_id']} · Week {data['week']}"]
     phase_with_total = data.get("phase_display")
-    if phase_with_total and data.get("day_total"):
-        phase_with_total = f"{phase_with_total} of {data['day_total']}"
+    day_number = data.get("day_number")
+    day_total = data.get("day_total")
+    if phase_with_total and day_total:
+        phase_with_total = f"{phase_with_total} of {day_total}"
+        if day_number is not None:
+            after_today = max(0, day_total - day_number)
+            phase_word = "battle" if data.get("phase") == "battle" else "practice"
+            if after_today > 0:
+                more = "day" if after_today == 1 else "days"
+                phase_with_total += f" (today + {after_today} more {phase_word} {more})"
     if phase_with_total:
         parts.append(phase_with_total)
     if data.get("is_colosseum_week"):

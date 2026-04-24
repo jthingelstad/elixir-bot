@@ -5,7 +5,7 @@
 #   River Race:     get_river_race, get_war_season, get_war_member_standings
 #   Clan domain:    get_clan_roster, get_clan_health, get_clan_trends
 #   Cards:          lookup_cards
-#   Utility:        get_player_details, update_member, save_clan_memory
+#   Utility:        update_member, save_clan_memory
 
 TOOLS = [
     # ── MEMBER DOMAIN ──────────────────────────────────────────────────────
@@ -43,7 +43,17 @@ TOOLS = [
             "which aspects to return. Defaults to profile + form.\n\n"
             "Include options:\n"
             "- profile: join date, role, level, trophies, bio, Discord link, CR account age, activity rate\n"
-            "- form: recent form (wins/losses, streak, hot/mixed/slumping)\n"
+            "- form: recent form aggregates (wins/losses, streak, hot/mixed/slumping) — NOT individual battles\n"
+            "- battles: chronological list of this member's recent individual battles — outcome, crowns, "
+            "trophy change, opponent name/tag/clan, slim own/opponent deck, and battle_time per row. "
+            "Uses local DB, goes deeper than the ~25-battle CR API battlelog. Control with "
+            "battles_limit (default 10, max 30) and battles_scope "
+            "(overall_10 / competitive_10 / ladder_ranked_10 / war_10). Use this for 'tell me about my last N battles' "
+            "or 'what happened in my recent matches'. "
+            "When the user asks about a relative window ('tonight', 'today', 'this morning'), do NOT assume a timezone — "
+            "members are international. Instead, infer the session the user means by looking for a natural gap in battle_time "
+            "(e.g. several hours between clusters = a break between sessions) and only discuss the most recent cluster. "
+            "If the cluster boundary is ambiguous, ask the user to narrow the window rather than guessing.\n"
             "- war: current-day war deck status + season participation summary\n"
             "- trend: trophy/activity trend with window comparison\n"
             "- deck: current deck + signature cards (most-used from battle logs)\n"
@@ -56,6 +66,7 @@ TOOLS = [
             "(War Champ, Iron King, Donation Champ, Rookie MVP, War Participant), with rank, "
             "season, and metric. The awards table is the authoritative record of clan achievements.\n\n"
             "For 'tell me about X', use default includes. "
+            "For 'tell me about my last N battles' / 'what happened in my recent matches', include=['battles']. "
             "For 'what deck does X use', include=['deck']. "
             "For deck-review work, include=['deck','cards','losses']. "
             "For leadership evaluation, include=['profile', 'war', 'history', 'memories']. "
@@ -72,7 +83,7 @@ TOOLS = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "Which aspects to include. Options: profile, form, war, trend, deck, "
+                        "Which aspects to include. Options: profile, form, battles, war, trend, deck, "
                         "cards, losses, history, memories, chests, awards. Default: ['profile', 'form']."
                     ),
                     "default": ["profile", "form"],
@@ -99,6 +110,16 @@ TOOLS = [
                     "type": "integer",
                     "description": "How many recent battles to scan for the 'losses' include. Default 30.",
                     "default": 30,
+                },
+                "battles_limit": {
+                    "type": "integer",
+                    "description": "How many recent battles to return for the 'battles' include. Default 10, max 30.",
+                    "default": 10,
+                },
+                "battles_scope": {
+                    "type": "string",
+                    "description": "Battle scope filter for the 'battles' include: overall_10 (all modes), competitive_10, ladder_ranked_10, war_10. Default: overall_10.",
+                    "default": "overall_10",
                 },
             },
             "required": ["member_tag"],
@@ -401,20 +422,6 @@ TOOLS = [
     # ── UTILITY ────────────────────────────────────────────────────────────
 
     {
-        "name": "get_player_details",
-        "description": "Fetch fresh player stats directly from the Clash Royale API when raw live details are needed.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "player_tag": {
-                    "type": "string",
-                    "description": "The player tag, in-game name, alias, or Discord handle (e.g. '#ABC123' or '@jamie').",
-                },
-            },
-            "required": ["player_tag"],
-        },
-    },
-    {
         "name": "get_clan_intel_report",
         "description": (
             "Build a scouting/threat analysis for a competing clan in OUR current river race. "
@@ -449,7 +456,9 @@ TOOLS = [
             "- player: profile, trophies, clan, current deck, favourite card\n"
             "- player_battles: recent battle log with opponent tags preserved (chain into "
             "aspect='player' or 'clan' to scout opponents). Optional mode filter: "
-            "ladder / war / tournament / challenge / path_of_legends\n"
+            "ladder / war / tournament / challenge / path_of_legends. "
+            "For OUR clan members, prefer get_member include=['battles'] — deeper history, "
+            "no live API call, and opponent tags cross-reference our roster.\n"
             "- player_chests: upcoming chest cycle\n"
             "- clan: profile + member summary (counts, averages). Rejects OUR clan.\n"
             "- clan_members: top-N members with tags, roles, trophies, donations\n"

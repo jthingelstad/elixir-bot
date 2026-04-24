@@ -252,6 +252,43 @@ def test_execute_tool_get_member_chests_resolves_member_name():
         mock_chests.assert_called_once_with("#ABC123")
 
 
+def test_execute_tool_get_member_battles_returns_recent_battle_list():
+    with (
+        patch("elixir_agent.cr_api.get_player", return_value={"tag": "#ABC123", "name": "King Levy"}),
+        patch("elixir_agent.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
+        patch("elixir_agent.db") as mock_db,
+    ):
+        mock_db.get_member_recent_battles.return_value = {
+            "member_tag": "#ABC123",
+            "member_name": "King Levy",
+            "scope": "overall_10",
+            "count": 1,
+            "battles": [
+                {
+                    "battle_time": "2026-04-24T00:55:02.000Z",
+                    "battle_type": "PvP",
+                    "game_mode_name": "Ladder",
+                    "outcome": "W",
+                    "crowns_for": 3,
+                    "crowns_against": 0,
+                    "opponent_name": "Foo",
+                    "opponent_tag": "#XYZ",
+                }
+            ],
+        }
+        result = json.loads(elixir_agent._execute_tool(
+            "get_member",
+            {"member_tag": "#ABC123", "include": ["battles"], "battles_limit": 3},
+        ))
+        assert result["battles"]["count"] == 1
+        assert result["battles"]["battles"][0]["outcome"] == "W"
+        mock_db.get_member_recent_battles.assert_called_once_with(
+            "#ABC123", scope="overall_10", limit=3,
+        )
+        # battles include must trigger battlelog cache refresh
+        mock_db.snapshot_player_battlelog.assert_called_once()
+
+
 def test_execute_tool_get_war_season_summary_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_war_season_summary.return_value = {"season_id": 129, "races": 4}
