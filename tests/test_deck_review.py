@@ -454,6 +454,60 @@ def test_respond_in_deck_review_war_review_for_new_player_injects_offer_instruct
     assert "build my war decks" in msg
 
 
+def test_respond_in_deck_review_injects_full_card_collection_with_levels():
+    """The 2026-04-24 hallucination — Elixir saying Fireball was L12 when it
+    was actually L8 — happened because the LLM never fetched the card
+    collection and made up levels for swap candidates. We now inject the
+    owned collection (name, level, rarity, count) into the user message with
+    a strong "use ONLY these levels" directive so the model can't invent."""
+    from unittest.mock import patch
+    from agent import workflows
+
+    captured = {}
+
+    def fake_chat(system_prompt, user_msg, **kwargs):
+        captured["user_msg"] = user_msg
+        return {"event_type": "deck_review_response", "summary": "ok", "content": "ok"}
+
+    fake_collection = {
+        "cards": [
+            {"name": "Royal Ghost", "level": 12, "rarity": "legendary", "count": 6},
+            {"name": "Fireball", "level": 8, "rarity": "rare", "count": 102},
+            {"name": "Inferno Dragon", "level": 9, "rarity": "legendary", "count": 1},
+        ],
+        "support_cards": [
+            {"name": "Tower Princess", "level": 14, "rarity": "legendary", "count": 30},
+        ],
+    }
+
+    with patch.object(workflows, "_chat_with_tools", side_effect=fake_chat), \
+         patch.object(workflows.db, "get_member_current_deck", return_value=None), \
+         patch.object(workflows.db, "get_member_card_collection", return_value=fake_collection):
+        workflows.respond_in_deck_review(
+            question="review my deck",
+            author_name="shimmeringhost",
+            channel_name="#ask-elixir",
+            mode="regular",
+            subject="review",
+            target_member_tag="#2209PJPVGG",
+            target_member_name="shimmeringhost",
+        )
+
+    msg = captured["user_msg"]
+    assert "YOUR CARD COLLECTION" in msg
+    # Authoritative levels for the exact cards involved in the hallucination.
+    assert "Fireball: L8 rare" in msg
+    assert "Inferno Dragon: L9 legendary" in msg
+    assert "Royal Ghost: L12 legendary" in msg
+    # Support cards are included.
+    assert "Tower Princess: L14 legendary" in msg
+    # Total count is reported.
+    assert "Total: 4 cards owned" in msg
+    # The directive that prevents hallucination is present.
+    assert "AUTHORITATIVE levels" in msg
+    assert "Never invent or infer" in msg
+
+
 def test_respond_in_deck_review_war_review_with_decks_does_not_inject_new_player_instruction():
     """Sanity check: when war_decks reconstruction succeeds, the special new-player
     instruction is NOT injected (only the pre-fetch context is)."""
