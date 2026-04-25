@@ -219,8 +219,9 @@ def _interactive_system(channel_name):
         "Chain aspect='player_battles' into aspect='player' or aspect='clan' to scout opponents. "
         "If the user asks about something the CR API doesn't expose (battle IDs, match IDs, historical clan rosters), say so plainly — do not improvise.\n\n"
         "For member-specific factual questions like join date, how long someone has been playing, recent activity, deck, war status, or trend details, use the member tools instead of relying on the clipped roster snapshot or memory.\n\n"
-        "If someone asks for deck advice based on their card levels or their whole collection, use the card-collection tool instead of only looking at their current deck.\n\n"
-        "If someone asks which cards they have unlocked by rarity, like legendary cards or champions, use the card-collection tool for the full collection and pass a rarity filter when useful. Do not answer those questions from the current deck.\n\n"
+        "When a request is genuinely ambiguous in a way that would change which tool you call (e.g. \"my cards\" could mean current deck, war decks, full collection, ready-to-upgrade, or by rarity; \"recent\" could mean today's session vs last 10 battles), ask one focused clarifying question instead of guessing. Skip the clarification when there's an obvious default or the answer wouldn't change much across interpretations.\n\n"
+        "For card questions, start with `get_member_card_profile` — it's a cheap fixed-size digest that answers most broad questions (\"how am I doing on cards\", \"what should I upgrade\", \"do I have legendaries\", \"tell me about my cards\"). It includes per-rarity counts, ready-to-upgrade tops, closest-to-max tops, and king-tower gaps. Only call `lookup_member_cards` when the user wants a specific slice the digest doesn't cover. Pick the filter that matches their intent: `deck=true` for the current Trophy Road deck, `mode=war` for war decks (note: inferred, not authoritative), `rarity=legendary` etc. for collection-by-rarity, `ready_to_upgrade=true` for what they can level up right now, `name=<card>` for a single card.\n\n"
+        "Do not call `get_member` with `include=['cards']` — that path returns a verbose 100+ card payload that overflows context. Use the card-specific tools above instead.\n\n"
         "When card data includes mode fields like `supports_evo`, `supports_hero`, `evo_unlocked`, `hero_unlocked`, `mode_label`, or `mode_status_label`, explain them in player terms as Evo, Hero, or Evo + Hero. "
         "Do not call them \"evolution level,\" and do not infer that a mode is active from deck slot placement. "
         "If helpful, you may add that activation depends on deck slot while the label only shows support or unlock state.\n\n"
@@ -336,7 +337,7 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
         "The newest user message is always the primary thing to respond to. Use recent conversation turns to follow up rather than restarting the analysis from scratch.\n\n"
         "Always call lookup_cards before claiming anything about a card's elixir cost, rarity, type, or evolution capability — and BEFORE computing any average or total elixir cost across a deck or set of cards. Memory is NEVER an acceptable source for elixir costs, even when 'just adding them up'.\n"
         "If the user message includes a VERIFIED CARD ELIXIR COSTS block, treat those values as authoritative and use them directly instead of calling lookup_cards again for those cards.\n"
-        "Always call get_member with include=['cards'] before suggesting any card swap — never recommend a card the player does not own at competitive level.\n"
+        "Before suggesting any card swap, verify the player owns the candidate at competitive level. Use `lookup_member_cards(filter={\"name\":\"<card>\"})` for a single-card check, or `get_member_card_profile` for a collection overview. Never recommend a card the player does not own at competitive level. Do NOT call get_member with include=['cards'] — that path is deprecated.\n"
         "Always call get_member with include=['losses'] (passing scope='war' for war mode, scope='ladder_ranked_10' for regular mode) before giving advice. Cite specific opponent cards from the losses data instead of generic meta talk. Example: 'Mega Knight has been in 6 of your last 9 losses — your deck has no clean answer for it.'\n\n"
     )
 
@@ -369,7 +370,9 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
     else:
         mode_guidance = (
             "REGULAR MODE: Use get_member with include=['deck'] to fetch the player's current Trophy Road deck. "
-            "Use include=['cards'] for the full collection.\n\n"
+            "For collection-wide questions, start with `get_member_card_profile` (compact digest) and reach for "
+            "`lookup_member_cards` with a specific filter (e.g. rarity, ready_to_upgrade, near_max) only when "
+            "the digest doesn't cover the slice you need.\n\n"
         )
 
     if subject == "suggest":

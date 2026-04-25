@@ -945,8 +945,8 @@ def test_chat_with_tools_returns_empty_response_after_max_tool_rounds(caplog):
     )
     tool_message = SimpleNamespace(role="assistant", content=None, tool_calls=[tool_call])
     tool_choice = SimpleNamespace(message=tool_message, stop_reason="tool_use")
-    # interactive max_tool_rounds=3 → loop runs 4 iterations of tool calls, then 1 final call
-    tool_responses = [SimpleNamespace(choices=[tool_choice]) for _ in range(4)]
+    # interactive max_tool_rounds=4 → loop runs 5 iterations of tool calls, then 1 final call
+    tool_responses = [SimpleNamespace(choices=[tool_choice]) for _ in range(5)]
     empty_message = SimpleNamespace(role="assistant", content="", tool_calls=None)
     empty_choice = SimpleNamespace(message=empty_message, stop_reason="end_turn")
     responses = tool_responses + [SimpleNamespace(choices=[empty_choice])]
