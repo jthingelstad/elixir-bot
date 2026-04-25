@@ -1251,7 +1251,9 @@ def get_member_recent_battles(
     ).fetchone()
     if not member_row:
         return None
-    capped_limit = max(1, min(int(limit or 10), 30))
+    requested_limit = max(1, int(limit or 10))
+    cap = 100
+    capped_limit = min(requested_limit, cap)
     rows = conn.execute(
         f"SELECT battle_time, battle_type, game_mode_name, outcome, crowns_for, crowns_against, "
         f"trophy_change, deck_json, opponent_deck_json, opponent_name, opponent_tag, opponent_clan_tag "
@@ -1281,13 +1283,22 @@ def get_member_recent_battles(
             if isinstance(cards, list) and cards:
                 entry[field] = [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
         battles.append(entry)
-    return {
+    result = {
         "member_tag": member_tag,
         "member_name": member_row["current_name"],
         "scope": scope,
         "count": len(battles),
         "battles": battles,
     }
+    if requested_limit > cap:
+        result["requested_limit"] = requested_limit
+        result["capped_at"] = cap
+        result["cap_note"] = (
+            f"You asked for {requested_limit} battles but the per-call cap is {cap}. "
+            f"Returned the most recent {cap}. Tell the user you're working from {cap} battles, "
+            f"not the {requested_limit} they requested."
+        )
+    return result
 
 
 @managed_connection
