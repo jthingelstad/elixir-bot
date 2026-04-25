@@ -1176,6 +1176,30 @@ def test_card_mode_fields_interpret_observed_evo_and_hero_mapping():
         ) == expected
 
 
+def test_get_member_recent_battles_surfaces_cap_when_requested_over_limit():
+    """When the caller asks for more than the cap, the result must surface
+    requested_limit + capped_at so the LLM can tell the user instead of
+    silently answering against fewer battles than asked."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Tester", "role": "member"}],
+            conn=conn,
+        )
+        # Under-cap request: no cap fields surfaced.
+        result = db.get_member_recent_battles("#ABC123", limit=5, conn=conn)
+        assert "capped_at" not in result
+        assert "requested_limit" not in result
+
+        # Over-cap request (50 > 100? no — try 250 > 100):
+        result = db.get_member_recent_battles("#ABC123", limit=250, conn=conn)
+        assert result["requested_limit"] == 250
+        assert result["capped_at"] == 100
+        assert "Tell the user" in result["cap_note"]
+    finally:
+        conn.close()
+
+
 def test_cards_required_to_upgrade_table_returns_known_values():
     from cr_knowledge import cards_required_to_upgrade, is_ready_to_upgrade
 

@@ -48,7 +48,7 @@ TOOLS = [
             "- battles: chronological list of this member's recent individual battles — outcome, crowns, "
             "trophy change, opponent name/tag/clan, slim own/opponent deck, and battle_time per row. "
             "Uses local DB, goes deeper than the ~25-battle CR API battlelog. Control with "
-            "battles_limit (default 10, max 30) and battles_scope "
+            "battles_limit (default 10, max 100) and battles_scope "
             "(overall_10 / competitive_10 / ladder_ranked_10 / war_10). Use this for 'tell me about my last N battles' "
             "or 'what happened in my recent matches'. "
             "When the user asks about a relative window ('tonight', 'today', 'this morning'), do NOT assume a timezone — "
@@ -107,7 +107,12 @@ TOOLS = [
                 },
                 "battles_limit": {
                     "type": "integer",
-                    "description": "How many recent battles to return for the 'battles' include. Default 10, max 30.",
+                    "description": (
+                        "How many recent battles to return for the 'battles' include. "
+                        "Default 10, max 100. If the user asks for more (e.g. 'last 200 "
+                        "battles'), pass the actual number — the call will return up to "
+                        "the cap and surface a `capped_at` field so you can tell the user."
+                    ),
                     "default": 10,
                 },
                 "battles_scope": {
