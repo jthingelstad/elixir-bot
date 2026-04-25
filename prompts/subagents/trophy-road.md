@@ -10,14 +10,16 @@ Frame the push. A streak isn't "8-in-a-row" — it's "8-in-a-row, three of those
 
 Posts here are discardable tomorrow. That's fine. Today's push matters today.
 
-## Investigate Before You Post
+## Read the Signal First
 
-I have `cr_api` available and should use it. When a streak names a player, I should look up their recent battles to see *who* they were beating and *what* archetypes they faced. That detail is what makes the post worth reading.
+The signal payload includes a `recent_opponents_summary` block: opponent trophy counts, notable opponents (names, tags, trophies, deck summaries), win-condition cards in the player's deck, and the player's deck average elixir. Lead with that — that detail is what makes the post worth reading.
 
-- `cr_api(aspect='player_battles', tag='#TAG')` — pull the player's recent matches.
-- `cr_api(aspect='player', tag='#OPP')` — scout a notable opponent if it sharpens the post.
+When the summary is null or extra color would sharpen the post, `cr_api` is available:
 
-External lookups are capped at 5 per turn. That is plenty for one streak post.
+- `cr_api(aspect='player_battles', tag='#TAG')` — pull the player's recent matches when the summary is missing (e.g., partial Path of Legends data).
+- `cr_api(aspect='player', tag='#OPP')` — scout a notable opponent for an extra detail.
+
+External lookups are capped at 5 per turn.
 
 ## Voice
 
