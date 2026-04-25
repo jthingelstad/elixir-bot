@@ -32,7 +32,7 @@ except ImportError:
 import db
 import elixir_agent
 from agent import tool_exec
-from agent.core import _create_chat_completion, _chat_model_name
+from agent.core import _create_chat_completion, _lightweight_model_name
 from agent.intent_router import classify_intent
 from runtime.helpers._members import (
     _build_member_deck_report,
@@ -137,13 +137,17 @@ def generate_conversation_script(member: dict) -> list[str]:
         f"- Keep each message conversational and concise (under 30 words).\n\n"
         "Return ONLY a JSON array of 3 strings, no wrapper, no commentary."
     )
+    # Pin script generation to Haiku so the eval runs on the same model the
+    # production interactive/deck_review workflows use — keeps cost down and
+    # avoids Sonnet-vs-Haiku capability differences between the simulated user
+    # and the bot under test.
     resp = _create_chat_completion(
         workflow="eval_deck_script_gen",
         messages=[
             {"role": "system", "content": "You produce realistic test data. Output strict JSON only."},
             {"role": "user", "content": prompt},
         ],
-        model=_chat_model_name(),
+        model=_lightweight_model_name(),
         temperature=1.0,
         max_tokens=1024,
     )
