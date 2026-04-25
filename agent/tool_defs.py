@@ -58,7 +58,6 @@ TOOLS = [
             "- war: current-day war deck status + season participation summary\n"
             "- trend: trophy/activity trend with window comparison\n"
             "- deck: current deck + signature cards (most-used from battle logs)\n"
-            "- cards: full card collection with levels, rarity summaries, strongest cards\n"
             "- losses: top opponent cards seen in recent losses + crown deficit + loss-streak context (uses scope param to pick mode: war_10/ladder_ranked_10/competitive_10/overall_10)\n"
             "- history: trophy and donation history from snapshots\n"
             "- memories: stored memories/observations about this member\n"
@@ -69,9 +68,10 @@ TOOLS = [
             "For 'tell me about X', use default includes. "
             "For 'tell me about my last N battles' / 'what happened in my recent matches', include=['battles']. "
             "For 'what deck does X use', include=['deck']. "
-            "For deck-review work, include=['deck','cards','losses']. "
+            "For deck-review work, include=['deck','losses'] — for card collection data, use get_member_card_profile or lookup_member_cards. "
             "For leadership evaluation, include=['profile', 'war', 'history', 'memories']. "
-            "For 'has X won anything' / 'what has X earned', include=['profile', 'awards']."
+            "For 'has X won anything' / 'what has X earned', include=['profile', 'awards']. "
+            "For card-collection questions ('what should I upgrade', 'review my cards', 'do I have X'), do NOT use this tool — use get_member_card_profile or lookup_member_cards instead."
         ),
         "input_schema": {
             "type": "object",
@@ -85,7 +85,8 @@ TOOLS = [
                     "items": {"type": "string"},
                     "description": (
                         "Which aspects to include. Options: profile, form, battles, war, trend, deck, "
-                        "cards, losses, history, memories, chests, awards. Default: ['profile', 'form']."
+                        "losses, history, memories, chests, awards. Default: ['profile', 'form']. "
+                        "For card-collection data, use get_member_card_profile or lookup_member_cards."
                     ),
                     "default": ["profile", "form"],
                 },
@@ -98,14 +99,6 @@ TOOLS = [
                     "type": "integer",
                     "description": "History/trend window in days. Default 30.",
                     "default": 30,
-                },
-                "rarity": {
-                    "type": "string",
-                    "description": "Card rarity filter (for 'cards' include): common, rare, epic, legendary, champion.",
-                },
-                "min_level": {
-                    "type": "integer",
-                    "description": "Minimum displayed card level filter (for 'cards' include).",
                 },
                 "losses_limit": {
                     "type": "integer",

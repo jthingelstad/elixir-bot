@@ -240,28 +240,14 @@ def _execute_get_member(arguments):
         )
 
     if "cards" in include:
-        collection = db.get_member_card_collection(
-            member_tag,
-            limit=arguments.get("limit", 100),
-            min_level=arguments.get("min_level"),
-            include_support=True,
-            rarity=arguments.get("rarity"),
-        )
-        if isinstance(collection, dict):
-            collection = dict(collection)
-            collection["cards"] = _slim_card_list(collection.get("cards"))
-            collection["support_cards"] = _slim_card_list(collection.get("support_cards"))
-            summary = collection.get("summary")
-            if isinstance(summary, dict) and "strongest_cards" in summary:
-                summary = dict(summary)
-                summary["strongest_cards"] = _slim_card_list(summary.get("strongest_cards"))
-                collection["summary"] = summary
-            collection_summary = collection.get("collection_summary")
-            if isinstance(collection_summary, dict) and "strongest_cards" in collection_summary:
-                collection_summary = dict(collection_summary)
-                collection_summary["strongest_cards"] = _slim_card_list(collection_summary.get("strongest_cards"))
-                collection["collection_summary"] = collection_summary
-        result["card_collection"] = _enrich_member_card_collection(collection)
+        result["card_collection"] = {
+            "error": "deprecated_include",
+            "hint": (
+                "include=['cards'] was removed because the full collection routinely "
+                "overflowed context. Use get_member_card_profile for a compact digest, "
+                "or lookup_member_cards(filter=...) for a targeted slice."
+            ),
+        }
 
     if "losses" in include:
         result["losses"] = db.get_member_recent_losses(
