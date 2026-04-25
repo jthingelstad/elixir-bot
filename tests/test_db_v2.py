@@ -1176,6 +1176,177 @@ def test_card_mode_fields_interpret_observed_evo_and_hero_mapping():
         ) == expected
 
 
+def test_cards_required_to_upgrade_table_returns_known_values():
+    from cr_knowledge import cards_required_to_upgrade, is_ready_to_upgrade
+
+    # Spot-check known wiki values across rarities.
+    assert cards_required_to_upgrade("common", 1) == 2
+    assert cards_required_to_upgrade("rare", 9) == 800
+    assert cards_required_to_upgrade("epic", 5) == 100
+    assert cards_required_to_upgrade("legendary", 1) == 2
+    assert cards_required_to_upgrade("champion", 1) == 5
+
+    # Beyond the table → None (already maxed or out of range).
+    assert cards_required_to_upgrade("legendary", 99) is None
+    assert cards_required_to_upgrade("unknown_rarity", 1) is None
+    assert cards_required_to_upgrade("common", 0) is None
+
+    # is_ready_to_upgrade composes count + rarity + level.
+    assert is_ready_to_upgrade("rare", 9, 800) is True
+    assert is_ready_to_upgrade("rare", 9, 799) is False
+    assert is_ready_to_upgrade("legendary", 99, 1000) is False  # maxed → False
+
+
+def _seed_member_with_collection(conn, *, exp_level=12):
+    db.snapshot_members(
+        [{"tag": "#ABC123", "name": "Tester", "role": "member", "expLevel": exp_level}],
+        conn=conn,
+    )
+    db.snapshot_player_profile(
+        {
+            "tag": "#ABC123",
+            "name": "Tester",
+            "expLevel": exp_level,
+            "cards": [
+                # Common, level 9, has 1000 (needed for L9->10 is 800) → ready_to_upgrade.
+                {"name": "Knight", "level": 9, "maxLevel": 16, "rarity": "common", "count": 1000},
+                # Rare, level 13, 200 of 1500 needed → near_ready=False (under 50%).
+                {"name": "Hog Rider", "level": 13, "maxLevel": 16, "rarity": "rare", "count": 200},
+                # Rare, level 9, 500 of 800 → near_ready (>=50% but not ready).
+                {"name": "Musketeer", "level": 9, "maxLevel": 16, "rarity": "rare", "count": 500},
+                # Epic, level 14, 1 level from max → near_max.
+                {"name": "P.E.K.K.A", "level": 14, "maxLevel": 15, "rarity": "epic", "count": 50},
+                # Legendary, max level → maxed.
+                {"name": "Log", "level": 16, "maxLevel": 16, "rarity": "legendary", "count": 100},
+                # Common at level 8, king tower 12 → king_tower_gap = 4.
+                {"name": "Archers", "level": 8, "maxLevel": 16, "rarity": "common", "count": 100},
+                # Card with evolution unlocked.
+                {"name": "Valkyrie", "level": 14, "maxLevel": 16, "rarity": "rare", "count": 100, "evolutionLevel": 1, "maxEvolutionLevel": 1},
+            ],
+        },
+        conn=conn,
+    )
+
+
+def test_get_member_card_profile_returns_compact_digest_with_upgrade_signals():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_member_with_collection(conn, exp_level=12)
+        profile = db.get_member_card_profile("#ABC123", conn=conn)
+
+        assert profile["king_tower_level"] == 12
+        # 7 cards total, 1 maxed (Log).
+        assert profile["totals"]["owned"] == 7
+        assert profile["totals"]["max_level"] == 1
+        # By-rarity breakdown.
+        assert profile["by_rarity"]["common"]["owned"] == 2
+        assert profile["by_rarity"]["common"]["ready"] == 1  # Knight is ready
+        # Knight should top the ready list with 1000 stockpiled vs 800 required.
+        assert profile["ready_to_upgrade_top"][0]["name"] == "Knight"
+        assert profile["ready_to_upgrade_top"][0]["count"] == 1000
+        # Closest-to-max should surface P.E.K.K.A (1 level from max, not maxed).
+        names = [c["name"] for c in profile["closest_to_max_top"]]
+        assert "P.E.K.K.A" in names
+        # King-tower gap should surface Archers (level 8 vs king tower 12, gap 4).
+        assert profile["biggest_king_tower_gaps_top"][0]["name"] == "Archers"
+        assert profile["biggest_king_tower_gaps_top"][0]["king_tower_gap"] == 4
+        # Mode counts pick up Valkyrie's unlocked evo.
+        assert profile["modes"]["evo_unlocked"] == 1
+    finally:
+        conn.close()
+
+
+def test_get_member_card_profile_under_3kb_serialized():
+    """Digest must stay small enough that it never triggers truncation."""
+    conn = db.get_connection(":memory:")
+    try:
+        # Seed with a realistic 100-card collection.
+        cards = [
+            {"name": f"Card{i:03d}", "level": (i % 14) + 1, "maxLevel": 16,
+             "rarity": ["common", "rare", "epic", "legendary"][i % 4], "count": (i * 13) % 2000}
+            for i in range(120)
+        ]
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "Stress", "role": "member", "expLevel": 14}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "Stress", "expLevel": 14, "cards": cards},
+            conn=conn,
+        )
+        profile = db.get_member_card_profile("#ABC123", conn=conn)
+        size = len(json.dumps(profile))
+        assert size < 3072, f"digest is {size} bytes; must stay under 3KB"
+    finally:
+        conn.close()
+
+
+def test_lookup_member_cards_requires_filter():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_member_with_collection(conn)
+        # No filter → structured filter_required error with hints.
+        result = db.lookup_member_cards("#ABC123", filter=None, conn=conn)
+        assert result["error"] == "filter_required"
+        assert any("ready_to_upgrade" in hint for hint in result["available_filters"])
+        assert "ask the user" in result["suggest_clarify"].lower()
+        # Empty-filter dict also rejected.
+        result = db.lookup_member_cards("#ABC123", filter={}, conn=conn)
+        assert result["error"] == "filter_required"
+    finally:
+        conn.close()
+
+
+def test_lookup_member_cards_ready_to_upgrade_returns_only_ready():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_member_with_collection(conn)
+        result = db.lookup_member_cards(
+            "#ABC123", filter={"ready_to_upgrade": True}, conn=conn,
+        )
+        names = {c["name"] for c in result["cards"]}
+        # Knight (common L9, count 1000 ≥ 800 required) is ready.
+        assert "Knight" in names
+        # Hog Rider (rare L13, only 200 of 1500) is NOT ready.
+        assert "Hog Rider" not in names
+        # Log is maxed → never ready.
+        assert "Log" not in names
+        # Each returned card carries upgrade context.
+        for card in result["cards"]:
+            assert card["ready_to_upgrade"] is True
+            assert card["count"] >= card["cards_required_for_next_level"]
+    finally:
+        conn.close()
+
+
+def test_lookup_member_cards_filters_by_rarity_and_near_max():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_member_with_collection(conn)
+        # Rarity filter.
+        result = db.lookup_member_cards("#ABC123", filter={"rarity": "common"}, conn=conn)
+        names = {c["name"] for c in result["cards"]}
+        assert names == {"Knight", "Archers"}
+        # near_max returns cards 1-2 levels from max: P.E.K.K.A (1 from max)
+        # and Valkyrie (2 from max). Log is maxed → excluded.
+        result = db.lookup_member_cards("#ABC123", filter={"near_max": True}, conn=conn)
+        assert {c["name"] for c in result["cards"]} == {"P.E.K.K.A", "Valkyrie"}
+    finally:
+        conn.close()
+
+
+def test_lookup_member_cards_war_mode_carries_caveat():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_member_with_collection(conn)
+        result = db.lookup_member_cards("#ABC123", filter={"mode": "war"}, conn=conn)
+        # No war battles seeded → empty matching, but caveat must be present.
+        assert "war_deck_caveat" in result
+        assert "not authoritative" in result["war_deck_caveat"]
+    finally:
+        conn.close()
+
+
 def test_get_member_card_collection_can_filter_by_rarity_for_full_collection_questions():
     conn = db.get_connection(":memory:")
     try:

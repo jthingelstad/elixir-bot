@@ -1150,6 +1150,26 @@ def _execute_tool(name, arguments, workflow=None):
                 has_evolution=arguments.get("has_evolution"),
                 limit=arguments.get("limit", 25),
             )
+        elif name == "get_member_card_profile":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            _refresh_member_cache(member_tag, include_battles=False)
+            result = db.get_member_card_profile(member_tag)
+            if result is None:
+                result = {
+                    "error": "no_collection_snapshot",
+                    "member_tag": member_tag,
+                    "hint": "No card collection snapshot exists yet for this member.",
+                }
+        elif name == "lookup_member_cards":
+            member_tag = _resolve_member_tag(arguments["member_tag"])
+            include_battles = bool(((arguments.get("filter") or {}).get("mode")) == "war"
+                                   or (arguments.get("filter") or {}).get("deck"))
+            _refresh_member_cache(member_tag, include_battles=include_battles)
+            result = db.lookup_member_cards(
+                member_tag,
+                filter=arguments.get("filter"),
+                limit=arguments.get("limit", 20),
+            )
         elif name == "cr_api":
             result = _execute_cr_api(arguments)
         elif name == "get_clan_intel_report":
