@@ -1258,7 +1258,11 @@ def test_get_member_card_profile_returns_compact_digest_with_upgrade_signals():
         _seed_member_with_collection(conn, exp_level=12)
         profile = db.get_member_card_profile("#ABC123", conn=conn)
 
+        # exp_level=12 is below the King Tower cap (16), so king_tower
+        # equals experience_level. Both are surfaced separately.
         assert profile["king_tower_level"] == 12
+        assert profile["experience_level"] == 12
+        assert profile["king_tower_max"] == 16
         # 7 cards total, 1 maxed (Log).
         assert profile["totals"]["owned"] == 7
         assert profile["totals"]["max_level"] == 1
@@ -1276,6 +1280,27 @@ def test_get_member_card_profile_returns_compact_digest_with_upgrade_signals():
         assert profile["biggest_king_tower_gaps_top"][0]["king_tower_gap"] == 4
         # Mode counts pick up Valkyrie's unlocked evo.
         assert profile["modes"]["evo_unlocked"] == 1
+    finally:
+        conn.close()
+
+
+def test_get_member_card_profile_clamps_king_tower_at_cap():
+    """When experience_level exceeds the King Tower cap (16), king_tower_level
+    must clamp at the cap. Reading expLevel raw produced nonsense gaps like
+    "27 levels" on shimmeringhost (cards L7 vs expLevel 34) when actual gap
+    was 9 (L7 vs King Tower 16, capped)."""
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_member_with_collection(conn, exp_level=34)  # past cap
+        profile = db.get_member_card_profile("#ABC123", conn=conn)
+        assert profile["experience_level"] == 34
+        assert profile["king_tower_level"] == 16  # clamped
+        # Archers at level 8 vs King Tower 16 = gap of 8, NOT 26.
+        archers = next(
+            c for c in profile["biggest_king_tower_gaps_top"]
+            if c["name"] == "Archers"
+        )
+        assert archers["king_tower_gap"] == 8
     finally:
         conn.close()
 
