@@ -3495,3 +3495,88 @@ def test_detect_war_completion_retries_until_signal_is_marked():
         conn.close()
 
 
+def test_member_join_detection_survives_non_heartbeat_warstate_ingest():
+    """Regression: a non-heartbeat path (Discord channel handler that fetches
+    live war state) must not promote a brand-new clan member from
+    'observed' to 'active' before the heartbeat's join detector runs.
+
+    Reproduces the 2026-04-25 Strixx miss: upsert_war_current_state inserts
+    the new clan member via _ensure_member(status=None) → 'observed'. Then
+    snapshot_members(create_if_missing=False) used to bump status to
+    'active', which made get_active_roster_map() return the tag, which
+    made detect_joins_leaves see the new member as already-known, which
+    silently dropped the member_join signal.
+
+    Fix lives in storage/roster.py:snapshot_members — the
+    create_if_missing=False branch now passes status=None.
+    """
+    from heartbeat._roster import detect_joins_leaves
+
+    conn = db.get_connection(":memory:")
+    try:
+        # 1. Pre-existing clan: one active member.
+        db.snapshot_members(
+            [{"tag": "#OLD", "name": "Veteran", "role": "member",
+              "lastSeen": "20260425T100000.000Z"}],
+            conn=conn,
+        )
+        assert "#NEW" not in db.get_active_roster_map(conn=conn)
+
+        # 2. Live CR API now sees a NEW player (they just joined). A Discord
+        #    channel handler fetches live war state, which inserts the new
+        #    member via the war-ingest _ensure_member path with status=None
+        #    (→ 'observed').
+        live_war = {
+            "state": "full",
+            "seasonId": 131,
+            "sectionIndex": 2,
+            "periodIndex": 12,
+            "periodType": "warDay",
+            "clan": {
+                "tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 4500,
+                "repairPoints": 0, "periodPoints": 4500, "clanScore": 100,
+                "participants": [
+                    {"tag": "#OLD", "name": "Veteran", "fame": 2000,
+                     "repairPoints": 0, "boatAttacks": 0, "decksUsed": 4,
+                     "decksUsedToday": 4},
+                    {"tag": "#NEW", "name": "Newcomer", "fame": 0,
+                     "repairPoints": 0, "boatAttacks": 0, "decksUsed": 0,
+                     "decksUsedToday": 0},
+                ],
+            },
+        }
+        db.upsert_war_current_state(live_war, conn=conn)
+
+        # 3. Same handler then calls snapshot_members with
+        #    create_if_missing=False (the _load_live_clan_context path).
+        #    PRE-FIX: this promoted #NEW from 'observed' to 'active',
+        #    breaking the heartbeat's diff. POST-FIX: status is preserved.
+        live_member_list = [
+            {"tag": "#OLD", "name": "Veteran", "role": "member",
+             "lastSeen": "20260425T120000.000Z"},
+            {"tag": "#NEW", "name": "Newcomer", "role": "member",
+             "lastSeen": "20260425T120000.000Z"},
+        ]
+        db.snapshot_members(live_member_list, create_if_missing=False, conn=conn)
+
+        # 4. The active roster as seen by the heartbeat MUST still hide #NEW —
+        #    otherwise the join diff comes back empty.
+        active_now = db.get_active_roster_map(conn=conn)
+        assert "#NEW" not in active_now, (
+            "non-heartbeat path promoted #NEW to active; heartbeat will miss the join"
+        )
+        assert "#OLD" in active_now
+
+        # 5. Now the heartbeat runs. It captures `known` BEFORE snapshotting,
+        #    then snapshots with create_if_missing=True (promoting #NEW to
+        #    active), then diffs.
+        known = db.get_active_roster_map(conn=conn)
+        db.snapshot_members(live_member_list, create_if_missing=True, conn=conn)
+        signals, _ = detect_joins_leaves(live_member_list, known, conn=conn)
+
+        join_tags = [s["tag"] for s in signals if s["type"] == "member_join"]
+        assert join_tags == ["#NEW"], (
+            f"expected exactly one member_join for #NEW, got {signals}"
+        )
+    finally:
+        conn.close()

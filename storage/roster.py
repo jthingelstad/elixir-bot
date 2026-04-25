@@ -106,7 +106,18 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
             existing = conn.execute("SELECT member_id FROM members WHERE player_tag = ?", (tag,)).fetchone()
             if not existing:
                 continue
-        member_id = _ensure_member(conn, tag, name=name, status="active")
+            # Non-heartbeat paths (interactive flows that fetch live clan/war
+            # context) must NOT promote 'observed' rows to 'active'. The
+            # heartbeat join detector compares the live API roster against
+            # get_active_roster_map(); if a member who was just inserted by
+            # upsert_war_current_state (status='observed') gets promoted here
+            # before the heartbeat runs, the diff comes back empty and the
+            # member_join signal never fires. Pass status=None so existing
+            # status is preserved — heartbeat is the only promoter.
+            ensure_status: Optional[str] = None
+        else:
+            ensure_status = "active"
+        member_id = _ensure_member(conn, tag, name=name, status=ensure_status)
         previous = conn.execute(
             "SELECT role, exp_level, trophies, best_trophies, clan_rank, previous_clan_rank, donations_week, donations_received_week, arena_id, arena_name, arena_raw_name, last_seen_api "
             "FROM member_current_state WHERE member_id = ?",
@@ -188,7 +199,13 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
                 (member_id, today, "bootstrap_seed" if bootstrap_snapshot else "clan_api_snapshot"),
             )
 
-    if seen_tags:
+    # Bulk promotion to 'active' is the heartbeat's job: it owns the
+    # observed→active transition that detect_joins_leaves diffs against.
+    # Non-heartbeat callers (interactive flows, onboarding) must NOT promote;
+    # otherwise a member just inserted by upsert_war_current_state with
+    # status='observed' becomes 'active' before the heartbeat can see them
+    # as new, and the member_join signal never fires.
+    if seen_tags and create_if_missing:
         placeholders = ",".join("?" for _ in seen_tags)
         conn.execute(
             f"UPDATE members SET status = CASE WHEN player_tag IN ({placeholders}) THEN 'active' ELSE status END",
