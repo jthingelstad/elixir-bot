@@ -292,7 +292,6 @@ def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
                         "phase": current_day.get("phase"),
                         "phase_display": current_day.get("phase_display"),
                         "day_number": current_day.get("day_number"),
-                        "day_total": current_day.get("day_total"),
                         "time_left_seconds": current_day.get("time_left_seconds"),
                         "time_left_text": current_day.get("time_left_text"),
                     })
@@ -311,7 +310,6 @@ def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
                         "phase": current_day.get("phase"),
                         "phase_display": current_day.get("phase_display"),
                         "day_number": current_day.get("day_number"),
-                        "day_total": current_day.get("day_total"),
                         "race_rank": current_day.get("race_rank"),
                         "clan_fame": current_day.get("clan_fame"),
                         "clan_score": current_day.get("clan_score"),
@@ -337,7 +335,6 @@ def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
                         "week": previous_day.get("week"),
                         "phase_display": previous_day.get("phase_display"),
                         "day_number": previous_day.get("day_number"),
-                        "day_total": previous_day.get("day_total"),
                         "completed_at": completed_at,
                         "latest_clan_defense_status": db.get_latest_clan_boat_defense_status(conn=conn),
                     })
@@ -352,7 +349,6 @@ def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
                         "week": previous_day.get("week"),
                         "phase_display": previous_day.get("phase_display"),
                         "day_number": previous_day.get("day_number"),
-                        "day_total": previous_day.get("day_total"),
                         "completed_at": completed_at,
                         "race_rank": previous_day.get("race_rank"),
                         "clan_fame": previous_day.get("clan_fame"),
@@ -390,7 +386,6 @@ def detect_war_battle_final_hours(conn=None, threshold_hours=6):
         "week": current.get("week"),
         "phase_display": current.get("phase_display"),
         "day_number": current.get("day_number"),
-        "day_total": current.get("day_total"),
         "race_rank": current.get("race_rank"),
         "time_left_seconds": current.get("time_left_seconds"),
         "time_left_text": current.get("time_left_text"),
@@ -494,7 +489,6 @@ def detect_war_battle_checkpoints(conn=None):
         "week": day_state.get("week"),
         "phase_display": day_state.get("phase_display"),
         "day_number": day_state.get("day_number"),
-        "day_total": day_state.get("day_total"),
         "race_rank": day_state.get("race_rank"),
         "clan_fame": day_state.get("clan_fame"),
         "clan_score": day_state.get("clan_score"),
@@ -590,7 +584,6 @@ def detect_war_battle_activity(conn=None):
         "season_id": day_state.get("season_id"),
         "week": day_state.get("week"),
         "day_number": day_state.get("day_number"),
-        "day_total": day_state.get("day_total"),
         "phase_display": day_state.get("phase_display"),
         "members": new_completions,
         "clan_fame": day_state.get("clan_fame"),
@@ -836,11 +829,15 @@ def build_situation_time(*, war_day_state=None, conn=None):
     battle_days_after_today = days_after_today if phase == "battle" else None
     practice_days_after_today = days_after_today if phase == "practice" else None
 
+    # day_total intentionally omitted from LLM-facing payload: phase_display
+    # ("Battle Day 2") + battle_days_after_today / practice_days_after_today
+    # cover every "how many days left" question the LLM should answer.
+    # Exposing day_total invited "day_total - day_number" derivation that
+    # produced off-by-one phrasing.
     return {
         "phase": phase,
         "phase_display": war_day_state.get("phase_display"),
         "day_number": day_number,
-        "day_total": day_total,
         "hours_remaining_in_day": hours_remaining_in_day,
         "minutes_remaining_in_day": minutes_remaining_in_day,
         "time_left_seconds": fresh_seconds,

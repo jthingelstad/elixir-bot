@@ -477,6 +477,10 @@ def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> tuple[Op
         trophy_stakes_known=bool(status.get("trophy_stakes_known")),
     )
 
+    # day_total is included while now_text is built ("Battle Day 2 of 4"
+    # reads naturally), then dropped from the LLM-facing dict so the model
+    # can't derive "days left" from day_total - day_number. See heartbeat
+    # _war.build_situation_time for the same rationale.
     data = {
         "season_id": status.get("season_id"),
         "week": status.get("week"),
@@ -495,6 +499,7 @@ def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> tuple[Op
         "race_standings": status.get("race_standings") or [],
     }
     data["now_text"] = _format_war_now_text(data)
+    data.pop("day_total", None)
     return data, data["now_text"]
 
 
@@ -948,7 +953,6 @@ def get_war_deck_status_today(conn: Optional[sqlite3.Connection] = None) -> dict
         "phase": state.get("phase"),
         "phase_display": state.get("phase_display"),
         "day_number": state.get("day_number"),
-        "day_total": state.get("day_total"),
         "period_started_at": state.get("period_started_at"),
         "period_ends_at": state.get("period_ends_at"),
         "time_left_seconds": state.get("time_left_seconds"),
