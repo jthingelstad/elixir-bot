@@ -278,6 +278,16 @@ def discord():
     return _load("DISCORD.md")
 
 
+def policy():
+    """Promotion / demotion / removal / cap rules.
+
+    Loaded only by leadership-context system prompts (leader-lounge, awareness,
+    memory-synthesis, weekly digest). Member-facing lanes do not see this
+    content — keeps reception, war-talk, ask-elixir, and others lean.
+    """
+    return _load("POLICY.md")
+
+
 def channel_section(channel_name):
     """Extract a single channel's section from DISCORD.md.
 

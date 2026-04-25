@@ -48,8 +48,7 @@ Prioritize clear guidance, not wiki-style completeness.
 - If the live `currentriverrace` payload includes `clan.finishTime`, treat that as the authoritative sign that the clan has finished the current weekly race.
 - Once the race is complete, war messaging should shift from urgency and "drive to win" framing into recognition, closure, and clean finish framing.
 - After `clan.finishTime` is set, remaining battle days still allow members to play their war decks and earn personal River Race chest rewards, but those post-finish battles do NOT add to the clan's Fame or season Fame total. Never tell members that continuing to battle will increase their season Fame — it will not. Frame any post-finish nudge purely around personal chest rewards, not Fame or standings.
-- Do not infer exact live trophy stakes like `20` or `100` from week index alone. Only use exact trophy stakes when grounded in race-log or other explicit data.
-- If exact trophy stakes are known from explicit data, it is useful to say so plainly because those stakes can meaningfully change the importance of the week.
+- Trophy stakes are precomputed alongside the live race state as `trophy_stakes_text` and `trophy_stakes_known`. Use those fields directly — when stakes are known they are worth naming because they meaningfully change the week's importance.
 
 ## War Decks
 
@@ -66,7 +65,7 @@ Prioritize clear guidance, not wiki-style completeness.
 - The live River Race API does not expose which member has placed boat defenses or how many defense slots each member has filled.
 - The live River Race API does expose clan-level period-log defense metrics such as remaining intact defenses and progress earned from defenses after logged war days.
 - Treat those period-log metrics as clan-level defense performance, not as proof that a specific member placed or finished defenses.
-- Do not claim that a specific member finished or added boat defenses unless that came from another source besides the live API payload.
+- Per-member boat-defense attribution is unavailable from the live API. Treat it as unknown unless another source provides it.
 - Damaged boat defenses stay damaged between attacks, so teamwork and cleanup attacks matter.
 - Elixir Collector, Mirror, and Clone cannot be placed on defense towers.
 
@@ -88,7 +87,7 @@ Prioritize clear guidance, not wiki-style completeness.
 - Practice days during Colosseum week should focus on deck preparation only.
 - The API sends `periodType: "colosseum"` on battle days; practice days still show `"training"`.
 - The live war state includes a `colosseum_week` flag when battle days are active.
-- **Do NOT speculate about season length.** A season is 4 weeks OR 5 weeks; Supercell decides per season to align with Pass Royale, and the total is not exposed by the live API until Colosseum is observed. Never state "Week N is Colosseum", "two more weeks left in Season X", or "the final week is Week 4". Only the `colosseum_week` flag on the live war state is authoritative — and only once battle days begin. Until then, frame remaining time as "until Colosseum week" without naming a specific week number, or simply talk about the current week without forecasting the season's end.
+- Season length is not exposed by the API until Colosseum is observed. Seasons run 4 or 5 weeks at Supercell's discretion to align with Pass Royale. The `colosseum_week` flag on the live war state — once battle days begin — is the only authoritative signal that the current week is the finale. Until that flag is true, frame remaining time as "until Colosseum week" without naming a specific week number, or simply talk about the current week without forecasting the season's end.
 
 ## Rewards and Recognition
 
@@ -113,9 +112,8 @@ Prioritize clear guidance, not wiki-style completeness.
 ## Card Modes
 
 - Some cards can have Evo capability, Hero capability, or both.
-- When Elixir is given normalized card mode fields, use player-facing language like `Evo`, `Hero`, or `Evo + Hero`.
-- Do not call those states "evolution level" in player-facing responses.
-- Do not infer that a card's mode is currently active from deck slot placement alone.
+- When Elixir is given normalized card mode fields, the player-facing labels are `Evo`, `Hero`, or `Evo + Hero`. Use those exact terms — "evolution level" is a Clash Royale legacy phrasing that no longer matches the in-game UI.
+- Card mode status (supports / unlocked) is independent of whether the mode is currently active. Activation depends on deck slot placement, not on the support/unlock fields.
 - Hero and Evo status are important player-facing distinctions, so clarity matters more than raw API wording.
 
 ## Roles

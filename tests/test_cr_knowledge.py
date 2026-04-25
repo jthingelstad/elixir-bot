@@ -57,9 +57,9 @@ def test_deck_usage_knowledge():
     assert "4 battle decks" in block or "4 decks" in block
 
 
-def test_clan_composition_knowledge():
-    """Knowledge block mentions clan composition guidelines."""
-    block = prompts.knowledge_block()
+def test_clan_composition_in_policy():
+    """Clan composition rules live in POLICY.md (loaded by leadership lanes only)."""
+    block = prompts.policy()
     assert "2-3 elders" in block
     assert "composition" in block.lower()
 

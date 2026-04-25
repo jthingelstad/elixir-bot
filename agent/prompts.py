@@ -69,9 +69,11 @@ def _help_system(channel_name: str, *, role: str) -> str:
         "card collection, recent form, war participation, signature cards, or general clan questions. "
         "Mention that you are read-only here and don't make admin decisions."
     )
+    policy_section = prompts.policy() if role == "clanops" else None
     return _build_system_prompt(
         purpose,
         knowledge,
+        policy_section,
         channel_context,
         role_guidance,
         "Write a short, natural-sounding answer in your own voice — not a bulleted manual. "
@@ -127,12 +129,14 @@ def _awareness_system():
     """System prompt for the per-tick awareness loop (Phase 4).
 
     Loads the awareness subagent prompt that defines lane rules, output
-    schema, and the "decide what to say" framing. Identity + knowledge
-    blocks come along so the agent can reason in voice.
+    schema, and the "decide what to say" framing. Identity + knowledge +
+    policy blocks come along so the agent can reason in voice and reference
+    leadership-context rules when a tick warrants a leader-lounge post.
     """
     return _build_system_prompt(
         prompts.identity_block(),
         prompts.knowledge_block(),
+        prompts.policy(),
         prompts.subagent_prompt("awareness"),
         _discord_formatting_guidance(),
         _discord_emoji_guidance(),
@@ -143,12 +147,14 @@ def _memory_synthesis_system():
     """System prompt for the weekly memory-synthesis job.
 
     Loads the memory-synthesis subagent prompt that defines the arc-memory
-    output schema + decay + contradiction-flag rules. Identity + knowledge
-    blocks come along so the agent can reason in voice.
+    output schema + decay + contradiction-flag rules. Identity + knowledge +
+    policy blocks come along so the agent can reason in voice and frame
+    leadership arcs (promotions, demotions, watch states) against the rules.
     """
     return _build_system_prompt(
         prompts.identity_block(),
         prompts.knowledge_block(),
+        prompts.policy(),
         prompts.subagent_prompt("memory-synthesis"),
         _discord_formatting_guidance(),
         _discord_emoji_guidance(allow_in_sensitive=True),
@@ -225,8 +231,8 @@ def _interactive_system(channel_name):
         "When card data includes mode fields like `supports_evo`, `supports_hero`, `evo_unlocked`, `hero_unlocked`, `mode_label`, or `mode_status_label`, explain them in player terms as Evo, Hero, or Evo + Hero. "
         "Do not call them \"evolution level,\" and do not infer that a mode is active from deck slot placement. "
         "If helpful, you may add that activation depends on deck slot while the label only shows support or unlock state.\n\n"
-        "Do not claim to know a member's current gold, wild cards, or other upgrade resources unless a tool explicitly returns them. "
-        "If someone asks what they can upgrade right now and gold is unknown, say that clearly and answer with upgrade priorities or cards closest to max instead.\n\n"
+        "Current gold, wild cards, and other upgrade resources are not exposed by any tool. Treat them as unknown. "
+        "If someone asks what they can upgrade right now, say resources are unknown and answer with upgrade priorities or cards closest to max instead.\n\n"
         "If a follow-up question exposes that an earlier answer assumed a missing fact, correct yourself clearly and continue from the corrected context.\n\n"
         "Do not evaluate whether someone should be promoted, demoted, or removed in this channel. "
         "If asked, you may state their current role and explain that promotion decisions belong in leadership spaces.\n\n"
@@ -268,6 +274,7 @@ def _clanops_system(channel_name):
     return _build_system_prompt(
         purpose,
         knowledge,
+        prompts.policy(),
         channel_context,
         "This is a private clan operations channel. "
         "This is the right place to discuss promotions, demotions, kicks, roster corrections, and leadership decisions. "
@@ -288,8 +295,8 @@ def _clanops_system(channel_name):
         "When card data includes mode fields like `supports_evo`, `supports_hero`, `evo_unlocked`, `hero_unlocked`, `mode_label`, or `mode_status_label`, explain them in player terms as Evo, Hero, or Evo + Hero. "
         "Do not call them \"evolution level,\" and do not infer that a mode is active from deck slot placement. "
         "If helpful, you may add that activation depends on deck slot while the label only shows support or unlock state.\n\n"
-        "Do not claim to know a member's current gold, wild cards, or other upgrade resources unless a tool explicitly returns them. "
-        "If someone asks what they can upgrade right now and gold is unknown, say that clearly and answer with upgrade priorities or cards closest to max instead.\n\n"
+        "Current gold, wild cards, and other upgrade resources are not exposed by any tool. Treat them as unknown. "
+        "If someone asks what they can upgrade right now, say resources are unknown and answer with upgrade priorities or cards closest to max instead.\n\n"
         "Use recent conversation turns to resolve follow-up questions, and if a new turn reveals that an earlier answer assumed a missing fact, correct the earlier claim instead of compounding it.\n\n"
         "Member profiles can include derived Clash Royale account age from Years Played badge data and recent games-per-day activity. "
         "If someone asks how long a member has been playing, use the account-age fields directly when they are present. "
@@ -394,7 +401,7 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
     closing_guidance = (
         "Card mode labels (`mode_label`, `evo_unlocked`, `hero_unlocked`) describe support / unlock state, not active deck slot. "
         "Refer to them as Evo, Hero, or Evo + Hero. Do not call them 'evolution level'.\n\n"
-        "Do not claim to know a member's current gold or upgrade resources unless a tool returns them.\n\n"
+        "Current gold and upgrade resources are not exposed by any tool. Treat them as unknown rather than guessing.\n\n"
         f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance()}"
     )
