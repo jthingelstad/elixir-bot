@@ -1848,6 +1848,8 @@ def test_snapshot_player_profile_emits_path_of_legend_promotion_signal():
         conn.close()
 
     assert first == []
+    # No ranked battles ingested before the promotion → recent_opponents_summary
+    # gracefully falls back to None instead of a half-populated dict.
     assert second == [{
         "type": "path_of_legend_promotion",
         "tag": "#ABC123",
@@ -1856,6 +1858,7 @@ def test_snapshot_player_profile_emits_path_of_legend_promotion_signal():
         "new_league_number": 8,
         "trophies": 1800,
         "rank": None,
+        "recent_opponents_summary": None,
     }]
 
 
@@ -2155,6 +2158,170 @@ def _ranked_battle(ts: str, trophies_before: int, trophy_change: int = 40, win: 
         "opponent": [{"tag": f"#OPP_{ts}", "name": "Opp", "crowns": 0 if win else 3,
                       "cards": [], "supportCards": []}],
     }
+
+
+_PLAYER_DECK_HOG = [
+    {"name": "Hog Rider"}, {"name": "Fireball"}, {"name": "Musketeer"},
+    {"name": "Ice Spirit"}, {"name": "Skeletons"}, {"name": "Cannon"},
+    {"name": "Ice Golem"}, {"name": "Log"},
+]
+
+
+def _ladder_battle_rich(ts, trophies_before, opp_trophies, opp_name="Opp", trophy_change=30, win=True):
+    """Fixture with player deck (Hog 2.6) and opponent startingTrophies — for
+    enrichment tests that need real opponent trophy + deck data."""
+    return {
+        "type": "PvP",
+        "battleTime": ts,
+        "gameMode": {"id": 72000006, "name": "Ladder"},
+        "team": [{"tag": "#ABC123", "name": "King Levy",
+                  "crowns": 3 if win else 0,
+                  "trophyChange": trophy_change if win else -trophy_change,
+                  "startingTrophies": trophies_before,
+                  "cards": _PLAYER_DECK_HOG,
+                  "supportCards": []}],
+        "opponent": [{"tag": f"#OPP_{ts}", "name": opp_name,
+                      "crowns": 1 if win else 3,
+                      "startingTrophies": opp_trophies,
+                      "cards": [{"name": "Giant"}, {"name": "Wizard"}, {"name": "Mini P.E.K.K.A"},
+                                {"name": "Skeleton Army"}, {"name": "Goblins"}, {"name": "Inferno Tower"},
+                                {"name": "Arrows"}, {"name": "Zap"}],
+                      "supportCards": []}],
+    }
+
+
+def test_battle_hot_streak_carries_rich_recent_opponents_summary():
+    """The signal must include opponent trophy aggregates, notable opponents,
+    player avg-elixir, and win-condition cards — so the awareness loop can
+    narrate without burning a cr_api(player_battles) call."""
+    conn = db.get_connection(":memory:")
+    try:
+        # Seed card_catalog so avg_elixir_cost is computable for the Hog deck.
+        for name, cost in [
+            ("Hog Rider", 4), ("Fireball", 4), ("Musketeer", 4), ("Ice Spirit", 1),
+            ("Skeletons", 1), ("Cannon", 3), ("Ice Golem", 2), ("Log", 2),
+        ]:
+            conn.execute(
+                "INSERT INTO card_catalog (card_id, name, elixir_cost, rarity, max_level, "
+                "card_type, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (hash(name) % 1_000_000_000, name, cost, "common", 16, "troop", "2026-01-01T00:00:00"),
+            )
+        conn.commit()
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        # Seed prior state so the streak signal can detect a transition.
+        db.snapshot_player_battlelog(
+            "#ABC123",
+            [_ladder_battle_rich("20260307T080000.000Z", 4970, 7100)],
+            conn=conn,
+        )
+        # Five wins, three of them against 7K+ opponents.
+        pulse = db.snapshot_player_battlelog(
+            "#ABC123",
+            [
+                _ladder_battle_rich("20260307T130000.000Z", 5060, 7300),
+                _ladder_battle_rich("20260307T120000.000Z", 5030, 7150, opp_name="Whale"),
+                _ladder_battle_rich("20260307T110000.000Z", 5000, 6800),
+                _ladder_battle_rich("20260307T100000.000Z", 5000, 7050),
+                _ladder_battle_rich("20260307T090000.000Z", 4980, 5900),
+            ],
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+    hot = next(p for p in pulse if p["type"] == "battle_hot_streak")
+    summary = hot["recent_opponents_summary"]
+    assert summary is not None
+    assert summary["wins"] >= 4
+    assert summary["losses"] == 0
+    # Trophy aggregates present because ladder battles carry startingTrophies.
+    assert "avg_trophies" in summary["opponents"]
+    assert summary["opponents"]["high_trophy_count"] >= 3
+    # Notable opponents capped at 3 and sorted by trophies desc.
+    notable = summary["opponents"]["notable_opponents"]
+    assert len(notable) == 3
+    trophies_seen = [n["trophies"] for n in notable]
+    assert trophies_seen == sorted(trophies_seen, reverse=True)
+    # Player deck enrichment.
+    assert summary["player_deck"]["avg_elixir_cost"] == 2.62  # (4+4+4+1+1+3+2+2)/8
+    assert summary["player_deck"]["win_condition_cards"] == ["Hog Rider"]
+
+
+def test_path_of_legend_promotion_recent_opponents_summary_omits_trophy_aggregates():
+    """Path of Legends opponents have no startingTrophies in the API payload,
+    so promotion signals get notable_opponents (deck only) but no trophy
+    aggregates. Other fields populate normally."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        # Initial league state.
+        db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+             "currentPathOfLegendSeasonResult": {"leagueNumber": 7, "trophies": 1600, "rank": None}},
+            conn=conn,
+        )
+        # Ingest 5 ranked battles (no opponent trophies in PoL).
+        db.snapshot_player_battlelog(
+            "#ABC123",
+            [_ranked_battle(f"20260307T1{h}0000.000Z", 1500 + h * 20)
+             for h in range(5)],
+            conn=conn,
+        )
+        # Trigger promotion via second profile snapshot.
+        signals = db.snapshot_player_profile(
+            {"tag": "#ABC123", "name": "King Levy", "currentDeck": [], "cards": [],
+             "currentPathOfLegendSeasonResult": {"leagueNumber": 8, "trophies": 1800, "rank": None}},
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+    promo = next(s for s in signals if s["type"] == "path_of_legend_promotion")
+    summary = promo["recent_opponents_summary"]
+    assert summary is not None
+    assert summary["battles_considered"] == 5
+    # Trophy aggregates absent for PoL.
+    assert "avg_trophies" not in summary["opponents"]
+    assert "median_trophies" not in summary["opponents"]
+    assert "high_trophy_count" not in summary["opponents"]
+    # notable_opponents present but trophies field omitted per entry.
+    assert summary["opponents"]["notable_opponents"]
+    assert all("trophies" not in entry for entry in summary["opponents"]["notable_opponents"])
+
+
+def test_recent_opponents_summary_returns_none_when_no_battles_in_mode():
+    """Graceful degradation: if there are no battles in the requested mode,
+    the helper returns None and signal callers can omit/null the field."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy"}],
+            conn=conn,
+        )
+        member_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = ?", ("#ABC123",),
+        ).fetchone()["member_id"]
+        from storage.player import _compute_recent_opponents_summary
+        result = _compute_recent_opponents_summary(member_id, "is_ranked = 1", conn)
+        assert result is None
+    finally:
+        conn.close()
+
+
+def test_filter_win_condition_cards_picks_known_win_cons():
+    """Win-condition extraction is case-insensitive and only returns cards
+    on the canonical list — no inventing."""
+    from cr_knowledge import filter_win_condition_cards
+    deck = ["hog rider", "Knight", "Fireball", "GIANT", "Random Card"]
+    assert filter_win_condition_cards(deck) == ["Hog Rider", "Giant"]
+    assert filter_win_condition_cards([]) == []
+    assert filter_win_condition_cards(None) == []
 
 
 def test_snapshot_player_battlelog_emits_ladder_mode_battle_pulse():

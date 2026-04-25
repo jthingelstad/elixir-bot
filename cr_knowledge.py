@@ -69,3 +69,48 @@ def is_ready_to_upgrade(rarity, current_level, count):
     if needed is None:
         return False
     return isinstance(count, int) and count >= needed
+
+
+# Cards we treat as primary "win conditions" — the cards a deck builds around.
+# A deck can have one or two; a deck with none typically uses chip damage from
+# spells + cycle (Miner-cycle is borderline; Miner is included here because it
+# IS the win condition in those decks).
+#
+# Source: prompts/subagents/tournament.md plus the deck-review prompt's
+# tournament-style language. Encoded as a constant so signal enrichment, deck
+# review, and tournament commentary all read from the same list.
+WIN_CONDITION_CARDS = frozenset({
+    "Hog Rider",
+    "Giant",
+    "Royal Giant",
+    "Golem",
+    "Elixir Golem",
+    "Ram Rider",
+    "Battle Ram",
+    "Graveyard",
+    "X-Bow",
+    "Mortar",
+    "Miner",
+    "Balloon",
+    "Goblin Drill",
+    "Three Musketeers",
+    "Wall Breakers",
+    "Royal Hogs",
+    "Skeleton Barrel",
+    "Lava Hound",
+})
+
+
+def filter_win_condition_cards(card_names):
+    """Return the subset of card_names that are primary win conditions.
+
+    Order is preserved; case-insensitive match against the canonical list."""
+    canonical = {c.lower(): c for c in WIN_CONDITION_CARDS}
+    result = []
+    for name in card_names or []:
+        if not isinstance(name, str):
+            continue
+        match = canonical.get(name.lower())
+        if match and match not in result:
+            result.append(match)
+    return result

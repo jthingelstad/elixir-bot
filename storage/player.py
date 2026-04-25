@@ -348,6 +348,9 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
             "new_league_number": new_league,
             "trophies": new_pol.get("trophies"),
             "rank": new_rank,
+            "recent_opponents_summary": _compute_recent_opponents_summary(
+                member_id, "is_ranked = 1", conn,
+            ),
         })
         # v4.7 #24: Ultimate Champion (league 10) is a season-long
         # milestone worth a distinct callout on top of the generic promotion.
@@ -869,6 +872,126 @@ _BATTLE_MODE_PREDICATES = {
     "ranked": "is_ranked = 1",
 }
 
+_HIGH_TROPHY_THRESHOLD = 7000
+_NOTABLE_OPPONENT_LIMIT = 3
+_OPPONENTS_SUMMARY_LIMIT = 10
+
+
+def _avg_elixir_for_card_names(conn, card_names):
+    if not card_names:
+        return None
+    placeholders = ",".join("?" * len(card_names))
+    rows = conn.execute(
+        f"SELECT name, elixir_cost FROM card_catalog WHERE name IN ({placeholders})",
+        tuple(card_names),
+    ).fetchall()
+    by_name = {r["name"]: r["elixir_cost"] for r in rows}
+    costs = [by_name[n] for n in card_names if isinstance(by_name.get(n), int)]
+    if not costs:
+        return None
+    return round(sum(costs) / len(costs), 2)
+
+
+def _opponent_card_names(opponent_deck_json):
+    try:
+        cards = json.loads(opponent_deck_json or "[]")
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+    if not isinstance(cards, list):
+        return []
+    return [c.get("name") for c in cards if isinstance(c, dict) and c.get("name")]
+
+
+def _compute_recent_opponents_summary(member_id, mode_predicate, conn, *, limit=_OPPONENTS_SUMMARY_LIMIT):
+    """Build a recent_opponents_summary block for streak/push/promotion signals.
+
+    Reads the last `limit` battles in the given mode (mode_predicate is a SQL
+    fragment like "is_ladder = 1") and aggregates opponent trophies (when
+    available — Path of Legends battles omit opponent.startingTrophies),
+    notable opponents, player deck avg-elixir, and win-condition cards.
+
+    Returns None when there's no usable data so callers can omit the field
+    cleanly. Never returns a half-populated dict.
+    """
+    from cr_knowledge import filter_win_condition_cards
+
+    rows = conn.execute(
+        f"SELECT outcome, deck_json, opponent_name, opponent_tag, "
+        f"opponent_deck_json, raw_json "
+        f"FROM member_battle_facts "
+        f"WHERE member_id = ? AND {mode_predicate} "
+        f"ORDER BY battle_time DESC LIMIT ?",
+        (member_id, limit),
+    ).fetchall()
+    if not rows:
+        return None
+
+    wins = sum(1 for r in rows if r["outcome"] == "W")
+    losses = sum(1 for r in rows if r["outcome"] == "L")
+    opponents = []
+    for idx, row in enumerate(rows):
+        try:
+            payload = json.loads(row["raw_json"] or "{}")
+        except (json.JSONDecodeError, TypeError, ValueError):
+            payload = {}
+        opp_payload = (payload.get("opponent") or [{}])[0] if isinstance(payload, dict) else {}
+        starting_trophies = opp_payload.get("startingTrophies") if isinstance(opp_payload, dict) else None
+        opponents.append({
+            "name": row["opponent_name"],
+            "tag": row["opponent_tag"],
+            "trophies": starting_trophies if isinstance(starting_trophies, int) else None,
+            "deck_summary": _opponent_card_names(row["opponent_deck_json"]),
+            "_recency_index": idx,
+        })
+
+    opp_block = {}
+    trophies_present = [o["trophies"] for o in opponents if isinstance(o["trophies"], int)]
+    if trophies_present:
+        sorted_trophies = sorted(trophies_present)
+        median = sorted_trophies[len(sorted_trophies) // 2]
+        opp_block["avg_trophies"] = round(sum(trophies_present) / len(trophies_present))
+        opp_block["median_trophies"] = median
+        opp_block["high_trophy_count"] = sum(
+            1 for t in trophies_present if t >= _HIGH_TROPHY_THRESHOLD
+        )
+
+    # Sort by trophies desc (None last), tiebreak by recency. Top N.
+    opponents.sort(key=lambda o: (
+        -(o["trophies"] if isinstance(o["trophies"], int) else 0),
+        o["_recency_index"],
+    ))
+    notable = []
+    for opp in opponents[:_NOTABLE_OPPONENT_LIMIT]:
+        entry = {"name": opp["name"], "tag": opp["tag"], "deck_summary": opp["deck_summary"]}
+        if isinstance(opp["trophies"], int):
+            entry["trophies"] = opp["trophies"]
+        notable.append(entry)
+    opp_block["notable_opponents"] = notable
+
+    player_card_names = []
+    try:
+        player_cards = json.loads(rows[0]["deck_json"] or "[]")
+        if isinstance(player_cards, list):
+            player_card_names = [
+                c.get("name") for c in player_cards
+                if isinstance(c, dict) and c.get("name")
+            ]
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    player_deck = {
+        "avg_elixir_cost": _avg_elixir_for_card_names(conn, player_card_names),
+        "win_condition_cards": filter_win_condition_cards(player_card_names),
+    }
+
+    return {
+        "battles_considered": len(rows),
+        "wins": wins,
+        "losses": losses,
+        "opponents": opp_block,
+        "player_deck": player_deck,
+    }
+
 
 def _latest_battle_time_for_mode(member_id: int, mode: str, conn=None):
     predicate = _BATTLE_MODE_PREDICATES[mode]
@@ -959,6 +1082,9 @@ def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, pre
                 "new_battle_count": len(new_rows),
                 "latest_battle_type": new_rows[0]["battle_type"],
                 "latest_mode_name": new_rows[0]["game_mode_name"],
+                "recent_opponents_summary": _compute_recent_opponents_summary(
+                    member_id, predicate, conn,
+                ),
             })
 
         trophy_rows = [
@@ -989,6 +1115,9 @@ def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, pre
                 "trophies_per_battle": round(trophy_delta / max(1, len(trophy_rows)), 1),
                 "latest_battle_type": new_rows[0]["battle_type"],
                 "latest_mode_name": new_rows[0]["game_mode_name"],
+                "recent_opponents_summary": _compute_recent_opponents_summary(
+                    member_id, predicate, conn,
+                ),
             })
     return signals
 
