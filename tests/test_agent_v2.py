@@ -86,34 +86,25 @@ def test_execute_tool_get_member_profile_includes_current_role_summary():
         assert result["profile"]["current_role_summary"] == "King Thing is currently the clan leader."
 
 
-def test_execute_tool_get_member_card_collection_uses_db():
+def test_execute_tool_get_member_cards_returns_deprecation_hint():
+    """include=['cards'] is removed; calls get a structured hint pointing
+    the agent at get_member_card_profile / lookup_member_cards instead."""
     with (
         patch("elixir_agent.cr_api.get_player", return_value={"tag": "#ABC123", "name": "King Levy"}),
         patch("elixir_agent.db") as mock_db,
     ):
-        mock_db.get_member_card_collection.return_value = {
-            "summary": {"highest_level": 16},
-            "cards": [{"name": "Knight", "level": 16}],
-        }
-
         result = json.loads(
             elixir_agent._execute_tool(
                 "get_member",
-                {"member_tag": "#ABC123", "include": ["cards"], "min_level": 14},
+                {"member_tag": "#ABC123", "include": ["cards"]},
             )
         )
 
-        assert result["card_collection"]["summary"]["highest_level"] == 16
-        assert result["card_collection"]["gold_known"] is False
-        assert "Current gold is not available" in result["card_collection"]["gold_note"]
-        mock_db.snapshot_player_profile.assert_called_once()
-        mock_db.get_member_card_collection.assert_called_once_with(
-            "#ABC123",
-            limit=100,
-            min_level=14,
-            include_support=True,
-            rarity=None,
-        )
+        assert result["card_collection"]["error"] == "deprecated_include"
+        assert "get_member_card_profile" in result["card_collection"]["hint"]
+        assert "lookup_member_cards" in result["card_collection"]["hint"]
+        # The deprecated path must NOT call the heavy collection function.
+        mock_db.get_member_card_collection.assert_not_called()
 
 
 def test_build_tool_result_envelope_strips_card_image_fields_from_context():
@@ -216,56 +207,44 @@ def test_execute_tool_get_member_resolves_handle_before_refresh():
         mock_db.get_member_profile.assert_called_once_with("#ABC123")
 
 
-def test_execute_tool_get_member_cards_accepts_bare_player_tag():
+def test_execute_tool_get_member_card_profile_routes_to_digest():
+    """The new card_profile tool returns the compact digest from db."""
     with (
         patch("elixir_agent.cr_api.get_player", return_value={"tag": "#20JJJ2CCRU", "name": "King Thing"}),
         patch("elixir_agent.db") as mock_db,
     ):
-        mock_db.get_member_card_collection.return_value = {"summary": {"highest_level": 16}, "cards": []}
-
-        result = json.loads(elixir_agent._execute_tool(
-            "get_member",
-            {"member_tag": "20JJJ2CCRU", "include": ["cards"]},
-        ))
-
-        assert result["card_collection"]["summary"]["highest_level"] == 16
-        mock_db.resolve_member.assert_not_called()
-        mock_db.get_member_card_collection.assert_called_once_with(
-            "#20JJJ2CCRU",
-            limit=100,
-            min_level=None,
-            include_support=True,
-            rarity=None,
-        )
-
-
-def test_execute_tool_get_member_cards_passes_rarity_filter():
-    with (
-        patch("elixir_agent.cr_api.get_player", return_value={"tag": "#20JJJ2CCRU", "name": "King Thing"}),
-        patch("elixir_agent.db") as mock_db,
-    ):
-        mock_db.get_member_card_collection.return_value = {
-            "summary": {"rarity_counts": {"legendary": 5}},
-            "cards_by_rarity": {"legendary": ["Royal Ghost", "Princess"]},
-            "cards": [],
-            "support_cards": [],
+        mock_db.get_member_card_profile.return_value = {
+            "totals": {"owned": 119, "max_level": 47},
+            "ready_to_upgrade_top": [],
         }
 
-        result = json.loads(
-            elixir_agent._execute_tool(
-                "get_member",
-                {"member_tag": "20JJJ2CCRU", "include": ["cards"], "rarity": "legendary"},
-            )
-        )
+        result = json.loads(elixir_agent._execute_tool(
+            "get_member_card_profile",
+            {"member_tag": "20JJJ2CCRU"},
+        ))
 
-        assert result["card_collection"]["summary"]["rarity_counts"]["legendary"] == 5
-        assert "Royal Ghost" in result["card_collection"]["cards_by_rarity"]["legendary"]
-        mock_db.get_member_card_collection.assert_called_once_with(
-            "#20JJJ2CCRU",
-            limit=100,
-            min_level=None,
-            include_support=True,
-            rarity="legendary",
+        assert result["totals"]["owned"] == 119
+        mock_db.get_member_card_profile.assert_called_once_with("#20JJJ2CCRU")
+
+
+def test_execute_tool_lookup_member_cards_passes_filter_through():
+    with (
+        patch("elixir_agent.cr_api.get_player", return_value={"tag": "#20JJJ2CCRU", "name": "King Thing"}),
+        patch("elixir_agent.db") as mock_db,
+    ):
+        mock_db.lookup_member_cards.return_value = {
+            "filter_applied": {"rarity": "legendary"},
+            "cards": [{"name": "Royal Ghost"}],
+        }
+
+        result = json.loads(elixir_agent._execute_tool(
+            "lookup_member_cards",
+            {"member_tag": "20JJJ2CCRU", "filter": {"rarity": "legendary"}},
+        ))
+
+        assert result["filter_applied"] == {"rarity": "legendary"}
+        mock_db.lookup_member_cards.assert_called_once_with(
+            "#20JJJ2CCRU", filter={"rarity": "legendary"}, limit=20,
         )
 
 
