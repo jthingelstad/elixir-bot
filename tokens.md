@@ -4,7 +4,7 @@ Base URL: `https://api.poap.tech`
 
 ## Authentication
 
-All endpoints require an API key via header:
+Most endpoints require an API key via header:
 
 ```
 x-api-key: <your-api-key>
@@ -34,7 +34,7 @@ Original artwork can be up to 4MB per image.
 
 ### GET /actions/scan/{address}/{eventId}
 
-Check if an address holds a POAP for a specific event. Returns a single [Token object](#token-object) if found, or HTTP 404 if not.
+Check if an address holds a POAP for a specific event. Returns a reduced token record with only `event`, `tokenId`, and `owner` if found, or HTTP 404 if not.
 
 **Path Parameters:**
 
@@ -43,7 +43,7 @@ Check if an address holds a POAP for a specific event. Returns a single [Token o
 | `address` | string | Ethereum address, ENS, or email |
 | `eventId` | string | Numeric event ID |
 
-**Response** (200): Single [Token object](#token-object)
+**Response** (200): Single [Scan-by-Event object](#scan-by-event-object)
 
 **Response** (404): `{"statusCode": 404, "error": "Not Found", "message": "Address does not have token for this event"}`
 
@@ -178,7 +178,7 @@ Get full details for a specific POAP token including event info, owner, chain la
 
 ### Token Object
 
-Returned by `/actions/scan` endpoints.
+Returned by `GET /actions/scan/{address}`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -187,11 +187,21 @@ Returned by `/actions/scan` endpoints.
 | `owner` | string | Owner's Ethereum address |
 | `chain` | string | Minting chain: `"homestead"` (Ethereum), `"xdai"` (Gnosis), `"base"`, `"matic"` (Polygon), `"arbitrum-one"`, `"celo"`, `"chiliz"`, `"mantle"`, `"unichain"` |
 | `created` | string | Time minted (e.g. `"2021-12-08 01:04:55"`) |
-| `migrated` | string\|null | Time migrated to another chain, or `null` |
+| `migrated` | string\|null | Time migrated to another chain, or `null` (may be absent on current responses) |
+
+### Scan-by-Event Object
+
+Returned by `GET /actions/scan/{address}/{eventId}`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `event` | [Scan Event](#scan-event-object) | Event details (without `supply`) |
+| `tokenId` | string | POAP token ID |
+| `owner` | string | Owner's Ethereum address |
 
 ### Event Object
 
-Note: The Event object returned by token/scan endpoints is a subset of the full Event object defined in [events.md](events.md). Fields like `animation_url`, `from_admin`, `virtual_event`, `event_template_id`, `private_event`, and `drop_image` are not returned here. The `supply` field below is unique to scan endpoints.
+Note: The Event object returned by `GET /actions/scan/{address}` is a subset of the full Event object defined in [events.md](events.md). Fields like `animation_url`, `from_admin`, `virtual_event`, `event_template_id`, `private_event`, and `drop_image` are not returned here. The `supply` field below is unique to this endpoint.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -208,7 +218,27 @@ Note: The Event object returned by token/scan endpoints is a subset of the full 
 | `end_date` | string | End date (returned as `DD-Mon-YYYY`) |
 | `expiry_date` | string | Last date POAPs are claimable (returned as `DD-Mon-YYYY`) |
 | `timezone` | string | Timezone (e.g. `"America/New_York"`) |
-| `supply` | number | Total POAPs minted (present on scan endpoints only, not on `/token/{tokenId}`) |
+| `supply` | number | Total POAPs minted (present on `GET /actions/scan/{address}` only, not on `/token/{tokenId}`) |
+
+### Scan Event Object
+
+Returned inside [Scan-by-Event object](#scan-by-event-object).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | number | Numeric event ID (e.g. `16947`) |
+| `fancy_id` | string | Unique event identifier from event name (max 256 chars) |
+| `name` | string | Event name (max 256 chars) |
+| `description` | string | Event description (max 1500 chars) |
+| `city` | string | City (optional for virtual events, max 256 chars) |
+| `country` | string | Country (optional for virtual events, max 256 chars) |
+| `event_url` | string | URL attendees should visit |
+| `image_url` | string | POAP image URL (append `?size=small` for lower resolution) |
+| `year` | number | Year the event took place |
+| `start_date` | string | Start date (returned as `DD-Mon-YYYY`, e.g. `"07-Dec-2021"`) |
+| `end_date` | string | End date (returned as `DD-Mon-YYYY`) |
+| `expiry_date` | string | Last date POAPs are claimable (returned as `DD-Mon-YYYY`) |
+| `timezone` | string | Timezone (e.g. `"America/New_York"`) |
 
 ### Drop Image Object
 

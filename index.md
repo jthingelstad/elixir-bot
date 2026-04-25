@@ -11,11 +11,13 @@ This directory contains the complete reference for the POAP API. Start here when
 
 ## Authentication Summary
 
-All endpoints require an API key:
+Most endpoints require an API key:
 
 ```
 x-api-key: <your-api-key>
 ```
+
+Exception: `GET /metadata/{eventId}/{tokenId}` requires no authentication.
 
 **Protected endpoints** additionally require a bearer access token (valid 24 hours, generated via OAuth2 client credentials at `https://auth.accounts.poap.xyz/oauth/token`):
 
@@ -31,7 +33,7 @@ Protected endpoints:
 - `POST /redeem-requests` — Request additional mint codes
 - `GET /secret/{secret_word}` — Get secret word/website claim info
 
-All other endpoints are open (API key only).
+All other documented endpoints in this repo, except `GET /metadata/{eventId}/{tokenId}`, are open (API key only).
 
 ## API Reference Files
 
@@ -74,7 +76,7 @@ All other endpoints are open (API key only).
 ## Common Workflow: Check if an Address Holds a POAP
 
 ```
-GET /actions/scan/{address}/{eventId}  → returns Token object (200) or 404 if not held
+GET /actions/scan/{address}/{eventId}  → returns { event, tokenId, owner } (200) or 404 if not held
 ```
 
 ## Gotchas and Known Quirks
@@ -94,15 +96,17 @@ These all refer to the same concept. Note the type difference: `edit_code` is an
 ### Two Different Status Tracking Systems
 After minting, there are two status tracking systems with different value sets:
 
-1. **`tx_status`** (on Claim objects from `GET /actions/claim-qr`): `waiting_tx` | `pending` | `passed` | `failed` | `bumped`
+1. **`tx_status`** (on Claim objects from `GET /actions/claim-qr`): documented values are `waiting_tx` | `pending` | `passed` | `failed` | `bumped`, but live responses may also return an empty string
 2. **`status`** (from `GET /transaction-requests/{id}`): `IN_PROCESS` | `IN_PROCESS_WORKER` | `FINISH` | `FINISH_WITH_ERROR`
 
 Use `transaction-requests` to poll for mint completion (status = `FINISH`).
 
 ### `chain` vs `layer`
 Token endpoints use two different fields for the same concept:
-- `chain`: `"homestead"` (Ethereum), `"xdai"` (Gnosis), `"base"`, `"matic"` (Polygon), `"arbitrum-one"`, `"celo"`, `"chiliz"`, `"mantle"`, `"unichain"` (on `/actions/scan` responses)
+- `chain`: `"homestead"` (Ethereum), `"xdai"` (Gnosis), `"base"`, `"matic"` (Polygon), `"arbitrum-one"`, `"celo"`, `"chiliz"`, `"mantle"`, `"unichain"` (on `GET /actions/scan/{address}` responses)
 - `layer`: `"Layer1"` (Ethereum) or `"Layer2"` (all other chains) (on `GET /token/{tokenId}` responses)
+
+`GET /actions/scan/{address}/{eventId}` is a smaller lookup response and does not include `chain`, `created`, or `migrated`.
 
 ### `timezone` Field Means Different Things
 - On Event objects: IANA timezone string (e.g. `"America/New_York"`)
@@ -116,7 +120,7 @@ The API accepts dates as `YYYY-MM-DD` or `MM-DD-YYYY` for input. However, respon
 - `secret_codes` in deliveries is a **string** containing a single six-digit code (not an array)
 
 ### Event Object Varies by Endpoint
-The Event object returned by token/scan endpoints (`tokens.md`) is a subset — it omits `animation_url`, `from_admin`, `virtual_event`, `event_template_id`, `private_event`, and `drop_image`, but adds `supply` (on scan endpoints only). The canonical full Event object is defined in [events.md](events.md).
+The Event object returned by token/scan endpoints (`tokens.md`) is a subset — it omits `animation_url`, `from_admin`, `virtual_event`, `event_template_id`, `private_event`, and `drop_image`. On `GET /actions/scan/{address}`, it also adds `supply`. The canonical full Event object is defined in [events.md](events.md).
 
 The full Event object itself also varies: `animation_url` is only present on `/paginated-events` (not on `/events/id` or `/events/{fancyId}`), while `created_date` is only present on `/events/id` and `/events/{fancyId}` (not on `/paginated-events`). `drop_image` may be absent on older events.
 
