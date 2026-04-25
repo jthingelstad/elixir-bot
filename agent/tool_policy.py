@@ -118,7 +118,10 @@ TOOLSETS_BY_WORKFLOW = {
 MAX_ROUNDS_BY_WORKFLOW = {
     "clanops": 5,
     "channel_update_leadership": 6,
-    "interactive": 3,
+    # interactive: 4 rounds covers card-question chains where the agent calls
+    # get_member_card_profile, then lookup_member_cards with a filter, then
+    # answers — plus headroom for an optional clarifying-question turn.
+    "interactive": 4,
     "observation": 3,
     "observe": 3,
     # channel_update gets real reach as of v4.5 — investigate streak opponents,
