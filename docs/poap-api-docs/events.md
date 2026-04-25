@@ -117,7 +117,7 @@ Get event details by numeric event ID.
 |-------|------|-------------|
 | `id` | string | Numeric event ID |
 
-**Response** (200): [Event object](#event-object) (with `drop_image`)
+**Response** (200): [Event object](#event-object) (`drop_image` may be present; older events may omit it)
 
 ---
 
@@ -166,7 +166,7 @@ Get event details by fancy ID string.
 |-------|------|-------------|
 | `fancyId` | string | The event's unique fancy_id string |
 
-**Response** (200): [Event object](#event-object) (with `drop_image`)
+**Response** (200): [Event object](#event-object) (`drop_image` may be present; older events may omit it)
 
 ---
 

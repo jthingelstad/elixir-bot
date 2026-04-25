@@ -5,6 +5,8 @@
 1. **Open endpoints** — require only an API key (`x-api-key` header).
 2. **Protected endpoints** — require an API key **and** a valid access token (`Authorization: Bearer` header).
 
+Exception: `GET /metadata/{eventId}/{tokenId}` requires no authentication.
+
 ## Protected Endpoints
 
 These endpoints require an access token:

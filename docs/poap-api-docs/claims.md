@@ -55,7 +55,7 @@ Look up information on an individual mint-link including claim status, `secret` 
 |-------|------|-------------|
 | `qr_hash` | string | Six-character alphanumeric mint-link code (e.g. `"2abwt1"`) |
 
-**Response** (200): [Claim object](#claim-object) (full version with all fields)
+**Response** (200): [Claim object](#claim-object) (field presence varies; see notes below)
 
 ---
 
@@ -83,10 +83,10 @@ Look up information on an individual mint-link including claim status, `secret` 
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `tx_hash` | string | Transaction hash (e.g. `"0x238b1f..."`) |
-| `secret` | string | Authentication code unique to this mint-link (needed for POST claim). May return `"NOT_REQUIRED_ANYMORE"` for already-claimed links |
-| `tx_status` | string | Minting transaction status: `waiting_tx`, `pending`, `passed`, `failed`, or `bumped` |
-| `result` | object\|null | Contains `token` (number) — the token ID, when minting is complete |
+| `tx_hash` | string | Transaction hash (e.g. `"0x238b1f..."`). May be present even when other mint-status fields are empty |
+| `secret` | string | Authentication code for this mint-link. On live responses this may also be `"NOT_REQUIRED_ANYMORE"` |
+| `tx_status` | string | Minting transaction status. Documented values are `waiting_tx`, `pending`, `passed`, `failed`, or `bumped`, but live responses may also return an empty string |
+| `result` | object\|null | Contains `token` (number) when present, but this field is often absent from live responses |
 
 **Additional field on POST response only:**
 
