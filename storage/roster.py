@@ -1543,6 +1543,9 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
         conn=conn,
     ) if season_id is not None else {"members": []}
 
+    from storage.awards import get_season_awards_standings
+    season_awards = get_season_awards_standings(season_id=season_id, conn=conn) if season_id is not None else None
+
     return {
         "window_days": days,
         "roster": roster,
@@ -1557,4 +1560,5 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
         "progression_highlights": progression[:8],
         "hot_streaks": hot_streaks,
         "recent_joins": recent_joins,
+        "season_awards": season_awards,
     }

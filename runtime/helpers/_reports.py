@@ -844,6 +844,31 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             f"top_contributors {top_contributors or 'n/a'}"
         )
 
+    season_awards = summary.get("season_awards") or {}
+    if any(season_awards.get(k) for k in ("war_champ", "iron_kings", "donation_champs", "rookie_mvps")):
+        lines.append("")
+        lines.append("=== SEASON AWARDS STANDINGS (current — not yet final) ===")
+        for entry in season_awards.get("war_champ") or []:
+            lines.append(
+                f"- War Champ rank {entry.get('rank')}: {entry.get('name')} ({entry.get('tag')}) "
+                f"— {_fmt_num(entry.get('metric_value'))} fame"
+            )
+        for entry in season_awards.get("iron_kings") or []:
+            lines.append(
+                f"- Iron King candidate: {entry.get('name')} ({entry.get('tag')}) "
+                f"— perfect attendance through {entry.get('metric_value')} battle days"
+            )
+        for entry in season_awards.get("donation_champs") or []:
+            lines.append(
+                f"- Donation Champ rank {entry.get('rank')}: {entry.get('name')} ({entry.get('tag')}) "
+                f"— {_fmt_num(entry.get('metric_value'))} donations"
+            )
+        for entry in season_awards.get("rookie_mvps") or []:
+            lines.append(
+                f"- Rookie MVP rank {entry.get('rank')}: {entry.get('name')} ({entry.get('tag')}) "
+                f"— {_fmt_num(entry.get('metric_value'))} fame"
+            )
+
     recent_races = summary.get("recent_war_races") or []
     if recent_races:
         lines.append("")

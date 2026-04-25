@@ -655,3 +655,134 @@ def test_get_awards_tool_leaderboard_requires_award_type():
     import pytest as _pytest
     with _pytest.raises(ValueError):
         _execute_get_awards({"mode": "leaderboard"})
+
+
+# -- get_season_awards_standings unified helper ------------------------------
+
+_AWARDS_PAYLOAD_KEYS = ("war_champ", "iron_kings", "donation_champs", "rookie_mvps")
+
+
+def test_season_awards_standings_empty_when_no_data():
+    conn = db.get_connection(":memory:")
+    try:
+        result = db.get_season_awards_standings(season_id=999, conn=conn)
+        assert result["season_id"] == 999
+        for key in _AWARDS_PAYLOAD_KEYS:
+            assert result[key] == []
+    finally:
+        conn.close()
+
+
+def test_season_awards_standings_returns_signal_shape_mid_season():
+    """Mid-season helper returns the same per-entry shape the signal payload uses."""
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        bob = _seed_member(conn, "#BBB", "Bob")
+        # One section logged → mid-season state.
+        race_id = _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_participation(conn, race_id, alice, "#AAA", fame=4500, decks=16)
+        _seed_participation(conn, race_id, bob, "#BBB", fame=3000, decks=16)
+        # Snapshots so Alice and Bob both qualify for Iron King this section.
+        for member, tag in ((alice, "#AAA"), (bob, "#BBB")):
+            for period in (3, 4):
+                _seed_snapshot(
+                    conn, season_id=131, section_index=0, period_index=period,
+                    member_id=member, tag=tag, decks_used_today=4,
+                    observed_at="2026-01-01T05:00:00",
+                )
+
+        result = db.get_season_awards_standings(season_id=131, conn=conn)
+        assert result["season_id"] == 131
+        # War Champ — top entries in fame order with rank, fame metric, metadata
+        assert [e["tag"] for e in result["war_champ"]] == ["#AAA", "#BBB"]
+        assert result["war_champ"][0]["rank"] == 1
+        assert result["war_champ"][0]["metric_value"] == 4500
+        assert result["war_champ"][0]["metric_unit"] == "fame"
+        assert "races_participated" in result["war_champ"][0]["metadata"]
+        # Iron King — both qualify, rank=1 for everyone
+        iron_tags = {e["tag"] for e in result["iron_kings"]}
+        assert iron_tags == {"#AAA", "#BBB"}
+        assert all(e["rank"] == 1 for e in result["iron_kings"])
+        assert all(e["metric_unit"] == "battle_days" for e in result["iron_kings"])
+        # Per-entry shape contract — every bucket entry has these keys
+        for key in _AWARDS_PAYLOAD_KEYS:
+            for entry in result[key]:
+                assert set(entry.keys()) >= {"rank", "tag", "name", "metric_value", "metric_unit", "metadata"}
+    finally:
+        conn.close()
+
+
+def test_season_awards_standings_uses_current_season_when_id_omitted():
+    """Omitting season_id falls back to the current season."""
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        race_id = _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_participation(conn, race_id, alice, "#AAA", fame=2000, decks=16)
+        _seed_current_war(conn, season_id=131)
+
+        result = db.get_season_awards_standings(conn=conn)
+        assert result["season_id"] == 131
+        assert [e["tag"] for e in result["war_champ"]] == ["#AAA"]
+    finally:
+        conn.close()
+
+
+def test_season_awards_standings_rookie_eligibility_filters_long_tenure():
+    """Members joined before season start are excluded from rookie_mvps."""
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")  # legacy member
+        rookie = _seed_member(conn, "#NEW", "Rookie")
+        # Long-tenure: clan_membership joined a year before season
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source) "
+            "VALUES (?, '2025-01-01T00:00:00.000Z', NULL, 'test')",
+            (alice,),
+        )
+        # Rookie joined during S131 (season starts at the war race created_date,
+        # 2026-01-01T10:00:00, so we pick a time after that)
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source) "
+            "VALUES (?, '2026-01-01T11:00:00.000Z', NULL, 'test')",
+            (rookie,),
+        )
+        race_id = _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_participation(conn, race_id, alice, "#AAA", fame=5000)
+        _seed_participation(conn, race_id, rookie, "#NEW", fame=3500)
+
+        result = db.get_season_awards_standings(season_id=131, conn=conn)
+        rookie_tags = [e["tag"] for e in result["rookie_mvps"]]
+        # Long-tenure Alice is excluded, rookie present
+        assert "#AAA" not in rookie_tags
+        assert "#NEW" in rookie_tags
+    finally:
+        conn.close()
+
+
+def test_perfect_war_participants_honors_post_victory_exemption():
+    """After reconciliation, perfect-attendance follows the Iron King rule:
+    a player who skipped a post-10k-fame battle day still qualifies."""
+    conn = db.get_connection(":memory:")
+    try:
+        alice = _seed_member(conn, "#AAA", "Alice")
+        # Single section. _seed_war_race sets finish_time = 2026-01-01T10:00:00,
+        # so a snapshot at 12:00 is post-victory and should not count.
+        _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_snapshot(
+            conn, season_id=131, section_index=0, period_index=3,
+            member_id=alice, tag="#AAA", decks_used_today=4,
+            observed_at="2026-01-01T05:00:00",
+        )
+        _seed_snapshot(
+            conn, season_id=131, section_index=0, period_index=4,
+            member_id=alice, tag="#AAA", decks_used_today=0,
+            observed_at="2026-01-01T12:00:00",
+        )
+
+        result = db.get_perfect_war_participants(season_id=131, conn=conn)
+        tags = [r["tag"] for r in result]
+        assert tags == ["#AAA"], f"expected Alice to qualify post-victory, got {tags}"
+    finally:
+        conn.close()

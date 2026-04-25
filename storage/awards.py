@@ -32,6 +32,7 @@ __all__ = [
     "get_iron_king_candidates",
     "get_season_donation_leaderboard",
     "get_rookie_mvp_candidates",
+    "get_season_awards_standings",
     "get_war_participant_candidates",
     "list_awards",
     "award_leaderboard",
@@ -564,6 +565,97 @@ def get_war_participant_candidates(
         }
         for r in rows
     ]
+
+
+# -- unified standings ------------------------------------------------------
+
+@managed_connection
+def get_season_awards_standings(
+    season_id: Optional[int] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Current standings for all four season awards in signal-payload shape.
+
+    Mid-season callers see who would win if the season ended now; final
+    callers (after season-end grant) see the same data the announcement post
+    will read. Each entry mirrors the ``season_awards_granted`` payload —
+    ``rank``, ``tag``, ``name``, ``metric_value``, ``metric_unit``,
+    ``metadata`` — so prompt-side narration stays consistent across the
+    Situation block, weekly digest, interactive tools, and the season-end
+    post.
+    """
+    from storage.war_analytics import get_war_champ_standings
+
+    season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
+    empty = {
+        "season_id": season_id,
+        "war_champ": [],
+        "iron_kings": [],
+        "donation_champs": [],
+        "rookie_mvps": [],
+    }
+    if season_id is None:
+        return empty
+
+    war_champ = []
+    for i, entry in enumerate(get_war_champ_standings(season_id=season_id, conn=conn)[:3]):
+        war_champ.append({
+            "rank": i + 1,
+            "tag": entry["tag"],
+            "name": entry.get("name"),
+            "metric_value": entry.get("total_fame"),
+            "metric_unit": "fame",
+            "metadata": {
+                "races_participated": entry.get("races_participated"),
+                "avg_fame": entry.get("avg_fame"),
+            },
+        })
+
+    iron_kings = []
+    for c in get_iron_king_candidates(season_id=season_id, conn=conn):
+        iron_kings.append({
+            "rank": 1,
+            "tag": c["tag"],
+            "name": c.get("name"),
+            "metric_value": c.get("total_battle_days"),
+            "metric_unit": "battle_days",
+            "metadata": {
+                "perfect_days": c.get("perfect_days"),
+                "total_battle_days": c.get("total_battle_days"),
+            },
+        })
+
+    donation_champs = []
+    for entry in get_season_donation_leaderboard(season_id=season_id, conn=conn):
+        donation_champs.append({
+            "rank": entry["rank"],
+            "tag": entry["tag"],
+            "name": entry.get("name"),
+            "metric_value": entry.get("total_donations"),
+            "metric_unit": "donations",
+            "metadata": {},
+        })
+
+    rookie_mvps = []
+    for entry in get_rookie_mvp_candidates(season_id=season_id, conn=conn):
+        rookie_mvps.append({
+            "rank": entry["rank"],
+            "tag": entry["tag"],
+            "name": entry.get("name"),
+            "metric_value": entry.get("total_fame"),
+            "metric_unit": "fame",
+            "metadata": {
+                "races_participated": entry.get("races_participated"),
+            },
+        })
+
+    return {
+        "season_id": season_id,
+        "war_champ": war_champ,
+        "iron_kings": iron_kings,
+        "donation_champs": donation_champs,
+        "rookie_mvps": rookie_mvps,
+    }
 
 
 # -- season-close detection -------------------------------------------------
