@@ -429,7 +429,48 @@ def _member_reference_fields(conn: sqlite3.Connection, member_id: int, item: dic
     if not tag:
         return item
     item["member_ref"] = format_member_reference(tag, conn=conn)
+    item.update(_member_ranks_for(conn, member_id))
     return item
+
+
+# Member-rank cache keyed on id(conn). sqlite3.Connection rejects arbitrary
+# attribute assignment, so we can't stash this on the conn itself. Bounded
+# size keeps memory predictable; FIFO eviction keeps the policy simple.
+# Connections are short-lived (managed_connection opens fresh per public
+# call), so id-collision after close is theoretically possible but rare —
+# tests can call _clear_member_ranks_cache() to reset between assertions.
+_MEMBER_RANKS_CACHE: dict[int, dict] = {}
+_MEMBER_RANKS_CACHE_MAX = 16
+
+
+def _clear_member_ranks_cache() -> None:
+    """Test hook to drop all cached rank tables."""
+    _MEMBER_RANKS_CACHE.clear()
+
+
+def _member_ranks_for(conn: sqlite3.Connection, member_id: int) -> dict:
+    """Return rank fields for one member.
+
+    The full rank table is computed once per connection and cached at the
+    module level keyed on id(conn). Subsequent lookups are O(1) — important
+    because ``_member_reference_fields`` is called per-row in roster,
+    digest, and promotion-candidate flows. Inactive members and members
+    with insufficient data get every field set to ``None`` so consumers
+    can distinguish "no data" from a real rank.
+    """
+    from storage.member_ranks import RANK_FIELDS, compute_member_ranks
+
+    key = id(conn)
+    cache = _MEMBER_RANKS_CACHE.get(key)
+    if cache is None:
+        cache = compute_member_ranks(conn=conn)
+        if len(_MEMBER_RANKS_CACHE) >= _MEMBER_RANKS_CACHE_MAX:
+            _MEMBER_RANKS_CACHE.pop(next(iter(_MEMBER_RANKS_CACHE)))
+        _MEMBER_RANKS_CACHE[key] = cache
+    member_entry = cache.get(member_id)
+    if member_entry is None:
+        return {field: None for field in RANK_FIELDS}
+    return dict(member_entry)
 
 
 def _ensure_channel(conn: sqlite3.Connection, channel_id, channel_name=None, channel_kind=None) -> None:
@@ -612,6 +653,7 @@ from storage import tournament as _tournament_module
 from storage import card_catalog as _card_catalog_module
 from storage import revisits as _revisits_module
 from storage import awards as _awards_module
+from storage import member_ranks as _member_ranks_module
 
 __all__ = [name for name in globals() if not name.startswith("__")]
 for _module in (
@@ -626,6 +668,7 @@ for _module in (
     _card_catalog_module,
     _revisits_module,
     _awards_module,
+    _member_ranks_module,
 ):
     __export_public(_module)
 

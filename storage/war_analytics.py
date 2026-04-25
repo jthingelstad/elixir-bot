@@ -682,33 +682,48 @@ def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqli
 
 @managed_connection
 def get_perfect_war_participants(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    """Members with perfect war attendance — same definition as Iron King.
+
+    Delegates to ``get_iron_king_candidates`` so the strict rule (4/4 decks
+    on every *required* battle day of every section, post-10k-fame days
+    excluded, no mid-season joiners) is the only definition of perfect
+    attendance in the codebase. Enriches with ``total_fame`` and
+    ``races_participated`` from war_participation for ranking and display.
+    """
+    from storage.awards import get_iron_king_candidates
+
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     if season_id is None:
         return []
-    total_row = conn.execute("SELECT COUNT(*) AS cnt FROM war_races WHERE season_id = ?", (season_id,)).fetchone()
-    total_races = total_row["cnt"] if total_row else 0
-    if total_races == 0:
+    candidates = get_iron_king_candidates(season_id=season_id, conn=conn)
+    if not candidates:
         return []
-    rows = conn.execute(
-        "SELECT wp.player_tag AS tag, MAX(m.current_name) AS name, COUNT(*) AS races_participated, SUM(COALESCE(wp.fame, 0)) AS total_fame "
-        "FROM war_participation wp "
-        "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-        "JOIN members m ON m.member_id = wp.member_id "
-        "WHERE wr.season_id = ? AND m.status = 'active' AND COALESCE(wp.decks_used, 0) > 0 "
-        "GROUP BY wp.player_tag HAVING COUNT(*) = ? ORDER BY total_fame DESC",
-        (season_id, total_races),
-    ).fetchall()
+    total_row = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM war_races WHERE season_id = ?", (season_id,)
+    ).fetchone()
+    total_races = total_row["cnt"] if total_row else 0
     result = []
-    for row in rows:
-        item = {**dict(row), "total_races_in_season": total_races}
-        member = conn.execute(
-            "SELECT member_id FROM members WHERE player_tag = ?",
-            (_canon_tag(item["tag"]),),
+    for c in candidates:
+        stats = conn.execute(
+            "SELECT COUNT(*) AS races_participated, SUM(COALESCE(wp.fame, 0)) AS total_fame "
+            "FROM war_participation wp "
+            "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
+            "WHERE wr.season_id = ? AND wp.member_id = ?",
+            (season_id, c["member_id"]),
         ).fetchone()
-        if member:
-            item = _member_reference_fields(conn, member["member_id"], item)
+        item = {
+            "tag": c["tag"],
+            "name": c.get("name"),
+            "member_id": c["member_id"],
+            "total_battle_days": c.get("total_battle_days"),
+            "races_participated": stats["races_participated"] if stats else 0,
+            "total_fame": stats["total_fame"] if stats else 0,
+            "total_races_in_season": total_races,
+        }
+        item = _member_reference_fields(conn, c["member_id"], item)
         result.append(item)
+    result.sort(key=lambda r: (-(r.get("total_fame") or 0), (r.get("name") or "").lower()))
     return result
 
 @managed_connection
@@ -1070,12 +1085,19 @@ def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int 
                 (season_id, row["member_id"]),
             ).fetchone()["cnt"]
 
-        checks = {
-            "donations": (row["donations"] or 0) >= min_donations_week,
-            "tenure": tenure_days is not None and tenure_days >= min_tenure_days,
-            "activity": days_inactive is not None and days_inactive <= active_within_days,
-            "war": season_id is None or war_races_played >= min_war_races,
-        }
+        from storage.member_ranks import evaluate_elder_eligibility
+        eligibility = evaluate_elder_eligibility(
+            donations_week=row["donations"],
+            tenure_days=tenure_days,
+            days_inactive=days_inactive,
+            war_races_played=war_races_played,
+            season_id=season_id,
+            min_donations_week=min_donations_week,
+            min_tenure_days=min_tenure_days,
+            active_within_days=active_within_days,
+            min_war_races=min_war_races,
+        )
+        checks = eligibility["checks"]
         score = sum(1 for passed in checks.values() if passed)
         item = {
             "tag": row["tag"],
@@ -1097,7 +1119,7 @@ def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int 
         item["cr_account_age_years"] = _get_account_age_years(conn, row["member_id"])
         item["war_player_type"] = _war_player_type(conn, row["member_id"])
         item = _member_reference_fields(conn, row["member_id"], item)
-        if all(checks.values()):
+        if eligibility["all_passed"]:
             recommended.append(item)
         elif score >= 2:
             borderline.append(item)

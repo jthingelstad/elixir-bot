@@ -308,6 +308,13 @@ def _execute_get_member(arguments):
     return result
 
 
+def _execute_get_season_awards(arguments):
+    """Execute the get_season_awards tool — current standings for all four
+    season-end awards in signal-payload shape."""
+    season_id = arguments.get("season_id")
+    return db.get_season_awards_standings(season_id=season_id)
+
+
 def _execute_get_awards(arguments):
     """Execute the get_awards tool — filtered list or per-member leaderboard
     across the awards table."""
@@ -1112,6 +1119,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_member(arguments)
         elif name == "get_member_war_detail":
             result = _execute_get_member_war_detail(arguments)
+        elif name == "get_season_awards":
+            result = _execute_get_season_awards(arguments)
         elif name == "get_awards":
             result = _execute_get_awards(arguments)
         elif name == "get_river_race":

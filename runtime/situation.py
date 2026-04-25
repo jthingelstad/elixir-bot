@@ -156,6 +156,33 @@ def _build_standing(war: dict | None) -> dict | None:
     }
 
 
+def _clan_phase_block() -> dict | None:
+    """Clan age + phase classification (founding/establishing/established/
+    mature). Always included so the awareness agent can frame posts against
+    the clan's actual age rather than fall back to time-frozen prose.
+    """
+    try:
+        return prompts.clan_phase()
+    except Exception:
+        log.warning("clan_phase_block load failed", exc_info=True)
+        return None
+
+
+def _season_awards_block() -> dict | None:
+    """Current-season standings for War Champ / Iron King / Donation Champ /
+    Rookie MVP, in the same shape as the season_awards_granted signal payload.
+
+    Always included so the awareness agent can answer 'who's leading?' or
+    'is anyone on track for Iron King?' without re-deriving from raw fame
+    or donation rows.
+    """
+    try:
+        return db.get_season_awards_standings()
+    except Exception:
+        log.warning("season_awards_block load failed", exc_info=True)
+        return None
+
+
 def _channel_memory_for(subagent_key: str, *, recent_limit: int = 5) -> dict:
     """Pull recent assistant posts for one channel so the agent knows what it
     has already said. Pure DB read, no Discord call."""
@@ -310,6 +337,8 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
     return {
         "time": build_situation_time(),
         "standing": _build_standing(war),
+        "season_awards": _season_awards_block(),
+        "clan_phase": _clan_phase_block(),
         "signals_by_lane": _group_signals_by_lane(signals),
         "hard_post_signals": _hard_post_signals(signals),
         "due_revisits": due_revisits,

@@ -731,6 +731,35 @@ TOOLS = [
         },
     },
     {
+        "name": "get_season_awards",
+        "description": (
+            "Get the current standings for the four season-end awards in one "
+            "call: War Champ (top fame), Iron King (perfect war attendance — "
+            "4/4 decks every required battle day, post-victory days excluded), "
+            "Donation Champ (top season donations), Rookie MVP (top fame among "
+            "members who joined this season).\n\n"
+            "Mid-season this is who would win if the season ended now; after "
+            "season-close it's the final podium. Use for 'who's leading war "
+            "this season?', 'is anyone on track for Iron King?', 'who's the "
+            "rookie to watch?', and similar questions — read the standings "
+            "rather than re-deriving from raw fame or donation rows.\n\n"
+            "Returns: {season_id, war_champ, iron_kings, donation_champs, "
+            "rookie_mvps}. Each entry has rank, tag, name, metric_value, "
+            "metric_unit, metadata. For historical award grants (past seasons, "
+            "leaderboards, single-player trophy cases) use get_awards instead."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "season_id": {
+                    "type": "integer",
+                    "description": "Optional season ID. If omitted, uses the current season.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "get_awards",
         "description": (
             "Query the clan awards record — the authoritative history of every "

@@ -179,8 +179,8 @@ Notes on thresholds:
 
 ## Current Stage
 
-- POAP KINGS is still a young clan, just over a month old.
-- The founding era is still happening right now.
+- <<CLAN_AGE_TEXT>>
+- <<CLAN_PHASE_BEAT>>
 - Elixir should help create continuity, memory, and identity while the clan is still taking shape.
 
 ## Clan History

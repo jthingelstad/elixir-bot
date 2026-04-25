@@ -192,6 +192,118 @@ def test_clan_tag():
     assert tag == "J2RGCRVG"
 
 
+def test_clan_phase_founding_phase():
+    """0-91 days inclusive is founding."""
+    from datetime import date
+    p = prompts.clan_phase(today=date(2026, 4, 25))  # day 80
+    assert p["phase"] == "founding"
+    assert p["days"] == 80
+    assert "founding era" in p["phase_text"]
+    assert p["phase_beat"] == "The founding era is still happening right now."
+
+
+def test_clan_phase_establishing_phase():
+    """92-273 days inclusive is establishing."""
+    from datetime import date
+    p = prompts.clan_phase(today=date(2026, 5, 7))  # day 92
+    assert p["phase"] == "establishing"
+    assert p["days"] == 92
+    assert "establishing era" in p["phase_text"]
+
+
+def test_clan_phase_established_phase():
+    """274-730 days inclusive is established."""
+    from datetime import date
+    p = prompts.clan_phase(today=date(2026, 11, 5))  # day 274
+    assert p["phase"] == "established"
+    assert p["days"] == 274
+    assert "established era" in p["phase_text"]
+
+
+def test_clan_phase_mature_phase():
+    """731+ days is mature."""
+    from datetime import date
+    p = prompts.clan_phase(today=date(2028, 2, 5))  # day 731 (2y+1d)
+    assert p["phase"] == "mature"
+    assert p["days"] == 731
+    assert "mature clan" in p["phase_text"]
+
+
+def test_clan_phase_boundary_91_to_92_days():
+    """Phase flip from founding → establishing at day 92."""
+    from datetime import date
+    assert prompts.clan_phase(today=date(2026, 5, 6))["phase"] == "founding"      # day 91
+    assert prompts.clan_phase(today=date(2026, 5, 7))["phase"] == "establishing"  # day 92
+
+
+def test_clan_phase_boundary_273_to_274_days():
+    """Phase flip from establishing → established at day 274."""
+    from datetime import date
+    assert prompts.clan_phase(today=date(2026, 11, 4))["phase"] == "establishing"  # day 273
+    assert prompts.clan_phase(today=date(2026, 11, 5))["phase"] == "established"   # day 274
+
+
+def test_clan_phase_boundary_730_to_731_days():
+    """Phase flip from established → mature at day 731."""
+    from datetime import date
+    assert prompts.clan_phase(today=date(2028, 2, 4))["phase"] == "established"  # day 730
+    assert prompts.clan_phase(today=date(2028, 2, 5))["phase"] == "mature"       # day 731
+
+
+def test_clan_phase_natural_phrasing_at_milestone_dates():
+    """phase_text reads naturally at month-1, month-3, month-9, year-2, year-5."""
+    from datetime import date
+    cases = [
+        (date(2026, 3, 6), "one month"),       # 30 days
+        (date(2026, 5, 6), "three months"),    # day 91, edge of founding
+        (date(2026, 11, 5), "nine months"),    # day 274, just established
+        (date(2028, 2, 5), "two years"),       # day 731, just mature
+        (date(2031, 2, 4), "five years"),      # ~1826 days
+    ]
+    for today, expected_age in cases:
+        p = prompts.clan_phase(today=today)
+        assert expected_age in p["phase_text"], (
+            f"expected '{expected_age}' in phase_text for {today}, got: {p['phase_text']}"
+        )
+
+
+def test_clan_phase_handles_pre_founding_date():
+    """A reference date before clan_founded clamps to 0 days, brand-new phrasing."""
+    from datetime import date
+    p = prompts.clan_phase(today=date(2025, 1, 1))
+    assert p["days"] == 0
+    assert p["phase"] == "founding"
+    assert "brand new" in p["phase_text"]
+
+
+def test_clan_substitutes_age_and_phase_tokens():
+    """clan() replaces both <<CLAN_AGE_TEXT>> and <<CLAN_PHASE_BEAT>>."""
+    from datetime import date
+    text = prompts.clan(today=date(2026, 4, 25))  # founding, day 80
+    assert "<<CLAN_AGE_TEXT>>" not in text
+    assert "<<CLAN_PHASE_BEAT>>" not in text
+    assert "POAP KINGS is three months old" in text
+    assert "founding era is still happening" in text
+
+
+def test_clan_substitution_varies_by_phase():
+    """Same CLAN.md produces different prose at different phases."""
+    from datetime import date
+    founding = prompts.clan(today=date(2026, 4, 25))
+    mature = prompts.clan(today=date(2031, 2, 4))
+    assert "founding era is still happening" in founding
+    assert "founding era is still happening" not in mature
+    assert "mature clan" in mature
+    assert "mature clan" not in founding
+
+
+def test_thresholds_does_not_trigger_substitution():
+    """thresholds() reads the raw CLAN.md, no substitution on tokens."""
+    t = prompts.thresholds()
+    assert t["clan_founded"] == "2026-02-04"
+    # Confirms no AttributeError or recursion through clan_phase.
+
+
 def test_observation_prompt_includes_custom_emoji_guidance():
     system_prompt = agent_prompts._observe_system()
 

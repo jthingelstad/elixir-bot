@@ -6,6 +6,7 @@ configurable values from CLAN.md and DISCORD.md.
 
 import os
 import re
+from datetime import date, datetime
 
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 _SUBAGENT_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "subagents")
@@ -248,9 +249,28 @@ def game():
     return _load("GAME.md")
 
 
-def clan():
-    """Clan identity, rules, history, thresholds."""
+def _clan_raw():
+    """Unsubstituted CLAN.md — used by parsers (thresholds, clan_tag) that
+    must not trigger phase substitution and by clan_phase itself to avoid a
+    circular dependency with clan().
+    """
     return _load("CLAN.md")
+
+
+def clan(today: date | None = None) -> str:
+    """Clan identity, rules, history, thresholds.
+
+    Substitutes <<CLAN_AGE_TEXT>> and <<CLAN_PHASE_BEAT>> tokens in CLAN.md
+    with phase-aware prose so the Current Stage section ages with the clan.
+    Pass ``today`` for deterministic test output.
+    """
+    raw = _clan_raw()
+    phase = clan_phase(today=today)
+    return (
+        raw
+        .replace("<<CLAN_AGE_TEXT>>", phase["phase_text"])
+        .replace("<<CLAN_PHASE_BEAT>>", phase["phase_beat"])
+    )
 
 
 def discord():
@@ -466,9 +486,101 @@ def _parse_config_section(text, heading):
 def thresholds():
     """Parse the ## Thresholds section from CLAN.md into a dict.
 
-    Returns dict of {key: int_value}.
+    Returns dict of {key: int_value}. Reads the raw file to avoid triggering
+    clan-phase substitution (which itself depends on this).
     """
-    return _parse_config_section(clan(), "Thresholds")
+    return _parse_config_section(_clan_raw(), "Thresholds")
+
+
+# Phase boundaries in days. 30.4375 days/month is the mean Gregorian month
+# length, so day↔month conversion stays close to a calendar reading.
+_DAYS_PER_MONTH = 30.4375
+_PHASE_BOUNDARIES_DAYS = {
+    "founding": 92,         # < 3 months
+    "establishing": 274,    # < 9 months
+    "established": 731,     # < 2 years
+}
+
+_PHASE_TEXTS = {
+    "founding": "POAP KINGS is {age} old, still in its founding era.",
+    "establishing": "POAP KINGS is {age} old and is in its establishing era.",
+    "established": "POAP KINGS has been building for {age} and is in its established era.",
+    "mature": "POAP KINGS has been around for {age} and is a mature clan.",
+}
+
+_PHASE_BEATS = {
+    "founding": "The founding era is still happening right now.",
+    "establishing": "The earliest founding moments are recent memory; the clan is settling into its identity.",
+    "established": "The founding era is well behind us; building the clan is steady, deliberate work now.",
+    "mature": "Many seasons of clan history are behind us.",
+}
+
+_NUMBER_WORDS = {
+    1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
+    6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten",
+    11: "eleven", 12: "twelve",
+}
+
+
+def _spell_or_numeric(n: int) -> str:
+    return _NUMBER_WORDS.get(n, str(n))
+
+
+def _format_age_phrase(days: int, months: float) -> str:
+    """Natural-language age, e.g. 'two months', '14 months', 'five years'."""
+    if days <= 0:
+        return "brand new"
+    if days < 14:
+        return "less than two weeks"
+    if days < 30:
+        return "less than a month"
+    months_int = int(round(months))
+    # Months read more concretely under two years; switch to years at 24+ so
+    # the year-2 boundary lands cleanly on "two years" rather than "24 months".
+    if months_int < 24:
+        unit = "month" if months_int == 1 else "months"
+        return f"{_spell_or_numeric(months_int)} {unit}"
+    years_int = months_int // 12
+    unit = "year" if years_int == 1 else "years"
+    return f"{_spell_or_numeric(years_int)} {unit}"
+
+
+def _phase_for_days(days: int) -> str:
+    if days < _PHASE_BOUNDARIES_DAYS["founding"]:
+        return "founding"
+    if days < _PHASE_BOUNDARIES_DAYS["establishing"]:
+        return "establishing"
+    if days < _PHASE_BOUNDARIES_DAYS["established"]:
+        return "established"
+    return "mature"
+
+
+def clan_phase(today: date | None = None) -> dict:
+    """Return clan age + phase classification.
+
+    Args:
+        today: Reference date for testability. Defaults to ``date.today()``.
+
+    Returns:
+        ``{"founded": str, "days": int, "months": float, "phase": str,
+        "phase_text": str, "phase_beat": str}``
+    """
+    if today is None:
+        today = date.today()
+    founded_str = thresholds().get("clan_founded")
+    founded = datetime.strptime(founded_str, "%Y-%m-%d").date() if founded_str else today
+    days = max(0, (today - founded).days)
+    months = round(days / _DAYS_PER_MONTH, 1)
+    phase = _phase_for_days(days)
+    age = _format_age_phrase(days, days / _DAYS_PER_MONTH)
+    return {
+        "founded": founded_str,
+        "days": days,
+        "months": months,
+        "phase": phase,
+        "phase_text": _PHASE_TEXTS[phase].format(age=age),
+        "phase_beat": _PHASE_BEATS[phase],
+    }
 
 
 def discord_config():
