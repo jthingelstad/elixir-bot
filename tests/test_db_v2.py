@@ -3529,7 +3529,8 @@ def test_build_war_now_context_battle_day_regular_week():
         assert data["phase"] == "battle"
         assert data["phase_display"] == "Battle Day 2"
         assert data["day_number"] == 2
-        assert data["day_total"] == 4
+        # day_total intentionally omitted from data — see build_war_now_context.
+        assert "day_total" not in data
         assert data["is_colosseum_week"] is False
         assert "RIVER RACE — CURRENT MOMENT" in text
         assert "Battle Day 2 of 4" in text
@@ -3549,7 +3550,6 @@ def test_build_war_now_context_final_battle_day_omits_after_today_parenthetical(
         data, text = db.build_war_now_context(conn=conn)
         assert data["phase"] == "battle"
         assert data["day_number"] == 4
-        assert data["day_total"] == 4
         assert data["is_final_battle_day"] is True
         # On the final battle day there is no "today + N more" parenthetical —
         # the existing "Final battle day" marker already covers it.
@@ -3566,7 +3566,7 @@ def test_build_war_now_context_practice_day():
         data, text = db.build_war_now_context(conn=conn)
         assert data["phase"] == "practice"
         assert data["phase_display"] == "Practice Day 2"
-        assert data["day_total"] == 3
+        assert "day_total" not in data
         assert "Practice Day 2 of 3" in text
         # On practice day 2 of 3, one practice day remains after today.
         assert "today + 1 more practice day" in text

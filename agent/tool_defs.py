@@ -82,10 +82,16 @@ TOOLS = [
                 },
                 "include": {
                     "type": "array",
-                    "items": {"type": "string"},
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "profile", "form", "battles", "war", "trend",
+                            "deck", "losses", "history", "memories",
+                            "chests", "awards",
+                        ],
+                    },
                     "description": (
-                        "Which aspects to include. Options: profile, form, battles, war, trend, deck, "
-                        "losses, history, memories, chests, awards. Default: ['profile', 'form']. "
+                        "Which aspects to include. Default: ['profile', 'form']. "
                         "For card-collection data, use get_member_card_profile or lookup_member_cards."
                     ),
                     "default": ["profile", "form"],
