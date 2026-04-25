@@ -398,16 +398,17 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     tool_stats.setdefault("write_calls_succeeded", 0)
     tool_stats.setdefault("write_calls_denied", 0)
 
-    def _create_completion(call_messages):
+    def _create_completion(call_messages, *, allow_tools=True):
         start = time.perf_counter()
+        use_tools = allow_tools and bool(allowed_tools)
         resp = _create_chat_completion(
             workflow=workflow,
             messages=call_messages,
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=60,
-            tools=allowed_tools if allowed_tools else None,
-            tool_choice="auto" if allowed_tools else None,
+            tools=allowed_tools if use_tools else None,
+            tool_choice="auto" if use_tools else None,
         )
         completion_latencies_ms.append(round((time.perf_counter() - start) * 1000, 2))
         return resp
@@ -483,17 +484,23 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                 messages.append({
                     "role": "user",
                     "content": (
-                        "Your previous response was invalid for this workflow. "
-                        f"{parsed[1]} Return JSON only that satisfies the required schema. "
-                        "Do NOT return `null` — if the user's question is based on a false "
-                        "premise (a card they mentioned isn't actually in the deck, or the "
-                        "swap they proposed already exists), still return a valid response "
-                        "object with `content` explaining the mismatch and offering to "
-                        "help with what's actually there."
+                        f"Your previous response was invalid: {parsed[1]}. "
+                        "Reply NOW with valid JSON only that satisfies the required schema. "
+                        "Do not call any more tools. Do not return `null` or an empty string. "
+                        "You already have everything you need from the tool results above — "
+                        "use them to write a real `content` string that answers the user. "
+                        "If the user's question turned out to have a false premise (e.g. they "
+                        "asked about a card they don't own, or asked 'is X maxed' when X isn't), "
+                        "still return a valid response object whose `content` explains plainly "
+                        "what you found. Never abstain by returning null — abstaining only "
+                        "produces a fallback error message visible to the user."
                     ),
                 })
                 try:
-                    repair_resp = _create_completion(messages)
+                    # Repair attempts must not be allowed to escape into more
+                    # tool calls — the model's already had its tool budget and
+                    # we just want a clean JSON answer from the data it has.
+                    repair_resp = _create_completion(messages, allow_tools=False)
                 except (APIError, APIConnectionError) as e:
                     log.error("LLM API repair error: %s", e)
                     if return_errors:
@@ -612,7 +619,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         ),
     })
     try:
-        resp = _create_completion(messages)
+        resp = _create_completion(messages, allow_tools=False)
         final_choice = resp.choices[0]
         final_content = final_choice.message.content or ""
         completion_chars += len(final_content)
