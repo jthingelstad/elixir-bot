@@ -145,6 +145,47 @@ def test_build_tool_result_envelope_strips_card_image_fields_from_context():
     assert "icon_url" not in envelope["data"]["signature_cards"]["cards"][0]
 
 
+def test_build_tool_result_envelope_drops_oversized_lists_instead_of_slicing():
+    """Oversized payloads must drop large arrays cleanly, not mid-token slice
+    them. The model must still see ok=true (truncation is not a tool failure)
+    and a structured marker explaining what was dropped."""
+    bulky_card = {"name": "X" * 200, "level": 13, "extra": "Y" * 200}
+    raw = json.dumps({
+        "summary": {"total_cards": 100, "max_level": 47},
+        "card_collection": {
+            "cards": [dict(bulky_card, name=f"Card{i:03d}") for i in range(120)],
+        },
+    })
+
+    envelope = json.loads(elixir_agent._build_tool_result_envelope("get_member", raw))
+
+    # Truncation is a state, not an error.
+    assert envelope["ok"] is True
+    assert envelope["error"] is None
+    assert envelope["truncated"] is True
+    # Structured marker replaced the array; data is still a parseable dict.
+    cards_field = envelope["data"]["card_collection"]["cards"]
+    assert isinstance(cards_field, dict)
+    assert cards_field["dropped"] is True
+    assert cards_field["original_count"] == 120
+    assert "context_size" in cards_field["reason"]
+    # Summary is preserved — the model can still answer "how many total cards".
+    assert envelope["data"]["summary"]["total_cards"] == 100
+    # Meta records what was dropped.
+    assert "card_collection.cards" in envelope["meta"]["dropped_fields"]
+    assert envelope["meta"]["original_size"] > envelope["meta"]["char_limit"]
+
+
+def test_build_tool_result_envelope_under_limit_unchanged():
+    """Small payloads should pass through untouched."""
+    raw = json.dumps({"summary": {"total_cards": 10}, "cards": [{"name": "Knight"}]})
+    envelope = json.loads(elixir_agent._build_tool_result_envelope("get_member", raw))
+    assert envelope["ok"] is True
+    assert envelope["error"] is None
+    assert envelope["truncated"] is False
+    assert envelope["data"]["cards"] == [{"name": "Knight"}]
+
+
 def test_interactive_workflow_exposes_all_read_tools():
     interactive_names = {
         tool["name"] for tool in elixir_agent.TOOLSETS_BY_WORKFLOW["interactive"]
