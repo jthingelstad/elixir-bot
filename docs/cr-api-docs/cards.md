@@ -120,3 +120,27 @@ Observed error bodies are usually `{ reason, message? }`. This endpoint ignored 
 - `maxEvolutionLevel` is optional — only 46/121 standard cards have evolutions (values observed: 1, 2, or 3)
 - Observed icon correlation: `evolutionMedium` aligns with Evo capability, `heroMedium` aligns with Hero capability, and cards with both assets appear to support both
 - No `paging` object is present in responses
+
+---
+
+## Cards Required to Upgrade
+
+The CR API does **not** expose how many copies of a card are required to advance from level N to N+1. The `/players/{playerTag}` `cards` array reports a `count` (copies the player has stockpiled), but no `cardsRequired` field. To compute "is this player ready to upgrade this card right now," you must apply the public game table below.
+
+Source: https://clashroyale.fandom.com/wiki/Cards (Cards Required Per Level table). These are stable game-data values that change only with level-cap updates (~yearly cadence).
+
+**Verified: 2026-04-25** — re-check the wiki when Supercell raises the level cap.
+
+The list index is the count required to go from API level `N+1` to `N+2`, where `N` is the 0-indexed position. So `common[0]` is the cost of the first upgrade (level 1 → 2).
+
+| Rarity | API levels (start → max) | Cards required, per upgrade step |
+|---|---|---|
+| common | 1 → 16 | 2, 4, 10, 20, 50, 100, 200, 400, 800, 1000, 2000, 5000, 5000, 5000, 5000 |
+| rare | 1 → 14 | 2, 4, 10, 20, 50, 100, 200, 400, 800, 1000, 1500, 2000, 2000 |
+| epic | 1 → 11 | 4, 10, 20, 50, 100, 200, 400, 800, 1000, 1250, 1500 |
+| legendary | 1 → 8 | 2, 4, 10, 20, 40, 80, 100, 100 |
+| champion | 1 → 6 | 5, 10, 20, 50, 100 |
+
+(API levels are rarity-relative — see the normalization table earlier in this doc. A "common" maxes at API level 16, a "rare" at 14, etc., and they all reach normalized level 16.)
+
+**Implementation in this repo:** `cr_knowledge.CARDS_REQUIRED_BY_RARITY` plus the helpers `cards_required_to_upgrade(rarity, level)` and `is_ready_to_upgrade(rarity, level, count)`. These power the `ready_to_upgrade` filter in `lookup_member_cards` and the `ready_to_upgrade_top` list in `get_member_card_profile`.
