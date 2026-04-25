@@ -21,6 +21,7 @@ If the log is very large (>10k lines), start by tailing the last ~2000 lines. On
 - `Traceback` / `Exception` blocks — report with the exception type and the top app-code frame (not just the Python framework frame).
 - `elixir_agent: validation_failure workflow=... reason=...` — schema or parse errors in the agent's JSON output. Group by `workflow` + `reason`.
 - `elixir: prompt_failure ... type=... stage=... workflow=...` — agent-response failures that reached the user path. Group by `workflow` + `type`.
+- `elixir: prompt_feedback emoji=thumbs_down ...` (WARNING) — a user reacted thumbs-down on an Elixir response in #ask-elixir. Each is a quality signal worth surfacing. Group by `workflow` + `channel` and report counts; the representative line should include `message_id` and `reactor` so the user can grep the conversation. Thumbs-up is INFO and not a triage concern unless the user asks.
 - `tool_call_failure`, `tool_error`, `ingest_failed`, `signal_failure`, `retry_exhausted`, `truncation`, `unexpected_error` — any custom failure tag from the app.
 - Discord reconnect storms (`Attempting a reconnect` repeated within minutes) — note if >3 in an hour.
 - APScheduler missed / misfired jobs.

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import db
 
+
+log = logging.getLogger("elixir")
 
 THUMBS_UP = "\N{THUMBS UP SIGN}"
 THUMBS_DOWN = "\N{THUMBS DOWN SIGN}"
@@ -123,8 +126,27 @@ async def handle_raw_reaction_add(payload) -> None:
         channel_name=channel_config.get("name"),
         feedback_value=feedback_value,
     )
+    became_active_down = feedback_value == "down" and feedback.get("became_active_down")
+    # Surface every feedback event in elixir.log so log-triage can see it.
+    # Thumbs-down is a quality signal we want to triage promptly, so it goes
+    # WARNING; thumbs-up is informational. Only the first thumbs-down per
+    # message+user gets WARNING (became_active_down=True) — toggle-and-back
+    # is downgraded to INFO so we don't spam triage with re-reactions.
+    log_level = (
+        log.warning if became_active_down
+        else log.info
+    )
+    log_level(
+        "prompt_feedback emoji=%s channel=%s workflow=%s message_id=%s reactor=%s asker=%s",
+        f"thumbs_{feedback_value}",
+        channel_config.get("name"),
+        assistant.get("workflow"),
+        payload.message_id,
+        payload.user_id,
+        assistant.get("discord_user_id"),
+    )
     message = await _acknowledge_feedback(payload)
-    if feedback_value == "down" and feedback.get("became_active_down"):
+    if became_active_down:
         await _post_retry_invitation(
             payload,
             prompt_feedback_id=feedback.get("prompt_feedback_id"),

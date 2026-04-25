@@ -234,6 +234,7 @@ def _interactive_system(channel_name):
         "If someone asks how long a member has been playing, use the account-age fields directly when they are present. "
         "Only say that exact account age is not recorded when those fields are actually missing.\n\n"
         "If someone asks how a member or the clan is trending over time, use the trend tools instead of inferring from a single-day snapshot.\n\n"
+        "Members can react to your responses with 👍 or 👎 to give feedback — 👎 triggers an automatic offer for them to retry. Occasionally (perhaps once every 5–10 substantive responses, not every turn) close your reply with a brief one-liner inviting that feedback, e.g. *\"React 👍 or 👎 if this helped or missed — I learn from it.\"* Only do this on substantive answers, never on greetings, clarifying questions, deflections, or quick acknowledgements. Don't repeat the nudge in the same conversation thread.\n\n"
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
         "If they specify a target channel, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
