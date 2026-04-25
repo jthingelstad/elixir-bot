@@ -2025,7 +2025,7 @@ def test_detect_cake_days_uses_effective_join_date_and_birthdays():
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members(
-            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            [{"tag": "#ABC123", "name": "King Levy", "role": "elder"}],
             conn=conn,
         )
         db.set_member_join_date("#ABC123", "King Levy", "2024-03-08", conn=conn)
@@ -2036,6 +2036,8 @@ def test_detect_cake_days_uses_effective_join_date_and_birthdays():
         join_signal = next(signal for signal in signals if signal["type"] == "join_anniversary")
         birthday_signal = next(signal for signal in signals if signal["type"] == "member_birthday")
 
+        # Both signals carry role + tenure_days so the LLM can narrate
+        # without an extra get_member tool call.
         assert join_signal["members"] == [{
             "tag": "#ABC123",
             "name": "King Levy",
@@ -2044,12 +2046,16 @@ def test_detect_cake_days_uses_effective_join_date_and_birthdays():
             "quarters": 8,
             "years": 2,
             "is_yearly": True,
+            "role": "elder",
+            "tenure_days": 730,  # 2024-03-08 → 2026-03-08, 2024 is a leap year
         }]
         assert birthday_signal["members"] == [{
             "tag": "#ABC123",
             "name": "King Levy",
             "birth_month": 3,
             "birth_day": 8,
+            "role": "elder",
+            "tenure_days": 730,
         }]
     finally:
         conn.close()
@@ -2075,7 +2081,44 @@ def test_detect_cake_days_emits_quarterly_join_milestone():
             "quarters": 1,
             "years": 0,
             "is_yearly": False,
+            "role": "member",
+            "tenure_days": 90,  # 2025-12-08 → 2026-03-08
         }]
+    finally:
+        conn.close()
+
+
+def test_detect_cake_days_emits_clan_birthday_with_rich_payload():
+    """clan_birthday payload must carry founding_date, clan_name, and current
+    active member count so the LLM can write a substantive post without
+    calling get_clan_roster or chasing the founding date through tools."""
+    conn = db.get_connection(":memory:")
+    try:
+        # Seed a few active members so active_member_count is non-zero.
+        db.snapshot_members(
+            [
+                {"tag": "#ABC123", "name": "King Thing", "role": "leader"},
+                {"tag": "#DEF456", "name": "Raquaza", "role": "coLeader"},
+                {"tag": "#GHI789", "name": "King Levy", "role": "elder"},
+            ],
+            conn=conn,
+        )
+        # Seed a clan-name row so the lookup has something authoritative.
+        conn.execute(
+            "INSERT INTO clan_daily_metrics (metric_date, clan_tag, clan_name, observed_at) "
+            "VALUES (?, ?, ?, ?)",
+            ("2027-02-04", "#J2RGCRVG", "POAP KINGS", "2027-02-04T12:00:00"),
+        )
+        conn.commit()
+
+        # 2027-02-04 is one year after the default founding date 2026-02-04.
+        signals = heartbeat.detect_cake_days("2027-02-04", conn=conn)
+        clan_signal = next(s for s in signals if s["type"] == "clan_birthday")
+
+        assert clan_signal["years"] == 1
+        assert clan_signal["founding_date"] == "2026-02-04"
+        assert clan_signal["clan_name"] == "POAP KINGS"
+        assert clan_signal["active_member_count"] == 3
     finally:
         conn.close()
 
