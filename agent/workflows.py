@@ -584,6 +584,51 @@ def respond_in_deck_review(question, author_name, channel_name, *, mode, subject
                         "cards that aren't in this list (e.g. when proposing a swap target).\n"
                     )
 
+    # Pre-fetch the player's full card collection at light fidelity so the LLM
+    # has authoritative levels for every owned card. Without this, on
+    # 2026-04-24 Elixir hallucinated swap-target levels by copying the level
+    # of the card being swapped out (Royal Ghost L12 → Fireball "L12" when
+    # actual was L8). False data calls everything else into question, so we
+    # inject the collection rather than rely on the LLM to fetch it.
+    if target_member_tag:
+        try:
+            collection = db.get_member_card_collection(
+                target_member_tag, include_support=True,
+            )
+        except Exception as exc:
+            log.warning("collection pre-fetch failed for %s: %s", target_member_tag, exc)
+            collection = None
+        if isinstance(collection, dict):
+            owned = list(collection.get("cards") or []) + list(collection.get("support_cards") or [])
+            owned = [
+                {
+                    "name": c.get("name"),
+                    "level": c.get("level"),
+                    "rarity": c.get("rarity"),
+                    "count": c.get("count"),
+                }
+                for c in owned
+                if isinstance(c, dict) and c.get("name")
+            ]
+            if owned:
+                owned.sort(key=lambda c: (c["name"] or "").lower())
+                rows = "\n".join(
+                    f"  {c['name']}: L{c['level']} {c['rarity']}"
+                    + (f" ({c['count']} copies)" if c.get("count") is not None else "")
+                    for c in owned
+                )
+                base_user_msg += (
+                    "\n\n=== YOUR CARD COLLECTION (authoritative levels) ===\n"
+                    f"{rows}\n"
+                    f"Total: {len(owned)} cards owned.\n"
+                    "These are the AUTHORITATIVE levels for every card the player owns. "
+                    "When you mention any card in your response — especially as a swap target — "
+                    "use ONLY the level shown above. Never invent or infer a card's level. "
+                    "If a card you want to suggest does not appear in this list, the player does "
+                    "not own it; pick a different candidate. Do NOT call lookup_member_cards or "
+                    "get_member_card_profile to re-confirm levels — this list is already the truth.\n"
+                )
+
     base_user_msg += _format_memory_context(memory_context)
     system_prompt = _deck_review_system(channel_name, mode=mode, subject=subject)
     validate = mode == "war" and subject == "suggest"
