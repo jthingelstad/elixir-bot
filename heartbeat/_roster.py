@@ -558,7 +558,9 @@ def detect_cake_days(today_str=None, conn=None):
     """Check for clan birthday, join anniversaries, and member birthdays.
 
     Uses cake_day_announcements table for dedup -- only returns signals
-    for events not yet announced today.
+    for events not yet announced today. Payloads are intentionally rich
+    enough that the awareness loop / clan-events post path can compose
+    a Discord post without further tool calls.
 
     Returns list of signal dicts.
     """
@@ -573,17 +575,45 @@ def detect_cake_days(today_str=None, conn=None):
     if today_str[5:] == clan_founded[5:]:  # month-day match
         if not db.was_announcement_sent(today_str, "clan_birthday", None, conn=conn):
             years = int(today_str[:4]) - int(clan_founded[:4])
+            clan_name_row = conn.execute(
+                "SELECT clan_name FROM clan_daily_metrics "
+                "WHERE clan_name IS NOT NULL "
+                "ORDER BY metric_date DESC, observed_at DESC LIMIT 1",
+            ).fetchone()
+            member_count_row = conn.execute(
+                "SELECT COUNT(*) AS n FROM members WHERE status = 'active'",
+            ).fetchone()
             signals.append({
                 "type": "clan_birthday",
                 "years": years,
+                "founding_date": clan_founded,
+                "clan_name": (clan_name_row["clan_name"] if clan_name_row else None) or "POAP KINGS",
+                "active_member_count": member_count_row["n"] if member_count_row else None,
             })
 
-    # Join anniversaries
+    # Join anniversaries (yearly + quarterly milestones at 3/6/9 months).
+    # Quarterly cadence is intentional — a year is a long time in Clash Royale
+    # so we celebrate the smaller cycles too.
     anniversaries = db.get_join_anniversaries_today(today_str, conn=conn)
     unannounced = []
+    today_date = datetime.strptime(today_str[:10], "%Y-%m-%d").date()
     for a in anniversaries:
-        if not db.was_announcement_sent(today_str, "join_anniversary", a["tag"], conn=conn):
-            unannounced.append(a)
+        if db.was_announcement_sent(today_str, "join_anniversary", a["tag"], conn=conn):
+            continue
+        enriched = dict(a)
+        role_row = conn.execute(
+            "SELECT cs.role FROM member_current_state cs "
+            "JOIN members m ON m.member_id = cs.member_id "
+            "WHERE m.player_tag = ?",
+            (a["tag"],),
+        ).fetchone()
+        enriched["role"] = role_row["role"] if role_row else None
+        try:
+            joined_day = datetime.strptime(a["joined_date"][:10], "%Y-%m-%d").date()
+            enriched["tenure_days"] = (today_date - joined_day).days
+        except (ValueError, TypeError):
+            enriched["tenure_days"] = None
+        unannounced.append(enriched)
     if unannounced:
         signals.append({
             "type": "join_anniversary",
@@ -594,8 +624,28 @@ def detect_cake_days(today_str=None, conn=None):
     birthdays = db.get_birthdays_today(today_str, conn=conn)
     unannounced_bdays = []
     for b in birthdays:
-        if not db.was_announcement_sent(today_str, "birthday", b["tag"], conn=conn):
-            unannounced_bdays.append(b)
+        if db.was_announcement_sent(today_str, "birthday", b["tag"], conn=conn):
+            continue
+        enriched = dict(b)
+        enrich_row = conn.execute(
+            "SELECT cs.role, mm.joined_at FROM members m "
+            "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
+            "LEFT JOIN member_metadata mm ON mm.member_id = m.member_id "
+            "WHERE m.player_tag = ?",
+            (b["tag"],),
+        ).fetchone()
+        if enrich_row:
+            enriched["role"] = enrich_row["role"]
+            joined_at = enrich_row["joined_at"]
+            try:
+                joined_day = datetime.strptime(joined_at[:10], "%Y-%m-%d").date()
+                enriched["tenure_days"] = (today_date - joined_day).days
+            except (ValueError, TypeError, AttributeError):
+                enriched["tenure_days"] = None
+        else:
+            enriched["role"] = None
+            enriched["tenure_days"] = None
+        unannounced_bdays.append(enriched)
     if unannounced_bdays:
         signals.append({
             "type": "member_birthday",
