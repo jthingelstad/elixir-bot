@@ -786,6 +786,330 @@ def get_member_card_collection(tag: str, limit: Optional[int] = None, min_level:
     return result
 
 
+def _card_count(card: dict) -> int:
+    value = card.get("count")
+    return value if isinstance(value, int) else 0
+
+
+def _is_max(card: dict) -> bool:
+    level = card.get("level")
+    max_level = card.get("maxLevel")
+    return isinstance(level, int) and isinstance(max_level, int) and level >= max_level
+
+
+def _ready_required(card: dict) -> Optional[int]:
+    """Cards required to advance this card one level. None if maxed/unknown."""
+    from cr_knowledge import cards_required_to_upgrade
+    if _is_max(card):
+        return None
+    return cards_required_to_upgrade(card.get("rarity"), card.get("level"))
+
+
+def _enrich_card_for_lookup(card: dict, king_tower_level: Optional[int]) -> dict:
+    """Project a normalized card for lookup output: adds count, upgrade
+    readiness, and king-tower gap. Keeps the slim shape used in tool output."""
+    enriched = dict(card)
+    needed = _ready_required(card)
+    count = _card_count(card)
+    if needed is not None:
+        enriched["count"] = count
+        enriched["cards_required_for_next_level"] = needed
+        enriched["ready_to_upgrade"] = count >= needed
+        if not enriched["ready_to_upgrade"] and needed > 0:
+            enriched["progress_to_next_level"] = round(count / needed, 2)
+    else:
+        enriched["count"] = count
+        enriched["ready_to_upgrade"] = False
+    level = card.get("level")
+    if isinstance(king_tower_level, int) and isinstance(level, int):
+        enriched["king_tower_gap"] = king_tower_level - level
+    return enriched
+
+
+def _load_collection(conn: sqlite3.Connection, member_tag: str) -> Optional[dict]:
+    """Read the latest card-collection snapshot and return normalized cards.
+
+    Returns None when the member has no snapshot yet.
+    """
+    row = conn.execute(
+        "SELECT ccs.fetched_at, ccs.cards_json, ccs.support_cards_json "
+        "FROM member_card_collection_snapshots ccs "
+        "JOIN members m ON m.member_id = ccs.member_id "
+        "WHERE m.player_tag = ? "
+        "ORDER BY ccs.fetched_at DESC, ccs.snapshot_id DESC LIMIT 1",
+        (_canon_tag(member_tag),),
+    ).fetchone()
+    if not row:
+        return None
+    cards = [
+        _normalize_collection_card(raw_card)
+        for raw_card in json.loads(row["cards_json"] or "[]")
+        if isinstance(raw_card, dict) and raw_card.get("name")
+    ]
+    support_cards = [
+        _normalize_collection_card(raw_card)
+        for raw_card in json.loads(row["support_cards_json"] or "[]")
+        if isinstance(raw_card, dict) and raw_card.get("name")
+    ]
+    return {
+        "fetched_at": row["fetched_at"],
+        "cards": cards,
+        "support_cards": support_cards,
+    }
+
+
+def _king_tower_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int]:
+    row = conn.execute(
+        "SELECT cs.exp_level FROM member_current_state cs "
+        "JOIN members m ON m.member_id = cs.member_id "
+        "WHERE m.player_tag = ?",
+        (_canon_tag(member_tag),),
+    ).fetchone()
+    if not row:
+        return None
+    value = row["exp_level"]
+    return value if isinstance(value, int) else None
+
+
+@managed_connection
+def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    """Compact card-collection digest. Always small (~3KB), always answers
+    broad questions ("how am I doing on cards", "what should I upgrade")
+    without sending raw card lists."""
+    snapshot = _load_collection(conn, tag)
+    if snapshot is None:
+        return None
+    king_tower = _king_tower_level(conn, tag)
+    all_cards = [c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")]
+
+    # Aggregate counts.
+    totals = {
+        "owned": len(all_cards),
+        "max_level": sum(1 for c in all_cards if _is_max(c)),
+        "level_13_plus": sum(1 for c in all_cards if isinstance(c.get("level"), int) and c["level"] >= 13),
+        "level_14_plus": sum(1 for c in all_cards if isinstance(c.get("level"), int) and c["level"] >= 14),
+    }
+
+    by_rarity: dict[str, dict] = {}
+    for card in all_cards:
+        rarity = _normalize_rarity_filter(card.get("rarity")) or "unknown"
+        bucket = by_rarity.setdefault(rarity, {"owned": 0, "ready": 0, "maxed": 0})
+        bucket["owned"] += 1
+        if _is_max(card):
+            bucket["maxed"] += 1
+        elif _ready_required(card) is not None and _card_count(card) >= _ready_required(card):
+            bucket["ready"] += 1
+
+    modes = {
+        "evo_unlocked": sum(1 for c in all_cards if c.get("evo_unlocked")),
+        "hero_unlocked": sum(1 for c in all_cards if c.get("hero_unlocked")),
+        "supports_evo": sum(1 for c in all_cards if c.get("supports_evo")),
+        "supports_hero": sum(1 for c in all_cards if c.get("supports_hero")),
+    }
+
+    # Top lists. Keep entries minimal to stay under 3KB total.
+    def _slim_for_digest(card: dict, *, fields: list[str]) -> dict:
+        out = {"name": card.get("name"), "level": card.get("level"), "rarity": card.get("rarity")}
+        for field in fields:
+            value = card.get(field)
+            if value is not None:
+                out[field] = value
+        return out
+
+    enriched = [_enrich_card_for_lookup(c, king_tower) for c in all_cards]
+    ready_top = sorted(
+        (c for c in enriched if c.get("ready_to_upgrade")),
+        key=lambda c: (-_card_count(c), c.get("name") or ""),
+    )[:5]
+    closest_top = sorted(
+        (c for c in enriched if not _is_max(c) and isinstance(c.get("levels_to_max"), int)),
+        key=lambda c: (c["levels_to_max"], -(c.get("level") or 0), c.get("name") or ""),
+    )[:5]
+    if king_tower is not None:
+        gap_top = sorted(
+            (c for c in enriched if isinstance(c.get("king_tower_gap"), int) and c["king_tower_gap"] > 0),
+            key=lambda c: (-c["king_tower_gap"], c.get("name") or ""),
+        )[:5]
+    else:
+        gap_top = []
+
+    return {
+        "member_tag": _canon_tag(tag),
+        "fetched_at": snapshot["fetched_at"],
+        "king_tower_level": king_tower,
+        "totals": totals,
+        "by_rarity": by_rarity,
+        "modes": modes,
+        "ready_to_upgrade_top": [
+            _slim_for_digest(c, fields=["count", "cards_required_for_next_level", "king_tower_gap"])
+            for c in ready_top
+        ],
+        "closest_to_max_top": [
+            _slim_for_digest(c, fields=["levels_to_max", "count", "cards_required_for_next_level", "ready_to_upgrade", "king_tower_gap"])
+            for c in closest_top
+        ],
+        "biggest_king_tower_gaps_top": [
+            _slim_for_digest(c, fields=["king_tower_gap", "levels_to_max", "ready_to_upgrade"])
+            for c in gap_top
+        ],
+    }
+
+
+_LOOKUP_FILTER_HINTS = [
+    "deck=true (current Trophy Road deck, 8 cards)",
+    "mode=war (inferred war decks from recent battles — not authoritative)",
+    "rarity=common|rare|epic|legendary|champion (full collection by rarity)",
+    "name=<card name> (lookup one card; substring match, case-insensitive)",
+    "ready_to_upgrade=true (cards the player has enough copies to level up now)",
+    "near_ready=true (at least halfway to a level-up, but not yet ready)",
+    "near_max=true (1-2 levels from max)",
+    "maxed=true (already at max level)",
+    "evo_unlocked=true | hero_unlocked=true | has_special_mode=true",
+]
+
+
+def _filter_required_response() -> dict:
+    return {
+        "error": "filter_required",
+        "available_filters": list(_LOOKUP_FILTER_HINTS),
+        "suggest_clarify": (
+            "Ask the user which scope they mean before retrying. "
+            "'Cards' is ambiguous: it could mean current deck, war decks, full collection, "
+            "by rarity, ready-to-upgrade, etc."
+        ),
+    }
+
+
+def _matches_filter(card: dict, filt: dict, *, war_card_names: set[str]) -> bool:
+    if filt.get("rarity"):
+        if (_normalize_rarity_filter(card.get("rarity")) or "unknown") != filt["rarity"]:
+            return False
+    if filt.get("name"):
+        target = filt["name"].lower()
+        if target not in (card.get("name") or "").lower():
+            return False
+    if filt.get("mode") == "war":
+        if (card.get("name") or "") not in war_card_names:
+            return False
+    if filt.get("ready_to_upgrade"):
+        needed = _ready_required(card)
+        if needed is None or _card_count(card) < needed:
+            return False
+    if filt.get("near_ready"):
+        needed = _ready_required(card)
+        if needed is None or _card_count(card) >= needed:
+            return False
+        if _card_count(card) < (needed * 0.5):
+            return False
+    if filt.get("near_max"):
+        if _is_max(card):
+            return False
+        levels_to_max = card.get("levels_to_max")
+        if not (isinstance(levels_to_max, int) and 1 <= levels_to_max <= 2):
+            return False
+    if filt.get("maxed") and not _is_max(card):
+        return False
+    if filt.get("evo_unlocked") and not card.get("evo_unlocked"):
+        return False
+    if filt.get("hero_unlocked") and not card.get("hero_unlocked"):
+        return False
+    if filt.get("has_special_mode"):
+        if not (card.get("evo_unlocked") or card.get("hero_unlocked")):
+            return False
+    return True
+
+
+def _war_card_names(conn: sqlite3.Connection, member_tag: str) -> set[str]:
+    """Names of cards across the player's inferred war decks (mode=war filter)."""
+    from storage.war_analytics import reconstruct_member_war_decks
+    result = reconstruct_member_war_decks(member_tag, conn=conn)
+    names: set[str] = set()
+    for deck in result.get("decks", []) or []:
+        for card in deck.get("cards", []) or []:
+            name = card.get("name") if isinstance(card, dict) else None
+            if name:
+                names.add(name)
+    return names
+
+
+@managed_connection
+def lookup_member_cards(
+    tag: str,
+    filter: Optional[dict] = None,
+    limit: int = 20,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Filtered query over a member's card collection.
+
+    Filter is required — a missing or empty filter returns a structured
+    `filter_required` error so the agent is nudged to ask the user which
+    scope they meant. See _LOOKUP_FILTER_HINTS for the full list.
+    """
+    if not filter or not any(filter.values()):
+        return _filter_required_response()
+
+    filt = dict(filter)
+    rarity = filt.get("rarity")
+    if rarity:
+        filt["rarity"] = _normalize_rarity_filter(rarity)
+        if filt["rarity"] is None:
+            return {"error": "unknown_rarity", "value": rarity}
+
+    snapshot = _load_collection(conn, tag)
+    if snapshot is None:
+        return {"error": "no_collection_snapshot", "member_tag": _canon_tag(tag)}
+
+    king_tower = _king_tower_level(conn, tag)
+
+    # deck=true is a special case: pull from current_deck, not collection.
+    if filt.get("deck"):
+        deck = get_member_current_deck(tag, conn=conn)
+        if not deck:
+            return {"error": "no_current_deck", "member_tag": _canon_tag(tag)}
+        deck_cards = [_enrich_card_for_lookup(c, king_tower) for c in deck.get("cards", [])]
+        return {
+            "fetched_at": deck.get("fetched_at"),
+            "filter_applied": {"deck": True},
+            "total_matching": len(deck_cards),
+            "returned": len(deck_cards),
+            "cards": deck_cards,
+        }
+
+    war_names: set[str] = _war_card_names(conn, tag) if filt.get("mode") == "war" else set()
+
+    all_cards = [c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")]
+    matching = [c for c in all_cards if _matches_filter(c, filt, war_card_names=war_names)]
+
+    # Sort: ready-to-upgrade first prioritizes by count surplus; otherwise by level desc.
+    if filt.get("ready_to_upgrade"):
+        matching.sort(key=lambda c: -(_card_count(c) - (_ready_required(c) or 0)))
+    elif filt.get("near_ready"):
+        matching.sort(key=lambda c: -(_card_count(c) / max(_ready_required(c) or 1, 1)))
+    elif filt.get("near_max"):
+        matching.sort(key=lambda c: (c.get("levels_to_max") or 99, -(c.get("level") or 0)))
+    else:
+        matching.sort(key=_card_sort_key)
+
+    enforced_limit = max(0, min(int(limit) if isinstance(limit, int) else 20, 50))
+    total_matching = len(matching)
+    matching = matching[:enforced_limit]
+    enriched = [_enrich_card_for_lookup(c, king_tower) for c in matching]
+
+    result = {
+        "fetched_at": snapshot["fetched_at"],
+        "filter_applied": {k: v for k, v in filt.items() if v},
+        "total_matching": total_matching,
+        "returned": len(enriched),
+        "cards": enriched,
+    }
+    if filt.get("mode") == "war":
+        result["war_deck_caveat"] = (
+            "War decks are inferred from cards played in recent war battles, not "
+            "authoritative — the CR API does not expose them. Phrase carefully."
+        )
+    return result
+
+
 @managed_connection
 def get_member_signature_cards(tag: str, mode_scope: str = "overall", conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(

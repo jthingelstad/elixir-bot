@@ -1,10 +1,11 @@
 # ── Tool definitions for Anthropic Claude function calling ─────────────────
 #
-# Consolidated domain-aligned tools (15 total):
+# Consolidated domain-aligned tools:
 #   Member domain:  resolve_member, get_member, get_member_war_detail
 #   River Race:     get_river_race, get_war_season, get_war_member_standings
 #   Clan domain:    get_clan_roster, get_clan_health, get_clan_trends
-#   Cards:          lookup_cards
+#   Cards:          lookup_cards (catalog), get_member_card_profile (digest),
+#                   lookup_member_cards (filtered slice)
 #   Utility:        update_member, save_clan_memory
 
 TOOLS = [
@@ -416,6 +417,88 @@ TOOLS = [
                 },
             },
             "required": [],
+        },
+    },
+
+    {
+        "name": "get_member_card_profile",
+        "description": (
+            "Get a compact card-collection digest for a clan member. Always small "
+            "(~3KB) — use this as the FIRST call for any broad card question: "
+            "'how am I doing on cards', 'what should I upgrade', 'review my collection', "
+            "'do I have legendaries'. Returns:\n"
+            "- totals: owned, max_level, level_13_plus, level_14_plus\n"
+            "- by_rarity: per-rarity counts of owned/ready/maxed\n"
+            "- modes: evo_unlocked, hero_unlocked, supports_evo, supports_hero counts\n"
+            "- ready_to_upgrade_top: top 5 cards the player can upgrade RIGHT NOW (has enough copies)\n"
+            "- closest_to_max_top: top 5 cards closest to maxLevel\n"
+            "- biggest_king_tower_gaps_top: top 5 cards furthest below the player's King Tower level\n\n"
+            "After reading this digest, only call lookup_member_cards if the user "
+            "wants specific cards or a specific slice the digest doesn't cover."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_tag": {
+                    "type": "string",
+                    "description": "Player tag, in-game name, alias, or Discord handle.",
+                },
+            },
+            "required": ["member_tag"],
+        },
+    },
+    {
+        "name": "lookup_member_cards",
+        "description": (
+            "Targeted lookup over a member's card collection. Returns a small focused "
+            "list (≤20 by default) matching the filter, with each card carrying count, "
+            "cards_required_for_next_level, ready_to_upgrade, and king_tower_gap.\n\n"
+            "FILTER IS REQUIRED. If the user's question is ambiguous about which "
+            "scope they mean (e.g. 'my cards' could be current deck, war decks, full "
+            "collection, by rarity), ask one clarifying question before calling this — "
+            "do not guess.\n\n"
+            "Filter options (combine freely):\n"
+            "- deck=true — current Trophy Road deck (8 cards)\n"
+            "- mode=war — inferred war decks (CAVEAT: not authoritative; CR API does not expose them)\n"
+            "- rarity=common|rare|epic|legendary|champion — by rarity\n"
+            "- name=<str> — substring match on card name (e.g. 'fireball')\n"
+            "- ready_to_upgrade=true — has enough copies to level up RIGHT NOW\n"
+            "- near_ready=true — at least halfway to a level-up but not yet ready\n"
+            "- near_max=true — 1-2 levels from max\n"
+            "- maxed=true — at max level\n"
+            "- evo_unlocked=true | hero_unlocked=true | has_special_mode=true"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_tag": {
+                    "type": "string",
+                    "description": "Player tag, in-game name, alias, or Discord handle.",
+                },
+                "filter": {
+                    "type": "object",
+                    "description": "Filter map. Required — see tool description for options.",
+                    "properties": {
+                        "deck": {"type": "boolean"},
+                        "mode": {"type": "string", "enum": ["war"]},
+                        "rarity": {"type": "string"},
+                        "name": {"type": "string"},
+                        "ready_to_upgrade": {"type": "boolean"},
+                        "near_ready": {"type": "boolean"},
+                        "near_max": {"type": "boolean"},
+                        "maxed": {"type": "boolean"},
+                        "evo_unlocked": {"type": "boolean"},
+                        "hero_unlocked": {"type": "boolean"},
+                        "has_special_mode": {"type": "boolean"},
+                    },
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max cards to return. Default 20, max 50.",
+                    "default": 20,
+                },
+            },
+            "required": ["member_tag", "filter"],
         },
     },
 
