@@ -236,6 +236,44 @@ def _strip_context_image_fields(value):
     return value
 
 
+def _drop_largest_list(data):
+    """Replace the largest list nested anywhere in data with a marker.
+
+    Returns (modified_data, dropped_path) or (data, None) if no list found.
+    The marker preserves shape so the model can see what was dropped and how big.
+    """
+    if not isinstance(data, dict):
+        return data, None
+
+    candidates = []
+    stack = [(data, ())]
+    while stack:
+        obj, path = stack.pop()
+        if isinstance(obj, list):
+            candidates.append((path, len(obj), len(json.dumps(obj, default=str))))
+            continue
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                stack.append((value, path + (key,)))
+
+    if not candidates:
+        return data, None
+
+    candidates.sort(key=lambda c: c[2], reverse=True)
+    path, count, _size = candidates[0]
+
+    target = data
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = {
+        "dropped": True,
+        "original_count": count,
+        "reason": "context_size",
+        "hint": "Result trimmed to fit context. Use a more specific tool or filter to retrieve these items.",
+    }
+    return data, path
+
+
 def _build_tool_result_envelope(name, raw_result):
     """Normalize tool output into a compact envelope for model context."""
     try:
@@ -269,17 +307,34 @@ def _build_tool_result_envelope(name, raw_result):
             )
 
     serialized = json.dumps(envelope, default=str)
-    if len(serialized) > TOOL_RESULT_MAX_CHARS:
+    original_size = len(serialized)
+    if original_size > TOOL_RESULT_MAX_CHARS:
         envelope["truncated"] = True
         envelope["meta"]["char_limit"] = TOOL_RESULT_MAX_CHARS
-        envelope["meta"]["char_size"] = len(serialized)
-        data_s = json.dumps(envelope.get("data"), default=str)
-        envelope["data"] = data_s[:TOOL_RESULT_MAX_CHARS // 2] + "...[truncated]"
-        if envelope["ok"] and envelope["error"] is None:
-            envelope["error"] = "tool_result_truncated_for_context"
+        envelope["meta"]["original_size"] = original_size
+
+        dropped_paths = []
+        data = envelope.get("data")
+        if isinstance(data, dict):
+            while len(json.dumps(envelope, default=str)) > TOOL_RESULT_MAX_CHARS:
+                data, path = _drop_largest_list(data)
+                if path is None:
+                    break
+                dropped_paths.append(".".join(str(p) for p in path))
+                envelope["data"] = data
+
+        if len(json.dumps(envelope, default=str)) > TOOL_RESULT_MAX_CHARS:
+            envelope["data"] = {
+                "dropped": True,
+                "reason": "context_size_after_field_trim",
+                "hint": "Result too large even after dropping arrays. Narrow the query.",
+            }
+
+        if dropped_paths:
+            envelope["meta"]["dropped_fields"] = dropped_paths
         log.warning(
-            "tool_result_truncated tool=%s reason=char_limit char_size=%d char_limit=%d",
-            name, len(serialized), TOOL_RESULT_MAX_CHARS,
+            "tool_result_truncated tool=%s reason=char_limit char_size=%d char_limit=%d dropped=%s",
+            name, original_size, TOOL_RESULT_MAX_CHARS, dropped_paths or "data_replaced",
         )
 
     return json.dumps(envelope, default=str)
