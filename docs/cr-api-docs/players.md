@@ -19,7 +19,7 @@ Get full player profile.
 |-------|------|-------|
 | `tag` | string | e.g. `#PU9RCVYUG` |
 | `name` | string | |
-| `expLevel` | integer | Player's King Level |
+| `expLevel` | integer | Player's account-wide experience level (sometimes called "King Level"). NOT the King Tower level shown in arena — `expLevel` keeps climbing into the 60s/70s for active players, while the King Tower itself caps at 16 (matches Tower Troop `maxLevel`). Derive King Tower as `min(expLevel, 16)` when comparing to card levels. |
 | `expPoints` | integer | XP within current level |
 | `totalExpPoints` | integer | Lifetime XP earned |
 | `starPoints` | integer | Star points for card cosmetics |

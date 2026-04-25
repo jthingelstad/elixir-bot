@@ -858,7 +858,23 @@ def _load_collection(conn: sqlite3.Connection, member_tag: str) -> Optional[dict
     }
 
 
-def _king_tower_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int]:
+# King Tower currently caps at this level in Clash Royale. The CR API does
+# not expose King Tower separately from expLevel — they used to be the same
+# number, but King Tower stopped advancing at this cap while expLevel keeps
+# climbing into the 60s/70s. Reading expLevel raw as "King Tower" produced
+# nonsense gaps like "card L7 vs King Tower 34, 27-level gap" when in
+# reality the tower caps and the real gap is much smaller.
+#
+# Sourced from Tower Troop maxLevel in /v1/players/<tag> (e.g. Tower Princess
+# reports maxLevel: 16). Tower Troops scale with the King Tower so this is
+# the same ceiling. Update if Supercell raises it.
+KING_TOWER_MAX_LEVEL = 16
+
+
+def _experience_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int]:
+    """Account-wide experience level (CR API `expLevel`). Caps in the 60s+;
+    not directly the King Tower level — derive king_tower_level from this
+    via min(expLevel, KING_TOWER_MAX_LEVEL)."""
     row = conn.execute(
         "SELECT cs.exp_level FROM member_current_state cs "
         "JOIN members m ON m.member_id = cs.member_id "
@@ -871,6 +887,17 @@ def _king_tower_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int
     return value if isinstance(value, int) else None
 
 
+def _king_tower_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int]:
+    """King Tower level = expLevel clamped at KING_TOWER_MAX_LEVEL. This is
+    the number that's meaningful for card-level comparisons; cards top out
+    around the same range, so this is the right reference for "is this
+    card underleveled vs my tower"."""
+    exp = _experience_level(conn, member_tag)
+    if exp is None:
+        return None
+    return min(exp, KING_TOWER_MAX_LEVEL)
+
+
 @managed_connection
 def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     """Compact card-collection digest. Always small (~3KB), always answers
@@ -880,6 +907,7 @@ def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None)
     if snapshot is None:
         return None
     king_tower = _king_tower_level(conn, tag)
+    experience = _experience_level(conn, tag)
     all_cards = [c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")]
 
     # Aggregate counts.
@@ -937,6 +965,8 @@ def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None)
         "member_tag": _canon_tag(tag),
         "fetched_at": snapshot["fetched_at"],
         "king_tower_level": king_tower,
+        "king_tower_max": KING_TOWER_MAX_LEVEL,
+        "experience_level": experience,
         "totals": totals,
         "by_rarity": by_rarity,
         "modes": modes,
