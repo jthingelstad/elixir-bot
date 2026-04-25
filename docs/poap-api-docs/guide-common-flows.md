@@ -31,7 +31,7 @@ Need more codes? Use `POST /redeem-requests`.
 
 **Options:**
 
-- **Option 1 (fastest):** `GET /actions/scan/{address}/{eventId}` — returns a Token object (200) if the address holds the POAP, or 404 if not.
+- **Option 1 (fastest):** `GET /actions/scan/{address}/{eventId}` — returns `{ event, tokenId, owner }` (200) if the address holds the POAP, or 404 if not.
 - **Option 2:** `GET /actions/scan/{address}` — get all POAPs for an address, then check for the target event ID client-side.
 - **Option 3:** `GET /event/{id}/poaps` — get all addresses holding a POAP for an event, then check if the user's address is in the list.
 
