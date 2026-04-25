@@ -88,6 +88,7 @@ Prioritize clear guidance, not wiki-style completeness.
 - Practice days during Colosseum week should focus on deck preparation only.
 - The API sends `periodType: "colosseum"` on battle days; practice days still show `"training"`.
 - The live war state includes a `colosseum_week` flag when battle days are active.
+- **Do NOT speculate about season length.** A season is 4 weeks OR 5 weeks; Supercell decides per season to align with Pass Royale, and the total is not exposed by the live API until Colosseum is observed. Never state "Week N is Colosseum", "two more weeks left in Season X", or "the final week is Week 4". Only the `colosseum_week` flag on the live war state is authoritative — and only once battle days begin. Until then, frame remaining time as "until Colosseum week" without naming a specific week number, or simply talk about the current week without forecasting the season's end.
 
 ## Rewards and Recognition
 
