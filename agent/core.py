@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from anthropic import Anthropic, APIError, APIConnectionError
 
 import db
+from agent.workflow_registry import SONNET_RETAINED_WORKFLOWS, workflow_model_family
 from runtime import status as runtime_status
 
 log = logging.getLogger("elixir_agent")
@@ -58,21 +59,13 @@ def _lightweight_model_name():
     return os.getenv("ELIXIR_LIGHTWEIGHT_MODEL", "claude-haiku-4-5-20251001")
 
 
-SONNET_RETAINED_WORKFLOWS = frozenset({
-    "weekly_digest",
-    "tournament_recap",
-    "intel_report",
-    "memory_synthesis",
-})
-
-
 def _model_for_workflow(workflow, model=None):
     if model:
         return model
-    workflow = workflow or ""
-    if workflow == "site_promote_content":
+    model_family = workflow_model_family(workflow)
+    if model_family == "promotion":
         return _promotion_model_name()
-    if workflow in SONNET_RETAINED_WORKFLOWS:
+    if model_family == "chat":
         return _chat_model_name()
     return _lightweight_model_name()
 
