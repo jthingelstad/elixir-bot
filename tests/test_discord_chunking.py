@@ -111,6 +111,19 @@ def test_resolve_custom_emoji_keeps_unicode_shortcodes():
     assert ":crossed_swords:" in result
 
 
+def test_resolve_custom_emoji_normalizes_elixir_prefixed_unicode_shortcodes():
+    guild = _guild(("elixir_trophy", 1001))
+    result = _resolve_custom_emoji("battle day :elixir_crossed_swords:", guild)
+    assert result == "battle day :crossed_swords:"
+
+
+def test_resolve_custom_emoji_still_strips_unknown_elixir_prefixed_names():
+    guild = _guild(("elixir_trophy", 1001))
+    result = _resolve_custom_emoji("battle day :elixir_poap_kings:", guild)
+    assert ":elixir_poap_kings:" not in result
+    assert result == "battle day"
+
+
 def test_resolve_custom_emoji_leaves_timestamps_alone():
     # Digit-led ":30:" is not an emoji name; must not be treated like one.
     guild = _guild(("elixir_trophy", 1001))

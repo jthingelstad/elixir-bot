@@ -19,15 +19,30 @@ def _chunk_discord_text(text: str, limit: int = 2000) -> list[str]:
 def _resolve_custom_emoji(text: str, guild) -> str:
     emoji_map = {e.name: e for e in (guild.emojis if guild else [])}
 
+    def _is_unicode_shortcode(name: str) -> bool:
+        shortcode = f":{name}:"
+        return (
+            emoji.emojize(shortcode, language="alias") != shortcode
+            or emoji.emojize(shortcode) != shortcode
+        )
+
     def _replace(m):
         name = m.group(1)
         custom = emoji_map.get(name)
         if custom:
             prefix = "a" if custom.animated else ""
             return f"<{prefix}:{custom.name}:{custom.id}>"
-        if emoji.emojize(f":{name}:", language="alias") != f":{name}:" \
-                or emoji.emojize(f":{name}:") != f":{name}:":
+        if _is_unicode_shortcode(name):
             return m.group(0)
+        if name.startswith("elixir_"):
+            unicode_name = name.removeprefix("elixir_")
+            if _is_unicode_shortcode(unicode_name):
+                log.info(
+                    "emoji shortcode normalized: :%s: is not custom, using Unicode :%s:",
+                    name,
+                    unicode_name,
+                )
+                return f":{unicode_name}:"
         log.info("emoji shortcode stripped: :%s: is not a guild custom emoji or Unicode shortcode", name)
         return ""
 

@@ -28,6 +28,8 @@ def test_discord_emoji_guidance_enumerates_real_guild_emoji():
     for name in names:
         assert f":{name}:" in guidance
     assert "Do not invent custom emoji names" in guidance
+    assert "The `elixir_` prefix is reserved" in guidance
+    assert "not :elixir_crossed_swords:" in guidance
     # Unicode shortcodes like :dragon: / :trophy: do render via the Discord
     # client, so the guidance should call that out as an allowed source.
     assert "Unicode emoji shortcodes" in guidance
