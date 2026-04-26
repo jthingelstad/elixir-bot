@@ -11,6 +11,7 @@ def _discord_emoji_guidance(*, allow_in_sensitive: bool = False) -> str:
         "Emoji in Discord-ready messages — use the literal :name: shortcode syntax and only these sources:",
         f"- Elixir server custom emoji: {emoji_list}. These are the only custom emoji that exist.",
         "- Standard Unicode emoji shortcodes (e.g. :trophy:, :crossed_swords:, :dragon:) — Discord renders these on display. Or emit the Unicode character directly (🏆, ⚔️, 🐉).",
+        "The `elixir_` prefix is reserved for the exact server custom emoji listed above. Do not combine it with Unicode names; use :crossed_swords:, not :elixir_crossed_swords:.",
         "Do not invent custom emoji names. Shortcodes that match neither list above (e.g. :poap:, :poap_kings:) are stripped before posting.",
     ]
     if not allow_in_sensitive:
