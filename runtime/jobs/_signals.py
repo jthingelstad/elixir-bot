@@ -1179,3 +1179,38 @@ def _persist_signal_detector_cursors(cursor_updates):
             cursor_int=update.get("cursor_int"),
             metadata=update.get("metadata"),
         )
+
+
+# Focused implementations for helpers that no longer need to live in the
+# orchestration facade. Imported at the end so legacy patch paths above remain
+# available during module initialization.
+from runtime.signals.context import (  # noqa: E402,F401
+    _build_compact_war_context,
+    _build_outcome_context,
+    _build_player_insight_context,
+    _build_river_race_insight_layer,
+    _build_system_signal_context,
+    _extract_race_standings_summary,
+)
+from runtime.signals.memory import (  # noqa: E402,F401
+    _post_signal_memory,
+    _store_recap_memories_for_signal_batch,
+)
+from runtime.signals.state import (  # noqa: E402,F401
+    _mark_delivered_signals,
+    _mark_signal_group_completed,
+    _persist_signal_detector_cursors,
+)
+from runtime.signals.system import (  # noqa: E402,F401
+    _preauthored_system_signal_result,
+    _post_system_signal_updates,
+    _publish_pending_system_signal_updates,
+    _system_signal_updates,
+)
+from runtime.signals.delivery import (  # noqa: E402,F401
+    _deliver_awareness_post,
+    _deliver_awareness_post_plan,
+    _deliver_signal_group,
+    _deliver_signal_group_via_awareness,
+    _deliver_signal_outcome,
+)
