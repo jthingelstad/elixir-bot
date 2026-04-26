@@ -1,4 +1,4 @@
-from agent.prompts import _discord_emoji_guidance, _promote_system
+from agent.prompts import _deck_review_system, _discord_emoji_guidance, _promote_system
 from runtime.emoji import available_emoji_names
 
 
@@ -31,3 +31,14 @@ def test_discord_emoji_guidance_enumerates_real_guild_emoji():
     # Unicode shortcodes like :dragon: / :trophy: do render via the Discord
     # client, so the guidance should call that out as an allowed source.
     assert "Unicode emoji shortcodes" in guidance
+
+
+def test_deck_review_prompt_distinguishes_ownership_from_played_as():
+    text = _deck_review_system("#ask-elixir")
+
+    assert "played_as" in text
+    assert "actually deployed in that mode" in text
+    assert "signature_cards" in text
+    assert "losses cards" in text
+    assert "ownership, support, or current slot configuration" in text
+    assert "infer battle deployment from them" in text
