@@ -29,7 +29,7 @@ from runtime.helpers._channels import (  # noqa: F401
     _strip_bot_mentions,
     _is_bot_mentioned, _leading_bot_mention_pattern, _get_channel_behavior,
     _get_singleton_channel, _get_singleton_channel_id, _channel_reply_target_name,
-    _reply_text, _share_channel_result,
+    _safe_reply, _reply_text, _share_channel_result,
 )
 from runtime.helpers._reports import (  # noqa: F401
     _build_roster_join_dates_report, _build_kick_risk_report,

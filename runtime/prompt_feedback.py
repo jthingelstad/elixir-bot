@@ -80,7 +80,9 @@ async def _post_retry_invitation(payload, *, prompt_feedback_id: int | None, mes
         "and I'll take another shot."
     )
     try:
-        sent = await message.reply(content)
+        import runtime.app as app
+
+        sent = await app._safe_reply(message, content)
         if prompt_feedback_id:
             await asyncio.to_thread(
                 db.mark_prompt_feedback_retry_invited,

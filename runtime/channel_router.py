@@ -284,7 +284,7 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
                     discord_message_id=message.id,
                     detail=_agent_failure_detail(agent_error) if agent_error else None,
                 )
-                await message.reply(app._fallback_channel_response(ctx["raw_question"], "interactive"))
+                await app._safe_reply(message, app._fallback_channel_response(ctx["raw_question"], "interactive"))
                 return True
 
             content = result.get("content") or result.get("summary") or ""
@@ -295,7 +295,7 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
                     channel=message.channel, author=message.author,
                     discord_message_id=message.id, raw_json=result,
                 )
-                await message.reply(app._fallback_channel_response(ctx["raw_question"], "interactive"))
+                await app._safe_reply(message, app._fallback_channel_response(ctx["raw_question"], "interactive"))
                 return True
 
             sent = await app._reply_text(message, content)
@@ -327,7 +327,7 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
                 channel=message.channel, author=message.author,
                 discord_message_id=message.id, detail=str(e),
             )
-            await message.reply("Hit an error reviewing the deck. Try again in a sec.")
+            await app._safe_reply(message, "Hit an error reviewing the deck. Try again in a sec.")
     return True
 
 
@@ -630,7 +630,7 @@ async def route_message(message):
                         failure_kwargs["detail"] = type(result).__name__
                         failure_kwargs["result_preview"] = app._preview_text(result)
                     app._log_prompt_failure(**failure_kwargs)
-                    await message.reply("Having a hiccup. Try again in a sec.")
+                    await app._safe_reply(message, "Having a hiccup. Try again in a sec.")
                     return
                 content = result.get("content", result.get("summary", ""))
                 if not content:
@@ -645,7 +645,7 @@ async def route_message(message):
                         result_preview=app._preview_text(result),
                         raw_json=result,
                     )
-                    await message.reply("Having a hiccup. Try again in a sec.")
+                    await app._safe_reply(message, "Having a hiccup. Try again in a sec.")
                     return
                 sent_messages = await app._reply_text(message, content)
                 _reception_asst_msg_id = None
@@ -680,7 +680,7 @@ async def route_message(message):
                     discord_message_id=message.id,
                     detail=str(e),
                 )
-                await message.reply("Hit an error. Try again in a moment.")
+                await app._safe_reply(message, "Hit an error. Try again in a moment.")
         return
 
     if workflow in {"interactive", "clanops"}:
@@ -764,7 +764,7 @@ async def route_message(message):
                         failure_kwargs["result_preview"] = app._preview_text(result)
                     app._log_prompt_failure(**failure_kwargs)
                     if mentioned or allows_open_channel_reply:
-                        await message.reply(app._fallback_channel_response(raw_question, workflow))
+                        await app._safe_reply(message, app._fallback_channel_response(raw_question, workflow))
                     return
 
                 inline_memories = result.pop("memories", None) or []
@@ -790,7 +790,7 @@ async def route_message(message):
                         raw_json=result,
                     )
                     if mentioned or allows_open_channel_reply:
-                        await message.reply(app._fallback_channel_response(raw_question, workflow))
+                        await app._safe_reply(message, app._fallback_channel_response(raw_question, workflow))
                     return
                 sent_messages = await app._reply_text(message, content)
                 try:
@@ -830,7 +830,7 @@ async def route_message(message):
                     detail=str(e),
                 )
                 if mentioned:
-                    await message.reply("Hit an error. Try again in a moment.")
+                    await app._safe_reply(message, "Hit an error. Try again in a moment.")
         return
 
     await app.bot.process_commands(message)

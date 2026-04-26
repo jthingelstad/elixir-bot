@@ -355,13 +355,27 @@ async def _startup_channel_audit_summary() -> str:
                     bot_member_cache[cache_key] = me
             if me is not None:
                 perms = permissions_for(me)
-                can_view = getattr(perms, "view_channel", True)
-                can_send = getattr(perms, "send_messages", True)
-                if not can_view:
+                # Hard requirements — Elixir cannot function in the channel without these.
+                if not getattr(perms, "view_channel", True):
                     issues.append(f"{channel_name} not visible")
                     continue
-                if not can_send:
+                if not getattr(perms, "send_messages", True):
                     issues.append(f"{channel_name} not writable")
+                    continue
+                # Soft requirements — Elixir degrades but can still post.
+                # read_message_history: needed for message.reply() threading.
+                #   Without it, the _safe_reply fallback drops the reference.
+                # add_reactions: needed for the ✅ ack in #ask-elixir feedback.
+                # use_external_emojis: needed for custom guild emoji in posts.
+                missing_soft = []
+                if not getattr(perms, "read_message_history", True):
+                    missing_soft.append("read_message_history")
+                if not getattr(perms, "add_reactions", True):
+                    missing_soft.append("add_reactions")
+                if not getattr(perms, "use_external_emojis", True):
+                    missing_soft.append("use_external_emojis")
+                if missing_soft:
+                    issues.append(f"{channel_name} missing perms: {', '.join(missing_soft)}")
                     continue
 
         ok_names.append(channel_name)
