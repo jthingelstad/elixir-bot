@@ -1,6 +1,8 @@
 import asyncio
 import re
 
+import discord
+
 import db
 import prompts
 
@@ -10,7 +12,7 @@ __all__ = [
     "_strip_bot_mentions",
     "_is_bot_mentioned", "_leading_bot_mention_pattern", "_get_channel_behavior",
     "_get_singleton_channel", "_get_singleton_channel_id", "_channel_reply_target_name",
-    "_reply_text", "_share_channel_result",
+    "_safe_reply", "_reply_text", "_share_channel_result",
 ]
 
 from runtime.helpers._common import (
@@ -100,6 +102,19 @@ def _channel_reply_target_name(channel_config):
     return channel_config.get("name") or f"channel:{channel_config['id']}"
 
 
+async def _safe_reply(message, content):
+    # message.reply() uses a Discord message reference, which requires the bot
+    # to have Read Message History on the channel. When that perm is missing,
+    # Discord returns 403 code 160002 — fall back to a plain channel.send so
+    # the user still gets the response (just without threading).
+    try:
+        return await message.reply(content)
+    except discord.errors.Forbidden as exc:
+        if getattr(exc, "code", None) != 160002:
+            raise
+        return await message.channel.send(content)
+
+
 async def _reply_text(message, content):
     def _discord_safe_content(text: str) -> str:
         text = text or ""
@@ -123,11 +138,11 @@ async def _reply_text(message, content):
         safe_post = _runtime_app()._resolve_custom_emoji(safe_post, getattr(message, "guild", None))
         if len(safe_post) > DISCORD_MAX_MESSAGE_LEN:
             for chunk in _chunk_for_discord(safe_post):
-                sent = await message.reply(chunk)
+                sent = await _safe_reply(message, chunk)
                 if sent is not None:
                     sent_messages.append(sent)
         else:
-            sent = await message.reply(safe_post)
+            sent = await _safe_reply(message, safe_post)
             if sent is not None:
                 sent_messages.append(sent)
     return sent_messages

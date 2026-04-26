@@ -739,6 +739,67 @@ def test_startup_channel_audit_reports_missing_or_unwritable_channels():
     assert "#missing missing or unreachable" in summary
 
 
+def test_startup_channel_audit_flags_missing_soft_perms():
+    # The 2026-04-25 #reception incident: bot could view + send but lacked
+    # read_message_history, so message.reply() 403'd. Audit must catch this.
+    perms_missing_history = SimpleNamespace(
+        view_channel=True,
+        send_messages=True,
+        read_message_history=False,
+        add_reactions=True,
+        use_external_emojis=True,
+    )
+    perms_missing_reactions = SimpleNamespace(
+        view_channel=True,
+        send_messages=True,
+        read_message_history=True,
+        add_reactions=False,
+        use_external_emojis=False,
+    )
+    perms_ok = SimpleNamespace(
+        view_channel=True,
+        send_messages=True,
+        read_message_history=True,
+        add_reactions=True,
+        use_external_emojis=True,
+    )
+    guild = SimpleNamespace(id=1, me=object())
+    reception_channel = SimpleNamespace(
+        id=200, name="reception", type="text",
+        guild=guild, permissions_for=lambda m: perms_missing_history,
+    )
+    ask_channel = SimpleNamespace(
+        id=300, name="ask-elixir", type="text",
+        guild=guild, permissions_for=lambda m: perms_missing_reactions,
+    )
+    leader_channel = SimpleNamespace(
+        id=400, name="leader-lounge", type="text",
+        guild=guild, permissions_for=lambda m: perms_ok,
+    )
+
+    def fake_get_channel(channel_id):
+        return {200: reception_channel, 300: ask_channel, 400: leader_channel}.get(channel_id)
+
+    with (
+        patch.object(elixir.bot, "get_channel", side_effect=fake_get_channel),
+        patch.object(elixir.bot, "fetch_channel", new=AsyncMock(side_effect=RuntimeError("unused"))),
+        patch.object(type(elixir.bot), "user", new_callable=PropertyMock, return_value=SimpleNamespace(id=999)),
+        patch(
+            "elixir.prompts.discord_channel_configs",
+            return_value=[
+                {"id": 200, "name": "#reception", "workflow": "reception"},
+                {"id": 300, "name": "#ask-elixir", "workflow": "interactive"},
+                {"id": 400, "name": "#leader-lounge", "workflow": "clanops"},
+            ],
+        ),
+    ):
+        summary = asyncio.run(elixir._startup_channel_audit_summary())
+
+    assert "Channel audit: 1/3 active channels reachable and writable." in summary
+    assert "#reception missing perms: read_message_history" in summary
+    assert "#ask-elixir missing perms: add_reactions, use_external_emojis" in summary
+
+
 def test_ask_elixir_daily_insight_posts_fun_fact():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
