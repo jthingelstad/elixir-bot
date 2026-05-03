@@ -489,7 +489,11 @@ def get_rookie_mvp_candidates(
 
     Uses the most recent ``clan_memberships.joined_at`` (left_at IS NULL) — a
     returning member who rejoined mid-season counts as a rookie for this season.
+    Includes the current in-progress war week's fame so mid-season standings
+    reflect today's battles.
     """
+    from storage.war_analytics import _get_in_progress_war_fame
+
     season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
     if season_id is None:
         return []
@@ -514,11 +518,60 @@ def get_rookie_mvp_candidates(
         WHERE wr.season_id = ? AND m.status = 'active'
         GROUP BY wp.player_tag, wp.member_id
         HAVING total_fame > 0
-        ORDER BY total_fame DESC, races_participated DESC
-        LIMIT ?
         """,
-        (_cr_time_to_iso(start), _cr_time_to_iso(end), season_id, limit),
+        (_cr_time_to_iso(start), _cr_time_to_iso(end), season_id),
     ).fetchall()
+    by_tag: dict[str, dict] = {}
+    for r in rows:
+        tag = _canon_tag(r["tag"])
+        by_tag[tag] = {
+            "tag": tag,
+            "name": r["name"],
+            "member_id": r["member_id"],
+            "total_fame": r["total_fame"] or 0,
+            "races_participated": r["races_participated"],
+        }
+
+    # Membership-window check for any rookies whose only contribution so far
+    # is in the in-progress week (no finalized rows yet).
+    in_progress = _get_in_progress_war_fame(int(season_id), conn)
+    for tag, contrib in in_progress.items():
+        fame = contrib.get("fame") or 0
+        if fame <= 0:
+            continue
+        member_id = contrib.get("member_id")
+        if member_id is None:
+            continue
+        existing = by_tag.get(tag)
+        if existing is None:
+            cm = conn.execute(
+                """
+                SELECT 1 FROM clan_memberships cm
+                JOIN members m ON m.member_id = cm.member_id
+                WHERE cm.member_id = ? AND cm.left_at IS NULL
+                  AND cm.joined_at >= ? AND cm.joined_at < ?
+                  AND m.status = 'active'
+                LIMIT 1
+                """,
+                (member_id, _cr_time_to_iso(start), _cr_time_to_iso(end)),
+            ).fetchone()
+            if not cm:
+                continue
+            by_tag[tag] = {
+                "tag": tag,
+                "name": contrib.get("player_name"),
+                "member_id": member_id,
+                "total_fame": fame,
+                "races_participated": 1,
+            }
+        else:
+            existing["total_fame"] = (existing.get("total_fame") or 0) + fame
+            existing["races_participated"] = (existing.get("races_participated") or 0) + 1
+
+    ordered = sorted(
+        by_tag.values(),
+        key=lambda r: (-(r.get("total_fame") or 0), -(r.get("races_participated") or 0)),
+    )[:limit]
     return [
         {
             "tag": r["tag"],
@@ -528,7 +581,7 @@ def get_rookie_mvp_candidates(
             "races_participated": r["races_participated"],
             "rank": i + 1,
         }
-        for i, r in enumerate(rows)
+        for i, r in enumerate(ordered)
     ]
 
 
