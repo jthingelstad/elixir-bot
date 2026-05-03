@@ -507,6 +507,16 @@ def _execute_get_clan_roster(arguments):
         return db.get_recent_role_changes(days=days)
     elif aspect == "max_cards":
         return db.get_members_with_most_level_16_cards(limit=limit)
+    elif aspect == "trends":
+        window_days = arguments.get("window_days", 7)
+        comparison = db.compare_clan_trend_windows(window_days=window_days)
+        summary = db.build_clan_trend_summary_context(
+            days=days, window_days=window_days,
+        )
+        if isinstance(comparison, dict):
+            comparison["trend_summary"] = summary
+            return comparison
+        return {"comparison": comparison, "trend_summary": summary}
     else:
         return {"error": f"Unknown aspect: {aspect}"}
 
@@ -550,17 +560,6 @@ def _execute_get_clan_health(arguments, workflow=None):
         return {"error": f"Unknown aspect: {aspect}"}
 
 
-def _execute_get_clan_trends(arguments):
-    """Execute the consolidated get_clan_trends tool."""
-    window_days = arguments.get("window_days", 7)
-    days = arguments.get("days", 30)
-    # Return both the comparison and the summary for completeness
-    comparison = db.compare_clan_trend_windows(window_days=window_days)
-    summary = db.build_clan_trend_summary_context(days=days, window_days=window_days)
-    if isinstance(comparison, dict):
-        comparison["trend_summary"] = summary
-        return comparison
-    return {"comparison": comparison, "trend_summary": summary}
 
 
 # ── Write tools execution ─────────────────────────────────────────────────
@@ -1119,8 +1118,6 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_clan_roster(arguments)
         elif name == "get_clan_health":
             result = _execute_get_clan_health(arguments, workflow=workflow)
-        elif name == "get_clan_trends":
-            result = _execute_get_clan_trends(arguments)
         elif name == "lookup_cards":
             result = db.lookup_cards(
                 name=arguments.get("name"),

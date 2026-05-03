@@ -3,7 +3,7 @@
 # Consolidated domain-aligned tools:
 #   Member domain:  resolve_member, get_member, get_member_war_detail
 #   River Race:     get_river_race, get_war_season
-#   Clan domain:    get_clan_roster, get_clan_health, get_clan_trends
+#   Clan domain:    get_clan_roster, get_clan_health
 #   Cards:          lookup_cards (catalog), get_member_card_profile (digest),
 #                   lookup_member_cards (filtered slice)
 #   Utility:        update_member, save_clan_memory
@@ -258,7 +258,12 @@ TOOLS = [
             "- recent_joins: members who joined recently with form and war contribution\n"
             "- longest_tenure: longest-tenured active members\n"
             "- role_changes: recent promotions or demotions\n"
-            "- max_cards: members ranked by level 16 card count"
+            "- max_cards: members ranked by level 16 card count\n"
+            "- trends: compare clan metrics (member count, clan score, total trophies, "
+            "battle activity) across recent window vs prior same-length window. Uses "
+            "`window_days` (default 7) for the comparison window and `days` (default 30) "
+            "for the trend-summary context. A default trend summary may already be in "
+            "your context — use this for custom windows."
         ),
         "input_schema": {
             "type": "object",
@@ -267,12 +272,24 @@ TOOLS = [
                     "type": "string",
                     "description": "Which roster view to retrieve. Default: list.",
                     "default": "list",
-                    "enum": ["list", "summary", "recent_joins", "longest_tenure", "role_changes", "max_cards"],
+                    "enum": [
+                        "list", "summary", "recent_joins", "longest_tenure",
+                        "role_changes", "max_cards", "trends",
+                    ],
                 },
                 "days": {
                     "type": "integer",
-                    "description": "How many days back for recent_joins or role_changes. Default 30.",
+                    "description": (
+                        "Window in days. recent_joins / role_changes: lookback for "
+                        "the listing. trends: total days of trend-summary context. "
+                        "Default 30."
+                    ),
                     "default": 30,
+                },
+                "window_days": {
+                    "type": "integer",
+                    "description": "Comparison window in days for aspect='trends'. Default 7.",
+                    "default": 7,
                 },
                 "limit": {
                     "type": "integer",
@@ -341,31 +358,6 @@ TOOLS = [
             "required": [],
         },
     },
-    {
-        "name": "get_clan_trends",
-        "description": (
-            "Compare clan metrics (member count, clan score, total trophies, battle activity) "
-            "across recent window versus previous same-length window. "
-            "A default trend summary may already be in your context — use this for custom windows."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "window_days": {
-                    "type": "integer",
-                    "description": "How many recent days to compare against the prior same-length window. Default 7.",
-                    "default": 7,
-                },
-                "days": {
-                    "type": "integer",
-                    "description": "Total days of trend context. Default 30.",
-                    "default": 30,
-                },
-            },
-            "required": [],
-        },
-    },
-
     # ── CARD DOMAIN ────────────────────────────────────────────────────────
 
     {
