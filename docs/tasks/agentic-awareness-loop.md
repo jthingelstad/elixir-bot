@@ -49,7 +49,7 @@ Give it the full read-tool set **plus** `cr_api`, with ~8 tool rounds. That lets
 - Resolve streak-player opponents via `cr_api(aspect="player_battles")` → `cr_api(aspect="player")` and comment on who they actually beat.
 - Scout an inbound war opponent with `cr_api(aspect="clan_war")` without needing the separate scheduled `intel_report`.
 - Check its own memory (`get_member → memories`) before reposting an angle it covered 3 hours ago.
-- Read race standings via `get_river_race` / `get_war_member_standings` when the signal dict isn't enough.
+- Read race standings via `get_river_race` / `get_war_season(aspect='standings', metric=…)` when the signal dict isn't enough.
 
 ### Why this beats per-signal generation
 

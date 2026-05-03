@@ -2,7 +2,7 @@
 #
 # Consolidated domain-aligned tools:
 #   Member domain:  resolve_member, get_member, get_member_war_detail
-#   River Race:     get_river_race, get_war_season, get_war_member_standings
+#   River Race:     get_river_race, get_war_season
 #   Clan domain:    get_clan_roster, get_clan_health, get_clan_trends
 #   Cards:          lookup_cards (catalog), get_member_card_profile (digest),
 #                   lookup_member_cards (filtered slice)
@@ -196,8 +196,13 @@ TOOLS = [
             "Get season-level River Race analytics. Use 'aspect' to select the view.\n\n"
             "Aspects:\n"
             "- summary: season overview with races, fame/member, top contributors, non-participants\n"
-            "- standings: War Champ leaderboard (total fame per member across all races)\n"
-            "- win_rates: members with highest war-battle win rates\n"
+            "- standings: members ranked by a war metric. Use the `metric` param: "
+            "'fame' (default — War Champ leaderboard), 'win_rate' (highest war-battle "
+            "win rates), or 'attendance' (active members with zero war participation). "
+            "Each member entry is enriched with war_player_type "
+            "(regular/occasional/rare/never). Use for end-of-week race recaps and "
+            "'who is contributing most/least'.\n"
+            "- win_rates: members with highest war-battle win rates (no enrichment)\n"
             "- boat_battles: aggregate boat-battle win/loss/draw record\n"
             "- score_trend: war score/rating direction over time\n"
             "- season_comparison: fame-per-member vs previous season\n"
@@ -218,33 +223,9 @@ TOOLS = [
                         "perfect_attendance", "no_participation",
                     ],
                 },
-                "season_id": {
-                    "type": "integer",
-                    "description": "Optional season ID. If omitted, uses the current/most recent season.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of members to return (for rankings). Default 10.",
-                    "default": 10,
-                },
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "get_war_member_standings",
-        "description": (
-            "Get war performance for all active members ranked by a metric. "
-            "Shows each member's war_player_type (regular/occasional/rare/never). "
-            "Use for end-of-week race recaps, 'who is contributing most/least', and "
-            "distinguishing active war participants from those who never play."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
                 "metric": {
                     "type": "string",
-                    "description": "Ranking metric. Default: fame.",
+                    "description": "Ranking metric for aspect='standings'. Default: fame.",
                     "default": "fame",
                     "enum": ["fame", "win_rate", "attendance"],
                 },
@@ -254,8 +235,11 @@ TOOLS = [
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of members to return. Default 30.",
-                    "default": 30,
+                    "description": (
+                        "Maximum number of members to return (for rankings). Default 10. "
+                        "For full-roster standings (aspect='standings') pass a higher value, e.g. 30."
+                    ),
+                    "default": 10,
                 },
             },
             "required": [],

@@ -448,7 +448,23 @@ def _execute_get_war_season(arguments):
     if aspect == "summary":
         return db.get_war_season_summary(season_id=season_id, top_n=limit)
     elif aspect == "standings":
-        return db.get_war_champ_standings(season_id=season_id)
+        metric = arguments.get("metric", "fame")
+        if metric == "fame":
+            raw = db.get_war_champ_standings(season_id=season_id)
+        elif metric == "win_rate":
+            raw = db.get_war_battle_win_rates(
+                season_id=season_id, limit=limit, min_battles=1,
+            )
+        elif metric == "attendance":
+            raw = db.get_members_without_war_participation(season_id=season_id)
+        else:
+            return {"error": f"Unknown metric: {metric}"}
+        if isinstance(raw, dict):
+            members = (
+                raw.get("members") or raw.get("standings") or raw.get("results") or []
+            )
+            _enrich_war_player_types(members)
+        return raw
     elif aspect == "win_rates":
         return db.get_war_battle_win_rates(
             season_id=season_id, limit=limit, min_battles=1,
@@ -469,30 +485,6 @@ def _execute_get_war_season(arguments):
         return db.get_members_without_war_participation(season_id=season_id)
     else:
         return {"error": f"Unknown aspect: {aspect}"}
-
-
-def _execute_get_war_member_standings(arguments):
-    """Execute the new get_war_member_standings tool."""
-    metric = arguments.get("metric", "fame")
-    season_id = arguments.get("season_id")
-    limit = arguments.get("limit", 30)
-
-    if metric == "fame":
-        raw = db.get_war_champ_standings(season_id=season_id)
-    elif metric == "win_rate":
-        raw = db.get_war_battle_win_rates(
-            season_id=season_id, limit=limit, min_battles=1,
-        )
-    elif metric == "attendance":
-        raw = db.get_members_without_war_participation(season_id=season_id)
-    else:
-        return {"error": f"Unknown metric: {metric}"}
-
-    if isinstance(raw, dict):
-        members = raw.get("members") or raw.get("standings") or raw.get("results") or []
-        _enrich_war_player_types(members)
-
-    return raw
 
 
 # ── Clan domain execution ─────────────────────────────────────────────────
@@ -1123,8 +1115,6 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_river_race(arguments)
         elif name == "get_war_season":
             result = _execute_get_war_season(arguments)
-        elif name == "get_war_member_standings":
-            result = _execute_get_war_member_standings(arguments)
         elif name == "get_clan_roster":
             result = _execute_get_clan_roster(arguments)
         elif name == "get_clan_health":
