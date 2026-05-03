@@ -932,10 +932,13 @@ def detect_war_completion(clan_tag=None, conn=None, *, refresh_log=True):
         finish_time = row.get("finish_time")
         created_date = row.get("created_date")
         if _is_stale_war_race_timestamp(finish_time) and _is_stale_war_race_timestamp(created_date):
-            log.warning(
-                "war_completion_skipped_stale_finish_time season=%s section=%s finish_time=%r created_date=%r",
-                row.get("season_id"), row.get("section_index"), finish_time, created_date,
-            )
+            skip_log_type = f"war_completion_skipped::{row.get('season_id')}:{row.get('section_index')}"
+            if not db.was_signal_sent_any_date(skip_log_type, conn=conn):
+                log.warning(
+                    "war_completion_skipped_stale_finish_time season=%s section=%s finish_time=%r created_date=%r",
+                    row.get("season_id"), row.get("section_index"), finish_time, created_date,
+                )
+                db.mark_signal_sent(skip_log_type, db.chicago_today(), conn=conn)
             continue
         signals.append({
             "type": "war_completed",
