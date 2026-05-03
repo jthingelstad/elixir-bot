@@ -40,6 +40,7 @@ Get full player profile.
 | `tournamentBattleCount` | integer | |
 | `warDayWins` | integer | |
 | `clanCardsCollected` | integer | |
+| `currentWinLoseStreak` | integer | Optional — signed streak counter (positive = consecutive wins, negative = consecutive losses, 0 = last battle was a draw or the streak just reset). Absent for some players (~14% of payloads observed). |
 | `clan` | PlayerClan | `{ tag, name, badgeId }` — **absent** if not in a clan |
 | `leagueStatistics` | object | See below — **absent** for some players (not all players have this) |
 | `currentDeck` | array | 8 cards — each is a PlayerItemLevel (see below) |
@@ -174,10 +175,10 @@ Observed: returns ~30-40 battles (most commonly 30).
 | `type` | Description | Game Modes |
 |--------|-------------|------------|
 | `PvP` | Ladder / trophy battles | `Ladder` |
-| `pathOfLegend` | Ranked Path of Legend | `Ranked1v1_NewArena2` |
+| `pathOfLegend` | Ranked Path of Legend | `Ranked1v1_NewArena`, `Ranked1v1_NewArena2` |
 | `trail` | Event/challenge battles | `Crazy_Arena`, `Challenge_AllCards_EventDeck_NoSet` |
 | `clanMate` | Friendly battle within clan (1v1) | `Friendly` |
-| `clanMate2v2` | 2v2 with clanmate | `TeamVsTeam_Touchdown_Draft` |
+| `clanMate2v2` | 2v2 with clanmate | `TeamVsTeam` |
 | `friendly` | Friendly battle (not clanmate) | `Crazy_Arena`, `7xElixir_Friendly` |
 | `riverRacePvP` | River race 1v1 battle | `CW_Battle_1v1` |
 | `riverRaceDuel` | River race duel (best-of-3) | `CW_Duel_1v1` |
@@ -230,13 +231,14 @@ Observed: returns ~30-40 battles (most commonly 30).
 | 72000268 | CW_Battle_1v1 |
 | 72000314 | Duel_1v1_Friendly |
 | 72000321 | Touchdown_ClanWar |
-| 72000450 | Ranked1v1_NewArena (pre-v2 PoL arena) |
+| 72000450 | Ranked1v1_NewArena |
 | 72000464 | Ranked1v1_NewArena2 |
 | 72000469 | DraftMode_Princess |
 | 72000474 | Challenge_AllCards_EventDeck_NoSet |
 | 72000486 | Touchdown_Event |
 | 72000500 | RampUp_Friendly_EventDeck_4Card (listed, not observed March–April 2026) |
 | 72000502 | Crazy_Arena |
+| 72000503 | FloodHounds_Draft |
 
 Note: `gameMode.name` was observed on 100% of battles across March–April 2026 sampling (all tournament battles included). Earlier notes suggesting `name` might be absent on some tournament modes no longer apply — treat `name` as reliably present.
 
@@ -340,6 +342,8 @@ Observed error bodies are usually `{ reason, message? }`. `message` may be absen
 - `currentDeck` (8 cards) vs `cards` (full collection) vs battle-log card arrays: all three carry `evolutionLevel` but with **different semantics** (ownership vs deployment vs played-as-in-battle — see the evolutionLevel section above). `cards[]` also includes `count` of copies currently in stash.
 - `role` values: `member`, `elder`, `coLeader`, `leader`
 - Path of Legend `rank` field is null when the player hasn't achieved a rank yet
+- **Path of Legend arena IDs:** both `72000450 Ranked1v1_NewArena` and `72000464 Ranked1v1_NewArena2` appear on live `pathOfLegend` battles. Treat both as current PoL arenas. Within-clan sampling is not enough to tell which arena is "active" globally — PoL is high-level play and only a handful of our members reach it, so apparent drops in one ID can simply mean an active PoL player moved up or down a tier.
+- **Sampling caveat:** every count and enum frequency in this doc is computed from one clan's members. Absence of a value does not mean Supercell removed it; presence at low counts does not mean it is rare in general. Use observed-IDs as a "definitely exists" signal and treat absence as "we have no data" rather than "doesn't happen."
 - Battlelog returns a bare array (like `/events`), not a paginated response — no `paging` object. Returns ~30-40 battles (most commonly 30).
 - `progress` is a map of side-mode season results (Merge Tactics / AutoChess) — keys are mode season identifiers. Empty string key `""` = legacy/default season.
 - `progress` keys should be treated as opaque identifiers, not a stable enum. Parse the nested values, not the key naming pattern.
