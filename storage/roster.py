@@ -1,21 +1,35 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 
-def _fold_for_search(value: str) -> str:
-    """Lowercase + strip diacritics so non-ASCII names match ASCII queries.
+_NON_FOLD_CHARS = re.compile(r"[^a-z0-9 ]+")
+_FOLD_WHITESPACE = re.compile(r"\s+")
 
-    "José" and "jose" both fold to "jose"; "Pokémon" and "pokemon" both to
-    "pokemon". Used on both the query and the stored fields inside
-    resolve_member so searches are Unicode-tolerant.
+
+def _fold_for_search(value: str) -> str:
+    """Aggressively normalize a name for fuzzy matching.
+
+    NFKD compatibility decomposition unwinds fullwidth Latin (Ｓ→S),
+    superscripts/subscripts (²⁸→28), ligatures (ﬁ→fi), and similar
+    compatibility characters. Combining marks are stripped (José→jose),
+    then anything that isn't a letter/digit/space is dropped so emoji,
+    hearts, lightning bolts, hyphens, and the variation-selector tail on
+    emoji all fold away. Whitespace is collapsed.
+
+    "²⁸"→"28", "Ｓｈａｆｉｔｈ Ｎｉｈａｌ♥️"→"shafith nihal", "L-Drxgo⚡"→"ldrxgo",
+    "José"→"jose". Used on both the query and the stored fields inside
+    resolve_member so searches are unicode-tolerant.
     """
-    nfd = unicodedata.normalize("NFD", value or "")
-    return "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn").lower()
+    nfkd = unicodedata.normalize("NFKD", value or "")
+    stripped = "".join(ch for ch in nfkd if unicodedata.category(ch) != "Mn").lower()
+    stripped = _NON_FOLD_CHARS.sub("", stripped)
+    return _FOLD_WHITESPACE.sub(" ", stripped).strip()
 
 
 def pick_best_match(matches: list[dict]) -> dict | None:
@@ -310,7 +324,10 @@ def resolve_member(query: str, status: Optional[str] = "active", limit: int = 5,
         return []
     query_lower = _fold_for_search(query)
     query_handle = query_lower.lstrip("@")
-    query_tag = _canon_tag(query) if query.startswith("#") else ""
+    # Always try the query as a player tag — _canon_tag uppercases and prepends
+    # '#'. Real player tags are 8-10 chars in a restricted Supercell alphabet,
+    # so non-tag queries won't false-match against any actual player_tag.
+    query_tag = _canon_tag(query)
 
     rows = conn.execute(
         "SELECT m.member_id, m.player_tag, m.current_name, m.status, cs.role, cs.exp_level, cs.trophies, cs.clan_rank, "
