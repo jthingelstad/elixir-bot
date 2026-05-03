@@ -519,6 +519,50 @@ def test_execute_tool_get_war_season_win_rates_uses_db():
         mock_db.get_war_battle_win_rates.assert_called_once_with(season_id=129, limit=5, min_battles=1)
 
 
+def test_execute_tool_get_war_season_standings_metric_fame():
+    with (
+        patch("elixir_agent.db") as mock_db,
+        patch("agent.tool_exec._enrich_war_player_types") as mock_enrich,
+    ):
+        mock_db.get_war_champ_standings.return_value = {"season_id": 129, "standings": []}
+        result = json.loads(elixir_agent._execute_tool(
+            "get_war_season", {"aspect": "standings", "season_id": 129}
+        ))
+        assert result == {"season_id": 129, "standings": []}
+        mock_db.get_war_champ_standings.assert_called_once_with(season_id=129)
+        mock_enrich.assert_called_once()
+
+
+def test_execute_tool_get_war_season_standings_metric_win_rate():
+    with (
+        patch("elixir_agent.db") as mock_db,
+        patch("agent.tool_exec._enrich_war_player_types") as mock_enrich,
+    ):
+        mock_db.get_war_battle_win_rates.return_value = {"season_id": 129, "members": []}
+        result = json.loads(elixir_agent._execute_tool(
+            "get_war_season",
+            {"aspect": "standings", "metric": "win_rate", "season_id": 129, "limit": 30},
+        ))
+        assert result == {"season_id": 129, "members": []}
+        mock_db.get_war_battle_win_rates.assert_called_once_with(season_id=129, limit=30, min_battles=1)
+        mock_enrich.assert_called_once()
+
+
+def test_execute_tool_get_war_season_standings_metric_attendance():
+    with (
+        patch("elixir_agent.db") as mock_db,
+        patch("agent.tool_exec._enrich_war_player_types") as mock_enrich,
+    ):
+        mock_db.get_members_without_war_participation.return_value = {"season_id": 129, "members": []}
+        result = json.loads(elixir_agent._execute_tool(
+            "get_war_season",
+            {"aspect": "standings", "metric": "attendance", "season_id": 129},
+        ))
+        assert result == {"season_id": 129, "members": []}
+        mock_db.get_members_without_war_participation.assert_called_once_with(season_id=129)
+        mock_enrich.assert_called_once()
+
+
 def test_execute_tool_get_clan_roster_role_changes_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_recent_role_changes.return_value = [{"tag": "#ABC123", "old_role": "member", "new_role": "elder"}]
