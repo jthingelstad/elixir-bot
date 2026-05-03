@@ -2,7 +2,6 @@ from db import (
     _canon_tag,
     _ensure_member,
     _json_or_none,
-    _store_raw_payload,
     _tag_key,
     _utcnow,
     managed_connection,
@@ -127,7 +126,6 @@ def _upsert_period_logs(conn, observed_at, war_data, season_id):
 @managed_connection
 def store_war_log(race_log, clan_tag, conn=None):
     clan_tag = _tag_key(clan_tag)
-    _store_raw_payload(conn, "clan_war_log", clan_tag, race_log)
     stored = 0
     for entry in (race_log or {}).get("items", []):
         season_id = entry.get("seasonId")

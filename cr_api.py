@@ -6,8 +6,35 @@ import time
 import requests
 from dotenv import load_dotenv
 
+import db
 import prompts
 from runtime import status as runtime_status
+
+# Map cr_api's per-call endpoint_name onto the label used in raw_api_payloads.
+# Preserves the existing "clan_war_log" rows that storage/war_ingest.py wrote
+# under that name before persistence centralized here.
+_RAW_PAYLOAD_ENDPOINT_LABELS = {
+    "riverracelog": "clan_war_log",
+}
+
+
+def _persist_raw_payload(endpoint_name: str, entity_key: str | None, payload) -> None:
+    """Store a successful CR API response in raw_api_payloads (hash-deduped).
+
+    Failures here must never break the caller — the raw payload is for audit and
+    debugging, not for the API call's correctness.
+    """
+    label = _RAW_PAYLOAD_ENDPOINT_LABELS.get(endpoint_name, endpoint_name)
+    key = entity_key or "global"
+    try:
+        conn = db.get_connection()
+        try:
+            db._store_raw_payload(conn, label, key, payload)
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("raw_payload_persist_failed endpoint=%s entity=%s", label, key)
 
 load_dotenv()
 
@@ -132,7 +159,9 @@ def _request_json(endpoint_path, *, endpoint_name, entity_key=None):
                     "api_retry_success endpoint=%s attempt=%d/%d duration_ms=%.1f",
                     endpoint_name, attempt + 1, _MAX_RETRIES + 1, _elapsed_ms(started),
                 )
-            return response.json()
+            payload = response.json()
+            _persist_raw_payload(endpoint_name, entity_key, payload)
+            return payload
         except (requests.ConnectionError, requests.Timeout) as exc:
             last_exc = exc
             status_code = None
