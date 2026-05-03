@@ -308,21 +308,19 @@ def _execute_get_member(arguments):
     return result
 
 
-def _execute_get_season_awards(arguments):
-    """Execute the get_season_awards tool — current standings for all four
-    season-end awards in signal-payload shape."""
-    season_id = arguments.get("season_id")
-    return db.get_season_awards_standings(season_id=season_id)
-
-
 def _execute_get_awards(arguments):
-    """Execute the get_awards tool — filtered list or per-member leaderboard
-    across the awards table."""
+    """Execute the get_awards tool — filtered list, per-member leaderboard,
+    or current-season standings across the awards table."""
     mode = (arguments.get("mode") or "list").strip().lower()
     award_type = arguments.get("award_type")
     season_id = arguments.get("season_id")
     rank = arguments.get("rank")
     limit = arguments.get("limit")
+
+    if mode == "current_standings":
+        return db.get_season_awards_standings(
+            season_id=int(season_id) if season_id is not None else None,
+        )
 
     if mode == "leaderboard":
         if not award_type:
@@ -1119,8 +1117,6 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_member(arguments)
         elif name == "get_member_war_detail":
             result = _execute_get_member_war_detail(arguments)
-        elif name == "get_season_awards":
-            result = _execute_get_season_awards(arguments)
         elif name == "get_awards":
             result = _execute_get_awards(arguments)
         elif name == "get_river_race":
