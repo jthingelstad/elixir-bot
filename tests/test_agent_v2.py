@@ -331,12 +331,15 @@ def test_execute_tool_get_clan_roster_max_cards_and_clan_health_hot_streaks():
         mock_db.get_members_on_hot_streak.assert_called_once_with(min_streak=5, scope="ladder_ranked_10")
 
 
-def test_execute_tool_get_clan_trends_uses_db():
+def test_execute_tool_get_clan_roster_trends_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.compare_clan_trend_windows.return_value = {"clan": {"clan_tag": "#J2RGCRVG"}, "window_days": 14}
         mock_db.build_clan_trend_summary_context.return_value = "=== CLAN TREND SUMMARY ==="
 
-        result = json.loads(elixir_agent._execute_tool("get_clan_trends", {"window_days": 14, "days": 21}))
+        result = json.loads(elixir_agent._execute_tool(
+            "get_clan_roster",
+            {"aspect": "trends", "window_days": 14, "days": 21},
+        ))
 
         assert result["clan"]["clan_tag"] == "#J2RGCRVG"
         assert result["window_days"] == 14
