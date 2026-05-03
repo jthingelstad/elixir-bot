@@ -657,6 +657,18 @@ def test_get_awards_tool_leaderboard_requires_award_type():
         _execute_get_awards({"mode": "leaderboard"})
 
 
+def test_get_awards_tool_current_standings_mode():
+    """current_standings mode returns the four-award payload from
+    db.get_season_awards_standings; non-existent season yields empty lists."""
+    import agent.app
+    from agent.tool_exec import _execute_get_awards
+
+    out = _execute_get_awards({"mode": "current_standings", "season_id": -1})
+    assert out["season_id"] == -1
+    for key in ("war_champ", "iron_kings", "donation_champs", "rookie_mvps"):
+        assert out[key] == []
+
+
 # -- get_season_awards_standings unified helper ------------------------------
 
 _AWARDS_PAYLOAD_KEYS = ("war_champ", "iron_kings", "donation_champs", "rookie_mvps")

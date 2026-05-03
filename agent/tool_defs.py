@@ -737,35 +737,6 @@ TOOLS = [
         },
     },
     {
-        "name": "get_season_awards",
-        "description": (
-            "Get the current standings for the four season-end awards in one "
-            "call: War Champ (top fame), Iron King (perfect war attendance — "
-            "4/4 decks every required battle day, post-victory days excluded), "
-            "Donation Champ (top season donations), Rookie MVP (top fame among "
-            "members who joined this season).\n\n"
-            "Mid-season this is who would win if the season ended now; after "
-            "season-close it's the final podium. Use for 'who's leading war "
-            "this season?', 'is anyone on track for Iron King?', 'who's the "
-            "rookie to watch?', and similar questions — read the standings "
-            "rather than re-deriving from raw fame or donation rows.\n\n"
-            "Returns: {season_id, war_champ, iron_kings, donation_champs, "
-            "rookie_mvps}. Each entry has rank, tag, name, metric_value, "
-            "metric_unit, metadata. For historical award grants (past seasons, "
-            "leaderboards, single-player trophy cases) use get_awards instead."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "season_id": {
-                    "type": "integer",
-                    "description": "Optional season ID. If omitted, uses the current season.",
-                },
-            },
-            "required": [],
-        },
-    },
-    {
         "name": "get_awards",
         "description": (
             "Query the clan awards record — the authoritative history of every "
@@ -776,7 +747,18 @@ TOOLS = [
             "of member_tag, award_type, season_id, rank. Use for 'who won S130 War "
             "Champ?', 'list all iron kings this year', 'show S131 awards'.\n"
             "- leaderboard: aggregate count per member for a given award_type + "
-            "rank. Use for 'who has won X the most' questions. Requires award_type.\n\n"
+            "rank. Use for 'who has won X the most' questions. Requires award_type.\n"
+            "- current_standings: live standings for the four season-end awards in "
+            "one call — War Champ (top fame), Iron King (perfect war attendance — "
+            "4/4 decks every required battle day, post-victory days excluded), "
+            "Donation Champ (top season donations), Rookie MVP (top fame among "
+            "members who joined this season). Mid-season this is who would win if "
+            "the season ended now; after season-close it's the final podium. Use "
+            "for 'who's leading war this season?', 'is anyone on track for Iron "
+            "King?', 'who's the rookie to watch?'. Returns {season_id, war_champ, "
+            "iron_kings, donation_champs, rookie_mvps}; each entry has rank, tag, "
+            "name, metric_value, metric_unit, metadata. Honors season_id; ignores "
+            "member_tag / award_type / rank / limit filters.\n\n"
             "For a single player's full trophy case prefer get_member with "
             "include=['awards']."
         ),
@@ -785,7 +767,7 @@ TOOLS = [
             "properties": {
                 "mode": {
                     "type": "string",
-                    "enum": ["list", "leaderboard"],
+                    "enum": ["list", "leaderboard", "current_standings"],
                     "default": "list",
                     "description": "Query mode. Default: list.",
                 },
