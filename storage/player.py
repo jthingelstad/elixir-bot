@@ -18,7 +18,6 @@ from db import (
     _hash_payload,
     _json_or_none,
     _member_reference_fields,
-    _store_raw_payload,
     _tag_key,
     _upsert_member_metadata,
     _utcnow,
@@ -236,7 +235,6 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
         "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, support_cards_json, sample_size) VALUES (?, ?, 'player_profile', 'overall', ?, ?, ?, 1)",
         (member_id, fetched_at, deck_hash, _json_or_none(current_deck) or "[]", _json_or_none(current_deck_support_cards) or "[]"),
     )
-    _store_raw_payload(conn, "player", _tag_key(tag), player_data)
     _upsert_member_metadata(conn, member_id, **_years_played_metadata_fields(player_data, fetched_at=fetched_at))
     conn.commit()
     if previous is None:
@@ -1130,7 +1128,6 @@ def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Opt
     # mode-specific streak / push signals and let the awareness agent post
     # Trophy Road vs Path of Legends moments with the right voice.
     previous_battle_state = _capture_previous_battle_state(member_id, conn=conn)
-    _store_raw_payload(conn, "player_battlelog", _tag_key(tag), battle_log)
     latest_name = None
     affected_dates = set()
     for battle in battle_log or []:

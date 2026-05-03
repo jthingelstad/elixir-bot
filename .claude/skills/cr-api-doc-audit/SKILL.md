@@ -13,15 +13,21 @@ Pairs with `log-triage` (runtime health) and `awareness-report` (agent quality).
 
 Source of truth for live behavior: `/Users/jamie/Projects/elixir-bot/elixir.db` → table `raw_api_payloads`.
 
-Only three endpoints are persisted as raw payloads (deduped by content hash):
+Every successful Supercell API call is persisted as a raw payload (hash-deduped) by the hook in `cr_api._persist_raw_payload`. Endpoint labels in `raw_api_payloads`:
 
-| endpoint          | doc page       | call site                      |
-|-------------------|----------------|--------------------------------|
-| `player`          | `players.md`   | `storage/player.py` snapshot    |
-| `player_battlelog`| `players.md`   | `storage/player.py` snapshot    |
-| `clan_war_log`    | `clans.md`     | `storage/war_ingest.py` ingest  |
+| endpoint label     | doc page     | source                                  |
+|--------------------|--------------|-----------------------------------------|
+| `player`           | `players.md` | `cr_api.get_player`                     |
+| `player_battlelog` | `players.md` | `cr_api.get_player_battle_log`          |
+| `player_chests`    | `players.md` | `cr_api.get_player_chests`              |
+| `clan`             | `clans.md`   | `cr_api.get_clan` (our clan)            |
+| `clan_by_tag`      | `clans.md`   | `cr_api.get_clan_by_tag` (any clan)     |
+| `currentriverrace` | `clans.md`   | `cr_api.get_current_war`                |
+| `clan_war_log`     | `clans.md`   | `cr_api.get_river_race_log` (`/riverracelog`; preserved label from before centralization) |
+| `tournament`       | `tournaments.md` | `cr_api.get_tournament`              |
+| `cards`            | `cards.md`   | `cr_api.get_cards` (entity_key `global`) |
 
-Other endpoints (`clan`, `currentriverrace`, `riverracelog`, `tournament`, `player_chests`, `cards`) are fetched but not persisted — if the user asks to audit them, say so and fall back to either (a) live `cr_api.py` calls in the REPL, or (b) the structured tables that ingest parts of those responses (e.g. `war_races` for riverracelog). Do not guess a schema for endpoints we do not store.
+Coverage caveat: a payload only lands in the table when the corresponding `cr_api.get_*` function is actually called. `get_tournament` and `get_clan_by_tag`, for example, only fire when an agent or user references a specific tag — there can be long stretches with zero rows.
 
 Default window: the full retained history in `raw_api_payloads`. Payload retention is 180 days (see `storage/metadata.py:RAW_PAYLOAD_RETENTION_DAYS`). The user can narrow: "just the last week", "only since 2026-04-01", "one payload per player".
 
@@ -201,9 +207,9 @@ Outputs a list of interesting paths with coverage and observed types. Diff this 
 
 - <e.g., "`leagueStatistics.bestSeason.rank` appears ~20% of the time — doc already says 'optional `rank`' so no change, just confirming">
 
-### Endpoints out of scope this run
+### Endpoints with no data this run
 
-- <e.g., "clan / currentriverrace / riverracelog not persisted; would need live `cr_api.py` calls to audit">
+- <e.g., "tournament: 0 payloads — only fetched on demand for specific tags">
 ```
 
 Keep the report tight — under ~40 lines when there's little drift. If nothing needs patching, say so in one sentence and stop.
