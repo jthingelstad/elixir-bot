@@ -419,6 +419,8 @@ def _parse_optional_int(value: Optional[str], *, field_name: str, minimum: int, 
 
 
 def _member_reference_fields(conn: sqlite3.Connection, member_id: int, item: dict) -> dict:
+    from storage._formatting import callable_name
+
     tag = item.get("player_tag") or item.get("tag")
     if not tag:
         row = conn.execute(
@@ -429,6 +431,13 @@ def _member_reference_fields(conn: sqlite3.Connection, member_id: int, item: dic
     if not tag:
         return item
     item["member_ref"] = format_member_reference(tag, conn=conn)
+    # Substitute readable forms for every name field surfaced to the LLM so
+    # ²⁸/Ｓｈａｆｉｔｈ-style names get narrated as "28" / "Shafith Nihal" instead
+    # of the literal unicode. The DB columns stay literal — only the dict
+    # passed to callers (and the LLM) is transformed.
+    for name_field in ("current_name", "name", "player_name", "member_name"):
+        if item.get(name_field):
+            item[name_field] = callable_name(item[name_field])
     item.update(_member_ranks_for(conn, member_id))
     return item
 
