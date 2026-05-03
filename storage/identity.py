@@ -245,11 +245,22 @@ def get_linked_member_for_discord_user(discord_user_id: str | int, conn: Optiona
 
 @managed_connection
 def format_member_reference(member_or_tag: str | dict, conn: Optional[sqlite3.Connection] = None) -> str:
-    """Return a plain display name for a member tag or identity dict."""
+    """Return a plain display name for a member tag or identity dict.
+
+    The returned form runs through ``callable_name`` so emoji, hearts,
+    fullwidth Latin, and superscripts collapse to the readable equivalent
+    a Discord user would actually type — "²⁸" becomes "28",
+    "Ｓｈａｆｉｔｈ Ｎｉｈａｌ♥️" becomes "Shafith Nihal", "L-Drxgo⚡" becomes
+    "L-Drxgo". Falls back to the literal name when the input is entirely
+    non-Latin / non-decomposable.
+    """
+    from storage._formatting import callable_name
+
     member = member_or_tag if isinstance(member_or_tag, dict) else get_member_identity(member_or_tag, conn=conn)
     if not member:
-        return str(member_or_tag)
-    return member.get("member_name") or member.get("current_name") or member.get("player_tag")
+        return callable_name(str(member_or_tag))
+    raw = member.get("member_name") or member.get("current_name") or member.get("player_tag")
+    return callable_name(raw)
 
 
 @managed_connection
