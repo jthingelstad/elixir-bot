@@ -660,7 +660,7 @@ def test_resolve_member_matches_at_prefixed_discord_display_name():
         db.snapshot_members(
             [
                 {"tag": "#ABC123", "name": "King Levy", "role": "leader"},
-                {"tag": "#DEF456", "name": "Vijay", "role": "member"},
+                {"tag": "#DEF456", "name": "VijayCR", "role": "member"},
             ],
             conn=conn,
         )
