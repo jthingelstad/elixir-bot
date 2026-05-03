@@ -502,11 +502,13 @@ def _execute_get_war_season(arguments):
         if metric == "fame":
             members = db.get_war_champ_standings(season_id=season_id)
             _enrich_war_player_types(members)
+            rookie_mvps = db.get_rookie_mvp_candidates(season_id=season_id, limit=3)
             return {
                 "season_id": season_id,
                 "metric": "fame",
                 "freshness": _war_standings_freshness(season_id),
                 "members": members,
+                "rookie_mvps": rookie_mvps,
             }
         elif metric == "win_rate":
             raw = db.get_war_battle_win_rates(
