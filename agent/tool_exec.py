@@ -318,9 +318,12 @@ def _execute_get_awards(arguments):
     limit = arguments.get("limit")
 
     if mode == "current_standings":
-        return db.get_season_awards_standings(
-            season_id=int(season_id) if season_id is not None else None,
-        )
+        target_season = int(season_id) if season_id is not None else None
+        standings = db.get_season_awards_standings(season_id=target_season)
+        if isinstance(standings, dict):
+            standings = dict(standings)
+            standings["freshness"] = _war_standings_freshness(target_season)
+        return standings
 
     if mode == "leaderboard":
         if not award_type:
@@ -439,6 +442,53 @@ def _execute_get_river_race(arguments):
     return {"error": f"Unknown aspect: {aspect}"}
 
 
+def _war_standings_freshness(season_id=None):
+    """Snapshot timestamp and section-finalization summary for live standings.
+
+    Returns a dict the agent can quote to players (`as_of`,
+    `current_week_included`, `current_week_war_day_key`, `finalized_races`).
+    Falls back gracefully when no live war is active.
+    """
+    state = db.get_current_war_day_state() or {}
+    state_season = state.get("season_id")
+    target_season = season_id if season_id is not None else state_season
+    war_day_key = state.get("war_day_key")
+    section_index = state.get("section_index")
+
+    finalized_races = 0
+    current_section_finalized = False
+    if target_season is not None:
+        finalized_races = db.count_war_races_for_season(int(target_season)) or 0
+        if section_index is not None:
+            current_section_finalized = db.is_war_section_finalized(
+                int(target_season), int(section_index)
+            )
+
+    current_week_included = bool(
+        war_day_key
+        and section_index is not None
+        and state_season == target_season
+        and not current_section_finalized
+    )
+    as_of = None
+    if current_week_included and war_day_key:
+        as_of = db.get_latest_war_participant_snapshot_observed_at(war_day_key)
+    if not as_of:
+        as_of = db.get_latest_war_race_finish_time(int(target_season)) if target_season is not None else None
+
+    return {
+        "as_of": as_of,
+        "current_week_included": current_week_included,
+        "current_week_war_day_key": war_day_key if current_week_included else None,
+        "current_week_section_index": section_index if current_week_included else None,
+        "finalized_races": finalized_races,
+        "narration_hint": (
+            "Quote `as_of` when answering 'right now' questions so players see how fresh the read is. "
+            "If `current_week_included` is true, today's battles are included; if false, the response covers only finalized weeks."
+        ),
+    }
+
+
 def _execute_get_war_season(arguments):
     """Execute the consolidated get_war_season tool."""
     aspect = arguments.get("aspect", "summary")
@@ -450,7 +500,14 @@ def _execute_get_war_season(arguments):
     elif aspect == "standings":
         metric = arguments.get("metric", "fame")
         if metric == "fame":
-            raw = db.get_war_champ_standings(season_id=season_id)
+            members = db.get_war_champ_standings(season_id=season_id)
+            _enrich_war_player_types(members)
+            return {
+                "season_id": season_id,
+                "metric": "fame",
+                "freshness": _war_standings_freshness(season_id),
+                "members": members,
+            }
         elif metric == "win_rate":
             raw = db.get_war_battle_win_rates(
                 season_id=season_id, limit=limit, min_battles=1,

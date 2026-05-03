@@ -526,12 +526,26 @@ def test_execute_tool_get_war_season_standings_metric_fame():
     with (
         patch("elixir_agent.db") as mock_db,
         patch("agent.tool_exec._enrich_war_player_types") as mock_enrich,
+        patch("agent.tool_exec._war_standings_freshness") as mock_fresh,
     ):
-        mock_db.get_war_champ_standings.return_value = {"season_id": 129, "standings": []}
+        mock_db.get_war_champ_standings.return_value = [
+            {"name": "Player", "total_fame": 5000}
+        ]
+        mock_fresh.return_value = {
+            "as_of": "2026-05-03T10:39:00",
+            "current_week_included": True,
+            "current_week_war_day_key": "s00131-w03-p027",
+            "current_week_section_index": 3,
+            "finalized_races": 3,
+            "narration_hint": "...",
+        }
         result = json.loads(elixir_agent._execute_tool(
             "get_war_season", {"aspect": "standings", "season_id": 129}
         ))
-        assert result == {"season_id": 129, "standings": []}
+        assert result["season_id"] == 129
+        assert result["metric"] == "fame"
+        assert result["freshness"]["current_week_included"] is True
+        assert result["members"] == [{"name": "Player", "total_fame": 5000}]
         mock_db.get_war_champ_standings.assert_called_once_with(season_id=129)
         mock_enrich.assert_called_once()
 

@@ -1129,6 +1129,43 @@ def get_current_season_id(conn: Optional[sqlite3.Connection] = None) -> Optional
     current = get_current_war_status(conn=conn)
     return current.get("season_id") if current else None
 
+
+@managed_connection
+def count_war_races_for_season(season_id: int, conn: Optional[sqlite3.Connection] = None) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM war_races WHERE season_id = ?", (season_id,)
+    ).fetchone()
+    return int(row["cnt"]) if row and row["cnt"] is not None else 0
+
+
+@managed_connection
+def is_war_section_finalized(
+    season_id: int, section_index: int, conn: Optional[sqlite3.Connection] = None
+) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM war_races WHERE season_id = ? AND section_index = ? LIMIT 1",
+        (season_id, section_index),
+    ).fetchone()
+    return row is not None
+
+
+@managed_connection
+def get_latest_war_race_finish_time(
+    season_id: int, conn: Optional[sqlite3.Connection] = None
+) -> Optional[str]:
+    """Returns the most recent finalized race's finish_time (or created_date as
+    fallback) for the season — used as a freshness anchor when no live war
+    snapshot is available."""
+    row = conn.execute(
+        "SELECT finish_time, created_date FROM war_races "
+        "WHERE season_id = ? ORDER BY section_index DESC LIMIT 1",
+        (season_id,),
+    ).fetchone()
+    if not row:
+        return None
+    ft = _usable_live_finish_time(row["finish_time"])
+    return ft or row["created_date"]
+
 def _season_bounds(conn: sqlite3.Connection, season_id: int) -> tuple[Optional[str], Optional[str]]:
     row = conn.execute(
         "SELECT MIN(created_date) AS start_date, MAX(created_date) AS end_date "

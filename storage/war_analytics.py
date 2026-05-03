@@ -653,6 +653,65 @@ def get_trending_war_contributors(season_id: Optional[str] = None, recent_races:
         "members": members[:limit],
     }
 
+def _get_in_progress_war_fame(
+    season_id: int, conn: sqlite3.Connection
+) -> dict[str, dict]:
+    """Per-player fame for the current in-progress war week, keyed by canonical
+    player_tag. Returns ``{}`` when there is no live war or when the current
+    section is already finalized in ``war_races`` (so the caller never
+    double-counts).
+
+    ``war_participant_snapshots.fame`` is cumulative race-week fame, so the
+    latest snapshot per player IS that player's contribution to the
+    in-progress week.
+    """
+    from storage.war_status import get_current_war_day_state
+
+    state = get_current_war_day_state(conn=conn)
+    if not state:
+        return {}
+    if state.get("season_id") != season_id:
+        return {}
+    section_index = state.get("section_index")
+    if section_index is None:
+        return {}
+    finalized = conn.execute(
+        "SELECT 1 FROM war_races WHERE season_id = ? AND section_index = ? LIMIT 1",
+        (season_id, section_index),
+    ).fetchone()
+    if finalized:
+        return {}
+    rows = conn.execute(
+        """
+        SELECT s.player_tag, s.player_name, s.member_id,
+               s.fame AS fame, s.observed_at
+        FROM war_participant_snapshots s
+        JOIN (
+            SELECT player_tag, MAX(observed_at) AS observed_at
+            FROM war_participant_snapshots
+            WHERE season_id = ? AND section_index = ?
+            GROUP BY player_tag
+        ) latest USING(player_tag, observed_at)
+        WHERE s.season_id = ? AND s.section_index = ?
+        """,
+        (season_id, section_index, season_id, section_index),
+    ).fetchall()
+    out: dict[str, dict] = {}
+    for row in rows:
+        tag = _canon_tag(row["player_tag"])
+        if not tag:
+            continue
+        out[tag] = {
+            "player_tag": tag,
+            "player_name": row["player_name"],
+            "member_id": row["member_id"],
+            "fame": row["fame"] or 0,
+            "observed_at": row["observed_at"],
+            "section_index": section_index,
+        }
+    return out
+
+
 @managed_connection
 def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     if season_id is None:
@@ -668,12 +727,55 @@ def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqli
         "GROUP BY wp.player_tag ORDER BY total_fame DESC, races_participated DESC",
         (season_id,),
     ).fetchall()
-    result = []
+    by_tag: dict[str, dict] = {}
     for row in rows:
         item = dict(row)
+        item["tag"] = _canon_tag(item["tag"])
+        item["finalized_fame"] = item["total_fame"] or 0
+        item["in_progress_fame"] = 0
+        by_tag[item["tag"]] = item
+
+    in_progress = _get_in_progress_war_fame(int(season_id), conn)
+    for tag, contrib in in_progress.items():
+        fame = contrib.get("fame") or 0
+        if fame <= 0:
+            continue
+        existing = by_tag.get(tag)
+        if existing is None:
+            m = conn.execute(
+                "SELECT current_name FROM members WHERE player_tag = ? AND status = 'active'",
+                (tag,),
+            ).fetchone()
+            if not m:
+                continue
+            by_tag[tag] = {
+                "tag": tag,
+                "name": m["current_name"] or contrib.get("player_name"),
+                "total_fame": fame,
+                "races_participated": 1,
+                "avg_fame": float(fame),
+                "finalized_fame": 0,
+                "in_progress_fame": fame,
+            }
+        else:
+            existing["in_progress_fame"] = fame
+            existing["total_fame"] = (existing.get("finalized_fame") or 0) + fame
+            existing["races_participated"] = (existing.get("races_participated") or 0) + 1
+            races = existing["races_participated"]
+            if races:
+                existing["avg_fame"] = round(existing["total_fame"] / races, 0)
+
+    ordered = sorted(
+        by_tag.values(),
+        key=lambda r: (-(r.get("total_fame") or 0), -(r.get("races_participated") or 0)),
+    )
+    result = []
+    for item in ordered:
+        if (item.get("total_fame") or 0) <= 0:
+            continue
         member = conn.execute(
             "SELECT member_id FROM members WHERE player_tag = ?",
-            (_canon_tag(item["tag"]),),
+            (item["tag"],),
         ).fetchone()
         if member:
             item = _member_reference_fields(conn, member["member_id"], item)
