@@ -28,9 +28,9 @@ from db import (
     managed_connection,
 )
 
-CARD_UPGRADE_SIGNAL_MIN_LEVEL = 15
+CARD_UPGRADE_SIGNAL_MIN_LEVEL = 16
 MASTERY_BADGE_SIGNAL_MIN_LEVEL = 5
-CARD_UNLOCK_SIGNAL_RARITIES = {"epic", "legendary", "champion"}
+CARD_UNLOCK_SIGNAL_RARITIES = {"legendary", "champion"}
 GAMES_PER_DAY_WINDOW_DAYS = 14
 BADGE_NAME_OVERRIDES = {
     "Classic12Wins": "Classic Challenge 12 Wins",

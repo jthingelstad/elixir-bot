@@ -22,7 +22,6 @@ refactor).
 | `weekly_donation_leader` | Top 3 donors of the prior CR week, emitted Mondays off frozen Sunday `member_daily_metrics.donations_week`. | `signal_log_type` weekly: `weekly_donation_leader:<isoweek>`. |
 | `inactive_members` | Members past `INACTIVITY_DAYS` threshold; Fridays only, once per week. | `signal_log` keyed on `inactive_members:<date>`. |
 | `member_active_again` | Previous snapshot stale (≥ threshold), current fresh, `last_seen_api` advanced. | `signal_log_type` keyed on `member_active_again:<tag>:<observed_at>`. |
-| `clan_rank_top_spot` | Current snapshot has `clan_rank = 1`, previous had `> 1` or NULL. | `signal_log_type` keyed on `clan_rank_top_spot:<tag>:<observed_at>`. |
 | `recent_form_slump` | Form crosses top-tier (`hot`/`strong`) → bottom-tier (`slumping`/`cold`). Per-(member,scope) cursor remembers last label. | `signal_log_type` weekly: `recent_form_slump:<tag>:<scope>:<isoweek>`. |
 | `deck_archetype_change` | Current deck differs by 4+ cards from the deck fetched 24+ hours ago (mode_scope='overall'). Natural de-flicker via the 24h window. | `signal_log_type` daily: `deck_archetype_change:<tag>:<YYYY-MM-DD>`. |
 | `clan_birthday` | Month-day of `clan_founded` matches today. | `cake_day_announcements` unique on (date, type, tag). |
@@ -157,8 +156,6 @@ that remain unsurfaced:
 - **`member_recent_form`** — four scopes × ~30 members. Only upward transitions
   fed `battle_hot_streak`; downward was dark. **Closed by #27
   (`recent_form_slump`).**
-- **`clan_rank` on every snapshot** — tracked but never signaled. **Closed by
-  #29 (`clan_rank_top_spot`).**
 - **`member_state_snapshots.last_seen_api` returning to fresh** — no "welcome
   back" counterpart to the inactivity detector. **Closed by #26
   (`member_active_again`).**
@@ -206,7 +203,7 @@ Three conventions are used across detectors:
    calendar-bounded events (daily/weekly). Example: `donation_leaders:<date>`.
 2. **`signal_log_type`** on a signal dict — the downstream publisher writes the
    type to `signal_log` automatically when the post lands. Used for
-   per-observation dedup like `clan_rank_top_spot:<tag>:<observed_at>`.
+   per-observation dedup like `member_active_again:<tag>:<observed_at>`.
 3. **`signal_detector_cursors`** — keyed `(detector_key, scope_key)` with free
    text / int payloads. Used when the detector needs remembered state that
    isn't a table-level field. Example: `form_slump` remembers last label per

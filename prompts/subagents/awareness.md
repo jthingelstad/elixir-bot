@@ -78,7 +78,6 @@ Rules:
 
 **Concrete triggers.** These signals almost always merit a write, not just (or instead of) a post:
 
-- `clan_rank_top_spot` → `save_clan_memory(title="{name} reached clan rank #1 on {date}")`. A durable progression moment the clan should remember.
 - `member_active_again` after a long silence → if they were on a watch, this is the "clear the watch" moment. A `record_leadership_followup(topic="{name} back after N days", recommendation="welcome back, mark watch resolved")` is often right.
 - Trend I notice across multiple signals in this tick → `save_clan_memory` the pattern so next tick and next week's synthesis can connect it.
 
