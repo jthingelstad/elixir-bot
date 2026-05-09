@@ -17,6 +17,12 @@ from runtime import status as runtime_status
 
 log = logging.getLogger("elixir_agent")
 
+# Workflows whose call cadence (1+ hours apart) exceeds the 5-min ephemeral
+# cache TTL, so caching the system+tools prefix pays the 1.25x write premium
+# but rarely yields a read. Confirmed in May 2026 sampling: awareness had
+# 89% write-only calls, 10% read-only, 1% mixed — net cost penalty.
+WORKFLOWS_WITHOUT_CACHE = {"awareness"}
+
 
 def _get_build_hash():
     try:
@@ -278,15 +284,23 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
         "timeout": timeout,
     }
 
-    # System prompt with prompt caching
-    if system_text:
-        kwargs["system"] = [{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}]
+    cache_enabled = workflow not in WORKFLOWS_WITHOUT_CACHE
 
-    # Tools with prompt caching on the last tool definition
+    # System prompt with optional prompt caching
+    if system_text:
+        system_block = {"type": "text", "text": system_text}
+        if cache_enabled:
+            system_block["cache_control"] = {"type": "ephemeral"}
+        kwargs["system"] = [system_block]
+
+    # Tools with optional prompt caching on the last tool definition
     if tools:
-        cached_tools = [dict(t) for t in tools]
-        cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
-        kwargs["tools"] = cached_tools
+        if cache_enabled:
+            cached_tools = [dict(t) for t in tools]
+            cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+            kwargs["tools"] = cached_tools
+        else:
+            kwargs["tools"] = list(tools)
     if tool_choice:
         translated_tc = _translate_tool_choice(tool_choice)
         if translated_tc:
