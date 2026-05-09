@@ -11,29 +11,6 @@ log = logging.getLogger("elixir_heartbeat")
 BATTLE_DAY_SECONDS = 24 * 60 * 60
 _RACE_FAME_TARGET = 10_000
 _COLOSSEUM_FAME_TARGET = 5_000
-_BATTLE_DAY_CHECKPOINTS = (
-    {
-        "hour": 21,
-        "signal_type": "war_battle_day_final_hours",
-        "signal_key": "war_battle_day_checkpoint",
-        "label": "final push",
-        "hours_remaining": 3,
-    },
-    {
-        "hour": 18,
-        "signal_type": "war_battle_day_live_update",
-        "signal_key": "war_battle_day_checkpoint",
-        "label": "late push",
-        "hours_remaining": 6,
-    },
-    {
-        "hour": 12,
-        "signal_type": "war_battle_day_live_update",
-        "signal_key": "war_battle_day_checkpoint",
-        "label": "midday check-in",
-        "hours_remaining": 12,
-    },
-)
 
 WAR_LIVE_STATE_CURSOR_KEY = "war_live_state_pipeline"
 WAR_PARTICIPANT_CURSOR_KEY = "war_participant_pipeline"

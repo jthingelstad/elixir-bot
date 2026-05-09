@@ -1469,13 +1469,7 @@ def list_clan_daily_battle_rollups(days: int = 30, clan_tag: Optional[str] = Non
 
 @managed_connection
 def _recompute_member_recent_form(member_id: int, conn=None):
-    scopes = {
-        "overall_10": "1=1",
-        "competitive_10": "is_competitive = 1",
-        "ladder_ranked_10": "(is_ladder = 1 OR is_ranked = 1)",
-        "war_10": "is_war = 1",
-    }
-    for scope, predicate in scopes.items():
+    for scope, predicate in _LOSSES_SCOPE_PREDICATES.items():
         rows = conn.execute(
             f"SELECT outcome, crowns_for, crowns_against, trophy_change FROM member_battle_facts WHERE member_id = ? AND {predicate} ORDER BY battle_time DESC LIMIT 10",
             (member_id,),

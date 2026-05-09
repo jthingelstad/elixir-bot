@@ -133,7 +133,7 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
             ensure_status = "active"
         member_id = _ensure_member(conn, tag, name=name, status=ensure_status)
         previous = conn.execute(
-            "SELECT role, exp_level, trophies, best_trophies, clan_rank, previous_clan_rank, donations_week, donations_received_week, arena_id, arena_name, arena_raw_name, last_seen_api "
+            "SELECT role, exp_level, trophies, best_trophies, clan_rank, donations_week, donations_received_week, arena_id, arena_name, arena_raw_name, last_seen_api "
             "FROM member_current_state WHERE member_id = ?",
             (member_id,),
         ).fetchone()
@@ -149,7 +149,6 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
             "trophies": member.get("trophies", 0),
             "best_trophies": member.get("bestTrophies", member.get("best_trophies")),
             "clan_rank": member.get("clanRank", member.get("clan_rank")),
-            "previous_clan_rank": member.get("previousClanRank"),
             "donations_week": member.get("donations", 0),
             "donations_received_week": member.get("donationsReceived", member.get("donations_received", 0)),
             "arena_id": arena_id,
@@ -166,7 +165,6 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
             or previous["trophies"] != state["trophies"]
             or previous["best_trophies"] != state["best_trophies"]
             or previous["clan_rank"] != state["clan_rank"]
-            or previous["previous_clan_rank"] != state["previous_clan_rank"]
             or previous["donations_week"] != state["donations_week"]
             or previous["donations_received_week"] != state["donations_received_week"]
             or previous["arena_id"] != state["arena_id"]
@@ -175,14 +173,14 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
             or previous["last_seen_api"] != state["last_seen_api"]
         )
         conn.execute(
-            "INSERT INTO member_current_state (member_id, observed_at, role, exp_level, trophies, best_trophies, clan_rank, previous_clan_rank, donations_week, donations_received_week, arena_id, arena_name, arena_raw_name, last_seen_api, source, raw_json) "
-            "VALUES (:member_id, :observed_at, :role, :exp_level, :trophies, :best_trophies, :clan_rank, :previous_clan_rank, :donations_week, :donations_received_week, :arena_id, :arena_name, :arena_raw_name, :last_seen_api, :source, :raw_json) "
-            "ON CONFLICT(member_id) DO UPDATE SET observed_at = excluded.observed_at, role = excluded.role, exp_level = excluded.exp_level, trophies = excluded.trophies, best_trophies = excluded.best_trophies, clan_rank = excluded.clan_rank, previous_clan_rank = excluded.previous_clan_rank, donations_week = excluded.donations_week, donations_received_week = excluded.donations_received_week, arena_id = excluded.arena_id, arena_name = excluded.arena_name, arena_raw_name = excluded.arena_raw_name, last_seen_api = excluded.last_seen_api, source = excluded.source, raw_json = excluded.raw_json",
+            "INSERT INTO member_current_state (member_id, observed_at, role, exp_level, trophies, best_trophies, clan_rank, donations_week, donations_received_week, arena_id, arena_name, arena_raw_name, last_seen_api, source, raw_json) "
+            "VALUES (:member_id, :observed_at, :role, :exp_level, :trophies, :best_trophies, :clan_rank, :donations_week, :donations_received_week, :arena_id, :arena_name, :arena_raw_name, :last_seen_api, :source, :raw_json) "
+            "ON CONFLICT(member_id) DO UPDATE SET observed_at = excluded.observed_at, role = excluded.role, exp_level = excluded.exp_level, trophies = excluded.trophies, best_trophies = excluded.best_trophies, clan_rank = excluded.clan_rank, donations_week = excluded.donations_week, donations_received_week = excluded.donations_received_week, arena_id = excluded.arena_id, arena_name = excluded.arena_name, arena_raw_name = excluded.arena_raw_name, last_seen_api = excluded.last_seen_api, source = excluded.source, raw_json = excluded.raw_json",
             {"member_id": member_id, **state},
         )
         if state_changed:
             conn.execute(
-                "INSERT INTO member_state_snapshots (member_id, observed_at, name, role, exp_level, trophies, best_trophies, clan_rank, previous_clan_rank, donations_week, donations_received_week, arena_id, arena_name, arena_raw_name, last_seen_api, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO member_state_snapshots (member_id, observed_at, name, role, exp_level, trophies, best_trophies, clan_rank, donations_week, donations_received_week, arena_id, arena_name, arena_raw_name, last_seen_api, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     member_id,
                     observed_at,
@@ -192,7 +190,6 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
                     state["trophies"],
                     state["best_trophies"],
                     state["clan_rank"],
-                    state["previous_clan_rank"],
                     state["donations_week"],
                     state["donations_received_week"],
                     state["arena_id"],
@@ -451,7 +448,7 @@ def get_member_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> O
     row = conn.execute(
         "SELECT m.member_id, m.player_tag, m.current_name AS member_name, m.status, "
         "cs.observed_at, cs.role, cs.exp_level, cs.trophies, cs.best_trophies, cs.clan_rank, "
-        "cs.previous_clan_rank, cs.donations_week, cs.donations_received_week, cs.arena_name, cs.last_seen_api, "
+        "cs.donations_week, cs.donations_received_week, cs.arena_name, cs.last_seen_api, "
         "md.birth_month, md.birth_day, md.cr_account_age_days, md.cr_account_age_years, md.cr_account_age_updated_at, "
         "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
         "md.profile_url, md.poap_address, md.note, "
@@ -1209,7 +1206,7 @@ def get_member_recent_form(tag: str, scope: str = "competitive_10", conn: Option
 @managed_connection
 def get_members_on_losing_streak(min_streak: int = 3, scope: str = "competitive_10", conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     rows = conn.execute(
-        "SELECT m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role, "
+        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role, "
         "f.current_streak, f.current_streak_type, f.wins, f.losses, f.sample_size, f.form_label, f.summary "
         "FROM member_recent_form f "
         "JOIN members m ON m.member_id = f.member_id "
@@ -1221,11 +1218,7 @@ def get_members_on_losing_streak(min_streak: int = 3, scope: str = "competitive_
     result = []
     for row in rows:
         item = dict(row)
-        tag = item.get("tag")
-        member_id = conn.execute(
-            "SELECT member_id FROM members WHERE player_tag = ?",
-            (_canon_tag(tag),),
-        ).fetchone()["member_id"]
+        member_id = item.pop("member_id")
         result.append(_member_reference_fields(conn, member_id, item))
     return result
 
@@ -1233,7 +1226,7 @@ def get_members_on_losing_streak(min_streak: int = 3, scope: str = "competitive_
 @managed_connection
 def get_members_on_hot_streak(min_streak: int = 4, scope: str = "ladder_ranked_10", conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     rows = conn.execute(
-        "SELECT m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role, "
+        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role, "
         "f.current_streak, f.current_streak_type, f.wins, f.losses, f.draws, f.sample_size, "
         "f.form_label, f.summary, f.avg_trophy_change "
         "FROM member_recent_form f "
@@ -1246,10 +1239,7 @@ def get_members_on_hot_streak(min_streak: int = 4, scope: str = "ladder_ranked_1
     result = []
     for row in rows:
         item = dict(row)
-        member_id = conn.execute(
-            "SELECT member_id FROM members WHERE player_tag = ?",
-            (_canon_tag(item["tag"]),),
-        ).fetchone()["member_id"]
+        member_id = item.pop("member_id")
         result.append(_member_reference_fields(conn, member_id, item))
     return result
 

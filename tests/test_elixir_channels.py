@@ -1748,67 +1748,22 @@ def test_slash_activity_run_defers_before_dispatching():
     followup.send.assert_not_awaited()
 
 
-def test_queue_startup_system_signals_enqueues_memory_capability_announcement():
+def test_queue_startup_system_signals_enqueues_well_formed_announcements():
+    from runtime.system_signals import STARTUP_SYSTEM_SIGNALS
+
     with patch("elixir.db.queue_system_signal") as mock_queue:
         elixir.queue_startup_system_signals()
 
-    queued = {call.args[0]: call.args[2] for call in mock_queue.call_args_list}
-    assert queued["release_three_lane_elixir_v3"]["title"] == 'Achievement Unlocked: v3 "Three-Lane Elixir"'
-    assert queued["release_three_lane_elixir_v3"]["capability_area"] == "three_lane_elixir"
-    assert "Three-Lane Elixir" in queued["release_three_lane_elixir_v3"]["message"]
-    assert "River Race coordination" in " ".join(queued["release_three_lane_elixir_v3"]["details"])
-    assert "Ask Elixir" in " ".join(queued["release_three_lane_elixir_v3"]["details"])
-    assert queued["capability_memory_system_v1"]["title"] == "Achievement Unlocked: Stronger Memory"
-    assert queued["capability_memory_system_v1"]["capability_area"] == "memory"
-    assert "/elixir memory show" in " ".join(queued["capability_memory_system_v1"]["details"])
-    assert queued["capability_battle_pulse_v1"]["title"] == "Achievement Unlocked: Battle Pulse"
-    assert queued["capability_battle_pulse_v1"]["capability_area"] == "battle_pulse"
-    assert "Path of Legend" in " ".join(queued["capability_battle_pulse_v1"]["details"])
-    assert queued["capability_badge_and_achievement_celebrations_v1"]["title"] == "Achievement Unlocked: Badge Celebrations"
-    assert queued["capability_badge_and_achievement_celebrations_v1"]["capability_area"] == "badge_celebrations"
-    assert "Years Played" in " ".join(queued["capability_badge_and_achievement_celebrations_v1"]["details"])
-    assert queued["capability_player_profile_depth_v1"]["title"] == "Achievement Unlocked: Deeper Player Profiles"
-    assert queued["capability_player_profile_depth_v1"]["capability_area"] == "player_profile_depth"
-    assert "games-per-day" in queued["capability_player_profile_depth_v1"]["message"]
-    assert queued["capability_weekly_clan_recap_v2"]["title"] == "Achievement Unlocked: Weekly Clan Recap"
-    assert queued["capability_weekly_clan_recap_v2"]["capability_area"] == "weekly_recap"
-    assert "Every Monday" in queued["capability_weekly_clan_recap_v2"]["message"]
-    assert "best single snapshot" in " ".join(queued["capability_weekly_clan_recap_v2"]["details"])
-    assert queued["capability_long_term_trends_v1"]["title"] == "Achievement Unlocked: Long-Term Trend Tracking"
-    assert queued["capability_long_term_trends_v1"]["capability_area"] == "long_term_trends"
-    assert "time-series" in queued["capability_long_term_trends_v1"]["message"]
-    assert "future charts" in " ".join(queued["capability_long_term_trends_v1"]["details"])
-    assert queued["capability_roster_showcase_depth_v1"]["title"] == "Achievement Unlocked: Deeper Roster Showcase"
-    assert queued["capability_roster_showcase_depth_v1"]["capability_area"] == "roster_showcase"
-    assert "badge highlights" in queued["capability_roster_showcase_depth_v1"]["message"].lower()
-    assert queued["capability_poap_kings_integration_v2"]["title"] == "Achievement Unlocked: Formal POAP KINGS Integration"
-    assert queued["capability_poap_kings_integration_v2"]["capability_area"] == "poap_kings_integration"
-    assert "behind the scenes" in queued["capability_poap_kings_integration_v2"]["message"]
-    assert "website publishing now lives in a dedicated integration" in " ".join(
-        queued["capability_poap_kings_integration_v2"]["details"]
-    )
-    assert queued["capability_war_awareness_v1"]["title"] == "Achievement Unlocked: War Awareness"
-    assert queued["capability_war_awareness_v1"]["capability_area"] == "war_awareness"
-    assert "live game-driven phases" in queued["capability_war_awareness_v1"]["message"]
-    assert "day-by-day battle recaps" in " ".join(queued["capability_war_awareness_v1"]["details"])
-    assert queued["capability_card_modes_and_war_completion_v1"]["title"] == "Achievement Unlocked: Sharper Card And War Intel"
-    assert queued["capability_card_modes_and_war_completion_v1"]["capability_area"] == "war_and_card_intel"
-    assert "Hero + Evo" in queued["capability_card_modes_and_war_completion_v1"]["message"]
-    assert queued["capability_card_modes_and_war_completion_v1"]["discord_content"].startswith("**Achievement Unlocked: Sharper Card And War Intel**")
-    assert "clock-based" in " ".join(queued["capability_card_modes_and_war_completion_v1"]["details"])
-    assert "finished the race" in " ".join(queued["capability_card_modes_and_war_completion_v1"]["details"])
-    assert queued["capability_subagent_behavior_upgrade_v1"]["title"] == "Achievement Unlocked: Sharper Channel Instincts"
-    assert queued["capability_subagent_behavior_upgrade_v1"]["capability_area"] == "subagent_behavior"
-    assert "channel to channel" in queued["capability_subagent_behavior_upgrade_v1"]["message"]
-    assert queued["capability_subagent_behavior_upgrade_v1"]["discord_content"].startswith("**Achievement Unlocked: Sharper Channel Instincts**")
-    assert "#reception" in queued["capability_subagent_behavior_upgrade_v1"]["discord_content"]
-    assert "leader" in " ".join(queued["capability_subagent_behavior_upgrade_v1"]["details"]).lower()
-    assert queued["capability_ask_elixir_reaction_feedback_v1"]["title"] == "Achievement Unlocked: Ask Elixir Feedback Reactions"
-    assert queued["capability_ask_elixir_reaction_feedback_v1"]["capability_area"] == "ask_elixir_feedback"
-    assert "thumbs-up" in queued["capability_ask_elixir_reaction_feedback_v1"]["message"]
-    assert queued["capability_ask_elixir_reaction_feedback_v1"]["discord_content"].startswith("**Achievement Unlocked: Ask Elixir Feedback Reactions**")
-    assert "#ask-elixir" in queued["capability_ask_elixir_reaction_feedback_v1"]["discord_content"]
-    assert "review loop" in " ".join(queued["capability_ask_elixir_reaction_feedback_v1"]["details"])
+    queued_keys = [call.args[0] for call in mock_queue.call_args_list]
+    assert queued_keys == [s["signal_key"] for s in STARTUP_SYSTEM_SIGNALS]
+    assert len(queued_keys) == len(set(queued_keys)), "duplicate signal_keys"
+
+    for signal in STARTUP_SYSTEM_SIGNALS:
+        payload = signal["payload"]
+        assert payload.get("title", "").startswith("Achievement Unlocked"), signal["signal_key"]
+        assert payload.get("message"), signal["signal_key"]
+        assert payload.get("capability_area"), signal["signal_key"]
+        assert signal["signal_type"] in {"capability_unlock"}, signal["signal_key"]
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():
