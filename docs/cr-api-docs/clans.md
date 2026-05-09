@@ -31,7 +31,7 @@ Get full clan info including member list, scores, description, badge.
 | `clanChestMaxLevel` | integer | Legacy field |
 | `members` | integer | Member count |
 | `memberList` | array | Full member list (see ClanMember below) |
-| `location` | Location | `{ id, name, isCountry, countryCode }` |
+| `location` | Location | `{ id, name, isCountry, countryCode? }` — `countryCode` is a 2-letter ISO code, present only when `isCountry=true`; absent (not null) on meta-locations like `International` (id `57000006`). |
 
 **ClanMember shape:**
 ```json
