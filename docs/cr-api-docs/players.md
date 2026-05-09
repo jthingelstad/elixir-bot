@@ -131,10 +131,11 @@ Evidence for deployment semantics in `currentDeck` and battle-log arrays (verifi
 ```json
 {
   "": { "arena": { "id": 168000059, "name": "Diamond", "rawName": "AutoChessArena10_2025_Oct" }, "trophies": 4257, "bestTrophies": 4337 },
-  "AutoChess_2026_Mar": { "arena": { ... }, "trophies": 3460, "bestTrophies": 3593 }
+  "AutoChess_2026_Season_8": { "arena": { ... }, "trophies": 3460, "bestTrophies": 3593 },
+  "TripleDraftTrail": { "arena": { ... }, "trophies": 1820, "bestTrophies": 2110 }
 }
 ```
-Keys are opaque mode-season identifiers. The empty string key `""` is a legacy/default bucket. Clients should not hardcode specific key names beyond treating them as labels.
+Keys are opaque mode-season identifiers. The empty string key `""` is a legacy/default bucket. Clients should not hardcode specific key names beyond treating them as labels — May 2026 sampling shows `AutoChess_2026_Season_8` (~90% of profiles), `TripleDraftTrail` (~17%), and `AutoChess_2026_Mar` (~15%) alongside the always-present `""` bucket; new mode/season keys appear over time.
 
 ---
 
@@ -235,7 +236,7 @@ Observed: returns ~30-40 battles (most commonly 30).
 | 72000464 | Ranked1v1_NewArena2 |
 | 72000469 | DraftMode_Princess |
 | 72000474 | Challenge_AllCards_EventDeck_NoSet |
-| 72000486 | Touchdown_Event |
+| 72000486 | Touchdown_Event (listed, not observed April–May 2026) |
 | 72000500 | RampUp_Friendly_EventDeck_4Card (listed, not observed March–April 2026) |
 | 72000502 | Crazy_Arena |
 | 72000503 | FloodHounds_Draft |
