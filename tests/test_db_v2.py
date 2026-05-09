@@ -2667,12 +2667,12 @@ def test_snapshot_player_profile_detects_level_wins_new_cards_and_card_upgrades(
         assert any(sig["type"] == "career_wins_milestone" and sig["milestone"] == 500 for sig in signals)
         assert any(sig["type"] == "career_wins_milestone" and sig["milestone"] == 1000 for sig in signals)
         assert not any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Archers" for sig in signals), "common unlocks should be suppressed"
-        assert any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Goblin Barrel" and sig["rarity"] == "epic" for sig in signals)
+        assert not any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Goblin Barrel" for sig in signals), "epic unlocks should be suppressed (legendary + champion only)"
         assert any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Little Prince" for sig in signals)
         assert any(sig["type"] == "new_champion_unlocked" and sig["card_name"] == "Little Prince" for sig in signals)
         assert any(sig["type"] == "new_card_unlocked" and sig["card_name"] == "Little Prince" and sig["is_champion"] is True for sig in signals)
         assert any(sig["type"] == "card_level_milestone" and sig["card_name"] == "Fireball" and sig["milestone"] == 16 for sig in signals)
-        assert any(sig["type"] == "card_level_milestone" and sig["card_name"] == "Knight" and sig["milestone"] == 15 for sig in signals)
+        assert not any(sig["type"] == "card_level_milestone" and sig["card_name"] == "Knight" for sig in signals), "Knight at display level 15 is below max=16; should not fire"
     finally:
         conn.close()
 

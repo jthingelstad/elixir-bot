@@ -40,7 +40,6 @@ from heartbeat._pipeline import (
 from heartbeat._roster import (
     detect_arena_changes,
     detect_cake_days,
-    detect_clan_rank_top_spot,
     detect_clan_score_records,
     detect_returning_members,
     detect_donation_leaders,
@@ -173,9 +172,6 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
         # Inverse of inactivity: members who went dark and are back.
         signals.extend(detect_returning_members(conn=conn))
 
-        # Leapfrogging into clan rank #1 is a durable #player-progress moment.
-        signals.extend(detect_clan_rank_top_spot(conn=conn))
-
         # Form slumps: kept as background context data only — not emitted as
         # signals per user feedback. Form labels enrich the Situation's
         # roster_vitals; the agent uses them to frame OTHER posts.
@@ -239,7 +235,6 @@ __all__ = [
     "detect_donation_leaders",
     "detect_inactivity",
     "detect_returning_members",
-    "detect_clan_rank_top_spot",
     "detect_clan_score_records",
     "detect_weekly_donation_leader",
     "detect_cake_days",

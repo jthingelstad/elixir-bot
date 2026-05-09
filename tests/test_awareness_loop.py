@@ -61,7 +61,6 @@ def test_classify_signal_lane_covers_all_v47_signal_types():
     new signals were invisible to the awareness agent."""
     routing = {
         # milestone — durable progression
-        "clan_rank_top_spot": "milestone",
         "card_evolution_unlocked": "milestone",
         "best_trophies_peak": "milestone",
         "challenge_performance_milestone": "milestone",
