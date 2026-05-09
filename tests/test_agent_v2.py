@@ -789,6 +789,49 @@ def test_create_chat_completion_records_llm_telemetry():
     assert create.call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
 
 
+def test_create_chat_completion_skips_cache_for_awareness():
+    """awareness ticks are 1+ hours apart, exceeding the 5-min cache TTL —
+    caching the system+tools prefix pays the 1.25x write premium with no
+    payoff. Confirmed in May 2026 sampling: 89% write-only calls."""
+    response = _mock_anthropic_response()
+    create = Mock(return_value=response)
+    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    with (
+        patch("agent.core._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_llm_call"),
+    ):
+        elixir_agent._create_chat_completion(
+            workflow="awareness",
+            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "u"}],
+            tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
+        )
+
+    sys_block = create.call_args.kwargs["system"][0]
+    assert "cache_control" not in sys_block, "awareness must not cache the system prompt"
+    tools = create.call_args.kwargs["tools"]
+    assert all("cache_control" not in t for t in tools), "awareness must not cache tools"
+
+
+def test_create_chat_completion_caches_other_workflows():
+    response = _mock_anthropic_response()
+    create = Mock(return_value=response)
+    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    with (
+        patch("agent.core._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_llm_call"),
+    ):
+        elixir_agent._create_chat_completion(
+            workflow="channel_update",
+            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "u"}],
+            tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
+        )
+
+    sys_block = create.call_args.kwargs["system"][0]
+    assert sys_block.get("cache_control") == {"type": "ephemeral"}
+    last_tool = create.call_args.kwargs["tools"][-1]
+    assert last_tool.get("cache_control") == {"type": "ephemeral"}
+
+
 def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
     response = _mock_anthropic_response()
     create = Mock(return_value=response)
