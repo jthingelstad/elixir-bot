@@ -719,7 +719,9 @@ def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqli
     if season_id is None:
         return []
     rows = conn.execute(
-        "SELECT wp.player_tag AS tag, MAX(m.current_name) AS name, SUM(COALESCE(wp.fame, 0)) AS total_fame, COUNT(*) AS races_participated, ROUND(AVG(COALESCE(wp.fame, 0)), 0) AS avg_fame "
+        "SELECT wp.player_tag AS tag, MAX(m.member_id) AS member_id, MAX(m.current_name) AS name, "
+        "SUM(COALESCE(wp.fame, 0)) AS total_fame, COUNT(*) AS races_participated, "
+        "ROUND(AVG(COALESCE(wp.fame, 0)), 0) AS avg_fame "
         "FROM war_participation wp "
         "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
         "JOIN members m ON m.member_id = wp.member_id "
@@ -743,13 +745,14 @@ def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqli
         existing = by_tag.get(tag)
         if existing is None:
             m = conn.execute(
-                "SELECT current_name FROM members WHERE player_tag = ? AND status = 'active'",
+                "SELECT member_id, current_name FROM members WHERE player_tag = ? AND status = 'active'",
                 (tag,),
             ).fetchone()
             if not m:
                 continue
             by_tag[tag] = {
                 "tag": tag,
+                "member_id": m["member_id"],
                 "name": m["current_name"] or contrib.get("player_name"),
                 "total_fame": fame,
                 "races_participated": 1,
@@ -773,12 +776,9 @@ def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqli
     for item in ordered:
         if (item.get("total_fame") or 0) <= 0:
             continue
-        member = conn.execute(
-            "SELECT member_id FROM members WHERE player_tag = ?",
-            (item["tag"],),
-        ).fetchone()
-        if member:
-            item = _member_reference_fields(conn, member["member_id"], item)
+        member_id = item.pop("member_id", None)
+        if member_id is not None:
+            item = _member_reference_fields(conn, member_id, item)
         result.append(item)
     return result
 

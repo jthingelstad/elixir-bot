@@ -382,8 +382,6 @@ _MEMBER_METADATA_COLUMNS = frozenset({
     "joined_at", "birth_month", "birth_day", "profile_url", "poap_address", "note",
     "generated_bio", "generated_highlight", "generated_profile_updated_at",
     "cr_account_age_days", "cr_account_age_years", "cr_account_age_updated_at",
-    "years_played", "years_played_updated_at",
-    "games_per_day", "games_per_day_updated_at",
     "cr_games_per_day", "cr_games_per_day_window_days", "cr_games_per_day_updated_at",
 })
 

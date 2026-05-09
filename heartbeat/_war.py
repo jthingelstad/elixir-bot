@@ -9,7 +9,6 @@ import cr_api
 import db
 from heartbeat._helpers import (
     BATTLE_DAY_SECONDS,
-    _BATTLE_DAY_CHECKPOINTS,
     _COLOSSEUM_FAME_TARGET,
     _RACE_FAME_TARGET,
     _battle_lead_payload,
@@ -365,37 +364,6 @@ def _detect_war_day_markers_for_pair(current, previous=None, conn=None):
     return signals
 
 
-def detect_war_battle_final_hours(conn=None, threshold_hours=6):
-    current = db.get_current_war_day_state(conn=conn)
-    if not current or current.get("phase") != "battle":
-        return []
-    if current.get("race_completed"):
-        return []
-    time_left_seconds = current.get("time_left_seconds")
-    if time_left_seconds is None or time_left_seconds <= 0 or time_left_seconds > int(threshold_hours * 3600):
-        return []
-    signal_log_type = _war_period_signal_log_type("war_battle_day_final_hours", current)
-    signal_date = _war_signal_date_for_state(current)
-    if db.was_signal_sent_any_date(signal_log_type, conn=conn):
-        return []
-    return [{
-        "type": "war_battle_day_final_hours",
-        "signal_log_type": signal_log_type,
-        "signal_date": signal_date,
-        "season_id": current.get("season_id"),
-        "week": current.get("week"),
-        "phase_display": current.get("phase_display"),
-        "day_number": current.get("day_number"),
-        "race_rank": current.get("race_rank"),
-        "time_left_seconds": current.get("time_left_seconds"),
-        "time_left_text": current.get("time_left_text"),
-        "used_all_4": current.get("used_all_4") or [],
-        "used_some": current.get("used_some") or [],
-        "top_fame_today": current.get("top_fame_today") or [],
-        **_battle_lead_payload(current.get("race_rank"), war_state=current),
-    }]
-
-
 def detect_war_rank_changes(conn=None):
     states = db.get_recent_live_war_states(limit=2, conn=conn)
     if len(states) < 2:
@@ -437,95 +405,6 @@ def _detect_war_rank_changes_for_pair(current, previous, conn=None):
         "top_fame_today": (current_day or {}).get("top_fame_today") or [],
         **_battle_lead_payload(current_rank, previous_rank=previous_rank, war_state=current_day or current),
     }]
-
-
-def detect_war_battle_checkpoints(conn=None):
-    """Emit battle-day updates at 12h, 18h, and 21h elapsed.
-
-    If Elixir wakes up late, emit only the latest reached unsent checkpoint
-    instead of replaying older checkpoints.
-    """
-    day_state = db.get_current_war_day_state(conn=conn) or {}
-    if day_state.get("phase") != "battle":
-        return []
-    if day_state.get("race_completed"):
-        return []
-
-    time_left_seconds = day_state.get("time_left_seconds")
-    if time_left_seconds is None:
-        return []
-
-    elapsed_seconds = max(0, BATTLE_DAY_SECONDS - time_left_seconds)
-    signal_date = _war_signal_date_for_state(day_state)
-    war_state = {
-        "war_day_key": day_state.get("war_day_key"),
-        "season_id": day_state.get("season_id"),
-        "section_index": day_state.get("section_index"),
-        "period_index": day_state.get("period_index"),
-    }
-
-    chosen_checkpoint = None
-    for checkpoint in _BATTLE_DAY_CHECKPOINTS:
-        if elapsed_seconds < checkpoint["hour"] * 3600:
-            continue
-        signal_log_type = (
-            f"{_war_period_signal_log_type(checkpoint['signal_key'], war_state)}"
-            f"::h{checkpoint['hour']}"
-        )
-        if db.was_signal_sent_any_date(signal_log_type, conn=conn):
-            continue
-        chosen_checkpoint = (checkpoint, signal_log_type)
-        break
-
-    if chosen_checkpoint is None:
-        return []
-
-    checkpoint, signal_log_type = chosen_checkpoint
-    return [{
-        "type": checkpoint["signal_type"],
-        "signal_log_type": signal_log_type,
-        "signal_date": signal_date,
-        "season_id": day_state.get("season_id"),
-        "week": day_state.get("week"),
-        "phase_display": day_state.get("phase_display"),
-        "day_number": day_state.get("day_number"),
-        "race_rank": day_state.get("race_rank"),
-        "clan_fame": day_state.get("clan_fame"),
-        "clan_score": day_state.get("clan_score"),
-        "period_points": day_state.get("period_points"),
-        "time_left_seconds": time_left_seconds,
-        "time_left_text": day_state.get("time_left_text"),
-        "used_all_4": day_state.get("used_all_4") or [],
-        "used_some": day_state.get("used_some") or [],
-        "top_fame_today": day_state.get("top_fame_today") or [],
-        "top_fame_total": day_state.get("top_fame_total") or [],
-        "engaged_count": day_state.get("engaged_count") or 0,
-        "finished_count": day_state.get("finished_count") or 0,
-        "untouched_count": day_state.get("untouched_count") or 0,
-        "total_participants": day_state.get("total_participants") or 0,
-        "checkpoint_hour": checkpoint["hour"],
-        "checkpoint_label": checkpoint["label"],
-        "checkpoint_hours_remaining": checkpoint["hours_remaining"],
-        "hours_elapsed": elapsed_seconds // 3600,
-        "hours_remaining": max(0, time_left_seconds) // 3600,
-        "engagement_pct": round(100 * (day_state.get("engaged_count") or 0) / max(1, day_state.get("total_participants") or 1)),
-        "completion_pct": round(100 * (day_state.get("finished_count") or 0) / max(1, day_state.get("total_participants") or 1)),
-        "pace_status": _compute_pace_status(
-            day_state.get("clan_fame"),
-            day_state.get("day_number"),
-            day_state.get("day_total"),
-            elapsed_seconds // 3600,
-            day_state.get("period_type"),
-        ),
-        "fame_target": _COLOSSEUM_FAME_TARGET if is_colosseum_week(day_state.get("period_type")) else _RACE_FAME_TARGET,
-        **_battle_lead_payload(day_state.get("race_rank"), war_state=day_state),
-    }]
-
-
-def detect_war_deck_usage(war_data, conn=None):
-    """Compatibility wrapper for older callers."""
-    del war_data
-    return detect_war_battle_checkpoints(conn=conn)
 
 
 def detect_war_battle_activity(conn=None):

@@ -89,13 +89,7 @@ Schema is managed by `_MIGRATIONS` list in `db/__init__.py` using `PRAGMA user_v
 
 Migrations run automatically in `get_connection()`. This repo currently treats the baseline schema as the clean foundation; additive migrations are fine, but breaking resets are acceptable when the model changes materially.
 
-Current migrations:
-- `_migration_0` — baseline schema
-- `_migration_1` — prompt failure logging table for channel/reception LLM failures
-- `_migration_2` — generated roster profile fields in `member_metadata`
-- `_migration_3` — promote trusted join dates into metadata
-- `_migration_4` — rename `member_metadata.joined_at_override` to `joined_at`
-- `_migration_17` — signal detector cursors for forward-only war processing
+The `_MIGRATIONS` list in `db/_migrations.py` is the canonical history — read it directly rather than maintaining a duplicate enumeration here.
 
 ## Site Content System
 
