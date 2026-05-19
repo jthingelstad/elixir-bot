@@ -23,6 +23,15 @@ log = logging.getLogger("elixir_agent")
 # 89% write-only calls, 10% read-only, 1% mixed — net cost penalty.
 WORKFLOWS_WITHOUT_CACHE = {"awareness"}
 
+# Per-workflow request timeouts (seconds) override the 60s default. Sonnet 4.6
+# on the weekly memory_synthesis batch (~75K input tokens) routinely completes
+# in 55-120s, which trips the default timeout and triggers SDK retries that
+# the model can't outrun — three Sunday runs failed in a row (2026-05-03/10/17)
+# before this override was added.
+WORKFLOW_TIMEOUT_OVERRIDES = {
+    "memory_synthesis": 300,
+}
+
 
 def _get_build_hash():
     try:
@@ -276,12 +285,14 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
 
     system_text, translated_messages = _translate_messages(messages)
 
+    effective_timeout = WORKFLOW_TIMEOUT_OVERRIDES.get(workflow, timeout)
+
     kwargs = {
         "model": selected_model,
         "messages": translated_messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "timeout": timeout,
+        "timeout": effective_timeout,
     }
 
     cache_enabled = workflow not in WORKFLOWS_WITHOUT_CACHE
