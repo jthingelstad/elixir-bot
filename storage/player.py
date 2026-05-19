@@ -204,8 +204,8 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
     tag = _canon_tag(player_data.get("tag"))
     member_id = _ensure_member(conn, tag, player_data.get("name"), status=None)
     previous = conn.execute(
-        "SELECT exp_level, wins, best_trophies, challenge_max_wins, cards_json, badges_json, "
-        "achievements_json, current_path_of_legend_season_result_json "
+        "SELECT snapshot_id, content_hash, exp_level, wins, best_trophies, challenge_max_wins, "
+        "cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json "
         "FROM player_profile_snapshots WHERE member_id = ? "
         "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
         (member_id,),
@@ -216,25 +216,83 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
     cards = _normalize_cards_for_storage(player_data.get("cards") or [])
     support_cards = _normalize_cards_for_storage(player_data.get("supportCards") or [])
     favourite = player_data.get("currentFavouriteCard") or {}
-    conn.execute(
-        "INSERT INTO player_profile_snapshots (member_id, fetched_at, exp_level, exp_points, total_exp_points, star_points, trophies, best_trophies, wins, losses, battle_count, total_donations, donations, donations_received, war_day_wins, challenge_max_wins, challenge_cards_won, tournament_battle_count, tournament_cards_won, three_crown_wins, clan_cards_collected, current_favourite_card_id, current_favourite_card_name, league_statistics_json, current_deck_json, current_deck_support_cards_json, cards_json, support_cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json, last_path_of_legend_season_result_json, best_path_of_legend_season_result_json, legacy_trophy_road_high_score, progress_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            member_id, fetched_at, player_data.get("expLevel"), player_data.get("expPoints"), player_data.get("totalExpPoints"), player_data.get("starPoints"), player_data.get("trophies"), player_data.get("bestTrophies"), player_data.get("wins"), player_data.get("losses"), player_data.get("battleCount"), player_data.get("totalDonations"), player_data.get("donations"), player_data.get("donationsReceived"), player_data.get("warDayWins"), player_data.get("challengeMaxWins"), player_data.get("challengeCardsWon"), player_data.get("tournamentBattleCount"), player_data.get("tournamentCardsWon"), player_data.get("threeCrownWins"), player_data.get("clanCardsCollected"), favourite.get("id"), favourite.get("name"), _json_or_none(player_data.get("leagueStatistics")), _json_or_none(current_deck), _json_or_none(current_deck_support_cards), _json_or_none(cards), _json_or_none(support_cards), _json_or_none(player_data.get("badges") or []), _json_or_none(player_data.get("achievements") or []), _json_or_none(player_data.get("currentPathOfLegendSeasonResult")), _json_or_none(player_data.get("lastPathOfLegendSeasonResult")), _json_or_none(player_data.get("bestPathOfLegendSeasonResult")), player_data.get("legacyTrophyRoadHighScore"), _json_or_none(player_data.get("progress"))
-        ),
+
+    # Build profile values + content hash. When the hash matches the latest
+    # row, slide fetched_at forward instead of writing a duplicate snapshot —
+    # ~62% of player intel refreshes don't change profile content.
+    profile_values = (
+        player_data.get("expLevel"), player_data.get("expPoints"), player_data.get("totalExpPoints"),
+        player_data.get("starPoints"), player_data.get("trophies"), player_data.get("bestTrophies"),
+        player_data.get("wins"), player_data.get("losses"), player_data.get("battleCount"),
+        player_data.get("totalDonations"), player_data.get("donations"), player_data.get("donationsReceived"),
+        player_data.get("warDayWins"), player_data.get("challengeMaxWins"), player_data.get("challengeCardsWon"),
+        player_data.get("tournamentBattleCount"), player_data.get("tournamentCardsWon"),
+        player_data.get("threeCrownWins"), player_data.get("clanCardsCollected"),
+        favourite.get("id"), favourite.get("name"),
+        _json_or_none(player_data.get("leagueStatistics")),
+        _json_or_none(current_deck), _json_or_none(current_deck_support_cards),
+        _json_or_none(cards), _json_or_none(support_cards),
+        _json_or_none(player_data.get("badges") or []),
+        _json_or_none(player_data.get("achievements") or []),
+        _json_or_none(player_data.get("currentPathOfLegendSeasonResult")),
+        _json_or_none(player_data.get("lastPathOfLegendSeasonResult")),
+        _json_or_none(player_data.get("bestPathOfLegendSeasonResult")),
+        player_data.get("legacyTrophyRoadHighScore"),
+        _json_or_none(player_data.get("progress")),
     )
-    conn.execute(
-        "INSERT INTO member_card_collection_snapshots (member_id, fetched_at, cards_json, support_cards_json) VALUES (?, ?, ?, ?)",
-        (member_id, fetched_at, _json_or_none(cards) or "[]", _json_or_none(support_cards) or "[]"),
-    )
+    profile_hash = _hash_payload(list(profile_values))
+
+    if previous and previous["content_hash"] == profile_hash:
+        conn.execute(
+            "UPDATE player_profile_snapshots SET fetched_at = ? WHERE snapshot_id = ?",
+            (fetched_at, previous["snapshot_id"]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO player_profile_snapshots (member_id, fetched_at, content_hash, exp_level, exp_points, total_exp_points, star_points, trophies, best_trophies, wins, losses, battle_count, total_donations, donations, donations_received, war_day_wins, challenge_max_wins, challenge_cards_won, tournament_battle_count, tournament_cards_won, three_crown_wins, clan_cards_collected, current_favourite_card_id, current_favourite_card_name, league_statistics_json, current_deck_json, current_deck_support_cards_json, cards_json, support_cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json, last_path_of_legend_season_result_json, best_path_of_legend_season_result_json, legacy_trophy_road_high_score, progress_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (member_id, fetched_at, profile_hash, *profile_values),
+        )
+
+    cards_json_value = _json_or_none(cards) or "[]"
+    support_cards_json_value = _json_or_none(support_cards) or "[]"
+    cards_hash = _hash_payload([cards_json_value, support_cards_json_value])
+    previous_cards = conn.execute(
+        "SELECT snapshot_id, content_hash FROM member_card_collection_snapshots "
+        "WHERE member_id = ? ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
+        (member_id,),
+    ).fetchone()
+    if previous_cards and previous_cards["content_hash"] == cards_hash:
+        conn.execute(
+            "UPDATE member_card_collection_snapshots SET fetched_at = ? WHERE snapshot_id = ?",
+            (fetched_at, previous_cards["snapshot_id"]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO member_card_collection_snapshots (member_id, fetched_at, cards_json, support_cards_json, content_hash) VALUES (?, ?, ?, ?, ?)",
+            (member_id, fetched_at, cards_json_value, support_cards_json_value, cards_hash),
+        )
+
     deck_payload = {
         "cards": current_deck,
         "support_cards": current_deck_support_cards,
     }
     deck_hash = _hash_payload(deck_payload) if (current_deck or current_deck_support_cards) else None
-    conn.execute(
-        "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, support_cards_json, sample_size) VALUES (?, ?, 'player_profile', 'overall', ?, ?, ?, 1)",
-        (member_id, fetched_at, deck_hash, _json_or_none(current_deck) or "[]", _json_or_none(current_deck_support_cards) or "[]"),
-    )
+    previous_deck = conn.execute(
+        "SELECT snapshot_id, deck_hash FROM member_deck_snapshots "
+        "WHERE member_id = ? AND source = 'player_profile' "
+        "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
+        (member_id,),
+    ).fetchone()
+    if previous_deck and deck_hash is not None and previous_deck["deck_hash"] == deck_hash:
+        conn.execute(
+            "UPDATE member_deck_snapshots SET fetched_at = ? WHERE snapshot_id = ?",
+            (fetched_at, previous_deck["snapshot_id"]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, support_cards_json, sample_size) VALUES (?, ?, 'player_profile', 'overall', ?, ?, ?, 1)",
+            (member_id, fetched_at, deck_hash, _json_or_none(current_deck) or "[]", _json_or_none(current_deck_support_cards) or "[]"),
+        )
     _upsert_member_metadata(conn, member_id, **_years_played_metadata_fields(player_data, fetched_at=fetched_at))
     conn.commit()
     if previous is None:
