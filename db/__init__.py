@@ -503,14 +503,8 @@ def _store_raw_payload(conn: sqlite3.Connection, endpoint: str, entity_key: str,
     if payload_json is None:
         return
     payload_hash = _hash_payload(payload_json)
-    existing = conn.execute(
-        "SELECT payload_id FROM raw_api_payloads WHERE endpoint = ? AND entity_key = ? AND payload_hash = ?",
-        (endpoint, entity_key, payload_hash),
-    ).fetchone()
-    if existing:
-        return
     conn.execute(
-        "INSERT INTO raw_api_payloads (endpoint, entity_key, fetched_at, payload_hash, payload_json) VALUES (?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO raw_api_payloads (endpoint, entity_key, fetched_at, payload_hash, payload_json) VALUES (?, ?, ?, ?, ?)",
         (endpoint, entity_key, _utcnow(), payload_hash, payload_json),
     )
 
