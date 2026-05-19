@@ -1538,7 +1538,25 @@ def _migration_31(conn: sqlite3.Connection) -> None:
             break
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31]
+def _migration_32(conn: sqlite3.Connection) -> None:
+    """Add content_hash to snapshot tables so write-time dedup can compare to
+    the latest row in O(1) and slide fetched_at forward when nothing changed.
+
+    Player intel refresh runs every 30 min per member, but 62-68% of the
+    resulting profile/card-collection snapshots had identical content to the
+    prior row (May 2026 sampling). Leaving content_hash NULL on pre-existing
+    rows is fine — the first post-migration write either matches a hashed row
+    (unlikely) or starts a new INSERT chain.
+    """
+    profile_columns = _table_columns(conn, "player_profile_snapshots")
+    if "content_hash" not in profile_columns:
+        conn.execute("ALTER TABLE player_profile_snapshots ADD COLUMN content_hash TEXT")
+    cards_columns = _table_columns(conn, "member_card_collection_snapshots")
+    if "content_hash" not in cards_columns:
+        conn.execute("ALTER TABLE member_card_collection_snapshots ADD COLUMN content_hash TEXT")
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
