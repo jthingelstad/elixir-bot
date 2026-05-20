@@ -211,6 +211,7 @@ Observed: returns ~30-40 battles (most commonly 30).
 | 72000009 | Tournament |
 | 72000013 | (tournament mode — listed by Supercell, not observed on the wire March–April 2026) |
 | 72000014 | TeamVsTeam |
+| 72000031 | Overtime_Friendly |
 | 72000032 | TripleElixir_Friendly |
 | 72000042 | PickMode |
 | 72000050 | Touchdown_Draft |
