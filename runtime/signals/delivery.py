@@ -452,13 +452,14 @@ async def _deliver_awareness_post_plan(plan: dict, signals: list[dict]) -> dict:
     delivered = 0
     rejected = 0
     covered: set[str] = set()
+    attempted: set[str] = set()
     for post in posts:
+        post_keys = {str(key) for key in (post.get("covers_signal_keys") or []) if key}
+        attempted |= post_keys
         ok = await facade._deliver_awareness_post(post, signals or [])
         if ok:
             delivered += 1
-            for key in post.get("covers_signal_keys") or []:
-                if key:
-                    covered.add(str(key))
+            covered |= post_keys
         else:
             rejected += 1
 
@@ -474,6 +475,7 @@ async def _deliver_awareness_post_plan(plan: dict, signals: list[dict]) -> dict:
         "delivered": delivered,
         "rejected": rejected,
         "covered_signal_keys": covered,
+        "attempted_signal_keys": attempted,
     }
 
 
@@ -485,11 +487,14 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
     bundle = HeartbeatTickResult(signals=signals or [], clan=clan or {}, war=war or {})
     situation = build_situation(bundle)
 
-    if signals:
-        await facade._mark_signal_group_completed(signals)
-
     if situation_is_quiet(situation):
         log.info("awareness loop: quiet tick, skipping agent call")
+        # A quiet tick means nothing here is worth posting; mark the inputs
+        # handled so they don't re-emit every cycle. (Signals only get marked
+        # completed after a confirmed post/skip — not speculatively up front —
+        # so a planned post that fails delivery is retried, not burned.)
+        if signals:
+            await facade._mark_signal_group_completed(signals)
         return True
 
     tool_stats: dict = {}
@@ -525,11 +530,24 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
                 fallback_failed_keys.add(signal_source_key(signal))
             all_ok = all_ok and ok
 
+    attempted_keys = report.get("attempted_signal_keys") or set()
+    # Soft signals the agent planned to post but whose delivery failed. Do NOT
+    # mark these completed — leaving them unmarked lets the next tick retry,
+    # instead of permanently burning a post that never reached Discord.
+    post_failed_keys = {
+        signal_source_key(signal)
+        for signal in (signals or [])
+        if signal_source_key(signal) in attempted_keys
+        and signal_source_key(signal) not in covered_keys
+        and signal_source_key(signal) not in hard_required_keys
+    }
+
     considered_skipped = [
         signal for signal in (signals or [])
         if signal_source_key(signal) not in covered_keys
         and signal_source_key(signal) not in fallback_failed_keys
         and signal_source_key(signal) not in hard_required_keys
+        and signal_source_key(signal) not in post_failed_keys
     ]
     if considered_skipped:
         await facade._mark_signal_group_completed(considered_skipped)
@@ -567,6 +585,8 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
             status = "fallback_failed"
         elif key in uncovered_keys:
             status = "fallback"
+        elif key in post_failed_keys:
+            status = "post_failed"
         else:
             status = "skipped"
         signal_outcomes.append({

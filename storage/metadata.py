@@ -335,8 +335,21 @@ def _utc_cutoff(days):
     return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def _cr_cutoff(days):
+    # member_battle_facts stores battle_time in raw Clash Royale format
+    # (YYYYMMDDTHHMMSS.000Z). That sorts differently from the ISO cutoff used
+    # everywhere else — the 'T'-position char ('0' vs '-') makes every CR
+    # timestamp compare greater than an ISO cutoff, so an ISO comparison never
+    # deletes anything. This cutoff matches the stored format.
+    return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
+
+
 def _date_cutoff(days):
     return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+# Tables whose retention column stores raw Clash Royale timestamps, not ISO.
+_CR_TIMESTAMP_TABLES = {"member_battle_facts"}
 
 
 # Ordered list of (table, column, retention_days) for all purge targets.
@@ -370,7 +383,7 @@ def purge_old_data(conn: Optional[sqlite3.Connection] = None) -> dict[str, int]:
     """Delete expired rows and return per-table deletion counts."""
     stats = {}
     for table, column, days in _PURGE_TARGETS:
-        cutoff = _utc_cutoff(days)
+        cutoff = _cr_cutoff(days) if table in _CR_TIMESTAMP_TABLES else _utc_cutoff(days)
         cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
         stats[table] = cursor.rowcount
     for table, column, days in _PURGE_DATE_TARGETS:

@@ -68,7 +68,14 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-scheduler = AsyncIOScheduler(timezone=CHICAGO)
+scheduler = AsyncIOScheduler(
+    timezone=CHICAGO,
+    # misfire_grace_time defaults to 1s, which silently drops any cron that
+    # fires while the event loop is briefly busy. Give every job a few minutes
+    # of grace and collapse missed runs into one. max_instances=1 prevents a
+    # slow tick from overlapping its next run (now effective — see below).
+    job_defaults={"misfire_grace_time": 300, "coalesce": True, "max_instances": 1},
+)
 APP_GUILD = discord.Object(id=GUILD_ID) if GUILD_ID else None
 SLASH_COMMANDS_SYNCED = False
 
@@ -227,15 +234,16 @@ async def on_ready():
     if guild:
         await sync_emoji(guild)
     if not scheduler.running:
-        def _job_runner(job_callable):
-            return lambda: bot.loop.call_soon_threadsafe(
-                lambda: bot.loop.create_task(job_callable())
-            )
-
+        # AsyncIOScheduler awaits coroutine jobs on the bot's running event
+        # loop, so register the tick coroutines directly. The old
+        # call_soon_threadsafe shim was a BackgroundScheduler-era holdover that
+        # returned instantly — APScheduler only ever saw the shim, so each
+        # job's max_instances/coalesce guard applied to a no-op while the real
+        # coroutine ran detached and could overlap itself.
         register_scheduled_activities(
             scheduler=scheduler,
             runtime_module=sys.modules[__name__],
-            create_task=_job_runner,
+            create_task=lambda job_callable: job_callable,
         )
         scheduler.start()
         startup_posted = await _post_startup_message()
