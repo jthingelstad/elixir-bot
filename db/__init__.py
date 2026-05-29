@@ -522,13 +522,15 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
 
 
 def _schema_is_compatible(conn: sqlite3.Connection) -> bool:
+    # Judges ONLY whether this is a pre-v2 legacy schema with no forward
+    # migration path (missing core tables/columns) — that case is safe to back
+    # up and rebuild. A higher-than-expected user_version is handled separately
+    # in get_connection by REFUSING to start, never by rebuilding: a "future"
+    # version means the DB was written by newer code and its data is intact, so
+    # wiping it would be catastrophic (this exact footgun wiped prod once).
     tables = _existing_tables(conn)
     if not tables:
         return True
-
-    version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version > len(_MIGRATIONS):
-        return False
 
     for table_name, expected_columns in _V2_SCHEMA_CORE.items():
         if table_name not in tables:
@@ -594,6 +596,16 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     path = os.fspath(db_path or DB_PATH)
     conn = sqlite3.connect(path)
     _configure_connection(conn, path)
+    if path != ":memory:":
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version > len(_MIGRATIONS):
+            conn.close()
+            raise RuntimeError(
+                f"Database at {path} is at schema version {version}, but this build only "
+                f"knows {len(_MIGRATIONS)} migrations — it was written by NEWER code. Refusing "
+                f"to start so data is not destroyed. Deploy the newer code (or restore a backup "
+                f"matching this build). Do NOT delete the database."
+            )
     if path != ":memory:" and not _schema_is_compatible(conn):
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         tables = sorted(_existing_tables(conn))

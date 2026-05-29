@@ -1,6 +1,7 @@
 from db import (
     _canon_tag,
     _ensure_member,
+    _hash_payload,
     _json_or_none,
     _tag_key,
     _utcnow,
@@ -168,10 +169,31 @@ def store_war_log(race_log, clan_tag, conn=None):
 def upsert_war_current_state(war_data, conn=None):
     observed_at = _utcnow()
     clan = (war_data or {}).get("clan", {})
-    conn.execute(
-        "INSERT INTO war_current_state (observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (observed_at, war_data.get("state"), _canon_tag(clan.get("tag")), clan.get("name"), clan.get("fame"), clan.get("repairPoints"), clan.get("periodPoints"), clan.get("clanScore"), _json_or_none(war_data)),
-    )
+    # war_current_state is conceptually a single "current" value. Dedup on the
+    # clan-level summary fields *plus* the period identifiers so repeated polls
+    # with no change slide observed_at forward instead of appending a full
+    # ~25 KB row each time — while still inserting a fresh row whenever the war
+    # period advances (detect_war_day_transition compares consecutive rows).
+    # Participant-level changes are still captured every poll in war_day_status
+    # and war_participant_snapshots below.
+    content_hash = _hash_payload([
+        war_data.get("state"), _canon_tag(clan.get("tag")), clan.get("fame"),
+        clan.get("repairPoints"), clan.get("periodPoints"), clan.get("clanScore"),
+        war_data.get("sectionIndex"), war_data.get("periodIndex"), war_data.get("periodType"),
+    ])
+    latest = conn.execute(
+        "SELECT war_id, content_hash FROM war_current_state ORDER BY observed_at DESC, war_id DESC LIMIT 1"
+    ).fetchone()
+    if latest and latest["content_hash"] == content_hash:
+        conn.execute(
+            "UPDATE war_current_state SET observed_at = ? WHERE war_id = ?",
+            (observed_at, latest["war_id"]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO war_current_state (observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (observed_at, war_data.get("state"), _canon_tag(clan.get("tag")), clan.get("name"), clan.get("fame"), clan.get("repairPoints"), clan.get("periodPoints"), clan.get("clanScore"), _json_or_none(war_data), content_hash),
+        )
     latest_logged_race = _get_latest_logged_race(conn)
     season_id = _infer_current_season_id_from_live_state(war_data, latest_logged_race)
     section_index = war_data.get("sectionIndex")

@@ -205,8 +205,17 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
     member_id = _ensure_member(conn, tag, player_data.get("name"), status=None)
     previous = conn.execute(
         "SELECT snapshot_id, content_hash, exp_level, wins, best_trophies, challenge_max_wins, "
-        "cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json "
+        "badges_json, achievements_json, current_path_of_legend_season_result_json "
         "FROM player_profile_snapshots WHERE member_id = ? "
+        "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
+        (member_id,),
+    ).fetchone()
+    # Card-upgrade signals diff the prior card collection. That collection is
+    # stored (deduped) in member_card_collection_snapshots, so read it here —
+    # before the new collection is written below — instead of duplicating the
+    # full card list into player_profile_snapshots.cards_json.
+    previous_card_row = conn.execute(
+        "SELECT cards_json FROM member_card_collection_snapshots WHERE member_id = ? "
         "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
         (member_id,),
     ).fetchone()
@@ -231,7 +240,6 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
         favourite.get("id"), favourite.get("name"),
         _json_or_none(player_data.get("leagueStatistics")),
         _json_or_none(current_deck), _json_or_none(current_deck_support_cards),
-        _json_or_none(cards), _json_or_none(support_cards),
         _json_or_none(player_data.get("badges") or []),
         _json_or_none(player_data.get("achievements") or []),
         _json_or_none(player_data.get("currentPathOfLegendSeasonResult")),
@@ -249,7 +257,7 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
         )
     else:
         conn.execute(
-            "INSERT INTO player_profile_snapshots (member_id, fetched_at, content_hash, exp_level, exp_points, total_exp_points, star_points, trophies, best_trophies, wins, losses, battle_count, total_donations, donations, donations_received, war_day_wins, challenge_max_wins, challenge_cards_won, tournament_battle_count, tournament_cards_won, three_crown_wins, clan_cards_collected, current_favourite_card_id, current_favourite_card_name, league_statistics_json, current_deck_json, current_deck_support_cards_json, cards_json, support_cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json, last_path_of_legend_season_result_json, best_path_of_legend_season_result_json, legacy_trophy_road_high_score, progress_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO player_profile_snapshots (member_id, fetched_at, content_hash, exp_level, exp_points, total_exp_points, star_points, trophies, best_trophies, wins, losses, battle_count, total_donations, donations, donations_received, war_day_wins, challenge_max_wins, challenge_cards_won, tournament_battle_count, tournament_cards_won, three_crown_wins, clan_cards_collected, current_favourite_card_id, current_favourite_card_name, league_statistics_json, current_deck_json, current_deck_support_cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json, last_path_of_legend_season_result_json, best_path_of_legend_season_result_json, legacy_trophy_road_high_score, progress_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (member_id, fetched_at, profile_hash, *profile_values),
         )
 
@@ -444,8 +452,8 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
         })
 
     previous_cards = {}
-    if previous and previous["cards_json"]:
-        for card in json.loads(previous["cards_json"] or "[]"):
+    if previous_card_row and previous_card_row["cards_json"]:
+        for card in json.loads(previous_card_row["cards_json"] or "[]"):
             if card.get("name"):
                 previous_cards[card["name"]] = {
                     "level": _card_level(card),

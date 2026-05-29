@@ -1068,7 +1068,7 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
 
         profile_row = conn.execute(
             "SELECT exp_points, total_exp_points, star_points, clan_cards_collected, "
-            "current_deck_support_cards_json, support_cards_json, current_path_of_legend_season_result_json, "
+            "current_deck_support_cards_json, current_path_of_legend_season_result_json, "
             "legacy_trophy_road_high_score, progress_json "
             "FROM player_profile_snapshots ORDER BY snapshot_id DESC LIMIT 1"
         ).fetchone()
@@ -1079,9 +1079,14 @@ def test_profile_and_battlelog_snapshots_power_deck_cards_and_recent_form():
         assert json.loads(profile_row["current_deck_support_cards_json"])[0]["name"] == "Dagger Duchess"
         assert json.loads(profile_row["current_deck_support_cards_json"])[0]["level"] == 16
         assert json.loads(profile_row["current_deck_support_cards_json"])[0]["api_level"] == 4
-        assert json.loads(profile_row["support_cards_json"])[0]["name"] == "Dagger Duchess"
-        assert json.loads(profile_row["support_cards_json"])[0]["maxLevel"] == 16
-        assert json.loads(profile_row["support_cards_json"])[0]["api_max_level"] == 4
+        # The full card collection is stored once in member_card_collection_snapshots,
+        # not duplicated into player_profile_snapshots.
+        collection_row = conn.execute(
+            "SELECT support_cards_json FROM member_card_collection_snapshots ORDER BY snapshot_id DESC LIMIT 1"
+        ).fetchone()
+        assert json.loads(collection_row["support_cards_json"])[0]["name"] == "Dagger Duchess"
+        assert json.loads(collection_row["support_cards_json"])[0]["maxLevel"] == 16
+        assert json.loads(collection_row["support_cards_json"])[0]["api_max_level"] == 4
         assert json.loads(profile_row["current_path_of_legend_season_result_json"])["leagueNumber"] == 9
         assert profile_row["legacy_trophy_road_high_score"] == 9000
         assert json.loads(profile_row["progress_json"])["AutoChess_2026_Mar"]["trophies"] == 3460

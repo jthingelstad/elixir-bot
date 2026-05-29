@@ -1556,7 +1556,72 @@ def _migration_32(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE member_card_collection_snapshots ADD COLUMN content_hash TEXT")
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32]
+def _migration_33(conn: sqlite3.Connection) -> None:
+    """war_current_state was append-only — every war poll INSERTed a full row
+    (incl. ~25 KB raw_json) even when the clan-level state was unchanged, so
+    ~2.7k rows held one conceptual "current" value. Add content_hash, backfill
+    it with the same scheme used at write time, then collapse consecutive
+    duplicate observations, keeping the earliest row of each run. Participant
+    history lives in war_day_status / war_participant_snapshots and is untouched.
+    """
+    from db import _hash_payload
+
+    if "content_hash" not in _table_columns(conn, "war_current_state"):
+        conn.execute("ALTER TABLE war_current_state ADD COLUMN content_hash TEXT")
+    rows = conn.execute(
+        "SELECT war_id, war_state, clan_tag, fame, repair_points, period_points, clan_score, raw_json "
+        "FROM war_current_state ORDER BY observed_at, war_id"
+    ).fetchall()
+    prev_hash = None
+    stale_ids = []
+    for row in rows:
+        # Period identifiers live only in raw_json, not in dedicated columns,
+        # but they distinguish meaningful war-day transitions — include them so
+        # the backfill hash matches the write path and distinct periods are not
+        # collapsed together.
+        try:
+            payload = json.loads(row["raw_json"]) if row["raw_json"] else {}
+        except (TypeError, ValueError):
+            payload = {}
+        row_hash = _hash_payload([
+            row["war_state"], row["clan_tag"], row["fame"],
+            row["repair_points"], row["period_points"], row["clan_score"],
+            payload.get("sectionIndex"), payload.get("periodIndex"), payload.get("periodType"),
+        ])
+        conn.execute(
+            "UPDATE war_current_state SET content_hash = ? WHERE war_id = ?",
+            (row_hash, row["war_id"]),
+        )
+        if row_hash == prev_hash:
+            stale_ids.append(row["war_id"])
+        prev_hash = row_hash
+    if stale_ids:
+        conn.executemany(
+            "DELETE FROM war_current_state WHERE war_id = ?",
+            [(war_id,) for war_id in stale_ids],
+        )
+
+
+def _migration_34(conn: sqlite3.Connection) -> None:
+    """player_profile_snapshots.cards_json / support_cards_json duplicated the
+    full card collection that is already stored (with its own content-hash
+    dedup) in member_card_collection_snapshots — ~46 KB/row written but never
+    read except by the write-time upgrade diff, which now sources the prior
+    collection from member_card_collection_snapshots. NULL the historical
+    copies to reclaim space (the file shrinks after a VACUUM).
+    """
+    columns = _table_columns(conn, "player_profile_snapshots")
+    if "cards_json" in columns:
+        conn.execute(
+            "UPDATE player_profile_snapshots SET cards_json = NULL WHERE cards_json IS NOT NULL"
+        )
+    if "support_cards_json" in columns:
+        conn.execute(
+            "UPDATE player_profile_snapshots SET support_cards_json = NULL WHERE support_cards_json IS NOT NULL"
+        )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

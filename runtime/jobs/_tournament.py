@@ -411,13 +411,12 @@ def start_tournament_watch():
     except Exception:
         pass  # job may not exist yet
 
-    def _job_runner():
-        bot.loop.call_soon_threadsafe(
-            lambda: bot.loop.create_task(_tournament_watch_tick())
-        )
-
+    # Register the coroutine directly so max_instances/coalesce actually guard
+    # the tick. The old call_soon_threadsafe shim returned instantly, so
+    # APScheduler's overlap guard only ever saw the no-op shim (see the
+    # scheduler setup in runtime/app.py).
     _app.scheduler.add_job(
-        _job_runner,
+        _tournament_watch_tick,
         "interval",
         id=_TOURNAMENT_JOB_ID,
         name="tournament-watch",
