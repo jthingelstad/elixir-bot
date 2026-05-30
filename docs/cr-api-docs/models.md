@@ -227,12 +227,13 @@ Note: `badgeUrls` is NOT present in responses — only `badgeId` (integer).
 | `RiverRaceClan` | nested in CurrentRiverRace | tag, name, badgeId, fame, repairPoints, participants, periodPoints, clanScore, finishTime (observed live after completion) |
 | `RiverRaceParticipant` | nested in RiverRaceClan | tag, name, fame, repairPoints, boatAttacks, decksUsed, decksUsedToday |
 | `PeriodLog` | periodLogs array | periodIndex, items (array of PeriodLogEntry) |
-| `PeriodLogEntry` | nested in PeriodLog | clan: {tag}, pointsEarned, progressStartOfDay, progressEndOfDay, endOfDayRank, progressEarned, numOfDefensesRemaining, progressEarnedFromDefenses |
+| `PeriodLogEntry` | nested in PeriodLog | clan: {tag}, pointsEarned, progressStartOfDay, progressEndOfDay, endOfDayRank (0-indexed; 0 = 1st, up to 4; `-1` = not-yet-ranked sentinel), progressEarned, numOfDefensesRemaining, progressEarnedFromDefenses |
 | `RiverRaceLogEntry` | `/riverracelog` items | seasonId (sequential int), sectionIndex, createdDate, standings |
 | `RiverRaceStanding` | standings array | rank, trophyChange, clan (RiverRaceClan with finishTime) |
 
-**River race state observed:** `full`
-**River race periodType observed:** `training`
+**River race state observed:** `full` across all period types — `state` does not change per war day; `periodType` is the daily-phase field.
+**River race periodType observed:** `training`, `warDay`, `colosseum` (May 2026 sampling: ~57% warDay, ~23% training, ~18% colosseum). See `clans.md` for the full `periodType` lifecycle notes.
+**`endOfDayRank`:** 0-indexed (0 = 1st place, up to 4 for the 5th clan); `-1` is a "not yet ranked / day not finished" sentinel seen across all period types.
 **Note:** `collectionEndTime` and `warEndTime` were NOT observed in responses — these fields may only appear during active war periods, or may be deprecated.
 
 **Season/section structure:**
