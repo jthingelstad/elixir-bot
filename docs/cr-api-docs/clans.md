@@ -78,7 +78,7 @@ Get the clan's active river race state.
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `state` | string | e.g. `full` |
+| `state` | string | Observed `full` across all period types (training/warDay/colosseum) — `state` does not flip per day; `periodType` is the field that tracks the war's daily phase. |
 | `sectionIndex` | integer | Current section (week) |
 | `periodIndex` | integer | Current period within section |
 | `periodType` | string | Observed: `training`, `warDay`, `colosseum` (see notes) |
@@ -130,6 +130,8 @@ Observed in live payloads after a clan finishes:
   ]
 }
 ```
+
+- `endOfDayRank` is **0-indexed** — `0` = 1st place, up to `4` for the 5th clan. A value of `-1` is a sentinel for "not yet ranked / day not finished" (observed across all period types in May 2026 sampling, ~2-3% of entries). Add 1 before showing players a 1-based placement, and treat `-1` as "pending", not as a placement.
 
 ---
 
