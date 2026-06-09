@@ -15,6 +15,7 @@ PROGRESSION_SIGNAL_TYPES = {
     "arena_change",
     "player_level_up",
     "career_wins_milestone",
+    "cr_account_anniversary",
     "new_card_unlocked",
     "new_champion_unlocked",
     "card_level_milestone",
@@ -45,6 +46,7 @@ OPTIONAL_PROGRESSION_SIGNAL_TYPES = {
 
 ARENA_RELAY_CELEBRATION_SIGNAL_TYPES = {
     "career_wins_milestone",
+    "cr_account_anniversary",
     "new_champion_unlocked",
     "new_card_unlocked",
     "player_level_up",

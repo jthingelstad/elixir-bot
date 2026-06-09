@@ -1078,6 +1078,19 @@ def test_plan_signal_outcomes_routes_join_anniversary_to_arena_relay_sidecar():
     assert outcomes[1]["intent"] == "celebration_relay"
 
 
+def test_plan_signal_outcomes_routes_cr_account_anniversary_to_arena_relay_sidecar():
+    outcomes = plan_signal_outcomes([{
+        "type": "cr_account_anniversary",
+        "tag": "#ABC",
+        "name": "King Levy",
+        "new_years": 5,
+    }])
+
+    channels = [outcome["target_channel_key"] for outcome in outcomes]
+    assert channels == ["player-progress", "arena-relay"]
+    assert outcomes[1]["intent"] == "celebration_relay"
+
+
 def test_plan_signal_outcomes_splits_mixed_durable_and_battle_mode_batch():
     outcomes = plan_signal_outcomes([
         {"type": "battle_hot_streak", "tag": "#ABC", "name": "King Levy", "streak": 6},
@@ -1238,6 +1251,24 @@ def test_arena_relay_result_builds_copyable_celebration_card():
     assert result["content"][1] == (
         "Big milestone: King Levy just reached 5,000 lifetime wins. "
         "Drop a congrats when you see them."
+    )
+
+
+def test_arena_relay_result_builds_cr_account_cake_day_copy():
+    from runtime.signals.delivery import _build_arena_relay_result
+
+    result = _build_arena_relay_result([{
+        "type": "cr_account_anniversary",
+        "tag": "#ABC",
+        "name": "King Levy",
+        "new_years": 5,
+        "account_age_days": 1825,
+    }])
+
+    assert result["event_type"] == "celebration_relay"
+    assert result["content"][1] == (
+        "CR cake day: King Levy's Clash Royale account is 5 years old. "
+        "That is real staying power."
     )
 
 
