@@ -2196,6 +2196,7 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert specs["daily-clan-insight"]["schedule"] == "Daily at 12:00 CT."
     assert "leadership-action-scan" in specs
     assert specs["leadership-action-scan"]["owner_subagent"] == "arena-relay"
+    assert specs["leadership-action-scan"]["schedule"] == "Every 240 minutes."
     assert "Discord: #arena-relay singular leader action cards" in specs["leadership-action-scan"]["delivery_targets"]
     assert "promotion-content" in specs
     assert "Discord: #promote-the-clan" in specs["promotion-content"]["delivery_targets"]
@@ -2224,7 +2225,6 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
         "player-progression",
         "daily-clan-insight",
         "leadership-action-scan",
-        "leadership-review",
         "memory-synthesis",
         "weekly-recap",
         "site-content",

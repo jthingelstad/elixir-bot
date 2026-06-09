@@ -6,6 +6,7 @@ import sqlite3
 from unittest.mock import patch
 
 import db
+from runtime import leader_action_policy
 
 
 def test_v2_schema_initializes_core_tables():
@@ -108,6 +109,33 @@ def test_leader_action_recommendation_records_reaction_decision():
         )
         assert noted["decision_note"] == "boat defenses full already"
         assert noted["decision_note_message_id"] == "654"
+    finally:
+        conn.close()
+
+
+def test_leader_action_policy_respects_quiet_hours_and_daily_cap():
+    conn = db.get_connection(":memory:")
+    try:
+        quiet = datetime(2026, 6, 9, 5, 0, tzinfo=timezone.utc)  # midnight Chicago
+        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=quiet)
+        assert not allowed
+        assert reason == "quiet_hours"
+
+        active = datetime(2026, 6, 9, 17, 0, tzinfo=timezone.utc)  # noon Chicago
+        for index in range(leader_action_policy.LEADER_ACTION_DAILY_CAP):
+            db.create_leader_action_recommendation(
+                action_type="kick_recommendation",
+                objective="roster_health",
+                prompt_text=f"Review member {index}.",
+                conn=conn,
+            )
+        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=active)
+        assert not allowed
+        assert reason == f"daily_cap:{leader_action_policy.LEADER_ACTION_DAILY_CAP}"
+
+        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=quiet, critical=True)
+        assert allowed
+        assert reason is None
     finally:
         conn.close()
 

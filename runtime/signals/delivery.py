@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import db
 import elixir_agent
+from runtime.leader_action_policy import can_post_leader_action
 from runtime.channel_subagents import (
     SEASON_AWARDS_SIGNAL_TYPES,
     build_subagent_memory_context,
@@ -25,6 +26,10 @@ WAR_NUDGE_SIGNAL_TYPES = {
     "war_battle_phase_active",
     "war_battle_day_started",
     "war_battle_day_live_update",
+    "war_battle_day_final_hours",
+    "war_final_battle_day",
+}
+CRITICAL_LEADER_ACTION_SIGNAL_TYPES = {
     "war_battle_day_final_hours",
     "war_final_battle_day",
 }
@@ -359,6 +364,23 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     mark_attempt=True,
                 )
                 return True
+            critical = bool({signal.get("type") for signal in signals or []} & CRITICAL_LEADER_ACTION_SIGNAL_TYPES)
+            allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
+            if not allowed:
+                await asyncio.to_thread(
+                    db.upsert_signal_outcome,
+                    outcome["source_signal_key"],
+                    outcome["source_signal_type"],
+                    outcome["target_channel_key"],
+                    outcome["target_channel_id"],
+                    outcome["intent"],
+                    required=outcome.get("required", True),
+                    delivery_status="skipped",
+                    payload={"signals": signals},
+                    error_detail=f"leader_action_policy:{reason}",
+                    mark_attempt=True,
+                )
+                return True
             result = _build_arena_relay_result(signals)
             if result is not None:
                 metadata = result.get("metadata") if isinstance(result, dict) else {}
@@ -627,6 +649,7 @@ async def _deliver_war_nudge_sidecars(signals) -> int:
     types = {signal.get("type") for signal in signals or []}
     if not (types & WAR_NUDGE_SIGNAL_TYPES):
         return 0
+    critical = bool(types & CRITICAL_LEADER_ACTION_SIGNAL_TYPES)
     try:
         channel_config = _facade()._channel_config_by_key("arena-relay")
     except Exception:
@@ -646,6 +669,10 @@ async def _deliver_war_nudge_sidecars(signals) -> int:
         channel_kind = str(channel_kind)
 
     for candidate in candidates:
+        allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
+        if not allowed:
+            log.info("war nudge sidecar skipped by policy: %s", reason)
+            return posted
         name = candidate["name"]
         tag = candidate["tag"]
         prompt_text = f"Nudge {name} to use war decks today."

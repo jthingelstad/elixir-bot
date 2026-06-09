@@ -139,7 +139,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         job_function="_leadership_action_scan",
         schedule_kind="interval",
         schedule_config={
-            "minutes": _attr("LEADERSHIP_ACTION_SCAN_MINUTES", 60),
+            "minutes": _attr("LEADERSHIP_ACTION_SCAN_MINUTES", 240),
             "max_instances": 1,
             "coalesce": True,
         },
@@ -147,24 +147,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "Discord: #arena-relay singular leader action cards",
         ),
         legacy_commands=("leadership-actions",),
-    ),
-    ActivityDefinition(
-        activity_key="leadership-review",
-        owner_subagent="leader-lounge",
-        purpose="Post the weekly leadership review for clan operations.",
-        job_id="leadership-review",
-        job_function="_clanops_weekly_review",
-        schedule_kind="cron",
-        schedule_config={
-            "day_of_week": _attr("CLANOPS_WEEKLY_REVIEW_DAY", "fri"),
-            "hour": _attr("CLANOPS_WEEKLY_REVIEW_HOUR", 19),
-            "minute": 0,
-        },
-        delivery_targets=(
-            "Discord: #leader-lounge data review",
-            "Discord: #arena-relay leader action cards",
-        ),
-        legacy_commands=("clanops-review",),
     ),
     ActivityDefinition(
         activity_key="memory-synthesis",
