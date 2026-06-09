@@ -52,6 +52,8 @@ def _make_message(channel_id, channel_name, content, *, mentions=None, roles=Non
         mentions=mentions or [],
         role_mentions=[],
         id=555,
+        reference=None,
+        add_reaction=AsyncMock(),
         reply=AsyncMock(),
     )
 
@@ -254,6 +256,46 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
         discord_user_id=123,
         emoji="✅",
     )
+
+
+def test_arena_relay_reply_records_action_note():
+    message = _make_message(
+        1513758211206025227,
+        "arena-relay",
+        "boat defenses full already",
+        roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
+    )
+    message.reference = SimpleNamespace(message_id=987)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1513758211206025227,
+            "name": "#arena-relay",
+            "subagent": "arena-relay",
+            "workflow": "channel_update",
+            "reply_policy": "disabled",
+            "memory_scope": "leadership",
+        }),
+        patch("runtime.channel_router.db.upsert_discord_user"),
+        patch("runtime.channel_router.db.record_leader_action_note_by_message", return_value={"action_id": 1}) as mock_note,
+        patch("runtime.channel_router.db.save_message") as mock_save,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_note.assert_called_once_with(
+        987,
+        note="boat defenses full already",
+        discord_user_id=123,
+        note_message_id=555,
+    )
+    assert mock_save.call_args.kwargs["event_type"] == "leader_action_note"
+    message.add_reaction.assert_awaited_once_with("✅")
+    mock_process.assert_not_awaited()
 
 
 def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
