@@ -268,7 +268,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="db-maintenance",
-        owner_subagent="leader-lounge",
+        owner_subagent="elixir-log",
         purpose="Purge expired data, VACUUM the database, and report space reclaimed.",
         job_id="db-maintenance",
         job_function="_db_maintenance_cycle",
@@ -279,7 +279,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "minute": 0,
         },
         delivery_targets=(
-            "Discord: #leader-lounge",
+            "Discord webhook: #elixir-log",
         ),
     ),
     ActivityDefinition(

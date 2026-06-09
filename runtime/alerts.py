@@ -7,6 +7,7 @@ import logging
 
 import db
 import prompts
+from runtime import elixir_log
 from runtime import status as runtime_status
 from runtime.helpers import _channel_msg_kwargs, _channel_scope
 
@@ -31,6 +32,9 @@ async def _alert_admin(content: str, event_type: str, signature: str) -> bool:
 
     if _ALERT_SIGNATURES.get(event_type) == signature:
         return False
+    if await elixir_log.post_event_async(content):
+        _ALERT_SIGNATURES[event_type] = signature
+        return True
     channel_configs = prompts.discord_channels_by_workflow("clanops")
     if not channel_configs:
         log.warning("Admin alert skipped (%s): no clanops channel configured", event_type)

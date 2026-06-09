@@ -231,6 +231,7 @@ def snapshot() -> dict:
                 "has_discord_token": bool(os.getenv("DISCORD_TOKEN")),
                 "has_claude_api_key": bool(os.getenv("CLAUDE_API_KEY")),
                 "has_cr_api_key": bool(os.getenv("CR_API_KEY")),
+                "has_elixir_log_webhook": bool(os.getenv("ELIXIR_LOG_WEBHOOK_URL")),
             },
             "jobs": jobs,
             "api": copy.deepcopy(_API_STATUS),

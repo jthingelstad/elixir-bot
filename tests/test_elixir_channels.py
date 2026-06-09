@@ -1122,7 +1122,7 @@ def test_post_to_elixir_resolves_custom_emoji_shortcodes():
     channel.send.assert_awaited_once_with("Keep climbing <:elixir_hype:321>")
 
 
-def test_post_startup_message_posts_build_hash_to_clanops():
+def test_post_startup_message_posts_build_hash_to_elixir_log_webhook():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
@@ -1142,6 +1142,7 @@ def test_post_startup_message_posts_build_hash_to_clanops():
         patch("elixir.elixir_agent.RELEASE_LABEL", 'v3.0 "Three-Lane Elixir"'),
         patch("elixir.elixir_agent.BUILD_HASH", "abc1234"),
         patch("elixir.elixir_agent.generate_message", return_value=":elixir_hype: I just dropped into the arena and the king tower is awake.") as mock_generate,
+        patch("runtime.startup.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
     ):
@@ -1149,15 +1150,15 @@ def test_post_startup_message_posts_build_hash_to_clanops():
 
     assert sent is True
     mock_generate.assert_called_once()
-    posted = mock_post.await_args.args[1]["content"]
+    posted = mock_log.await_args.args[0]
     assert posted.startswith("**Elixir Online**")
     assert 'Release: **v3.0 "Three-Lane Elixir"**' in posted
     assert "Build: **abc1234**" in posted
     assert "Host: **" in posted
     assert "king tower is awake" in posted
     assert "Channel audit: 2/2 active channels reachable and writable." in posted
-    assert mock_save.call_args.kwargs["workflow"] == "clanops"
-    assert mock_save.call_args.kwargs["event_type"] == "startup_announcement"
+    mock_post.assert_not_awaited()
+    mock_save.assert_not_called()
 
 
 def test_post_startup_message_fetches_channel_when_not_cached():
@@ -1176,6 +1177,7 @@ def test_post_startup_message_fetches_channel_when_not_cached():
         patch("elixir.elixir_agent.RELEASE_LABEL", 'v3.0 "Three-Lane Elixir"'),
         patch("elixir.elixir_agent.BUILD_HASH", "abc1234"),
         patch("elixir.elixir_agent.generate_message", return_value="Elixir has entered the arena.") as mock_generate,
+        patch("runtime.startup.elixir_log.post_event_async", new=AsyncMock(return_value=True)),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
     ):
@@ -1185,6 +1187,32 @@ def test_post_startup_message_fetches_channel_when_not_cached():
     assert mock_fetch.await_count == 2
     mock_fetch.assert_any_await(200)
     mock_generate.assert_called_once()
+    mock_post.assert_not_awaited()
+    mock_save.assert_not_called()
+
+
+def test_post_startup_message_falls_back_to_clanops_when_webhook_unavailable():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge"}]),
+        patch("elixir.prompts.discord_channel_configs", return_value=[{"id": 200, "name": "#leader-lounge", "workflow": "clanops"}]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("elixir.elixir_agent.RELEASE_LABEL", 'v3.0 "Three-Lane Elixir"'),
+        patch("elixir.elixir_agent.BUILD_HASH", "abc1234"),
+        patch("elixir.elixir_agent.generate_message", return_value="Elixir has entered the arena."),
+        patch("runtime.startup.elixir_log.post_event_async", new=AsyncMock(return_value=False)),
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("elixir.db.save_message") as mock_save,
+    ):
+        sent = asyncio.run(elixir._post_startup_message())
+
+    assert sent is True
     mock_post.assert_awaited_once()
     assert mock_save.call_args.kwargs["event_type"] == "startup_announcement"
 
@@ -2330,6 +2358,7 @@ def test_cr_api_auth_failure_alert_posts_once_per_signature():
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
         patch("elixir.db.save_message") as mock_save,
+        patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
         patch("elixir.runtime_status.snapshot", return_value={
             "api": {
                 "last_ok": False,
@@ -2347,13 +2376,13 @@ def test_cr_api_auth_failure_alert_posts_once_per_signature():
     try:
         assert first is True
         assert second is False
-        mock_post.assert_awaited_once()
-        posted = mock_post.await_args.args[1]["content"]
+        mock_log.assert_awaited_once()
+        posted = mock_log.await_args.args[0]
         assert "King Thing" in posted
         assert "live clan refresh" in posted
         assert "IP allowlist" in posted or "key or its IP allowlist" in posted
-        assert mock_save.call_count == 1
-        assert mock_save.call_args.kwargs["event_type"] == "cr_api_auth_failure"
+        mock_post.assert_not_awaited()
+        mock_save.assert_not_called()
     finally:
         elixir._CR_API_ALERT_SIGNATURE = None
 
@@ -2367,6 +2396,7 @@ def test_cr_api_outage_alert_posts_after_consecutive_failures():
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
         patch("elixir.db.save_message") as mock_save,
+        patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
         patch("elixir.runtime_status.snapshot", return_value={
             "api": {
                 "last_ok": False,
@@ -2383,11 +2413,12 @@ def test_cr_api_outage_alert_posts_after_consecutive_failures():
 
     try:
         assert sent is True
-        mock_post.assert_awaited_once()
-        posted = mock_post.await_args.args[1]["content"]
+        mock_log.assert_awaited_once()
+        posted = mock_log.await_args.args[0]
         assert "failed 3 times in a row" in posted
         assert "player intel refresh" in posted
-        assert mock_save.call_args.kwargs["event_type"] == "cr_api_outage"
+        mock_post.assert_not_awaited()
+        mock_save.assert_not_called()
     finally:
         elixir._CR_API_OUTAGE_ALERT_SIGNATURE = None
 
@@ -2407,6 +2438,7 @@ def test_llm_outage_alert_fires_on_first_hard_fail_error():
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
         patch("elixir.db.save_message") as mock_save,
+        patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
         patch("runtime.app.runtime_status.snapshot", return_value={
             "llm": {
                 "last_ok": False,
@@ -2422,12 +2454,13 @@ def test_llm_outage_alert_fires_on_first_hard_fail_error():
 
     try:
         assert sent is True, "hard-fail error should alert on first occurrence"
-        mock_post.assert_awaited_once()
-        posted = mock_post.await_args.args[1]["content"]
+        mock_log.assert_awaited_once()
+        posted = mock_log.await_args.args[0]
         assert "704062105258557511" in posted, "admin must be @mentioned"
         assert "channel update" in posted
         assert "usage limits" in posted.lower()
-        assert mock_save.call_args.kwargs["event_type"] == "llm_outage"
+        mock_post.assert_not_awaited()
+        mock_save.assert_not_called()
     finally:
         runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
 
@@ -2456,6 +2489,7 @@ def test_llm_outage_alert_waits_for_three_consecutive_soft_errors():
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
         patch("elixir.db.save_message"),
+        patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
     ):
         runtime_app._ALERT_SIGNATURES.pop("llm_outage", None)
         try:
@@ -2468,7 +2502,8 @@ def test_llm_outage_alert_waits_for_three_consecutive_soft_errors():
 
     assert early is False, "soft errors must not alert on 2nd failure"
     assert third is True, "soft errors alert on 3rd consecutive failure"
-    mock_post.assert_awaited_once()
+    mock_log.assert_awaited_once()
+    mock_post.assert_not_awaited()
 
 
 def test_schedule_llm_failure_alert_is_noop_when_loop_unavailable():
@@ -2499,6 +2534,7 @@ def test_llm_outage_alert_dedupes_on_signature():
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
         patch("elixir.db.save_message"),
+        patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log,
         patch("runtime.app.runtime_status.snapshot", return_value={
             "llm": {
                 "last_ok": False,
@@ -2518,7 +2554,8 @@ def test_llm_outage_alert_dedupes_on_signature():
 
     assert first is True
     assert second is False, "second call with same signature must not re-post"
-    mock_post.assert_awaited_once()
+    mock_log.assert_awaited_once()
+    mock_post.assert_not_awaited()
 
 
 def test_build_schedule_report_shows_47_minute_heartbeat():
@@ -2655,6 +2692,9 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert specs["weekly-discord-invite-relay"]["owner_subagent"] == "arena-relay"
     assert specs["weekly-discord-invite-relay"]["schedule"] == "Every Sat at 11:00 CT."
     assert "Discord: #arena-relay weekly no-link Discord invite copy" in specs["weekly-discord-invite-relay"]["delivery_targets"]
+    assert "db-maintenance" in specs
+    assert specs["db-maintenance"]["owner_subagent"] == "elixir-log"
+    assert "Discord webhook: #elixir-log" in specs["db-maintenance"]["delivery_targets"]
     assert "promotion-content" in specs
     assert "Discord: #promote-the-clan" in specs["promotion-content"]["delivery_targets"]
     assert "POAP KINGS: promotion payloads" in specs["promotion-content"]["delivery_targets"]

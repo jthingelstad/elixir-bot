@@ -40,6 +40,13 @@ CLAUDE_API_KEY=your_anthropic_api_key
 CR_API_KEY=your_clash_royale_api_key
 ```
 
+Optional operational logging:
+
+```env
+ELIXIR_LOG_WEBHOOK_URL=your_discord_webhook_url_for_elixir_log
+ELIXIR_LOG_WEBHOOK_USERNAME=Elixir
+```
+
 Optional site publishing settings:
 
 ```env
@@ -86,7 +93,7 @@ venv/bin/python elixir.py
 On startup, Elixir should:
 - connect to Discord
 - register scheduled activities from the activity registry
-- post a startup check-in to the leadership workflow with the running build hash
+- post a startup check-in to the #elixir-log webhook with the running build hash
 - seed startup system signals if needed
 
 ## Process Management (`launchd`)
@@ -226,7 +233,7 @@ Scheduler started — clan-awareness — Every 30 minutes., war-poll — Every h
 ```
 
 You should also see:
-- a startup message in the leadership workflow
+- a startup message in #elixir-log
 - activity registration from the scheduler summary
 
 ### What to look for in logs

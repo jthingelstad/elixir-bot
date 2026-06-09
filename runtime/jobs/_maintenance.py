@@ -12,6 +12,7 @@ import cr_api
 import db
 from runtime.app import bot, log
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
+from runtime import elixir_log
 from runtime import status as runtime_status
 from runtime.jobs._signals import _post_to_elixir
 
@@ -115,17 +116,6 @@ async def _db_maintenance_cycle():
     runtime_status.mark_job_start("db_maintenance")
 
     try:
-        channel_id = _get_singleton_channel_id("leader-lounge")
-    except Exception as exc:
-        runtime_status.mark_job_failure("db_maintenance", f"leader-lounge channel config error: {exc}")
-        return
-
-    channel = bot.get_channel(channel_id)
-    if not channel:
-        runtime_status.mark_job_failure("db_maintenance", "leader-lounge channel not found")
-        return
-
-    try:
         db_path = db.DB_PATH
         size_before = os.path.getsize(db_path)
 
@@ -155,13 +145,26 @@ async def _db_maintenance_cycle():
             pruned_count=len(pruned),
         )
 
-        await _post_to_elixir(channel, {"content": report})
-        await asyncio.to_thread(
-            db.save_message,
-            _channel_scope(channel), "assistant", report,
-            **_channel_msg_kwargs(channel), workflow="clanops",
-            event_type="db_maintenance",
-        )
+        posted_to_log = await elixir_log.post_event_async(report)
+        if not posted_to_log:
+            try:
+                channel_id = _get_singleton_channel_id("leader-lounge")
+            except Exception as exc:
+                runtime_status.mark_job_failure("db_maintenance", f"leader-lounge channel config error: {exc}")
+                return
+
+            channel = bot.get_channel(channel_id)
+            if not channel:
+                runtime_status.mark_job_failure("db_maintenance", "leader-lounge channel not found")
+                return
+
+            await _post_to_elixir(channel, {"content": report})
+            await asyncio.to_thread(
+                db.save_message,
+                _channel_scope(channel), "assistant", report,
+                **_channel_msg_kwargs(channel), workflow="clanops",
+                event_type="db_maintenance",
+            )
         runtime_status.mark_job_success("db_maintenance", f"freed {_format_size(size_before - size_after)}")
     except Exception as exc:
         log.error("DB maintenance failed: %s", exc, exc_info=True)
