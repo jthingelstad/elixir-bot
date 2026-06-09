@@ -2379,6 +2379,7 @@ def test_cr_api_auth_failure_alert_posts_once_per_signature():
         mock_log.assert_awaited_once()
         posted = mock_log.await_args.args[0]
         assert "King Thing" in posted
+        assert "<@" not in posted
         assert "live clan refresh" in posted
         assert "IP allowlist" in posted or "key or its IP allowlist" in posted
         mock_post.assert_not_awaited()
@@ -2416,6 +2417,7 @@ def test_cr_api_outage_alert_posts_after_consecutive_failures():
         mock_log.assert_awaited_once()
         posted = mock_log.await_args.args[0]
         assert "failed 3 times in a row" in posted
+        assert "<@" not in posted
         assert "player intel refresh" in posted
         mock_post.assert_not_awaited()
         mock_save.assert_not_called()
@@ -2456,7 +2458,8 @@ def test_llm_outage_alert_fires_on_first_hard_fail_error():
         assert sent is True, "hard-fail error should alert on first occurrence"
         mock_log.assert_awaited_once()
         posted = mock_log.await_args.args[0]
-        assert "704062105258557511" in posted, "admin must be @mentioned"
+        assert "King Thing" in posted
+        assert "<@" not in posted
         assert "channel update" in posted
         assert "usage limits" in posted.lower()
         mock_post.assert_not_awaited()
@@ -2503,6 +2506,7 @@ def test_llm_outage_alert_waits_for_three_consecutive_soft_errors():
     assert early is False, "soft errors must not alert on 2nd failure"
     assert third is True, "soft errors alert on 3rd consecutive failure"
     mock_log.assert_awaited_once()
+    assert "<@" not in mock_log.await_args.args[0]
     mock_post.assert_not_awaited()
 
 
@@ -2555,6 +2559,7 @@ def test_llm_outage_alert_dedupes_on_signature():
     assert first is True
     assert second is False, "second call with same signature must not re-post"
     mock_log.assert_awaited_once()
+    assert "<@" not in mock_log.await_args.args[0]
     mock_post.assert_not_awaited()
 
 

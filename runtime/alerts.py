@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 import db
 import prompts
@@ -14,14 +15,28 @@ from runtime.helpers import _channel_msg_kwargs, _channel_scope
 log = logging.getLogger("elixir")
 
 _ALERT_SIGNATURES: dict[str, str | None] = {}
+_DISCORD_USER_MENTION_RE = re.compile(r"\s*\(<@!?\d+>\)|<@!?\d+>")
+
+
+def _without_user_mentions(text: str) -> str:
+    lines = []
+    for line in str(text or "").splitlines():
+        lines.append(" ".join(_DISCORD_USER_MENTION_RE.sub("", line).split()))
+    return "\n".join(lines).strip()
+
+
+def _admin_display_name() -> str:
+    name = db.format_member_reference("#20JJJ2CCRU")
+    name = _without_user_mentions(name)
+    if not name or name == "#20JJJ2CCRU":
+        name = "King Thing"
+    return name
 
 
 def _admin_mention_ref() -> str:
     from runtime import app as runtime_app
 
-    name = db.format_member_reference("#20JJJ2CCRU")
-    if not name or name == "#20JJJ2CCRU":
-        name = "King Thing"
+    name = _admin_display_name()
     if runtime_app.ADMIN_DISCORD_ID:
         return f"{name} (<@{runtime_app.ADMIN_DISCORD_ID}>)"
     return name
@@ -32,7 +47,7 @@ async def _alert_admin(content: str, event_type: str, signature: str) -> bool:
 
     if _ALERT_SIGNATURES.get(event_type) == signature:
         return False
-    if await elixir_log.post_event_async(content):
+    if await elixir_log.post_event_async(_without_user_mentions(content)):
         _ALERT_SIGNATURES[event_type] = signature
         return True
     channel_configs = prompts.discord_channels_by_workflow("clanops")
