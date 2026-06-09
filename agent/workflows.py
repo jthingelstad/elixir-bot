@@ -14,6 +14,7 @@ from agent.core import (
 )
 from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_json_response, _parse_response
 from agent.prompts import (
+    _arena_relay_observation_system,
     _awareness_system,
     _channel_subagent_system,
     _clanops_system,
@@ -731,6 +732,56 @@ def respond_to_help_request(question, *, author_name, channel_name, role,
         return None
 
 
+def _arena_relay_action_context(limit: int = 5) -> str:
+    try:
+        actions = db.list_leader_actions(status="proposed", limit=limit) or []
+    except Exception as exc:
+        log.warning("arena relay action context unavailable: %s", exc)
+        return ""
+    if not actions:
+        return ""
+    lines = ["=== RECENT OPEN ARENA-RELAY ACTIONS ==="]
+    for action in actions[:limit]:
+        prompt_text = " ".join((action.get("prompt_text") or "").split())
+        if len(prompt_text) > 180:
+            prompt_text = prompt_text[:177] + "..."
+        lines.append(
+            f"- id={action.get('action_id')} type={action.get('action_type')} "
+            f"objective={action.get('objective')} proposed_at={action.get('proposed_at')} "
+            f"prompt={prompt_text}"
+        )
+    return "\n".join(lines)
+
+
+def analyze_arena_relay_screenshot(question, *, author_name, channel_name,
+                                   memory_context=None, image_blocks=None):
+    """Analyze leader-submitted Clash Royale screenshots posted to #arena-relay."""
+    user_msg = (
+        f"Leader '{author_name}' posted screenshot evidence in {channel_name}.\n\n"
+        f"{question}\n\n"
+        "Read the attached screenshot(s) as operational evidence. "
+        "Return a crisp arena-relay readout, not a conversational answer."
+    )
+    war_ctx = _war_status_prompt_context()
+    if war_ctx:
+        user_msg += f"\n\n{war_ctx}"
+    action_ctx = _arena_relay_action_context()
+    if action_ctx:
+        user_msg += f"\n\n{action_ctx}"
+    user_msg += _format_memory_context(memory_context)
+    user_msg = _with_image_blocks(user_msg, image_blocks)
+    return _chat_with_tools(
+        _arena_relay_observation_system(channel_name),
+        user_msg,
+        workflow="arena_relay_observation",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["arena_relay_observation"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["arena_relay_observation"],
+        strict_json=True,
+        return_errors=True,
+        max_tokens=1400,
+    )
+
+
 def respond_in_channel(question, author_name, channel_name, workflow, clan_data, war_data,
                        conversation_history=None, memory_context=None, image_blocks=None):
     """Channel Q&A for interactive/clanops workflows."""
@@ -1159,6 +1210,7 @@ __all__ = [
     "respond_in_channel",
     "respond_in_deck_review",
     "respond_to_help_request",
+    "analyze_arena_relay_screenshot",
     "generate_message",
     "explain_quiz_answer",
     "generate_home_message",

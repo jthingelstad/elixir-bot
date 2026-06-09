@@ -123,6 +123,7 @@ Current primary subagents:
 - `ask-elixir` — open-channel clan conversation
 - `war-talk` — mention-driven tactical war Q&A
 - `leader-lounge` — private leadership and clan operations
+- `arena-relay` — crisp leader action cards and leader-posted Clash Royale screenshot observation readouts
 - `river-race` — war coordination and battle-day urgency
 - `player-progress` — milestone and progression celebrations
 - `clan-events` — joins, promotions, anniversaries, and clan recognitions
@@ -218,6 +219,7 @@ Important rules:
   - `mention_only` for channels like `#general`, `#war-talk`, and `#leader-lounge`
   - `open_channel` for `#ask-elixir`
   - `disabled` for notification-only channels like `#poapkings-com`, `#river-race`, and `#announcements`
+- `#arena-relay` is normally action-board style with disabled general replies, but `runtime/channel_router.py` special-cases leader-posted Clash Royale screenshots as observation evidence and replies with a concise `arena_relay_screenshot_observation` readout.
 
 ### Agent Feedback Review
 

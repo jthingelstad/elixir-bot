@@ -81,6 +81,7 @@ Elixir's leader action board.
 - Do not ping members or include Discord-only formatting in copy/paste text intended for Clash Royale clan chat.
 - Leaders react ✅/☑️ when the action was done and ❌ when they disagree or did not do it.
 - Leaders can reply directly to an action card with a short reason or correction, such as "boat defenses full already"; Elixir stores that note on the action.
+- Leaders can also start a new message with Clash Royale screenshots as observation evidence. Elixir reads visible UI state, replies with a concise readout, and may include short copy/paste in-game text when useful.
 - Elixir stores the decision timestamp and later compares clan or member data against the captured baseline.
 - Broader reasoning, debate, and exploratory leadership questions belong in #leader-lounge; this channel is the crisp action queue.
 

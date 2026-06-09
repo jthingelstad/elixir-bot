@@ -444,6 +444,30 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
     )
 
 
+def _arena_relay_observation_system(channel_name: str):
+    subagent_key = prompts.subagent_key_for_channel(channel_name, "clanops")
+    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
+    guidance = (
+        "You are reading leader-submitted Clash Royale screenshot evidence in #arena-relay. "
+        "This is not a normal conversation and not a new action card unless the screenshot clearly supports one.\n\n"
+        "Inspect the visible UI first. Screenshots may show boat defenses, clan chat, war activity, leaderboards, profiles, rewards, store offers, or battle logs. "
+        "Name only what you can read or reasonably identify. Say plainly when text, counts, names, or state are cropped, blurry, or uncertain.\n\n"
+        "Connect the screenshot to leadership usefulness: observed state, operational implication, and whether a leader relay/nudge/follow-up is useful now. "
+        "If it shows boat defenses, estimate visible open defense slots and visible member names, but do not claim the full boat state unless the screenshot shows it. "
+        "If it shows clan chat, identify useful social/context signals without turning one message into a personality verdict.\n\n"
+        "If a copy/paste in-game message would help, include one short line clearly labeled `Copy:` and keep it under 240 characters. "
+        "Do not include check/cross reaction instructions; this is an observation readout, not an action card. "
+        "Keep the whole response crisp enough for #arena-relay.\n\n"
+        f"{_discord_formatting_guidance()}"
+        f"{_discord_emoji_guidance(allow_in_sensitive=True)}"
+        "Respond with JSON only (no markdown wrapper):\n"
+        '{"event_type": "arena_relay_screenshot_observation", '
+        '"summary": "one sentence observation summary", '
+        '"content": "Discord-ready concise readout"}'
+    )
+    return _build_system_prompt(purpose, knowledge, channel_context, guidance)
+
+
 def _reception_system():
     reception = prompts.discord_singleton_subagent("reception")
     purpose, _, channel_context = _subagent_base(reception["name"], reception["subagent_key"])
@@ -828,6 +852,7 @@ __all__ = [
     "_quiz_explain_system",
     "_interactive_system",
     "_clanops_system",
+    "_arena_relay_observation_system",
     "_reception_system",
     "_channel_subagent_system",
     "_home_message_system",

@@ -344,6 +344,132 @@ async def _handle_arena_relay_action_note(app, message, channel_config, raw_ques
     return True
 
 
+async def _handle_arena_relay_screenshot_observation(
+    app,
+    message,
+    channel_config,
+    raw_question: str,
+    image_attachments: list,
+) -> bool:
+    if (channel_config.get("subagent") or "") != "arena-relay":
+        return False
+    if not image_attachments:
+        return False
+    if not app._has_leader_role(message.author):
+        return False
+
+    async with message.channel.typing():
+        image_blocks = await _collect_screenshot_image_blocks(message)
+        question = raw_question
+        if not image_blocks:
+            question = _question_with_unreadable_attachment_context(message.content, image_attachments)
+
+        ch = app._channel_msg_kwargs(message.channel)
+        author = app._author_msg_kwargs(message.author)
+        user_msg_id = await asyncio.to_thread(
+            db.save_message,
+            app._channel_scope(message.channel),
+            "user",
+            question,
+            **ch,
+            **author,
+            workflow="arena-relay",
+            event_type="arena_relay_screenshot_observation_input",
+            discord_message_id=message.id,
+            raw_json={
+                "attachment_summary": _attachment_summary(image_attachments),
+                "image_blocks_read": len(image_blocks),
+            },
+        )
+
+        if not image_blocks:
+            content = (
+                "**👁️ Screenshot Read**\n"
+                "I saw a Clash Royale image attachment, but I could not read the image bytes. "
+                "Please resend it or add a short note about what changed."
+            )
+            sent = await app._reply_text(message, content)
+            await asyncio.to_thread(
+                db.save_message,
+                app._channel_scope(message.channel),
+                "assistant",
+                content,
+                **ch,
+                **author,
+                workflow="arena-relay",
+                event_type="arena_relay_screenshot_observation",
+                discord_message_id=_primary_discord_message_id(sent),
+                raw_json={"input_message_id": user_msg_id, "image_blocks_read": 0},
+            )
+            return True
+
+        memory_context = await asyncio.to_thread(
+            db.build_memory_context,
+            discord_user_id=message.author.id,
+            channel_id=message.channel.id,
+            viewer_scope=channel_config.get("memory_scope") or "leadership",
+        )
+        result = await asyncio.to_thread(
+            elixir_agent.analyze_arena_relay_screenshot,
+            question,
+            author_name=message.author.display_name,
+            channel_name=app._channel_reply_target_name(channel_config),
+            memory_context=memory_context,
+            image_blocks=image_blocks,
+        )
+        failure = _classify_agent_result(result)
+        if failure:
+            failure_kind, agent_error = failure
+            app._log_prompt_failure(
+                question=question,
+                workflow="arena-relay",
+                failure_type=failure_kind,
+                failure_stage="analyze_arena_relay_screenshot",
+                channel=message.channel,
+                author=message.author,
+                discord_message_id=message.id,
+                detail=_agent_failure_detail(agent_error) if agent_error else None,
+                raw_json=result if isinstance(result, dict) else None,
+            )
+            await app._safe_reply(message, "I saw the screenshot, but hit an error reading it. Try again in a sec.")
+            return True
+
+        content = result.get("content") or result.get("summary") or ""
+        if not content:
+            app._log_prompt_failure(
+                question=question,
+                workflow="arena-relay",
+                failure_type="empty_result",
+                failure_stage="analyze_arena_relay_screenshot",
+                channel=message.channel,
+                author=message.author,
+                discord_message_id=message.id,
+                raw_json=result,
+            )
+            await app._safe_reply(message, "I saw the screenshot, but did not get a usable readout. Try again in a sec.")
+            return True
+
+        sent = await app._reply_text(message, content)
+        await asyncio.to_thread(
+            db.save_message,
+            app._channel_scope(message.channel),
+            "assistant",
+            _stored_assistant_content(content),
+            **ch,
+            **author,
+            workflow="arena-relay",
+            event_type=result.get("event_type") or "arena_relay_screenshot_observation",
+            summary=result.get("summary"),
+            discord_message_id=_primary_discord_message_id(sent),
+            raw_json={
+                "result": result,
+                "input_message_id": user_msg_id,
+                "image_blocks_read": len(image_blocks),
+            },
+        )
+    return True
+
+
 async def _save_reply_save(app, message, conversation_scope, raw_question, content, workflow, event_type):
     """Common pattern: save user message, reply, save assistant message."""
     ch = app._channel_msg_kwargs(message.channel)
@@ -710,6 +836,14 @@ async def route_message(message):
     }
 
     if await _handle_arena_relay_action_note(app, message, channel_config, raw_question):
+        return
+    if await _handle_arena_relay_screenshot_observation(
+        app,
+        message,
+        channel_config,
+        raw_question,
+        image_attachments,
+    ):
         return
 
     # If the bot wasn't addressed and the channel doesn't allow proactive
