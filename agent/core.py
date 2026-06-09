@@ -265,6 +265,33 @@ def _translate_messages(messages):
     return system_text, translated
 
 
+def _content_has_anthropic_payload(content) -> bool:
+    if content is None:
+        return False
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        return bool(content)
+    return True
+
+
+def _sanitize_anthropic_messages(messages):
+    """Drop empty turns after translation so Anthropic never sees blank content."""
+    sanitized = []
+    dropped = 0
+    for msg in messages:
+        if _content_has_anthropic_payload(msg.get("content")):
+            sanitized.append(msg)
+        else:
+            dropped += 1
+    if dropped:
+        log.info("anthropic_empty_messages_dropped count=%s", dropped)
+    if not sanitized:
+        sanitized.append({"role": "user", "content": "No user message content was provided."})
+        log.warning("anthropic_messages_empty_after_sanitize inserted_placeholder=true")
+    return sanitized
+
+
 def _translate_tool_choice(tool_choice):
     """Convert tool_choice string to Anthropic format."""
     if tool_choice == "auto":
@@ -284,6 +311,7 @@ def _create_chat_completion(*, workflow, messages, model=None, temperature=0.7, 
     selected_model = _model_for_workflow(workflow, model=model)
 
     system_text, translated_messages = _translate_messages(messages)
+    translated_messages = _sanitize_anthropic_messages(translated_messages)
 
     effective_timeout = WORKFLOW_TIMEOUT_OVERRIDES.get(workflow, timeout)
 
