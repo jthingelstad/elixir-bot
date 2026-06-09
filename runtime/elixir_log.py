@@ -49,7 +49,11 @@ def post_event(content: str, *, username: str | None = None) -> bool:
         try:
             response = requests.post(
                 url,
-                json={"content": chunk, "username": sender},
+                json={
+                    "content": chunk,
+                    "username": sender,
+                    "allowed_mentions": {"parse": []},
+                },
                 timeout=10,
             )
             response.raise_for_status()

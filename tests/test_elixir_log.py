@@ -19,6 +19,7 @@ def test_elixir_log_post_event_uses_configured_webhook(monkeypatch):
     assert mock_post.call_args.kwargs["json"] == {
         "content": "maintenance complete",
         "username": "Elixir Test",
+        "allowed_mentions": {"parse": []},
     }
 
 
@@ -43,3 +44,17 @@ def test_alert_admin_prefers_elixir_log_webhook():
     assert sent is True
     mock_log.assert_awaited_once_with("CR API failed")
     mock_channels.assert_not_called()
+
+
+def test_alert_admin_strips_mentions_from_elixir_log_webhook():
+    alerts._ALERT_SIGNATURES.clear()
+
+    with patch("runtime.alerts.elixir_log.post_event_async", new=AsyncMock(return_value=True)) as mock_log:
+        sent = asyncio.run(alerts._alert_admin(
+            "King Thing (<@704062105258557511>) CR API failed",
+            "cr_api_outage",
+            "sig-mentions",
+        ))
+
+    assert sent is True
+    assert mock_log.await_args.args[0] == "King Thing CR API failed"
