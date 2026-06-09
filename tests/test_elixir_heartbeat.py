@@ -125,6 +125,113 @@ def test_clan_awareness_tick_swallows_revoke_exceptions():
     mock_success.assert_called_once()
 
 
+def test_leave_signal_marks_completed_kick_recommendation_as_leader_removal():
+    from heartbeat._helpers import _enrich_leave_signal
+
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{
+                "tag": "#ABC123",
+                "name": "QuickChurn",
+                "role": "member",
+                "lastSeen": "20260601T120000.000Z",
+                "trophies": 5000,
+                "donations": 0,
+            }],
+            conn=conn,
+        )
+        db.record_join_date(
+            "#ABC123",
+            "QuickChurn",
+            (datetime.now(timezone.utc).date() - timedelta(days=3)).isoformat(),
+            conn=conn,
+        )
+        db.create_leader_action_recommendation(
+            action_type="kick_recommendation",
+            objective="roster_health",
+            prompt_text="Remove QuickChurn from the clan.",
+            rationale="Inactive and not using war decks.",
+            target_player_tag="#ABC123",
+            target_player_name="QuickChurn",
+            source_message_id=987,
+            conn=conn,
+        )
+        db.decide_leader_action_by_message(
+            987,
+            status=db.ACTION_DONE,
+            discord_user_id=123,
+            emoji="✅",
+            conn=conn,
+        )
+
+        signal = _enrich_leave_signal("#ABC123", "QuickChurn", conn)
+
+        assert signal["departure_kind"] == "leader_removal"
+        assert signal["leader_action_rationale"] == "Inactive and not using war decks."
+        assert signal["tenure_days"] == 3
+    finally:
+        conn.close()
+
+
+def test_clan_events_skips_low_tenure_voluntary_departure():
+    from runtime.signals.delivery import _is_low_value_public_departure
+
+    assert not _is_low_value_public_departure({
+        "type": "member_leave",
+        "tag": "#KICKED",
+        "name": "Removed",
+        "tenure_days": 1,
+        "departure_kind": "leader_removal",
+    })
+
+    signals = [{
+        "type": "member_leave",
+        "tag": "#ABC123",
+        "name": "QuickChurn",
+        "tenure_days": 1,
+    }]
+    clan = {"memberList": []}
+    war = {}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.name = "clan-events"
+    channel.type = "text"
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals.plan_signal_outcomes", return_value=[{
+            "source_signal_key": "member_leave:#ABC123",
+            "source_signal_type": "member_leave",
+            "target_channel_key": "clan-events",
+            "target_channel_id": "1482352209878138880",
+            "intent": "clan_event_public",
+            "required": True,
+            "payload": {"signals": signals},
+            "delivery_status": "planned",
+        }]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.db.upsert_signal_outcome") as mock_upsert,
+        patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "skipped"}]),
+        patch("elixir.db.mark_signal_sent"),
+        patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
+        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
+    ):
+        assert asyncio.run(elixir._deliver_signal_group(signals, clan, war))
+
+    mock_generate.assert_not_called()
+    mock_post.assert_not_awaited()
+    skip_calls = [
+        call for call in mock_upsert.call_args_list
+        if call.kwargs.get("delivery_status") == "skipped"
+    ]
+    assert skip_calls
+    assert "low_value_departure" in skip_calls[0].kwargs["error_detail"]
+
+
 def test_clan_awareness_tick_reseeds_startup_system_signals_before_tick():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[],

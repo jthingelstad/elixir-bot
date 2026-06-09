@@ -188,19 +188,41 @@ def _enrich_leave_signal(tag, name, conn):
     if conn is None:
         return signal
     row = conn.execute(
-        "SELECT cs.role, cs.last_seen_api, cs.trophies, cs.donations_week, mm.cr_games_per_day "
+        "SELECT m.member_id, cs.role, cs.last_seen_api, cs.trophies, cs.donations_week, mm.cr_games_per_day "
         "FROM members m "
         "JOIN member_current_state cs ON cs.member_id = m.member_id "
         "LEFT JOIN member_metadata mm ON mm.member_id = m.member_id "
-        "WHERE m.player_tag = ?",
-        (tag.lstrip("#"),),
+        "WHERE m.player_tag IN (?, ?)",
+        (tag, tag.lstrip("#")),
     ).fetchone()
     if not row:
         return signal
+    joined_at = db._current_joined_at(conn, row["member_id"])
+    signal["joined_date"] = joined_at
+    if joined_at:
+        try:
+            joined_day = datetime.strptime(joined_at[:10], "%Y-%m-%d").date()
+            today = datetime.strptime(db.chicago_today(), "%Y-%m-%d").date()
+            signal["tenure_days"] = max(0, (today - joined_day).days)
+        except (TypeError, ValueError):
+            signal["tenure_days"] = None
     signal["last_role"] = row["role"]
     signal["last_trophies"] = row["trophies"]
     signal["last_donations_week"] = row["donations_week"]
     signal["games_per_day"] = row["cr_games_per_day"]
+    removal_action = db.get_recent_leader_action_for_target(
+        action_type="kick_recommendation",
+        target_player_tag=tag,
+        status=db.ACTION_DONE,
+        within_hours=168,
+        conn=conn,
+    )
+    if removal_action:
+        signal["departure_kind"] = "leader_removal"
+        signal["leader_action_id"] = removal_action.get("action_id")
+        signal["leader_action_decided_at"] = removal_action.get("decided_at")
+        signal["leader_action_rationale"] = removal_action.get("rationale")
+        signal["leader_action_note"] = removal_action.get("decision_note")
     last_seen_dt = db._parse_cr_time(row["last_seen_api"])
     if last_seen_dt is not None:
         days_inactive = (datetime.now(timezone.utc).replace(tzinfo=None) - last_seen_dt).days
