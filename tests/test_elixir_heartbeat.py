@@ -1613,6 +1613,7 @@ def test_weekly_leader_actions_post_to_arena_relay():
         patch("runtime.jobs._core.db.get_members_at_risk", return_value={
             "members": [{"member_ref": "Vijay", "player_tag": "#DEF456", "reasons": [{"detail": "last seen 8 days ago"}]}],
         }),
+        patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
         patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
         patch("runtime.jobs._core.db.create_leader_action_recommendation", side_effect=created) as mock_create,
         patch("runtime.jobs._core._post_to_elixir", new=AsyncMock(return_value=[SimpleNamespace(id=999)])) as mock_post,
@@ -1626,6 +1627,23 @@ def test_weekly_leader_actions_post_to_arena_relay():
     assert mock_post.await_count == 2
     assert mock_update.call_count == 2
     assert mock_save.call_args.kwargs["workflow"] == "arena-relay"
+
+
+def test_leadership_action_scan_posts_singular_actions():
+    with (
+        patch("runtime.jobs._signals._deliver_war_nudge_sidecars", new=AsyncMock(return_value=1)) as mock_nudge,
+        patch("runtime.jobs._core._post_candidate_leader_action_recommendations", new=AsyncMock(return_value=2)) as mock_candidates,
+        patch("runtime.jobs._core.runtime_status.mark_job_start") as mock_start,
+        patch("runtime.jobs._core.runtime_status.mark_job_success") as mock_success,
+        patch("runtime.jobs._core.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(elixir._leadership_action_scan())
+
+    mock_start.assert_called_once_with("leadership_action_scan")
+    mock_nudge.assert_awaited_once_with([{"type": "war_battle_day_live_update"}])
+    mock_candidates.assert_awaited_once_with(max_actions=2)
+    mock_success.assert_called_once_with("leadership_action_scan", "posted 3 action(s)")
+    mock_failure.assert_not_called()
 
 
 def test_weekly_clan_recap_posts_to_weekly_digest_channel():

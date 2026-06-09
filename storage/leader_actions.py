@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import db as _db
@@ -56,6 +57,11 @@ def _stable_action_key(
     ]
     digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
     return f"{action_type}:{digest}"
+
+
+def _cutoff_hours_ago(hours: int | float) -> str:
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=max(1, float(hours or 1)))
+    return cutoff.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _member_baseline(tag: str | None, *, conn) -> dict:
@@ -353,6 +359,30 @@ def list_leader_actions(
 
 
 @managed_connection
+def has_recent_leader_action(
+    *,
+    action_type: str,
+    target_player_tag: str | None = None,
+    objective: str | None = None,
+    within_hours: int = 168,
+    conn: Optional[sqlite3.Connection] = None,
+) -> bool:
+    where = ["action_type = ?", "proposed_at >= ?"]
+    params: list = [(action_type or "").strip(), _cutoff_hours_ago(within_hours)]
+    if target_player_tag:
+        where.append("target_player_tag = ?")
+        params.append(_db._canon_tag(target_player_tag))
+    if objective:
+        where.append("objective = ?")
+        params.append((objective or "").strip())
+    row = conn.execute(
+        f"SELECT 1 FROM leader_action_recommendations WHERE {' AND '.join(where)} LIMIT 1",
+        tuple(params),
+    ).fetchone()
+    return row is not None
+
+
+@managed_connection
 def decide_leader_action_by_message(
     source_message_id: str | int,
     *,
@@ -492,6 +522,7 @@ __all__ = [
     "decide_leader_action_by_message",
     "get_leader_action_by_key",
     "get_leader_action_by_message",
+    "has_recent_leader_action",
     "list_leader_actions",
     "record_leader_action_note_by_message",
     "refresh_leader_action_outcome",

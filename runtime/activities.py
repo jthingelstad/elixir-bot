@@ -132,6 +132,23 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         ),
     ),
     ActivityDefinition(
+        activity_key="leadership-action-scan",
+        owner_subagent="arena-relay",
+        purpose="Continuously scan for singular leader actions and post crisp action cards when the data warrants one.",
+        job_id="leadership-action-scan",
+        job_function="_leadership_action_scan",
+        schedule_kind="interval",
+        schedule_config={
+            "minutes": _attr("LEADERSHIP_ACTION_SCAN_MINUTES", 60),
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Discord: #arena-relay singular leader action cards",
+        ),
+        legacy_commands=("leadership-actions",),
+    ),
+    ActivityDefinition(
         activity_key="leadership-review",
         owner_subagent="leader-lounge",
         purpose="Post the weekly leadership review for clan operations.",

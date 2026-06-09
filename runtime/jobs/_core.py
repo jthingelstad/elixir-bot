@@ -6,6 +6,7 @@ __all__ = [
     "WAR_POLL_MINUTE", "WAR_AWARENESS_MINUTE",
     "PLAYER_INTEL_BATCH_SIZE", "PLAYER_INTEL_STALE_HOURS",
     "PLAYER_INTEL_REQUEST_SPACING_SECONDS",
+    "LEADERSHIP_ACTION_SCAN_MINUTES", "LEADERSHIP_ACTION_SCAN_MAX_ACTIONS",
     "CLANOPS_WEEKLY_REVIEW_DAY", "CLANOPS_WEEKLY_REVIEW_HOUR",
     "WEEKLY_RECAP_DAY", "WEEKLY_RECAP_HOUR",
     "MEMORY_SYNTHESIS_DAY", "MEMORY_SYNTHESIS_HOUR",
@@ -16,6 +17,7 @@ __all__ = [
     "_ask_elixir_daily_insight", "_clan_awareness_tick",
     "_war_poll_tick", "_war_awareness_tick", "_player_intel_refresh",
     "_clanops_weekly_review", "_weekly_clan_recap",
+    "_leadership_action_scan",
     "_post_weekly_leader_action_recommendations",
     "_memory_synthesis_cycle",
     "_apply_memory_synthesis_plan",
@@ -135,6 +137,8 @@ else:
 PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "5"))
 PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "1"))
 PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))
+LEADERSHIP_ACTION_SCAN_MINUTES = int(os.getenv("LEADERSHIP_ACTION_SCAN_MINUTES", "60"))
+LEADERSHIP_ACTION_SCAN_MAX_ACTIONS = int(os.getenv("LEADERSHIP_ACTION_SCAN_MAX_ACTIONS", "3"))
 CLANOPS_WEEKLY_REVIEW_DAY = os.getenv("CLANOPS_WEEKLY_REVIEW_DAY", "fri")
 CLANOPS_WEEKLY_REVIEW_HOUR = int(os.getenv("CLANOPS_WEEKLY_REVIEW_HOUR", "19"))
 WEEKLY_RECAP_DAY = os.getenv("WEEKLY_RECAP_DAY", "mon")
@@ -708,7 +712,16 @@ async def _post_leader_action_recommendation(
     rationale: str,
     target_player_tag: str | None = None,
     target_player_name: str | None = None,
+    dedupe_hours: int = 168,
 ) -> bool:
+    if target_player_tag and await asyncio.to_thread(
+        db.has_recent_leader_action,
+        action_type=action_type,
+        target_player_tag=target_player_tag,
+        objective=objective,
+        within_hours=dedupe_hours,
+    ):
+        return False
     baseline = await asyncio.to_thread(
         db.build_leader_action_baseline,
         action_type=action_type,
@@ -759,15 +772,15 @@ async def _post_leader_action_recommendation(
     return True
 
 
-async def _post_weekly_leader_action_recommendations() -> int:
+async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3) -> int:
     try:
         target_config = prompts.discord_singleton_subagent("arena-relay")
     except Exception as exc:
-        log.info("weekly leader actions skipped: arena-relay unavailable: %s", exc)
+        log.info("leader action candidates skipped: arena-relay unavailable: %s", exc)
         return 0
     channel = bot.get_channel(target_config["id"])
     if not channel:
-        log.warning("weekly leader actions skipped: arena-relay channel not found")
+        log.warning("leader action candidates skipped: arena-relay channel not found")
         return 0
 
     try:
@@ -778,7 +791,10 @@ async def _post_weekly_leader_action_recommendations() -> int:
         return 0
 
     posted = 0
+    max_actions = max(1, int(max_actions or 1))
     for member in (promotions.get("recommended") or [])[:3]:
+        if posted >= max_actions:
+            return posted
         label = _leader_action_member_label(member)
         tag = _leader_action_member_tag(member)
         rationale = _leader_action_reason(member, promotion=True)
@@ -796,6 +812,8 @@ async def _post_weekly_leader_action_recommendations() -> int:
             posted += 1
 
     for member in ((at_risk or {}).get("members") or [])[:3]:
+        if posted >= max_actions:
+            return posted
         label = _leader_action_member_label(member)
         tag = _leader_action_member_tag(member)
         rationale = _leader_action_reason(member, promotion=False)
@@ -812,6 +830,27 @@ async def _post_weekly_leader_action_recommendations() -> int:
         ):
             posted += 1
     return posted
+
+
+async def _post_weekly_leader_action_recommendations() -> int:
+    return await _post_candidate_leader_action_recommendations(max_actions=6)
+
+
+async def _leadership_action_scan():
+    runtime_status.mark_job_start("leadership_action_scan")
+    posted = 0
+    try:
+        from runtime.jobs._signals import _deliver_war_nudge_sidecars
+
+        posted += await _deliver_war_nudge_sidecars([{"type": "war_battle_day_live_update"}])
+        remaining = max(0, LEADERSHIP_ACTION_SCAN_MAX_ACTIONS - posted)
+        if remaining:
+            posted += await _post_candidate_leader_action_recommendations(max_actions=remaining)
+    except Exception as exc:
+        runtime_status.mark_job_failure("leadership_action_scan", str(exc))
+        log.warning("leadership action scan failed: %s", exc, exc_info=True)
+        return
+    runtime_status.mark_job_success("leadership_action_scan", f"posted {posted} action(s)")
 
 
 async def _weekly_clan_recap():
