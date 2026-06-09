@@ -826,6 +826,45 @@ def test_respond_in_deck_review_passes_screenshot_blocks_to_chat():
     assert user_msg[1] == image_block
 
 
+def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
+    image_block = {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "data": "Ym9hdA==",
+        },
+    }
+    with (
+        patch("elixir_agent._chat_with_tools", return_value={"event_type": "arena_relay_screenshot_observation", "content": "ok"}) as mock_chat,
+        patch("agent.workflows.db.build_war_now_context", return_value=(None, "=== RIVER RACE — CURRENT MOMENT ===\nTraining Day 1")),
+        patch("agent.workflows.db.list_leader_actions", return_value=[
+            {
+                "action_id": 7,
+                "action_type": "in_game_relay",
+                "objective": "boat_defense_setup",
+                "proposed_at": "2026-06-09T01:00:00",
+                "prompt_text": "Please add boat defenses.",
+            }
+        ]),
+    ):
+        elixir_agent.analyze_arena_relay_screenshot(
+            "Shared Clash Royale screenshot image(s).",
+            author_name="Jamie",
+            channel_name="#arena-relay",
+            memory_context={},
+            image_blocks=[image_block],
+        )
+
+    user_msg = mock_chat.call_args.args[1]
+    assert user_msg[0]["type"] == "text"
+    assert "screenshot evidence" in user_msg[0]["text"]
+    assert "Training Day 1" in user_msg[0]["text"]
+    assert "boat_defense_setup" in user_msg[0]["text"]
+    assert user_msg[1] == image_block
+    assert mock_chat.call_args.kwargs["workflow"] == "arena_relay_observation"
+
+
 def _mock_anthropic_response(text="ok", input_tokens=10, output_tokens=20):
     """Build a mock Anthropic Messages response."""
     return SimpleNamespace(

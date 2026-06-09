@@ -107,6 +107,7 @@ _WORKFLOW_SPECS = (
         max_tool_rounds=3,
     ),
     WorkflowSpec("deck_review", response_schema=_CHANNEL_SCHEMA, tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=10),
+    WorkflowSpec("arena_relay_observation", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=4),
     WorkflowSpec("intel_report", response_schema=_CHANNEL_SCHEMA, tools=INTEL_REPORT_TOOLS, max_tool_rounds=15, model_family="chat"),
     WorkflowSpec("tournament_recap", response_schema={"required": ["content"]}, tools=TOURNAMENT_RECAP_TOOLS, max_tool_rounds=8, model_family="chat"),
     WorkflowSpec("tournament_update", response_schema=_CHANNEL_SCHEMA, tools=TOURNAMENT_UPDATE_TOOLS, max_tool_rounds=4),

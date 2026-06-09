@@ -430,6 +430,67 @@ def test_arena_relay_reply_records_action_note():
     mock_process.assert_not_awaited()
 
 
+def test_arena_relay_leader_screenshot_is_observed():
+    attachment = SimpleNamespace(
+        filename="boat-defense.jpg",
+        content_type="image/jpeg",
+        size=9,
+        read=AsyncMock(return_value=b"boatstate"),
+    )
+    message = _make_message(
+        1513758211206025227,
+        "arena-relay",
+        "",
+        roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
+        attachments=[attachment],
+    )
+    message.reply = AsyncMock(return_value=SimpleNamespace(id=990))
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1513758211206025227,
+            "name": "#arena-relay",
+            "subagent": "arena-relay",
+            "workflow": "channel_update",
+            "reply_policy": "disabled",
+            "memory_scope": "leadership",
+        }),
+        patch("runtime.channel_router.db.upsert_discord_user"),
+        patch("runtime.channel_router.db.build_memory_context", return_value={}),
+        patch("runtime.channel_router.db.save_message", return_value=111) as mock_save,
+        patch(
+            "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
+            return_value={
+                "event_type": "arena_relay_screenshot_observation",
+                "summary": "Boat defenses still have visible open slots.",
+                "content": "**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3.",
+            },
+        ) as mock_analyze,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    attachment.read.assert_awaited_once()
+    question = mock_analyze.call_args.args[0]
+    kwargs = mock_analyze.call_args.kwargs
+    assert "Shared Clash Royale screenshot image" in question
+    assert "boat-defense.jpg" in question
+    assert kwargs["channel_name"] == "#arena-relay"
+    assert kwargs["image_blocks"][0]["source"]["media_type"] == "image/jpeg"
+    assert kwargs["image_blocks"][0]["source"]["data"] == "Ym9hdHN0YXRl"
+    event_types = [call.kwargs.get("event_type") for call in mock_save.call_args_list]
+    assert event_types == [
+        "arena_relay_screenshot_observation_input",
+        "arena_relay_screenshot_observation",
+    ]
+    message.reply.assert_awaited_once_with("**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3.")
+    mock_process.assert_not_awaited()
+
+
 def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
     payload = SimpleNamespace(
         channel_id=1482368505058955467,
