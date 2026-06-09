@@ -369,7 +369,12 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     # Inject prior conversation turns if provided
     if conversation_history:
         for turn in conversation_history:
-            messages.append({"role": turn["role"], "content": turn["content"]})
+            content = turn.get("content")
+            if isinstance(content, str) and not content.strip():
+                continue
+            if content is None:
+                continue
+            messages.append({"role": turn["role"], "content": content})
     messages.append({"role": "user", "content": user_message})
 
     if allowed_tools is None:

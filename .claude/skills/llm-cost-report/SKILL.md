@@ -7,7 +7,7 @@ description: Analyze the llm_calls table in elixir.db to break down Elixir's LLM
 
 Read `/Users/jamie/Projects/elixir-bot/elixir.db` (table `llm_calls`), compute real spend using correct Sonnet 4.6 and Haiku 4.5 pricing, and hand the user a short prioritized report: where the money goes, whether caching is paying off, daily trend, anomalies, and concrete next levers. Pairs with `log-triage` ("is the bot alive?") and `awareness-report` ("is the bot making good calls?") — this one answers "where is the money going?"
 
-Budget context: the user's target is **$15/month (~$0.50/day)**. Report current spend against that bar.
+Budget context: the user's target is **$20/month (~$0.67/day)**. Report current spend against that bar.
 
 ## Scope
 
@@ -166,7 +166,7 @@ Compact report, top-down by priority. Keep the whole thing under ~40 lines.
 ```
 ## LLM Cost Report — <window>
 
-**Summary:** $X.XX over N days ≈ $YY/month (target $15/mo). Top driver: `<workflow>` at $Z.ZZ (W%).
+**Summary:** $X.XX over N days ≈ $YY/month (target $20/mo). Top driver: `<workflow>` at $Z.ZZ (W%).
 
 ### Cost by workflow (top 10 by cost)
 | Workflow | Model | Calls | Cost | % | r/w |

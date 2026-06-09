@@ -963,6 +963,47 @@ def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
     assert result["content"] == "We are in war day."
 
 
+def test_chat_with_tools_skips_blank_conversation_history():
+    message = SimpleNamespace(
+        role="assistant",
+        content=json.dumps(
+            {
+                "event_type": "channel_response",
+                "summary": "ok",
+                "content": "Still working.",
+            }
+        ),
+        tool_calls=None,
+    )
+    captured_messages = []
+
+    def fake_create_chat_completion(**kwargs):
+        captured_messages.append([dict(m) for m in kwargs["messages"]])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    with patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion):
+        result = elixir_agent._chat_with_tools(
+            "system",
+            "current question",
+            conversation_history=[
+                {"role": "user", "content": ""},
+                {"role": "assistant", "content": "   "},
+                {"role": "user", "content": "real prior question"},
+            ],
+            workflow="interactive",
+            allowed_tools=[],
+            response_schema=elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["interactive"],
+            strict_json=True,
+        )
+
+    assert result["content"] == "Still working."
+    assert captured_messages == [[
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "real prior question"},
+        {"role": "user", "content": "current question"},
+    ]]
+
+
 def test_chat_with_tools_returns_error_payload_for_invalid_final_json():
     bad_message = SimpleNamespace(role="assistant", content='{"event_type":"channel_response"', tool_calls=None)
     repair_message = SimpleNamespace(role="assistant", content='{"event_type":"channel_response"', tool_calls=None)
