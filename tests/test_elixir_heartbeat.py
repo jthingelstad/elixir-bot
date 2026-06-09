@@ -1060,8 +1060,22 @@ def test_plan_signal_outcomes_routes_durable_milestone_to_player_progress():
         "rarity": "legendary",
     }])
 
-    assert len(outcomes) == 1
-    assert outcomes[0]["target_channel_key"] == "player-progress"
+    channels = [outcome["target_channel_key"] for outcome in outcomes]
+    assert channels == ["player-progress", "arena-relay"]
+    assert outcomes[0]["required"] is True
+    assert outcomes[1]["intent"] == "celebration_relay"
+    assert outcomes[1]["required"] is False
+
+
+def test_plan_signal_outcomes_routes_join_anniversary_to_arena_relay_sidecar():
+    outcomes = plan_signal_outcomes([{
+        "type": "join_anniversary",
+        "members": [{"tag": "#ABC", "name": "King Levy", "tenure_days": 365}],
+    }])
+
+    channels = [outcome["target_channel_key"] for outcome in outcomes]
+    assert channels == ["clan-events", "arena-relay"]
+    assert outcomes[1]["intent"] == "celebration_relay"
 
 
 def test_plan_signal_outcomes_splits_mixed_durable_and_battle_mode_batch():
@@ -1205,6 +1219,26 @@ def test_leader_action_card_uses_categorical_action_icon():
 
     assert card.startswith("**R22 👋 war nudge recommendation**")
     assert "✅ done  ❌ decline" in card
+
+
+def test_arena_relay_result_builds_copyable_celebration_card():
+    from runtime.signals.delivery import _build_arena_relay_result
+
+    result = _build_arena_relay_result([{
+        "type": "career_wins_milestone",
+        "tag": "#ABC",
+        "name": "King Levy",
+        "milestone": 5000,
+    }])
+
+    assert result["event_type"] == "celebration_relay"
+    assert result["metadata"]["action_type"] == "celebration_relay"
+    assert result["metadata"]["objective"] == "player_celebration"
+    assert result["content"][0].startswith("**R? 🎉 celebration relay**")
+    assert result["content"][1] == (
+        "Big milestone: King Levy just reached 5,000 lifetime wins. "
+        "Drop a congrats when you see them."
+    )
 
 
 def test_clan_awareness_tick_does_not_mark_system_signal_sent_before_success():
