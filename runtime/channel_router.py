@@ -27,6 +27,18 @@ def _attachment_media_type(attachment) -> str | None:
     return (guessed or "").lower() or None
 
 
+def _sniff_image_media_type(data: bytes, fallback: str | None = None) -> str | None:
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return fallback
+
+
 def _image_attachments(message) -> list:
     images = []
     for attachment in getattr(message, "attachments", []) or []:
@@ -116,11 +128,28 @@ async def _collect_screenshot_image_blocks(message) -> list[dict]:
                 len(data),
             )
             continue
+        sniffed_media_type = _sniff_image_media_type(data, media_type)
+        if sniffed_media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
+            _log.info(
+                "screenshot_attachment_skipped_unknown_type message_id=%s filename=%r media_type=%r",
+                getattr(message, "id", None),
+                getattr(attachment, "filename", None),
+                sniffed_media_type,
+            )
+            continue
+        if sniffed_media_type != media_type:
+            _log.info(
+                "screenshot_attachment_media_type_corrected message_id=%s filename=%r declared=%r sniffed=%r",
+                getattr(message, "id", None),
+                getattr(attachment, "filename", None),
+                media_type,
+                sniffed_media_type,
+            )
         blocks.append({
             "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": media_type,
+                "media_type": sniffed_media_type,
                 "data": base64.b64encode(data).decode("ascii"),
             },
         })

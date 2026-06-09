@@ -216,6 +216,57 @@ def test_on_message_routes_ask_elixir_image_only_screenshot():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_corrects_mislabeled_screenshot_media_type():
+    attachment = SimpleNamespace(
+        filename="clan-chat.png",
+        content_type="image/jpeg",
+        size=16,
+        read=AsyncMock(return_value=b"\x89PNG\r\n\x1a\nfakepng"),
+    )
+    message = _make_message(
+        1482368505058955467,
+        "ask-elixir",
+        "",
+        attachments=[attachment],
+    )
+    message.reply = AsyncMock(return_value=SimpleNamespace(id=988))
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1482368505058955467,
+            "name": "#ask-elixir",
+            "subagent": "ask-elixir",
+            "workflow": "interactive",
+            "reply_policy": "open_channel",
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={}),
+        patch("elixir.db.save_message"),
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "agent.intent_router.classify_intent",
+            return_value={"route": "llm_chat", "confidence": 0.75, "rationale": "screenshot question"},
+        ),
+        patch(
+            "elixir.elixir_agent.respond_in_channel",
+            return_value={"event_type": "channel_response", "content": "I can read this clan chat screenshot.", "summary": "screenshot"},
+        ) as mock_respond,
+        patch("elixir._share_channel_result", new=AsyncMock()),
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    kwargs = mock_respond.call_args.kwargs
+    assert kwargs["image_blocks"][0]["source"]["media_type"] == "image/png"
+    mock_process.assert_not_awaited()
+
+
 def test_on_message_passes_screenshot_to_deck_review():
     attachment = SimpleNamespace(
         filename="deck.png",
@@ -488,6 +539,63 @@ def test_arena_relay_leader_screenshot_is_observed():
         "arena_relay_screenshot_observation",
     ]
     message.reply.assert_awaited_once_with("**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3.")
+    mock_process.assert_not_awaited()
+
+
+def test_arena_relay_leader_multi_screenshot_corrects_media_types():
+    attachments = [
+        SimpleNamespace(
+            filename=f"IMG_333{idx}.png",
+            content_type="image/jpeg",
+            size=16,
+            read=AsyncMock(return_value=b"\x89PNG\r\n\x1a\nfakepng"),
+        )
+        for idx in range(3)
+    ]
+    message = _make_message(
+        1513758211206025227,
+        "arena-relay",
+        "",
+        roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
+        attachments=attachments,
+    )
+    message.reply = AsyncMock(return_value=SimpleNamespace(id=990))
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1513758211206025227,
+            "name": "#arena-relay",
+            "subagent": "arena-relay",
+            "workflow": "channel_update",
+            "reply_policy": "disabled",
+            "memory_scope": "leadership",
+        }),
+        patch("runtime.channel_router.db.upsert_discord_user"),
+        patch("runtime.channel_router.db.build_memory_context", return_value={}),
+        patch("runtime.channel_router.db.save_message", return_value=111),
+        patch(
+            "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
+            return_value={
+                "event_type": "arena_relay_screenshot_observation",
+                "summary": "Read multiple screenshots.",
+                "content": "**👁️ Screenshot Read**\nI read all three.",
+            },
+        ) as mock_analyze,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    kwargs = mock_analyze.call_args.kwargs
+    assert len(kwargs["image_blocks"]) == 3
+    assert [block["source"]["media_type"] for block in kwargs["image_blocks"]] == [
+        "image/png",
+        "image/png",
+        "image/png",
+    ]
     mock_process.assert_not_awaited()
 
 
