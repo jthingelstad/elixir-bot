@@ -3,13 +3,128 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
+import mimetypes
 
 import cr_api
 import db
 import elixir_agent
 
 _log = logging.getLogger("elixir.channel_router")
+
+SUPPORTED_IMAGE_MEDIA_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+MAX_SCREENSHOT_ATTACHMENTS = 3
+MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024
+
+
+def _attachment_media_type(attachment) -> str | None:
+    media_type = (getattr(attachment, "content_type", None) or "").split(";", 1)[0].strip().lower()
+    if media_type:
+        return media_type
+    filename = getattr(attachment, "filename", "") or ""
+    guessed, _ = mimetypes.guess_type(filename)
+    return (guessed or "").lower() or None
+
+
+def _image_attachments(message) -> list:
+    images = []
+    for attachment in getattr(message, "attachments", []) or []:
+        media_type = _attachment_media_type(attachment)
+        if media_type in SUPPORTED_IMAGE_MEDIA_TYPES:
+            images.append(attachment)
+    return images
+
+
+def _attachment_summary(attachments) -> str:
+    parts = []
+    for idx, attachment in enumerate(attachments[:MAX_SCREENSHOT_ATTACHMENTS], start=1):
+        filename = getattr(attachment, "filename", None) or f"image-{idx}"
+        media_type = _attachment_media_type(attachment) or "image"
+        size = getattr(attachment, "size", None)
+        size_text = f", {int(size):,} bytes" if isinstance(size, int) else ""
+        parts.append(f"{idx}. {filename} ({media_type}{size_text})")
+    if len(attachments) > MAX_SCREENSHOT_ATTACHMENTS:
+        parts.append(f"... {len(attachments) - MAX_SCREENSHOT_ATTACHMENTS} more image attachment(s) not inspected")
+    return "\n".join(parts)
+
+
+def _question_with_attachment_context(raw_question: str, image_attachments: list) -> str:
+    question = (raw_question or "").strip()
+    if not image_attachments:
+        return question
+    summary = _attachment_summary(image_attachments)
+    attachment_text = (
+        "Attached Clash Royale screenshot image(s):\n"
+        f"{summary}\n"
+        "Inspect the visible in-game UI before answering. If something is too small, cropped, or unclear, say what you can and cannot read."
+    )
+    if question:
+        return f"{question}\n\n{attachment_text}"
+    return (
+        "Shared Clash Royale screenshot image(s).\n\n"
+        f"{attachment_text}\n"
+        "Respond to the screenshot directly and explain what you notice."
+    )
+
+
+def _question_with_unreadable_attachment_context(raw_question: str, image_attachments: list) -> str:
+    question = (raw_question or "").strip()
+    summary = _attachment_summary(image_attachments)
+    attachment_text = (
+        "Attached Clash Royale screenshot image(s) were present, but Elixir could not read the image bytes:\n"
+        f"{summary}\n"
+        "Do not guess what is in the screenshot. Ask the member to resend it or add a short description."
+    )
+    if question:
+        return f"{question}\n\n{attachment_text}"
+    return attachment_text
+
+
+async def _collect_screenshot_image_blocks(message) -> list[dict]:
+    blocks = []
+    for attachment in _image_attachments(message)[:MAX_SCREENSHOT_ATTACHMENTS]:
+        media_type = _attachment_media_type(attachment)
+        if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
+            continue
+        size = getattr(attachment, "size", None)
+        if isinstance(size, int) and size > MAX_SCREENSHOT_BYTES:
+            _log.info(
+                "screenshot_attachment_skipped_too_large message_id=%s filename=%r size=%s",
+                getattr(message, "id", None),
+                getattr(attachment, "filename", None),
+                size,
+            )
+            continue
+        try:
+            data = await attachment.read()
+        except Exception:
+            _log.warning(
+                "screenshot_attachment_read_failed message_id=%s filename=%r",
+                getattr(message, "id", None),
+                getattr(attachment, "filename", None),
+                exc_info=True,
+            )
+            continue
+        if not data:
+            continue
+        if len(data) > MAX_SCREENSHOT_BYTES:
+            _log.info(
+                "screenshot_attachment_skipped_too_large_after_read message_id=%s filename=%r size=%s",
+                getattr(message, "id", None),
+                getattr(attachment, "filename", None),
+                len(data),
+            )
+            continue
+        blocks.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": base64.b64encode(data).decode("ascii"),
+            },
+        })
+    return blocks
 
 
 def _persist_inline_memories(memories, channel_id, workflow):
@@ -321,6 +436,7 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
                 target_member_name=target_name,
                 conversation_history=conversation_history,
                 memory_context=memory_context,
+                image_blocks=ctx.get("image_blocks"),
             )
 
             failure = _classify_agent_result(result)
@@ -578,13 +694,17 @@ async def route_message(message):
     allows_open_channel_reply = reply_policy == "open_channel"
     scope = app._channel_scope(message.channel)
     conversation_scope = app._channel_conversation_scope(message.channel, message.author.id)
-    raw_question = app._strip_bot_mentions(message.content).strip() if mentioned else message.content.strip()
+    stripped_content = app._strip_bot_mentions(message.content).strip() if mentioned else message.content.strip()
+    image_attachments = _image_attachments(message)
+    raw_question = _question_with_attachment_context(stripped_content, image_attachments)
 
     ctx = {
         "mentioned": mentioned,
         "subagent": subagent,
         "workflow": workflow,
         "raw_question": raw_question,
+        "text_question": stripped_content,
+        "image_blocks": [],
         "conversation_scope": conversation_scope,
         "allows_open_channel_reply": allows_open_channel_reply,
     }
@@ -596,6 +716,11 @@ async def route_message(message):
     # replies, skip routing entirely. Avoids wasting an LLM router call on
     # human-to-human chatter.
     bot_should_consider = mentioned or allows_open_channel_reply or workflow == "reception"
+    if bot_should_consider and image_attachments and workflow in {"interactive", "clanops"}:
+        ctx["image_blocks"] = await _collect_screenshot_image_blocks(message)
+        if not ctx["image_blocks"]:
+            ctx["raw_question"] = _question_with_unreadable_attachment_context(stripped_content, image_attachments)
+    raw_question = ctx["raw_question"]
 
     # LLM intent classifier — only for interactive/clanops where the bot was
     # addressed. Reception has its own onboarding pipeline below.
@@ -786,6 +911,7 @@ async def route_message(message):
                     war_data=war,
                     conversation_history=conversation_history,
                     memory_context=memory_context,
+                    image_blocks=ctx.get("image_blocks"),
                 )
                 failure = _classify_agent_result(result)
                 if failure:
