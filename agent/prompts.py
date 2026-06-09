@@ -458,6 +458,12 @@ def _arena_relay_observation_system(channel_name: str):
         "If it shows clan chat, identify useful social/context signals without turning one message into a personality verdict.\n\n"
         "If it shows a deck or collection screen, extract visible player-state details: deck cards, average elixir, card levels, maxed/evo/hero indicators, upgrade progress counts, tower troop or king tower state, collection level, gold, gems, and pass/reward progress. "
         "Frame these as screenshot-observed facts. Only infer a leadership implication when it is clear and useful.\n\n"
+        "When the screenshot reveals a durable fact leaders should remember later, include a `memories` array. "
+        "Save only clear, useful facts: member availability, stated absence/return timing, promotion or role-change evidence, recurring chat context, completed/blocked action evidence, or stable player-state observations that may affect future advice. "
+        "Do not save temporary UI counts like current open boat-defense slots unless they explain an action outcome or a short-lived operational blocker. "
+        "Each memory entry must be: {\"title\": \"short label\", \"body\": \"screenshot-observed fact with timestamp/context\", \"action\": \"save\" or \"correct\", \"member_tag\": \"player tag, visible player name, or null\", \"confidence\": 0.6-0.95, \"tags\": [\"screenshot\", \"availability\"]}. "
+        "Use `member_tag` when the fact is about one visible/resolvable member, otherwise null. "
+        "If no durable facts should be saved, use an empty memories array.\n\n"
         "If a copy/paste in-game message would help, include one short line clearly labeled `Copy:` and keep it under 240 characters. "
         "Do not include check/cross reaction instructions; this is an observation readout, not an action card. "
         "Keep the whole response crisp enough for #arena-relay.\n\n"
@@ -466,7 +472,8 @@ def _arena_relay_observation_system(channel_name: str):
         "Respond with JSON only (no markdown wrapper):\n"
         '{"event_type": "arena_relay_screenshot_observation", '
         '"summary": "one sentence observation summary", '
-        '"content": "Discord-ready concise readout"}'
+        '"content": "Discord-ready concise readout", '
+        '"memories": []}'
     )
     return _build_system_prompt(purpose, knowledge, channel_context, guidance)
 
