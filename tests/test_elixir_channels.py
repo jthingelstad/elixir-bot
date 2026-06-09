@@ -2321,6 +2321,18 @@ def test_build_status_report_omits_job_schedule_section():
                 "signal_date": "2026-03-08",
             },
             "current_season_id": 130,
+            "llm_cost_7d": {
+                "calls": 12,
+                "failures": 1,
+                "cost_usd": 3.5,
+            },
+            "awareness_7d": {
+                "ticks": 20,
+                "signals_in": 8,
+                "posts_delivered": 6,
+                "failed_ticks": 0,
+                "fallback_failed": 0,
+            },
             "contextual_memory": {
                 "sqlite_vec_enabled": True,
                 "latest_memory_at": "2026-03-08T10:20:00",
@@ -2347,6 +2359,8 @@ def test_build_status_report_omits_job_schedule_section():
     assert "Current war season id: 130" in report
     assert "Member role auto-grant: Manage Roles permission missing" in report
     assert "🧠 Context memory: 7 total (3 leader / 2 inference / 2 system)" in report
+    assert "💸 Claude spend: 7d $3.50 across 12 call(s), projected $15.00/mo; failures 1" in report
+    assert "👁️ Awareness 7d: 20 tick(s), 8 signal(s), 6 post(s), failed ticks 0, fallback failures 0" in report
 
 
 def test_on_message_handles_interactive_help_directly():

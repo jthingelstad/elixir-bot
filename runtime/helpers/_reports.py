@@ -112,7 +112,11 @@ def _build_status_report():
     cr_env_badge = "🟢" if runtime["env"]["has_cr_api_key"] else "🔴"
     schema_display = data.get("schema_display") or f"v{data.get('schema_version')}"
     memory = data.get("contextual_memory") or {}
+    llm_cost = data.get("llm_cost_7d") or {}
+    awareness = data.get("awareness_7d") or {}
     vec_badge = "🟢" if memory.get("sqlite_vec_enabled") else "🟡"
+    llm_cost_7d = float(llm_cost.get("cost_usd") or 0)
+    llm_monthly = llm_cost_7d / 7 * 30 if llm_cost_7d else 0
     lines = [
         "**Elixir Status**",
         f"🏷️ Release: `{elixir_agent.RELEASE_LABEL}`",
@@ -127,6 +131,8 @@ def _build_status_report():
         f"🧠 Context memory: {memory.get('total', 0)} total ({memory.get('leader_notes', 0)} leader / {memory.get('inferences', 0)} inference / {memory.get('system_notes', 0)} system) | latest {_fmt_relative(memory.get('latest_memory_at'))} | vec {vec_badge}",
         f"{_status_badge(api.get('last_ok'))} CR API: last {(api.get('last_endpoint') or 'n/a')} ({api.get('last_entity_key') or '-'}) {_fmt_relative(api.get('last_call_at'))}; status {api.get('last_status_code') or 'n/a'}; {'ok' if api.get('last_ok') else 'error' if api.get('last_ok') is not None else 'n/a'}; {api.get('last_duration_ms') or 'n/a'}ms; total {api.get('call_count', 0)} calls / {api.get('error_count', 0)} errors / {api.get('consecutive_error_count', 0)} consecutive failures",
         f"{_status_badge(llm.get('last_ok'))} Claude: last {(llm.get('last_workflow') or 'n/a')} via {(llm.get('last_model') or 'n/a')} {_fmt_relative(llm.get('last_call_at'))}; {'ok' if llm.get('last_ok') else 'error' if llm.get('last_ok') is not None else 'n/a'}; {llm.get('last_duration_ms') or 'n/a'}ms; tokens p/c/t {llm.get('last_prompt_tokens') or 'n/a'}/{llm.get('last_completion_tokens') or 'n/a'}/{llm.get('last_total_tokens') or 'n/a'}; cache w/r {llm.get('last_cache_creation_tokens') or 'n/a'}/{llm.get('last_cache_read_tokens') or 'n/a'}; total {llm.get('call_count', 0)} calls / {llm.get('error_count', 0)} errors",
+        f"💸 Claude spend: 7d ${llm_cost_7d:.2f} across {llm_cost.get('calls', 0)} call(s), projected ${llm_monthly:.2f}/mo; failures {llm_cost.get('failures', 0)}",
+        f"👁️ Awareness 7d: {awareness.get('ticks', 0)} tick(s), {awareness.get('signals_in', 0)} signal(s), {awareness.get('posts_delivered', 0)} post(s), failed ticks {awareness.get('failed_ticks', 0)}, fallback failures {awareness.get('fallback_failed', 0)}",
         f"🔐 Env: Discord {discord_badge}, Claude {claude_env_badge}, CR {cr_env_badge}",
     ]
     role_status = _runtime_app()._member_role_grant_status()
