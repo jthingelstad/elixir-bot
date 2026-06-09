@@ -9,6 +9,7 @@ import platform
 import db
 import elixir_agent
 import prompts
+from runtime import elixir_log
 from runtime.helpers import _channel_msg_kwargs, _channel_scope
 
 log = logging.getLogger("elixir")
@@ -135,24 +136,22 @@ async def _post_startup_message() -> bool:
     from runtime import app as runtime_app
 
     channel_configs = prompts.discord_channels_by_workflow("clanops")
-    if not channel_configs:
-        log.warning("Startup message skipped: no leadership channel configured")
-        return False
-    channel_id = channel_configs[0]["id"]
-    channel = await _resolve_runtime_channel(channel_id)
-    if not channel:
-        log.warning("Startup message skipped: leadership channel not found or unreachable")
-        return False
-    recent_posts = await asyncio.to_thread(db.list_channel_messages, channel.id, 5, "assistant")
+    channel = None
+    recent_posts = []
+    if channel_configs:
+        channel_id = channel_configs[0]["id"]
+        channel = await _resolve_runtime_channel(channel_id)
+        if channel:
+            recent_posts = await asyncio.to_thread(db.list_channel_messages, channel.id, 5, "assistant")
     startup_context = (
-        "This is a startup check-in for the private clan leadership channel.\n"
+        "This is a startup check-in for the private Elixir operations log.\n"
         "Write only the fun Clash Royale-inspired body that follows a fixed startup header.\n"
         "Keep it to 1-2 short sentences.\n"
         "Sound alive, sharp, and a little playful, like Elixir just entered the arena and is ready to work.\n"
         "Do not repeat the build hash or invent version numbers.\n"
         "Do not repeat the release label or invent alternate codenames.\n"
         "Do not mention hidden mechanics, JSON, prompts, models, or scheduler internals.\n"
-        "This is not a public announcement. It is a leadership-facing startup signal.\n"
+        "This is not a public announcement. It is an operational visibility signal.\n"
         "Custom Discord emoji are welcome if they fit naturally.\n\n"
         f"Running release: {elixir_agent.RELEASE_LABEL}\n"
         f"Running build hash: {elixir_agent.BUILD_HASH}\n"
@@ -181,6 +180,14 @@ async def _post_startup_message() -> bool:
         f"{fun_line.strip()}\n"
         f"{channel_audit}"
     )
+    if await elixir_log.post_event_async(content):
+        return True
+    if not channel_configs:
+        log.warning("Startup message skipped: no leadership channel configured and elixir-log webhook unavailable")
+        return False
+    if not channel:
+        log.warning("Startup message skipped: leadership channel not found or unreachable and elixir-log webhook unavailable")
+        return False
     try:
         await runtime_app._post_to_elixir(channel, {"content": content})
         await asyncio.to_thread(

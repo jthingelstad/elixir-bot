@@ -94,6 +94,7 @@ Create a `.env` file with the required secrets:
 DISCORD_TOKEN=your_discord_bot_token
 CLAUDE_API_KEY=your_anthropic_api_key
 CR_API_KEY=your_clash_royale_api_key
+ELIXIR_LOG_WEBHOOK_URL=optional_discord_webhook_url_for_elixir_log
 ```
 
 Start the bot locally:
@@ -226,7 +227,7 @@ No-change publishes stay quiet.
 
 ## Admin and Operations
 
-Elixir's operator surface now lives entirely in Discord `#leader-lounge`.
+Elixir's operator commands live in Discord `#leader-lounge`; routine runtime notices go to `#elixir-log` when `ELIXIR_LOG_WEBHOOK_URL` is configured.
 
 Use slash commands under `/elixir ...`.
 

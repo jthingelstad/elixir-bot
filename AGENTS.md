@@ -261,7 +261,7 @@ One-time capability or upgrade announcements should use the queued `system_signa
   - `payload` fields the channel-update workflow can talk about, including `audience` when the update is meant for the clan
 - Startup queues these signals idempotently via `queue_startup_system_signals()`
 - Clan-awareness surfaces pending signals through the normal channel-update routing flow and marks them announced after a successful post
-- Elixir also posts a separate startup check-in to the leadership workflow with the running build hash and a short Clash Royale-flavored line
+- Elixir also posts a separate startup check-in to the #elixir-log webhook with the running build hash and a short Clash Royale-flavored line
 
 This keeps feature announcements discoverable: future changes should usually mean “edit one list” instead of remembering startup-hook details.
 
