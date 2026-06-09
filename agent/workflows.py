@@ -81,6 +81,13 @@ def _mentions_war(text):
     return any(pat.search(text) for pat in _WAR_MENTION_PATTERNS)
 
 
+def _with_image_blocks(text: str, image_blocks=None):
+    blocks = list(image_blocks or [])
+    if not blocks:
+        return text
+    return [{"type": "text", "text": text}, *blocks]
+
+
 _LIGHTWEIGHT_ASK_ELIXIR_PATTERNS = tuple(re.compile(pat, re.IGNORECASE) for pat in (
     r"\bthanks?\b",
     r"\bthank you\b",
@@ -461,7 +468,8 @@ def _validate_war_deck_suggestion(result):
 
 def respond_in_deck_review(question, author_name, channel_name, *, mode, subject,
                            target_member_tag=None, target_member_name=None,
-                           conversation_history=None, memory_context=None):
+                           conversation_history=None, memory_context=None,
+                           image_blocks=None):
     """Run the dedicated deck_review workflow.
 
     mode: 'regular' or 'war'
@@ -480,7 +488,9 @@ def respond_in_deck_review(question, author_name, channel_name, *, mode, subject
     base_user_msg = (
         f"Latest deck-{subject} request from '{author_name}' in {channel_name} "
         f"(mode={mode}, subject={subject}): {question}{target_line}\n\n"
-        "Follow the deck-review workflow guidance precisely. Ground every claim in tool calls."
+        "Follow the deck-review workflow guidance precisely. Ground every recommendation in tool calls. "
+        "If screenshot images are attached, first identify the visible cards/UI from the image, say when any detail is unclear, "
+        "and then use tools for player collection, recent losses, and card facts that cannot be trusted from vision alone."
     )
 
     # For war review/suggest, pre-fetch reconstruction so the LLM sees the
@@ -634,7 +644,7 @@ def respond_in_deck_review(question, author_name, channel_name, *, mode, subject
     validate = mode == "war" and subject == "suggest"
     max_attempts = 3 if validate else 1
     history = list(conversation_history or [])
-    user_msg = base_user_msg
+    user_msg = _with_image_blocks(base_user_msg, image_blocks)
     last_result = None
     for attempt in range(max_attempts):
         result = _chat_with_tools(
@@ -722,7 +732,7 @@ def respond_to_help_request(question, *, author_name, channel_name, role,
 
 
 def respond_in_channel(question, author_name, channel_name, workflow, clan_data, war_data,
-                       conversation_history=None, memory_context=None):
+                       conversation_history=None, memory_context=None, image_blocks=None):
     """Channel Q&A for interactive/clanops workflows."""
     if workflow not in {"interactive", "clanops"}:
         raise ValueError(f"unsupported channel workflow: {workflow}")
@@ -760,6 +770,15 @@ def respond_in_channel(question, author_name, channel_name, workflow, clan_data,
         if war_ctx:
             user_msg += f"\n\n{war_ctx}"
     user_msg += _format_memory_context(memory_context)
+    if image_blocks:
+        user_msg += (
+            "\n\n=== SCREENSHOT INPUT ===\n"
+            "One or more Clash Royale screenshots are attached to this message. Inspect the visible UI directly. "
+            "They may show decks, battle logs, leaderboards, store offers, profiles, collections, rewards, clan chat, or war screens. "
+            "Answer the user's question from what is visible, say when text or details are unclear, and use tools only for "
+            "structured clan/player context or card facts that would improve the answer."
+        )
+    user_msg = _with_image_blocks(user_msg, image_blocks)
     system_prompt = (
         _interactive_system(channel_name)
         if workflow == "interactive"

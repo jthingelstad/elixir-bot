@@ -36,7 +36,7 @@ class _DummyChannel:
         return _TypingContext()
 
 
-def _make_message(channel_id, channel_name, content, *, mentions=None, roles=None):
+def _make_message(channel_id, channel_name, content, *, mentions=None, roles=None, attachments=None):
     author = SimpleNamespace(
         bot=False,
         id=123,
@@ -49,6 +49,7 @@ def _make_message(channel_id, channel_name, content, *, mentions=None, roles=Non
         author=author,
         channel=_DummyChannel(channel_id, channel_name),
         content=content,
+        attachments=attachments or [],
         mentions=mentions or [],
         role_mentions=[],
         id=555,
@@ -146,6 +147,137 @@ def test_on_message_routes_ask_elixir_without_mention():
     assistant_save = [call for call in mock_save.call_args_list if call.args[1] == "assistant"][0]
     assert assistant_save.kwargs["discord_message_id"] == "987"
     mock_share.assert_awaited_once()
+    mock_process.assert_not_awaited()
+
+
+def test_on_message_routes_ask_elixir_image_only_screenshot():
+    attachment = SimpleNamespace(
+        filename="clan-chat.jpg",
+        content_type="image/jpeg",
+        size=9,
+        read=AsyncMock(return_value=b"fakeimage"),
+    )
+    message = _make_message(
+        1482368505058955467,
+        "ask-elixir",
+        "",
+        attachments=[attachment],
+    )
+    sent_message = SimpleNamespace(id=988)
+    message.reply = AsyncMock(return_value=sent_message)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1482368505058955467,
+            "name": "#ask-elixir",
+            "subagent": "ask-elixir",
+            "workflow": "interactive",
+            "reply_policy": "open_channel",
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={}),
+        patch("elixir.db.save_message") as mock_save,
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "agent.intent_router.classify_intent",
+            return_value={"route": "llm_chat", "confidence": 0.75, "rationale": "screenshot question"},
+        ),
+        patch(
+            "elixir.elixir_agent.respond_in_channel",
+            return_value={"event_type": "channel_response", "content": "I can read this clan chat screenshot.", "summary": "screenshot"},
+        ) as mock_respond,
+        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    attachment.read.assert_awaited_once()
+    kwargs = mock_respond.call_args.kwargs
+    assert "Shared Clash Royale screenshot image" in kwargs["question"]
+    assert "clan-chat.jpg" in kwargs["question"]
+    assert kwargs["image_blocks"] == [{
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "data": "ZmFrZWltYWdl",
+        },
+    }]
+    user_save = [call for call in mock_save.call_args_list if call.args[1] == "user"][0]
+    assert "Shared Clash Royale screenshot image" in user_save.args[2]
+    message.reply.assert_awaited_once_with("I can read this clan chat screenshot.")
+    mock_share.assert_awaited_once()
+    mock_process.assert_not_awaited()
+
+
+def test_on_message_passes_screenshot_to_deck_review():
+    attachment = SimpleNamespace(
+        filename="deck.png",
+        content_type="image/png",
+        size=7,
+        read=AsyncMock(return_value=b"deckpic"),
+    )
+    message = _make_message(
+        1482368505058955467,
+        "ask-elixir",
+        "Can you review this deck?",
+        attachments=[attachment],
+    )
+    sent_message = SimpleNamespace(id=989)
+    message.reply = AsyncMock(return_value=sent_message)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1482368505058955467,
+            "name": "#ask-elixir",
+            "subagent": "ask-elixir",
+            "workflow": "interactive",
+            "reply_policy": "open_channel",
+            "memory_scope": "public",
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={}),
+        patch("elixir.db.save_message"),
+        patch("elixir._extract_member_deck_target", return_value="#ABC123"),
+        patch("elixir.db.get_member_profile", return_value={"current_name": "King Thing"}),
+        patch(
+            "agent.intent_router.classify_intent",
+            return_value={
+                "route": "deck_review",
+                "mode": "regular",
+                "target_member": "self",
+                "confidence": 0.92,
+                "rationale": "asking for deck review",
+            },
+        ),
+        patch(
+            "elixir.elixir_agent.respond_in_deck_review",
+            return_value={"event_type": "deck_review_response", "content": "This deck has a clear win condition.", "summary": "deck"},
+        ) as mock_review,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    attachment.read.assert_awaited_once()
+    kwargs = mock_review.call_args.kwargs
+    assert "Can you review this deck?" in kwargs["question"]
+    assert "deck.png" in kwargs["question"]
+    assert kwargs["target_member_tag"] == "#ABC123"
+    assert kwargs["image_blocks"][0]["source"]["media_type"] == "image/png"
+    assert kwargs["image_blocks"][0]["source"]["data"] == "ZGVja3BpYw=="
+    message.reply.assert_awaited_once_with("This deck has a clear win condition.")
     mock_process.assert_not_awaited()
 
 

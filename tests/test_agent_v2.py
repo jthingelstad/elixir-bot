@@ -763,6 +763,69 @@ def test_respond_in_channel_omits_war_context_for_non_war_question():
         assert "=== WAR DECKS TODAY ===" not in user_msg
 
 
+def test_respond_in_channel_passes_screenshot_blocks_to_chat():
+    image_block = {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "data": "ZmFrZQ==",
+        },
+    }
+    with (
+        patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "ok"}) as mock_chat,
+        patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
+    ):
+        elixir_agent.respond_in_channel(
+            question="What does this screenshot show?",
+            author_name="Jamie",
+            channel_name="#ask-elixir",
+            workflow="interactive",
+            clan_data={"memberList": []},
+            war_data={},
+            conversation_history=[],
+            memory_context={},
+            image_blocks=[image_block],
+        )
+
+    user_msg = mock_chat.call_args.args[1]
+    assert user_msg[0]["type"] == "text"
+    assert "SCREENSHOT INPUT" in user_msg[0]["text"]
+    assert user_msg[1] == image_block
+
+
+def test_respond_in_deck_review_passes_screenshot_blocks_to_chat():
+    image_block = {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": "ZGVjaw==",
+        },
+    }
+    with (
+        patch("elixir_agent._chat_with_tools", return_value={"event_type": "deck_review_response", "content": "ok"}) as mock_chat,
+        patch("agent.workflows.db.get_member_current_deck", return_value=None),
+        patch("agent.workflows.db.get_member_card_collection", return_value=None),
+    ):
+        elixir_agent.respond_in_deck_review(
+            question="Review this deck screenshot",
+            author_name="Jamie",
+            channel_name="#ask-elixir",
+            mode="regular",
+            subject="review",
+            target_member_tag="#ABC123",
+            conversation_history=[],
+            memory_context={},
+            image_blocks=[image_block],
+        )
+
+    user_msg = mock_chat.call_args.args[1]
+    assert user_msg[0]["type"] == "text"
+    assert "first identify the visible cards/UI" in user_msg[0]["text"]
+    assert user_msg[1] == image_block
+
+
 def _mock_anthropic_response(text="ok", input_tokens=10, output_tokens=20):
     """Build a mock Anthropic Messages response."""
     return SimpleNamespace(
