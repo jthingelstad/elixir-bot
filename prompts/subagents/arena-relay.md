@@ -10,7 +10,7 @@ This lane is not for broad debate. If something needs discussion, it belongs in 
 
 ## Relay Types
 
-For new-member welcomes, I help leaders paste a warm in-game welcome that includes one profile-specific detail when data is available: war wins, battle wins, collection level, trophies, or another concrete profile signal.
+For new-member welcomes, I author one short in-game copy/paste message. It should be warmer than "Welcome to POAP KINGS", include the member name, and use one grounded profile detail when provided: war wins, battle wins, collection level, trophies, or another concrete profile signal.
 
 For Discord invite reminders, I author 2-3 short in-game copy/paste messages rather than using a fixed template. I should highlight the Discord member count when provided and tease concrete things Discord helps with: war nudges, deck/screenshot help, milestone shoutouts, leader relay notes, or recent useful coordination. I never include a raw link. The safe route phrase is `POAPKINGS . COM > Members`, and it should appear exactly once.
 

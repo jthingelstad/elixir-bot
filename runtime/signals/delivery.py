@@ -168,36 +168,108 @@ def _profile_number(value) -> int | None:
     return value if isinstance(value, int) and value > 0 else None
 
 
-def _member_join_profile_detail(signal: dict) -> str:
+def _member_join_profile(signal: dict) -> dict:
     tag = signal.get("tag") or signal.get("player_tag")
-    profile = {}
     if tag:
         try:
-            profile = db.get_member_profile(tag) or {}
+            return db.get_member_profile(tag) or {}
         except Exception:
-            profile = {}
+            return {}
+    return {}
+
+
+def _member_join_profile_facts(signal: dict) -> list[str]:
+    profile = _member_join_profile(signal)
+    facts = []
+    tag = signal.get("tag") or signal.get("player_tag")
+    name = str(signal.get("name") or "").strip()
+    if name:
+        facts.append(f"- Name: {name}")
+    if tag:
+        facts.append(f"- Player tag: {tag}")
 
     war_wins = _profile_number(profile.get("cr_clan_war_wins"))
-    if war_wins and war_wins >= 50:
-        return f"I see {war_wins:,} clan war wins on your profile, so the river already knows you."
+    if war_wins:
+        facts.append(f"- Clan war wins: {war_wins:,}")
 
     battle_wins = _profile_number(profile.get("cr_battle_wins"))
-    if battle_wins and battle_wins >= 1000:
-        return f"Your profile shows {battle_wins:,} battle wins, which is a lot of reps."
+    if battle_wins:
+        facts.append(f"- Battle wins: {battle_wins:,}")
 
     collection_level = _profile_number(profile.get("cr_collection_level"))
     if collection_level:
-        return f"Collection Level {collection_level:,} gives you a deep card base to build from."
+        facts.append(f"- Collection Level: {collection_level:,}")
 
     trophies = _profile_number(profile.get("trophies") or profile.get("current_trophies"))
     if trophies:
-        return f"Joining at {trophies:,} trophies is a strong start."
+        facts.append(f"- Current trophies: {trophies:,}")
 
     best_trophies = _profile_number(profile.get("best_trophies"))
     if best_trophies:
-        return f"Best trophies {best_trophies:,} says you know how to climb."
+        facts.append(f"- Best trophies: {best_trophies:,}")
 
-    return "Glad to have you in the clan."
+    return facts
+
+
+def _member_join_welcome_context(base_context: str | None, signal: dict) -> str:
+    facts = _member_join_profile_facts(signal)
+    fact_block = "\n".join(facts) if facts else "- No profile facts available beyond the join signal."
+    instructions = (
+        "Arena-relay new-member welcome task:\n"
+        f"{fact_block}\n"
+        "- Author one short Clash Royale clan-chat welcome a leader can copy/paste.\n"
+        "- Include the member name exactly as provided when available.\n"
+        "- Make it warmer and more specific than a generic welcome by using one grounded profile fact when facts are available.\n"
+        "- Do not invent achievements, personality, role, Discord status, or future behavior.\n"
+        "- Do not include raw URLs, markdown links, Discord-only formatting, message numbers, or labels inside the copy/paste message.\n"
+        f"- Keep the copy/paste message under {ARENA_RELAY_MAX_COPY_CHARS} characters.\n"
+        "- Return `content` as a single string containing only the Clash Royale copy/paste message. The code will add the arena-relay action card.\n"
+    )
+    if base_context:
+        return f"{base_context}\n\n{instructions}"
+    return instructions
+
+
+def _build_generated_welcome_relay_result(signals: list[dict], generated: dict | None) -> dict | None:
+    primary = (signals or [{}])[0] or {}
+    name = str(primary.get("name") or "new member").strip() or "new member"
+    tag = primary.get("tag") or primary.get("player_tag")
+    copies = [_clip_relay_copy(item) for item in _result_content_items(generated)]
+    copies = [item for item in copies if item]
+    if not copies:
+        return None
+    copy = copies[0]
+    copy_lower = copy.lower()
+    if "http://" in copy_lower or "https://" in copy_lower:
+        return None
+    if name != "new member" and name.lower() not in copy_lower:
+        return None
+    reason = "A profile-specific welcome helps new members feel seen in the in-game chat."
+    card = (
+        "**R? 👋 welcome relay**\n"
+        "🎯 `new_member_welcome`\n"
+        "📋 Copy the next message into Clash Royale.\n"
+        f"🧠 {reason}\n\n"
+        "✅ done  ❌ decline  ↩️ reply with note"
+    )
+    return {
+        "event_type": "welcome_relay",
+        "summary": f"In-game relay suggestion: {copy}",
+        "content": [card, copy],
+        "metadata": {
+            "action_type": "welcome_relay",
+            "objective": "new_member_welcome",
+            "rationale": reason,
+            "relay_copy": copy,
+            "relay_copy_text": copy,
+            "relay_copy_count": 1,
+            "relay_target": "clash_royale_clan_chat",
+            "copy_message_index": 1,
+            "target_player_tag": tag,
+            "target_player_name": name,
+            "authored_by": "elixir_agent",
+        },
+    }
 
 
 def _is_low_value_public_departure(signal: dict) -> bool:
@@ -359,19 +431,6 @@ def _arena_relay_copy(signals: list[dict]) -> tuple[str | list[str], str, str, s
                 "celebration relay",
                 "celebration_relay",
             )
-
-    if types & {"member_join"}:
-        name = str(primary.get("name") or "new member").strip() or "new member"
-        detail = _member_join_profile_detail(primary)
-        copy = f"Welcome to POAP KINGS {name}! {detail}"
-        return (
-            copy,
-            "new_member_welcome",
-            "A profile-specific welcome helps new members feel seen in the in-game chat.",
-            "welcome_relay",
-            "welcome relay",
-            "welcome_relay",
-        )
 
     if types & {"war_practice_phase_active", "war_practice_day_started", "war_final_practice_day"}:
         return (
@@ -774,6 +833,17 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     leadership=(channel_config["memory_scope"] == "leadership"),
                 )
                 result = _build_generated_discord_invite_relay_result(delivery_signals, generated)
+            elif arena_types == {"member_join"}:
+                generated = await asyncio.to_thread(
+                    elixir_agent.generate_channel_update,
+                    channel_config["name"],
+                    channel_config["subagent_key"],
+                    _member_join_welcome_context(context, delivery_signals[0] if delivery_signals else {}),
+                    recent_posts=recent_posts,
+                    memory_context=memory_context,
+                    leadership=(channel_config["memory_scope"] == "leadership"),
+                )
+                result = _build_generated_welcome_relay_result(delivery_signals, generated)
             else:
                 result = _build_arena_relay_result(delivery_signals)
             if result is not None:
