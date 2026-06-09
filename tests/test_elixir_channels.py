@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, PropertyMock, patch
 
 import elixir
+import runtime.channel_router as channel_router
 from runtime.activities import (
     list_registered_activities,
     manual_activity_choices,
@@ -540,6 +541,112 @@ def test_arena_relay_leader_screenshot_is_observed():
     ]
     message.reply.assert_awaited_once_with("**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3.")
     mock_process.assert_not_awaited()
+
+
+def test_arena_relay_screenshot_persists_structured_memories():
+    attachment = SimpleNamespace(
+        filename="clan-chat.png",
+        content_type="image/png",
+        size=9,
+        read=AsyncMock(return_value=b"chatstate"),
+    )
+    message = _make_message(
+        1513758211206025227,
+        "arena-relay",
+        "",
+        roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
+        attachments=[attachment],
+    )
+    message.reply = AsyncMock(return_value=SimpleNamespace(id=990))
+    memories = [
+        {
+            "title": "Fullboat limited availability",
+            "body": "Screenshot shows Fullboat said they will be camping for a week and may have limited signal.",
+            "member_tag": "Fullboat",
+            "confidence": 0.9,
+            "tags": ["availability"],
+        }
+    ]
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1513758211206025227,
+            "name": "#arena-relay",
+            "subagent": "arena-relay",
+            "workflow": "channel_update",
+            "reply_policy": "disabled",
+            "memory_scope": "leadership",
+        }),
+        patch("runtime.channel_router.db.upsert_discord_user"),
+        patch("runtime.channel_router.db.build_memory_context", return_value={}),
+        patch("runtime.channel_router.db.save_message", return_value=111),
+        patch(
+            "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
+            return_value={
+                "event_type": "arena_relay_screenshot_observation",
+                "summary": "Fullboat has limited availability.",
+                "content": "**Read:** Fullboat is camping with limited signal.",
+                "memories": memories,
+            },
+        ),
+        patch("runtime.channel_router._persist_screenshot_memories", return_value=1) as mock_persist,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_persist.assert_called_once_with(
+        memories,
+        1513758211206025227,
+        "arena-relay",
+        555,
+    )
+    message.reply.assert_awaited_once_with("**Read:** Fullboat is camping with limited signal.")
+    mock_process.assert_not_awaited()
+
+
+def test_persist_screenshot_memories_saves_elixir_inference_with_evidence():
+    memories = [
+        {
+            "title": "Fullboat limited availability",
+            "body": "Screenshot shows Fullboat said they will be camping for a week and may have limited signal.",
+            "member_tag": "Fullboat",
+            "confidence": 1.0,
+            "tags": ["availability"],
+        }
+    ]
+
+    with (
+        patch("agent.tool_exec._resolve_member_tag", return_value="#ABC123") as mock_resolve,
+        patch("memory_store.create_memory", return_value={"memory_id": 42}) as mock_create,
+        patch("memory_store.attach_tags") as mock_tags,
+        patch("memory_store.attach_evidence_ref") as mock_evidence,
+    ):
+        saved = channel_router._persist_screenshot_memories(
+            memories,
+            channel_id=1513758211206025227,
+            workflow="arena-relay",
+            source_message_id=555,
+        )
+
+    assert saved == 1
+    mock_resolve.assert_called_once_with("Fullboat")
+    kwargs = mock_create.call_args.kwargs
+    assert kwargs["source_type"] == "elixir_inference"
+    assert kwargs["is_inference"] is True
+    assert kwargs["confidence"] == 0.95
+    assert kwargs["scope"] == "leadership"
+    assert kwargs["member_tag"] == "#ABC123"
+    assert kwargs["channel_id"] == "1513758211206025227"
+    assert kwargs["event_type"] == "arena_relay_screenshot_fact"
+    assert kwargs["event_id"] == "555"
+    assert kwargs["metadata"]["source"] == "arena_relay_screenshot"
+    mock_tags.assert_called_once_with(42, ["screenshot", "arena-relay", "availability"], actor="elixir:arena-relay-screenshot")
+    mock_evidence.assert_called_once()
+    assert mock_evidence.call_args.kwargs["evidence_ref"] == "555"
 
 
 def test_arena_relay_leader_multi_screenshot_corrects_media_types():

@@ -857,6 +857,9 @@ def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
         )
 
     user_msg = mock_chat.call_args.args[1]
+    system_prompt = mock_chat.call_args.args[0]
+    assert "include a `memories` array" in system_prompt
+    assert '"memories": []' in system_prompt
     assert user_msg[0]["type"] == "text"
     assert "screenshot evidence" in user_msg[0]["text"]
     assert "Training Day 1" in user_msg[0]["text"]

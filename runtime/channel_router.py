@@ -239,6 +239,98 @@ def _persist_inline_memories(memories, channel_id, workflow):
     return saved
 
 
+def _persist_screenshot_memories(memories, channel_id, workflow, source_message_id=None):
+    """Persist durable facts Elixir inferred from leader-submitted screenshots."""
+    from agent.tool_exec import _resolve_member_tag
+    from memory_store import archive_memory, attach_evidence_ref, attach_tags, create_memory, search_memories
+
+    created_by = f"elixir:{workflow}-screenshot"
+    saved = 0
+    for mem in memories:
+        title = (mem.get("title") or "").strip()
+        body = (mem.get("body") or "").strip()
+        if not title or not body:
+            _log.warning("screenshot_memory skipped: missing title or body")
+            continue
+
+        action = (mem.get("action") or "save").strip().lower()
+        member_tag_input = mem.get("member_tag")
+        tags = ["screenshot", "arena-relay"]
+        tags.extend(str(t).strip().lower() for t in (mem.get("tags") or []) if t)
+        tags = list(dict.fromkeys(tag for tag in tags if tag))
+        confidence = mem.get("confidence", 0.85)
+        try:
+            confidence = max(0.1, min(0.95, float(confidence)))
+        except (TypeError, ValueError):
+            confidence = 0.85
+
+        try:
+            if action == "correct":
+                candidates = search_memories(
+                    title,
+                    viewer_scope="system_internal",
+                    include_system_internal=True,
+                    filters={"source_type": "elixir_inference"},
+                    limit=5,
+                )
+                for result in candidates:
+                    old = result.memory
+                    if old.get("status") == "active":
+                        archive_memory(old["memory_id"], actor=created_by)
+                        _log.info(
+                            "screenshot_memory corrected: archived memory_id=%s title=%r",
+                            old["memory_id"], old.get("title"),
+                        )
+
+            resolved_tag = None
+            if member_tag_input:
+                try:
+                    resolved_tag = _resolve_member_tag(member_tag_input)
+                except Exception:
+                    resolved_tag = None
+
+            metadata = {
+                "source": "arena_relay_screenshot",
+                "member_label": member_tag_input,
+            }
+            if source_message_id is not None:
+                metadata["source_message_id"] = str(source_message_id)
+
+            memory = create_memory(
+                title=title,
+                body=body,
+                summary=body[:220],
+                source_type="elixir_inference",
+                is_inference=True,
+                confidence=confidence,
+                created_by=created_by,
+                scope="leadership",
+                member_tag=resolved_tag,
+                channel_id=str(channel_id) if channel_id else None,
+                event_type="arena_relay_screenshot_fact",
+                event_id=str(source_message_id) if source_message_id is not None else None,
+                metadata=metadata,
+            )
+            if tags:
+                attach_tags(memory["memory_id"], tags, actor=created_by)
+            if source_message_id is not None:
+                attach_evidence_ref(
+                    memory["memory_id"],
+                    evidence_type="discord_message",
+                    evidence_ref=str(source_message_id),
+                    evidence_label="arena relay screenshot",
+                    actor=created_by,
+                )
+            saved += 1
+            _log.info(
+                "screenshot_memory saved: memory_id=%s title=%r member_tag=%r confidence=%.2f",
+                memory["memory_id"], title, resolved_tag, confidence,
+            )
+        except Exception:
+            _log.warning("screenshot_memory failed for %r", title, exc_info=True)
+    return saved
+
+
 async def _post_conversation_memory(
     user_message_id, assistant_message_id,
     user_content, assistant_content,
@@ -477,6 +569,25 @@ async def _handle_arena_relay_screenshot_observation(
             )
             await app._safe_reply(message, "I saw the screenshot, but did not get a usable readout. Try again in a sec.")
             return True
+
+        screenshot_memories = result.get("memories") or []
+        if screenshot_memories:
+            try:
+                saved = await asyncio.to_thread(
+                    _persist_screenshot_memories,
+                    screenshot_memories,
+                    message.channel.id,
+                    "arena-relay",
+                    message.id,
+                )
+                app.log.info(
+                    "arena_relay_screenshot_memories input_message_id=%s saved=%s requested=%s",
+                    message.id,
+                    saved,
+                    len(screenshot_memories),
+                )
+            except Exception:
+                _log.error("arena relay screenshot memory persistence failed", exc_info=True)
 
         sent = await app._reply_text(message, content)
         await asyncio.to_thread(
