@@ -680,13 +680,21 @@ def _leader_action_reason(member: dict, *, promotion: bool) -> str:
 def _format_leader_action_card(action: dict, *, title: str, prompt_text: str, rationale: str) -> str:
     action_id = action.get("action_id")
     objective = action.get("objective") or "leader_action"
+    action_type = action.get("action_type") or ""
+    icon = {
+        "in_game_relay": "📣",
+        "war_nudge_recommendation": "👋",
+        "promotion_recommendation": "⬆️",
+        "demotion_recommendation": "⬇️",
+        "kick_recommendation": "🚪",
+    }.get(action_type, "⚡")
     return (
-        f"**Leader action R{action_id}: {title}**\n"
-        f"Objective: `{objective}`\n\n"
-        "Action:\n"
+        f"**R{action_id} {icon} {title}**\n"
+        f"🎯 `{objective}`\n"
+        "🛠️ Action\n"
         f"```text\n{prompt_text}\n```\n"
-        f"Why: {rationale}\n\n"
-        "React ✅ after doing it in Clash Royale, or ❌ if leaders disagree or are not doing this one."
+        f"🧠 {rationale}\n\n"
+        "✅ done  ❌ decline  ↩️ reply with note"
     )
 
 
