@@ -55,6 +55,12 @@ def test_execute_tool_get_member_profile_includes_account_age_and_activity_summa
             "cr_account_age_days": 1474,
             "cr_games_per_day": 3.64,
             "cr_games_per_day_window_days": 14,
+            "cr_collection_level": 1639,
+            "cr_clan_war_wins": 421,
+            "cr_battle_wins": 6400,
+            "cr_clan_donations": 32145,
+            "cr_banner_count": 88,
+            "cr_emote_count": 123,
         }
         mock_db.get_member_recent_form.return_value = {"form": "hot"}
 
@@ -65,6 +71,10 @@ def test_execute_tool_get_member_profile_includes_account_age_and_activity_summa
         )
         assert result["profile"]["recent_activity_summary"] == (
             "Recent activity: 3.64 games played per day over the last 14 days"
+        )
+        assert result["profile"]["profile_badge_metrics_summary"] == (
+            "Badge-backed profile metrics: collection level 1,639; clan war wins 421; "
+            "battle wins 6,400; clan donations 32,145; banners 88; emotes 123"
         )
 
 

@@ -383,6 +383,9 @@ _MEMBER_METADATA_COLUMNS = frozenset({
     "generated_bio", "generated_highlight", "generated_profile_updated_at",
     "cr_account_age_days", "cr_account_age_years", "cr_account_age_updated_at",
     "cr_games_per_day", "cr_games_per_day_window_days", "cr_games_per_day_updated_at",
+    "cr_collection_level", "cr_collection_level_badge_tier", "cr_collection_level_badge_max_tier",
+    "cr_collection_level_updated_at", "cr_clan_war_wins", "cr_battle_wins",
+    "cr_clan_donations", "cr_banner_count", "cr_emote_count", "cr_profile_badges_updated_at",
 })
 
 

@@ -218,7 +218,12 @@ def test_build_roster_data(conn):
             "cards": [],
             "badges": [
                 {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825, "iconUrls": {"large": "https://cdn/years.png"}},
+                {"name": "CollectionLevel", "level": 8, "maxLevel": 8, "progress": 1639},
+                {"name": "ClanWarWins", "level": 5, "maxLevel": 10, "progress": 421},
                 {"name": "BattleWins", "level": 5, "maxLevel": 8, "progress": 2079, "target": 2500, "iconUrls": {"large": "https://cdn/wins.png"}},
+                {"name": "ClanDonations", "level": 9, "maxLevel": 10, "progress": 32145},
+                {"name": "BannerCollection", "level": 3, "maxLevel": 10, "progress": 88},
+                {"name": "EmoteCollection", "level": 4, "maxLevel": 10, "progress": 123},
                 {"name": "MasteryGoblinBarrel", "level": 3, "maxLevel": 10, "progress": 180, "target": 200, "iconUrls": {"large": "https://cdn/mastery-gb.png"}},
             ],
             "achievements": [
@@ -294,9 +299,16 @@ def test_build_roster_data(conn):
     assert levy["cr_games_per_day"] == 0.14
     assert levy["cr_games_per_day_window_days"] == 14
     assert levy["cr_games_per_day_updated_at"] is not None
-    assert levy["badge_count"] == 3
+    assert levy["cr_collection_level"] == 1639
+    assert levy["cr_collection_level_badge_tier"] == 8
+    assert levy["cr_clan_war_wins"] == 421
+    assert levy["cr_battle_wins"] == 2079
+    assert levy["cr_clan_donations"] == 32145
+    assert levy["cr_banner_count"] == 88
+    assert levy["cr_emote_count"] == 123
+    assert levy["cr_profile_badges_updated_at"] is not None
+    assert levy["badge_count"] == 8
     assert levy["badge_highlights"][0]["name"] == "YearsPlayed"
-    assert levy["badge_highlights"][1]["name"] == "BattleWins"
     assert levy["badge_highlights"][0]["icon_url"] == "https://cdn/years.png"
     assert levy["mastery_highlights"][0]["card_name"] == "Goblin Barrel"
     assert levy["mastery_highlights"][0]["icon_url"] == "https://cdn/mastery-gb.png"
@@ -498,6 +510,8 @@ def test_build_roster_data_with_cards(conn):
         ],
         "badges": [
             {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825, "iconUrls": {"large": "https://cdn/years.png"}},
+            {"name": "CollectionLevel", "level": 6, "maxLevel": 8, "progress": 1170, "target": 1200},
+            {"name": "ClanWarWins", "level": 4, "maxLevel": 10, "progress": 275},
             {"name": "MasteryHogRider", "level": 4, "maxLevel": 10, "progress": 220, "target": 240, "iconUrls": {"large": "https://cdn/mastery-hog.png"}},
         ],
         "achievements": [
@@ -529,6 +543,9 @@ def test_build_roster_data_with_cards(conn):
     assert m["current_deck_mode_note"] == "Activation depends on deck slot; these labels show what the card supports or has unlocked."
     assert m["current_deck_support_cards"][0]["icon_url"] == "https://cdn/duchess-medium.png"
     assert m["collection_highlights"][0]["mode_label"] == "Evo + Hero"
+    assert m["cr_collection_level"] == 1170
+    assert m["cr_collection_level_badge_tier"] == 6
+    assert m["cr_clan_war_wins"] == 275
     assert m["badge_highlights"][0]["name"] == "YearsPlayed"
     assert m["badge_highlights"][0]["icon_url"] == "https://cdn/years.png"
     assert m["mastery_highlights"][0]["card_name"] == "Hog Rider"
