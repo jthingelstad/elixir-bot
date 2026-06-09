@@ -46,6 +46,7 @@ CELEBRATION_RELAY_SIGNAL_TYPES = {
     "member_birthday",
     "clan_birthday",
 }
+DISCORD_INVITE_COPY = "Join clan Discord! POAPKINGS . COM > Members"
 
 
 def _clip_relay_copy(text: str, limit: int = ARENA_RELAY_MAX_COPY_CHARS) -> str:
@@ -74,6 +75,42 @@ def _signal_names(signals: list[dict], limit: int = 4) -> list[str]:
         if len(names) >= limit:
             break
     return names
+
+
+def _profile_number(value) -> int | None:
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _member_join_profile_detail(signal: dict) -> str:
+    tag = signal.get("tag") or signal.get("player_tag")
+    profile = {}
+    if tag:
+        try:
+            profile = db.get_member_profile(tag) or {}
+        except Exception:
+            profile = {}
+
+    war_wins = _profile_number(profile.get("cr_clan_war_wins"))
+    if war_wins and war_wins >= 50:
+        return f"I see {war_wins:,} clan war wins on your profile, so the river already knows you."
+
+    battle_wins = _profile_number(profile.get("cr_battle_wins"))
+    if battle_wins and battle_wins >= 1000:
+        return f"Your profile shows {battle_wins:,} battle wins, which is a lot of reps."
+
+    collection_level = _profile_number(profile.get("cr_collection_level"))
+    if collection_level:
+        return f"Collection Level {collection_level:,} gives you a deep card base to build from."
+
+    trophies = _profile_number(profile.get("trophies") or profile.get("current_trophies"))
+    if trophies:
+        return f"Joining at {trophies:,} trophies is a strong start."
+
+    best_trophies = _profile_number(profile.get("best_trophies"))
+    if best_trophies:
+        return f"Best trophies {best_trophies:,} says you know how to climb."
+
+    return "Glad to have you in the clan."
 
 
 def _is_low_value_public_departure(signal: dict) -> bool:
@@ -236,6 +273,29 @@ def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str, str, str, str
                 "celebration_relay",
             )
 
+    if types & {"member_join"}:
+        name = str(primary.get("name") or "new member").strip() or "new member"
+        detail = _member_join_profile_detail(primary)
+        copy = f"Welcome to POAP KINGS {name}! {detail}"
+        return (
+            copy,
+            "new_member_welcome",
+            "A profile-specific welcome helps new members feel seen in the in-game chat.",
+            "welcome_relay",
+            "welcome relay",
+            "welcome_relay",
+        )
+
+    if types & {"discord_invite_reminder"}:
+        return (
+            DISCORD_INVITE_COPY,
+            "discord_onboarding",
+            "A weekly no-link reminder helps clan members find Discord through the website members page.",
+            "discord_invite_relay",
+            "Discord invite relay",
+            "discord_invite_relay",
+        )
+
     if types & {"war_practice_phase_active", "war_practice_day_started", "war_final_practice_day"}:
         return (
             "Practice days are live. Please set boat defenses early so they are ready before battle days start.",
@@ -314,9 +374,14 @@ def _build_arena_relay_result(signals: list[dict]) -> dict | None:
     relay = _arena_relay_copy(signals)
     if relay is None:
         return None
+    primary = (signals or [{}])[0] or {}
     copy, objective, reason, action_type, title, event_type = relay
     copy = _clip_relay_copy(copy)
-    icon = "🎉" if action_type == "celebration_relay" else "📣"
+    icon = {
+        "celebration_relay": "🎉",
+        "welcome_relay": "👋",
+        "discord_invite_relay": "💬",
+    }.get(action_type, "📣")
     card = (
         f"**R? {icon} {title}**\n"
         f"🎯 `{objective}`\n"
@@ -335,6 +400,8 @@ def _build_arena_relay_result(signals: list[dict]) -> dict | None:
             "relay_copy": copy,
             "relay_target": "clash_royale_clan_chat",
             "copy_message_index": 1,
+            "target_player_tag": primary.get("tag") or primary.get("player_tag"),
+            "target_player_name": primary.get("name"),
         },
     }
 
@@ -612,6 +679,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 baseline = await asyncio.to_thread(
                     db.build_leader_action_baseline,
                     action_type=action_type,
+                    target_player_tag=metadata.get("target_player_tag"),
                     signals=delivery_signals,
                 )
                 action = await asyncio.to_thread(
@@ -622,6 +690,8 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     rationale=metadata.get("rationale"),
                     target_channel_key=outcome["target_channel_key"],
                     target_channel_id=outcome["target_channel_id"],
+                    target_player_tag=metadata.get("target_player_tag"),
+                    target_player_name=metadata.get("target_player_name"),
                     source_signal_key=outcome["source_signal_key"],
                     source_signal_type=outcome["source_signal_type"],
                     baseline=baseline,

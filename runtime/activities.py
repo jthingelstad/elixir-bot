@@ -149,6 +149,25 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         legacy_commands=("leadership-actions",),
     ),
     ActivityDefinition(
+        activity_key="weekly-discord-invite-relay",
+        owner_subagent="arena-relay",
+        purpose="Post a weekly no-link Clash Royale clan-chat prompt that helps members find the Discord via POAPKINGS . COM > Members.",
+        job_id="weekly-discord-invite-relay",
+        job_function="_weekly_discord_invite_relay",
+        schedule_kind="cron",
+        schedule_config={
+            "day_of_week": _attr("WEEKLY_DISCORD_INVITE_RELAY_DAY", "sat"),
+            "hour": _attr("WEEKLY_DISCORD_INVITE_RELAY_HOUR", 11),
+            "minute": 0,
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Discord: #arena-relay weekly no-link Discord invite copy",
+        ),
+        legacy_commands=("discord-invite-relay",),
+    ),
+    ActivityDefinition(
         activity_key="memory-synthesis",
         owner_subagent="leader-lounge",
         purpose="Weekly pass that writes arc memories, retires stale entries, and flags contradictions against live state.",

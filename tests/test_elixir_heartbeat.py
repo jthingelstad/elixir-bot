@@ -1104,6 +1104,26 @@ def test_clan_awareness_tick_does_not_mark_non_system_signal_sent_when_post_fail
     assert not all(row.get("delivery_status") in {"delivered", "skipped"} for row in outcome_rows)
 
 
+def test_weekly_discord_invite_relay_emits_weekly_signal():
+    async def fake_sidecars(signals, clan, war):
+        return len(signals)
+
+    with (
+        patch("elixir.runtime_status.mark_job_start") as mock_start,
+        patch("elixir.runtime_status.mark_job_success") as mock_success,
+        patch("elixir.runtime_status.mark_job_failure") as mock_failure,
+        patch("runtime.jobs._core._deliver_arena_relay_sidecars", new=AsyncMock(side_effect=fake_sidecars)) as mock_sidecars,
+    ):
+        asyncio.run(elixir._weekly_discord_invite_relay())
+
+    mock_start.assert_called_once_with("weekly_discord_invite_relay")
+    mock_failure.assert_not_called()
+    signal = mock_sidecars.await_args.args[0][0]
+    assert signal["type"] == "discord_invite_reminder"
+    assert signal["signal_key"].startswith("discord_invite_reminder:")
+    mock_success.assert_called_once()
+
+
 def test_plan_signal_outcomes_routes_clan_audience_system_signal_to_announcements():
     outcomes = plan_signal_outcomes([{
         "type": "capability_unlock",
@@ -1263,6 +1283,31 @@ def test_plan_signal_outcomes_routes_actionable_war_signal_to_arena_relay():
     ]
 
 
+def test_plan_signal_outcomes_routes_member_join_to_arena_relay_welcome():
+    outcomes = plan_signal_outcomes([{
+        "type": "member_join",
+        "tag": "#ABC",
+        "name": "King Levy",
+    }])
+
+    assert [(item["target_channel_key"], item["intent"], item["required"]) for item in outcomes] == [
+        ("clan-events", "member_join_public", True),
+        ("leader-lounge", "member_join_ops", True),
+        ("arena-relay", "welcome_relay", False),
+    ]
+
+
+def test_plan_signal_outcomes_routes_weekly_discord_invite_to_arena_relay():
+    outcomes = plan_signal_outcomes([{
+        "type": "discord_invite_reminder",
+        "signal_key": "discord_invite_reminder:2026-W24",
+    }])
+
+    assert [(item["target_channel_key"], item["intent"], item["required"]) for item in outcomes] == [
+        ("arena-relay", "discord_invite_relay", False),
+    ]
+
+
 def test_arena_relay_result_is_copy_paste_brief():
     from runtime.signals.delivery import _build_arena_relay_result
 
@@ -1280,6 +1325,51 @@ def test_arena_relay_result_is_copy_paste_brief():
     assert result["content"][1] == result["metadata"]["relay_copy"]
     assert "POAP KINGS is 1st with 6,870 fame" in result["content"][1]
     assert len(result["metadata"]["relay_copy"]) <= 240
+
+
+def test_arena_relay_result_builds_profile_specific_welcome_copy():
+    from runtime.signals.delivery import _build_arena_relay_result
+
+    with patch("runtime.signals.delivery.db.get_member_profile", return_value={
+        "player_tag": "#ABC",
+        "member_name": "King Levy",
+        "cr_clan_war_wins": 421,
+        "cr_battle_wins": 6400,
+        "cr_collection_level": 1597,
+        "trophies": 6000,
+    }):
+        result = _build_arena_relay_result([{
+            "type": "member_join",
+            "tag": "#ABC",
+            "name": "King Levy",
+        }])
+
+    assert result["event_type"] == "welcome_relay"
+    assert result["metadata"]["action_type"] == "welcome_relay"
+    assert result["metadata"]["objective"] == "new_member_welcome"
+    assert result["metadata"]["target_player_tag"] == "#ABC"
+    assert result["content"][0].startswith("**R? 👋 welcome relay**")
+    assert result["content"][1] == (
+        "Welcome to POAP KINGS King Levy! I see 421 clan war wins on your profile, "
+        "so the river already knows you."
+    )
+    assert len(result["content"][1]) <= 240
+
+
+def test_arena_relay_result_builds_weekly_discord_invite_copy():
+    from runtime.signals.delivery import DISCORD_INVITE_COPY, _build_arena_relay_result
+
+    result = _build_arena_relay_result([{
+        "type": "discord_invite_reminder",
+        "signal_key": "discord_invite_reminder:2026-W24",
+    }])
+
+    assert result["event_type"] == "discord_invite_relay"
+    assert result["metadata"]["action_type"] == "discord_invite_relay"
+    assert result["metadata"]["objective"] == "discord_onboarding"
+    assert result["content"][0].startswith("**R? 💬 Discord invite relay**")
+    assert result["content"][1] == DISCORD_INVITE_COPY
+    assert "http" not in result["content"][1].lower()
 
 
 def test_arena_relay_cooldown_blocks_recent_posts():

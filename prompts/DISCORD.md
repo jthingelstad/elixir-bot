@@ -79,6 +79,8 @@ Elixir's leader action board.
 - Messages here are practical handoff cards: crisp, brief, bold ID first, emoji-scannable labels, clear action boundaries, and no hunting for where the usable text starts or stops.
 - For in-game relay prompts, include one clearly marked copy/paste block and keep the Clash Royale clan-chat copy under 240 characters whenever possible.
 - Do not ping members or include Discord-only formatting in copy/paste text intended for Clash Royale clan chat.
+- New-member welcome relays should be warmer than "Welcome to POAP KINGS": include one profile-specific detail when available, such as war wins, battle wins, collection level, trophies, or another visible profile signal.
+- Weekly Discord invite relays must not include raw links. Use no-link copy such as `Join clan Discord! POAPKINGS . COM > Members`.
 - Leaders react ✅/☑️ when the action was done and ❌ when they disagree or did not do it.
 - Leaders can reply directly to an action card with a short reason or correction, such as "boat defenses full already"; Elixir stores that note on the action.
 - Leaders can also start a new message with Clash Royale screenshots as observation evidence. Elixir reads visible UI state, replies with a concise readout, and may include short copy/paste in-game text when useful.

@@ -19,6 +19,8 @@ ACTION_OUTCOME_DELAY_HOURS = {
     "war_nudge_recommendation": 2,
     "in_game_relay": 24,
     "celebration_relay": 24,
+    "welcome_relay": 24,
+    "discord_invite_relay": 24,
     "promotion_recommendation": 24,
     "kick_recommendation": 24,
     "demotion_recommendation": 24,
@@ -193,6 +195,7 @@ def build_leader_action_baseline(
         "kick_recommendation",
         "demotion_recommendation",
         "war_nudge_recommendation",
+        "welcome_relay",
     }:
         baseline["member"] = _member_baseline(target_player_tag, conn=conn)
         if action_type == "war_nudge_recommendation":
@@ -242,7 +245,7 @@ def evaluate_leader_action(action: dict, *, conn) -> dict:
             "untouched_count": _outcome_delta(base_day.get("untouched_count"), current.get("untouched_count")),
             "clan_fame": _outcome_delta(base_day.get("clan_fame"), current.get("clan_fame")),
         }
-    elif action_type in {"promotion_recommendation", "kick_recommendation", "demotion_recommendation"}:
+    elif action_type in {"promotion_recommendation", "kick_recommendation", "demotion_recommendation", "welcome_relay"}:
         current = _member_baseline(action.get("target_player_tag"), conn=conn)
         base_member = baseline.get("member") or {}
         outcome["member"] = current

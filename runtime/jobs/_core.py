@@ -19,6 +19,7 @@ __all__ = [
     "_clanops_weekly_review", "_weekly_clan_recap",
     "_leadership_action_scan",
     "_post_weekly_leader_action_recommendations",
+    "_weekly_discord_invite_relay",
     "_memory_synthesis_cycle",
     "_apply_memory_synthesis_plan",
     "_build_memory_synthesis_context",
@@ -56,6 +57,7 @@ from runtime.system_signals import queue_startup_system_signals
 from runtime.jobs._signals import (
     _channel_config_by_key,
     _deliver_signal_group,
+    _deliver_arena_relay_sidecars,
     _deliver_signal_group_via_awareness,
     _format_weekly_recap_post,
     _load_live_clan_context,
@@ -140,6 +142,8 @@ PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "1"))
 PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))
 LEADERSHIP_ACTION_SCAN_MINUTES = int(os.getenv("LEADERSHIP_ACTION_SCAN_MINUTES", "240"))
 LEADERSHIP_ACTION_SCAN_MAX_ACTIONS = int(os.getenv("LEADERSHIP_ACTION_SCAN_MAX_ACTIONS", "2"))
+WEEKLY_DISCORD_INVITE_RELAY_DAY = os.getenv("WEEKLY_DISCORD_INVITE_RELAY_DAY", "sat")
+WEEKLY_DISCORD_INVITE_RELAY_HOUR = int(os.getenv("WEEKLY_DISCORD_INVITE_RELAY_HOUR", "11"))
 CLANOPS_WEEKLY_REVIEW_DAY = os.getenv("CLANOPS_WEEKLY_REVIEW_DAY", "fri")
 CLANOPS_WEEKLY_REVIEW_HOUR = int(os.getenv("CLANOPS_WEEKLY_REVIEW_HOUR", "19"))
 WEEKLY_RECAP_DAY = os.getenv("WEEKLY_RECAP_DAY", "mon")
@@ -868,6 +872,29 @@ async def _leadership_action_scan():
         log.warning("leadership action scan failed: %s", exc, exc_info=True)
         return
     runtime_status.mark_job_success("leadership_action_scan", f"posted {posted} action(s)")
+
+
+async def _weekly_discord_invite_relay():
+    runtime_status.mark_job_start("weekly_discord_invite_relay")
+    try:
+        now = datetime.now(CHICAGO)
+        week_key = now.strftime("%G-W%V")
+        signal_key = f"discord_invite_reminder:{week_key}"
+        signal = {
+            "type": "discord_invite_reminder",
+            "signal_key": signal_key,
+            "signal_log_type": signal_key,
+            "week_key": week_key,
+        }
+        processed = await _deliver_arena_relay_sidecars([signal], {}, {})
+    except Exception as exc:
+        runtime_status.mark_job_failure("weekly_discord_invite_relay", str(exc))
+        log.warning("weekly Discord invite relay failed: %s", exc, exc_info=True)
+        return
+    runtime_status.mark_job_success(
+        "weekly_discord_invite_relay",
+        f"processed {processed} arena-relay invite signal(s)",
+    )
 
 
 def _leadership_scan_has_critical_war_action() -> bool:
