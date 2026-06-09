@@ -15,6 +15,14 @@ from db import managed_connection
 ACTION_DONE = "done"
 ACTION_PROPOSED = "proposed"
 ACTION_REJECTED = "rejected"
+ACTION_OUTCOME_DELAY_HOURS = {
+    "war_nudge_recommendation": 2,
+    "in_game_relay": 24,
+    "celebration_relay": 24,
+    "promotion_recommendation": 24,
+    "kick_recommendation": 24,
+    "demotion_recommendation": 24,
+}
 
 
 def _json_loads(value) -> dict:
@@ -62,6 +70,65 @@ def _stable_action_key(
 def _cutoff_hours_ago(hours: int | float) -> str:
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=max(1, float(hours or 1)))
     return cutoff.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _parse_utc(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip().replace("Z", "")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _format_utc(value: datetime) -> str:
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _utc_plus(*, hours: int | float = 0, days: int | float = 0, start: str | None = None) -> str:
+    base = _parse_utc(start) or datetime.now(timezone.utc).replace(tzinfo=None)
+    return _format_utc(base + timedelta(hours=float(hours or 0), days=float(days or 0)))
+
+
+def _outcome_delay_hours(action_type: str | None) -> int:
+    return ACTION_OUTCOME_DELAY_HOURS.get((action_type or "").strip(), 24)
+
+
+def _pending_outcome(action: dict, *, decided_at: str) -> dict:
+    delay = _outcome_delay_hours(action.get("action_type"))
+    return {
+        "action_type": action.get("action_type"),
+        "status": action.get("status"),
+        "pending_evaluation": True,
+        "decided_at": decided_at,
+        "due_at": _utc_plus(hours=delay, start=decided_at),
+        "evaluation_delay_hours": delay,
+    }
+
+
+def _note_feedback(note: str, *, noted_at: str) -> dict:
+    text = " ".join((note or "").lower().split())
+    if not text:
+        return {}
+    if "revisit" in text or "check again" in text:
+        if "month" in text:
+            return {"note_category": "revisit", "suppressed_until": _utc_plus(days=30, start=noted_at)}
+        if "2 week" in text or "two week" in text:
+            return {"note_category": "revisit", "suppressed_until": _utc_plus(days=14, start=noted_at)}
+        if "week" in text:
+            return {"note_category": "revisit", "suppressed_until": _utc_plus(days=7, start=noted_at)}
+        if "tomorrow" in text:
+            return {"note_category": "revisit", "suppressed_until": _utc_plus(days=1, start=noted_at)}
+        return {"note_category": "revisit", "suppressed_until": _utc_plus(days=7, start=noted_at)}
+    if any(phrase in text for phrase in ("already done", "already full", "full already", "not needed")):
+        return {"note_category": "state_already_satisfied", "suppressed_until": _utc_plus(days=1, start=noted_at)}
+    return {}
 
 
 def _member_baseline(tag: str | None, *, conn) -> dict:
@@ -367,8 +434,12 @@ def has_recent_leader_action(
     within_hours: int = 168,
     conn: Optional[sqlite3.Connection] = None,
 ) -> bool:
-    where = ["action_type = ?", "proposed_at >= ?"]
-    params: list = [(action_type or "").strip(), _cutoff_hours_ago(within_hours)]
+    now = _db._utcnow()
+    where = [
+        "action_type = ?",
+        "((expires_at IS NOT NULL AND expires_at > ?) OR (expires_at IS NULL AND proposed_at >= ?))",
+    ]
+    params: list = [(action_type or "").strip(), now, _cutoff_hours_ago(within_hours)]
     if target_player_tag:
         where.append("target_player_tag = ?")
         params.append(_db._canon_tag(target_player_tag))
@@ -402,7 +473,7 @@ def decide_leader_action_by_message(
     outcome = None
     if status == ACTION_DONE:
         action["status"] = status
-        outcome = evaluate_leader_action(action, conn=conn)
+        outcome = _pending_outcome(action, decided_at=stamp)
     conn.execute(
         """
         UPDATE leader_action_recommendations
@@ -469,12 +540,22 @@ def record_leader_action_note_by_message(
     if not body:
         return action
     now = _db._utcnow()
+    feedback = _note_feedback(body, noted_at=now)
+    outcome = action.get("outcome") or {}
+    if feedback:
+        outcome = {
+            **outcome,
+            "leader_note": {
+                "category": feedback.get("note_category"),
+                "suppressed_until": feedback.get("suppressed_until"),
+            },
+        }
     conn.execute(
         """
         UPDATE leader_action_recommendations
         SET decision_note = ?, decision_note_at = ?,
             decision_note_message_id = ?, decision_note_by_discord_user_id = ?,
-            updated_at = ?
+            expires_at = COALESCE(?, expires_at), outcome_json = ?, updated_at = ?
         WHERE action_id = ?
         """,
         (
@@ -482,6 +563,8 @@ def record_leader_action_note_by_message(
             now,
             str(note_message_id) if note_message_id is not None else None,
             str(discord_user_id),
+            feedback.get("suppressed_until"),
+            _json_dumps(outcome) if outcome else None,
             now,
             action["action_id"],
         ),
@@ -512,7 +595,39 @@ def refresh_leader_action_outcome(
     return get_leader_action_by_key(action["action_key"], conn=conn)
 
 
+@managed_connection
+def refresh_due_leader_action_outcomes(
+    *,
+    limit: int = 20,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM leader_action_recommendations "
+        "WHERE status = ? AND decided_at IS NOT NULL "
+        "ORDER BY decided_at ASC LIMIT ?",
+        (ACTION_DONE, max(1, min(int(limit or 20), 100))),
+    ).fetchall()
+    refreshed = []
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for row in rows:
+        action = _row_to_action(row)
+        decided_at = _parse_utc(action.get("decided_at"))
+        if decided_at is None:
+            continue
+        outcome = action.get("outcome") or {}
+        if outcome and not outcome.get("pending_evaluation"):
+            continue
+        delay = _outcome_delay_hours(action.get("action_type"))
+        if now < decided_at + timedelta(hours=delay):
+            continue
+        refreshed_action = refresh_leader_action_outcome(action["action_id"], conn=conn)
+        if refreshed_action:
+            refreshed.append(refreshed_action)
+    return refreshed
+
+
 __all__ = [
+    "ACTION_OUTCOME_DELAY_HOURS",
     "ACTION_DONE",
     "ACTION_PROPOSED",
     "ACTION_REJECTED",
@@ -525,6 +640,7 @@ __all__ = [
     "has_recent_leader_action",
     "list_leader_actions",
     "record_leader_action_note_by_message",
+    "refresh_due_leader_action_outcomes",
     "refresh_leader_action_outcome",
     "update_leader_action_message",
     "update_leader_action_copy_message",

@@ -847,6 +847,9 @@ async def _leadership_action_scan():
     try:
         from runtime.jobs._signals import _deliver_war_nudge_sidecars
 
+        refreshed = await asyncio.to_thread(db.refresh_due_leader_action_outcomes)
+        if refreshed:
+            log.info("leadership action scan refreshed %s due action outcome(s)", len(refreshed))
         critical = await asyncio.to_thread(_leadership_scan_has_critical_war_action)
         allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
         if not allowed:
