@@ -45,6 +45,8 @@ Get the full list of available cards in the game.
 ```
 Support items lack `elixirCost` and `maxEvolutionLevel`.
 
+Mirror is the exception among standard cards: it appears in `items` but omits `elixirCost` in live June 2026 catalog payloads because its in-game cost is variable. Treat missing `elixirCost` as unknown/variable rather than as zero.
+
 **Rarity → maxLevel mapping (observed):**
 
 This is the API's rarity-relative upgrade scale, not a universal cross-rarity power scale. Higher-rarity cards have fewer API level steps, but all rarities still top out at the same effective end-state when normalized.
@@ -117,7 +119,7 @@ Observed error bodies are usually `{ reason, message? }`. This endpoint ignored 
 - `items` vs `supportItems`: Tower Troops (cards that replace/augment crown towers) are in `supportItems`; everything else is in `items`
 - Pagination parameters appear to be ignored — `/cards?limit=1`, `/cards?after=...`, and `/cards?before=...` still returned the full catalog in March 2026 testing
 - `maxLevel` is the rarity-relative API cap, not a normalized universal cap. Example: champions report `maxLevel: 6`, which corresponds to normalized level 16 at full upgrade.
-- `maxEvolutionLevel` is optional — only 46/121 standard cards have evolutions (values observed: 1, 2, or 3)
+- `maxEvolutionLevel` is optional — 52/121 standard cards had an alternate mode in the June 2026 catalog (values observed: 1, 2, or 3)
 - Observed icon correlation: `evolutionMedium` aligns with Evo capability, `heroMedium` aligns with Hero capability, and cards with both assets appear to support both
 - No `paging` object is present in responses
 

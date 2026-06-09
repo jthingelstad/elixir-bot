@@ -146,7 +146,7 @@ Get recent battle history.
 
 **Returns:** bare JSON array of `Battle` objects (not paginated, not wrapped in `{ items: [...] }`)
 
-Observed: returns ~30-40 battles (most commonly 30).
+Observed May-June 2026: returns 5-43 battles depending on account activity, most commonly 30 or 40. New or low-activity accounts can return much shorter arrays.
 
 **Battle object fields:**
 
@@ -177,7 +177,7 @@ Observed: returns ~30-40 battles (most commonly 30).
 |--------|-------------|------------|
 | `PvP` | Ladder / trophy battles | `Ladder` |
 | `pathOfLegend` | Ranked Path of Legend | `Ranked1v1_NewArena`, `Ranked1v1_NewArena2` |
-| `trail` | Event/challenge battles | `Crazy_Arena`, `Challenge_AllCards_EventDeck_NoSet` |
+| `trail` | Event/challenge battles | Examples observed: `Crazy_Arena`, `TeamVsTeam`, `Overtime_Friendly`, `TripleElixir_Friendly`, `DraftMode_Princess`, `Showdown_Friendly`, `Ladder`, `Challenge_AllCards_EventDeck_NoSet`, `PickMode`, `Heist_Friendly`, `FloodHounds_Draft` |
 | `clanMate` | Friendly battle within clan (1v1) | `Friendly` |
 | `clanMate2v2` | 2v2 with clanmate | `TeamVsTeam` |
 | `friendly` | Friendly battle (not clanmate) | `Crazy_Arena`, `7xElixir_Friendly` |
@@ -192,9 +192,9 @@ Observed: returns ~30-40 battles (most commonly 30).
 
 | `deckSelection` | Used in |
 |-----------------|---------|
-| `collection` | PvP, pathOfLegend, riverRacePvP, clanMate, friendly |
+| `collection` | PvP, pathOfLegend, riverRacePvP, boatBattle, clanMate, friendly, tournament, many trail/event battles |
 | `eventDeck` | trail, some friendlies |
-| `draft` | clanMate2v2 (draft modes) |
+| `draft` | clanMate2v2 (draft modes), some trail/event modes such as `DraftMode_Princess` and `FloodHounds_Draft` |
 | `warDeckPick` | riverRaceDuel |
 | `pick` | pick-mode friendlies |
 | `draftCompetitive` | competitive draft friendlies, Triple Draft tournaments |
@@ -346,7 +346,7 @@ Observed error bodies are usually `{ reason, message? }`. `message` may be absen
 - Path of Legend `rank` field is null when the player hasn't achieved a rank yet
 - **Path of Legend arena IDs:** both `72000450 Ranked1v1_NewArena` and `72000464 Ranked1v1_NewArena2` appear on live `pathOfLegend` battles. Treat both as current PoL arenas. Within-clan sampling is not enough to tell which arena is "active" globally — PoL is high-level play and only a handful of our members reach it, so apparent drops in one ID can simply mean an active PoL player moved up or down a tier.
 - **Sampling caveat:** every count and enum frequency in this doc is computed from one clan's members. Absence of a value does not mean Supercell removed it; presence at low counts does not mean it is rare in general. Use observed-IDs as a "definitely exists" signal and treat absence as "we have no data" rather than "doesn't happen."
-- Battlelog returns a bare array (like `/events`), not a paginated response — no `paging` object. Returns ~30-40 battles (most commonly 30).
+- Battlelog returns a bare array (like `/events`), not a paginated response — no `paging` object. May-June 2026 sampling returned 5-43 battles: most active players return 30 or 40, while new/low-activity accounts can return shorter arrays.
 - `progress` is a map of side-mode season results (Merge Tactics / AutoChess) — keys are mode season identifiers. Empty string key `""` = legacy/default season.
 - `progress` keys should be treated as opaque identifiers, not a stable enum. Parse the nested values, not the key naming pattern.
 - `battleTime` format is `YYYYMMDDTHHmmss.sssZ` — parse carefully, no dashes or colons
@@ -356,8 +356,9 @@ Observed error bodies are usually `{ reason, message? }`. `message` may be absen
 - Additional battle variants observed in March 2026 sampling: `riverRaceDuelColosseum` and an occasional `unknown` type on friendlies
 - For player-facing text, avoid raw `Evolution Level N` wording; Elixir should translate to `Evo`, `Hero`, or `Evo + Hero`
 - Additional `deckSelection` values observed in March 2026 sampling: `pick`, `draftCompetitive`, `predefined`
+- **Trail/event battles are broad:** May-June 2026 sampling shows `type=trail` with ordinary-looking game modes (`TeamVsTeam`, `Ladder`, `Overtime_Friendly`, `TripleElixir_Friendly`, etc.) and often `deckSelection=collection`. Do not assume every trail battle uses `eventDeck` or a bespoke event deck.
 - **Tournament battles:** `type=tournament` battles include a `tournamentTag` field that links back to `/tournaments/{tag}`. This allows matching battles to specific tournaments. The `gameMode` distinguishes tournament format: `72000009`/`Tournament` for bring-your-own-deck, `72000194`/`Draft_Competitive` for Triple Draft. In draft tournaments, each battle has different cards (drafted per match); in standard tournaments, players use their `collection` deck.
 - **Tournament battle dedup:** Both players in a match see the same `battleTime`. Dedup key: `battleTime` + sorted pair of `(team[0].tag, opponent[0].tag)`. For tournament winner detection, use crowns comparison (no `trophyChange` field on tournament battles). The `startingTrophies` field on tournament battles reflects tournament score, not ladder trophies.
-- **Tournament battle log retention:** Battle logs are not permanent (~30-40 battles). Tournament battles will rotate out as players play more games. To capture tournament battle data reliably, poll player battle logs shortly after the tournament ends. Battles from a 13-player tournament were partially lost within ~24h due to active players' logs rotating.
+- **Tournament battle log retention:** Battle logs are not permanent (commonly 30 or 40 battles for active players, but shorter for new/low-activity accounts). Tournament battles will rotate out as players play more games. To capture tournament battle data reliably, poll player battle logs shortly after the tournament ends. Battles from a 13-player tournament were partially lost within ~24h due to active players' logs rotating.
 - **Badges:** Two categories — progress badges (with `level`/`maxLevel`/`progress`/`target`) and one-time badges (`level`, `maxLevel`, and `target` are **absent** — not present as `null` — only `name`, `progress`, and `iconUrls` are guaranteed). Mastery badges are per-card (e.g. `MasteryKnight`).
 - **Achievements:** Fixed set of 12 achievements. `stars` (0-3) indicates completion tier. `completionInfo` is typically null.
