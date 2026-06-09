@@ -22,6 +22,7 @@ log = logging.getLogger("elixir")
 ARENA_RELAY_COOLDOWN_HOURS = 18
 ARENA_RELAY_MAX_COPY_CHARS = 240
 ARENA_RELAY_MAX_NUDGE_ACTIONS = 3
+PUBLIC_DEPARTURE_MIN_TENURE_DAYS = 14
 WAR_NUDGE_SIGNAL_TYPES = {
     "war_battle_phase_active",
     "war_battle_day_started",
@@ -73,6 +74,30 @@ def _signal_names(signals: list[dict], limit: int = 4) -> list[str]:
         if len(names) >= limit:
             break
     return names
+
+
+def _is_low_value_public_departure(signal: dict) -> bool:
+    if (signal or {}).get("type") != "member_leave":
+        return False
+    if (signal or {}).get("departure_kind") == "leader_removal":
+        return False
+    tenure_days = signal.get("tenure_days")
+    if isinstance(tenure_days, int):
+        return tenure_days < PUBLIC_DEPARTURE_MIN_TENURE_DAYS
+    return False
+
+
+def _filter_public_announcement_signals(signals: list[dict], *, target_channel_key: str) -> tuple[list[dict], list[dict]]:
+    if target_channel_key != "clan-events":
+        return (signals or []), []
+    filtered = []
+    suppressed = []
+    for signal in signals or []:
+        if _is_low_value_public_departure(signal):
+            suppressed.append(signal)
+        else:
+            filtered.append(signal)
+    return filtered, suppressed
 
 
 def _members_from_group_signal(signal: dict) -> list[dict]:
@@ -470,32 +495,74 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         return False
 
     channel_id = channel_config["id"]
+    delivery_signals, suppressed_public_signals = _filter_public_announcement_signals(
+        signals,
+        target_channel_key=outcome["target_channel_key"],
+    )
+    if suppressed_public_signals and not delivery_signals:
+        reason = f"low_value_departure_under_{PUBLIC_DEPARTURE_MIN_TENURE_DAYS}d"
+        log.info(
+            "public announcement skipped: channel=%s reason=%s suppressed=%s",
+            outcome["target_channel_key"],
+            reason,
+            [
+                {
+                    "type": signal.get("type"),
+                    "tag": signal.get("tag"),
+                    "tenure_days": signal.get("tenure_days"),
+                }
+                for signal in suppressed_public_signals
+            ],
+        )
+        await asyncio.to_thread(
+            db.upsert_signal_outcome,
+            outcome["source_signal_key"],
+            outcome["source_signal_type"],
+            outcome["target_channel_key"],
+            outcome["target_channel_id"],
+            outcome["intent"],
+            required=outcome.get("required", True),
+            delivery_status="skipped",
+            payload={
+                "signals": signals,
+                "suppressed_signals": suppressed_public_signals,
+            },
+            error_detail=reason,
+            mark_attempt=True,
+        )
+        return True
+    if suppressed_public_signals:
+        log.info(
+            "public announcement filtered %s low-value departure signal(s) before generation",
+            len(suppressed_public_signals),
+        )
+
     recent_posts = await asyncio.to_thread(db.list_channel_messages, channel_id, 10, "assistant")
     memory_context = await asyncio.to_thread(
         build_subagent_memory_context,
         channel_config,
-        signals=signals,
+        signals=delivery_signals,
     )
 
     from runtime.channel_subagents import TOURNAMENT_SIGNAL_TYPES, WAR_RECAP_SIGNAL_TYPES
 
-    is_tournament_batch = bool(signals) and all(
-        (s or {}).get("type") in TOURNAMENT_SIGNAL_TYPES for s in signals
+    is_tournament_batch = bool(delivery_signals) and all(
+        (s or {}).get("type") in TOURNAMENT_SIGNAL_TYPES for s in delivery_signals
     )
-    is_war_recap_batch = bool(signals) and all(
-        (s or {}).get("type") in WAR_RECAP_SIGNAL_TYPES for s in signals
+    is_war_recap_batch = bool(delivery_signals) and all(
+        (s or {}).get("type") in WAR_RECAP_SIGNAL_TYPES for s in delivery_signals
     )
-    is_season_awards_batch = bool(signals) and all(
-        (s or {}).get("type") in SEASON_AWARDS_SIGNAL_TYPES for s in signals
+    is_season_awards_batch = bool(delivery_signals) and all(
+        (s or {}).get("type") in SEASON_AWARDS_SIGNAL_TYPES for s in delivery_signals
     )
     if is_tournament_batch or is_war_recap_batch or is_season_awards_batch:
         context = None
     else:
-        context = facade._build_outcome_context(outcome, signals, clan, war)
+        context = facade._build_outcome_context(outcome, delivery_signals, clan, war)
 
     preauthored_result = None
-    if len(signals) == 1 and signals[0].get("signal_key"):
-        preauthored_result = facade._preauthored_system_signal_result(signals[0])
+    if len(delivery_signals) == 1 and delivery_signals[0].get("signal_key"):
+        preauthored_result = facade._preauthored_system_signal_result(delivery_signals[0])
 
     try:
         channel_name = getattr(channel, "name", None)
@@ -521,7 +588,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     mark_attempt=True,
                 )
                 return True
-            critical = bool({signal.get("type") for signal in signals or []} & CRITICAL_LEADER_ACTION_SIGNAL_TYPES)
+            critical = bool({signal.get("type") for signal in delivery_signals or []} & CRITICAL_LEADER_ACTION_SIGNAL_TYPES)
             allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
             if not allowed:
                 await asyncio.to_thread(
@@ -538,14 +605,14 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     mark_attempt=True,
                 )
                 return True
-            result = _build_arena_relay_result(signals)
+            result = _build_arena_relay_result(delivery_signals)
             if result is not None:
                 metadata = result.get("metadata") if isinstance(result, dict) else {}
                 action_type = metadata.get("action_type") or "in_game_relay"
                 baseline = await asyncio.to_thread(
                     db.build_leader_action_baseline,
                     action_type=action_type,
-                    signals=signals,
+                    signals=delivery_signals,
                 )
                 action = await asyncio.to_thread(
                     db.create_leader_action_recommendation,
@@ -565,21 +632,21 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         elif is_tournament_batch:
             result = await asyncio.to_thread(
                 elixir_agent.generate_tournament_update,
-                signals,
+                delivery_signals,
                 recent_posts=recent_posts,
                 memory_context=memory_context,
             )
         elif is_war_recap_batch:
             result = await asyncio.to_thread(
                 elixir_agent.generate_war_recap_update,
-                signals,
+                delivery_signals,
                 recent_posts=recent_posts,
                 memory_context=memory_context,
             )
         elif is_season_awards_batch:
             result = await asyncio.to_thread(
                 elixir_agent.generate_season_awards_post,
-                signals,
+                delivery_signals,
                 recent_posts=recent_posts,
                 memory_context=memory_context,
             )
@@ -665,7 +732,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     )
         if (
             channel_config["subagent_key"] == "clan-events"
-            and any(s.get("type") == "member_join" for s in signals)
+            and any(s.get("type") == "member_join" for s in delivery_signals)
         ):
             from modules.poap_kings import site as _pk_site
 
@@ -676,7 +743,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 try:
                     blog_result = await asyncio.to_thread(
                         _publish_member_join_blog_post,
-                        signals,
+                        delivery_signals,
                         join_body,
                         result.get("summary"),
                     )
@@ -709,6 +776,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     "intent": outcome["intent"],
                     "target_channel_key": outcome["target_channel_key"],
                     "result": result,
+                    "suppressed_signals": suppressed_public_signals,
                 },
             )
 
@@ -721,7 +789,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             outcome["intent"],
             required=outcome.get("required", True),
             delivery_status="delivered",
-            payload={"result": result, "signals": signals},
+            payload={"result": result, "signals": signals, "suppressed_signals": suppressed_public_signals},
             mark_attempt=True,
             delivered=True,
         )
@@ -730,23 +798,23 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             await asyncio.to_thread(
                 facade.maybe_upsert_signal_memory,
                 source_signal_key=outcome["source_signal_key"],
-                signal_type=(signals[0].get("type") or outcome["source_signal_type"]),
+                signal_type=(delivery_signals[0].get("type") or outcome["source_signal_type"]),
                 body=body,
                 outcome=outcome,
-                signals=signals,
+                signals=delivery_signals,
             )
 
         from agent.memory_tasks import store_observation_facts
 
-        await asyncio.to_thread(store_observation_facts, signals, channel_id)
-        if channel_config["subagent_key"] == "river-race" and facade._signal_group_needs_recap_memory(signals):
-            await asyncio.to_thread(facade._store_recap_memories_for_signal_batch, signals, posts, channel_id)
+        await asyncio.to_thread(store_observation_facts, delivery_signals, channel_id)
+        if channel_config["subagent_key"] == "river-race" and facade._signal_group_needs_recap_memory(delivery_signals):
+            await asyncio.to_thread(facade._store_recap_memories_for_signal_batch, delivery_signals, posts, channel_id)
 
         from runtime.helpers._common import _safe_create_task
 
         if channel_config["subagent_key"] != "arena-relay":
             _safe_create_task(
-                facade._post_signal_memory(body, outcome, signals),
+                facade._post_signal_memory(body, outcome, delivery_signals),
                 name="signal_memory",
             )
         return True

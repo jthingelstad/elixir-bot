@@ -195,6 +195,40 @@ def test_leader_action_note_revisit_controls_recent_suppression_window():
         conn.close()
 
 
+def test_recent_leader_action_lookup_finds_completed_kick_target():
+    conn = db.get_connection(":memory:")
+    try:
+        action = db.create_leader_action_recommendation(
+            action_type="kick_recommendation",
+            objective="roster_health",
+            prompt_text="Remove QuickChurn from the clan.",
+            rationale="Inactive and not using war decks.",
+            target_player_tag="#ABC123",
+            target_player_name="QuickChurn",
+            source_message_id=987,
+            conn=conn,
+        )
+        db.decide_leader_action_by_message(
+            987,
+            status=db.ACTION_DONE,
+            discord_user_id=123,
+            emoji="✅",
+            conn=conn,
+        )
+
+        found = db.get_recent_leader_action_for_target(
+            action_type="kick_recommendation",
+            target_player_tag="#ABC123",
+            status=db.ACTION_DONE,
+            conn=conn,
+        )
+
+        assert found["action_id"] == action["action_id"]
+        assert found["rationale"] == "Inactive and not using war decks."
+    finally:
+        conn.close()
+
+
 def test_leader_action_policy_respects_quiet_hours_and_daily_cap():
     conn = db.get_connection(":memory:")
     try:

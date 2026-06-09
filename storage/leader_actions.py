@@ -426,6 +426,32 @@ def list_leader_actions(
 
 
 @managed_connection
+def get_recent_leader_action_for_target(
+    *,
+    action_type: str,
+    target_player_tag: str,
+    status: str | None = None,
+    within_hours: int = 168,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    where = ["action_type = ?", "target_player_tag = ?", "proposed_at >= ?"]
+    params: list = [
+        (action_type or "").strip(),
+        _db._canon_tag(target_player_tag),
+        _cutoff_hours_ago(within_hours),
+    ]
+    if status:
+        where.append("status = ?")
+        params.append((status or "").strip())
+    row = conn.execute(
+        f"SELECT * FROM leader_action_recommendations WHERE {' AND '.join(where)} "
+        "ORDER BY COALESCE(decided_at, proposed_at) DESC, action_id DESC LIMIT 1",
+        tuple(params),
+    ).fetchone()
+    return _row_to_action(row) if row else None
+
+
+@managed_connection
 def has_recent_leader_action(
     *,
     action_type: str,
@@ -637,6 +663,7 @@ __all__ = [
     "decide_leader_action_by_message",
     "get_leader_action_by_key",
     "get_leader_action_by_message",
+    "get_recent_leader_action_for_target",
     "has_recent_leader_action",
     "list_leader_actions",
     "record_leader_action_note_by_message",
