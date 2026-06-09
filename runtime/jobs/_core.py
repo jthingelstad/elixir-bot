@@ -50,6 +50,7 @@ from runtime.app import (
     log,
 )
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id, _safe_create_task
+from runtime.leader_action_policy import can_post_leader_action
 from runtime import status as runtime_status
 from runtime.system_signals import queue_startup_system_signals
 from runtime.jobs._signals import (
@@ -137,8 +138,8 @@ else:
 PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "5"))
 PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "1"))
 PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))
-LEADERSHIP_ACTION_SCAN_MINUTES = int(os.getenv("LEADERSHIP_ACTION_SCAN_MINUTES", "60"))
-LEADERSHIP_ACTION_SCAN_MAX_ACTIONS = int(os.getenv("LEADERSHIP_ACTION_SCAN_MAX_ACTIONS", "3"))
+LEADERSHIP_ACTION_SCAN_MINUTES = int(os.getenv("LEADERSHIP_ACTION_SCAN_MINUTES", "240"))
+LEADERSHIP_ACTION_SCAN_MAX_ACTIONS = int(os.getenv("LEADERSHIP_ACTION_SCAN_MAX_ACTIONS", "2"))
 CLANOPS_WEEKLY_REVIEW_DAY = os.getenv("CLANOPS_WEEKLY_REVIEW_DAY", "fri")
 CLANOPS_WEEKLY_REVIEW_HOUR = int(os.getenv("CLANOPS_WEEKLY_REVIEW_HOUR", "19"))
 WEEKLY_RECAP_DAY = os.getenv("WEEKLY_RECAP_DAY", "mon")
@@ -722,6 +723,10 @@ async def _post_leader_action_recommendation(
         within_hours=dedupe_hours,
     ):
         return False
+    allowed, reason = await asyncio.to_thread(can_post_leader_action)
+    if not allowed:
+        log.info("leader action candidate skipped by policy: %s", reason)
+        return False
     baseline = await asyncio.to_thread(
         db.build_leader_action_baseline,
         action_type=action_type,
@@ -842,6 +847,11 @@ async def _leadership_action_scan():
     try:
         from runtime.jobs._signals import _deliver_war_nudge_sidecars
 
+        critical = await asyncio.to_thread(_leadership_scan_has_critical_war_action)
+        allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
+        if not allowed:
+            runtime_status.mark_job_success("leadership_action_scan", f"skipped: {reason}")
+            return
         posted += await _deliver_war_nudge_sidecars([{"type": "war_battle_day_live_update"}])
         remaining = max(0, LEADERSHIP_ACTION_SCAN_MAX_ACTIONS - posted)
         if remaining:
@@ -851,6 +861,24 @@ async def _leadership_action_scan():
         log.warning("leadership action scan failed: %s", exc, exc_info=True)
         return
     runtime_status.mark_job_success("leadership_action_scan", f"posted {posted} action(s)")
+
+
+def _leadership_scan_has_critical_war_action() -> bool:
+    state = db.get_current_war_day_state() or {}
+    if state.get("phase") != "battle":
+        return False
+    remaining = state.get("time_left_seconds")
+    if remaining is not None and int(remaining) <= 2 * 60 * 60:
+        return True
+    if (
+        state.get("day_number") is not None
+        and state.get("day_total") is not None
+        and state.get("day_number") == state.get("day_total")
+        and remaining is not None
+        and int(remaining) <= 6 * 60 * 60
+    ):
+        return True
+    return False
 
 
 async def _weekly_clan_recap():
