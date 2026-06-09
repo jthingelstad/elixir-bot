@@ -1699,6 +1699,7 @@ def test_leadership_action_scan_posts_singular_actions():
     with (
         patch("runtime.jobs._signals._deliver_war_nudge_sidecars", new=AsyncMock(return_value=1)) as mock_nudge,
         patch("runtime.jobs._core._post_candidate_leader_action_recommendations", new=AsyncMock(return_value=2)) as mock_candidates,
+        patch("runtime.jobs._core.db.refresh_due_leader_action_outcomes", return_value=[{"action_id": 1}]) as mock_refresh,
         patch("runtime.jobs._core._leadership_scan_has_critical_war_action", return_value=False),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.jobs._core.runtime_status.mark_job_start") as mock_start,
@@ -1708,6 +1709,7 @@ def test_leadership_action_scan_posts_singular_actions():
         asyncio.run(elixir._leadership_action_scan())
 
     mock_start.assert_called_once_with("leadership_action_scan")
+    mock_refresh.assert_called_once()
     mock_nudge.assert_awaited_once_with([{"type": "war_battle_day_live_update"}])
     mock_candidates.assert_awaited_once_with(max_actions=1)
     mock_success.assert_called_once_with("leadership_action_scan", "posted 3 action(s)")

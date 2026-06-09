@@ -109,6 +109,88 @@ def test_leader_action_recommendation_records_reaction_decision():
         )
         assert noted["decision_note"] == "boat defenses full already"
         assert noted["decision_note_message_id"] == "654"
+        assert noted["expires_at"] is not None
+        assert noted["outcome"]["leader_note"]["category"] == "state_already_satisfied"
+    finally:
+        conn.close()
+
+
+def test_leader_action_done_decision_uses_delayed_outcome_refresh():
+    conn = db.get_connection(":memory:")
+    try:
+        action = db.create_leader_action_recommendation(
+            action_type="promotion_recommendation",
+            objective="reward_and_retention",
+            prompt_text="Promote King Levy to Elder.",
+            target_player_tag="#ABC123",
+            target_player_name="King Levy",
+            source_message_id=987,
+            baseline={"member": {"role": "member", "status": "active"}},
+            conn=conn,
+        )
+
+        decided = db.decide_leader_action_by_message(
+            987,
+            status=db.ACTION_DONE,
+            discord_user_id=123,
+            emoji="✅",
+            decided_at="2026-01-01T00:00:00",
+            conn=conn,
+        )
+
+        assert decided["status"] == db.ACTION_DONE
+        assert decided["outcome"]["pending_evaluation"] is True
+        assert decided["outcome"]["due_at"] == "2026-01-02T00:00:00"
+
+        refreshed = db.refresh_due_leader_action_outcomes(conn=conn)
+        assert refreshed
+        updated = db.get_leader_action_by_key(action["action_key"], conn=conn)
+        assert not updated["outcome"].get("pending_evaluation")
+        assert updated["outcome"]["changed"]["role"] is True
+    finally:
+        conn.close()
+
+
+def test_leader_action_note_revisit_controls_recent_suppression_window():
+    conn = db.get_connection(":memory:")
+    try:
+        action = db.create_leader_action_recommendation(
+            action_type="kick_recommendation",
+            objective="roster_health",
+            prompt_text="Review King Levy for removal.",
+            target_player_tag="#ABC123",
+            target_player_name="King Levy",
+            source_message_id=987,
+            conn=conn,
+        )
+
+        noted = db.record_leader_action_note_by_message(
+            987,
+            note="Revisit in a week.",
+            discord_user_id=123,
+            conn=conn,
+        )
+
+        assert noted["expires_at"] is not None
+        assert noted["outcome"]["leader_note"]["category"] == "revisit"
+        assert db.has_recent_leader_action(
+            action_type="kick_recommendation",
+            target_player_tag="#ABC123",
+            objective="roster_health",
+            conn=conn,
+        )
+
+        conn.execute(
+            "UPDATE leader_action_recommendations SET expires_at = '2026-01-01T00:00:00' WHERE action_id = ?",
+            (action["action_id"],),
+        )
+        conn.commit()
+        assert not db.has_recent_leader_action(
+            action_type="kick_recommendation",
+            target_player_tag="#ABC123",
+            objective="roster_health",
+            conn=conn,
+        )
     finally:
         conn.close()
 
