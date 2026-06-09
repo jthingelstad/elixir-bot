@@ -173,6 +173,8 @@ def get_member_metadata(tag: str, conn: Optional[sqlite3.Connection] = None) -> 
     row = conn.execute(
         "SELECT m.member_id, md.birth_month, md.birth_day, md.cr_account_age_days, md.cr_account_age_years, md.cr_account_age_updated_at, "
         "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
+        "md.cr_collection_level, md.cr_collection_level_badge_tier, md.cr_collection_level_badge_max_tier, md.cr_collection_level_updated_at, "
+        "md.cr_clan_war_wins, md.cr_battle_wins, md.cr_clan_donations, md.cr_banner_count, md.cr_emote_count, md.cr_profile_badges_updated_at, "
         "md.profile_url, md.poap_address, md.note, md.generated_bio, md.generated_highlight, md.generated_profile_updated_at "
         "FROM members m LEFT JOIN member_metadata md ON md.member_id = m.member_id WHERE m.player_tag = ?",
         (_canon_tag(tag),),
@@ -191,6 +193,16 @@ def get_member_metadata(tag: str, conn: Optional[sqlite3.Connection] = None) -> 
         "cr_games_per_day": row["cr_games_per_day"],
         "cr_games_per_day_window_days": row["cr_games_per_day_window_days"],
         "cr_games_per_day_updated_at": row["cr_games_per_day_updated_at"],
+        "cr_collection_level": row["cr_collection_level"],
+        "cr_collection_level_badge_tier": row["cr_collection_level_badge_tier"],
+        "cr_collection_level_badge_max_tier": row["cr_collection_level_badge_max_tier"],
+        "cr_collection_level_updated_at": row["cr_collection_level_updated_at"],
+        "cr_clan_war_wins": row["cr_clan_war_wins"],
+        "cr_battle_wins": row["cr_battle_wins"],
+        "cr_clan_donations": row["cr_clan_donations"],
+        "cr_banner_count": row["cr_banner_count"],
+        "cr_emote_count": row["cr_emote_count"],
+        "cr_profile_badges_updated_at": row["cr_profile_badges_updated_at"],
         "profile_url": row["profile_url"] or "",
         "poap_address": row["poap_address"] or "",
         "note": row["note"] or "",
@@ -205,6 +217,8 @@ def get_member_metadata_map(conn: Optional[sqlite3.Connection] = None) -> dict[s
     rows = conn.execute(
         "SELECT m.member_id, m.player_tag, md.birth_month, md.birth_day, md.cr_account_age_days, md.cr_account_age_years, md.cr_account_age_updated_at, "
         "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
+        "md.cr_collection_level, md.cr_collection_level_badge_tier, md.cr_collection_level_badge_max_tier, md.cr_collection_level_updated_at, "
+        "md.cr_clan_war_wins, md.cr_battle_wins, md.cr_clan_donations, md.cr_banner_count, md.cr_emote_count, md.cr_profile_badges_updated_at, "
         "md.profile_url, md.poap_address, md.note, md.generated_bio, md.generated_highlight, md.generated_profile_updated_at "
         "FROM members m LEFT JOIN member_metadata md ON md.member_id = m.member_id"
     ).fetchall()
@@ -220,6 +234,16 @@ def get_member_metadata_map(conn: Optional[sqlite3.Connection] = None) -> dict[s
             "cr_games_per_day": row["cr_games_per_day"],
             "cr_games_per_day_window_days": row["cr_games_per_day_window_days"],
             "cr_games_per_day_updated_at": row["cr_games_per_day_updated_at"],
+            "cr_collection_level": row["cr_collection_level"],
+            "cr_collection_level_badge_tier": row["cr_collection_level_badge_tier"],
+            "cr_collection_level_badge_max_tier": row["cr_collection_level_badge_max_tier"],
+            "cr_collection_level_updated_at": row["cr_collection_level_updated_at"],
+            "cr_clan_war_wins": row["cr_clan_war_wins"],
+            "cr_battle_wins": row["cr_battle_wins"],
+            "cr_clan_donations": row["cr_clan_donations"],
+            "cr_banner_count": row["cr_banner_count"],
+            "cr_emote_count": row["cr_emote_count"],
+            "cr_profile_badges_updated_at": row["cr_profile_badges_updated_at"],
             "profile_url": row["profile_url"] or "",
             "poap_address": row["poap_address"] or "",
             "note": row["note"] or "",
@@ -236,6 +260,8 @@ def list_member_metadata_rows(status: Optional[str] = "active", conn: Optional[s
         "SELECT m.member_id, m.player_tag, m.current_name, m.status, cs.role, "
         "md.joined_at, md.birth_month, md.birth_day, md.cr_account_age_days, md.cr_account_age_years, md.cr_account_age_updated_at, "
         "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
+        "md.cr_collection_level, md.cr_collection_level_badge_tier, md.cr_collection_level_badge_max_tier, md.cr_collection_level_updated_at, "
+        "md.cr_clan_war_wins, md.cr_battle_wins, md.cr_clan_donations, md.cr_banner_count, md.cr_emote_count, md.cr_profile_badges_updated_at, "
         "md.profile_url, md.poap_address, md.note, "
         "dl.discord_username, dl.discord_display_name "
         "FROM members m "
@@ -264,6 +290,16 @@ def list_member_metadata_rows(status: Optional[str] = "active", conn: Optional[s
             "cr_games_per_day": row["cr_games_per_day"],
             "cr_games_per_day_window_days": row["cr_games_per_day_window_days"],
             "cr_games_per_day_updated_at": row["cr_games_per_day_updated_at"],
+            "cr_collection_level": row["cr_collection_level"],
+            "cr_collection_level_badge_tier": row["cr_collection_level_badge_tier"],
+            "cr_collection_level_badge_max_tier": row["cr_collection_level_badge_max_tier"],
+            "cr_collection_level_updated_at": row["cr_collection_level_updated_at"],
+            "cr_clan_war_wins": row["cr_clan_war_wins"],
+            "cr_battle_wins": row["cr_battle_wins"],
+            "cr_clan_donations": row["cr_clan_donations"],
+            "cr_banner_count": row["cr_banner_count"],
+            "cr_emote_count": row["cr_emote_count"],
+            "cr_profile_badges_updated_at": row["cr_profile_badges_updated_at"],
             "profile_url": row["profile_url"] or "",
             "poap_address": row["poap_address"] or "",
             "note": row["note"] or "",

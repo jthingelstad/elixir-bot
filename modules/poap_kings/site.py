@@ -997,6 +997,16 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                 "cr_games_per_day": extra.get("cr_games_per_day"),
                 "cr_games_per_day_window_days": extra.get("cr_games_per_day_window_days"),
                 "cr_games_per_day_updated_at": extra.get("cr_games_per_day_updated_at"),
+                "cr_collection_level": extra.get("cr_collection_level"),
+                "cr_collection_level_badge_tier": extra.get("cr_collection_level_badge_tier"),
+                "cr_collection_level_badge_max_tier": extra.get("cr_collection_level_badge_max_tier"),
+                "cr_collection_level_updated_at": extra.get("cr_collection_level_updated_at"),
+                "cr_clan_war_wins": extra.get("cr_clan_war_wins"),
+                "cr_battle_wins": extra.get("cr_battle_wins"),
+                "cr_clan_donations": extra.get("cr_clan_donations"),
+                "cr_banner_count": extra.get("cr_banner_count"),
+                "cr_emote_count": extra.get("cr_emote_count"),
+                "cr_profile_badges_updated_at": extra.get("cr_profile_badges_updated_at"),
                 "badge_count": showcase.get("badge_count"),
                 "badge_highlights": showcase.get("badge_highlights", []),
                 "mastery_highlights": showcase.get("mastery_highlights", []),
@@ -1054,6 +1064,16 @@ def build_roster_data(clan_data, include_cards=False, conn=None):
                         member["cr_games_per_day"] = refreshed_meta.get("cr_games_per_day")
                         member["cr_games_per_day_window_days"] = refreshed_meta.get("cr_games_per_day_window_days")
                         member["cr_games_per_day_updated_at"] = refreshed_meta.get("cr_games_per_day_updated_at")
+                        member["cr_collection_level"] = refreshed_meta.get("cr_collection_level")
+                        member["cr_collection_level_badge_tier"] = refreshed_meta.get("cr_collection_level_badge_tier")
+                        member["cr_collection_level_badge_max_tier"] = refreshed_meta.get("cr_collection_level_badge_max_tier")
+                        member["cr_collection_level_updated_at"] = refreshed_meta.get("cr_collection_level_updated_at")
+                        member["cr_clan_war_wins"] = refreshed_meta.get("cr_clan_war_wins")
+                        member["cr_battle_wins"] = refreshed_meta.get("cr_battle_wins")
+                        member["cr_clan_donations"] = refreshed_meta.get("cr_clan_donations")
+                        member["cr_banner_count"] = refreshed_meta.get("cr_banner_count")
+                        member["cr_emote_count"] = refreshed_meta.get("cr_emote_count")
+                        member["cr_profile_badges_updated_at"] = refreshed_meta.get("cr_profile_badges_updated_at")
                 except (requests.RequestException, sqlite3.Error, KeyError, TypeError):
                     _hydrate_member_card_data(member, conn, existing_member=existing_by_tag.get(tag))
 

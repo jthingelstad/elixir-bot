@@ -43,7 +43,7 @@ TOOLS = [
             "Get comprehensive information about a clan member. Use 'include' to select "
             "which aspects to return. Defaults to profile + form.\n\n"
             "Include options:\n"
-            "- profile: join date, role, level, trophies, bio, Discord link, CR account age, activity rate\n"
+            "- profile: join date, role, level, trophies, bio, Discord link, CR account age, activity rate, badge-backed profile metrics such as Collection Level and Clan War Wins\n"
             "- form: recent form aggregates (wins/losses, streak, hot/mixed/slumping) — NOT individual battles\n"
             "- battles: chronological list of this member's recent individual battles — outcome, crowns, "
             "trophy change, opponent name/tag/clan, slim own/opponent deck, and battle_time per row. "

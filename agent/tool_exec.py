@@ -24,6 +24,25 @@ def _resource_constraints_note() -> dict:
     }
 
 
+def _badge_profile_metrics_summary(profile: dict) -> str | None:
+    metric_specs = (
+        ("cr_collection_level", "collection level"),
+        ("cr_clan_war_wins", "clan war wins"),
+        ("cr_battle_wins", "battle wins"),
+        ("cr_clan_donations", "clan donations"),
+        ("cr_banner_count", "banners"),
+        ("cr_emote_count", "emotes"),
+    )
+    parts = []
+    for key, label in metric_specs:
+        value = profile.get(key)
+        if isinstance(value, int) and value >= 0:
+            parts.append(f"{label} {value:,}")
+    if not parts:
+        return None
+    return "Badge-backed profile metrics: " + "; ".join(parts)
+
+
 def _enrich_member_profile(result):
     if not isinstance(result, dict):
         return result
@@ -61,6 +80,10 @@ def _enrich_member_profile(result):
         enriched["recent_activity_summary"] = (
             f"Recent activity: {games_per_day:.2f} games played per day over the last {window_days} days"
         )
+
+    profile_badge_summary = _badge_profile_metrics_summary(enriched)
+    if profile_badge_summary:
+        enriched["profile_badge_metrics_summary"] = profile_badge_summary
 
     enriched.update(_resource_constraints_note())
     return enriched

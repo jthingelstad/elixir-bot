@@ -37,6 +37,16 @@ def _migration_0(conn: sqlite3.Connection) -> None:
             cr_games_per_day REAL,
             cr_games_per_day_window_days INTEGER,
             cr_games_per_day_updated_at TEXT,
+            cr_collection_level INTEGER,
+            cr_collection_level_badge_tier INTEGER,
+            cr_collection_level_badge_max_tier INTEGER,
+            cr_collection_level_updated_at TEXT,
+            cr_clan_war_wins INTEGER,
+            cr_battle_wins INTEGER,
+            cr_clan_donations INTEGER,
+            cr_banner_count INTEGER,
+            cr_emote_count INTEGER,
+            cr_profile_badges_updated_at TEXT,
             profile_url TEXT DEFAULT '',
             poap_address TEXT DEFAULT '',
             note TEXT DEFAULT '',
@@ -1621,7 +1631,25 @@ def _migration_34(conn: sqlite3.Connection) -> None:
         )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34]
+def _migration_35(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "member_metadata")
+    for name, sql_type in (
+        ("cr_collection_level", "INTEGER"),
+        ("cr_collection_level_badge_tier", "INTEGER"),
+        ("cr_collection_level_badge_max_tier", "INTEGER"),
+        ("cr_collection_level_updated_at", "TEXT"),
+        ("cr_clan_war_wins", "INTEGER"),
+        ("cr_battle_wins", "INTEGER"),
+        ("cr_clan_donations", "INTEGER"),
+        ("cr_banner_count", "INTEGER"),
+        ("cr_emote_count", "INTEGER"),
+        ("cr_profile_badges_updated_at", "TEXT"),
+    ):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE member_metadata ADD COLUMN {name} {sql_type}")
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

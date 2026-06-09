@@ -69,7 +69,7 @@ def _badge_category(name: str | None) -> str:
         return "seasonal"
     if badge_name.startswith("Crl") or badge_name in {"EasterEgg"}:
         return "event"
-    if badge_name in {"YearsPlayed", "BattleWins", "ClanWarsVeteran", "LadderTop1000"}:
+    if badge_name in {"YearsPlayed", "BattleWins", "ClanWarWins", "ClanWarsVeteran", "LadderTop1000"}:
         return "career"
     return "general"
 
@@ -147,6 +147,27 @@ def _years_played_metadata_fields(player_data: dict, *, fetched_at: str) -> dict
         "cr_account_age_days": age_days if isinstance(age_days, int) and age_days >= 0 else None,
         "cr_account_age_years": age_years if isinstance(age_years, int) and age_years >= 0 else None,
         "cr_account_age_updated_at": fetched_at,
+    }
+
+
+def _nonnegative_int(value) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+def _profile_badge_metadata_fields(player_data: dict, *, fetched_at: str) -> dict:
+    badges = _indexed_items(player_data.get("badges") or [])
+    collection_level = badges.get("CollectionLevel") or {}
+    return {
+        "cr_collection_level": _nonnegative_int(collection_level.get("progress")),
+        "cr_collection_level_badge_tier": _nonnegative_int(collection_level.get("level")),
+        "cr_collection_level_badge_max_tier": _nonnegative_int(collection_level.get("maxLevel")),
+        "cr_collection_level_updated_at": fetched_at,
+        "cr_clan_war_wins": _nonnegative_int((badges.get("ClanWarWins") or {}).get("progress")),
+        "cr_battle_wins": _nonnegative_int((badges.get("BattleWins") or {}).get("progress")),
+        "cr_clan_donations": _nonnegative_int((badges.get("ClanDonations") or {}).get("progress")),
+        "cr_banner_count": _nonnegative_int((badges.get("BannerCollection") or {}).get("progress")),
+        "cr_emote_count": _nonnegative_int((badges.get("EmoteCollection") or {}).get("progress")),
+        "cr_profile_badges_updated_at": fetched_at,
     }
 
 
@@ -301,7 +322,12 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
             "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, support_cards_json, sample_size) VALUES (?, ?, 'player_profile', 'overall', ?, ?, ?, 1)",
             (member_id, fetched_at, deck_hash, _json_or_none(current_deck) or "[]", _json_or_none(current_deck_support_cards) or "[]"),
         )
-    _upsert_member_metadata(conn, member_id, **_years_played_metadata_fields(player_data, fetched_at=fetched_at))
+    _upsert_member_metadata(
+        conn,
+        member_id,
+        **_years_played_metadata_fields(player_data, fetched_at=fetched_at),
+        **_profile_badge_metadata_fields(player_data, fetched_at=fetched_at),
+    )
     conn.commit()
     if previous is None:
         return []

@@ -389,6 +389,12 @@ def test_snapshot_player_profile_derives_clash_royale_account_age_metadata():
                 "cards": [],
                 "badges": [
                     {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825},
+                    {"name": "CollectionLevel", "level": 8, "maxLevel": 8, "progress": 1639},
+                    {"name": "ClanWarWins", "level": 5, "maxLevel": 10, "progress": 421},
+                    {"name": "BattleWins", "level": 7, "maxLevel": 10, "progress": 6400},
+                    {"name": "ClanDonations", "level": 9, "maxLevel": 10, "progress": 32145},
+                    {"name": "BannerCollection", "level": 3, "maxLevel": 10, "progress": 88},
+                    {"name": "EmoteCollection", "level": 4, "maxLevel": 10, "progress": 123},
                 ],
             },
             conn=conn,
@@ -400,12 +406,31 @@ def test_snapshot_player_profile_derives_clash_royale_account_age_metadata():
         assert metadata["cr_account_age_days"] == 1473
         assert metadata["cr_account_age_years"] == 4
         assert metadata["cr_account_age_updated_at"] is not None
+        assert metadata["cr_collection_level"] == 1639
+        assert metadata["cr_collection_level_badge_tier"] == 8
+        assert metadata["cr_collection_level_badge_max_tier"] == 8
+        assert metadata["cr_collection_level_updated_at"] is not None
+        assert metadata["cr_clan_war_wins"] == 421
+        assert metadata["cr_battle_wins"] == 6400
+        assert metadata["cr_clan_donations"] == 32145
+        assert metadata["cr_banner_count"] == 88
+        assert metadata["cr_emote_count"] == 123
+        assert metadata["cr_profile_badges_updated_at"] is not None
         assert profile["cr_account_age_days"] == 1473
         assert profile["cr_account_age_years"] == 4
+        assert profile["cr_collection_level"] == 1639
+        assert profile["cr_collection_level_badge_tier"] == 8
+        assert profile["cr_clan_war_wins"] == 421
+        assert profile["cr_battle_wins"] == 6400
+        assert profile["cr_clan_donations"] == 32145
+        assert profile["cr_banner_count"] == 88
+        assert profile["cr_emote_count"] == 123
 
         rows = db.list_member_metadata_rows(conn=conn)
         assert rows[0]["cr_account_age_days"] == 1473
         assert rows[0]["cr_account_age_years"] == 4
+        assert rows[0]["cr_collection_level"] == 1639
+        assert rows[0]["cr_clan_war_wins"] == 421
     finally:
         conn.close()
 
