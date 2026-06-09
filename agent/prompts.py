@@ -464,6 +464,11 @@ def _arena_relay_observation_system(channel_name: str):
         "Each memory entry must be: {\"title\": \"short label\", \"body\": \"screenshot-observed fact with timestamp/context\", \"action\": \"save\" or \"correct\", \"member_tag\": \"player tag, visible player name, or null\", \"confidence\": 0.6-0.95, \"tags\": [\"screenshot\", \"availability\"]}. "
         "Use `member_tag` when the fact is about one visible/resolvable member, otherwise null. "
         "If no durable facts should be saved, use an empty memories array.\n\n"
+        "Also include an `observation` object so Elixir can track screenshot learning over time. "
+        "`observation.screenshot_type` must be one of: clan_chat, boat_defense, deck, collection, war_activity, leaderboard, profile, reward, store_offer, battle_log, unknown. "
+        "`observation.players` should list visible player names or tags. "
+        "`observation.actionable_facts` should list short visible facts a leader might act on or analyze later. "
+        "`observation.uncertainty` should briefly name what was cropped, blurry, or not visible, or null.\n\n"
         "If a copy/paste in-game message would help, include one short line clearly labeled `Copy:` and keep it under 240 characters. "
         "Do not include check/cross reaction instructions; this is an observation readout, not an action card. "
         "Keep the whole response crisp enough for #arena-relay.\n\n"
@@ -473,6 +478,7 @@ def _arena_relay_observation_system(channel_name: str):
         '{"event_type": "arena_relay_screenshot_observation", '
         '"summary": "one sentence observation summary", '
         '"content": "Discord-ready concise readout", '
+        '"observation": {"screenshot_type": "boat_defense", "players": [], "actionable_facts": [], "uncertainty": null}, '
         '"memories": []}'
     )
     return _build_system_prompt(purpose, knowledge, channel_context, guidance)

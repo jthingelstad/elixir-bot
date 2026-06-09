@@ -1,6 +1,8 @@
 """Tests for channel-role routing in elixir.py."""
 
 import asyncio
+import base64
+import io
 import json
 import signal
 from datetime import datetime, timedelta
@@ -9,6 +11,7 @@ from unittest.mock import AsyncMock, PropertyMock, patch
 
 import elixir
 import runtime.channel_router as channel_router
+from PIL import Image
 from runtime.activities import (
     list_registered_activities,
     manual_activity_choices,
@@ -515,12 +518,19 @@ def test_arena_relay_leader_screenshot_is_observed():
         patch("runtime.channel_router.db.upsert_discord_user"),
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111) as mock_save,
+        patch("runtime.channel_router.db.save_arena_relay_screenshot_observation", return_value={"screenshot_type": "boat_defense", "image_count": 1}) as mock_observation,
         patch(
             "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
             return_value={
                 "event_type": "arena_relay_screenshot_observation",
                 "summary": "Boat defenses still have visible open slots.",
                 "content": "**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3.",
+                "observation": {
+                    "screenshot_type": "boat_defense",
+                    "players": ["dez42"],
+                    "actionable_facts": ["At least three open defense slots are visible."],
+                    "uncertainty": None,
+                },
             },
         ) as mock_analyze,
     ):
@@ -539,6 +549,9 @@ def test_arena_relay_leader_screenshot_is_observed():
         "arena_relay_screenshot_observation_input",
         "arena_relay_screenshot_observation",
     ]
+    mock_observation.assert_called_once()
+    assert mock_observation.call_args.kwargs["screenshot_type"] == "boat_defense"
+    assert mock_observation.call_args.kwargs["players"] == ["dez42"]
     message.reply.assert_awaited_once_with("**👁️ Screenshot Read**\nVisible open boat-defense slots: at least 3.")
     mock_process.assert_not_awaited()
 
@@ -595,6 +608,7 @@ def test_arena_relay_screenshot_persists_structured_memories():
             },
         ),
         patch("runtime.channel_router._persist_screenshot_memories", return_value=1) as mock_persist,
+        patch("runtime.channel_router.db.save_arena_relay_screenshot_observation", return_value={"screenshot_type": "clan_chat", "image_count": 1}),
     ):
         asyncio.run(elixir.on_message(message))
 
@@ -685,6 +699,7 @@ def test_arena_relay_leader_multi_screenshot_corrects_media_types():
         patch("runtime.channel_router.db.upsert_discord_user"),
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111),
+        patch("runtime.channel_router.db.save_arena_relay_screenshot_observation", return_value={"screenshot_type": "unknown", "image_count": 3}),
         patch(
             "runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot",
             return_value={
@@ -704,6 +719,36 @@ def test_arena_relay_leader_multi_screenshot_corrects_media_types():
         "image/png",
     ]
     mock_process.assert_not_awaited()
+
+
+def test_collect_screenshot_payload_resizes_large_images():
+    raw = io.BytesIO()
+    Image.new("RGB", (1400, 2600), (20, 80, 140)).save(raw, format="PNG")
+    data = raw.getvalue()
+    attachment = SimpleNamespace(
+        filename="tall-screenshot.png",
+        content_type="image/png",
+        size=len(data),
+        read=AsyncMock(return_value=data),
+    )
+    message = _make_message(
+        1513758211206025227,
+        "arena-relay",
+        "",
+        roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
+        attachments=[attachment],
+    )
+
+    blocks, metadata = asyncio.run(channel_router._collect_screenshot_image_payload(message))
+
+    attachment.read.assert_awaited_once()
+    assert len(blocks) == 1
+    assert blocks[0]["source"]["media_type"] == "image/jpeg"
+    submitted = base64.b64decode(blocks[0]["source"]["data"])
+    assert len(submitted) < len(data)
+    assert metadata[0]["resized"] is True
+    assert metadata[0]["reencoded"] is True
+    assert max(metadata[0]["width"], metadata[0]["height"]) == channel_router.MAX_SCREENSHOT_LONG_EDGE
 
 
 def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():

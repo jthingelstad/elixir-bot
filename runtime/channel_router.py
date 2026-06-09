@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import logging
 import mimetypes
 
 import cr_api
 import db
 import elixir_agent
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 _log = logging.getLogger("elixir.channel_router")
 
 SUPPORTED_IMAGE_MEDIA_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 MAX_SCREENSHOT_ATTACHMENTS = 3
-MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024
+MAX_SCREENSHOT_READ_BYTES = 12 * 1024 * 1024
+MAX_SCREENSHOT_SUBMIT_BYTES = 900 * 1024
+MAX_SCREENSHOT_LONG_EDGE = 1440
 
 
 def _attachment_media_type(attachment) -> str | None:
@@ -37,6 +41,76 @@ def _sniff_image_media_type(data: bytes, fallback: str | None = None) -> str | N
     if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
     return fallback
+
+
+def _prepare_screenshot_image(data: bytes, media_type: str | None) -> tuple[bytes, str | None, dict]:
+    """Resize/re-encode large screenshots before sending them to the LLM."""
+    metadata = {
+        "original_bytes": len(data or b""),
+        "submitted_bytes": len(data or b""),
+        "declared_media_type": media_type,
+        "media_type": media_type,
+        "resized": False,
+        "reencoded": False,
+    }
+    if not data:
+        return data, media_type, metadata
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image = ImageOps.exif_transpose(image)
+            metadata["original_width"] = image.width
+            metadata["original_height"] = image.height
+            if (
+                len(data) <= MAX_SCREENSHOT_SUBMIT_BYTES
+                and max(image.width, image.height) <= MAX_SCREENSHOT_LONG_EDGE
+            ):
+                metadata["width"] = image.width
+                metadata["height"] = image.height
+                return data, media_type, metadata
+
+            long_edge = max(image.width, image.height)
+            if long_edge > MAX_SCREENSHOT_LONG_EDGE:
+                scale = MAX_SCREENSHOT_LONG_EDGE / long_edge
+                new_size = (
+                    max(1, int(image.width * scale)),
+                    max(1, int(image.height * scale)),
+                )
+                image = image.resize(new_size, Image.Resampling.LANCZOS)
+                metadata["resized"] = True
+
+            if image.mode not in {"RGB", "L"}:
+                background = Image.new("RGB", image.size, (255, 255, 255))
+                if image.mode in {"RGBA", "LA"}:
+                    background.paste(image.convert("RGBA"), mask=image.convert("RGBA").getchannel("A"))
+                else:
+                    background.paste(image.convert("RGB"))
+                image = background
+            elif image.mode == "L":
+                image = image.convert("RGB")
+
+            best = None
+            best_quality = None
+            for quality in (88, 82, 76, 70, 64, 58):
+                output = io.BytesIO()
+                image.save(output, format="JPEG", quality=quality, optimize=True, progressive=True)
+                candidate = output.getvalue()
+                best = candidate
+                best_quality = quality
+                if len(candidate) <= MAX_SCREENSHOT_SUBMIT_BYTES:
+                    break
+            if best:
+                metadata.update({
+                    "submitted_bytes": len(best),
+                    "media_type": "image/jpeg",
+                    "width": image.width,
+                    "height": image.height,
+                    "quality": best_quality,
+                    "reencoded": True,
+                })
+                return best, "image/jpeg", metadata
+    except (UnidentifiedImageError, OSError, ValueError):
+        metadata["preprocess_error"] = "unreadable_image"
+    return data, media_type, metadata
 
 
 def _image_attachments(message) -> list:
@@ -93,14 +167,15 @@ def _question_with_unreadable_attachment_context(raw_question: str, image_attach
     return attachment_text
 
 
-async def _collect_screenshot_image_blocks(message) -> list[dict]:
+async def _collect_screenshot_image_payload(message) -> tuple[list[dict], list[dict]]:
     blocks = []
+    metadata_rows = []
     for attachment in _image_attachments(message)[:MAX_SCREENSHOT_ATTACHMENTS]:
         media_type = _attachment_media_type(attachment)
         if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
             continue
         size = getattr(attachment, "size", None)
-        if isinstance(size, int) and size > MAX_SCREENSHOT_BYTES:
+        if isinstance(size, int) and size > MAX_SCREENSHOT_READ_BYTES:
             _log.info(
                 "screenshot_attachment_skipped_too_large message_id=%s filename=%r size=%s",
                 getattr(message, "id", None),
@@ -120,7 +195,7 @@ async def _collect_screenshot_image_blocks(message) -> list[dict]:
             continue
         if not data:
             continue
-        if len(data) > MAX_SCREENSHOT_BYTES:
+        if len(data) > MAX_SCREENSHOT_READ_BYTES:
             _log.info(
                 "screenshot_attachment_skipped_too_large_after_read message_id=%s filename=%r size=%s",
                 getattr(message, "id", None),
@@ -137,6 +212,28 @@ async def _collect_screenshot_image_blocks(message) -> list[dict]:
                 sniffed_media_type,
             )
             continue
+        prepared, prepared_media_type, image_meta = _prepare_screenshot_image(data, sniffed_media_type)
+        image_meta.update({
+            "filename": getattr(attachment, "filename", None),
+            "declared_media_type": media_type,
+            "sniffed_media_type": sniffed_media_type,
+        })
+        if image_meta.get("reencoded"):
+            _log.info(
+                "screenshot_attachment_preprocessed message_id=%s filename=%r original_bytes=%s submitted_bytes=%s size=%sx%s media_type=%s",
+                getattr(message, "id", None),
+                getattr(attachment, "filename", None),
+                image_meta.get("original_bytes"),
+                image_meta.get("submitted_bytes"),
+                image_meta.get("width"),
+                image_meta.get("height"),
+                prepared_media_type,
+            )
+        if prepared_media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
+            continue
+        if len(prepared) > MAX_SCREENSHOT_READ_BYTES:
+            continue
+        metadata_rows.append(image_meta)
         if sniffed_media_type != media_type:
             _log.info(
                 "screenshot_attachment_media_type_corrected message_id=%s filename=%r declared=%r sniffed=%r",
@@ -149,10 +246,15 @@ async def _collect_screenshot_image_blocks(message) -> list[dict]:
             "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": sniffed_media_type,
-                "data": base64.b64encode(data).decode("ascii"),
+                "media_type": prepared_media_type,
+                "data": base64.b64encode(prepared).decode("ascii"),
             },
         })
+    return blocks, metadata_rows
+
+
+async def _collect_screenshot_image_blocks(message) -> list[dict]:
+    blocks, _ = await _collect_screenshot_image_payload(message)
     return blocks
 
 
@@ -331,6 +433,72 @@ def _persist_screenshot_memories(memories, channel_id, workflow, source_message_
     return saved
 
 
+def _coerce_observation_list(value) -> list:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _screenshot_observation_payload(result: dict, content: str, image_count: int) -> dict:
+    observation = result.get("observation") if isinstance(result.get("observation"), dict) else {}
+    screenshot_type = (
+        observation.get("screenshot_type")
+        or observation.get("type")
+        or result.get("screenshot_type")
+        or "unknown"
+    )
+    players = (
+        observation.get("players")
+        or observation.get("visible_players")
+        or result.get("players")
+        or result.get("visible_players")
+        or []
+    )
+    actionable_facts = (
+        observation.get("actionable_facts")
+        or observation.get("facts")
+        or result.get("actionable_facts")
+        or []
+    )
+    uncertainty = (
+        observation.get("uncertainty")
+        or observation.get("unclear")
+        or result.get("uncertainty")
+        or ""
+    )
+    return {
+        "screenshot_type": screenshot_type,
+        "summary": result.get("summary") or content[:220],
+        "content": content,
+        "players": _coerce_observation_list(players),
+        "actionable_facts": _coerce_observation_list(actionable_facts),
+        "uncertainty": str(uncertainty) if uncertainty else None,
+        "image_count": image_count,
+    }
+
+
+def _persist_arena_relay_screenshot_observation(
+    result: dict,
+    content: str,
+    *,
+    message,
+    image_metadata: list[dict],
+):
+    payload = _screenshot_observation_payload(result, content, len(image_metadata))
+    return db.save_arena_relay_screenshot_observation(
+        source_message_id=message.id,
+        channel_id=message.channel.id,
+        channel_name=getattr(message.channel, "name", None),
+        author_discord_user_id=message.author.id,
+        author_display_name=getattr(message.author, "display_name", None),
+        **payload,
+        image_metadata=image_metadata,
+        result=result,
+    )
+
+
 async def _post_conversation_memory(
     user_message_id, assistant_message_id,
     user_content, assistant_content,
@@ -480,7 +648,7 @@ async def _handle_arena_relay_screenshot_observation(
         return False
 
     async with message.channel.typing():
-        image_blocks = await _collect_screenshot_image_blocks(message)
+        image_blocks, image_metadata = await _collect_screenshot_image_payload(message)
         question = raw_question
         if not image_blocks:
             question = _question_with_unreadable_attachment_context(message.content, image_attachments)
@@ -500,6 +668,7 @@ async def _handle_arena_relay_screenshot_observation(
             raw_json={
                 "attachment_summary": _attachment_summary(image_attachments),
                 "image_blocks_read": len(image_blocks),
+                "image_metadata": image_metadata,
             },
         )
 
@@ -521,6 +690,20 @@ async def _handle_arena_relay_screenshot_observation(
                 event_type="arena_relay_screenshot_observation",
                 discord_message_id=_primary_discord_message_id(sent),
                 raw_json={"input_message_id": user_msg_id, "image_blocks_read": 0},
+            )
+            await asyncio.to_thread(
+                db.save_arena_relay_screenshot_observation,
+                source_message_id=message.id,
+                channel_id=message.channel.id,
+                channel_name=getattr(message.channel, "name", None),
+                author_discord_user_id=message.author.id,
+                author_display_name=getattr(message.author, "display_name", None),
+                screenshot_type="unreadable",
+                summary="Elixir could not read the screenshot bytes.",
+                content=content,
+                image_count=0,
+                image_metadata=image_metadata,
+                result={"event_type": "arena_relay_screenshot_observation", "content": content},
             )
             return True
 
@@ -589,6 +772,23 @@ async def _handle_arena_relay_screenshot_observation(
             except Exception:
                 _log.error("arena relay screenshot memory persistence failed", exc_info=True)
 
+        try:
+            observation = await asyncio.to_thread(
+                _persist_arena_relay_screenshot_observation,
+                result,
+                content,
+                message=message,
+                image_metadata=image_metadata,
+            )
+            _log.info(
+                "arena_relay_screenshot_observation_saved source_message_id=%s type=%s images=%s",
+                message.id,
+                observation.get("screenshot_type"),
+                observation.get("image_count"),
+            )
+        except Exception:
+            _log.error("arena relay screenshot observation persistence failed", exc_info=True)
+
         sent = await app._reply_text(message, content)
         await asyncio.to_thread(
             db.save_message,
@@ -605,6 +805,7 @@ async def _handle_arena_relay_screenshot_observation(
                 "result": result,
                 "input_message_id": user_msg_id,
                 "image_blocks_read": len(image_blocks),
+                "image_metadata": image_metadata,
             },
         )
     return True
