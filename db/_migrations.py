@@ -1705,7 +1705,16 @@ def _migration_37(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE leader_action_recommendations ADD COLUMN {name} {sql_type}")
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37]
+def _migration_38(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "leader_action_recommendations")
+    if "copy_message_id" not in columns:
+        conn.execute("ALTER TABLE leader_action_recommendations ADD COLUMN copy_message_id TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leader_actions_copy_message ON leader_action_recommendations(copy_message_id)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

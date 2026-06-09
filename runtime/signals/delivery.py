@@ -131,23 +131,25 @@ def _build_arena_relay_result(signals: list[dict]) -> dict | None:
         return None
     copy, objective, reason = relay
     copy = _clip_relay_copy(copy)
+    card = (
+        "**Leader action: in-game relay**\n"
+        f"Objective: `{objective}`\n\n"
+        "Copy the next message wholesale into Clash Royale clan chat.\n"
+        f"Why: {reason}\n\n"
+        "React ✅ after posting it in Clash Royale clan chat, or ❌ if leaders are not doing this one. "
+        "Reply to this card with any note or wording change."
+    )
     return {
         "event_type": "war_relay_brief",
         "summary": f"In-game relay suggestion: {copy}",
-        "content": (
-            "**Leader action: in-game relay**\n"
-            f"Objective: `{objective}`\n\n"
-            "Copy/paste:\n"
-            f"```text\n{copy}\n```\n"
-            f"Why: {reason}\n\n"
-            "React ✅ after posting it in Clash Royale clan chat, or ❌ if leaders are not doing this one."
-        ),
+        "content": [card, copy],
         "metadata": {
             "action_type": "in_game_relay",
             "objective": objective,
             "rationale": reason,
             "relay_copy": copy,
             "relay_target": "clash_royale_clan_chat",
+            "copy_message_index": 1,
         },
     }
 
@@ -158,11 +160,19 @@ def _attach_leader_action_to_result(result: dict, action: dict) -> dict:
     action_id = action.get("action_id")
     if action_id:
         result["summary"] = f"Leader action R{action_id}: {result.get('summary') or action.get('prompt_text')}"
-        result["content"] = (result.get("content") or "").replace(
-            "**Leader action: ",
-            f"**Leader action R{action_id}: ",
-            1,
-        )
+        content = result.get("content")
+        if isinstance(content, list) and content:
+            content[0] = str(content[0] or "").replace(
+                "**Leader action: ",
+                f"**Leader action R{action_id}: ",
+                1,
+            )
+        else:
+            result["content"] = str(content or "").replace(
+                "**Leader action: ",
+                f"**Leader action R{action_id}: ",
+                1,
+            )
     metadata = result.setdefault("metadata", {})
     metadata.update({
         "leader_action_id": action.get("action_id"),
@@ -465,6 +475,15 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     action_id,
                     source_message_id=first_message_id,
                 )
+            copy_index = metadata.get("copy_message_index") if isinstance(metadata, dict) else None
+            if action_id and isinstance(copy_index, int) and copy_index < len(sent_messages):
+                copy_message_id = getattr(sent_messages[copy_index], "id", None)
+                if copy_message_id is not None:
+                    await asyncio.to_thread(
+                        db.update_leader_action_copy_message,
+                        action_id,
+                        copy_message_id=copy_message_id,
+                    )
         if (
             channel_config["subagent_key"] == "clan-events"
             and any(s.get("type") == "member_join" for s in signals)
