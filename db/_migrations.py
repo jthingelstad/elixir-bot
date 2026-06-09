@@ -1726,7 +1726,40 @@ def _migration_39(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39]
+def _migration_40(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS arena_relay_screenshot_observations (
+            observation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_message_id TEXT NOT NULL UNIQUE,
+            channel_id TEXT,
+            channel_name TEXT,
+            author_discord_user_id TEXT,
+            author_display_name TEXT,
+            observed_at TEXT NOT NULL,
+            screenshot_type TEXT NOT NULL DEFAULT 'unknown',
+            summary TEXT,
+            content TEXT,
+            players_json TEXT,
+            actionable_facts_json TEXT,
+            uncertainty TEXT,
+            image_count INTEGER NOT NULL DEFAULT 0,
+            image_metadata_json TEXT,
+            result_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_arena_screenshot_observed ON arena_relay_screenshot_observations(observed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_arena_screenshot_type ON arena_relay_screenshot_observations(screenshot_type, observed_at DESC)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

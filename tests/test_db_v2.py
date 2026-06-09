@@ -43,6 +43,7 @@ def test_v2_schema_initializes_core_tables():
             "raw_api_payloads",
             "leader_action_recommendations",
             "runtime_job_status",
+            "arena_relay_screenshot_observations",
         }
         assert expected.issubset(tables)
     finally:
@@ -942,6 +943,37 @@ def test_runtime_job_status_round_trips():
         assert statuses["memory_synthesis"]["run_count"] == 2
         assert statuses["memory_synthesis"]["last_error"] == "agent truncation"
         assert statuses["memory_synthesis"]["updated_at"]
+    finally:
+        conn.close()
+
+
+def test_arena_relay_screenshot_observation_round_trips():
+    conn = db.get_connection(":memory:")
+    try:
+        saved = db.save_arena_relay_screenshot_observation(
+            source_message_id=12345,
+            channel_id=1513758211206025227,
+            channel_name="arena-relay",
+            author_discord_user_id=999,
+            author_display_name="Leader",
+            screenshot_type="boat defense",
+            summary="Three visible open defense slots.",
+            content="**Read:** three open slots visible.",
+            players=["dez42", "WaltadR"],
+            actionable_facts=["At least three boat defense slots are visible."],
+            uncertainty="bottom of the list is cropped",
+            image_count=1,
+            image_metadata=[{"filename": "boat.png", "submitted_bytes": 1234}],
+            result={"event_type": "arena_relay_screenshot_observation"},
+            conn=conn,
+        )
+        rows = db.list_arena_relay_screenshot_observations(conn=conn)
+
+        assert saved["screenshot_type"] == "boat_defense"
+        assert rows[0]["players_json"] == ["dez42", "WaltadR"]
+        assert rows[0]["actionable_facts_json"] == ["At least three boat defense slots are visible."]
+        assert rows[0]["image_metadata_json"][0]["filename"] == "boat.png"
+        assert rows[0]["result_json"]["event_type"] == "arena_relay_screenshot_observation"
     finally:
         conn.close()
 
