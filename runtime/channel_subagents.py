@@ -43,6 +43,18 @@ OPTIONAL_PROGRESSION_SIGNAL_TYPES = {
     "card_evolution_unlocked",
 }
 
+ARENA_RELAY_CELEBRATION_SIGNAL_TYPES = {
+    "career_wins_milestone",
+    "new_champion_unlocked",
+    "new_card_unlocked",
+    "player_level_up",
+    "best_trophies_peak",
+    "challenge_performance_milestone",
+    "join_anniversary",
+    "member_birthday",
+    "clan_birthday",
+}
+
 CLAN_EVENT_SIGNAL_TYPES = {
     "member_join",
     "member_leave",
@@ -245,6 +257,10 @@ def is_progression_signal(signal: dict) -> bool:
     return (signal or {}).get("type") in PROGRESSION_SIGNAL_TYPES
 
 
+def is_arena_relay_celebration_signal(signal: dict) -> bool:
+    return (signal or {}).get("type") in ARENA_RELAY_CELEBRATION_SIGNAL_TYPES
+
+
 def is_battle_mode_signal(signal: dict) -> bool:
     return (signal or {}).get("type") in BATTLE_MODE_SIGNAL_TYPES
 
@@ -373,6 +389,8 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
 
     if all(is_progression_signal(signal) for signal in signals):
         add("player-progress", "player_progress", required=True)
+        if any(is_arena_relay_celebration_signal(signal) for signal in signals):
+            add("arena-relay", "celebration_relay", required=False)
         return outcomes
 
     # Mixed durable + battle-mode batches: split so each lane gets only its kind.
@@ -411,6 +429,8 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
         add("clan-events", "clan_event_public", required=True)
         if any(signal.get("type") == "elder_promotion" for signal in signals):
             add("leader-lounge", "clan_event_ops", required=False)
+        if any(is_arena_relay_celebration_signal(signal) for signal in signals):
+            add("arena-relay", "celebration_relay", required=False)
         return outcomes
 
     add("leader-lounge", "leadership_note", required=True)
@@ -456,8 +476,10 @@ def maybe_upsert_signal_memory(*, source_signal_key: str, signal_type: str, body
 
 
 __all__ = [
+    "ARENA_RELAY_CELEBRATION_SIGNAL_TYPES",
     "BATTLE_MODE_SIGNAL_TYPES",
     "build_subagent_memory_context",
+    "is_arena_relay_celebration_signal",
     "is_battle_mode_signal",
     "is_progression_signal",
     "is_war_signal",

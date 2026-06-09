@@ -33,6 +33,17 @@ CRITICAL_LEADER_ACTION_SIGNAL_TYPES = {
     "war_battle_day_final_hours",
     "war_final_battle_day",
 }
+CELEBRATION_RELAY_SIGNAL_TYPES = {
+    "career_wins_milestone",
+    "new_champion_unlocked",
+    "new_card_unlocked",
+    "player_level_up",
+    "best_trophies_peak",
+    "challenge_performance_milestone",
+    "join_anniversary",
+    "member_birthday",
+    "clan_birthday",
+}
 
 
 def _clip_relay_copy(text: str, limit: int = ARENA_RELAY_MAX_COPY_CHARS) -> str:
@@ -63,16 +74,141 @@ def _signal_names(signals: list[dict], limit: int = 4) -> list[str]:
     return names
 
 
-def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str] | None:
+def _members_from_group_signal(signal: dict) -> list[dict]:
+    members = signal.get("members")
+    if isinstance(members, list):
+        return [m for m in members if isinstance(m, dict)]
+    return []
+
+
+def _celebration_relay_copy(signals: list[dict]) -> tuple[str, str, str] | None:
+    signals = signals or []
+    primary = signals[0] if signals else {}
+    signal_type = primary.get("type")
+    name = str(primary.get("name") or "").strip()
+
+    if signal_type == "career_wins_milestone" and name:
+        milestone = primary.get("milestone") or primary.get("new_wins")
+        if isinstance(milestone, int):
+            return (
+                f"Big milestone: {name} just reached {milestone:,} lifetime wins. Drop a congrats when you see them.",
+                "player_celebration",
+                "Lifetime win milestones are rare enough to recognize in game chat.",
+            )
+
+    if signal_type == "new_champion_unlocked" and name:
+        card = primary.get("card_name") or primary.get("new_card") or "a Champion"
+        return (
+            f"Congrats {name} on unlocking {card}. That is a huge progression moment.",
+            "player_celebration",
+            "Champion unlocks are special progression moments most members understand.",
+        )
+
+    if signal_type == "new_card_unlocked" and name:
+        card = primary.get("card_name") or primary.get("new_card") or "a new card"
+        rarity = str(primary.get("rarity") or "").strip().lower()
+        if rarity in {"legendary", "champion"}:
+            return (
+                f"Congrats {name} on unlocking {card}. Big pull for the collection.",
+                "player_celebration",
+                "Rare card unlocks are good clan-chat celebration material.",
+            )
+
+    if signal_type == "player_level_up" and name:
+        new_level = primary.get("new_level")
+        if isinstance(new_level, int):
+            return (
+                f"Level-up shoutout: {name} reached King Level {new_level}. Nice grind.",
+                "player_celebration",
+                "King-level milestones are visible proof of long-term progress.",
+            )
+
+    if signal_type == "best_trophies_peak" and name:
+        best = primary.get("new_best_trophies") or primary.get("new_value") or primary.get("best_trophies")
+        if isinstance(best, int):
+            return (
+                f"New personal best: {name} hit {best:,} trophies. Give them a shout.",
+                "player_celebration",
+                "Personal-best trophy peaks are worth reinforcing in clan chat.",
+            )
+
+    if signal_type == "challenge_performance_milestone" and name:
+        milestone = primary.get("milestone") or primary.get("challenge_max_wins")
+        if isinstance(milestone, int):
+            return (
+                f"Challenge milestone: {name} reached {milestone} wins in a challenge. That is not easy.",
+                "player_celebration",
+                "Strong challenge runs are skill milestones the clan can appreciate.",
+            )
+
+    if signal_type == "join_anniversary":
+        members = _members_from_group_signal(primary)
+        if members:
+            names = [str(m.get("name") or m.get("member_name") or "").strip() for m in members[:3]]
+            names = [item for item in names if item]
+            if names:
+                joined = ", ".join(names)
+                if len(members) > len(names):
+                    joined += f" and {len(members) - len(names)} more"
+                return (
+                    f"Clan cake day: thanks to {joined} for sticking with POAP KINGS. Glad you are here.",
+                    "clan_celebration",
+                    "Clan tenure milestones are worth celebrating where all members can see them.",
+                )
+
+    if signal_type == "member_birthday":
+        members = _members_from_group_signal(primary)
+        names = [str(m.get("name") or m.get("member_name") or "").strip() for m in members[:3]]
+        names = [item for item in names if item]
+        if names:
+            return (
+                f"Birthday shoutout to {', '.join(names)}. Hope it is a good one.",
+                "clan_celebration",
+                "Member birthdays are warm clan moments leaders can carry into game chat.",
+            )
+
+    if signal_type == "clan_birthday":
+        years = primary.get("years")
+        clan_name = primary.get("clan_name") or "POAP KINGS"
+        if isinstance(years, int) and years > 0:
+            copy = f"{clan_name} cake day: {years} year{'s' if years != 1 else ''} of the clan. Thanks for building it together."
+        else:
+            copy = f"{clan_name} cake day. Thanks for building this clan together."
+        return (
+            copy,
+            "clan_celebration",
+            "Clan birthdays are shared identity moments that belong in game chat too.",
+        )
+
+    return None
+
+
+def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str, str, str, str] | None:
     signals = signals or []
     types = {signal.get("type") for signal in signals}
     primary = signals[0] if signals else {}
+
+    if types & CELEBRATION_RELAY_SIGNAL_TYPES:
+        celebration = _celebration_relay_copy(signals)
+        if celebration is not None:
+            copy, objective, reason = celebration
+            return (
+                copy,
+                objective,
+                reason,
+                "celebration_relay",
+                "celebration relay",
+                "celebration_relay",
+            )
 
     if types & {"war_practice_phase_active", "war_practice_day_started", "war_final_practice_day"}:
         return (
             "Practice days are live. Please set boat defenses early so they are ready before battle days start.",
             "boat_defense_setup",
             "Practice timing is the main in-game action before battle days.",
+            "in_game_relay",
+            "In-game relay",
+            "war_relay_brief",
         )
 
     if types & {"war_final_battle_day", "war_battle_day_final_hours"}:
@@ -80,6 +216,9 @@ def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str] | None:
             "Final battle day: use any remaining war decks today. Every deck helps lock River Chest rewards and finish the race strong.",
             "war_participation",
             "Final-day reminders are one of the most useful in-game relay moments.",
+            "in_game_relay",
+            "In-game relay",
+            "war_relay_brief",
         )
 
     if types & {"war_battle_phase_active", "war_battle_day_started"}:
@@ -87,6 +226,9 @@ def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str] | None:
             "Battle day is live. Please use all 4 war decks when you can; every attack helps keep POAP KINGS moving.",
             "war_participation",
             "Battle-day start messages are useful for members who do not read Discord.",
+            "in_game_relay",
+            "In-game relay",
+            "war_relay_brief",
         )
 
     if types & {"war_battle_day_live_update"}:
@@ -98,7 +240,7 @@ def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str] | None:
             copy = f"War check: POAP KINGS is {rank}. Use remaining decks today; every attack keeps pressure on."
         else:
             copy = "War check: use remaining decks today if you can. Every attack keeps pressure on and helps the clan chest."
-        return (copy, "war_participation", "Current war state is timely enough to relay into game chat.")
+        return (copy, "war_participation", "Current war state is timely enough to relay into game chat.", "in_game_relay", "In-game relay", "war_relay_brief")
 
     if types & {"war_attacks_complete"}:
         names = _signal_names(signals)
@@ -107,7 +249,7 @@ def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str] | None:
             copy = f"Props to {named} for using all 4 war decks today. If you still have decks, jump in and help finish strong."
         else:
             copy = "Props to everyone using all 4 war decks today. If you still have decks, jump in and help finish strong."
-        return (copy, "war_recognition", "Recognition can reinforce the exact behavior leaders want repeated.")
+        return (copy, "war_recognition", "Recognition can reinforce the exact behavior leaders want repeated.", "in_game_relay", "In-game relay", "war_relay_brief")
 
     if types & {"war_week_complete", "war_completed"}:
         rank = _ordinal(primary.get("our_rank") or primary.get("race_rank"))
@@ -118,13 +260,16 @@ def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str] | None:
             copy = f"War week complete: POAP KINGS finished {rank}. Thanks to everyone who used decks."
         else:
             copy = "War week complete. Thanks to everyone who used decks and helped keep POAP KINGS moving."
-        return (copy, "war_recognition", "Week-end recognition is useful in game chat because many contributors are not in Discord.")
+        return (copy, "war_recognition", "Week-end recognition is useful in game chat because many contributors are not in Discord.", "in_game_relay", "In-game relay", "war_relay_brief")
 
     if types & {"war_season_complete"}:
         return (
             "War season complete. Thanks to everyone who kept showing up and using decks for POAP KINGS.",
             "war_recognition",
             "Season-end recognition belongs where the full clan can see it.",
+            "in_game_relay",
+            "In-game relay",
+            "war_relay_brief",
         )
 
     return None
@@ -134,21 +279,22 @@ def _build_arena_relay_result(signals: list[dict]) -> dict | None:
     relay = _arena_relay_copy(signals)
     if relay is None:
         return None
-    copy, objective, reason = relay
+    copy, objective, reason, action_type, title, event_type = relay
     copy = _clip_relay_copy(copy)
+    icon = "🎉" if action_type == "celebration_relay" else "📣"
     card = (
-        "**R? 📣 In-game relay**\n"
+        f"**R? {icon} {title}**\n"
         f"🎯 `{objective}`\n"
         "📋 Copy the next message into Clash Royale.\n"
         f"🧠 {reason}\n\n"
         "✅ done  ❌ decline  ↩️ reply with note"
     )
     return {
-        "event_type": "war_relay_brief",
+        "event_type": event_type,
         "summary": f"In-game relay suggestion: {copy}",
         "content": [card, copy],
         "metadata": {
-            "action_type": "in_game_relay",
+            "action_type": action_type,
             "objective": objective,
             "rationale": reason,
             "relay_copy": copy,
@@ -199,6 +345,7 @@ def _format_leader_action_card(action: dict, *, title: str, prompt_text: str, ra
         "promotion_recommendation": "⬆️",
         "demotion_recommendation": "⬇️",
         "kick_recommendation": "🚪",
+        "celebration_relay": "🎉",
     }.get(action_type, "⚡")
     return (
         f"**R{action_id} {icon} {title}**\n"
@@ -384,14 +531,15 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             result = _build_arena_relay_result(signals)
             if result is not None:
                 metadata = result.get("metadata") if isinstance(result, dict) else {}
+                action_type = metadata.get("action_type") or "in_game_relay"
                 baseline = await asyncio.to_thread(
                     db.build_leader_action_baseline,
-                    action_type="in_game_relay",
+                    action_type=action_type,
                     signals=signals,
                 )
                 action = await asyncio.to_thread(
                     db.create_leader_action_recommendation,
-                    action_type="in_game_relay",
+                    action_type=action_type,
                     objective=metadata.get("objective") or "war_participation",
                     prompt_text=metadata.get("relay_copy") or result.get("summary") or "",
                     rationale=metadata.get("rationale"),
