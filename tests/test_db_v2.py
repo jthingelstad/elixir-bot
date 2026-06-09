@@ -1510,7 +1510,8 @@ def test_member_daily_battle_rollups_group_by_chicago_day_and_mode_group():
             conn=conn,
         )
 
-        rollups = db.list_member_daily_battle_rollups("#ABC123", days=120, conn=conn)
+        with patch("storage.player.chicago_today", return_value="2026-01-12"):
+            rollups = db.list_member_daily_battle_rollups("#ABC123", days=120, conn=conn)
 
         assert [(row["battle_date"], row["mode_group"]) for row in rollups] == [
             ("2026-01-10", "ladder"),
@@ -1611,7 +1612,8 @@ def test_clan_daily_battle_rollups_aggregate_member_daily_rollups():
             conn=conn,
         )
 
-        rollups = db.list_clan_daily_battle_rollups(days=120, conn=conn)
+        with patch("storage.player.chicago_today", return_value="2026-01-12"):
+            rollups = db.list_clan_daily_battle_rollups(days=120, conn=conn)
 
         assert len(rollups) == 1
         assert rollups[0]["battle_date"] == "2026-01-10"
