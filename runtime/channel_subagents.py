@@ -177,6 +177,7 @@ def signal_routing_summary() -> list[dict]:
             "targets": [
                 {"subagent": "clan-events", "intent": "member_join_public", "required": True},
                 {"subagent": "leader-lounge", "intent": "member_join_ops", "required": True},
+                {"subagent": "arena-relay", "intent": "welcome_relay", "required": False},
             ],
         },
         {
@@ -409,6 +410,11 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
     if any((signal.get("type") == "member_join") for signal in signals):
         add("clan-events", "member_join_public", required=True)
         add("leader-lounge", "member_join_ops", required=True)
+        add("arena-relay", "welcome_relay", required=False)
+        return outcomes
+
+    if any((signal.get("type") == "discord_invite_reminder") for signal in signals):
+        add("arena-relay", "discord_invite_relay", required=False)
         return outcomes
 
     if any(is_public_system_signal(signal) for signal in signals):

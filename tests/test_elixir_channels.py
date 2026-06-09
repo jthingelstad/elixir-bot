@@ -2651,6 +2651,10 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert specs["leadership-action-scan"]["owner_subagent"] == "arena-relay"
     assert specs["leadership-action-scan"]["schedule"] == "Every 240 minutes."
     assert "Discord: #arena-relay singular leader action cards" in specs["leadership-action-scan"]["delivery_targets"]
+    assert "weekly-discord-invite-relay" in specs
+    assert specs["weekly-discord-invite-relay"]["owner_subagent"] == "arena-relay"
+    assert specs["weekly-discord-invite-relay"]["schedule"] == "Every Sat at 11:00 CT."
+    assert "Discord: #arena-relay weekly no-link Discord invite copy" in specs["weekly-discord-invite-relay"]["delivery_targets"]
     assert "promotion-content" in specs
     assert "Discord: #promote-the-clan" in specs["promotion-content"]["delivery_targets"]
     assert "POAP KINGS: promotion payloads" in specs["promotion-content"]["delivery_targets"]
@@ -2678,6 +2682,7 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
         "player-progression",
         "daily-clan-insight",
         "leadership-action-scan",
+        "weekly-discord-invite-relay",
         "memory-synthesis",
         "weekly-recap",
         "site-content",
@@ -2689,6 +2694,7 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
     assert "war-poll" in job_ids
     assert "war-awareness" in job_ids
     assert "daily-clan-insight" in job_ids
+    assert "weekly-discord-invite-relay" in job_ids
     assert "promotion-content" in job_ids
 
 
