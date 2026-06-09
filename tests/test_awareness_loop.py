@@ -301,6 +301,34 @@ def test_deliver_signal_group_via_awareness_falls_back_for_uncovered_hard_floor(
     assert args[0] == [member_join]
 
 
+def test_deliver_signal_group_via_awareness_invokes_arena_relay_sidecar_for_war():
+    war_signal = {
+        "type": "war_battle_day_started",
+        "signal_key": "war:start",
+        "season_id": 133,
+    }
+    empty_plan = {"posts": [], "skipped_reason": "river-race quiet"}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._signals.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value={"phase": "battle"}),
+        patch("runtime.situation.db.get_members_on_hot_streak", return_value=[]),
+        patch("runtime.jobs._signals.elixir_agent.run_awareness_tick", return_value=empty_plan),
+        patch("runtime.jobs._signals.db.record_awareness_tick"),
+        patch("runtime.jobs._signals._deliver_arena_relay_sidecars", new=AsyncMock(return_value=1)) as mock_relay,
+    ):
+        ok = asyncio.run(
+            signals_module._deliver_signal_group_via_awareness([war_signal], {}, {}, workflow="war_awareness")
+        )
+
+    assert ok is True
+    mock_relay.assert_awaited_once_with([war_signal], {}, {})
+
+
 def test_deliver_signal_group_via_awareness_skips_quiet_tick():
     """When situation is quiet, the agent is never called."""
 

@@ -16,6 +16,7 @@ __all__ = [
     "_ask_elixir_daily_insight", "_clan_awareness_tick",
     "_war_poll_tick", "_war_awareness_tick", "_player_intel_refresh",
     "_clanops_weekly_review", "_weekly_clan_recap",
+    "_post_weekly_leader_action_recommendations",
     "_memory_synthesis_cycle",
     "_apply_memory_synthesis_plan",
     "_build_memory_synthesis_context",
@@ -637,7 +638,172 @@ async def _clanops_weekly_review():
         tags=["weekly", "clanops", "review"],
         metadata={"channel_id": channel.id, "workflow": "clanops"},
     )
+    action_count = await _post_weekly_leader_action_recommendations()
+    if action_count:
+        log.info("clanops_weekly_review posted %d leader action recommendation(s)", action_count)
     runtime_status.mark_job_success("clanops_weekly_review", "weekly review posted")
+
+
+def _leader_action_member_label(member: dict) -> str:
+    return (
+        member.get("member_ref")
+        or member.get("current_name")
+        or member.get("member_name")
+        or member.get("name")
+        or member.get("player_name")
+        or member.get("tag")
+        or member.get("player_tag")
+        or "member"
+    )
+
+
+def _leader_action_member_tag(member: dict) -> str | None:
+    return member.get("player_tag") or member.get("tag") or member.get("member_tag")
+
+
+def _leader_action_reason(member: dict, *, promotion: bool) -> str:
+    if promotion:
+        bits = []
+        if member.get("donations") is not None:
+            bits.append(f"{member.get('donations')} donations")
+        if member.get("war_races_played") is not None:
+            bits.append(f"{member.get('war_races_played')} war races")
+        if member.get("tenure_days") is not None:
+            bits.append(f"{member.get('tenure_days')}d tenure")
+        return ", ".join(bits) or "promotion candidate data is above threshold"
+    reasons = member.get("reasons") or []
+    if reasons:
+        return "; ".join((reason.get("detail") or reason.get("type") or "needs review") for reason in reasons[:3])
+    return "risk data says this member needs roster review"
+
+
+def _format_leader_action_card(action: dict, *, title: str, prompt_text: str, rationale: str) -> str:
+    action_id = action.get("action_id")
+    objective = action.get("objective") or "leader_action"
+    return (
+        f"**Leader action R{action_id}: {title}**\n"
+        f"Objective: `{objective}`\n\n"
+        "Action:\n"
+        f"```text\n{prompt_text}\n```\n"
+        f"Why: {rationale}\n\n"
+        "React ✅ after doing it in Clash Royale, or ❌ if leaders disagree or are not doing this one."
+    )
+
+
+async def _post_leader_action_recommendation(
+    channel,
+    *,
+    action_type: str,
+    objective: str,
+    title: str,
+    prompt_text: str,
+    rationale: str,
+    target_player_tag: str | None = None,
+    target_player_name: str | None = None,
+) -> bool:
+    baseline = await asyncio.to_thread(
+        db.build_leader_action_baseline,
+        action_type=action_type,
+        target_player_tag=target_player_tag,
+    )
+    action = await asyncio.to_thread(
+        db.create_leader_action_recommendation,
+        action_type=action_type,
+        objective=objective,
+        prompt_text=prompt_text,
+        rationale=rationale,
+        target_channel_key="arena-relay",
+        target_channel_id=getattr(channel, "id", None),
+        target_player_tag=target_player_tag,
+        target_player_name=target_player_name,
+        baseline=baseline,
+    )
+    if not action or action.get("source_message_id"):
+        return False
+    content = _format_leader_action_card(
+        action,
+        title=title,
+        prompt_text=prompt_text,
+        rationale=rationale,
+    )
+    sent_messages = await _post_to_elixir(channel, {"content": content})
+    if not isinstance(sent_messages, list):
+        sent_messages = []
+    first_message_id = getattr(sent_messages[0], "id", None) if sent_messages else None
+    if first_message_id is not None:
+        await asyncio.to_thread(
+            db.update_leader_action_message,
+            action["action_id"],
+            source_message_id=first_message_id,
+        )
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(channel),
+        "assistant",
+        content,
+        summary=f"Leader action R{action.get('action_id')}: {title}",
+        **_channel_msg_kwargs(channel),
+        workflow="arena-relay",
+        event_type=action_type,
+        discord_message_id=first_message_id,
+        raw_json={"leader_action": action},
+    )
+    return True
+
+
+async def _post_weekly_leader_action_recommendations() -> int:
+    try:
+        target_config = prompts.discord_singleton_subagent("arena-relay")
+    except Exception as exc:
+        log.info("weekly leader actions skipped: arena-relay unavailable: %s", exc)
+        return 0
+    channel = bot.get_channel(target_config["id"])
+    if not channel:
+        log.warning("weekly leader actions skipped: arena-relay channel not found")
+        return 0
+
+    try:
+        promotions = await asyncio.to_thread(db.get_promotion_candidates)
+        at_risk = await asyncio.to_thread(db.get_members_at_risk, require_war_participation=True)
+    except Exception as exc:
+        log.warning("weekly leader action data unavailable: %s", exc, exc_info=True)
+        return 0
+
+    posted = 0
+    for member in (promotions.get("recommended") or [])[:3]:
+        label = _leader_action_member_label(member)
+        tag = _leader_action_member_tag(member)
+        rationale = _leader_action_reason(member, promotion=True)
+        prompt_text = f"Promote {label} to Elder."
+        if await _post_leader_action_recommendation(
+            channel,
+            action_type="promotion_recommendation",
+            objective="reward_and_retention",
+            title="promotion recommendation",
+            prompt_text=prompt_text,
+            rationale=rationale,
+            target_player_tag=tag,
+            target_player_name=label,
+        ):
+            posted += 1
+
+    for member in ((at_risk or {}).get("members") or [])[:3]:
+        label = _leader_action_member_label(member)
+        tag = _leader_action_member_tag(member)
+        rationale = _leader_action_reason(member, promotion=False)
+        prompt_text = f"Review {label} for removal from the clan."
+        if await _post_leader_action_recommendation(
+            channel,
+            action_type="kick_recommendation",
+            objective="roster_health",
+            title="kick/removal recommendation",
+            prompt_text=prompt_text,
+            rationale=rationale,
+            target_player_tag=tag,
+            target_player_name=label,
+        ):
+            posted += 1
+    return posted
 
 
 async def _weekly_clan_recap():

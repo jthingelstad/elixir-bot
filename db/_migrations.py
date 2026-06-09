@@ -1649,7 +1649,51 @@ def _migration_35(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE member_metadata ADD COLUMN {name} {sql_type}")
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35]
+def _migration_36(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS leader_action_recommendations (
+            action_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_key TEXT NOT NULL UNIQUE,
+            action_type TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'proposed',
+            target_channel_key TEXT,
+            target_channel_id TEXT,
+            target_player_tag TEXT,
+            target_player_name TEXT,
+            source_signal_key TEXT,
+            source_signal_type TEXT,
+            source_message_id TEXT,
+            prompt_text TEXT NOT NULL,
+            rationale TEXT,
+            baseline_json TEXT,
+            outcome_json TEXT,
+            proposed_at TEXT NOT NULL,
+            expires_at TEXT,
+            decided_at TEXT,
+            decided_by_discord_user_id TEXT,
+            decision_emoji TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leader_actions_status ON leader_action_recommendations(status, proposed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leader_actions_message ON leader_action_recommendations(source_message_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leader_actions_target ON leader_action_recommendations(target_player_tag, action_type)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leader_actions_source ON leader_action_recommendations(source_signal_key, action_type)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

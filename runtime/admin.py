@@ -27,6 +27,7 @@ class AdminCommandSpec:
 
 
 SIGNAL_SHOW_VIEWS = {"all", "routes", "recent", "pending"}
+RELAY_STATUS_VIEWS = {"all", "pending", "decided"}
 
 COMMAND_SPECS = {
     "help": AdminCommandSpec("help", ("help",), "Show the Elixir operator help page.", event_type="help"),
@@ -42,6 +43,7 @@ COMMAND_SPECS = {
     "member.set": AdminCommandSpec("member.set", ("member", "set"), "Set one member field.", leader_only=True, write=True, event_type="member_set"),
     "member.clear": AdminCommandSpec("member.clear", ("member", "clear"), "Clear one member field.", leader_only=True, write=True, event_type="member_clear"),
     "memory.show": AdminCommandSpec("memory.show", ("memory", "show"), "Inspect stored conversation and contextual memory.", leader_only=True, event_type="memory_report"),
+    "relay.status": AdminCommandSpec("relay.status", ("relay", "status"), "Show leader action recommendations and reaction decisions.", leader_only=True, event_type="relay_status_report"),
     "signal.show": AdminCommandSpec("signal.show", ("signal", "show"), "Show signal routing, recent routed signals, and pending system signals.", event_type="signals_report"),
     "signal.publish-pending": AdminCommandSpec("signal.publish-pending", ("signal", "publish-pending"), "Queue missing startup signals and publish pending system announcements.", leader_only=True, write=True, event_type="signal_publish_pending"),
     "signal.backfill-joins": AdminCommandSpec("signal.backfill-joins", ("signal", "backfill-joins"), "Send belated welcome messages for members who joined without an announcement.", leader_only=True, write=True, event_type="signal_backfill_joins"),
@@ -63,6 +65,7 @@ COMMAND_GROUP_ORDER = [
     "clan",
     "member",
     "memory",
+    "relay",
     "signal",
     "activity",
     "integration",
@@ -141,6 +144,7 @@ def render_admin_help(*, slash_prefix: str = "/elixir") -> str:
             f"- `{slash_prefix} member show member:Ditika`",
             f"- `{slash_prefix} member set member:Ditika field:join-date value:2026-03-07`",
             f"- `{slash_prefix} signal show view:recent`",
+            f"- `{slash_prefix} relay status view:pending`",
             f"- `{slash_prefix} activity run activity:clan-awareness preview:true`",
             f"- `{slash_prefix} integration publish integration:poap-kings target:promote preview:true`",
         ]
@@ -371,6 +375,90 @@ def _build_signals_report(*, view: str = "all", recent_limit: int = 10, conn=Non
                         f"- `{signal.get('type') or signal.get('signal_type') or 'unknown'}` "
                         f"`{signal.get('signal_key')}` created {signal.get('created_at') or 'n/a'}"
                     )
+        return "\n".join(lines)
+    finally:
+        if close:
+            conn.close()
+
+
+def _format_leader_action_outcome(action: dict) -> str:
+    outcome = action.get("outcome") or {}
+    if action.get("action_type") == "in_game_relay":
+        deltas = outcome.get("deltas") or {}
+        bits = []
+        for key, label in (
+            ("engaged_count", "engaged"),
+            ("finished_count", "finished"),
+            ("untouched_count", "untouched"),
+            ("clan_fame", "fame"),
+        ):
+            value = deltas.get(key)
+            if value is not None:
+                sign = "+" if value > 0 else ""
+                bits.append(f"{label} {sign}{value}")
+        return " | ".join(bits) if bits else "outcome pending more data"
+    if action.get("action_type") in {"promotion_recommendation", "kick_recommendation", "demotion_recommendation"}:
+        changed = outcome.get("changed") or {}
+        if changed:
+            return " | ".join(f"{key} changed {'yes' if value else 'no'}" for key, value in changed.items())
+    return "outcome pending"
+
+
+def _format_leader_action_line(action: dict) -> str:
+    action_id = action.get("action_id")
+    status = action.get("status") or "unknown"
+    kind = action.get("action_type") or "leader_action"
+    objective = action.get("objective") or "n/a"
+    prompt = _truncate_for_report(action.get("prompt_text") or "", 110)
+    decided = action.get("decided_at")
+    by = action.get("decided_by_discord_user_id")
+    decision = f" | decided {decided}" if decided else ""
+    if by:
+        decision += f" by <@{by}>"
+    outcome = ""
+    if status == "done":
+        outcome = f" | {_format_leader_action_outcome(action)}"
+    return f"- `R{action_id}` `{status}` `{kind}` `{objective}`: {prompt}{decision}{outcome}"
+
+
+def _build_relay_status_report(*, view: str = "all", limit: int = 10, conn=None) -> str:
+    import db
+
+    close = conn is None
+    conn = conn or db.get_connection()
+    try:
+        view = normalize_admin_command(view) or "all"
+        if view not in RELAY_STATUS_VIEWS:
+            raise ValueError(f"invalid relay status view: {view}")
+        limit = max(1, min(int(limit or 10), 25))
+
+        if view == "pending":
+            actions = db.list_leader_actions(status=db.ACTION_PROPOSED, limit=limit, conn=conn)
+        elif view == "decided":
+            actions = [
+                action for action in db.list_leader_actions(limit=limit * 3, conn=conn)
+                if action.get("status") in {db.ACTION_DONE, db.ACTION_REJECTED}
+            ][:limit]
+        else:
+            actions = db.list_leader_actions(limit=limit, conn=conn)
+
+        refreshed = []
+        for action in actions:
+            if action.get("status") == db.ACTION_DONE:
+                refreshed.append(db.refresh_leader_action_outcome(action["action_id"], conn=conn) or action)
+            else:
+                refreshed.append(action)
+
+        pending_count = len(db.list_leader_actions(status=db.ACTION_PROPOSED, limit=50, conn=conn))
+        lines = ["**Arena Relay Leader Actions**"]
+        lines.append(f"- Pending: {pending_count}")
+        lines.append("- Feedback: ✅/☑️ means done, ❌ means rejected")
+        lines.append("")
+        if not refreshed:
+            lines.append("_No leader actions recorded yet._")
+        else:
+            for action in refreshed:
+                lines.append(_format_leader_action_line(action))
         return "\n".join(lines)
     finally:
         if close:
@@ -1236,6 +1324,12 @@ async def dispatch_admin_command(command: str | dict, *, preview: bool = False, 
             limit=args.get("limit", 5),
             include_system_internal=str(args.get("include_system_internal", "")).lower() in {"1", "true", "yes", "on"},
         )
+    if key == "relay.status":
+        return await asyncio.to_thread(
+            _build_relay_status_report,
+            view=args.get("view", "all"),
+            limit=args.get("limit", 10),
+        )
     if key == "member.verify-discord":
         return await _run_verify_discord(preview=preview, args=args)
     if key == "member.audit-discord":
@@ -1267,6 +1361,7 @@ __all__ = [
     "LEADER_ONLY_COMMANDS",
     "admin_command_requires_leader",
     "_build_signals_report",
+    "_build_relay_status_report",
     "COMMAND_HELP",
     "COMMAND_ORDER",
     "COMMAND_SPECS",

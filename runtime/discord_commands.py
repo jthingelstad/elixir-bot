@@ -20,6 +20,7 @@ def register_elixir_app_commands(bot) -> None:
     clan_commands = app_commands.Group(name="clan", description="Clan-wide status and roster commands")
     member_commands = app_commands.Group(name="member", description="Single-member inspection and metadata commands")
     memory_commands = app_commands.Group(name="memory", description="Inspect Elixir memory")
+    relay_commands = app_commands.Group(name="relay", description="Leader action relay board")
     signal_commands = app_commands.Group(name="signal", description="Signal routing and system-signal commands")
     activity_commands = app_commands.Group(name="activity", description="Recurring activity inspection and manual run commands")
     integration_commands = app_commands.Group(name="integration", description="Integration modules and external publishing")
@@ -209,6 +210,25 @@ def register_elixir_app_commands(bot) -> None:
                 "include_system_internal": "true" if system_internal else "false",
             },
             event_type=COMMAND_SPECS["memory.show"].event_type,
+        )
+
+    @relay_commands.command(name="status", description=COMMAND_SPECS["relay.status"].description)
+    @app_commands.describe(view="Which leader actions to show.", limit="Maximum actions to list.")
+    @app_commands.choices(view=[
+        app_commands.Choice(name="All", value="all"),
+        app_commands.Choice(name="Pending", value="pending"),
+        app_commands.Choice(name="Decided", value="decided"),
+    ])
+    async def slash_relay_status(
+        interaction: discord.Interaction,
+        view: str = "all",
+        limit: app_commands.Range[int, 1, 25] = 10,
+    ):
+        await run_admin_interaction(
+            interaction,
+            command_name="relay.status",
+            args={"view": view, "limit": str(limit)},
+            event_type=COMMAND_SPECS["relay.status"].event_type,
         )
 
     @member_commands.command(name="verify-discord", description=COMMAND_SPECS["member.verify-discord"].description)
@@ -678,6 +698,7 @@ def register_elixir_app_commands(bot) -> None:
     elixir_commands.add_command(clan_commands)
     elixir_commands.add_command(member_commands)
     elixir_commands.add_command(memory_commands)
+    elixir_commands.add_command(relay_commands)
     elixir_commands.add_command(signal_commands)
     elixir_commands.add_command(activity_commands)
     elixir_commands.add_command(integration_commands)

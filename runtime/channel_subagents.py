@@ -84,6 +84,21 @@ WAR_RECAP_SIGNAL_TYPES = {
     "war_season_complete",
 }
 
+WAR_RELAY_SIGNAL_TYPES = {
+    "war_practice_phase_active",
+    "war_practice_day_started",
+    "war_final_practice_day",
+    "war_battle_phase_active",
+    "war_battle_day_started",
+    "war_battle_day_live_update",
+    "war_battle_day_final_hours",
+    "war_final_battle_day",
+    "war_attacks_complete",
+    "war_week_complete",
+    "war_completed",
+    "war_season_complete",
+}
+
 # Season awards — one aggregated post to #clan-events when a season's
 # podium grants land. Replaces the old per-award Discord spam (~12 fires).
 # Uses a dedicated clean-context generator so the signal payload is the
@@ -117,6 +132,7 @@ def signal_routing_summary() -> list[dict]:
             "match": "all signals in the batch are war signals",
             "targets": [
                 {"subagent": "river-race", "intent": "war_update", "required": True},
+                {"subagent": "arena-relay", "intent": "war_relay_brief", "required": False, "condition": "war state is useful for an in-game clan chat relay"},
                 {"subagent": "leader-lounge", "intent": "war_ops_note", "required": False, "condition": "important rank swing, recovery need, or ops-relevant war state"},
             ],
         },
@@ -219,6 +235,10 @@ def batch_source_key(signals: list[dict]) -> str:
 
 def is_war_signal(signal: dict) -> bool:
     return str((signal or {}).get("type") or "").startswith("war_")
+
+
+def is_war_relay_signal(signal: dict) -> bool:
+    return (signal or {}).get("type") in WAR_RELAY_SIGNAL_TYPES
 
 
 def is_progression_signal(signal: dict) -> bool:
@@ -332,6 +352,8 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
 
     if all(is_war_signal(signal) for signal in signals):
         add("river-race", "war_update", required=True)
+        if any(is_war_relay_signal(signal) for signal in signals):
+            add("arena-relay", "war_relay_brief", required=False)
         if any(
             signal.get("type") in {"war_battle_rank_change", "war_week_complete", "war_completed", "war_race_finished_live"}
             or signal.get("needs_lead_recovery")

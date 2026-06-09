@@ -221,6 +221,41 @@ def test_on_message_does_not_save_unsent_interactive_reply():
     mock_process.assert_not_awaited()
 
 
+def test_on_raw_reaction_add_marks_arena_relay_action_done():
+    payload = SimpleNamespace(
+        channel_id=1513758211206025227,
+        message_id=987,
+        user_id=123,
+        emoji="✅",
+        member=SimpleNamespace(bot=False, roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)]),
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1513758211206025227,
+            "name": "#arena-relay",
+            "subagent": "arena-relay",
+        }),
+        patch("runtime.prompt_feedback.db.decide_leader_action_by_message", return_value={
+            "action_id": 42,
+            "action_type": "in_game_relay",
+            "status": "done",
+        }) as mock_decide,
+    ):
+        asyncio.run(elixir.on_raw_reaction_add(payload))
+
+    mock_decide.assert_called_once_with(
+        987,
+        status="done",
+        discord_user_id=123,
+        emoji="✅",
+    )
+
+
 def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
     payload = SimpleNamespace(
         channel_id=1482368505058955467,
@@ -1193,6 +1228,15 @@ def test_register_elixir_app_commands_includes_signals():
     assert signal_group.get_command("show") is not None
 
 
+def test_register_elixir_app_commands_includes_relay_status():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+    relay_group = root.get_command("relay")
+    assert relay_group is not None
+    assert relay_group.get_command("status") is not None
+
+
 def test_register_elixir_app_commands_includes_member_audit_discord():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
@@ -2071,7 +2115,7 @@ def test_build_schedule_report_includes_clock_aligned_war_pipeline():
     assert "Every hour at :00 CT." in report
     assert "war-awareness" in report
     assert "Every hour at :05 CT." in report
-    assert "Discord routed outcomes: #river-race, optional #leader-lounge" in report
+    assert "Discord routed outcomes: #river-race, optional #arena-relay leader actions, optional #leader-lounge" in report
 
 
 def test_activity_registry_has_unique_keys_and_required_fields():

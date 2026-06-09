@@ -67,6 +67,16 @@ def test_channel_section_poapkings_com():
     assert "github-backed site publish" in section.lower()
 
 
+def test_arena_relay_channel_is_configured():
+    channel = prompts.discord_singleton_subagent("arena-relay")
+    assert channel["id"] == 1513758211206025227
+    assert channel["reply_policy"] == "disabled"
+    assert channel["memory_scope"] == "leadership"
+    section = prompts.channel_section("#arena-relay")
+    assert "leader action board" in section.lower()
+    assert "✅/☑️" in section
+
+
 def test_channel_section_nonexistent():
     """Returns empty string for unknown channel."""
     section = prompts.channel_section("#nonexistent")

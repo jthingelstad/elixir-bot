@@ -1115,6 +1115,49 @@ def test_plan_signal_outcomes_routes_live_finish_signal_to_war_channels():
     ]
 
 
+def test_plan_signal_outcomes_routes_actionable_war_signal_to_arena_relay():
+    outcomes = plan_signal_outcomes([{
+        "type": "war_battle_day_started",
+        "season_id": 133,
+        "section_index": 1,
+        "week": 2,
+    }])
+
+    assert [(item["target_channel_key"], item["intent"], item["required"]) for item in outcomes] == [
+        ("river-race", "war_update", True),
+        ("arena-relay", "war_relay_brief", False),
+    ]
+
+
+def test_arena_relay_result_is_copy_paste_brief():
+    from runtime.signals.delivery import _build_arena_relay_result
+
+    result = _build_arena_relay_result([{
+        "type": "war_battle_day_live_update",
+        "race_rank": 1,
+        "clan_fame": 6870,
+    }])
+
+    assert result["event_type"] == "war_relay_brief"
+    assert "Copy/paste:" in result["content"]
+    assert "POAP KINGS is 1st with 6,870 fame" in result["content"]
+    assert len(result["metadata"]["relay_copy"]) <= 240
+
+
+def test_arena_relay_cooldown_blocks_recent_posts():
+    from datetime import datetime
+    from runtime.signals.delivery import _arena_relay_recently_posted
+
+    assert _arena_relay_recently_posted(
+        [{"recorded_at": "2026-06-08T12:00:00"}],
+        now=datetime(2026, 6, 8, 20, 0, 0),
+    )
+    assert not _arena_relay_recently_posted(
+        [{"recorded_at": "2026-06-07T00:00:00"}],
+        now=datetime(2026, 6, 8, 20, 0, 0),
+    )
+
+
 def test_clan_awareness_tick_does_not_mark_system_signal_sent_before_success():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[{
@@ -1484,6 +1527,7 @@ def test_clanops_weekly_review_posts_to_clanops_channel():
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.save_message") as mock_save,
         patch("runtime.jobs._core.upsert_weekly_summary_memory") as mock_memory,
+        patch("runtime.jobs._core._post_weekly_leader_action_recommendations", new=AsyncMock(return_value=0)) as mock_actions,
     ):
         asyncio.run(elixir._clanops_weekly_review())
 
@@ -1493,6 +1537,46 @@ def test_clanops_weekly_review_posts_to_clanops_channel():
     mock_memory.assert_called_once()
     assert mock_memory.call_args.kwargs["event_type"] == "weekly_clanops_review"
     assert mock_memory.call_args.kwargs["scope"] == "leadership"
+    mock_actions.assert_awaited_once()
+
+
+def test_weekly_leader_actions_post_to_arena_relay():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 1513758211206025227
+    channel.name = "arena-relay"
+    channel.type = "text"
+
+    created = [
+        {"action_id": 1, "action_key": "promotion:1", "status": "proposed", "objective": "reward_and_retention"},
+        {"action_id": 2, "action_key": "kick:1", "status": "proposed", "objective": "roster_health"},
+    ]
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#arena-relay"}),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("runtime.jobs._core.db.get_promotion_candidates", return_value={
+            "recommended": [{"member_ref": "King Levy", "player_tag": "#ABC123", "donations": 220, "war_races_played": 4, "tenure_days": 90}],
+        }),
+        patch("runtime.jobs._core.db.get_members_at_risk", return_value={
+            "members": [{"member_ref": "Vijay", "player_tag": "#DEF456", "reasons": [{"detail": "last seen 8 days ago"}]}],
+        }),
+        patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
+        patch("runtime.jobs._core.db.create_leader_action_recommendation", side_effect=created) as mock_create,
+        patch("runtime.jobs._core._post_to_elixir", new=AsyncMock(return_value=[SimpleNamespace(id=999)])) as mock_post,
+        patch("runtime.jobs._core.db.update_leader_action_message") as mock_update,
+        patch("runtime.jobs._core.db.save_message") as mock_save,
+    ):
+        posted = asyncio.run(elixir._post_weekly_leader_action_recommendations())
+
+    assert posted == 2
+    assert mock_create.call_count == 2
+    assert mock_post.await_count == 2
+    assert mock_update.call_count == 2
+    assert mock_save.call_args.kwargs["workflow"] == "arena-relay"
 
 
 def test_weekly_clan_recap_posts_to_weekly_digest_channel():

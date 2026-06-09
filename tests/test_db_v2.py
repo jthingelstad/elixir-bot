@@ -39,8 +39,49 @@ def test_v2_schema_initializes_core_tables():
             "war_participation",
             "war_period_clan_status",
             "raw_api_payloads",
+            "leader_action_recommendations",
         }
         assert expected.issubset(tables)
+    finally:
+        conn.close()
+
+
+def test_leader_action_recommendation_records_reaction_decision():
+    conn = db.get_connection(":memory:")
+    try:
+        action = db.create_leader_action_recommendation(
+            action_type="promotion_recommendation",
+            objective="reward_and_retention",
+            prompt_text="Promote King Levy to Elder.",
+            rationale="220 donations, 4 war races",
+            target_player_tag="#ABC123",
+            target_player_name="King Levy",
+            source_message_id=987,
+            baseline={"member": {"role": "member", "status": "active"}},
+            conn=conn,
+        )
+
+        assert action["status"] == db.ACTION_PROPOSED
+        decided = db.decide_leader_action_by_message(
+            987,
+            status=db.ACTION_REJECTED,
+            discord_user_id=123,
+            emoji="❌",
+            conn=conn,
+        )
+
+        assert decided["status"] == db.ACTION_REJECTED
+        assert decided["decided_by_discord_user_id"] == "123"
+        assert decided["baseline"]["member"]["role"] == "member"
+
+        cleared = db.clear_leader_action_decision_by_message(
+            987,
+            discord_user_id=123,
+            emoji="❌",
+            conn=conn,
+        )
+        assert cleared["status"] == db.ACTION_PROPOSED
+        assert cleared["decided_at"] is None
     finally:
         conn.close()
 

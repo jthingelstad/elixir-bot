@@ -11,6 +11,8 @@ log = logging.getLogger("elixir")
 THUMBS_UP = "\N{THUMBS UP SIGN}"
 THUMBS_DOWN = "\N{THUMBS DOWN SIGN}"
 WHITE_CHECK_MARK = "\N{WHITE HEAVY CHECK MARK}"
+BALLOT_BOX_WITH_CHECK = "\N{BALLOT BOX WITH CHECK}"
+CROSS_MARK = "\N{CROSS MARK}"
 
 
 def feedback_value_for_emoji(emoji) -> str | None:
@@ -19,6 +21,15 @@ def feedback_value_for_emoji(emoji) -> str | None:
         return "up"
     if value == THUMBS_DOWN:
         return "down"
+    return None
+
+
+def leader_action_value_for_emoji(emoji) -> str | None:
+    value = str(emoji or "").strip()
+    if value in {WHITE_CHECK_MARK, BALLOT_BOX_WITH_CHECK, f"{BALLOT_BOX_WITH_CHECK}\ufe0f"}:
+        return db.ACTION_DONE
+    if value == CROSS_MARK:
+        return db.ACTION_REJECTED
     return None
 
 
@@ -104,6 +115,29 @@ async def handle_raw_reaction_add(payload) -> None:
         return
     if getattr(getattr(payload, "member", None), "bot", False):
         return
+    action_status = leader_action_value_for_emoji(getattr(payload, "emoji", None))
+    if action_status:
+        channel_config = app._get_channel_behavior(payload.channel_id)
+        if channel_config and (channel_config.get("subagent") or "") == "arena-relay":
+            if not app._has_leader_role(getattr(payload, "member", None)):
+                return
+            action = await asyncio.to_thread(
+                db.decide_leader_action_by_message,
+                payload.message_id,
+                status=action_status,
+                discord_user_id=payload.user_id,
+                emoji=str(getattr(payload, "emoji", "")),
+            )
+            if action:
+                log.info(
+                    "leader_action_decision action_id=%s type=%s status=%s message_id=%s reactor=%s",
+                    action.get("action_id"),
+                    action.get("action_type"),
+                    action.get("status"),
+                    payload.message_id,
+                    payload.user_id,
+                )
+            return
     feedback_value = feedback_value_for_emoji(getattr(payload, "emoji", None))
     if not feedback_value:
         return
@@ -163,6 +197,26 @@ async def handle_raw_reaction_remove(payload) -> None:
         return
     if app.bot.user and int(payload.user_id) == int(app.bot.user.id):
         return
+    action_status = leader_action_value_for_emoji(getattr(payload, "emoji", None))
+    if action_status:
+        channel_config = app._get_channel_behavior(payload.channel_id)
+        if channel_config and (channel_config.get("subagent") or "") == "arena-relay":
+            action = await asyncio.to_thread(
+                db.clear_leader_action_decision_by_message,
+                payload.message_id,
+                discord_user_id=payload.user_id,
+                emoji=str(getattr(payload, "emoji", "")),
+            )
+            if action:
+                log.info(
+                    "leader_action_decision_cleared action_id=%s type=%s status=%s message_id=%s reactor=%s",
+                    action.get("action_id"),
+                    action.get("action_type"),
+                    action.get("status"),
+                    payload.message_id,
+                    payload.user_id,
+                )
+            return
     feedback_value = feedback_value_for_emoji(getattr(payload, "emoji", None))
     if not feedback_value:
         return
@@ -189,7 +243,10 @@ __all__ = [
     "THUMBS_DOWN",
     "THUMBS_UP",
     "WHITE_CHECK_MARK",
+    "BALLOT_BOX_WITH_CHECK",
+    "CROSS_MARK",
     "feedback_value_for_emoji",
     "handle_raw_reaction_add",
     "handle_raw_reaction_remove",
+    "leader_action_value_for_emoji",
 ]

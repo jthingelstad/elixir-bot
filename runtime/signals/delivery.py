@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 import db
 import elixir_agent
@@ -16,6 +17,174 @@ from runtime.channel_subagents import (
 from runtime.helpers import _channel_scope
 
 log = logging.getLogger("elixir")
+
+ARENA_RELAY_COOLDOWN_HOURS = 18
+ARENA_RELAY_MAX_COPY_CHARS = 240
+
+
+def _clip_relay_copy(text: str, limit: int = ARENA_RELAY_MAX_COPY_CHARS) -> str:
+    body = " ".join((text or "").split())
+    if len(body) <= limit:
+        return body
+    return body[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _ordinal(value) -> str | None:
+    if not isinstance(value, int) or value <= 0:
+        return None
+    if 10 <= value % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(value % 10, "th")
+    return f"{value}{suffix}"
+
+
+def _signal_names(signals: list[dict], limit: int = 4) -> list[str]:
+    names = []
+    for signal in signals or []:
+        name = str(signal.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+        if len(names) >= limit:
+            break
+    return names
+
+
+def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str] | None:
+    signals = signals or []
+    types = {signal.get("type") for signal in signals}
+    primary = signals[0] if signals else {}
+
+    if types & {"war_practice_phase_active", "war_practice_day_started", "war_final_practice_day"}:
+        return (
+            "Practice days are live. Please set boat defenses early so they are ready before battle days start.",
+            "boat_defense_setup",
+            "Practice timing is the main in-game action before battle days.",
+        )
+
+    if types & {"war_final_battle_day", "war_battle_day_final_hours"}:
+        return (
+            "Final battle day: use any remaining war decks today. Every deck helps lock River Chest rewards and finish the race strong.",
+            "war_participation",
+            "Final-day reminders are one of the most useful in-game relay moments.",
+        )
+
+    if types & {"war_battle_phase_active", "war_battle_day_started"}:
+        return (
+            "Battle day is live. Please use all 4 war decks when you can; every attack helps keep POAP KINGS moving.",
+            "war_participation",
+            "Battle-day start messages are useful for members who do not read Discord.",
+        )
+
+    if types & {"war_battle_day_live_update"}:
+        rank = _ordinal(primary.get("race_rank") or primary.get("our_rank"))
+        fame = primary.get("clan_fame") or primary.get("our_fame") or primary.get("fame")
+        if rank and isinstance(fame, int):
+            copy = f"War check: POAP KINGS is {rank} with {fame:,} fame. Use remaining decks today; every attack keeps pressure on."
+        elif rank:
+            copy = f"War check: POAP KINGS is {rank}. Use remaining decks today; every attack keeps pressure on."
+        else:
+            copy = "War check: use remaining decks today if you can. Every attack keeps pressure on and helps the clan chest."
+        return (copy, "war_participation", "Current war state is timely enough to relay into game chat.")
+
+    if types & {"war_attacks_complete"}:
+        names = _signal_names(signals)
+        if names:
+            named = ", ".join(names)
+            copy = f"Props to {named} for using all 4 war decks today. If you still have decks, jump in and help finish strong."
+        else:
+            copy = "Props to everyone using all 4 war decks today. If you still have decks, jump in and help finish strong."
+        return (copy, "war_recognition", "Recognition can reinforce the exact behavior leaders want repeated.")
+
+    if types & {"war_week_complete", "war_completed"}:
+        rank = _ordinal(primary.get("our_rank") or primary.get("race_rank"))
+        fame = primary.get("our_fame") or primary.get("clan_fame") or primary.get("fame")
+        if rank and isinstance(fame, int):
+            copy = f"War week complete: POAP KINGS finished {rank} with {fame:,} fame. Thanks to everyone who used decks."
+        elif rank:
+            copy = f"War week complete: POAP KINGS finished {rank}. Thanks to everyone who used decks."
+        else:
+            copy = "War week complete. Thanks to everyone who used decks and helped keep POAP KINGS moving."
+        return (copy, "war_recognition", "Week-end recognition is useful in game chat because many contributors are not in Discord.")
+
+    if types & {"war_season_complete"}:
+        return (
+            "War season complete. Thanks to everyone who kept showing up and using decks for POAP KINGS.",
+            "war_recognition",
+            "Season-end recognition belongs where the full clan can see it.",
+        )
+
+    return None
+
+
+def _build_arena_relay_result(signals: list[dict]) -> dict | None:
+    relay = _arena_relay_copy(signals)
+    if relay is None:
+        return None
+    copy, objective, reason = relay
+    copy = _clip_relay_copy(copy)
+    return {
+        "event_type": "war_relay_brief",
+        "summary": f"In-game relay suggestion: {copy}",
+        "content": (
+            "**Leader action: in-game relay**\n"
+            f"Objective: `{objective}`\n\n"
+            "Copy/paste:\n"
+            f"```text\n{copy}\n```\n"
+            f"Why: {reason}\n\n"
+            "React ✅ after posting it in Clash Royale clan chat, or ❌ if leaders are not doing this one."
+        ),
+        "metadata": {
+            "action_type": "in_game_relay",
+            "objective": objective,
+            "rationale": reason,
+            "relay_copy": copy,
+            "relay_target": "clash_royale_clan_chat",
+        },
+    }
+
+
+def _attach_leader_action_to_result(result: dict, action: dict) -> dict:
+    if not action:
+        return result
+    action_id = action.get("action_id")
+    if action_id:
+        result["summary"] = f"Leader action R{action_id}: {result.get('summary') or action.get('prompt_text')}"
+        result["content"] = (result.get("content") or "").replace(
+            "**Leader action: ",
+            f"**Leader action R{action_id}: ",
+            1,
+        )
+    metadata = result.setdefault("metadata", {})
+    metadata.update({
+        "leader_action_id": action.get("action_id"),
+        "leader_action_key": action.get("action_key"),
+        "leader_action_status": action.get("status"),
+    })
+    return result
+
+
+def _parse_recorded_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _arena_relay_recently_posted(recent_posts: list[dict], *, now: datetime | None = None) -> bool:
+    current = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = current - timedelta(hours=ARENA_RELAY_COOLDOWN_HOURS)
+    for post in recent_posts or []:
+        recorded = _parse_recorded_at(post.get("recorded_at") or post.get("created_at"))
+        if recorded and recorded >= cutoff:
+            return True
+    return False
 
 
 def _facade():
@@ -110,7 +279,44 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         if channel_kind is not None:
             channel_kind = str(channel_kind)
 
-        if preauthored_result is not None:
+        if channel_config["subagent_key"] == "arena-relay":
+            if _arena_relay_recently_posted(recent_posts):
+                await asyncio.to_thread(
+                    db.upsert_signal_outcome,
+                    outcome["source_signal_key"],
+                    outcome["source_signal_type"],
+                    outcome["target_channel_key"],
+                    outcome["target_channel_id"],
+                    outcome["intent"],
+                    required=outcome.get("required", True),
+                    delivery_status="skipped",
+                    payload={"signals": signals},
+                    error_detail=f"arena_relay_cooldown:{ARENA_RELAY_COOLDOWN_HOURS}h",
+                    mark_attempt=True,
+                )
+                return True
+            result = _build_arena_relay_result(signals)
+            if result is not None:
+                metadata = result.get("metadata") if isinstance(result, dict) else {}
+                baseline = await asyncio.to_thread(
+                    db.build_leader_action_baseline,
+                    action_type="in_game_relay",
+                    signals=signals,
+                )
+                action = await asyncio.to_thread(
+                    db.create_leader_action_recommendation,
+                    action_type="in_game_relay",
+                    objective=metadata.get("objective") or "war_participation",
+                    prompt_text=metadata.get("relay_copy") or result.get("summary") or "",
+                    rationale=metadata.get("rationale"),
+                    target_channel_key=outcome["target_channel_key"],
+                    target_channel_id=outcome["target_channel_id"],
+                    source_signal_key=outcome["source_signal_key"],
+                    source_signal_type=outcome["source_signal_type"],
+                    baseline=baseline,
+                )
+                result = _attach_leader_action_to_result(result, action)
+        elif preauthored_result is not None:
             result = preauthored_result
         elif is_tournament_batch:
             result = await asyncio.to_thread(
@@ -190,7 +396,20 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             return True
 
         posts = app._entry_posts(result)
-        await facade._post_to_elixir(channel, result)
+        sent_messages = await facade._post_to_elixir(channel, result)
+        if not isinstance(sent_messages, list):
+            sent_messages = []
+        if channel_config["subagent_key"] == "arena-relay":
+            metadata = result.get("metadata") if isinstance(result, dict) else {}
+            action_id = metadata.get("leader_action_id") if isinstance(metadata, dict) else None
+            first_message = sent_messages[0] if sent_messages else None
+            first_message_id = getattr(first_message, "id", None)
+            if action_id and first_message_id is not None:
+                await asyncio.to_thread(
+                    db.update_leader_action_message,
+                    action_id,
+                    source_message_id=first_message_id,
+                )
         if (
             channel_config["subagent_key"] == "clan-events"
             and any(s.get("type") == "member_join" for s in signals)
@@ -216,6 +435,8 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         summary = result.get("summary")
         event_type = result.get("event_type") or outcome["intent"]
         for index, post in enumerate(posts):
+            sent_message = sent_messages[index] if index < len(sent_messages) else None
+            sent_message_id = getattr(sent_message, "id", None)
             post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
             post_event_type = event_type if index == 0 else f"{event_type}_part"
             await asyncio.to_thread(
@@ -229,6 +450,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 channel_kind=channel_kind,
                 workflow=channel_config["subagent_key"],
                 event_type=post_event_type,
+                discord_message_id=sent_message_id,
                 raw_json={
                     "source_signal_key": outcome["source_signal_key"],
                     "intent": outcome["intent"],
@@ -251,14 +473,15 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             delivered=True,
         )
         body = "\n\n".join(posts)
-        await asyncio.to_thread(
-            facade.maybe_upsert_signal_memory,
-            source_signal_key=outcome["source_signal_key"],
-            signal_type=(signals[0].get("type") or outcome["source_signal_type"]),
-            body=body,
-            outcome=outcome,
-            signals=signals,
-        )
+        if channel_config["subagent_key"] != "arena-relay":
+            await asyncio.to_thread(
+                facade.maybe_upsert_signal_memory,
+                source_signal_key=outcome["source_signal_key"],
+                signal_type=(signals[0].get("type") or outcome["source_signal_type"]),
+                body=body,
+                outcome=outcome,
+                signals=signals,
+            )
 
         from agent.memory_tasks import store_observation_facts
 
@@ -268,10 +491,11 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
 
         from runtime.helpers._common import _safe_create_task
 
-        _safe_create_task(
-            facade._post_signal_memory(body, outcome, signals),
-            name="signal_memory",
-        )
+        if channel_config["subagent_key"] != "arena-relay":
+            _safe_create_task(
+                facade._post_signal_memory(body, outcome, signals),
+                name="signal_memory",
+            )
         return True
     except Exception as exc:
         await asyncio.to_thread(
@@ -311,6 +535,18 @@ async def _deliver_signal_group(signals, clan, war):
         await facade._mark_signal_group_completed(signals)
         return True
     return all(results)
+
+
+async def _deliver_arena_relay_sidecars(signals, clan, war) -> int:
+    facade = _facade()
+    delivered = 0
+    for outcome in facade.plan_signal_outcomes(signals or []):
+        if outcome.get("target_channel_key") != "arena-relay":
+            continue
+        ok = await facade._deliver_signal_outcome(outcome, signals, clan, war)
+        if ok:
+            delivered += 1
+    return delivered
 
 
 async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
@@ -509,6 +745,7 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         return await facade._deliver_signal_group(signals, clan, war)
 
     report = await facade._deliver_awareness_post_plan(plan, signals)
+    relay_sidecars = await facade._deliver_arena_relay_sidecars(signals, clan, war)
 
     hard_required_keys = {hp.get("signal_key") for hp in (situation.get("hard_post_signals") or [])}
     covered_keys = report["covered_signal_keys"]
@@ -563,7 +800,7 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
 
     log.info(
         "awareness_tick_result workflow=%r delivered=%d rejected=%d covered=%d considered_skipped=%d "
-        "hard_fallback=%d hard_fallback_failed=%d signals_in=%d skipped_reason=%r",
+        "hard_fallback=%d hard_fallback_failed=%d relay_sidecars=%d signals_in=%d skipped_reason=%r",
         workflow,
         report["delivered"],
         report["rejected"],
@@ -571,6 +808,7 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         len(considered_skipped),
         len(uncovered),
         len(fallback_failed_keys),
+        relay_sidecars,
         len(signals or []),
         (plan or {}).get("skipped_reason"),
     )

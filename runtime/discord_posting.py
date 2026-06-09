@@ -110,10 +110,12 @@ def _entry_posts(entry: dict, field="content"):
 
 async def _post_to_elixir(channel, entry: dict):
     guild = getattr(channel, "guild", None)
+    sent_messages = []
     for post in _entry_posts(entry):
         post = _resolve_custom_emoji(post, guild)
         if len(post) > DISCORD_MAX_MESSAGE_LEN:
             for chunk in _chunk_for_discord(post):
-                await channel.send(chunk)
+                sent_messages.append(await channel.send(chunk))
         else:
-            await channel.send(post)
+            sent_messages.append(await channel.send(post))
+    return sent_messages

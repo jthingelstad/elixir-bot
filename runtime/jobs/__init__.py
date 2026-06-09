@@ -14,6 +14,7 @@ from runtime.jobs._core import (  # noqa: F401
     _clan_awareness_tick, _war_poll_tick, _war_awareness_tick,
     _award_detection_tick,
     _player_intel_refresh, _clanops_weekly_review, _weekly_clan_recap,
+    _post_weekly_leader_action_recommendations,
     _memory_synthesis_cycle, _build_memory_synthesis_context,
     _apply_memory_synthesis_plan,
     _clan_wars_intel_report,
