@@ -1,5 +1,6 @@
 """Tests for the weekly memory-synthesis job (PR3 of #12)."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,7 +19,9 @@ from memory_store import SOURCE_TYPES, create_memory, list_memories
 from runtime.jobs._core import (
     _apply_memory_synthesis_plan,
     _build_memory_synthesis_context,
+    _memory_synthesis_cycle,
 )
+import runtime.jobs._core as core
 
 
 @pytest.fixture
@@ -180,3 +183,51 @@ def test_build_context_returns_expected_keys(memdb):
     # Recent memory should appear in the week window.
     titles = {m.get("title") for m in context["week_memories"]}
     assert "recent" in titles
+
+
+def test_build_context_bounds_memory_count_and_text_size(memdb, monkeypatch):
+    monkeypatch.setattr(core, "MEMORY_SYNTHESIS_MEMORY_LIMIT", 2)
+    monkeypatch.setattr(core, "MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", 24)
+    for idx in range(4):
+        create_memory(
+            title=f"recent {idx}",
+            body="x" * 80,
+            source_type="elixir_inference",
+            is_inference=True,
+            confidence=0.7,
+            created_by="elixir",
+            scope="leadership",
+        )
+
+    context = _build_memory_synthesis_context()
+
+    assert len(context["week_memories"]) == 2
+    assert all(len(item["body"]) <= 24 for item in context["week_memories"])
+    assert all(item["body"].endswith("…") for item in context["week_memories"])
+
+
+def test_memory_synthesis_cycle_marks_structured_agent_error_as_failure():
+    channel = MagicMock()
+    with (
+        patch("runtime.jobs._core.prompts.discord_channels_by_workflow", return_value=[{"id": 42}]),
+        patch("runtime.jobs._core.bot.get_channel", return_value=channel),
+        patch("runtime.jobs._core._build_memory_synthesis_context", return_value={"week_window": {}}),
+        patch(
+            "runtime.jobs._core.elixir_agent.run_memory_synthesis",
+            return_value={
+                "_error": {
+                    "kind": "truncation",
+                    "phase": "initial_response",
+                    "detail": "LLM response truncated by max_tokens=3000",
+                }
+            },
+        ),
+        patch("runtime.jobs._core.runtime_status.mark_job_start") as mock_start,
+        patch("runtime.jobs._core.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(_memory_synthesis_cycle())
+
+    mock_start.assert_called_once_with("memory_synthesis")
+    mock_failure.assert_called_once()
+    assert mock_failure.call_args.args[0] == "memory_synthesis"
+    assert "truncation" in mock_failure.call_args.args[1]

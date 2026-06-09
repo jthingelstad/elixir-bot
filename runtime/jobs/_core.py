@@ -147,7 +147,11 @@ WEEKLY_RECAP_HOUR = int(os.getenv("WEEKLY_RECAP_HOUR", "9"))
 MEMORY_SYNTHESIS_DAY = os.getenv("MEMORY_SYNTHESIS_DAY", "sun")
 MEMORY_SYNTHESIS_HOUR = int(os.getenv("MEMORY_SYNTHESIS_HOUR", "22"))
 MEMORY_SYNTHESIS_DRY_RUN = os.getenv("MEMORY_SYNTHESIS_DRY_RUN", "").strip().lower() in {"1", "true", "yes", "on"}
-MEMORY_SYNTHESIS_POSTS_PER_CHANNEL = int(os.getenv("MEMORY_SYNTHESIS_POSTS_PER_CHANNEL", "25"))
+MEMORY_SYNTHESIS_MEMORY_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_MEMORY_LIMIT", "80"))
+MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT", "12"))
+MEMORY_SYNTHESIS_POSTS_PER_CHANNEL = int(os.getenv("MEMORY_SYNTHESIS_POSTS_PER_CHANNEL", "12"))
+MEMORY_SYNTHESIS_MEMORY_BODY_CHARS = int(os.getenv("MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", "500"))
+MEMORY_SYNTHESIS_POST_CHARS = int(os.getenv("MEMORY_SYNTHESIS_POST_CHARS", "700"))
 
 
 def _build_weekly_clanops_review(*args, **kwargs):
@@ -992,15 +996,24 @@ def _current_war_week_id(conn=None) -> str | None:
     return f"{season}:{week}"
 
 
+def _clip_text(value, limit: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if limit <= 0 or len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
 def _compact_memory_row(row: dict) -> dict:
     """Return just the fields the synthesis agent needs to reason from."""
     return {
         "memory_id": row.get("memory_id"),
         "source_type": row.get("source_type"),
         "scope": row.get("scope"),
-        "title": row.get("title"),
-        "body": row.get("body"),
-        "summary": row.get("summary"),
+        "title": _clip_text(row.get("title"), 160),
+        "body": _clip_text(row.get("body"), MEMORY_SYNTHESIS_MEMORY_BODY_CHARS),
+        "summary": _clip_text(row.get("summary"), 300),
         "member_tag": row.get("member_tag"),
         "war_week_id": row.get("war_week_id"),
         "war_season_id": row.get("war_season_id"),
@@ -1015,8 +1028,8 @@ def _compact_post_row(row: dict) -> dict:
     return {
         "channel_id": row.get("channel_id"),
         "author_type": row.get("author_type"),
-        "content": row.get("content"),
-        "summary": row.get("summary"),
+        "content": _clip_text(row.get("content"), MEMORY_SYNTHESIS_POST_CHARS),
+        "summary": _clip_text(row.get("summary"), 300),
         "created_at": row.get("created_at"),
         "workflow": row.get("workflow"),
         "event_type": row.get("event_type"),
@@ -1037,7 +1050,7 @@ def _build_memory_synthesis_context():
         week_memories = list_memories(
             viewer_scope="leadership",
             filters={"created_after": week_ago},
-            limit=200,
+            limit=MEMORY_SYNTHESIS_MEMORY_LIMIT,
         )
     except Exception:
         log.warning("memory synthesis: week memories load failed", exc_info=True)
@@ -1048,7 +1061,7 @@ def _build_memory_synthesis_context():
         prior_arcs = list_memories(
             viewer_scope="leadership",
             filters={"source_type": "elixir_synthesis"},
-            limit=25,
+            limit=MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT,
         )
     except Exception:
         log.warning("memory synthesis: prior arcs load failed", exc_info=True)
@@ -1207,6 +1220,23 @@ async def _memory_synthesis_cycle():
         return
     if plan is None:
         runtime_status.mark_job_failure("memory_synthesis", "agent returned no plan")
+        return
+    if isinstance(plan, dict) and isinstance(plan.get("_error"), dict):
+        error = plan["_error"]
+        kind = error.get("kind") or "agent_error"
+        phase = error.get("phase") or "unknown"
+        detail = error.get("detail") or error.get("result_preview") or "no detail"
+        log.warning("memory_synthesis: agent returned structured error: %s", error)
+        runtime_status.mark_job_failure(
+            "memory_synthesis",
+            f"agent {kind} during {phase}: {detail}",
+        )
+        return
+    if not isinstance(plan, dict):
+        runtime_status.mark_job_failure(
+            "memory_synthesis",
+            f"agent returned invalid plan type: {type(plan).__name__}",
+        )
         return
 
     week_id = (context.get("week_window") or {}).get("war_week_id")

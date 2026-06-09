@@ -524,7 +524,7 @@ def get_database_status(conn: Optional[sqlite3.Connection] = None) -> dict:
 
 
 @managed_connection
-def build_memory_context(discord_user_id: Optional[str | int] = None, member_tag: Optional[str] = None, channel_id: Optional[str | int] = None, *, viewer_scope: str = "public", conn: Optional[sqlite3.Connection] = None) -> dict:
+def build_memory_context(discord_user_id: Optional[str | int] = None, member_tag: Optional[str] = None, channel_id: Optional[str | int] = None, *, viewer_scope: str = "public", durable_memory_limit: int = 5, conn: Optional[sqlite3.Connection] = None) -> dict:
     context = {
         "discord_user": None,
         "member": None,
@@ -554,6 +554,21 @@ def build_memory_context(discord_user_id: Optional[str | int] = None, member_tag
             "state": get_channel_state(channel_id, conn=conn),
             "episodes": get_memory_episodes("channel", key, conn=conn),
         }
+    if durable_memory_limit:
+        try:
+            from memory_store import list_memories
+
+            filters = {"member_tag": _canon_tag(member_tag)} if member_tag else None
+            memories = list_memories(
+                viewer_scope=viewer_scope or "public",
+                filters=filters,
+                limit=max(1, int(durable_memory_limit)),
+                conn=conn,
+            )
+        except Exception:
+            memories = []
+        if memories:
+            context["durable_memories"] = memories
     return context
 
 

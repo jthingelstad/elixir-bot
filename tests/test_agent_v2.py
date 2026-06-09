@@ -42,6 +42,61 @@ def test_execute_tool_get_member_profile_refreshes_member_cache():
         mock_db.get_member_profile.assert_called_once_with("#ABC123")
 
 
+def test_execute_tool_get_member_memories_uses_leadership_scope_for_clanops():
+    with (
+        patch("agent.tool_exec._refresh_member_cache"),
+        patch(
+            "memory_store.list_memories",
+            return_value=[
+                {
+                    "title": "Quiet leader note",
+                    "body": "Leadership-only context.",
+                    "scope": "leadership",
+                    "source_type": "leader_note",
+                    "created_at": "2026-06-01T00:00:00",
+                    "tags": ["leadership"],
+                }
+            ],
+        ) as mock_list,
+    ):
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_member",
+                {"member_tag": "#ABC123", "include": ["memories"]},
+                workflow="clanops",
+            )
+        )
+
+    assert result["memories"]["count"] == 1
+    assert result["memories"]["memories"][0]["scope"] == "leadership"
+    mock_list.assert_called_once_with(
+        viewer_scope="leadership",
+        filters={"member_tag": "#ABC123"},
+        limit=15,
+    )
+
+
+def test_execute_tool_get_member_memories_defaults_to_public_scope():
+    with (
+        patch("agent.tool_exec._refresh_member_cache"),
+        patch("memory_store.list_memories", return_value=[]) as mock_list,
+    ):
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_member",
+                {"member_tag": "#ABC123", "include": ["memories"]},
+                workflow="interactive",
+            )
+        )
+
+    assert result["memories"]["message"] == "No stored memories for this member."
+    mock_list.assert_called_once_with(
+        viewer_scope="public",
+        filters={"member_tag": "#ABC123"},
+        limit=15,
+    )
+
+
 def test_execute_tool_get_member_profile_includes_account_age_and_activity_summaries():
     with (
         patch("elixir_agent.cr_api.get_player", return_value={"tag": "#ABC123", "name": "King Levy"}),

@@ -671,6 +671,7 @@ from storage import revisits as _revisits_module
 from storage import awards as _awards_module
 from storage import member_ranks as _member_ranks_module
 from storage import leader_actions as _leader_actions_module
+from storage import runtime_status as _runtime_status_module
 
 __all__ = [name for name in globals() if not name.startswith("__")]
 for _module in (
@@ -687,6 +688,7 @@ for _module in (
     _awards_module,
     _member_ranks_module,
     _leader_actions_module,
+    _runtime_status_module,
 ):
     __export_public(_module)
 

@@ -378,6 +378,8 @@ def run_memory_synthesis(context: dict):
         allowed_tools=TOOLSETS_BY_WORKFLOW["memory_synthesis"],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["memory_synthesis"],
         strict_json=True,
+        return_errors=True,
+        max_tokens=3000,
     )
 
 

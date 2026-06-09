@@ -50,31 +50,56 @@ _LLM_STATUS = {
 }
 
 
+def _default_job_state() -> dict:
+    return {
+        "run_count": 0,
+        "success_count": 0,
+        "failure_count": 0,
+        "last_started_at": None,
+        "last_finished_at": None,
+        "last_success_at": None,
+        "last_failure_at": None,
+        "last_error": None,
+        "last_summary": None,
+        "running": False,
+    }
+
+
+def _persist_job_status(name: str, state: dict) -> None:
+    try:
+        import db
+
+        db.save_runtime_job_status(name, state)
+    except Exception:
+        # Runtime status should never break the job it is observing.
+        return
+
+
+def _load_persisted_job_status() -> dict:
+    try:
+        import db
+
+        statuses = db.list_runtime_job_status()
+    except Exception:
+        return {}
+    for state in statuses.values():
+        state["running"] = False
+    return statuses
+
+
 def mark_job_start(name: str) -> None:
     with _LOCK:
-        state = _JOB_STATUS.setdefault(
-            name,
-            {
-                "run_count": 0,
-                "success_count": 0,
-                "failure_count": 0,
-                "last_started_at": None,
-                "last_finished_at": None,
-                "last_success_at": None,
-                "last_failure_at": None,
-                "last_error": None,
-                "last_summary": None,
-                "running": False,
-            },
-        )
+        state = _JOB_STATUS.setdefault(name, _default_job_state())
         state["run_count"] += 1
         state["last_started_at"] = _utcnow()
         state["running"] = True
+        snapshot_state = copy.deepcopy(state)
+    _persist_job_status(name, snapshot_state)
 
 
 def mark_job_success(name: str, summary: str | None = None) -> None:
     with _LOCK:
-        state = _JOB_STATUS.setdefault(name, {})
+        state = _JOB_STATUS.setdefault(name, _default_job_state())
         now = _utcnow()
         state["success_count"] = int(state.get("success_count", 0)) + 1
         state["last_finished_at"] = now
@@ -82,17 +107,21 @@ def mark_job_success(name: str, summary: str | None = None) -> None:
         state["last_error"] = None
         state["last_summary"] = summary
         state["running"] = False
+        snapshot_state = copy.deepcopy(state)
+    _persist_job_status(name, snapshot_state)
 
 
 def mark_job_failure(name: str, error: str) -> None:
     with _LOCK:
-        state = _JOB_STATUS.setdefault(name, {})
+        state = _JOB_STATUS.setdefault(name, _default_job_state())
         now = _utcnow()
         state["failure_count"] = int(state.get("failure_count", 0)) + 1
         state["last_finished_at"] = now
         state["last_failure_at"] = now
         state["last_error"] = str(error)
         state["running"] = False
+        snapshot_state = copy.deepcopy(state)
+    _persist_job_status(name, snapshot_state)
 
 
 def record_api_call(endpoint: str, entity_key: str | None = None, *, ok: bool, status_code=None, error=None, duration_ms=None) -> None:
@@ -192,7 +221,10 @@ def record_llm_call(workflow: str, *, ok: bool, model=None, error=None, duration
 
 
 def snapshot() -> dict:
+    persisted_jobs = _load_persisted_job_status()
     with _LOCK:
+        jobs = copy.deepcopy(persisted_jobs)
+        jobs.update(copy.deepcopy(_JOB_STATUS))
         return {
             "started_at": STARTED_AT,
             "env": {
@@ -200,7 +232,7 @@ def snapshot() -> dict:
                 "has_claude_api_key": bool(os.getenv("CLAUDE_API_KEY")),
                 "has_cr_api_key": bool(os.getenv("CR_API_KEY")),
             },
-            "jobs": copy.deepcopy(_JOB_STATUS),
+            "jobs": jobs,
             "api": copy.deepcopy(_API_STATUS),
             "llm": copy.deepcopy(_LLM_STATUS),
         }
