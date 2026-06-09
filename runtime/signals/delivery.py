@@ -46,7 +46,7 @@ CELEBRATION_RELAY_SIGNAL_TYPES = {
     "member_birthday",
     "clan_birthday",
 }
-DISCORD_INVITE_COPY = "Join clan Discord! POAPKINGS . COM > Members"
+DISCORD_INVITE_ROUTE = "POAPKINGS . COM > Members"
 
 
 def _clip_relay_copy(text: str, limit: int = ARENA_RELAY_MAX_COPY_CHARS) -> str:
@@ -75,6 +75,93 @@ def _signal_names(signals: list[dict], limit: int = 4) -> list[str]:
         if len(names) >= limit:
             break
     return names
+
+
+def _discord_member_counts() -> tuple[int | None, int | None]:
+    try:
+        members = db.list_members()
+    except Exception:
+        return None, None
+    active = len(members)
+    linked = sum(1 for member in members if member.get("in_discord"))
+    return linked, active
+
+
+def _discord_invite_relay_context(base_context: str | None) -> str:
+    linked, active = _discord_member_counts()
+    if isinstance(linked, int) and isinstance(active, int) and active > 0:
+        count_line = f"- Discord-linked clan members: {linked}/{active}"
+    else:
+        count_line = "- Discord-linked clan member count: unavailable"
+    instructions = (
+        "Arena-relay Discord invite task:\n"
+        f"{count_line}\n"
+        "- Author 2-3 short Clash Royale clan-chat messages a leader can copy/paste in sequence.\n"
+        "- Highlight why Discord is worth joining: war nudges, deck/screenshot help, milestone shoutouts, leader relay notes, or recent useful coordination.\n"
+        f"- Include `{DISCORD_INVITE_ROUTE}` exactly once, preferably in the final copy/paste message.\n"
+        "- Do not include raw URLs, markdown links, Discord-only formatting, message numbers, or labels inside the copy/paste messages.\n"
+        f"- Keep each copy/paste message under {ARENA_RELAY_MAX_COPY_CHARS} characters.\n"
+        "- Return `content` as a JSON array containing only the Clash Royale copy/paste messages. The code will add the arena-relay action card.\n"
+    )
+    if base_context:
+        return f"{base_context}\n\n{instructions}"
+    return instructions
+
+
+def _result_content_items(result: dict | None) -> list[str]:
+    if not isinstance(result, dict):
+        return []
+    content = result.get("content")
+    if isinstance(content, list):
+        return [str(item or "").strip() for item in content if str(item or "").strip()]
+    if isinstance(content, str) and content.strip():
+        return [content.strip()]
+    return []
+
+
+def _build_generated_discord_invite_relay_result(signals: list[dict], generated: dict | None) -> dict | None:
+    copies = [_clip_relay_copy(item) for item in _result_content_items(generated)]
+    copies = [item for item in copies if item]
+    if not copies:
+        return None
+    copies = copies[:3]
+    relay_copy_text = "\n".join(copies)
+    relay_copy_lower = relay_copy_text.lower()
+    if "http://" in relay_copy_lower or "https://" in relay_copy_lower:
+        return None
+    if relay_copy_lower.count(DISCORD_INVITE_ROUTE.lower()) != 1:
+        return None
+    copy_count = len(copies)
+    copy_instruction = (
+        "📋 Copy the next message into Clash Royale."
+        if copy_count == 1
+        else f"📋 Copy the next {copy_count} messages into Clash Royale in order."
+    )
+    reason = "A weekly no-link reminder helps clan members see why Discord matters and find it through the website members page."
+    card = (
+        "**R? 💬 Discord invite relay**\n"
+        "🎯 `discord_onboarding`\n"
+        f"{copy_instruction}\n"
+        f"🧠 {reason}\n\n"
+        "✅ done  ❌ decline  ↩️ reply with note"
+    )
+    relay_copy = copies[0] if copy_count == 1 else copies
+    return {
+        "event_type": "discord_invite_relay",
+        "summary": f"In-game relay suggestion: {relay_copy_text}",
+        "content": [card, *copies],
+        "metadata": {
+            "action_type": "discord_invite_relay",
+            "objective": "discord_onboarding",
+            "rationale": reason,
+            "relay_copy": relay_copy,
+            "relay_copy_text": relay_copy_text,
+            "relay_copy_count": copy_count,
+            "relay_target": "clash_royale_clan_chat",
+            "copy_message_index": 1,
+            "authored_by": "elixir_agent",
+        },
+    }
 
 
 def _profile_number(value) -> int | None:
@@ -255,7 +342,7 @@ def _celebration_relay_copy(signals: list[dict]) -> tuple[str, str, str] | None:
     return None
 
 
-def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str, str, str, str] | None:
+def _arena_relay_copy(signals: list[dict]) -> tuple[str | list[str], str, str, str, str, str] | None:
     signals = signals or []
     types = {signal.get("type") for signal in signals}
     primary = signals[0] if signals else {}
@@ -284,16 +371,6 @@ def _arena_relay_copy(signals: list[dict]) -> tuple[str, str, str, str, str, str
             "welcome_relay",
             "welcome relay",
             "welcome_relay",
-        )
-
-    if types & {"discord_invite_reminder"}:
-        return (
-            DISCORD_INVITE_COPY,
-            "discord_onboarding",
-            "A weekly no-link reminder helps clan members find Discord through the website members page.",
-            "discord_invite_relay",
-            "Discord invite relay",
-            "discord_invite_relay",
         )
 
     if types & {"war_practice_phase_active", "war_practice_day_started", "war_final_practice_day"}:
@@ -376,28 +453,41 @@ def _build_arena_relay_result(signals: list[dict]) -> dict | None:
         return None
     primary = (signals or [{}])[0] or {}
     copy, objective, reason, action_type, title, event_type = relay
-    copy = _clip_relay_copy(copy)
+    copies = copy if isinstance(copy, list) else [copy]
+    copies = [_clip_relay_copy(item) for item in copies if str(item or "").strip()]
+    if not copies:
+        return None
     icon = {
         "celebration_relay": "🎉",
         "welcome_relay": "👋",
         "discord_invite_relay": "💬",
     }.get(action_type, "📣")
+    copy_count = len(copies)
+    copy_instruction = (
+        "📋 Copy the next message into Clash Royale."
+        if copy_count == 1
+        else f"📋 Copy the next {copy_count} messages into Clash Royale in order."
+    )
     card = (
         f"**R? {icon} {title}**\n"
         f"🎯 `{objective}`\n"
-        "📋 Copy the next message into Clash Royale.\n"
+        f"{copy_instruction}\n"
         f"🧠 {reason}\n\n"
         "✅ done  ❌ decline  ↩️ reply with note"
     )
+    relay_copy = copies[0] if copy_count == 1 else copies
+    relay_copy_text = "\n".join(copies)
     return {
         "event_type": event_type,
-        "summary": f"In-game relay suggestion: {copy}",
-        "content": [card, copy],
+        "summary": f"In-game relay suggestion: {relay_copy_text}",
+        "content": [card, *copies],
         "metadata": {
             "action_type": action_type,
             "objective": objective,
             "rationale": reason,
-            "relay_copy": copy,
+            "relay_copy": relay_copy,
+            "relay_copy_text": relay_copy_text,
+            "relay_copy_count": copy_count,
             "relay_target": "clash_royale_clan_chat",
             "copy_message_index": 1,
             "target_player_tag": primary.get("tag") or primary.get("player_tag"),
@@ -640,6 +730,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             channel_kind = str(channel_kind)
 
         if channel_config["subagent_key"] == "arena-relay":
+            arena_types = {signal.get("type") for signal in delivery_signals or []}
             if _arena_relay_recently_posted(recent_posts):
                 await asyncio.to_thread(
                     db.upsert_signal_outcome,
@@ -672,7 +763,19 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     mark_attempt=True,
                 )
                 return True
-            result = _build_arena_relay_result(delivery_signals)
+            if arena_types == {"discord_invite_reminder"}:
+                generated = await asyncio.to_thread(
+                    elixir_agent.generate_channel_update,
+                    channel_config["name"],
+                    channel_config["subagent_key"],
+                    _discord_invite_relay_context(context),
+                    recent_posts=recent_posts,
+                    memory_context=memory_context,
+                    leadership=(channel_config["memory_scope"] == "leadership"),
+                )
+                result = _build_generated_discord_invite_relay_result(delivery_signals, generated)
+            else:
+                result = _build_arena_relay_result(delivery_signals)
             if result is not None:
                 metadata = result.get("metadata") if isinstance(result, dict) else {}
                 action_type = metadata.get("action_type") or "in_game_relay"
@@ -686,7 +789,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     db.create_leader_action_recommendation,
                     action_type=action_type,
                     objective=metadata.get("objective") or "war_participation",
-                    prompt_text=metadata.get("relay_copy") or result.get("summary") or "",
+                    prompt_text=metadata.get("relay_copy_text") or result.get("summary") or "",
                     rationale=metadata.get("rationale"),
                     target_channel_key=outcome["target_channel_key"],
                     target_channel_id=outcome["target_channel_id"],

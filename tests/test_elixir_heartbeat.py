@@ -1356,20 +1356,131 @@ def test_arena_relay_result_builds_profile_specific_welcome_copy():
     assert len(result["content"][1]) <= 240
 
 
-def test_arena_relay_result_builds_weekly_discord_invite_copy():
-    from runtime.signals.delivery import DISCORD_INVITE_COPY, _build_arena_relay_result
+def test_arena_relay_result_does_not_template_weekly_discord_invite_copy():
+    from runtime.signals.delivery import _build_arena_relay_result
 
     result = _build_arena_relay_result([{
         "type": "discord_invite_reminder",
         "signal_key": "discord_invite_reminder:2026-W24",
     }])
 
-    assert result["event_type"] == "discord_invite_relay"
-    assert result["metadata"]["action_type"] == "discord_invite_relay"
-    assert result["metadata"]["objective"] == "discord_onboarding"
-    assert result["content"][0].startswith("**R? 💬 Discord invite relay**")
-    assert result["content"][1] == DISCORD_INVITE_COPY
-    assert "http" not in result["content"][1].lower()
+    assert result is None
+
+
+def test_discord_invite_relay_context_gives_elixir_authoring_facts():
+    from runtime.signals.delivery import _discord_invite_relay_context
+
+    members = [
+        {"name": f"Member {index}", "in_discord": index <= 17}
+        for index in range(1, 51)
+    ]
+
+    with patch("runtime.signals.delivery.db.list_members", return_value=members):
+        context = _discord_invite_relay_context("Signal context")
+
+    assert "Discord-linked clan members: 17/50" in context
+    assert "Author 2-3 short Clash Royale clan-chat messages" in context
+    assert "POAPKINGS . COM > Members" in context
+    assert "Return `content` as a JSON array" in context
+
+
+def test_generated_discord_invite_relay_rejects_raw_links():
+    from runtime.signals.delivery import _build_generated_discord_invite_relay_result
+
+    result = _build_generated_discord_invite_relay_result(
+        [{"type": "discord_invite_reminder"}],
+        {
+            "content": [
+                "Join us at https://poapkings.com/members for Discord.",
+                "POAPKINGS . COM > Members",
+            ],
+        },
+    )
+
+    assert result is None
+
+
+def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
+    signals = [{
+        "type": "discord_invite_reminder",
+        "signal_key": "discord_invite_reminder:2026-W24",
+    }]
+    clan = {"memberList": []}
+    war = {}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 1513758211206025227
+    channel.name = "arena-relay"
+    channel.type = "text"
+
+    authored_messages = [
+        "Discord check: 17 of us are already there, and it is where the useful clan stuff lands first.",
+        "Deck screenshots, war nudges, milestone shoutouts, leader relay notes: Discord keeps that out of game chat clutter.",
+        "Join through POAPKINGS . COM > Members.",
+    ]
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals.plan_signal_outcomes", return_value=[{
+            "source_signal_key": "discord_invite_reminder:2026-W24",
+            "source_signal_type": "discord_invite_reminder",
+            "target_channel_key": "arena-relay",
+            "target_channel_id": 1513758211206025227,
+            "intent": "discord_invite_relay",
+            "required": False,
+            "payload": {"signals": signals},
+            "delivery_status": "planned",
+        }]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.db.get_signal_outcome", return_value=None),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("runtime.signals.delivery.db.list_members", return_value=[
+            {"name": f"Member {index}", "in_discord": index <= 17}
+            for index in range(1, 51)
+        ]),
+        patch("runtime.signals.delivery.build_subagent_memory_context", return_value=""),
+        patch("runtime.signals.delivery.can_post_leader_action", return_value=(True, None)),
+        patch("elixir.elixir_agent.generate_channel_update", return_value={
+            "event_type": "channel_update",
+            "summary": "Invite Discord",
+            "content": authored_messages,
+            "metadata": {"authored": True},
+        }) as mock_generate,
+        patch("elixir.db.build_leader_action_baseline", return_value={}),
+        patch("elixir.db.create_leader_action_recommendation", return_value={
+            "action_id": 42,
+            "action_key": "discord:2026-W24",
+            "status": "proposed",
+        }) as mock_create,
+        patch("elixir._post_to_elixir", new=AsyncMock(return_value=[
+            SimpleNamespace(id=1000),
+            SimpleNamespace(id=1001),
+            SimpleNamespace(id=1002),
+            SimpleNamespace(id=1003),
+        ])) as mock_post,
+        patch("elixir.db.update_leader_action_message") as mock_update_message,
+        patch("elixir.db.update_leader_action_copy_message") as mock_update_copy,
+        patch("elixir.db.save_message"),
+        patch("elixir.db.upsert_signal_outcome"),
+        patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "delivered"}]),
+        patch("runtime.jobs._signals._mark_signal_group_completed"),
+    ):
+        assert asyncio.run(elixir._deliver_signal_group(signals, clan, war))
+
+    mock_generate.assert_called_once()
+    assert "Discord-linked clan members: 17/50" in mock_generate.call_args.args[2]
+    mock_create.assert_called_once()
+    assert mock_create.call_args.kwargs["prompt_text"] == "\n".join(authored_messages)
+    posted_result = mock_post.await_args.args[1]
+    assert posted_result["content"][0].startswith("**R42 💬 Discord invite relay**")
+    assert posted_result["content"][1:] == authored_messages
+    assert posted_result["metadata"]["authored_by"] == "elixir_agent"
+    assert posted_result["metadata"]["relay_copy_count"] == 3
+    mock_update_message.assert_called_once_with(42, source_message_id=1000)
+    mock_update_copy.assert_called_once_with(42, copy_message_id=1001)
 
 
 def test_arena_relay_cooldown_blocks_recent_posts():
