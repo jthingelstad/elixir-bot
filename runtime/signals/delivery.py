@@ -20,6 +20,14 @@ log = logging.getLogger("elixir")
 
 ARENA_RELAY_COOLDOWN_HOURS = 18
 ARENA_RELAY_MAX_COPY_CHARS = 240
+ARENA_RELAY_MAX_NUDGE_ACTIONS = 3
+WAR_NUDGE_SIGNAL_TYPES = {
+    "war_battle_phase_active",
+    "war_battle_day_started",
+    "war_battle_day_live_update",
+    "war_battle_day_final_hours",
+    "war_final_battle_day",
+}
 
 
 def _clip_relay_copy(text: str, limit: int = ARENA_RELAY_MAX_COPY_CHARS) -> str:
@@ -162,6 +170,53 @@ def _attach_leader_action_to_result(result: dict, action: dict) -> dict:
         "leader_action_status": action.get("status"),
     })
     return result
+
+
+def _leader_action_member_name(member: dict) -> str:
+    return (
+        member.get("member_ref")
+        or member.get("name")
+        or member.get("player_name")
+        or member.get("tag")
+        or member.get("player_tag")
+        or "member"
+    )
+
+
+def _format_leader_action_card(action: dict, *, title: str, prompt_text: str, rationale: str) -> str:
+    action_id = action.get("action_id")
+    objective = action.get("objective") or "leader_action"
+    return (
+        f"**Leader action R{action_id}: {title}**\n"
+        f"Objective: `{objective}`\n\n"
+        "Action:\n"
+        f"```text\n{prompt_text}\n```\n"
+        f"Why: {rationale}\n\n"
+        "React ✅ after doing it in Clash Royale, or ❌ if leaders disagree or are not doing this one."
+    )
+
+
+def _war_nudge_candidates(limit: int = ARENA_RELAY_MAX_NUDGE_ACTIONS) -> list[dict]:
+    war_day = db.get_current_war_day_state() or {}
+    if war_day.get("phase") != "battle":
+        return []
+    candidates = []
+    for member in war_day.get("used_none") or []:
+        tag = member.get("tag") or member.get("player_tag")
+        if not tag:
+            continue
+        candidates.append({
+            "tag": tag,
+            "name": _leader_action_member_name(member),
+            "war_day_key": war_day.get("war_day_key"),
+            "phase_display": war_day.get("phase_display"),
+            "time_left_text": war_day.get("time_left_text"),
+            "race_completed": bool(war_day.get("race_completed")),
+            "member": member,
+        })
+        if len(candidates) >= limit:
+            break
+    return candidates
 
 
 def _parse_recorded_at(value: str | None) -> datetime | None:
@@ -546,7 +601,101 @@ async def _deliver_arena_relay_sidecars(signals, clan, war) -> int:
         ok = await facade._deliver_signal_outcome(outcome, signals, clan, war)
         if ok:
             delivered += 1
+    delivered += await _deliver_war_nudge_sidecars(signals)
     return delivered
+
+
+async def _deliver_war_nudge_sidecars(signals) -> int:
+    types = {signal.get("type") for signal in signals or []}
+    if not (types & WAR_NUDGE_SIGNAL_TYPES):
+        return 0
+    try:
+        channel_config = _facade()._channel_config_by_key("arena-relay")
+    except Exception:
+        log.info("war nudge sidecar skipped: arena-relay unavailable", exc_info=True)
+        return 0
+    app = _runtime_app()
+    channel = app.bot.get_channel(channel_config["id"])
+    if channel is None:
+        log.warning("war nudge sidecar skipped: arena-relay channel not found")
+        return 0
+
+    candidates = await asyncio.to_thread(_war_nudge_candidates)
+    posted = 0
+    channel_name = getattr(channel, "name", "arena-relay")
+    channel_kind = getattr(channel, "type", "text")
+    if channel_kind is not None:
+        channel_kind = str(channel_kind)
+
+    for candidate in candidates:
+        name = candidate["name"]
+        tag = candidate["tag"]
+        prompt_text = f"Nudge {name} to use war decks today."
+        if candidate.get("race_completed"):
+            rationale = (
+                f"{name} has not used war decks on {candidate.get('phase_display') or 'battle day'}; "
+                "the race is finished, so this is for personal River Chest rewards."
+            )
+        else:
+            rationale = (
+                f"{name} has not used war decks on {candidate.get('phase_display') or 'battle day'}"
+                + (f" with {candidate['time_left_text']} left" if candidate.get("time_left_text") else "")
+                + "."
+            )
+        baseline = await asyncio.to_thread(
+            db.build_leader_action_baseline,
+            action_type="war_nudge_recommendation",
+            target_player_tag=tag,
+        )
+        action = await asyncio.to_thread(
+            db.create_leader_action_recommendation,
+            action_type="war_nudge_recommendation",
+            objective="war_participation",
+            prompt_text=prompt_text,
+            rationale=rationale,
+            target_channel_key="arena-relay",
+            target_channel_id=channel_config["id"],
+            target_player_tag=tag,
+            target_player_name=name,
+            source_signal_key=f"war_nudge:{candidate.get('war_day_key') or 'unknown'}:{tag}",
+            source_signal_type="war_nudge_recommendation",
+            baseline=baseline,
+        )
+        if not action or action.get("source_message_id"):
+            continue
+        content = _format_leader_action_card(
+            action,
+            title="war nudge recommendation",
+            prompt_text=prompt_text,
+            rationale=rationale,
+        )
+        sent_messages = await app._post_to_elixir(channel, {"content": content})
+        if not isinstance(sent_messages, list):
+            sent_messages = []
+        first_message = sent_messages[0] if sent_messages else None
+        first_message_id = getattr(first_message, "id", None)
+        if first_message_id is not None:
+            await asyncio.to_thread(
+                db.update_leader_action_message,
+                action["action_id"],
+                source_message_id=first_message_id,
+            )
+        await asyncio.to_thread(
+            db.save_message,
+            _channel_scope(channel),
+            "assistant",
+            content,
+            summary=f"Leader action R{action.get('action_id')}: war nudge recommendation",
+            channel_id=channel_config["id"],
+            channel_name=channel_name,
+            channel_kind=channel_kind,
+            workflow="arena-relay",
+            event_type="war_nudge_recommendation",
+            discord_message_id=first_message_id,
+            raw_json={"leader_action": action},
+        )
+        posted += 1
+    return posted
 
 
 async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:

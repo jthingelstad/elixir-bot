@@ -82,6 +82,16 @@ def test_leader_action_recommendation_records_reaction_decision():
         )
         assert cleared["status"] == db.ACTION_PROPOSED
         assert cleared["decided_at"] is None
+
+        noted = db.record_leader_action_note_by_message(
+            987,
+            note="boat defenses full already",
+            discord_user_id=123,
+            note_message_id=654,
+            conn=conn,
+        )
+        assert noted["decision_note"] == "boat defenses full already"
+        assert noted["decision_note_message_id"] == "654"
     finally:
         conn.close()
 

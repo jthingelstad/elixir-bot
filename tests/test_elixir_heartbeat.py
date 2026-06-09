@@ -1158,6 +1158,33 @@ def test_arena_relay_cooldown_blocks_recent_posts():
     )
 
 
+def test_war_nudge_candidates_only_on_battle_days():
+    from runtime.signals.delivery import _war_nudge_candidates
+
+    with patch("runtime.signals.delivery.db.get_current_war_day_state", return_value={
+        "phase": "battle",
+        "war_day_key": "s001-w01-p004",
+        "phase_display": "Battle Day 1",
+        "time_left_text": "3h 10m",
+        "used_none": [
+            {"tag": "#AAA", "name": "Aaqib"},
+            {"tag": "#BBB", "name": "Bada"},
+            {"tag": "#CCC", "name": "Cora"},
+            {"tag": "#DDD", "name": "Dez"},
+        ],
+    }):
+        candidates = _war_nudge_candidates(limit=3)
+
+    assert [item["name"] for item in candidates] == ["Aaqib", "Bada", "Cora"]
+    assert candidates[0]["war_day_key"] == "s001-w01-p004"
+
+    with patch("runtime.signals.delivery.db.get_current_war_day_state", return_value={
+        "phase": "practice",
+        "used_none": [{"tag": "#AAA", "name": "Aaqib"}],
+    }):
+        assert _war_nudge_candidates() == []
+
+
 def test_clan_awareness_tick_does_not_mark_system_signal_sent_before_success():
     bundle = heartbeat.HeartbeatTickResult(
         signals=[{

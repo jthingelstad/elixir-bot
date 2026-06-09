@@ -401,6 +401,12 @@ def _format_leader_action_outcome(action: dict) -> str:
         changed = outcome.get("changed") or {}
         if changed:
             return " | ".join(f"{key} changed {'yes' if value else 'no'}" for key, value in changed.items())
+    if action.get("action_type") == "war_nudge_recommendation":
+        result = outcome.get("nudge_result") or {}
+        if result:
+            played = "yes" if result.get("played_after_nudge") else "no"
+            decks = result.get("decks_used_today")
+            return f"played after nudge {played} | decks today {decks if decks is not None else 'n/a'}"
     return "outcome pending"
 
 
@@ -415,10 +421,13 @@ def _format_leader_action_line(action: dict) -> str:
     decision = f" | decided {decided}" if decided else ""
     if by:
         decision += f" by <@{by}>"
+    note = ""
+    if action.get("decision_note"):
+        note = f" | note: {_truncate_for_report(action.get('decision_note'), 90)}"
     outcome = ""
     if status == "done":
         outcome = f" | {_format_leader_action_outcome(action)}"
-    return f"- `R{action_id}` `{status}` `{kind}` `{objective}`: {prompt}{decision}{outcome}"
+    return f"- `R{action_id}` `{status}` `{kind}` `{objective}`: {prompt}{decision}{note}{outcome}"
 
 
 def _build_relay_status_report(*, view: str = "all", limit: int = 10, conn=None) -> str:

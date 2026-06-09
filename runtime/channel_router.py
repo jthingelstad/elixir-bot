@@ -180,6 +180,55 @@ def _stored_assistant_content(content) -> str:
     return (content or "").strip()
 
 
+async def _handle_arena_relay_action_note(app, message, channel_config, raw_question: str) -> bool:
+    if (channel_config.get("subagent") or "") != "arena-relay":
+        return False
+    reference = getattr(message, "reference", None)
+    referenced_message_id = getattr(reference, "message_id", None)
+    if referenced_message_id is None:
+        return False
+    if not app._has_leader_role(message.author):
+        return False
+    action = await asyncio.to_thread(
+        db.record_leader_action_note_by_message,
+        referenced_message_id,
+        note=raw_question,
+        discord_user_id=message.author.id,
+        note_message_id=message.id,
+    )
+    if not action:
+        return False
+    ch = app._channel_msg_kwargs(message.channel)
+    author = app._author_msg_kwargs(message.author)
+    await asyncio.to_thread(
+        db.save_message,
+        app._channel_scope(message.channel),
+        "user",
+        raw_question,
+        **ch,
+        **author,
+        workflow="arena-relay",
+        event_type="leader_action_note",
+        discord_message_id=message.id,
+        raw_json={
+            "leader_action_id": action.get("action_id"),
+            "referenced_message_id": str(referenced_message_id),
+        },
+    )
+    try:
+        await message.add_reaction("✅")
+    except Exception:
+        _log.warning("arena relay action note acknowledgement failed", exc_info=True)
+    app.log.info(
+        "leader_action_note action_id=%s message_id=%s note_message_id=%s author_id=%s",
+        action.get("action_id"),
+        referenced_message_id,
+        message.id,
+        message.author.id,
+    )
+    return True
+
+
 async def _save_reply_save(app, message, conversation_scope, raw_question, content, workflow, event_type):
     """Common pattern: save user message, reply, save assistant message."""
     ch = app._channel_msg_kwargs(message.channel)
@@ -539,6 +588,9 @@ async def route_message(message):
         "conversation_scope": conversation_scope,
         "allows_open_channel_reply": allows_open_channel_reply,
     }
+
+    if await _handle_arena_relay_action_note(app, message, channel_config, raw_question):
+        return
 
     # If the bot wasn't addressed and the channel doesn't allow proactive
     # replies, skip routing entirely. Avoids wasting an LLM router call on

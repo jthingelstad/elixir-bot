@@ -115,8 +115,23 @@ def build_leader_action_baseline(
             "period_index": war_status.get("period_index"),
             "phase": war_status.get("phase"),
         }
-    elif action_type in {"promotion_recommendation", "kick_recommendation", "demotion_recommendation"}:
+    elif action_type in {
+        "promotion_recommendation",
+        "kick_recommendation",
+        "demotion_recommendation",
+        "war_nudge_recommendation",
+    }:
         baseline["member"] = _member_baseline(target_player_tag, conn=conn)
+        if action_type == "war_nudge_recommendation":
+            war_day = _db.get_current_war_day_state(conn=conn) or {}
+            baseline["war_day"] = {
+                "war_day_key": war_day.get("war_day_key"),
+                "observed_at": war_day.get("observed_at"),
+                "phase": war_day.get("phase"),
+                "phase_display": war_day.get("phase_display"),
+                "finished_count": war_day.get("finished_count"),
+                "untouched_count": war_day.get("untouched_count"),
+            }
     return baseline
 
 
@@ -161,6 +176,29 @@ def evaluate_leader_action(action: dict, *, conn) -> dict:
         outcome["changed"] = {
             "role": base_member.get("role") != current.get("role"),
             "status": base_member.get("status") != current.get("status"),
+        }
+    elif action_type == "war_nudge_recommendation":
+        current = _db.get_current_war_day_state(conn=conn) or {}
+        target_tag = _db._canon_tag(action.get("target_player_tag"))
+        participants = current.get("participants") or []
+        participant = next(
+            (
+                item for item in participants
+                if _db._canon_tag(item.get("tag") or item.get("player_tag")) == target_tag
+            ),
+            {},
+        )
+        outcome["member"] = _member_baseline(target_tag, conn=conn)
+        outcome["war_day"] = {
+            "war_day_key": current.get("war_day_key"),
+            "observed_at": current.get("observed_at"),
+            "phase": current.get("phase"),
+            "phase_display": current.get("phase_display"),
+        }
+        outcome["nudge_result"] = {
+            "decks_used_today": participant.get("decks_used_today"),
+            "decks_used_total": participant.get("decks_used_total"),
+            "played_after_nudge": bool((participant.get("decks_used_today") or 0) > 0),
         }
     return outcome
 
@@ -368,6 +406,43 @@ def clear_leader_action_decision_by_message(
 
 
 @managed_connection
+def record_leader_action_note_by_message(
+    source_message_id: str | int,
+    *,
+    note: str,
+    discord_user_id: str | int,
+    note_message_id: str | int | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    action = get_leader_action_by_message(source_message_id, conn=conn)
+    if not action:
+        return None
+    body = " ".join((note or "").split())
+    if not body:
+        return action
+    now = _db._utcnow()
+    conn.execute(
+        """
+        UPDATE leader_action_recommendations
+        SET decision_note = ?, decision_note_at = ?,
+            decision_note_message_id = ?, decision_note_by_discord_user_id = ?,
+            updated_at = ?
+        WHERE action_id = ?
+        """,
+        (
+            body,
+            now,
+            str(note_message_id) if note_message_id is not None else None,
+            str(discord_user_id),
+            now,
+            action["action_id"],
+        ),
+    )
+    conn.commit()
+    return get_leader_action_by_message(source_message_id, conn=conn)
+
+
+@managed_connection
 def refresh_leader_action_outcome(
     action_id: int,
     *,
@@ -400,6 +475,7 @@ __all__ = [
     "get_leader_action_by_key",
     "get_leader_action_by_message",
     "list_leader_actions",
+    "record_leader_action_note_by_message",
     "refresh_leader_action_outcome",
     "update_leader_action_message",
 ]
