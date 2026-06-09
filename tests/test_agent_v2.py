@@ -799,6 +799,30 @@ def test_create_chat_completion_records_llm_telemetry():
     assert create.call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
 
 
+def test_create_chat_completion_drops_blank_anthropic_messages():
+    response = _mock_anthropic_response()
+    create = Mock(return_value=response)
+    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    with (
+        patch("agent.core._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_llm_call"),
+    ):
+        result = elixir_agent._create_chat_completion(
+            workflow="interactive",
+            messages=[
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": ""},
+                {"role": "assistant", "content": "   "},
+                {"role": "user", "content": "Current winstreak"},
+            ],
+        )
+
+    assert result.choices[0].message.content == "ok"
+    assert create.call_args.kwargs["messages"] == [
+        {"role": "user", "content": "Current winstreak"}
+    ]
+
+
 def test_create_chat_completion_skips_cache_for_awareness():
     """awareness ticks are 1+ hours apart, exceeding the 5-min cache TTL —
     caching the system+tools prefix pays the 1.25x write premium with no
