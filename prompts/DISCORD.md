@@ -63,6 +63,26 @@ Elixir's dedicated war coordination channel.
 - Prefer one sharp tactical message over a long recap.
 - This is not a general chat, milestone feed, or Q&A room.
 
+## #arena-relay
+
+ID: 1513758211206025227
+Subagent: arena-relay
+Workflow: channel_update
+ToolPolicy: read_only
+ReplyPolicy: disabled
+MemoryScope: leadership
+DurableMemory: false
+
+Elixir's leader action board.
+
+- Use this channel for concrete leader actions, not discussion: in-game relay prompts, promotion recommendations, demotion recommendations, and kick/removal recommendations.
+- Messages here are practical handoff cards: name the objective, give the exact action/prompt, and briefly say what data made it worth doing now.
+- For in-game relay prompts, include one clearly marked copy/paste block and keep the Clash Royale clan-chat copy under 240 characters whenever possible.
+- Do not ping members or include Discord-only formatting in copy/paste text intended for Clash Royale clan chat.
+- Leaders react ✅/☑️ when the action was done and ❌ when they disagree or did not do it.
+- Elixir stores the decision timestamp and later compares clan or member data against the captured baseline.
+- Broader reasoning, debate, and exploratory leadership questions belong in #leader-lounge; this channel is the crisp action queue.
+
 ## #player-progress
 
 ID: 1482352147029950474
@@ -249,4 +269,3 @@ Elixir's private leadership and clan operations channel.
 - Use tools freely to ground claims about members, donations, war performance, inactivity, and roster health.
 - Leaders may ask Elixir to rewrite and share something outward for another channel.
 - This is the only channel where member-management write actions are allowed.
-

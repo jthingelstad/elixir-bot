@@ -78,7 +78,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord routed outcomes: #river-race, optional #leader-lounge",
+            "Discord routed outcomes: #river-race, optional #arena-relay leader actions, optional #leader-lounge",
         ),
     ),
     ActivityDefinition(
@@ -144,7 +144,8 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "minute": 0,
         },
         delivery_targets=(
-            "Discord: #leader-lounge",
+            "Discord: #leader-lounge data review",
+            "Discord: #arena-relay leader action cards",
         ),
         legacy_commands=("clanops-review",),
     ),

@@ -670,6 +670,7 @@ from storage import card_catalog as _card_catalog_module
 from storage import revisits as _revisits_module
 from storage import awards as _awards_module
 from storage import member_ranks as _member_ranks_module
+from storage import leader_actions as _leader_actions_module
 
 __all__ = [name for name in globals() if not name.startswith("__")]
 for _module in (
@@ -685,6 +686,7 @@ for _module in (
     _revisits_module,
     _awards_module,
     _member_ranks_module,
+    _leader_actions_module,
 ):
     __export_public(_module)
 
