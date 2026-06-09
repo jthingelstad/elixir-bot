@@ -383,6 +383,31 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
     latest_signal = conn.execute(
         "SELECT signal_type, signal_date FROM signal_log ORDER BY signal_date DESC, signal_type ASC LIMIT 1"
     ).fetchone()
+    llm_cost_7d = conn.execute(
+        """
+        SELECT COUNT(*) AS calls,
+               SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures,
+               ROUND(COALESCE(SUM(CASE
+                    WHEN model LIKE 'claude-sonnet%' OR model LIKE 'Codex-sonnet%'
+                    THEN COALESCE(prompt_tokens, 0)*3 + COALESCE(cache_read_tokens, 0)*0.3 + COALESCE(cache_creation_tokens, 0)*3.75 + COALESCE(completion_tokens, 0)*15
+                    WHEN model LIKE 'claude-haiku%' OR model LIKE 'Codex-haiku%'
+                    THEN COALESCE(prompt_tokens, 0)*1 + COALESCE(cache_read_tokens, 0)*0.1 + COALESCE(cache_creation_tokens, 0)*1.25 + COALESCE(completion_tokens, 0)*5
+                    ELSE 0 END), 0) / 1000000.0, 4) AS cost_usd
+        FROM llm_calls
+        WHERE recorded_at >= datetime('now', '-7 days')
+        """
+    ).fetchone()
+    awareness_7d = conn.execute(
+        """
+        SELECT COUNT(*) AS ticks,
+               COALESCE(SUM(signals_in), 0) AS signals_in,
+               COALESCE(SUM(posts_delivered), 0) AS posts_delivered,
+               COALESCE(SUM(hard_fallback_failed), 0) AS fallback_failed,
+               COALESCE(SUM(CASE WHEN all_ok = 0 THEN 1 ELSE 0 END), 0) AS failed_ticks
+        FROM awareness_ticks
+        WHERE ticked_at >= datetime('now', '-7 days')
+        """
+    ).fetchone()
     memory_index_status = conn.execute(
         "SELECT value FROM clan_memory_index_status WHERE key = 'sqlite_vec_enabled'"
     ).fetchone()
@@ -403,6 +428,8 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         "current_season_id": current_season_id,
         "stale_player_intel_targets": stale_targets,
         "latest_signal": dict(latest_signal) if latest_signal else None,
+        "llm_cost_7d": dict(llm_cost_7d) if llm_cost_7d else None,
+        "awareness_7d": dict(awareness_7d) if awareness_7d else None,
         "contextual_memory": {
             "sqlite_vec_enabled": bool(memory_index_status and str(memory_index_status["value"]) == "1"),
             "latest_memory_at": freshness["contextual_memory_at"],

@@ -1187,6 +1187,22 @@ def test_get_system_status_summarizes_v2_data_layer():
             workflow="clanops",
             conn=conn,
         )
+        db.record_llm_call(
+            "interactive",
+            "claude-haiku-4-5-20251001",
+            ok=True,
+            prompt_tokens=1000,
+            completion_tokens=100,
+            total_tokens=1100,
+            conn=conn,
+        )
+        db.record_awareness_tick(
+            workflow="clan_awareness",
+            signals_in=2,
+            posts_delivered=1,
+            all_ok=True,
+            conn=conn,
+        )
 
         status = db.get_system_status(conn=conn)
 
@@ -1203,6 +1219,11 @@ def test_get_system_status_summarizes_v2_data_layer():
         assert "contextual_memory" in status
         assert status["contextual_memory"]["total"] == 0
         assert status["contextual_memory"]["leader_notes"] == 0
+        assert status["llm_cost_7d"]["calls"] == 1
+        assert status["llm_cost_7d"]["cost_usd"] == 0.0015
+        assert status["awareness_7d"]["ticks"] == 1
+        assert status["awareness_7d"]["signals_in"] == 2
+        assert status["awareness_7d"]["posts_delivered"] == 1
     finally:
         conn.close()
 
