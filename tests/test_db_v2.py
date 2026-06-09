@@ -534,6 +534,24 @@ def test_list_thread_messages_reads_thread_history_from_message_store():
         conn.close()
 
 
+def test_list_thread_messages_skips_blank_history_before_limit():
+    conn = db.get_connection(":memory:")
+    try:
+        db.save_message("leader:user123", "user", "First real question", workflow="leader", conn=conn)
+        db.save_message("leader:user123", "assistant", "", workflow="leader", conn=conn)
+        db.save_message("leader:user123", "user", "   ", workflow="leader", conn=conn)
+        db.save_message("leader:user123", "assistant", "Second real answer", workflow="leader", conn=conn)
+
+        history = db.list_thread_messages("leader:user123", limit=2, conn=conn)
+
+        assert [turn["content"] for turn in history] == [
+            "First real question",
+            "Second real answer",
+        ]
+    finally:
+        conn.close()
+
+
 def test_save_message_auto_links_discord_user_to_member_identity():
     conn = db.get_connection(":memory:")
     try:

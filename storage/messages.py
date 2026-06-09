@@ -740,7 +740,9 @@ def list_thread_messages(scope: str, limit: int = 10, conn: Optional[sqlite3.Con
     if not row:
         return []
     rows = conn.execute(
-        "SELECT author_type, content, summary, created_at FROM messages WHERE thread_id = ? ORDER BY created_at DESC, message_id DESC LIMIT ?",
+        "SELECT author_type, content, summary, created_at FROM messages "
+        "WHERE thread_id = ? AND TRIM(content) <> '' "
+        "ORDER BY created_at DESC, message_id DESC LIMIT ?",
         (row["thread_id"], limit),
     ).fetchall()
     out = []
