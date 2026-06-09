@@ -35,6 +35,7 @@ CRITICAL_LEADER_ACTION_SIGNAL_TYPES = {
 }
 CELEBRATION_RELAY_SIGNAL_TYPES = {
     "career_wins_milestone",
+    "cr_account_anniversary",
     "new_champion_unlocked",
     "new_card_unlocked",
     "player_level_up",
@@ -94,6 +95,15 @@ def _celebration_relay_copy(signals: list[dict]) -> tuple[str, str, str] | None:
                 f"Big milestone: {name} just reached {milestone:,} lifetime wins. Drop a congrats when you see them.",
                 "player_celebration",
                 "Lifetime win milestones are rare enough to recognize in game chat.",
+            )
+
+    if signal_type == "cr_account_anniversary" and name:
+        years = primary.get("new_years") or primary.get("years")
+        if isinstance(years, int):
+            return (
+                f"CR cake day: {name}'s Clash Royale account is {years} years old. That is real staying power.",
+                "player_celebration",
+                "Years Played is account-age data in badge form, and round-year anniversaries are special.",
             )
 
     if signal_type == "new_champion_unlocked" and name:

@@ -546,7 +546,26 @@ def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection
 
     previous_badges = _indexed_items(json.loads(previous["badges_json"] or "[]")) if previous and previous["badges_json"] else {}
     current_badges = _indexed_items(player_data.get("badges") or [])
+    previous_years_played = previous_badges.get("YearsPlayed") or {}
+    current_years_played = current_badges.get("YearsPlayed") or {}
+    old_account_years = previous_years_played.get("level")
+    new_account_years = current_years_played.get("level")
+    if (
+        isinstance(old_account_years, int)
+        and isinstance(new_account_years, int)
+        and new_account_years > old_account_years
+    ):
+        signals.append({
+            "type": "cr_account_anniversary",
+            "tag": tag,
+            "name": player_data.get("name"),
+            "old_years": old_account_years,
+            "new_years": new_account_years,
+            "account_age_days": current_years_played.get("progress"),
+        })
     for badge_name, badge in current_badges.items():
+        if badge_name == "YearsPlayed":
+            continue
         previous_badge = previous_badges.get(badge_name)
         if previous_badge is None:
             if _badge_category(badge_name) != "mastery":

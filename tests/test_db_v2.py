@@ -530,6 +530,55 @@ def test_snapshot_player_profile_derives_clash_royale_account_age_metadata():
         conn.close()
 
 
+def test_snapshot_player_profile_emits_cr_account_anniversary_signal():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "coLeader"}],
+            conn=conn,
+        )
+
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "badges": [
+                    {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473, "target": 1825},
+                ],
+            },
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "badges": [
+                    {"name": "YearsPlayed", "level": 5, "maxLevel": 11, "progress": 1825, "target": 2190},
+                ],
+            },
+            conn=conn,
+        )
+
+        assert {
+            "type": "cr_account_anniversary",
+            "tag": "#ABC123",
+            "name": "King Levy",
+            "old_years": 4,
+            "new_years": 5,
+            "account_age_days": 1825,
+        } in signals
+        assert not any(
+            signal["type"] == "badge_level_milestone" and signal.get("badge_name") == "YearsPlayed"
+            for signal in signals
+        )
+    finally:
+        conn.close()
+
+
 def test_snapshot_player_battlelog_derives_recent_games_per_day_metadata():
     conn = db.get_connection(":memory:")
     try:
