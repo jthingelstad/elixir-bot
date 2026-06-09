@@ -83,8 +83,12 @@ def test_leader_action_recommendation_records_reaction_decision():
         assert cleared["status"] == db.ACTION_PROPOSED
         assert cleared["decided_at"] is None
 
+        db.update_leader_action_copy_message(action["action_id"], copy_message_id=321, conn=conn)
+        copy_lookup = db.get_leader_action_by_message(321, conn=conn)
+        assert copy_lookup["action_id"] == action["action_id"]
+
         noted = db.record_leader_action_note_by_message(
-            987,
+            321,
             note="boat defenses full already",
             discord_user_id=123,
             note_message_id=654,

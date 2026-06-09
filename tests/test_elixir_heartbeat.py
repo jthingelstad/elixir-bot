@@ -1139,8 +1139,10 @@ def test_arena_relay_result_is_copy_paste_brief():
     }])
 
     assert result["event_type"] == "war_relay_brief"
-    assert "Copy/paste:" in result["content"]
-    assert "POAP KINGS is 1st with 6,870 fame" in result["content"]
+    assert isinstance(result["content"], list)
+    assert "Copy the next message wholesale" in result["content"][0]
+    assert result["content"][1] == result["metadata"]["relay_copy"]
+    assert "POAP KINGS is 1st with 6,870 fame" in result["content"][1]
     assert len(result["metadata"]["relay_copy"]) <= 240
 
 

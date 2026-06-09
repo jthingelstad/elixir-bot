@@ -294,6 +294,22 @@ def update_leader_action_message(
 
 
 @managed_connection
+def update_leader_action_copy_message(
+    action_id: int,
+    *,
+    copy_message_id: str | int | None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    if not action_id or copy_message_id is None:
+        return
+    conn.execute(
+        "UPDATE leader_action_recommendations SET copy_message_id = ?, updated_at = ? WHERE action_id = ?",
+        (str(copy_message_id), _db._utcnow(), int(action_id)),
+    )
+    conn.commit()
+
+
+@managed_connection
 def get_leader_action_by_key(action_key: str, *, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
         "SELECT * FROM leader_action_recommendations WHERE action_key = ?",
@@ -309,8 +325,10 @@ def get_leader_action_by_message(
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     row = conn.execute(
-        "SELECT * FROM leader_action_recommendations WHERE source_message_id = ? ORDER BY action_id DESC LIMIT 1",
-        (str(source_message_id),),
+        "SELECT * FROM leader_action_recommendations "
+        "WHERE source_message_id = ? OR copy_message_id = ? "
+        "ORDER BY action_id DESC LIMIT 1",
+        (str(source_message_id), str(source_message_id)),
     ).fetchone()
     return _row_to_action(row) if row else None
 
@@ -478,4 +496,5 @@ __all__ = [
     "record_leader_action_note_by_message",
     "refresh_leader_action_outcome",
     "update_leader_action_message",
+    "update_leader_action_copy_message",
 ]
