@@ -132,12 +132,11 @@ def _build_arena_relay_result(signals: list[dict]) -> dict | None:
     copy, objective, reason = relay
     copy = _clip_relay_copy(copy)
     card = (
-        "**Leader action: in-game relay**\n"
-        f"Objective: `{objective}`\n\n"
-        "Copy the next message wholesale into Clash Royale clan chat.\n"
-        f"Why: {reason}\n\n"
-        "React ✅ after posting it in Clash Royale clan chat, or ❌ if leaders are not doing this one. "
-        "Reply to this card with any note or wording change."
+        "**R? 📣 In-game relay**\n"
+        f"🎯 `{objective}`\n"
+        "📋 Copy the next message into Clash Royale.\n"
+        f"🧠 {reason}\n\n"
+        "✅ done  ❌ decline  ↩️ reply with note"
     )
     return {
         "event_type": "war_relay_brief",
@@ -162,17 +161,9 @@ def _attach_leader_action_to_result(result: dict, action: dict) -> dict:
         result["summary"] = f"Leader action R{action_id}: {result.get('summary') or action.get('prompt_text')}"
         content = result.get("content")
         if isinstance(content, list) and content:
-            content[0] = str(content[0] or "").replace(
-                "**Leader action: ",
-                f"**Leader action R{action_id}: ",
-                1,
-            )
+            content[0] = str(content[0] or "").replace("**R? ", f"**R{action_id} ", 1)
         else:
-            result["content"] = str(content or "").replace(
-                "**Leader action: ",
-                f"**Leader action R{action_id}: ",
-                1,
-            )
+            result["content"] = str(content or "").replace("**R? ", f"**R{action_id} ", 1)
     metadata = result.setdefault("metadata", {})
     metadata.update({
         "leader_action_id": action.get("action_id"),
@@ -196,13 +187,21 @@ def _leader_action_member_name(member: dict) -> str:
 def _format_leader_action_card(action: dict, *, title: str, prompt_text: str, rationale: str) -> str:
     action_id = action.get("action_id")
     objective = action.get("objective") or "leader_action"
+    action_type = action.get("action_type") or ""
+    icon = {
+        "in_game_relay": "📣",
+        "war_nudge_recommendation": "👋",
+        "promotion_recommendation": "⬆️",
+        "demotion_recommendation": "⬇️",
+        "kick_recommendation": "🚪",
+    }.get(action_type, "⚡")
     return (
-        f"**Leader action R{action_id}: {title}**\n"
-        f"Objective: `{objective}`\n\n"
-        "Action:\n"
+        f"**R{action_id} {icon} {title}**\n"
+        f"🎯 `{objective}`\n"
+        "🛠️ Action\n"
         f"```text\n{prompt_text}\n```\n"
-        f"Why: {rationale}\n\n"
-        "React ✅ after doing it in Clash Royale, or ❌ if leaders disagree or are not doing this one."
+        f"🧠 {rationale}\n\n"
+        "✅ done  ❌ decline  ↩️ reply with note"
     )
 
 

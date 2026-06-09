@@ -1140,7 +1140,9 @@ def test_arena_relay_result_is_copy_paste_brief():
 
     assert result["event_type"] == "war_relay_brief"
     assert isinstance(result["content"], list)
-    assert "Copy the next message wholesale" in result["content"][0]
+    assert "**R? 📣 In-game relay**" in result["content"][0]
+    assert "📋 Copy the next message into Clash Royale." in result["content"][0]
+    assert "✅ done  ❌ decline" in result["content"][0]
     assert result["content"][1] == result["metadata"]["relay_copy"]
     assert "POAP KINGS is 1st with 6,870 fame" in result["content"][1]
     assert len(result["metadata"]["relay_copy"]) <= 240
@@ -1185,6 +1187,24 @@ def test_war_nudge_candidates_only_on_battle_days():
         "used_none": [{"tag": "#AAA", "name": "Aaqib"}],
     }):
         assert _war_nudge_candidates() == []
+
+
+def test_leader_action_card_uses_categorical_action_icon():
+    from runtime.signals.delivery import _format_leader_action_card
+
+    card = _format_leader_action_card(
+        {
+            "action_id": 22,
+            "action_type": "war_nudge_recommendation",
+            "objective": "war_participation",
+        },
+        title="war nudge recommendation",
+        prompt_text="Nudge Aaqib to use war decks today.",
+        rationale="Aaqib has not used war decks on Battle Day 1.",
+    )
+
+    assert card.startswith("**R22 👋 war nudge recommendation**")
+    assert "✅ done  ❌ decline" in card
 
 
 def test_clan_awareness_tick_does_not_mark_system_signal_sent_before_success():
