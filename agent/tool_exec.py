@@ -225,7 +225,19 @@ def _resolve_member_tag(value):
 
 # ── Member domain execution ───────────────────────────────────────────────
 
-def _execute_get_member(arguments):
+def _memory_viewer_scope_for_workflow(workflow: str | None) -> str:
+    if workflow in {
+        "clanops",
+        "channel_update_leadership",
+        "arena_relay_observation",
+        "awareness",
+        "memory_synthesis",
+    }:
+        return "leadership"
+    return "public"
+
+
+def _execute_get_member(arguments, workflow=None):
     """Execute the consolidated get_member tool."""
     member_tag = _resolve_member_tag(arguments["member_tag"])
     include = arguments.get("include") or ["profile", "form"]
@@ -293,7 +305,7 @@ def _execute_get_member(arguments):
         from memory_store import list_memories
 
         memories = list_memories(
-            viewer_scope="public",
+            viewer_scope=_memory_viewer_scope_for_workflow(workflow),
             filters={"member_tag": member_tag},
             limit=15,
         )
@@ -1187,7 +1199,7 @@ def _execute_tool(name, arguments, workflow=None):
                 limit=arguments.get("limit", 5),
             )
         elif name == "get_member":
-            result = _execute_get_member(arguments)
+            result = _execute_get_member(arguments, workflow=workflow)
         elif name == "get_member_war_detail":
             result = _execute_get_member_war_detail(arguments)
         elif name == "get_awards":

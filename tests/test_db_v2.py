@@ -6,6 +6,7 @@ import sqlite3
 from unittest.mock import patch
 
 import db
+from memory_store import create_memory
 from runtime import leader_action_policy
 
 
@@ -41,6 +42,7 @@ def test_v2_schema_initializes_core_tables():
             "war_period_clan_status",
             "raw_api_payloads",
             "leader_action_recommendations",
+            "runtime_job_status",
         }
         assert expected.issubset(tables)
     finally:
@@ -889,6 +891,57 @@ def test_save_message_auto_links_discord_user_to_member_identity():
         # last_user_summary is written by _post_conversation_memory after
         # distillation, not by save_message, so no facts exist yet
         assert leadership_memory["discord_user"]["facts"] == []
+    finally:
+        conn.close()
+
+
+def test_memory_context_includes_scoped_durable_memories():
+    conn = db.get_connection(":memory:")
+    try:
+        create_memory(
+            title="Leadership context",
+            body="King Levy prefers late-war nudges.",
+            summary="Prefers late-war nudges",
+            source_type="leader_note",
+            is_inference=False,
+            confidence=1.0,
+            created_by="leader",
+            scope="leadership",
+            member_tag="#ABC123",
+            conn=conn,
+        )
+
+        public_context = db.build_memory_context(
+            member_tag="#ABC123",
+            viewer_scope="public",
+            conn=conn,
+        )
+        assert "durable_memories" not in public_context
+
+        leadership_context = db.build_memory_context(
+            member_tag="#ABC123",
+            viewer_scope="leadership",
+            conn=conn,
+        )
+        assert leadership_context["durable_memories"][0]["title"] == "Leadership context"
+    finally:
+        conn.close()
+
+
+def test_runtime_job_status_round_trips():
+    conn = db.get_connection(":memory:")
+    try:
+        saved = db.save_runtime_job_status(
+            "memory_synthesis",
+            {"run_count": 2, "last_error": "agent truncation"},
+            conn=conn,
+        )
+        statuses = db.list_runtime_job_status(conn=conn)
+
+        assert saved["job_name"] == "memory_synthesis"
+        assert statuses["memory_synthesis"]["run_count"] == 2
+        assert statuses["memory_synthesis"]["last_error"] == "agent truncation"
+        assert statuses["memory_synthesis"]["updated_at"]
     finally:
         conn.close()
 
