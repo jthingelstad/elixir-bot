@@ -2194,6 +2194,9 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert specs["daily-clan-insight"]["owner_subagent"] == "ask-elixir"
     assert "Discord: #ask-elixir" in specs["daily-clan-insight"]["delivery_targets"]
     assert specs["daily-clan-insight"]["schedule"] == "Daily at 12:00 CT."
+    assert "leadership-action-scan" in specs
+    assert specs["leadership-action-scan"]["owner_subagent"] == "arena-relay"
+    assert "Discord: #arena-relay singular leader action cards" in specs["leadership-action-scan"]["delivery_targets"]
     assert "promotion-content" in specs
     assert "Discord: #promote-the-clan" in specs["promotion-content"]["delivery_targets"]
     assert "POAP KINGS: promotion payloads" in specs["promotion-content"]["delivery_targets"]
@@ -2220,6 +2223,7 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
         "award-detection",
         "player-progression",
         "daily-clan-insight",
+        "leadership-action-scan",
         "leadership-review",
         "memory-synthesis",
         "weekly-recap",

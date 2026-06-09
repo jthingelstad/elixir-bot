@@ -62,6 +62,18 @@ def test_leader_action_recommendation_records_reaction_decision():
         )
 
         assert action["status"] == db.ACTION_PROPOSED
+        assert db.has_recent_leader_action(
+            action_type="promotion_recommendation",
+            target_player_tag="#ABC123",
+            objective="reward_and_retention",
+            conn=conn,
+        )
+        assert not db.has_recent_leader_action(
+            action_type="promotion_recommendation",
+            target_player_tag="#NOPE",
+            objective="reward_and_retention",
+            conn=conn,
+        )
         decided = db.decide_leader_action_by_message(
             987,
             status=db.ACTION_REJECTED,
