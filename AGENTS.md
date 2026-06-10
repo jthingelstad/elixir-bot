@@ -39,10 +39,14 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 
 ```bash
 python3 -m venv venv
-./venv/bin/pip install -r requirements.txt pytest
+./venv/bin/pip install -r requirements.txt -r requirements-dev.txt
 ```
 
 If the venv is missing or broken, recreate it with the commands above.
+
+`requirements.lock` is a `pip freeze` snapshot of the known-good production
+venv — use `pip install -r requirements.lock` to reproduce it exactly, and
+regenerate it after any deliberate dependency upgrade.
 
 ## Running Tests
 
