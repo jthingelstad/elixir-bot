@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from anthropic import APIError, APIConnectionError
 
-from agent.core import _create_chat_completion
+from agent.core import _create_chat_completion, response_text
 
 log = logging.getLogger("elixir_agent.memory_tasks")
 
@@ -38,15 +38,15 @@ def distill_summary(text: str) -> str | None:
         resp = _create_chat_completion(
             workflow="memory_distill",
             model=None,
+            system=_DISTILL_SYSTEM,
             messages=[
-                {"role": "system", "content": _DISTILL_SYSTEM},
                 {"role": "user", "content": text[:2000]},
             ],
             temperature=0.3,
             max_tokens=100,
             timeout=15,
         )
-        content = resp.choices[0].message.content
+        content = response_text(resp)
         if content and content.strip():
             return content.strip()
         return None
@@ -98,15 +98,15 @@ def extract_inference_facts(content: str, context_label: str | None = None) -> l
         resp = _create_chat_completion(
             workflow="memory_inference",
             model=None,
+            system=_INFERENCE_SYSTEM,
             messages=[
-                {"role": "system", "content": _INFERENCE_SYSTEM},
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.2,
             max_tokens=1500,
             timeout=20,
         )
-        raw = (resp.choices[0].message.content or "").strip()
+        raw = (response_text(resp) or "").strip()
         if not raw:
             return []
         raw = re.sub(r"^```(?:json)?\s*\n?", "", raw)

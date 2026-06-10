@@ -11,6 +11,7 @@ from agent.core import (
     MAX_CONTEXT_MEMBERS_FULL,
     _create_chat_completion,
     log,
+    response_text,
 )
 from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_json_response, _parse_response
 from agent.prompts import (
@@ -713,19 +714,19 @@ def respond_to_help_request(question, *, author_name, channel_name, role,
 
     system_prompt = _help_system(channel_name, role=role)
     messages = [
-        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_msg},
     ]
 
     try:
         resp = _create_chat_completion(
             workflow="help",
+            system=system_prompt,
             messages=messages,
             temperature=0.7,
             max_tokens=600,
             timeout=60,
         )
-        text = (resp.choices[0].message.content or "").strip()
+        text = (response_text(resp) or "").strip()
         if not text:
             return None
         return {"event_type": "help_response", "content": text, "summary": text[:200]}
@@ -886,18 +887,18 @@ def explain_quiz_answer(*, question_text: str, correct_answer: str, context: str
         "Write the explanation."
     )
     messages = [
-        {"role": "system", "content": _quiz_explain_system()},
         {"role": "user", "content": user_msg},
     ]
     try:
         resp = _create_chat_completion(
             workflow="event:quiz_explain",
+            system=_quiz_explain_system(),
             messages=messages,
             temperature=0.7,
             max_tokens=200,
             timeout=30,
         )
-        raw = (resp.choices[0].message.content or "").strip()
+        raw = (response_text(resp) or "").strip()
     except (APIError, APIConnectionError) as exc:
         log.warning("explain_quiz_answer API error: %s", exc)
         return None
@@ -924,18 +925,18 @@ def _generate_simple_message(system_prompt, user_msg, *, workflow, temperature=0
                               max_tokens=300, error_label="LLM"):
     """Shared pattern: system+user message -> text or None."""
     messages = [
-        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_msg},
     ]
     try:
         resp = _create_chat_completion(
             workflow=workflow,
+            system=system_prompt,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=60,
         )
-        text = (resp.choices[0].message.content or "").strip()
+        text = (response_text(resp) or "").strip()
         if not text or text.lower() == "null":
             return None
         return text
@@ -1018,18 +1019,18 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
     )
 
     messages = [
-        {"role": "system", "content": _promote_system(required_trophies=required_trophies)},
         {"role": "user", "content": user_msg},
     ]
     try:
         resp = _create_chat_completion(
             workflow="site_promote_content",
+            system=_promote_system(required_trophies=required_trophies),
             messages=messages,
             temperature=0.8,
             max_tokens=1500,
             timeout=60,
         )
-        return _parse_response(resp.choices[0].message.content or "null")
+        return _parse_response(response_text(resp) or "null")
     except (APIError, APIConnectionError) as e:
         log.error("Promote API error: %s", e)
         return None

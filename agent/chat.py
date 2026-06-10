@@ -9,6 +9,8 @@ from agent.core import (
     TOOL_RESULT_MAX_ITEMS,
     _create_chat_completion,
     log,
+    response_text,
+    response_tool_uses,
 )
 from agent.tool_policy import (
     ALL_TOOLS,
@@ -171,52 +173,23 @@ def _tool_names(tool_defs):
     return {t["name"] for t in (tool_defs or [])}
 
 
-def _normalize_message(message):
-    """Normalize an LLM response message into a dict for the messages array.
-
-    Produces Anthropic-native format:
-    - Plain text assistant: {"role": "assistant", "content": "text"}
-    - Tool-calling assistant: {"role": "assistant", "content": [blocks...]}
-    """
-    if isinstance(message, dict):
-        return message
-
-    role = getattr(message, "role", "assistant")
-    content = getattr(message, "content", None)
-    tool_calls = getattr(message, "tool_calls", None)
-
-    if tool_calls:
-        blocks = []
-        if content:
-            blocks.append({"type": "text", "text": content})
-        for tc in tool_calls:
-            fn = getattr(tc, "function", None)
-            args_str = getattr(fn, "arguments", "{}") if fn else "{}"
-            try:
-                args = json.loads(args_str) if isinstance(args_str, str) else args_str
-            except (json.JSONDecodeError, ValueError):
-                args = {}
-            blocks.append({
-                "type": "tool_use",
-                "id": getattr(tc, "id", ""),
-                "name": getattr(fn, "name", "") if fn else "",
-                "input": args,
-            })
-        return {"role": role, "content": blocks}
-
-    return {"role": role, "content": content or ""}
-
-
 def _estimate_message_chars(messages):
     """Cheap prompt-size proxy for telemetry."""
     total = 0
     for m in messages:
-        normalized = _normalize_message(m)
-        content = normalized.get("content", "")
+        content = m.get("content", "")
         if isinstance(content, str):
             total += len(content)
         elif isinstance(content, list):
-            total += len(json.dumps(content, default=str))
+            for block in content:
+                if isinstance(block, dict):
+                    total += len(json.dumps(block, default=str))
+                else:
+                    # Native SDK content block from a prior response
+                    total += len(getattr(block, "text", "") or "")
+                    block_input = getattr(block, "input", None)
+                    if block_input is not None:
+                        total += len(json.dumps(block_input, default=str))
         elif content is not None:
             total += len(str(content))
     return total
@@ -363,9 +336,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         so the caller can persist the awareness-loop write budget usage.
     Returns the final parsed response dict, or None.
     """
-    messages = [
-        {"role": "system", "content": system_prompt},
-    ]
+    messages = []
     # Inject prior conversation turns if provided
     if conversation_history:
         for turn in conversation_history:
@@ -408,6 +379,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
         use_tools = allow_tools and bool(allowed_tools)
         resp = _create_chat_completion(
             workflow=workflow,
+            system=system_prompt,
             messages=call_messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -442,8 +414,8 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             return None
         return "__REPAIR__", f"Schema validation failed: {error}"
 
-    def _is_truncated(choice):
-        return getattr(choice, "stop_reason", None) == "max_tokens"
+    def _is_truncated(resp):
+        return getattr(resp, "stop_reason", None) == "max_tokens"
 
     def _truncation_failure(phase, content):
         log.warning("llm_truncated workflow=%s phase=%s max_tokens=%d", workflow, phase, max_tokens)
@@ -474,13 +446,13 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                 return _failure_payload("llm_api_error", e, phase="initial_completion")
             return None
 
-        choice = resp.choices[0]
+        tool_uses = response_tool_uses(resp)
 
         # If no tool calls, we have the final answer
-        if not choice.message.tool_calls:
-            initial_content = choice.message.content or ""
+        if not tool_uses:
+            initial_content = response_text(resp) or ""
             completion_chars += len(initial_content)
-            if _is_truncated(choice):
+            if _is_truncated(resp):
                 _log_agent_loop(_round)
                 return _truncation_failure("initial_response", initial_content)
             parsed = _parse_and_validate(initial_content or "null", repair_allowed=True, phase="initial_response")
@@ -512,10 +484,9 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                         return _failure_payload("llm_api_error", e, phase="repair_completion")
                     return None
 
-                repair_choice = repair_resp.choices[0]
-                repaired = repair_choice.message.content or ""
+                repaired = response_text(repair_resp) or ""
                 completion_chars += len(repaired)
-                if _is_truncated(repair_choice):
+                if _is_truncated(repair_resp):
                     _log_agent_loop(_round)
                     return _truncation_failure("repair_response", repaired)
                 parsed = _parse_and_validate(repaired or "null", repair_allowed=False, phase="repair_response")
@@ -523,15 +494,12 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
             _log_agent_loop(_round)
             return parsed
 
-        # Process tool calls
-        messages.append(_normalize_message(choice.message))
+        # Process tool calls — echo the native content blocks back verbatim
+        messages.append({"role": "assistant", "content": resp.content})
         tool_result_blocks = []
-        for tool_call in choice.message.tool_calls:
-            fn_name = tool_call.function.name
-            try:
-                fn_args = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError:
-                fn_args = {}
+        for tool_use in tool_uses:
+            fn_name = tool_use.name
+            fn_args = tool_use.input if isinstance(tool_use.input, dict) else {}
 
             allowed = fn_name in allowed_tool_names
             if not allowed:
@@ -609,7 +577,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                         tool_stats["write_calls_succeeded"] += 1
             tool_result_blocks.append({
                 "type": "tool_result",
-                "tool_use_id": tool_call.id,
+                "tool_use_id": tool_use.id,
                 "content": result,
             })
         messages.append({"role": "user", "content": tool_result_blocks})
@@ -625,10 +593,9 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     })
     try:
         resp = _create_completion(messages, allow_tools=False)
-        final_choice = resp.choices[0]
-        final_content = final_choice.message.content or ""
+        final_content = response_text(resp) or ""
         completion_chars += len(final_content)
-        if _is_truncated(final_choice):
+        if _is_truncated(resp):
             _log_agent_loop(max_tool_rounds)
             return _truncation_failure("final_response", final_content)
         if not final_content.strip():

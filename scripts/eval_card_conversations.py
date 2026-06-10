@@ -52,7 +52,7 @@ except ImportError:
 import db
 import elixir_agent
 from agent import tool_exec
-from agent.core import _create_chat_completion, _lightweight_model_name
+from agent.core import _create_chat_completion, _lightweight_model_name, response_text
 from agent.intent_router import classify_intent
 from cr_api import CLAN_TAG
 
@@ -174,15 +174,15 @@ def generate_card_script(member: dict) -> list[tuple[str, str]]:
     )
     resp = _create_chat_completion(
         workflow="eval_card_script_gen",
+        system="You produce realistic test data. Output strict JSON only.",
         messages=[
-            {"role": "system", "content": "You produce realistic test data. Output strict JSON only."},
             {"role": "user", "content": prompt},
         ],
         model=_lightweight_model_name(),
         temperature=1.0,
         max_tokens=1024,
     )
-    text = (resp.choices[0].message.content or "").strip()
+    text = (response_text(resp) or "").strip()
     if text.startswith("```"):
         text = text.split("```", 2)[1]
         if text.startswith("json"):

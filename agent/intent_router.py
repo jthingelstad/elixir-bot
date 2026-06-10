@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from agent.core import _create_chat_completion, _lightweight_model_name
+from agent.core import _create_chat_completion, _lightweight_model_name, response_tool_uses
 from runtime.intent_registry import (
     ROUTE_KEYS,
     get_route,
@@ -170,8 +170,8 @@ def classify_intent(
     try:
         resp = _create_chat_completion(
             workflow=INTENT_ROUTER_WORKFLOW,
+            system=system_prompt,
             messages=[
-                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},
             ],
             model=selected_model,
@@ -184,15 +184,14 @@ def classify_intent(
         log.warning("intent_router_call_failed: %s", exc, exc_info=True)
         return _fallback_intent(started, selected_model, f"llm_error: {exc.__class__.__name__}")
 
-    tool_calls = (resp.choices[0].message.tool_calls or []) if resp.choices else []
-    if not tool_calls:
+    tool_uses = response_tool_uses(resp)
+    if not tool_uses:
         return _fallback_intent(started, selected_model, "no_tool_call")
 
-    call = tool_calls[0]
+    call = tool_uses[0]
     try:
-        import json as _json
-        args = _json.loads(call.function.arguments) if isinstance(call.function.arguments, str) else dict(call.function.arguments)
-    except Exception:
+        args = dict(call.input)
+    except (TypeError, ValueError):
         return _fallback_intent(started, selected_model, "tool_args_parse_error")
 
     route = args.get("route")

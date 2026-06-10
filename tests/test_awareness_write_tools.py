@@ -213,12 +213,24 @@ def test_save_clan_memory_from_clanops_still_uses_leader_note(memdb):
 # Write-budget enforcement in chat.py tool-call loop
 # ---------------------------------------------------------------------------
 
-def _fake_tool_call(tool_id, name, arguments):
-    """Simulate the shape of a `choice.message.tool_calls[*]` entry."""
+def _fake_tool_use(tool_id, name, arguments):
+    """Simulate the shape of a native Anthropic tool_use content block."""
     from types import SimpleNamespace
 
-    fn = SimpleNamespace(name=name, arguments=json.dumps(arguments))
-    return SimpleNamespace(id=tool_id, function=fn, type="function")
+    return SimpleNamespace(type="tool_use", id=tool_id, name=name, input=arguments)
+
+
+def _fake_response(content_blocks, stop_reason="end_turn"):
+    """Simulate a native Anthropic Message response."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(content=content_blocks, stop_reason=stop_reason)
+
+
+def _fake_text_block(text):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(type="text", text=text)
 
 
 def test_awareness_write_budget_rejects_fourth_call(memdb):
@@ -231,30 +243,16 @@ def test_awareness_write_budget_rejects_fourth_call(memdb):
 
     # Script the LLM responses: first turn makes 4 flag_member_watch calls;
     # second turn emits the final plan as JSON.
-    tool_calls_round1 = [
-        _fake_tool_call(f"t{i}", "flag_member_watch", {
+    tool_uses_round1 = [
+        _fake_tool_use(f"t{i}", "flag_member_watch", {
             "member_tag": f"#M{i}", "reason": f"Observation {i}",
         })
         for i in range(4)
     ]
 
-    class _Msg:
-        def __init__(self, content, tool_calls=None):
-            self.content = content
-            self.tool_calls = tool_calls or []
-
-    class _Choice:
-        def __init__(self, content, tool_calls=None, stop_reason="stop"):
-            self.message = _Msg(content, tool_calls=tool_calls)
-            self.stop_reason = stop_reason
-
-    class _Resp:
-        def __init__(self, choice):
-            self.choices = [choice]
-
     responses = iter([
-        _Resp(_Choice("", tool_calls=tool_calls_round1)),
-        _Resp(_Choice(json.dumps({"posts": [], "skipped_reason": "budget test"}))),
+        _fake_response(tool_uses_round1, stop_reason="tool_use"),
+        _fake_response([_fake_text_block(json.dumps({"posts": [], "skipped_reason": "budget test"}))]),
     ])
 
     def _fake_completion(**kwargs):
