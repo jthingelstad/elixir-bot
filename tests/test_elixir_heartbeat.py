@@ -1464,6 +1464,97 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
     mock_update_copy.assert_called_once_with(43, copy_message_id=2001)
 
 
+def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_batch():
+    signals = [
+        {
+            "type": "member_join",
+            "signal_key": "member_join:#ABC",
+            "tag": "#ABC",
+            "name": "King Levy",
+        },
+        {
+            "type": "arena_change",
+            "signal_key": "arena_change:#DEF",
+            "tag": "#DEF",
+            "name": "Other Player",
+            "old_arena": "PANCAKES!",
+            "new_arena": "Valkalla",
+        },
+    ]
+    clan = {"memberList": [{"tag": "#ABC", "name": "King Levy"}]}
+    war = {}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 1513758211206025227
+    channel.name = "arena-relay"
+    channel.type = "text"
+
+    authored_copy = "Welcome to POAP KINGS King Levy! 421 clan war wins is a strong river resume."
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals.plan_signal_outcomes", return_value=[{
+            "source_signal_key": "batch:joins-and-progress",
+            "source_signal_type": "member_join",
+            "target_channel_key": "arena-relay",
+            "target_channel_id": 1513758211206025227,
+            "intent": "welcome_relay",
+            "required": False,
+            "payload": {"signals": signals},
+            "delivery_status": "planned",
+        }]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.db.get_signal_outcome", return_value=None),
+        patch("elixir.db.list_channel_messages", return_value=[
+            {"created_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), "content": "Recent action"}
+        ]),
+        patch("runtime.signals.delivery.db.get_member_profile", return_value={
+            "player_tag": "#ABC",
+            "member_name": "King Levy",
+            "cr_clan_war_wins": 421,
+        }),
+        patch("runtime.signals.delivery.build_subagent_memory_context", return_value=""),
+        patch("runtime.signals.delivery.can_post_leader_action", return_value=(False, "daily_cap:4")) as mock_policy,
+        patch("elixir.elixir_agent.generate_channel_update", return_value={
+            "event_type": "channel_update",
+            "summary": "Welcome King Levy",
+            "content": authored_copy,
+        }) as mock_generate,
+        patch("elixir.db.build_leader_action_baseline", return_value={}),
+        patch("elixir.db.create_leader_action_recommendation", return_value={
+            "action_id": 44,
+            "action_key": "welcome:#ABC",
+            "status": "proposed",
+        }),
+        patch("elixir._post_to_elixir", new=AsyncMock(return_value=[
+            SimpleNamespace(id=3000),
+            SimpleNamespace(id=3001),
+        ])) as mock_post,
+        patch("elixir.db.update_leader_action_message"),
+        patch("elixir.db.update_leader_action_copy_message"),
+        patch("elixir.db.save_message"),
+        patch("elixir.db.upsert_signal_outcome") as mock_upsert,
+        patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "delivered"}]),
+        patch("runtime.jobs._signals._mark_signal_group_completed"),
+    ):
+        assert asyncio.run(elixir._deliver_signal_group(signals, clan, war))
+
+    mock_generate.assert_called_once()
+    mock_policy.assert_not_called()
+    assert "Clan war wins: 421" in mock_generate.call_args.args[2]
+    posted_result = mock_post.await_args.args[1]
+    assert posted_result["content"][0].startswith("**R44 👋 welcome relay**")
+    assert posted_result["content"][1] == authored_copy
+    assert not any(
+        call.kwargs.get("delivery_status") == "skipped"
+        and str(call.kwargs.get("error_detail", "")).startswith("arena_relay_cooldown")
+        for call in mock_upsert.call_args_list
+    )
+
+
 def test_arena_relay_result_does_not_template_weekly_discord_invite_copy():
     from runtime.signals.delivery import _build_arena_relay_result
 
