@@ -294,6 +294,7 @@ A new clan forks elixir-bot and primarily rewrites `CLAN.md` and `DISCORD.md`, p
 ### Future work
 
 - startup linting for subagent config, reply policy, and activity registry consistency outside the bot runtime
+- the intra-package aggregators (`db/__init__.py`, `storage/war.py`, `agent/tools.py`) still use the dynamic `__export_public` copy loop. Converting them to the explicit-facade pattern requires giving each aggregated submodule a real `__all__` first — without that, a static conversion either enshrines junk names (`datetime`, `Optional`) or risks dropping a name that whole-module `db` mocks in tests would never catch.
 
 ## Work Tracking
 
