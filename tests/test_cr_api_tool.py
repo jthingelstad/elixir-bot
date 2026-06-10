@@ -85,7 +85,7 @@ class TestTTLCache:
 @pytest.fixture
 def execute_cr_api():
     """Import lazily — agent.tool_exec requires the full agent package init."""
-    from agent import app  # noqa: F401 — triggers circular-import resolution
+    import elixir_agent  # noqa: F401 — triggers circular-import resolution
     from agent.tool_exec import _execute_cr_api
     return _execute_cr_api
 
@@ -297,7 +297,7 @@ class TestFilters:
 
 class TestPerTurnCap:
     def test_cap_constant(self):
-        from agent import app  # noqa: F401
+        import elixir_agent  # noqa: F401
         from agent.chat import EXTERNAL_LOOKUP_CAP
         assert EXTERNAL_LOOKUP_CAP == 5
 

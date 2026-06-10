@@ -625,7 +625,7 @@ def test_award_leaderboard_counts_per_member():
 # -- get_awards tool executor ------------------------------------------------
 
 def test_get_awards_tool_list_mode():
-    import agent.app  # warms up the full module graph, avoids circular init
+    import elixir_agent  # warms up the full module graph, avoids circular init
     from agent.tool_exec import _execute_get_awards
     conn = db.get_connection(":memory:")
     try:
@@ -650,7 +650,7 @@ def test_get_awards_tool_list_mode():
 
 
 def test_get_awards_tool_leaderboard_requires_award_type():
-    import agent.app
+    import elixir_agent
     from agent.tool_exec import _execute_get_awards
     import pytest as _pytest
     with _pytest.raises(ValueError):
@@ -660,7 +660,7 @@ def test_get_awards_tool_leaderboard_requires_award_type():
 def test_get_awards_tool_current_standings_mode():
     """current_standings mode returns the four-award payload from
     db.get_season_awards_standings; non-existent season yields empty lists."""
-    import agent.app
+    import elixir_agent
     from agent.tool_exec import _execute_get_awards
 
     out = _execute_get_awards({"mode": "current_standings", "season_id": -1})

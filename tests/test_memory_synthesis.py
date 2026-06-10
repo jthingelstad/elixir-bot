@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # Trigger full runtime init before importing runtime.jobs (which depends on
-# agent.app) to avoid circular-import surprises.
+# the elixir_agent facade) to avoid circular-import surprises.
 import elixir  # noqa: F401
 
 import db

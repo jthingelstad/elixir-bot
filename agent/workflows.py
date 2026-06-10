@@ -5,7 +5,6 @@ import sqlite3
 import db
 from anthropic import APIError, APIConnectionError
 
-from agent import app as _app
 from agent.core import (
     MAX_CONTEXT_MEMBERS_DEFAULT,
     MAX_CONTEXT_MEMBERS_FULL,
@@ -42,7 +41,11 @@ from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
 
 
 def _chat_with_tools(*args, **kwargs):
-    return _app._chat_with_tools(*args, **kwargs)
+    # Deliberate late binding through the facade so tests that patch
+    # elixir_agent._chat_with_tools intercept workflow-internal calls.
+    import elixir_agent
+
+    return elixir_agent._chat_with_tools(*args, **kwargs)
 
 
 def _clan_trend_prompt_context(days=30, window_days=7):

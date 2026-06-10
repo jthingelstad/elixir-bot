@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pytest
 
 # Trigger full runtime/agent init before importing tool_exec — avoids a
-# circular import between agent.tool_exec → agent.app → agent.chat.
+# circular import between agent.tool_exec → elixir_agent → agent.chat.
 import elixir  # noqa: F401
 
 import db
