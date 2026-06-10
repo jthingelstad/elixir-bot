@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from agent import intent_router
-from agent.core import _Choice, _Function, _LLMResponse, _Message, _ToolCall, _Usage
 from runtime import intent_registry
 
 
@@ -55,21 +53,11 @@ def test_router_route_summaries_includes_descriptions():
 # ── Intent router output construction ────────────────────────────────────────
 
 
-def _mock_tool_call_response(args: dict) -> _LLMResponse:
-    """Build the wrapped LLM response shape that classify_intent expects."""
-    return _LLMResponse(
-        choices=[_Choice(
-            message=_Message(
-                role="assistant",
-                content=None,
-                tool_calls=[_ToolCall(
-                    id="call_1",
-                    type="function",
-                    function=_Function(name="select_route", arguments=json.dumps(args)),
-                )],
-            ),
-        )],
-        usage=_Usage(prompt_tokens=100, completion_tokens=20, total_tokens=120),
+def _mock_tool_call_response(args: dict) -> SimpleNamespace:
+    """Build the native Anthropic Message shape that classify_intent expects."""
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="tool_use", id="call_1", name="select_route", input=args)],
+        stop_reason="tool_use",
     )
 
 
@@ -140,9 +128,9 @@ def test_classify_falls_back_when_route_unknown():
 
 def test_classify_falls_back_when_no_tool_call():
     """If the LLM returned plain text instead of calling the tool, we fall back."""
-    no_tool_resp = _LLMResponse(
-        choices=[_Choice(message=_Message(role="assistant", content="I think it's deck_review", tool_calls=None))],
-        usage=_Usage(prompt_tokens=10, completion_tokens=10, total_tokens=20),
+    no_tool_resp = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="I think it's deck_review")],
+        stop_reason="end_turn",
     )
     with patch("agent.intent_router._create_chat_completion", return_value=no_tool_resp):
         intent = intent_router.classify_intent("anything", workflow="interactive", mentioned=True)

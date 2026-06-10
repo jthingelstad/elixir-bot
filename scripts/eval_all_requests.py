@@ -37,7 +37,7 @@ except ImportError:
 import db
 import elixir_agent
 from agent import tool_exec
-from agent.core import _create_chat_completion, _chat_model_name
+from agent.core import _create_chat_completion, _chat_model_name, response_text
 from agent.intent_router import classify_intent
 from runtime.helpers._members import (
     _build_member_deck_report,
@@ -165,15 +165,15 @@ def generate_requests(bucket: str, count: int, fixtures: dict, round_idx: int) -
     )
     resp = _create_chat_completion(
         workflow=f"eval_allreqs_{bucket}",
+        system="You produce realistic test data. Output strict JSON only.",
         messages=[
-            {"role": "system", "content": "You produce realistic test data. Output strict JSON only."},
             {"role": "user", "content": prompt},
         ],
         model=_chat_model_name(),
         temperature=1.0,
         max_tokens=2048,
     )
-    text = (resp.choices[0].message.content or "").strip()
+    text = (response_text(resp) or "").strip()
     if text.startswith("```"):
         text = text.split("```", 2)[1]
         if text.startswith("json"):

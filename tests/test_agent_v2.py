@@ -936,6 +936,22 @@ def _mock_anthropic_response(text="ok", input_tokens=10, output_tokens=20):
     )
 
 
+def _native_text_response(text, stop_reason="end_turn"):
+    """Native Anthropic Message fake with a single text block."""
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=text)],
+        stop_reason=stop_reason,
+    )
+
+
+def _native_tool_use_response(name, args, stop_reason="tool_use"):
+    """Native Anthropic Message fake with a single tool_use block."""
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="tool_use", id="call_1", name=name, input=args)],
+        stop_reason=stop_reason,
+    )
+
+
 def test_create_chat_completion_records_llm_telemetry():
     response = _mock_anthropic_response()
     create = Mock(return_value=response)
@@ -951,7 +967,7 @@ def test_create_chat_completion_records_llm_telemetry():
             messages=[{"role": "user", "content": "status"}],
         )
 
-    assert result.choices[0].message.content == "ok"
+    assert result.content[0].text == "ok"
     mock_record.assert_called_once()
     assert mock_record.call_args.args[0] == "interactive"
     assert mock_record.call_args.kwargs["ok"] is True
@@ -969,18 +985,19 @@ def test_create_chat_completion_drops_blank_anthropic_messages():
     ):
         result = elixir_agent._create_chat_completion(
             workflow="interactive",
+            system="sys",
             messages=[
-                {"role": "system", "content": "sys"},
                 {"role": "user", "content": ""},
                 {"role": "assistant", "content": "   "},
                 {"role": "user", "content": "Current winstreak"},
             ],
         )
 
-    assert result.choices[0].message.content == "ok"
+    assert result.content[0].text == "ok"
     assert create.call_args.kwargs["messages"] == [
         {"role": "user", "content": "Current winstreak"}
     ]
+    assert create.call_args.kwargs["system"][0]["text"] == "sys"
 
 
 def test_create_chat_completion_skips_cache_for_awareness():
@@ -996,7 +1013,8 @@ def test_create_chat_completion_skips_cache_for_awareness():
     ):
         elixir_agent._create_chat_completion(
             workflow="awareness",
-            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "u"}],
+            system="sys",
+            messages=[{"role": "user", "content": "u"}],
             tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
         )
 
@@ -1016,7 +1034,8 @@ def test_create_chat_completion_caches_other_workflows():
     ):
         elixir_agent._create_chat_completion(
             workflow="channel_update",
-            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "u"}],
+            system="sys",
+            messages=[{"role": "user", "content": "u"}],
             tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
         )
 
@@ -1115,26 +1134,15 @@ def test_create_chat_completion_respects_model_env_overrides():
 
 
 def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
-    tool_call = SimpleNamespace(
-        id="call_1",
-        type="function",
-        function=SimpleNamespace(name="get_river_race", arguments="{}"),
-    )
-    first_message = SimpleNamespace(role="assistant", content=None, tool_calls=[tool_call])
-    second_message = SimpleNamespace(
-        role="assistant",
-        content=json.dumps(
+    responses = [
+        _native_tool_use_response("get_river_race", {}),
+        _native_text_response(json.dumps(
             {
                 "event_type": "channel_response",
                 "summary": "war answer",
                 "content": "We are in war day.",
             }
-        ),
-        tool_calls=None,
-    )
-    responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=first_message)]),
-        SimpleNamespace(choices=[SimpleNamespace(message=second_message)]),
+        )),
     ]
 
     def fake_create_chat_completion(**kwargs):
@@ -1158,22 +1166,18 @@ def test_chat_with_tools_normalizes_tool_call_messages_for_followup_rounds():
 
 
 def test_chat_with_tools_skips_blank_conversation_history():
-    message = SimpleNamespace(
-        role="assistant",
-        content=json.dumps(
-            {
-                "event_type": "channel_response",
-                "summary": "ok",
-                "content": "Still working.",
-            }
-        ),
-        tool_calls=None,
-    )
+    response = _native_text_response(json.dumps(
+        {
+            "event_type": "channel_response",
+            "summary": "ok",
+            "content": "Still working.",
+        }
+    ))
     captured_messages = []
 
     def fake_create_chat_completion(**kwargs):
         captured_messages.append([dict(m) for m in kwargs["messages"]])
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return response
 
     with patch("agent.chat._create_chat_completion", side_effect=fake_create_chat_completion):
         result = elixir_agent._chat_with_tools(
@@ -1192,18 +1196,15 @@ def test_chat_with_tools_skips_blank_conversation_history():
 
     assert result["content"] == "Still working."
     assert captured_messages == [[
-        {"role": "system", "content": "system"},
         {"role": "user", "content": "real prior question"},
         {"role": "user", "content": "current question"},
     ]]
 
 
 def test_chat_with_tools_returns_error_payload_for_invalid_final_json():
-    bad_message = SimpleNamespace(role="assistant", content='{"event_type":"channel_response"', tool_calls=None)
-    repair_message = SimpleNamespace(role="assistant", content='{"event_type":"channel_response"', tool_calls=None)
     responses = [
-        SimpleNamespace(choices=[SimpleNamespace(message=bad_message)]),
-        SimpleNamespace(choices=[SimpleNamespace(message=repair_message)]),
+        _native_text_response('{"event_type":"channel_response"'),
+        _native_text_response('{"event_type":"channel_response"'),
     ]
 
     def fake_create_chat_completion(**kwargs):
@@ -1226,13 +1227,10 @@ def test_chat_with_tools_returns_error_payload_for_invalid_final_json():
 
 
 def test_chat_with_tools_returns_truncation_when_initial_response_hits_max_tokens(caplog):
-    truncated_message = SimpleNamespace(
-        role="assistant",
-        content='{"event_type":"channel_response","summary":"deck","content":"This deck has',
-        tool_calls=None,
-    )
-    truncated_choice = SimpleNamespace(message=truncated_message, stop_reason="max_tokens")
-    responses = [SimpleNamespace(choices=[truncated_choice])]
+    responses = [_native_text_response(
+        '{"event_type":"channel_response","summary":"deck","content":"This deck has',
+        stop_reason="max_tokens",
+    )]
 
     def fake_create_chat_completion(**kwargs):
         return responses.pop(0)
@@ -1256,18 +1254,9 @@ def test_chat_with_tools_returns_truncation_when_initial_response_hits_max_token
 
 
 def test_chat_with_tools_returns_empty_response_after_max_tool_rounds(caplog):
-    tool_call = SimpleNamespace(
-        id="call_1",
-        type="function",
-        function=SimpleNamespace(name="get_river_race", arguments="{}"),
-    )
-    tool_message = SimpleNamespace(role="assistant", content=None, tool_calls=[tool_call])
-    tool_choice = SimpleNamespace(message=tool_message, stop_reason="tool_use")
     # interactive max_tool_rounds=4 → loop runs 5 iterations of tool calls, then 1 final call
-    tool_responses = [SimpleNamespace(choices=[tool_choice]) for _ in range(5)]
-    empty_message = SimpleNamespace(role="assistant", content="", tool_calls=None)
-    empty_choice = SimpleNamespace(message=empty_message, stop_reason="end_turn")
-    responses = tool_responses + [SimpleNamespace(choices=[empty_choice])]
+    tool_responses = [_native_tool_use_response("get_river_race", {}) for _ in range(5)]
+    responses = tool_responses + [_native_text_response("")]
 
     captured_messages = []
 
