@@ -3,7 +3,6 @@
 import logging
 from datetime import datetime, timezone
 
-import requests
 
 import cr_api
 import db
@@ -794,11 +793,7 @@ def _is_stale_war_race_timestamp(value) -> bool:
 def detect_war_completion(clan_tag=None, conn=None, *, refresh_log=True):
     """Emit any unannounced completed wars, optionally refreshing the race log first."""
     if refresh_log:
-        try:
-            race_log = cr_api.get_river_race_log()
-        except requests.RequestException as e:
-            log.warning("Failed to fetch river race log: %s", e)
-            return []
+        race_log = cr_api.get_river_race_log()
         if not race_log:
             return []
         db.store_war_log(race_log, clan_tag or cr_api.CLAN_TAG, conn=conn)

@@ -1,4 +1,11 @@
-"""Clash Royale API client."""
+"""Clash Royale API client.
+
+Error contract: every public fetcher returns the parsed payload on success
+and None on API failure (network error, HTTP error after retries, or a
+malformed JSON body). Callers branch on None — nothing here raises
+requests exceptions across the module boundary. InvalidTagError is the
+one deliberate exception, for callers that validate user/LLM input.
+"""
 import logging
 import os
 import random
@@ -220,14 +227,18 @@ def _cached_fetch(endpoint_name, tag, path, ttl_seconds):
         return cached
     try:
         payload = _request_json(path, endpoint_name=endpoint_name, entity_key=tag)
-    except requests.RequestException:
+    except (requests.RequestException, ValueError):
         return None
     _cache_set(cache_key, payload, ttl_seconds)
     return payload
 
 
 def get_clan():
-    return _request_json(f"/clans/%23{CLAN_TAG}", endpoint_name="clan", entity_key=CLAN_TAG)
+    """Fetch our clan profile. Returns payload dict or None on error."""
+    try:
+        return _request_json(f"/clans/%23{CLAN_TAG}", endpoint_name="clan", entity_key=CLAN_TAG)
+    except (requests.RequestException, ValueError):
+        return None
 
 
 def get_current_war(tag=None):
@@ -320,5 +331,5 @@ def get_cards():
     """
     try:
         return _request_json("/cards", endpoint_name="cards")
-    except requests.RequestException:
+    except (requests.RequestException, ValueError):
         return None
