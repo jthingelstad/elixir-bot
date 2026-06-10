@@ -1,4 +1,12 @@
-"""PID file and process helpers for the bot runtime."""
+"""PID file guard for the bot runtime.
+
+launchd (KeepAlive=true) is the real process manager — see scripts/admin.sh.
+This guard exists so an accidental manual `python elixir.py` cannot fight the
+launchd instance: a pid file pointing at a live Elixir process means refuse to
+start (the old SIGTERM-the-other-guy behavior just triggered a kill loop under
+KeepAlive). A pid that is dead, or was recycled by some unrelated process, is
+stale — overwrite it and start normally.
+"""
 
 from __future__ import annotations
 
@@ -6,9 +14,7 @@ import atexit
 import json
 import logging
 import os
-import signal
 import subprocess
-import time
 from datetime import datetime, timezone
 
 log = logging.getLogger("elixir")
@@ -38,21 +44,21 @@ def _read_pid_file(pid_file: str | None = None) -> int | None:
         return None
 
 
-def _write_pid_file(pid_file: str | None = None, *, os_module=os) -> None:
+def _write_pid_file(pid_file: str | None = None) -> None:
     path = pid_file or PID_FILE
     payload = {
-        "pid": os_module.getpid(),
+        "pid": os.getpid(),
         "written_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "cwd": os_module.getcwd(),
+        "cwd": os.getcwd(),
         "entrypoint": "elixir.py",
     }
     with open(path, "w") as f:
         json.dump(payload, f)
 
 
-def _process_exists(pid: int, *, os_module=os) -> bool:
+def _process_exists(pid: int) -> bool:
     try:
-        os_module.kill(pid, 0)
+        os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
@@ -60,20 +66,19 @@ def _process_exists(pid: int, *, os_module=os) -> bool:
     return True
 
 
-def _process_command(pid: int, *, subprocess_module=subprocess) -> str:
+def _process_command(pid: int) -> str:
     try:
-        return subprocess_module.check_output(
+        return subprocess.check_output(
             ["ps", "-p", str(pid), "-o", "command="],
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except (subprocess_module.SubprocessError, OSError):
+    except (subprocess.SubprocessError, OSError):
         return ""
 
 
-def _pid_looks_like_elixir(pid: int, *, process_command=None) -> bool:
-    command_fn = process_command or _process_command
-    command = command_fn(pid).lower()
+def _pid_looks_like_elixir(pid: int) -> bool:
+    command = _process_command(pid).lower()
     if not command:
         return False
     markers = {
@@ -84,71 +89,34 @@ def _pid_looks_like_elixir(pid: int, *, process_command=None) -> bool:
     return any(marker and marker in command for marker in markers)
 
 
-def _wait_for_process_exit(pid: int, timeout_seconds: float = 5.0, *, process_exists=None) -> bool:
-    exists = process_exists or _process_exists
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if not exists(pid):
-            return True
-        time.sleep(0.1)
-    return not exists(pid)
-
-
-def _acquire_pid_file(
-    *,
-    pid_file: str | None = None,
-    read_pid_file=None,
-    write_pid_file=None,
-    process_exists=None,
-    pid_looks_like_elixir=None,
-    wait_for_process_exit=None,
-    os_module=os,
-    signal_module=signal,
-    logger=log,
-):
+def _acquire_pid_file(pid_file: str | None = None) -> None:
     path = pid_file or PID_FILE
-    read_pid = read_pid_file or (lambda: _read_pid_file(path))
-    write_pid = write_pid_file or (lambda: _write_pid_file(path, os_module=os_module))
-    exists = process_exists or (lambda pid: _process_exists(pid, os_module=os_module))
-    looks_like = pid_looks_like_elixir or _pid_looks_like_elixir
-    wait_exit = wait_for_process_exit or (lambda pid: _wait_for_process_exit(pid, process_exists=exists))
-    if os_module.path.exists(path):
-        old_pid = read_pid()
-        if old_pid and old_pid != os_module.getpid() and exists(old_pid):
-            if looks_like(old_pid):
-                try:
-                    os_module.kill(old_pid, signal_module.SIGTERM)
-                except PermissionError as exc:
-                    raise RuntimeError(
-                        f"Existing Elixir process {old_pid} could not be terminated."
-                    ) from exc
-                if not wait_exit(old_pid):
-                    raise RuntimeError(
-                        f"Existing Elixir process {old_pid} did not exit after SIGTERM."
-                    )
-                logger.info("Stopped prior Elixir process %d", old_pid)
-            else:
-                logger.warning(
-                    "Ignoring stale pid file %s pointing to non-Elixir process %d",
-                    path,
-                    old_pid,
-                )
-    write_pid()
+    old_pid = _read_pid_file(path)
+    if old_pid and old_pid != os.getpid() and _process_exists(old_pid):
+        if _pid_looks_like_elixir(old_pid):
+            raise RuntimeError(
+                f"Another Elixir process (pid {old_pid}) is already running per {path}. "
+                "Stop it first (scripts/admin.sh stop) instead of starting a second copy."
+            )
+        log.warning(
+            "Ignoring stale pid file %s pointing to non-Elixir process %d",
+            path,
+            old_pid,
+        )
+    _write_pid_file(path)
 
 
-def _cleanup_pid_file(pid_file: str | None = None, *, os_module=os):
+def _cleanup_pid_file(pid_file: str | None = None) -> None:
     path = pid_file or PID_FILE
     try:
-        os_module.remove(path)
+        os.remove(path)
     except FileNotFoundError:
         pass
 
 
-def main(token, bot, *, acquire_pid_file=None, cleanup_pid_file=None, atexit_module=atexit):
+def main(token, bot):
     if not token:
         raise ValueError("DISCORD_TOKEN not set in .env")
-    acquire = acquire_pid_file or _acquire_pid_file
-    cleanup = cleanup_pid_file or _cleanup_pid_file
-    acquire()
-    atexit_module.register(cleanup)
+    _acquire_pid_file()
+    atexit.register(_cleanup_pid_file)
     bot.run(token, log_handler=None)
