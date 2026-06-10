@@ -4,9 +4,7 @@ import asyncio
 import json
 import os
 import re
-import signal
 import logging
-import subprocess
 import sys
 
 import discord
@@ -315,56 +313,5 @@ async def on_raw_reaction_remove(payload):
 PID_FILE = _process_service.PID_FILE
 
 
-def _read_pid_file() -> int | None:
-    return _process_service._read_pid_file(PID_FILE)
-
-
-def _write_pid_file() -> None:
-    return _process_service._write_pid_file(PID_FILE, os_module=os)
-
-
-def _process_exists(pid: int) -> bool:
-    return _process_service._process_exists(pid, os_module=os)
-
-
-def _process_command(pid: int) -> str:
-    return _process_service._process_command(pid, subprocess_module=subprocess)
-
-
-def _pid_looks_like_elixir(pid: int) -> bool:
-    return _process_service._pid_looks_like_elixir(pid, process_command=_process_command)
-
-
-def _wait_for_process_exit(pid: int, timeout_seconds: float = 5.0) -> bool:
-    return _process_service._wait_for_process_exit(
-        pid,
-        timeout_seconds,
-        process_exists=_process_exists,
-    )
-
-
-def _acquire_pid_file():
-    return _process_service._acquire_pid_file(
-        pid_file=PID_FILE,
-        read_pid_file=_read_pid_file,
-        write_pid_file=_write_pid_file,
-        process_exists=_process_exists,
-        pid_looks_like_elixir=_pid_looks_like_elixir,
-        wait_for_process_exit=_wait_for_process_exit,
-        os_module=os,
-        signal_module=signal,
-        logger=log,
-    )
-
-
-def _cleanup_pid_file():
-    return _process_service._cleanup_pid_file(PID_FILE, os_module=os)
-
-
 def main():
-    return _process_service.main(
-        TOKEN,
-        bot,
-        acquire_pid_file=_acquire_pid_file,
-        cleanup_pid_file=_cleanup_pid_file,
-    )
+    return _process_service.main(TOKEN, bot)

@@ -4,10 +4,11 @@ import asyncio
 import base64
 import io
 import json
-import signal
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, PropertyMock, patch
+
+import pytest
 
 import elixir
 import runtime.channel_router as channel_router
@@ -1217,43 +1218,42 @@ def test_post_startup_message_falls_back_to_clanops_when_webhook_unavailable():
     assert mock_save.call_args.kwargs["event_type"] == "startup_announcement"
 
 
-def test_acquire_pid_file_ignores_non_elixir_reused_pid(tmp_path):
+def test_acquire_pid_file_overwrites_non_elixir_reused_pid(tmp_path):
+    from runtime import process as runtime_process
+
     pid_file = tmp_path / "elixir.pid"
     pid_file.write_text("999")
 
     with (
-        patch("elixir.PID_FILE", str(pid_file)),
-        patch("elixir.os.getpid", return_value=1234),
-        patch("elixir._process_exists", return_value=True),
-        patch("elixir._pid_looks_like_elixir", return_value=False),
-        patch("elixir.os.kill") as mock_kill,
-        patch("elixir.log.warning") as mock_warning,
+        patch("runtime.process.os.getpid", return_value=1234),
+        patch("runtime.process._process_exists", return_value=True),
+        patch("runtime.process._pid_looks_like_elixir", return_value=False),
+        patch("runtime.process.log.warning") as mock_warning,
     ):
-        elixir._acquire_pid_file()
+        runtime_process._acquire_pid_file(str(pid_file))
 
     payload = json.loads(pid_file.read_text())
     assert payload["pid"] == 1234
-    mock_kill.assert_not_called()
     mock_warning.assert_called_once()
 
 
-def test_acquire_pid_file_stops_prior_elixir_process(tmp_path):
+def test_acquire_pid_file_refuses_when_live_elixir_holds_it(tmp_path):
+    """A live Elixir pid means refuse — never SIGTERM the launchd instance."""
+    from runtime import process as runtime_process
+
     pid_file = tmp_path / "elixir.pid"
     pid_file.write_text(json.dumps({"pid": 999}))
 
     with (
-        patch("elixir.PID_FILE", str(pid_file)),
-        patch("elixir.os.getpid", return_value=1234),
-        patch("elixir._process_exists", return_value=True),
-        patch("elixir._pid_looks_like_elixir", return_value=True),
-        patch("elixir._wait_for_process_exit", return_value=True),
-        patch("elixir.os.kill") as mock_kill,
+        patch("runtime.process.os.getpid", return_value=1234),
+        patch("runtime.process._process_exists", return_value=True),
+        patch("runtime.process._pid_looks_like_elixir", return_value=True),
+        pytest.raises(RuntimeError, match="already running"),
     ):
-        elixir._acquire_pid_file()
+        runtime_process._acquire_pid_file(str(pid_file))
 
-    payload = json.loads(pid_file.read_text())
-    assert payload["pid"] == 1234
-    mock_kill.assert_called_once_with(999, signal.SIGTERM)
+    # The existing owner's pid file must be left untouched.
+    assert json.loads(pid_file.read_text())["pid"] == 999
 
 
 def test_startup_channel_audit_reports_missing_or_unwritable_channels():
