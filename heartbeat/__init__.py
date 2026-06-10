@@ -8,7 +8,6 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-import requests
 
 import cr_api
 import cr_knowledge
@@ -100,10 +99,9 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
     4. Run all signal detectors
     5. Return collected signals with the fetched data bundle
     """
-    try:
-        clan = cr_api.get_clan()
-    except requests.RequestException as e:
-        log.error("Heartbeat: failed to fetch clan data: %s", e)
+    clan = cr_api.get_clan()
+    if not clan:
+        log.error("Heartbeat: failed to fetch clan data")
         return HeartbeatTickResult(signals=[], clan={}, war={})
 
     members = clan.get("memberList", [])
@@ -113,10 +111,7 @@ def tick(conn=None, *, include_nonwar=True, include_war=True):
 
     war = {}
     if include_war:
-        try:
-            war = cr_api.get_current_war()
-        except requests.RequestException:
-            war = {}
+        war = cr_api.get_current_war() or {}
 
     # 1. Get known roster BEFORE snapshotting (so we compare old vs new)
     known = db.get_active_roster_map(conn=conn)

@@ -2,7 +2,6 @@
 
 import logging
 
-import requests
 
 import cr_api
 import db
@@ -149,11 +148,7 @@ def ingest_live_war_state(conn=None, *, refresh_race_log=True):
     race_log_items = 0
     race_log_refreshed = False
     if refresh_race_log:
-        try:
-            race_log = cr_api.get_river_race_log()
-        except requests.RequestException as exc:
-            log.warning("War ingest: failed to refresh river race log: %s", exc)
-            race_log = None
+        race_log = cr_api.get_river_race_log()
         if race_log:
             race_log_items = db.store_war_log(race_log, cr_api.CLAN_TAG, conn=conn)
             race_log_refreshed = True
