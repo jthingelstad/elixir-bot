@@ -654,6 +654,20 @@ def _arena_relay_recently_posted(recent_posts: list[dict], *, now: datetime | No
     return False
 
 
+def _arena_relay_uses_cooldown(intent: str | None) -> bool:
+    """Cooldown is for generic broadcast relays; action cards use policy caps."""
+    return intent not in {
+        "welcome_relay",
+    }
+
+
+def _arena_relay_uses_leader_action_policy(intent: str | None) -> bool:
+    """Welcomes are opportunistic and should not consume action-board budget."""
+    return intent not in {
+        "welcome_relay",
+    }
+
+
 def _facade():
     from runtime.jobs import _signals as facade
 
@@ -790,7 +804,11 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
 
         if channel_config["subagent_key"] == "arena-relay":
             arena_types = {signal.get("type") for signal in delivery_signals or []}
-            if _arena_relay_recently_posted(recent_posts):
+            member_join_signals = [
+                signal for signal in delivery_signals or []
+                if signal.get("type") == "member_join"
+            ]
+            if _arena_relay_uses_cooldown(outcome.get("intent")) and _arena_relay_recently_posted(recent_posts):
                 await asyncio.to_thread(
                     db.upsert_signal_outcome,
                     outcome["source_signal_key"],
@@ -805,23 +823,24 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     mark_attempt=True,
                 )
                 return True
-            critical = bool({signal.get("type") for signal in delivery_signals or []} & CRITICAL_LEADER_ACTION_SIGNAL_TYPES)
-            allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
-            if not allowed:
-                await asyncio.to_thread(
-                    db.upsert_signal_outcome,
-                    outcome["source_signal_key"],
-                    outcome["source_signal_type"],
-                    outcome["target_channel_key"],
-                    outcome["target_channel_id"],
-                    outcome["intent"],
-                    required=outcome.get("required", True),
-                    delivery_status="skipped",
-                    payload={"signals": signals},
-                    error_detail=f"leader_action_policy:{reason}",
-                    mark_attempt=True,
-                )
-                return True
+            if _arena_relay_uses_leader_action_policy(outcome.get("intent")):
+                critical = bool({signal.get("type") for signal in delivery_signals or []} & CRITICAL_LEADER_ACTION_SIGNAL_TYPES)
+                allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
+                if not allowed:
+                    await asyncio.to_thread(
+                        db.upsert_signal_outcome,
+                        outcome["source_signal_key"],
+                        outcome["source_signal_type"],
+                        outcome["target_channel_key"],
+                        outcome["target_channel_id"],
+                        outcome["intent"],
+                        required=outcome.get("required", True),
+                        delivery_status="skipped",
+                        payload={"signals": signals},
+                        error_detail=f"leader_action_policy:{reason}",
+                        mark_attempt=True,
+                    )
+                    return True
             if arena_types == {"discord_invite_reminder"}:
                 generated = await asyncio.to_thread(
                     elixir_agent.generate_channel_update,
@@ -833,17 +852,17 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     leadership=(channel_config["memory_scope"] == "leadership"),
                 )
                 result = _build_generated_discord_invite_relay_result(delivery_signals, generated)
-            elif arena_types == {"member_join"}:
+            elif outcome.get("intent") == "welcome_relay" and member_join_signals:
                 generated = await asyncio.to_thread(
                     elixir_agent.generate_channel_update,
                     channel_config["name"],
                     channel_config["subagent_key"],
-                    _member_join_welcome_context(context, delivery_signals[0] if delivery_signals else {}),
+                    _member_join_welcome_context(context, member_join_signals[0]),
                     recent_posts=recent_posts,
                     memory_context=memory_context,
                     leadership=(channel_config["memory_scope"] == "leadership"),
                 )
-                result = _build_generated_welcome_relay_result(delivery_signals, generated)
+                result = _build_generated_welcome_relay_result(member_join_signals, generated)
             else:
                 result = _build_arena_relay_result(delivery_signals)
             if result is not None:
