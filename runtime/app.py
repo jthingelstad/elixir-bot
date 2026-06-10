@@ -147,24 +147,162 @@ def _log_prompt_failure(*, question, workflow, failure_type, failure_stage, chan
         log.error("prompt failure logging error: %s", exc)
 
 
-def __export_public(module):
-    names = getattr(module, "__all__", None) or [
-        name for name in vars(module) if not name.startswith("__")
-    ]
-    protected = {"BOT_ROLE_ID", "CHICAGO", "LEADER_ROLE_ID", "bot", "log", "scheduler"}
-    for name in names:
-        if name in protected:
-            continue
-        globals()[name] = getattr(module, name)
-    return names
+# ── The `elixir` runtime surface ─────────────────────────────────────────────
+# This module doubles as the top-level `elixir` module (see elixir.py), and
+# scheduling (runtime.activities resolves job functions and config constants
+# by name on this module), other runtime modules, and the test suite all
+# address helpers and jobs through it. These imports ARE that surface — they
+# replaced a dynamic __export_public copy loop, so keep them explicit.
 
-
-from runtime import helpers as _helpers_module
-from runtime import jobs as _jobs_module
-
-__all__ = [name for name in globals() if not name.startswith("__")]
-for _module in (_helpers_module, _jobs_module):
-    __export_public(_module)
+from runtime.helpers import (  # noqa: E402,F401
+    DISCORD_CHUNK_SIZE,
+    DISCORD_MAX_MESSAGE_LEN,
+    _DB_STATUS_MEMORY_TABLES,
+    _author_msg_kwargs,
+    _bot,
+    _bot_role_id,
+    _build_clan_status_report,
+    _build_clan_status_short_report,
+    _build_db_status_report,
+    _build_help_report,
+    _build_kick_risk_report,
+    _build_member_deck_report,
+    _build_member_war_decks_report,
+    _build_roster_join_dates_report,
+    _build_schedule_report,
+    _build_status_report,
+    _build_top_war_contributors_report,
+    _build_war_status_report,
+    _build_weekly_clan_recap_context,
+    _build_weekly_clanops_review,
+    _canon_tag,
+    _channel_conversation_scope,
+    _channel_msg_kwargs,
+    _channel_reply_target_name,
+    _channel_scope,
+    _chicago,
+    _chunk_for_discord,
+    _db_status_group_for_table,
+    _db_status_group_label,
+    _extract_member_deck_target,
+    _fallback_channel_response,
+    _fmt_bytes,
+    _fmt_iso_short,
+    _fmt_num,
+    _fmt_relative,
+    _format_relative_join_age,
+    _get_channel_behavior,
+    _get_singleton_channel,
+    _get_singleton_channel_id,
+    _is_bot_mentioned,
+    _job_next_runs,
+    _join_member_bits,
+    _leader_role_id,
+    _leader_role_mention,
+    _leading_bot_mention_pattern,
+    _load_live_clan_context,
+    _log,
+    _match_clan_member,
+    _member_label,
+    _recent_join_display_rows,
+    _reply_text,
+    _resolve_member_candidate,
+    _runtime_app,
+    _safe_create_task,
+    _safe_reply,
+    _schedule_specs,
+    _scheduler,
+    _share_channel_result,
+    _status_badge,
+    _strip_bot_mentions,
+    _with_leader_ping,
+)
+from runtime.jobs import (  # noqa: E402,F401
+    CLANOPS_WEEKLY_REVIEW_DAY,
+    CLANOPS_WEEKLY_REVIEW_HOUR,
+    MEMORY_SYNTHESIS_DAY,
+    MEMORY_SYNTHESIS_DRY_RUN,
+    MEMORY_SYNTHESIS_HOUR,
+    MEMORY_SYNTHESIS_POSTS_PER_CHANNEL,
+    PLAYER_INTEL_BATCH_SIZE,
+    PLAYER_INTEL_REFRESH_HOURS,
+    PLAYER_INTEL_REFRESH_MINUTES,
+    PLAYER_INTEL_REQUEST_SPACING_SECONDS,
+    PLAYER_INTEL_STALE_HOURS,
+    SITE_CONTENT_HOUR,
+    SITE_DATA_HOUR,
+    TOURNAMENT_BATTLE_LOG_SPACING_SECONDS,
+    TOURNAMENT_POLL_MINUTES,
+    WAR_AWARENESS_MINUTE,
+    WAR_POLL_MINUTE,
+    WEEKLY_DISCORD_INVITE_RELAY_DAY,
+    WEEKLY_DISCORD_INVITE_RELAY_HOUR,
+    WEEKLY_RECAP_DAY,
+    WEEKLY_RECAP_HOUR,
+    _TOURNAMENT_JOB_ID,
+    _WEEKLY_RECAP_HEADER_RE,
+    _apply_memory_synthesis_plan,
+    _ask_elixir_daily_insight,
+    _award_detection_tick,
+    _build_ask_elixir_daily_insight_context,
+    _build_maintenance_report,
+    _build_memory_synthesis_context,
+    _build_outcome_context,
+    _build_system_signal_context,
+    _card_catalog_sync,
+    _channel_config_by_key,
+    _clan_awareness_tick,
+    _clan_wars_intel_report,
+    _clanops_weekly_review,
+    _commit_site_content_or_raise,
+    _daily_quiz_post,
+    _db_maintenance_cycle,
+    _deliver_signal_group,
+    _deliver_signal_outcome,
+    _format_size,
+    _format_weekly_recap_post,
+    _leadership_action_scan,
+    _mark_delivered_signals,
+    _mark_signal_group_completed,
+    _memory_synthesis_cycle,
+    _normalize_poap_kings_publish_result,
+    _notify_poapkings_publish,
+    _persist_signal_detector_cursors,
+    _player_intel_refresh,
+    _player_intel_refresh_minutes,
+    _poapkings_publish_context,
+    _poapkings_publish_fallback,
+    _post_signal_memory,
+    _post_system_signal_updates,
+    _post_weekly_leader_action_recommendations,
+    _preauthored_system_signal_result,
+    _progression_signal_batches,
+    _promotion_channel_posts,
+    _promotion_content_cycle,
+    _promotion_discord_required_text,
+    _promotion_reddit_required_token,
+    _publish_pending_system_signal_updates,
+    _publish_poap_kings_site_or_raise,
+    _query_or_default,
+    _signal_group_needs_recap_memory,
+    _site_content_cycle,
+    _site_data_refresh,
+    _store_recap_memories_for_signal_batch,
+    _strip_weekly_recap_header,
+    _summarize_member_rows,
+    _system_signal_updates,
+    _tournament_recap,
+    _tournament_watch_tick,
+    _unwrap_outer_bold,
+    _validate_promote_content_or_raise,
+    _war_awareness_tick,
+    _war_poll_tick,
+    _weekly_clan_recap,
+    _weekly_discord_invite_relay,
+    _write_site_content_or_raise,
+    start_tournament_watch,
+    stop_tournament_watch,
+)
 
 from runtime.alerts import (  # noqa: E402,F401
     _ALERT_SIGNATURES,
@@ -195,7 +333,6 @@ from runtime.startup import (  # noqa: E402,F401
     _startup_channel_audit_summary,
 )
 
-__all__ = [name for name in globals() if not name.startswith("__")]
 register_elixir_app_commands(bot)
 
 @bot.event

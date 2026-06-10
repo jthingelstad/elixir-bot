@@ -250,10 +250,11 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
         except (OSError, sqlite3.Error):
             log.warning("llm_call_persist_failed workflow=%s", workflow, exc_info=True)
         # Central alert trigger: runs for every failing LLM call regardless of
-        # which workflow / caller ran. Lazy import to dodge the runtime.app →
-        # elixir_agent → agent.core → runtime.app cycle.
+        # which workflow / caller ran. Lazy import: runtime.alerts is cheap and
+        # cycle-free, but importing it at module load would still drag the
+        # runtime package into every agent-layer unit test.
         try:
-            from runtime.app import schedule_llm_failure_alert
+            from runtime.alerts import schedule_llm_failure_alert
             schedule_llm_failure_alert(workflow)
         except Exception:
             log.warning("schedule_llm_failure_alert_import_failed", exc_info=True)
