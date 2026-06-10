@@ -1,7 +1,9 @@
 import json
 import re
 
-from agent import app as _app
+import cr_api
+
+from agent.core import log
 
 
 class _ModuleProxy:
@@ -12,9 +14,16 @@ class _ModuleProxy:
         return getattr(self._getter(), name)
 
 
-db = _ModuleProxy(lambda: _app.db)
-cr_api = _app.cr_api
-log = _app.log
+def _facade_db():
+    # Late-bind through the elixir_agent facade so a test that patches
+    # elixir_agent.db intercepts every tool's data access. Function-level
+    # import: the facade imports this module, never the other way around.
+    import elixir_agent
+
+    return elixir_agent.db
+
+
+db = _ModuleProxy(_facade_db)
 
 
 def _resource_constraints_note() -> dict:
