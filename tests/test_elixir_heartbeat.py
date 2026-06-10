@@ -1365,6 +1365,9 @@ def test_member_join_welcome_context_gives_elixir_profile_facts():
     assert "Battle wins: 6,400" in context
     assert "Collection Level: 1,597" in context
     assert "Current trophies: 6,000" in context
+    assert "under 120 characters" in context
+    assert "real leader typing in Clash Royale clan chat" in context
+    assert "Do not mention war state" in context
     assert "Return `content` as a single string" in context
 
 
@@ -1377,6 +1380,20 @@ def test_generated_welcome_relay_result_rejects_copy_without_member_name():
     )
 
     assert result is None
+
+
+def test_generated_welcome_relay_result_clips_to_clan_chat_length():
+    from runtime.signals.delivery import ARENA_RELAY_WELCOME_MAX_COPY_CHARS, _build_generated_welcome_relay_result
+
+    result = _build_generated_welcome_relay_result(
+        [{"type": "member_join", "tag": "#ABC", "name": "King Levy"}],
+        {"content": "Welcome King Levy! 421 war wins is a strong river start for POAP KINGS. Glad to have you here with the crew."},
+    )
+
+    assert result is not None
+    copy = result["metadata"]["relay_copy"]
+    assert len(copy) <= ARENA_RELAY_WELCOME_MAX_COPY_CHARS
+    assert result["content"][1] == copy
 
 
 def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
@@ -1397,7 +1414,7 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
     channel.name = "arena-relay"
     channel.type = "text"
 
-    authored_copy = "Welcome to POAP KINGS King Levy! 421 clan war wins says you already know the river."
+    authored_copy = "Welcome King Levy! 421 war wins is strong. Glad you're with POAP KINGS."
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
@@ -1492,7 +1509,7 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
     channel.name = "arena-relay"
     channel.type = "text"
 
-    authored_copy = "Welcome to POAP KINGS King Levy! 421 clan war wins is a strong river resume."
+    authored_copy = "Welcome King Levy! 421 war wins is strong. Glad you're with POAP KINGS."
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),

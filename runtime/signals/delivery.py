@@ -21,6 +21,7 @@ log = logging.getLogger("elixir")
 
 ARENA_RELAY_COOLDOWN_HOURS = 18
 ARENA_RELAY_MAX_COPY_CHARS = 240
+ARENA_RELAY_WELCOME_MAX_COPY_CHARS = 120
 ARENA_RELAY_MAX_NUDGE_ACTIONS = 3
 PUBLIC_DEPARTURE_MIN_TENURE_DAYS = 14
 WAR_NUDGE_SIGNAL_TYPES = {
@@ -219,10 +220,13 @@ def _member_join_welcome_context(base_context: str | None, signal: dict) -> str:
         f"{fact_block}\n"
         "- Author one short Clash Royale clan-chat welcome a leader can copy/paste.\n"
         "- Include the member name exactly as provided when available.\n"
-        "- Make it warmer and more specific than a generic welcome by using one grounded profile fact when facts are available.\n"
+        "- Sound like a real leader typing in Clash Royale clan chat, not a polished announcement.\n"
+        "- Use one grounded profile fact when facts are available, but keep it casual.\n"
+        "- Do not mention war state, boat defenses, Discord, onboarding, instructions, or what the player should do next.\n"
+        "- Avoid corporate/promo phrases like 'serious battle experience', 'bring that energy', or 'we are looking for'.\n"
         "- Do not invent achievements, personality, role, Discord status, or future behavior.\n"
         "- Do not include raw URLs, markdown links, Discord-only formatting, message numbers, or labels inside the copy/paste message.\n"
-        f"- Keep the copy/paste message under {ARENA_RELAY_MAX_COPY_CHARS} characters.\n"
+        f"- Keep the copy/paste message under {ARENA_RELAY_WELCOME_MAX_COPY_CHARS} characters and ideally under 18 words.\n"
         "- Return `content` as a single string containing only the Clash Royale copy/paste message. The code will add the arena-relay action card.\n"
     )
     if base_context:
@@ -234,7 +238,7 @@ def _build_generated_welcome_relay_result(signals: list[dict], generated: dict |
     primary = (signals or [{}])[0] or {}
     name = str(primary.get("name") or "new member").strip() or "new member"
     tag = primary.get("tag") or primary.get("player_tag")
-    copies = [_clip_relay_copy(item) for item in _result_content_items(generated)]
+    copies = [_clip_relay_copy(item, limit=ARENA_RELAY_WELCOME_MAX_COPY_CHARS) for item in _result_content_items(generated)]
     copies = [item for item in copies if item]
     if not copies:
         return None
