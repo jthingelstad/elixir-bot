@@ -86,6 +86,9 @@ def _normalize_cr_tag(raw) -> str:
 
 
 _TTL_CACHE: dict[tuple[str, str], tuple[float, object]] = {}
+# The LLM-facing `cr_api` tool can fetch arbitrary player/clan tags, so the
+# cache must be bounded or it grows for the life of the process.
+_TTL_CACHE_MAX_ENTRIES = 256
 
 
 def _cache_get(key: tuple[str, str]):
@@ -101,6 +104,13 @@ def _cache_get(key: tuple[str, str]):
 
 
 def _cache_set(key: tuple[str, str], payload, ttl_seconds: float) -> None:
+    if key not in _TTL_CACHE and len(_TTL_CACHE) >= _TTL_CACHE_MAX_ENTRIES:
+        now = time.time()
+        for stale in [k for k, (exp, _) in _TTL_CACHE.items() if exp <= now]:
+            _TTL_CACHE.pop(stale, None)
+        while len(_TTL_CACHE) >= _TTL_CACHE_MAX_ENTRIES:
+            soonest_to_expire = min(_TTL_CACHE, key=lambda k: _TTL_CACHE[k][0])
+            _TTL_CACHE.pop(soonest_to_expire, None)
     _TTL_CACHE[key] = (time.time() + ttl_seconds, payload)
 
 
