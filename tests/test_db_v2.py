@@ -235,12 +235,17 @@ def test_recent_leader_action_lookup_finds_completed_kick_target():
 def test_leader_action_policy_respects_quiet_hours_and_daily_cap():
     conn = db.get_connection(":memory:")
     try:
-        quiet = datetime(2026, 6, 9, 5, 0, tzinfo=timezone.utc)  # midnight Chicago
+        # Build quiet/active from the real current Chicago day:
+        # create_leader_action_recommendation stamps rows with the real clock,
+        # so a hardcoded date here silently drifts out of count_actions_today's
+        # window (this bit us when the suite ran after 05:00 UTC).
+        chicago_now = datetime.now(db.CHICAGO_TZ)
+        quiet = chicago_now.replace(hour=0, minute=30, second=0, microsecond=0).astimezone(timezone.utc)
         allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=quiet)
         assert not allowed
         assert reason == "quiet_hours"
 
-        active = datetime(2026, 6, 9, 17, 0, tzinfo=timezone.utc)  # noon Chicago
+        active = chicago_now.replace(hour=12, minute=0, second=0, microsecond=0).astimezone(timezone.utc)  # noon Chicago
         for index in range(leader_action_policy.LEADER_ACTION_DAILY_CAP):
             db.create_leader_action_recommendation(
                 action_type="kick_recommendation",

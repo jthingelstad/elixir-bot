@@ -144,7 +144,9 @@ def test_leave_signal_marks_completed_kick_recommendation_as_leader_removal():
         db.record_join_date(
             "#ABC123",
             "QuickChurn",
-            (datetime.now(timezone.utc).date() - timedelta(days=3)).isoformat(),
+            # Seed on the Chicago calendar — tenure_days is computed against
+            # db.chicago_today(), and UTC rolls to tomorrow at ~7 PM CT.
+            (datetime.strptime(db.chicago_today(), "%Y-%m-%d").date() - timedelta(days=3)).isoformat(),
             conn=conn,
         )
         db.create_leader_action_recommendation(
