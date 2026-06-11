@@ -1347,9 +1347,19 @@ def test_member_join_welcome_context_gives_elixir_profile_facts():
     with patch("runtime.signals.delivery.db.get_member_profile", return_value={
         "player_tag": "#ABC",
         "member_name": "King Levy",
+        "cr_account_age_years": 7,
         "cr_clan_war_wins": 421,
         "cr_battle_wins": 6400,
         "cr_collection_level": 1597,
+        "cr_collection_level_badge_tier": 8,
+        "cr_collection_level_badge_max_tier": 10,
+        "cr_banner_count": 44,
+        "cr_emote_count": 88,
+        "current_favourite_card_name": "Archer Queen",
+        "card_collection_summary": {
+            "maxed_cards_count": 23,
+            "highest_level": 16,
+        },
         "trophies": 6000,
     }):
         context = _member_join_welcome_context("Signal context", {
@@ -1361,10 +1371,19 @@ def test_member_join_welcome_context_gives_elixir_profile_facts():
     assert "Arena-relay new-member welcome task:" in context
     assert "Name: King Levy" in context
     assert "Player tag: #ABC" in context
-    assert "Clan war wins: 421" in context
-    assert "Battle wins: 6,400" in context
+    assert "Years played/account age: 7 years" in context
+    assert "Max-level cards: 23" in context
     assert "Collection Level: 1,597" in context
-    assert "Current trophies: 6,000" in context
+    assert "Collection Level badge tier: 8/10" in context
+    assert "Favorite card: Archer Queen" in context
+    assert "Highest card level: 16" in context
+    assert "Banner collection: 44" in context
+    assert "Emote collection: 88" in context
+    assert "Fallback only - clan war wins: 421" in context
+    assert "Fallback only - battle wins: 6,400" in context
+    assert "Fallback only - current trophies: 6,000" in context
+    assert "Include `POAP KINGS` exactly" in context
+    assert "Prefer years played/account age" in context
     assert "under 120 characters" in context
     assert "real leader typing in Clash Royale clan chat" in context
     assert "Do not mention war state" in context
@@ -1382,12 +1401,46 @@ def test_generated_welcome_relay_result_rejects_copy_without_member_name():
     assert result is None
 
 
+def test_generated_welcome_relay_result_rejects_copy_without_poap_kings():
+    from runtime.signals.delivery import _build_generated_welcome_relay_result
+
+    result = _build_generated_welcome_relay_result(
+        [{"type": "member_join", "tag": "#ABC", "name": "King Levy"}],
+        {"content": "Welcome King Levy! 7 years played and 23 max cards is a cool profile."},
+    )
+
+    assert result is None
+
+
+def test_generated_welcome_relay_result_rejects_copy_without_profile_detail_when_available():
+    from runtime.signals.delivery import _build_generated_welcome_relay_result
+
+    result = _build_generated_welcome_relay_result(
+        [{"type": "member_join", "tag": "#ABC", "name": "King Levy"}],
+        {"content": "Welcome to POAP KINGS, King Levy! Glad to have you here."},
+        profile_facts=[
+            "- Name: King Levy",
+            "- Player tag: #ABC",
+            "- Years played/account age: 7 years",
+            "- Max-level cards: 23",
+        ],
+    )
+
+    assert result is None
+
+
 def test_generated_welcome_relay_result_clips_to_clan_chat_length():
     from runtime.signals.delivery import ARENA_RELAY_WELCOME_MAX_COPY_CHARS, _build_generated_welcome_relay_result
 
     result = _build_generated_welcome_relay_result(
         [{"type": "member_join", "tag": "#ABC", "name": "King Levy"}],
-        {"content": "Welcome King Levy! 421 war wins is a strong river start for POAP KINGS. Glad to have you here with the crew."},
+        {"content": "Welcome to POAP KINGS, King Levy! 7 years played and 23 max cards is a cool profile."},
+        profile_facts=[
+            "- Name: King Levy",
+            "- Player tag: #ABC",
+            "- Years played/account age: 7 years",
+            "- Max-level cards: 23",
+        ],
     )
 
     assert result is not None
@@ -1414,7 +1467,7 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
     channel.name = "arena-relay"
     channel.type = "text"
 
-    authored_copy = "Welcome King Levy! 421 war wins is strong. Glad you're with POAP KINGS."
+    authored_copy = "Welcome to POAP KINGS, King Levy! 7 years played and 23 max cards is a cool profile."
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
@@ -1434,6 +1487,8 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
         patch("runtime.signals.delivery.db.get_member_profile", return_value={
             "player_tag": "#ABC",
             "member_name": "King Levy",
+            "cr_account_age_years": 7,
+            "card_collection_summary": {"maxed_cards_count": 23},
             "cr_clan_war_wins": 421,
             "cr_battle_wins": 6400,
             "cr_collection_level": 1597,
@@ -1473,7 +1528,9 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
         assert asyncio.run(elixir._deliver_signal_group(signals, clan, war))
 
     mock_generate.assert_called_once()
-    assert "Clan war wins: 421" in mock_generate.call_args.args[2]
+    assert "Years played/account age: 7 years" in mock_generate.call_args.args[2]
+    assert "Max-level cards: 23" in mock_generate.call_args.args[2]
+    assert "Include `POAP KINGS` exactly" in mock_generate.call_args.args[2]
     assert mock_generate.call_args.kwargs["memory_context"]["durable_memories"][0]["summary"] == "Use short native clan-chat welcomes."
     mock_create.assert_called_once()
     assert mock_create.call_args.kwargs["action_type"] == "welcome_relay"
@@ -1516,7 +1573,7 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
     channel.name = "arena-relay"
     channel.type = "text"
 
-    authored_copy = "Welcome King Levy! 421 war wins is strong. Glad you're with POAP KINGS."
+    authored_copy = "Welcome to POAP KINGS, King Levy! Collection Level 1,597 already stands out."
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
@@ -1538,6 +1595,7 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
         patch("runtime.signals.delivery.db.get_member_profile", return_value={
             "player_tag": "#ABC",
             "member_name": "King Levy",
+            "cr_collection_level": 1597,
             "cr_clan_war_wins": 421,
         }),
         patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
@@ -1569,7 +1627,9 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
 
     mock_generate.assert_called_once()
     mock_policy.assert_not_called()
-    assert "Clan war wins: 421" in mock_generate.call_args.args[2]
+    assert "Collection Level: 1,597" in mock_generate.call_args.args[2]
+    assert "Fallback only - clan war wins: 421" in mock_generate.call_args.args[2]
+    assert "Include `POAP KINGS` exactly" in mock_generate.call_args.args[2]
     mock_card.assert_awaited_once()
     assert mock_card.await_args.args[1]["action_id"] == 44
     assert mock_card.await_args.kwargs["copy_messages"] == [authored_copy]
@@ -1729,10 +1789,10 @@ def test_war_nudge_candidates_only_on_battle_days():
         "phase_display": "Battle Day 1",
         "time_left_text": "3h 10m",
         "used_none": [
-            {"tag": "#AAA", "name": "Aaqib"},
-            {"tag": "#BBB", "name": "Bada"},
-            {"tag": "#CCC", "name": "Cora"},
-            {"tag": "#DDD", "name": "Dez"},
+            {"tag": "#AAA", "name": "Aaqib", "role": "member"},
+            {"tag": "#BBB", "name": "Bada", "role": "member"},
+            {"tag": "#CCC", "name": "Cora", "role": "member"},
+            {"tag": "#DDD", "name": "Dez", "role": "member"},
         ],
     }):
         candidates = _war_nudge_candidates(limit=3)
@@ -1745,6 +1805,34 @@ def test_war_nudge_candidates_only_on_battle_days():
         "used_none": [{"tag": "#AAA", "name": "Aaqib"}],
     }):
         assert _war_nudge_candidates() == []
+
+
+def test_war_nudge_candidates_skip_leaders_and_coleaders():
+    from runtime.signals.delivery import _war_nudge_candidates
+
+    roles = {
+        "#KING": {"role": "leader"},
+        "#RAQ": {"role": "coLeader"},
+        "#ELDER": {"role": "elder"},
+        "#MEMBER": {"role": "member"},
+    }
+    with (
+        patch("runtime.signals.delivery.db.get_current_war_day_state", return_value={
+            "phase": "battle",
+            "war_day_key": "s001-w01-p004",
+            "phase_display": "Battle Day 1",
+            "used_none": [
+                {"tag": "#KING", "name": "King Thing"},
+                {"tag": "#RAQ", "name": "Raquaza"},
+                {"tag": "#ELDER", "name": "Ollie"},
+                {"tag": "#MEMBER", "name": "Aaqib"},
+            ],
+        }),
+        patch("runtime.signals.delivery.db.get_member_profile", side_effect=lambda tag: roles[tag]),
+    ):
+        candidates = _war_nudge_candidates(limit=3)
+
+    assert [item["name"] for item in candidates] == ["Ollie", "Aaqib"]
 
 
 def test_leader_action_card_uses_categorical_action_icon():
