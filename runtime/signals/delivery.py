@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 import db
@@ -188,6 +189,11 @@ def _profile_number(value) -> int | None:
     return value if isinstance(value, int) and value > 0 else None
 
 
+def _is_leader_role(role: str | None) -> bool:
+    clean = "".join(ch for ch in str(role or "").lower() if ch.isalnum())
+    return clean in {"leader", "coleader"}
+
+
 def _member_join_profile(signal: dict) -> dict:
     tag = signal.get("tag") or signal.get("player_tag")
     if tag:
@@ -208,39 +214,76 @@ def _member_join_profile_facts(signal: dict) -> list[str]:
     if tag:
         facts.append(f"- Player tag: {tag}")
 
-    war_wins = _profile_number(profile.get("cr_clan_war_wins"))
-    if war_wins:
-        facts.append(f"- Clan war wins: {war_wins:,}")
+    age_years = _profile_number(profile.get("cr_account_age_years"))
+    if age_years:
+        facts.append(f"- Years played/account age: {age_years} years")
 
-    battle_wins = _profile_number(profile.get("cr_battle_wins"))
-    if battle_wins:
-        facts.append(f"- Battle wins: {battle_wins:,}")
+    collection_summary = profile.get("card_collection_summary") or {}
+    maxed_cards = _profile_number(collection_summary.get("maxed_cards_count"))
+    if maxed_cards:
+        facts.append(f"- Max-level cards: {maxed_cards:,}")
 
     collection_level = _profile_number(profile.get("cr_collection_level"))
     if collection_level:
         facts.append(f"- Collection Level: {collection_level:,}")
 
+    badge_tier = _profile_number(profile.get("cr_collection_level_badge_tier"))
+    badge_max = _profile_number(profile.get("cr_collection_level_badge_max_tier"))
+    if badge_tier and badge_max:
+        facts.append(f"- Collection Level badge tier: {badge_tier}/{badge_max}")
+
+    favorite_card = str(profile.get("current_favourite_card_name") or "").strip()
+    if favorite_card:
+        facts.append(f"- Favorite card: {favorite_card}")
+
+    highest_card_level = _profile_number(collection_summary.get("highest_level"))
+    if highest_card_level:
+        facts.append(f"- Highest card level: {highest_card_level}")
+
+    challenge_max = _profile_number(profile.get("challenge_max_wins"))
+    if challenge_max:
+        facts.append(f"- Best challenge run: {challenge_max} wins")
+
+    banner_count = _profile_number(profile.get("cr_banner_count"))
+    if banner_count:
+        facts.append(f"- Banner collection: {banner_count:,}")
+
+    emote_count = _profile_number(profile.get("cr_emote_count"))
+    if emote_count:
+        facts.append(f"- Emote collection: {emote_count:,}")
+
+    war_wins = _profile_number(profile.get("cr_clan_war_wins"))
+    if war_wins:
+        facts.append(f"- Fallback only - clan war wins: {war_wins:,}")
+
+    battle_wins = _profile_number(profile.get("cr_battle_wins"))
+    if battle_wins:
+        facts.append(f"- Fallback only - battle wins: {battle_wins:,}")
+
     trophies = _profile_number(profile.get("trophies") or profile.get("current_trophies"))
     if trophies:
-        facts.append(f"- Current trophies: {trophies:,}")
+        facts.append(f"- Fallback only - current trophies: {trophies:,}")
 
     best_trophies = _profile_number(profile.get("best_trophies"))
     if best_trophies:
-        facts.append(f"- Best trophies: {best_trophies:,}")
+        facts.append(f"- Fallback only - best trophies: {best_trophies:,}")
 
     return facts
 
 
-def _member_join_welcome_context(base_context: str | None, signal: dict) -> str:
-    facts = _member_join_profile_facts(signal)
+def _member_join_welcome_context(base_context: str | None, signal: dict, profile_facts: list[str] | None = None) -> str:
+    facts = profile_facts if profile_facts is not None else _member_join_profile_facts(signal)
     fact_block = "\n".join(facts) if facts else "- No profile facts available beyond the join signal."
     instructions = (
         "Arena-relay new-member welcome task:\n"
         f"{fact_block}\n"
         "- Author one short Clash Royale clan-chat welcome a leader can copy/paste.\n"
         "- Include the member name exactly as provided when available.\n"
+        "- Include `POAP KINGS` exactly in the copy/paste message.\n"
         "- Sound like a real leader typing in Clash Royale clan chat, not a polished announcement.\n"
-        "- Use one grounded profile fact when facts are available, but keep it casual.\n"
+        "- Use one or two distinctive profile facts when available. Prefer years played/account age, Collection Level, max-level cards, Collection Level badge tier, favorite card, challenge best, banner count, or emote count.\n"
+        "- Use plain win counts or trophies only as fallback facts when nothing more distinctive is available.\n"
+        "- Make the player feel like POAP KINGS noticed something specific about their profile.\n"
         "- Do not mention war state, boat defenses, Discord, onboarding, instructions, or what the player should do next.\n"
         "- Avoid corporate/promo phrases like 'serious battle experience', 'bring that energy', or 'we are looking for'.\n"
         "- Do not invent achievements, personality, role, Discord status, or future behavior.\n"
@@ -253,7 +296,37 @@ def _member_join_welcome_context(base_context: str | None, signal: dict) -> str:
     return instructions
 
 
-def _build_generated_welcome_relay_result(signals: list[dict], generated: dict | None) -> dict | None:
+def _welcome_profile_fact_markers(profile_facts: list[str] | None) -> list[str]:
+    markers = []
+    for fact in profile_facts or []:
+        text = str(fact or "").strip()
+        if not text or text.startswith("- Name:") or text.startswith("- Player tag:"):
+            continue
+        for value in re.findall(r"\d[\d,]*", text):
+            marker = value.replace(",", "")
+            if marker and marker not in markers:
+                markers.append(marker)
+        if "Favorite card:" in text:
+            card = text.split("Favorite card:", 1)[1].strip().lower()
+            if card and card not in markers:
+                markers.append(card)
+    return markers
+
+
+def _welcome_copy_mentions_profile_fact(copy: str, profile_facts: list[str] | None) -> bool:
+    markers = _welcome_profile_fact_markers(profile_facts)
+    if not markers:
+        return True
+    clean_copy = copy.lower().replace(",", "")
+    return any(marker in clean_copy for marker in markers)
+
+
+def _build_generated_welcome_relay_result(
+    signals: list[dict],
+    generated: dict | None,
+    *,
+    profile_facts: list[str] | None = None,
+) -> dict | None:
     primary = (signals or [{}])[0] or {}
     name = str(primary.get("name") or "new member").strip() or "new member"
     tag = primary.get("tag") or primary.get("player_tag")
@@ -265,7 +338,11 @@ def _build_generated_welcome_relay_result(signals: list[dict], generated: dict |
     copy_lower = copy.lower()
     if "http://" in copy_lower or "https://" in copy_lower:
         return None
+    if "poap kings" not in copy_lower:
+        return None
     if name != "new member" and name.lower() not in copy_lower:
+        return None
+    if not _welcome_copy_mentions_profile_fact(copy, profile_facts):
         return None
     reason = "A profile-specific welcome helps new members feel seen in the in-game chat."
     card = (
@@ -656,6 +733,8 @@ def _war_nudge_candidates(limit: int = ARENA_RELAY_MAX_NUDGE_ACTIONS) -> list[di
         tag = member.get("tag") or member.get("player_tag")
         if not tag:
             continue
+        if _war_nudge_target_is_leader(member, tag):
+            continue
         candidates.append({
             "tag": tag,
             "name": _leader_action_member_name(member),
@@ -668,6 +747,16 @@ def _war_nudge_candidates(limit: int = ARENA_RELAY_MAX_NUDGE_ACTIONS) -> list[di
         if len(candidates) >= limit:
             break
     return candidates
+
+
+def _war_nudge_target_is_leader(member: dict, tag: str) -> bool:
+    if member.get("role") is not None:
+        return _is_leader_role(member.get("role"))
+    try:
+        profile = db.get_member_profile(tag) or {}
+    except Exception:
+        return False
+    return _is_leader_role(profile.get("role"))
 
 
 def _parse_recorded_at(value: str | None) -> datetime | None:
@@ -901,6 +990,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 )
                 result = _build_generated_discord_invite_relay_result(delivery_signals, generated)
             elif outcome.get("intent") == "welcome_relay" and member_join_signals:
+                welcome_profile_facts = await asyncio.to_thread(_member_join_profile_facts, member_join_signals[0])
                 action_memory_context = _memory_context_with_leader_action_feedback(
                     memory_context,
                     await asyncio.to_thread(
@@ -913,12 +1003,16 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     elixir_agent.generate_channel_update,
                     channel_config["name"],
                     channel_config["subagent_key"],
-                    _member_join_welcome_context(context, member_join_signals[0]),
+                    _member_join_welcome_context(context, member_join_signals[0], profile_facts=welcome_profile_facts),
                     recent_posts=recent_posts,
                     memory_context=action_memory_context,
                     leadership=(channel_config["memory_scope"] == "leadership"),
                 )
-                result = _build_generated_welcome_relay_result(member_join_signals, generated)
+                result = _build_generated_welcome_relay_result(
+                    member_join_signals,
+                    generated,
+                    profile_facts=welcome_profile_facts,
+                )
             else:
                 result = _build_arena_relay_result(delivery_signals)
             if result is not None:
