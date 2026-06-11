@@ -49,10 +49,11 @@ def test_registry_model_selection_matches_existing_defaults(monkeypatch):
     assert elixir_agent._model_for_workflow("interactive") == "light-model"
     assert elixir_agent._model_for_workflow("site_promote_content") == "promotion-model"
     assert elixir_agent._model_for_workflow("intel_report") == "chat-model"
+    assert elixir_agent._model_for_workflow("leader_action_feedback") == "chat-model"
     assert elixir_agent._model_for_workflow("memory_synthesis") == "chat-model"
     assert elixir_agent._model_for_workflow("observe") == "light-model"
 
 
 def test_empty_toolsets_stay_empty():
-    for workflow in ("reception", "war_recap", "season_awards", "memory_synthesis"):
+    for workflow in ("reception", "war_recap", "season_awards", "memory_synthesis", "leader_action_feedback"):
         assert elixir_agent.TOOLSETS_BY_WORKFLOW[workflow] == []

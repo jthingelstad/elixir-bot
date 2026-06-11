@@ -435,6 +435,7 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
             "action_type": "in_game_relay",
             "status": "done",
         }) as mock_decide,
+        patch("runtime.prompt_feedback.queue_leader_action_feedback_refresh") as mock_feedback_refresh,
     ):
         asyncio.run(elixir.on_raw_reaction_add(payload))
 
@@ -444,6 +445,7 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
         discord_user_id=123,
         emoji="✅",
     )
+    mock_feedback_refresh.assert_called_once_with("in_game_relay")
 
 
 def test_arena_relay_reply_records_action_note():
@@ -470,8 +472,12 @@ def test_arena_relay_reply_records_action_note():
             "memory_scope": "leadership",
         }),
         patch("runtime.channel_router.db.upsert_discord_user"),
-        patch("runtime.channel_router.db.record_leader_action_note_by_message", return_value={"action_id": 1}) as mock_note,
+        patch("runtime.channel_router.db.record_leader_action_note_by_message", return_value={
+            "action_id": 1,
+            "action_type": "in_game_relay",
+        }) as mock_note,
         patch("runtime.channel_router.db.save_message") as mock_save,
+        patch("runtime.channel_router.queue_leader_action_feedback_refresh") as mock_feedback_refresh,
     ):
         asyncio.run(elixir.on_message(message))
 
@@ -481,6 +487,7 @@ def test_arena_relay_reply_records_action_note():
         discord_user_id=123,
         note_message_id=555,
     )
+    mock_feedback_refresh.assert_called_once_with("in_game_relay")
     assert mock_save.call_args.kwargs["event_type"] == "leader_action_note"
     message.add_reaction.assert_awaited_once_with("✅")
     mock_process.assert_not_awaited()

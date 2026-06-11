@@ -1053,12 +1053,39 @@ def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
         patch("agent.core._get_client", return_value=mock_client),
         patch("elixir_agent.runtime_status.record_llm_call"),
     ):
-        for workflow in ("weekly_digest", "tournament_recap", "intel_report", "memory_synthesis"):
+        for workflow in ("weekly_digest", "tournament_recap", "intel_report", "memory_synthesis", "leader_action_feedback"):
             elixir_agent._create_chat_completion(
                 workflow=workflow,
                 messages=[{"role": "user", "content": "status"}],
             )
             assert create.call_args.kwargs["model"] == "claude-sonnet-4-6", workflow
+
+
+def test_synthesize_leader_action_feedback_uses_strict_profile_schema():
+    captured = {}
+
+    def fake_chat_with_tools(system_prompt, user_message, **kwargs):
+        captured["system_prompt"] = system_prompt
+        captured["user_message"] = user_message
+        captured["kwargs"] = kwargs
+        return {
+            "action_type": "welcome_relay",
+            "sample_count": 1,
+            "summary": "Keep welcomes short.",
+            "guidance": ["Use native clan-chat phrasing."],
+            "evidence": [{"action_id": 12, "lesson": "Leader shortened the welcome."}],
+        }
+
+    with patch("elixir_agent._chat_with_tools", side_effect=fake_chat_with_tools):
+        result = elixir_agent.synthesize_leader_action_feedback({
+            "action_type": "welcome_relay",
+            "recent_actions": [{"action_id": 12, "decision_note": "shortened"}],
+        })
+
+    assert result["summary"] == "Keep welcomes short."
+    assert "recent #arena-relay leader feedback" in captured["user_message"]
+    assert captured["kwargs"]["workflow"] == "leader_action_feedback"
+    assert captured["kwargs"]["strict_json"] is True
 
 
 def test_generate_tournament_recap_uses_agent_loop_with_cr_api():

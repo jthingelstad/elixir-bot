@@ -25,6 +25,7 @@ ACTION_OUTCOME_DELAY_HOURS = {
     "kick_recommendation": 24,
     "demotion_recommendation": 24,
 }
+LEADER_ACTION_FEEDBACK_EVENT_TYPE = "leader_action_feedback_profile"
 
 
 def _json_loads(value) -> dict:
@@ -428,6 +429,192 @@ def list_leader_actions(
     return [_row_to_action(row) for row in rows]
 
 
+def _compact_action_for_feedback(action: dict) -> dict:
+    outcome = action.get("outcome") or {}
+    return {
+        "action_id": action.get("action_id"),
+        "action_type": action.get("action_type"),
+        "objective": action.get("objective"),
+        "status": action.get("status"),
+        "target_player_tag": action.get("target_player_tag"),
+        "target_player_name": action.get("target_player_name"),
+        "prompt_text": action.get("prompt_text"),
+        "rationale": action.get("rationale"),
+        "decision_emoji": action.get("decision_emoji"),
+        "decision_note": action.get("decision_note"),
+        "decision_note_at": action.get("decision_note_at"),
+        "proposed_at": action.get("proposed_at"),
+        "decided_at": action.get("decided_at"),
+        "expires_at": action.get("expires_at"),
+        "outcome": outcome if outcome else None,
+    }
+
+
+@managed_connection
+def build_leader_action_feedback_synthesis_context(
+    *,
+    action_type: str | None = None,
+    limit: int = 50,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    clean_type = (action_type or "").strip() or None
+    where = [
+        "(status != ? OR decision_note IS NOT NULL OR outcome_json IS NOT NULL)",
+    ]
+    params: list = [ACTION_PROPOSED]
+    if clean_type:
+        where.append("action_type = ?")
+        params.append(clean_type)
+    rows = conn.execute(
+        f"SELECT * FROM leader_action_recommendations WHERE {' AND '.join(where)} "
+        "ORDER BY COALESCE(decision_note_at, decided_at, proposed_at) DESC, action_id DESC LIMIT ?",
+        (*params, max(1, min(int(limit or 50), 100))),
+    ).fetchall()
+    actions = [_compact_action_for_feedback(_row_to_action(row)) for row in rows]
+    counts = {
+        "total": len(actions),
+        ACTION_DONE: sum(1 for item in actions if item.get("status") == ACTION_DONE),
+        ACTION_REJECTED: sum(1 for item in actions if item.get("status") == ACTION_REJECTED),
+        "with_notes": sum(1 for item in actions if item.get("decision_note")),
+    }
+    types = sorted({item.get("action_type") for item in actions if item.get("action_type")})
+    return {
+        "action_type": clean_type or "all",
+        "counts": counts,
+        "action_types_seen": types,
+        "recent_actions": actions,
+    }
+
+
+def _feedback_event_id(action_type: str | None) -> str:
+    clean = (action_type or "all").strip() or "all"
+    return f"leader_action_feedback:{clean}"
+
+
+def _profile_summary(profile: dict) -> str:
+    summary = " ".join(str(profile.get("summary") or "").split())
+    if len(summary) <= 220:
+        return summary
+    return summary[:217].rstrip() + "..."
+
+
+def _profile_body(profile: dict) -> str:
+    lines = []
+    summary = " ".join(str(profile.get("summary") or "").split())
+    if summary:
+        lines.append(summary)
+    guidance = [str(item).strip() for item in profile.get("guidance") or [] if str(item).strip()]
+    if guidance:
+        lines.append("Guidance:")
+        lines.extend(f"- {item}" for item in guidance[:8])
+    avoid = [str(item).strip() for item in profile.get("avoid") or [] if str(item).strip()]
+    if avoid:
+        lines.append("Avoid:")
+        lines.extend(f"- {item}" for item in avoid[:5])
+    try_next = [str(item).strip() for item in profile.get("try_next") or [] if str(item).strip()]
+    if try_next:
+        lines.append("Try next:")
+        lines.extend(f"- {item}" for item in try_next[:5])
+    evidence = profile.get("evidence") or []
+    evidence_lines = []
+    for item in evidence[:6]:
+        if not isinstance(item, dict):
+            continue
+        lesson = " ".join(str(item.get("lesson") or "").split())
+        if not lesson:
+            continue
+        action_id = item.get("action_id")
+        prefix = f"R{action_id}: " if action_id is not None else ""
+        evidence_lines.append(f"- {prefix}{lesson}")
+    if evidence_lines:
+        lines.append("Evidence:")
+        lines.extend(evidence_lines)
+    return "\n".join(lines).strip()
+
+
+@managed_connection
+def upsert_leader_action_feedback_profile(
+    *,
+    action_type: str,
+    profile: dict,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict | None:
+    if not isinstance(profile, dict) or profile.get("_error"):
+        return None
+    clean_type = (action_type or profile.get("action_type") or "all").strip() or "all"
+    body = _profile_body(profile)
+    if not body:
+        return None
+    title = f"Arena Relay Feedback: {clean_type}"
+    event_id = _feedback_event_id(clean_type)
+    metadata = {
+        "action_type": clean_type,
+        "sample_count": profile.get("sample_count"),
+        "profile": profile,
+    }
+    from memory_store import attach_tags, create_memory, list_memories, update_memory
+
+    existing = list_memories(
+        viewer_scope="system_internal",
+        include_system_internal=True,
+        filters={"event_type": LEADER_ACTION_FEEDBACK_EVENT_TYPE, "event_id": event_id},
+        limit=1,
+        conn=conn,
+    )
+    if existing:
+        memory = update_memory(
+            existing[0]["memory_id"],
+            actor="elixir:leader-action-feedback",
+            title=title,
+            body=body,
+            summary=_profile_summary(profile),
+            metadata=metadata,
+            conn=conn,
+        )
+    else:
+        memory = create_memory(
+            title=title,
+            body=body,
+            summary=_profile_summary(profile),
+            source_type="elixir_synthesis",
+            is_inference=False,
+            confidence=1.0,
+            created_by="elixir:leader-action-feedback",
+            scope="leadership",
+            event_type=LEADER_ACTION_FEEDBACK_EVENT_TYPE,
+            event_id=event_id,
+            metadata=metadata,
+            conn=conn,
+        )
+    attach_tags(
+        memory["memory_id"],
+        ["arena-relay", "leader-action-feedback", clean_type],
+        actor="elixir:leader-action-feedback",
+        conn=conn,
+    )
+    return memory
+
+
+@managed_connection
+def list_leader_action_feedback_profiles(
+    *,
+    action_type: str | None = None,
+    limit: int = 5,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    from memory_store import list_memories
+
+    filters = {"event_type": LEADER_ACTION_FEEDBACK_EVENT_TYPE}
+    if action_type:
+        filters["event_id"] = _feedback_event_id(action_type)
+    return list_memories(
+        viewer_scope="leadership",
+        filters=filters,
+        limit=max(1, min(int(limit or 5), 10)),
+        conn=conn,
+    )
+
+
 @managed_connection
 def get_recent_leader_action_for_target(
     *,
@@ -660,6 +847,8 @@ __all__ = [
     "ACTION_DONE",
     "ACTION_PROPOSED",
     "ACTION_REJECTED",
+    "LEADER_ACTION_FEEDBACK_EVENT_TYPE",
+    "build_leader_action_feedback_synthesis_context",
     "build_leader_action_baseline",
     "clear_leader_action_decision_by_message",
     "create_leader_action_recommendation",
@@ -668,10 +857,12 @@ __all__ = [
     "get_leader_action_by_message",
     "get_recent_leader_action_for_target",
     "has_recent_leader_action",
+    "list_leader_action_feedback_profiles",
     "list_leader_actions",
     "record_leader_action_note_by_message",
     "refresh_due_leader_action_outcomes",
     "refresh_leader_action_outcome",
     "update_leader_action_message",
     "update_leader_action_copy_message",
+    "upsert_leader_action_feedback_profile",
 ]

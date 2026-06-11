@@ -24,6 +24,7 @@ from agent.prompts import (
     _home_message_system,
     _intel_report_system,
     _interactive_system,
+    _leader_action_feedback_system,
     _members_message_system,
     _memory_synthesis_system,
     _observe_system,
@@ -384,6 +385,27 @@ def run_memory_synthesis(context: dict):
         strict_json=True,
         return_errors=True,
         max_tokens=3000,
+    )
+
+
+def synthesize_leader_action_feedback(context: dict):
+    """Synthesize leader action reactions/notes into future arena-relay guidance."""
+    public_context = {k: v for k, v in (context or {}).items() if not k.startswith("_")}
+    user_msg = (
+        "Here is recent #arena-relay leader feedback. Synthesize what Elixir should learn "
+        "for future cards of this action type. Focus on authoring choices, timing thresholds, "
+        "decision standards, and follow-up expectations.\n\n"
+        f"```json\n{json.dumps(public_context, indent=2, default=str)}\n```\n"
+    )
+    return _chat_with_tools(
+        _leader_action_feedback_system(),
+        user_msg,
+        workflow="leader_action_feedback",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["leader_action_feedback"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["leader_action_feedback"],
+        strict_json=True,
+        return_errors=True,
+        max_tokens=1200,
     )
 
 

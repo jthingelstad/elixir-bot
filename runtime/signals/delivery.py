@@ -50,6 +50,24 @@ CELEBRATION_RELAY_SIGNAL_TYPES = {
 DISCORD_INVITE_ROUTE = "POAPKINGS . COM > Members"
 
 
+def _memory_context_with_leader_action_feedback(memory_context: dict | None, profiles: list[dict] | None) -> dict | None:
+    profiles = profiles or []
+    if not profiles:
+        return memory_context
+    merged = dict(memory_context or {})
+    durable = list(merged.get("durable_memories") or [])
+    existing_ids = {item.get("memory_id") for item in durable if isinstance(item, dict)}
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        memory_id = profile.get("memory_id")
+        if memory_id is not None and memory_id in existing_ids:
+            continue
+        durable.append(profile)
+    merged["durable_memories"] = durable
+    return merged
+
+
 def _clip_relay_copy(text: str, limit: int = ARENA_RELAY_MAX_COPY_CHARS) -> str:
     body = " ".join((text or "").split())
     if len(body) <= limit:
@@ -846,24 +864,40 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     )
                     return True
             if arena_types == {"discord_invite_reminder"}:
+                action_memory_context = _memory_context_with_leader_action_feedback(
+                    memory_context,
+                    await asyncio.to_thread(
+                        db.list_leader_action_feedback_profiles,
+                        action_type="discord_invite_relay",
+                        limit=1,
+                    ),
+                )
                 generated = await asyncio.to_thread(
                     elixir_agent.generate_channel_update,
                     channel_config["name"],
                     channel_config["subagent_key"],
                     _discord_invite_relay_context(context),
                     recent_posts=recent_posts,
-                    memory_context=memory_context,
+                    memory_context=action_memory_context,
                     leadership=(channel_config["memory_scope"] == "leadership"),
                 )
                 result = _build_generated_discord_invite_relay_result(delivery_signals, generated)
             elif outcome.get("intent") == "welcome_relay" and member_join_signals:
+                action_memory_context = _memory_context_with_leader_action_feedback(
+                    memory_context,
+                    await asyncio.to_thread(
+                        db.list_leader_action_feedback_profiles,
+                        action_type="welcome_relay",
+                        limit=1,
+                    ),
+                )
                 generated = await asyncio.to_thread(
                     elixir_agent.generate_channel_update,
                     channel_config["name"],
                     channel_config["subagent_key"],
                     _member_join_welcome_context(context, member_join_signals[0]),
                     recent_posts=recent_posts,
-                    memory_context=memory_context,
+                    memory_context=action_memory_context,
                     leadership=(channel_config["memory_scope"] == "leadership"),
                 )
                 result = _build_generated_welcome_relay_result(member_join_signals, generated)

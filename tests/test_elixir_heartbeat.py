@@ -1439,7 +1439,13 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
             "cr_collection_level": 1597,
             "trophies": 6000,
         }),
-        patch("runtime.signals.delivery.build_subagent_memory_context", return_value=""),
+        patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
+        patch("elixir.db.list_leader_action_feedback_profiles", return_value=[{
+            "memory_id": 900,
+            "scope": "leadership",
+            "summary": "Use short native clan-chat welcomes.",
+            "body": "Use short native clan-chat welcomes.",
+        }]),
         patch("runtime.signals.delivery.can_post_leader_action", return_value=(True, None)),
         patch("elixir.elixir_agent.generate_channel_update", return_value={
             "event_type": "channel_update",
@@ -1468,6 +1474,7 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
 
     mock_generate.assert_called_once()
     assert "Clan war wins: 421" in mock_generate.call_args.args[2]
+    assert mock_generate.call_args.kwargs["memory_context"]["durable_memories"][0]["summary"] == "Use short native clan-chat welcomes."
     mock_create.assert_called_once()
     assert mock_create.call_args.kwargs["action_type"] == "welcome_relay"
     assert mock_create.call_args.kwargs["prompt_text"] == authored_copy
@@ -1533,7 +1540,8 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
             "member_name": "King Levy",
             "cr_clan_war_wins": 421,
         }),
-        patch("runtime.signals.delivery.build_subagent_memory_context", return_value=""),
+        patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
+        patch("elixir.db.list_leader_action_feedback_profiles", return_value=[]),
         patch("runtime.signals.delivery.can_post_leader_action", return_value=(False, "daily_cap:4")) as mock_policy,
         patch("elixir.elixir_agent.generate_channel_update", return_value={
             "event_type": "channel_update",
@@ -1657,7 +1665,8 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
             {"name": f"Member {index}", "in_discord": index <= 17}
             for index in range(1, 51)
         ]),
-        patch("runtime.signals.delivery.build_subagent_memory_context", return_value=""),
+        patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
+        patch("elixir.db.list_leader_action_feedback_profiles", return_value=[]),
         patch("runtime.signals.delivery.can_post_leader_action", return_value=(True, None)),
         patch("elixir.elixir_agent.generate_channel_update", return_value={
             "event_type": "channel_update",

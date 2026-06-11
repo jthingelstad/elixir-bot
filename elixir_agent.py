@@ -59,6 +59,7 @@ from agent.workflows import (
     respond_to_help_request,
     run_awareness_tick,
     run_memory_synthesis,
+    synthesize_leader_action_feedback,
 )
 
 __all__ = [
@@ -100,4 +101,5 @@ __all__ = [
     "run_awareness_tick",
     "run_memory_synthesis",
     "runtime_status",
+    "synthesize_leader_action_feedback",
 ]
