@@ -231,6 +231,48 @@ def register_elixir_app_commands(bot) -> None:
             event_type=COMMAND_SPECS["relay.status"].event_type,
         )
 
+    from runtime.leader_action_ui import leader_action_spec, leader_action_type_choices
+
+    LEADER_ACTION_TYPE_CHOICES = [
+        app_commands.Choice(name=leader_action_spec(action_type).label, value=action_type)
+        for action_type in leader_action_type_choices()
+    ]
+
+    @relay_commands.command(name="test-card", description=COMMAND_SPECS["relay.test-card"].description)
+    @app_commands.describe(action_type="Real leader action type to render.", target_name="Optional display name for member-specific cards.")
+    @app_commands.choices(action_type=LEADER_ACTION_TYPE_CHOICES)
+    async def slash_relay_test_card(
+        interaction: discord.Interaction,
+        action_type: str,
+        target_name: str | None = None,
+    ):
+        if not await validate_admin_interaction(interaction, command_name="relay.test-card", write=True):
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            target_config = app.prompts.discord_singleton_subagent("arena-relay")
+            channel = app.bot.get_channel(target_config["id"])
+        except Exception as exc:
+            app.log.warning("relay test card failed: arena-relay unavailable: %s", exc, exc_info=True)
+            await send_interaction_text(interaction, "Arena relay channel is not configured.", use_followup=True)
+            return
+        if channel is None:
+            await send_interaction_text(interaction, "Arena relay channel was not found.", use_followup=True)
+            return
+        from runtime.leader_action_ui import post_test_leader_action_card
+
+        try:
+            action = await post_test_leader_action_card(channel, action_type=action_type, target_name=target_name)
+        except Exception as exc:
+            app.log.warning("relay test card post failed: %s", exc, exc_info=True)
+            await send_interaction_text(interaction, f"Failed to post test card: {exc}", use_followup=True)
+            return
+        await send_interaction_text(
+            interaction,
+            f"Posted test {action_type} card as R{action.get('action_id')} in #arena-relay.",
+            use_followup=True,
+        )
+
     @member_commands.command(name="verify-discord", description=COMMAND_SPECS["member.verify-discord"].description)
     @app_commands.describe(member="Member name or tag.")
     @app_commands.autocomplete(member=member_autocomplete)

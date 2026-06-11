@@ -44,7 +44,7 @@ def count_actions_today(*, conn=None, now: datetime | None = None) -> int:
     try:
         row = conn.execute(
             "SELECT COUNT(*) AS cnt FROM leader_action_recommendations "
-            "WHERE proposed_at >= ? AND proposed_at < ?",
+            "WHERE proposed_at >= ? AND proposed_at < ? AND COALESCE(is_test, 0) = 0",
             (start, end),
         ).fetchone()
         return int(row["cnt"] if row else 0)

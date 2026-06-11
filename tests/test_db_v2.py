@@ -118,6 +118,70 @@ def test_leader_action_recommendation_records_reaction_decision():
         conn.close()
 
 
+def test_leader_action_defer_is_terminal_with_suppression_window():
+    conn = db.get_connection(":memory:")
+    try:
+        action = db.create_leader_action_recommendation(
+            action_type="kick_recommendation",
+            objective="roster_health",
+            prompt_text="Review Vijay for removal.",
+            rationale="inactive",
+            source_message_id=777,
+            conn=conn,
+        )
+
+        deferred = db.decide_leader_action_by_message(
+            777,
+            status=db.ACTION_DEFERRED,
+            discord_user_id=123,
+            emoji="⏳",
+            defer_days=3,
+            decision_note="Deferred for 3 days.",
+            decided_at="2026-06-11T12:00:00",
+            conn=conn,
+        )
+
+        assert deferred["action_id"] == action["action_id"]
+        assert deferred["status"] == db.ACTION_DEFERRED
+        assert deferred["defer_days"] == 3
+        assert deferred["deferred_until"] == "2026-06-14T12:00:00"
+        assert deferred["expires_at"] == deferred["deferred_until"]
+        assert deferred["decision_note"] == "Deferred for 3 days."
+    finally:
+        conn.close()
+
+
+def test_leader_action_copy_sequence_lookup_and_edit_diff():
+    conn = db.get_connection(":memory:")
+    try:
+        action = db.create_leader_action_recommendation(
+            action_type="discord_invite_relay",
+            objective="discord_recruiting",
+            prompt_text="Invite the clan to Discord.",
+            copy_original_text="Message one\nMessage two",
+            copy_current_text="Message one\nMessage two",
+            source_message_id=100,
+            conn=conn,
+        )
+        db.update_leader_action_copy_messages(action["action_id"], copy_message_ids=[101, 102], conn=conn)
+
+        lookup = db.get_leader_action_by_message(102, conn=conn)
+        assert lookup["action_id"] == action["action_id"]
+        assert lookup["copy_message_ids"] == ["101", "102"]
+
+        edited = db.update_leader_action_copy_text(
+            action["action_id"],
+            copy_text="Message one edited\nMessage two",
+            discord_user_id=456,
+            conn=conn,
+        )
+        assert edited["copy_current_text"] == "Message one edited\nMessage two"
+        assert edited["copy_edited_by_discord_user_id"] == "456"
+        assert edited["copy_edit_diff"]["changed"] is True
+    finally:
+        conn.close()
+
+
 def test_leader_action_feedback_profile_persists_as_elixir_synthesis_memory():
     conn = db.get_connection(":memory:")
     try:

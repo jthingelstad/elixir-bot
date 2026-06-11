@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import db
 import elixir_agent
 from runtime.leader_action_policy import can_post_leader_action
+from runtime.leader_action_ui import LEADER_ACTION_UI_VERSION, post_leader_action_card
 from runtime.channel_subagents import (
     SEASON_AWARDS_SIGNAL_TYPES,
     build_subagent_memory_context,
@@ -597,6 +598,22 @@ def _attach_leader_action_to_result(result: dict, action: dict) -> dict:
     return result
 
 
+def _leader_action_copy_messages_from_result(result: dict, metadata: dict | None = None) -> list[str]:
+    metadata = metadata or {}
+    relay_copy = metadata.get("relay_copy")
+    if isinstance(relay_copy, list):
+        return [str(item).strip() for item in relay_copy if str(item).strip()]
+    if isinstance(relay_copy, str) and relay_copy.strip():
+        return [relay_copy.strip()]
+    content = result.get("content")
+    if isinstance(content, list) and len(content) > 1:
+        return [str(item).strip() for item in content[1:] if str(item).strip()]
+    copy_text = metadata.get("relay_copy_text")
+    if isinstance(copy_text, str) and copy_text.strip():
+        return [line.strip() for line in copy_text.splitlines() if line.strip()]
+    return []
+
+
 def _leader_action_member_name(member: dict) -> str:
     return (
         member.get("member_ref")
@@ -816,6 +833,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
     if len(delivery_signals) == 1 and delivery_signals[0].get("signal_key"):
         preauthored_result = facade._preauthored_system_signal_result(delivery_signals[0])
 
+    arena_leader_action = None
     try:
         channel_name = getattr(channel, "name", None)
         if not isinstance(channel_name, str):
@@ -924,8 +942,12 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     target_player_name=metadata.get("target_player_name"),
                     source_signal_key=outcome["source_signal_key"],
                     source_signal_type=outcome["source_signal_type"],
+                    copy_original_text=metadata.get("relay_copy_text"),
+                    copy_current_text=metadata.get("relay_copy_text"),
+                    ui_version=LEADER_ACTION_UI_VERSION,
                     baseline=baseline,
                 )
+                arena_leader_action = action
                 result = _attach_leader_action_to_result(result, action)
         elif preauthored_result is not None:
             result = preauthored_result
@@ -1007,11 +1029,23 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             return True
 
         posts = app._entry_posts(result)
-        sent_messages = await facade._post_to_elixir(channel, result)
+        metadata = result.get("metadata") if isinstance(result, dict) else {}
+        sent_messages = []
+        if channel_config["subagent_key"] == "arena-relay" and isinstance(metadata, dict) and metadata.get("leader_action_id"):
+            action = arena_leader_action or await asyncio.to_thread(db.get_leader_action_by_id, metadata.get("leader_action_id"))
+            if action:
+                sent_messages = await post_leader_action_card(
+                    channel,
+                    action,
+                    copy_messages=_leader_action_copy_messages_from_result(result, metadata),
+                )
+            else:
+                sent_messages = await facade._post_to_elixir(channel, result)
+        else:
+            sent_messages = await facade._post_to_elixir(channel, result)
         if not isinstance(sent_messages, list):
             sent_messages = []
         if channel_config["subagent_key"] == "arena-relay":
-            metadata = result.get("metadata") if isinstance(result, dict) else {}
             action_id = metadata.get("leader_action_id") if isinstance(metadata, dict) else None
             first_message = sent_messages[0] if sent_messages else None
             first_message_id = getattr(first_message, "id", None)
@@ -1230,6 +1264,7 @@ async def _deliver_war_nudge_sidecars(signals) -> int:
             target_player_name=name,
             source_signal_key=f"war_nudge:{candidate.get('war_day_key') or 'unknown'}:{tag}",
             source_signal_type="war_nudge_recommendation",
+            ui_version=LEADER_ACTION_UI_VERSION,
             baseline=baseline,
         )
         if not action or action.get("source_message_id"):
@@ -1240,17 +1275,11 @@ async def _deliver_war_nudge_sidecars(signals) -> int:
             prompt_text=prompt_text,
             rationale=rationale,
         )
-        sent_messages = await app._post_to_elixir(channel, {"content": content})
+        sent_messages = await post_leader_action_card(channel, action, copy_messages=[])
         if not isinstance(sent_messages, list):
             sent_messages = []
         first_message = sent_messages[0] if sent_messages else None
         first_message_id = getattr(first_message, "id", None)
-        if first_message_id is not None:
-            await asyncio.to_thread(
-                db.update_leader_action_message,
-                action["action_id"],
-                source_message_id=first_message_id,
-            )
         await asyncio.to_thread(
             db.save_message,
             _channel_scope(channel),

@@ -416,6 +416,11 @@ async def on_ready():
             await restore_daily_view(bot)
         except Exception as exc:
             log.warning("Daily quiz view restore failed: %s", exc)
+        try:
+            from runtime.leader_action_ui import restore_leader_action_views
+            await restore_leader_action_views(bot)
+        except Exception as exc:
+            log.warning("Leader action view restore failed: %s", exc)
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 

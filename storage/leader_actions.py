@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -13,6 +14,7 @@ from db import managed_connection
 
 
 ACTION_DONE = "done"
+ACTION_DEFERRED = "deferred"
 ACTION_PROPOSED = "proposed"
 ACTION_REJECTED = "rejected"
 ACTION_OUTCOME_DELAY_HOURS = {
@@ -38,6 +40,16 @@ def _json_loads(value) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _json_loads_list(value) -> list:
+    if not value:
+        return []
+    try:
+        data = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
 def _json_dumps(data) -> str | None:
     if data is None:
         return None
@@ -48,6 +60,9 @@ def _row_to_action(row) -> dict:
     item = dict(row)
     item["baseline"] = _json_loads(item.pop("baseline_json", None))
     item["outcome"] = _json_loads(item.pop("outcome_json", None))
+    item["copy_message_ids"] = _json_loads_list(item.pop("copy_message_ids_json", None))
+    item["copy_edit_diff"] = _json_loads(item.pop("copy_edit_diff_json", None))
+    item["is_test"] = bool(item.get("is_test"))
     return item
 
 
@@ -294,9 +309,13 @@ def create_leader_action_recommendation(
     source_signal_key: str | None = None,
     source_signal_type: str | None = None,
     source_message_id: str | int | None = None,
+    copy_original_text: str | None = None,
+    copy_current_text: str | None = None,
     baseline: dict | None = None,
     expires_at: str | None = None,
     action_key: str | None = None,
+    is_test: bool = False,
+    ui_version: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
     action_type = (action_type or "").strip()
@@ -318,14 +337,19 @@ def create_leader_action_recommendation(
             action_key, action_type, objective, status, target_channel_key, target_channel_id,
             target_player_tag, target_player_name, source_signal_key, source_signal_type,
             source_message_id, prompt_text, rationale, baseline_json, proposed_at,
-            expires_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            expires_at, copy_original_text, copy_current_text, is_test, ui_version,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(action_key) DO UPDATE SET
             target_channel_key = excluded.target_channel_key,
             target_channel_id = excluded.target_channel_id,
             source_message_id = COALESCE(excluded.source_message_id, leader_action_recommendations.source_message_id),
             rationale = excluded.rationale,
             baseline_json = COALESCE(leader_action_recommendations.baseline_json, excluded.baseline_json),
+            copy_original_text = COALESCE(leader_action_recommendations.copy_original_text, excluded.copy_original_text),
+            copy_current_text = COALESCE(leader_action_recommendations.copy_current_text, excluded.copy_current_text),
+            is_test = excluded.is_test,
+            ui_version = COALESCE(excluded.ui_version, leader_action_recommendations.ui_version),
             expires_at = excluded.expires_at,
             updated_at = excluded.updated_at
         """,
@@ -346,6 +370,10 @@ def create_leader_action_recommendation(
             _json_dumps(baseline),
             now,
             expires_at,
+            (copy_original_text or "").strip() or None,
+            (copy_current_text or copy_original_text or "").strip() or None,
+            1 if is_test else 0,
+            (ui_version or "").strip() or None,
             now,
             now,
         ),
@@ -387,6 +415,101 @@ def update_leader_action_copy_message(
 
 
 @managed_connection
+def update_leader_action_copy_messages(
+    action_id: int,
+    *,
+    copy_message_ids: list[str | int] | tuple[str | int, ...] | None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    ids = [str(item) for item in (copy_message_ids or []) if item is not None]
+    if not action_id or not ids:
+        return
+    conn.execute(
+        """
+        UPDATE leader_action_recommendations
+        SET copy_message_id = ?, copy_message_ids_json = ?, updated_at = ?
+        WHERE action_id = ?
+        """,
+        (ids[0], _json_dumps(ids), _db._utcnow(), int(action_id)),
+    )
+    conn.commit()
+
+
+def _copy_diff(original: str, edited: str) -> dict:
+    old = original or ""
+    new = edited or ""
+    matcher = SequenceMatcher(None, old, new)
+    changed = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        changed.append({
+            "op": tag,
+            "old": old[i1:i2],
+            "new": new[j1:j2],
+        })
+    return {
+        "changed": old != new,
+        "similarity": round(matcher.ratio(), 4),
+        "ops": changed[:20],
+    }
+
+
+@managed_connection
+def update_leader_action_copy_text(
+    action_id: int,
+    *,
+    copy_text: str,
+    discord_user_id: str | int,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    row = conn.execute(
+        "SELECT * FROM leader_action_recommendations WHERE action_id = ?",
+        (int(action_id),),
+    ).fetchone()
+    if not row:
+        return None
+    action = _row_to_action(row)
+    clean = "\n".join(line.strip() for line in str(copy_text or "").splitlines()).strip()
+    original = action.get("copy_original_text") or action.get("copy_current_text") or action.get("prompt_text") or ""
+    now = _db._utcnow()
+    conn.execute(
+        """
+        UPDATE leader_action_recommendations
+        SET copy_original_text = COALESCE(copy_original_text, ?),
+            copy_current_text = ?, copy_edited_at = ?,
+            copy_edited_by_discord_user_id = ?, copy_edit_diff_json = ?,
+            updated_at = ?
+        WHERE action_id = ?
+        """,
+        (
+            original,
+            clean,
+            now,
+            str(discord_user_id),
+            _json_dumps(_copy_diff(original, clean)),
+            now,
+            int(action_id),
+        ),
+    )
+    conn.commit()
+    return get_leader_action_by_id(action_id, conn=conn)
+
+
+@managed_connection
+def get_leader_action_by_id(
+    action_id: int,
+    *,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    row = conn.execute(
+        "SELECT * FROM leader_action_recommendations WHERE action_id = ?",
+        (int(action_id),),
+    ).fetchone()
+    return _row_to_action(row) if row else None
+
+
+@managed_connection
 def get_leader_action_by_key(action_key: str, *, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
         "SELECT * FROM leader_action_recommendations WHERE action_key = ?",
@@ -401,11 +524,12 @@ def get_leader_action_by_message(
     *,
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
+    message_id = str(source_message_id)
     row = conn.execute(
         "SELECT * FROM leader_action_recommendations "
-        "WHERE source_message_id = ? OR copy_message_id = ? "
+        "WHERE source_message_id = ? OR copy_message_id = ? OR copy_message_ids_json LIKE ? "
         "ORDER BY action_id DESC LIMIT 1",
-        (str(source_message_id), str(source_message_id)),
+        (message_id, message_id, f'%"{message_id}"%'),
     ).fetchone()
     return _row_to_action(row) if row else None
 
@@ -443,6 +567,12 @@ def _compact_action_for_feedback(action: dict) -> dict:
         "decision_emoji": action.get("decision_emoji"),
         "decision_note": action.get("decision_note"),
         "decision_note_at": action.get("decision_note_at"),
+        "defer_days": action.get("defer_days"),
+        "deferred_until": action.get("deferred_until"),
+        "copy_original_text": action.get("copy_original_text"),
+        "copy_current_text": action.get("copy_current_text"),
+        "copy_edit_diff": action.get("copy_edit_diff"),
+        "is_test": action.get("is_test"),
         "proposed_at": action.get("proposed_at"),
         "decided_at": action.get("decided_at"),
         "expires_at": action.get("expires_at"),
@@ -460,6 +590,7 @@ def build_leader_action_feedback_synthesis_context(
     clean_type = (action_type or "").strip() or None
     where = [
         "(status != ? OR decision_note IS NOT NULL OR outcome_json IS NOT NULL)",
+        "COALESCE(is_test, 0) = 0",
     ]
     params: list = [ACTION_PROPOSED]
     if clean_type:
@@ -474,6 +605,7 @@ def build_leader_action_feedback_synthesis_context(
     counts = {
         "total": len(actions),
         ACTION_DONE: sum(1 for item in actions if item.get("status") == ACTION_DONE),
+        ACTION_DEFERRED: sum(1 for item in actions if item.get("status") == ACTION_DEFERRED),
         ACTION_REJECTED: sum(1 for item in actions if item.get("status") == ACTION_REJECTED),
         "with_notes": sum(1 for item in actions if item.get("decision_note")),
     }
@@ -624,7 +756,7 @@ def get_recent_leader_action_for_target(
     within_hours: int = 168,
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
-    where = ["action_type = ?", "target_player_tag = ?", "proposed_at >= ?"]
+    where = ["action_type = ?", "target_player_tag = ?", "proposed_at >= ?", "COALESCE(is_test, 0) = 0"]
     params: list = [
         (action_type or "").strip(),
         _db._canon_tag(target_player_tag),
@@ -653,6 +785,7 @@ def has_recent_leader_action(
     now = _db._utcnow()
     where = [
         "action_type = ?",
+        "COALESCE(is_test, 0) = 0",
         "((expires_at IS NOT NULL AND expires_at > ?) OR (expires_at IS NULL AND proposed_at >= ?))",
     ]
     params: list = [(action_type or "").strip(), now, _cutoff_hours_ago(within_hours)]
@@ -676,39 +809,91 @@ def decide_leader_action_by_message(
     status: str,
     discord_user_id: str | int,
     emoji: str,
+    decision_note: str | None = None,
+    defer_days: int | None = None,
     decided_at: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
     action = get_leader_action_by_message(source_message_id, conn=conn)
     if not action:
         return None
+    return decide_leader_action(
+        action["action_id"],
+        status=status,
+        discord_user_id=discord_user_id,
+        emoji=emoji,
+        decision_note=decision_note,
+        defer_days=defer_days,
+        decided_at=decided_at,
+        conn=conn,
+    )
+
+
+@managed_connection
+def decide_leader_action(
+    action_id: int,
+    *,
+    status: str,
+    discord_user_id: str | int,
+    emoji: str | None = None,
+    decision_note: str | None = None,
+    defer_days: int | None = None,
+    decided_at: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    action = get_leader_action_by_id(action_id, conn=conn)
+    if not action:
+        return None
     status = (status or "").strip()
-    if status not in {ACTION_DONE, ACTION_REJECTED}:
+    if status not in {ACTION_DONE, ACTION_DEFERRED, ACTION_REJECTED}:
         raise ValueError(f"invalid leader action status: {status}")
     stamp = decided_at or _db._utcnow()
     outcome = None
     if status == ACTION_DONE:
         action["status"] = status
         outcome = _pending_outcome(action, decided_at=stamp)
+    clean_note = " ".join((decision_note or "").split()) or None
+    deferred_until = None
+    clean_defer_days = None
+    expires_at = action.get("expires_at")
+    if status == ACTION_DEFERRED:
+        try:
+            clean_defer_days = max(1, min(int(defer_days or 1), 30))
+        except (TypeError, ValueError):
+            clean_defer_days = 1
+        parsed = _parse_utc(stamp) or datetime.now(timezone.utc).replace(tzinfo=None)
+        deferred_until = (parsed + timedelta(days=clean_defer_days)).strftime("%Y-%m-%dT%H:%M:%S")
+        expires_at = deferred_until
     conn.execute(
         """
         UPDATE leader_action_recommendations
         SET status = ?, decided_at = ?, decided_by_discord_user_id = ?,
-            decision_emoji = ?, outcome_json = ?, updated_at = ?
+            decision_emoji = ?, decision_note = COALESCE(?, decision_note),
+            decision_note_at = CASE WHEN ? IS NOT NULL THEN ? ELSE decision_note_at END,
+            decision_note_by_discord_user_id = CASE WHEN ? IS NOT NULL THEN ? ELSE decision_note_by_discord_user_id END,
+            defer_days = ?, deferred_until = ?, expires_at = ?, outcome_json = ?, updated_at = ?
         WHERE action_id = ?
         """,
         (
             status,
             stamp,
             str(discord_user_id),
-            emoji,
+            emoji or "",
+            clean_note,
+            clean_note,
+            stamp,
+            clean_note,
+            str(discord_user_id),
+            clean_defer_days,
+            deferred_until,
+            expires_at,
             _json_dumps(outcome),
             stamp,
             action["action_id"],
         ),
     )
     conn.commit()
-    return get_leader_action_by_message(source_message_id, conn=conn)
+    return get_leader_action_by_id(action["action_id"], conn=conn)
 
 
 @managed_connection
@@ -731,7 +916,8 @@ def clear_leader_action_decision_by_message(
         """
         UPDATE leader_action_recommendations
         SET status = ?, decided_at = NULL, decided_by_discord_user_id = NULL,
-            decision_emoji = NULL, outcome_json = NULL, updated_at = ?
+            decision_emoji = NULL, defer_days = NULL, deferred_until = NULL,
+            outcome_json = NULL, updated_at = ?
         WHERE action_id = ?
         """,
         (ACTION_PROPOSED, now, action["action_id"]),
@@ -844,6 +1030,7 @@ def refresh_due_leader_action_outcomes(
 
 __all__ = [
     "ACTION_OUTCOME_DELAY_HOURS",
+    "ACTION_DEFERRED",
     "ACTION_DONE",
     "ACTION_PROPOSED",
     "ACTION_REJECTED",
@@ -852,7 +1039,9 @@ __all__ = [
     "build_leader_action_baseline",
     "clear_leader_action_decision_by_message",
     "create_leader_action_recommendation",
+    "decide_leader_action",
     "decide_leader_action_by_message",
+    "get_leader_action_by_id",
     "get_leader_action_by_key",
     "get_leader_action_by_message",
     "get_recent_leader_action_for_target",
@@ -862,7 +1051,9 @@ __all__ = [
     "record_leader_action_note_by_message",
     "refresh_due_leader_action_outcomes",
     "refresh_leader_action_outcome",
+    "update_leader_action_copy_messages",
     "update_leader_action_message",
     "update_leader_action_copy_message",
+    "update_leader_action_copy_text",
     "upsert_leader_action_feedback_profile",
 ]
