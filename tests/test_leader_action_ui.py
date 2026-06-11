@@ -1,9 +1,21 @@
 """Tests for arena-relay leader action Discord UI composition."""
 
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import discord
 
 import db
-from runtime.leader_action_ui import LeaderActionView, build_leader_action_embed, leader_action_view_for
+from runtime import leader_action_ui
+from runtime.leader_action_ui import (
+    CopyEditModal,
+    DecisionReasonModal,
+    LeaderActionView,
+    NoteModal,
+    build_leader_action_embed,
+    leader_action_view_for,
+)
 
 
 def _action(action_type: str, **overrides):
@@ -80,3 +92,31 @@ def test_embed_marks_test_cards_explicitly():
 
     assert embed.title.startswith("TEST R12")
     assert "test card" in embed.footer.text
+
+
+def test_text_inputs_use_paragraph_style():
+    copy_modal = CopyEditModal(_action("welcome_relay"), ["Short Clash copy."])
+    decline_modal = DecisionReasonModal(_action("kick_recommendation"))
+    note_modal = NoteModal(_action("in_game_relay"))
+
+    assert copy_modal.inputs[0].style == discord.TextStyle.paragraph
+    assert decline_modal.reason.style == discord.TextStyle.paragraph
+    assert note_modal.note.style == discord.TextStyle.paragraph
+
+
+def test_card_update_removes_view_without_sending_confirmation():
+    interaction = SimpleNamespace(
+        response=SimpleNamespace(
+            is_done=lambda: False,
+            edit_message=AsyncMock(),
+            defer=AsyncMock(),
+        ),
+    )
+    action = _action("promotion_recommendation", status=db.ACTION_DONE)
+
+    asyncio.run(leader_action_ui._apply_card_update(interaction, action))
+
+    interaction.response.edit_message.assert_awaited_once()
+    kwargs = interaction.response.edit_message.await_args.kwargs
+    assert kwargs["view"] is None
+    interaction.response.defer.assert_not_awaited()

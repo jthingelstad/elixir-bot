@@ -268,6 +268,31 @@ async def _refresh_card_message(interaction: discord.Interaction, action: dict) 
         log.warning("leader action card refresh failed action_id=%s", action.get("action_id"), exc_info=True)
 
 
+async def _apply_card_update(interaction: discord.Interaction, action: dict) -> None:
+    embed = build_leader_action_embed(action)
+    view = leader_action_view_for(action)
+    if not interaction.response.is_done():
+        try:
+            await interaction.response.edit_message(embed=embed, view=view)
+            return
+        except Exception:
+            log.warning(
+                "leader action interaction edit failed action_id=%s",
+                action.get("action_id"),
+                exc_info=True,
+            )
+    await _refresh_card_message(interaction, action)
+    if not interaction.response.is_done():
+        try:
+            await interaction.response.defer(ephemeral=True, thinking=False)
+        except Exception:
+            log.warning(
+                "leader action silent ack failed action_id=%s",
+                action.get("action_id"),
+                exc_info=True,
+            )
+
+
 async def _edit_copy_messages(interaction: discord.Interaction, action: dict, copies: list[str]) -> None:
     ids = [str(item) for item in (action.get("copy_message_ids") or []) if item]
     if not ids and action.get("copy_message_id"):
@@ -306,7 +331,7 @@ class CopyEditModal(discord.ui.Modal):
         for index, copy in enumerate((copies or [""])[:5], 1):
             item = discord.ui.TextInput(
                 label=f"Clash message {index}",
-                style=discord.TextStyle.short,
+                style=discord.TextStyle.paragraph,
                 default=copy[:CLASH_COPY_MAX_LENGTH],
                 max_length=CLASH_COPY_MAX_LENGTH,
                 required=True,
@@ -322,7 +347,6 @@ class CopyEditModal(discord.ui.Modal):
         if not copies:
             await _send_ephemeral(interaction, "No copy text submitted.")
             return
-        await interaction.response.defer(ephemeral=True)
         action = await asyncio.to_thread(
             db.update_leader_action_copy_text,
             self.action_id,
@@ -330,13 +354,12 @@ class CopyEditModal(discord.ui.Modal):
             discord_user_id=interaction.user.id,
         )
         if not action:
-            await interaction.followup.send("Action not found.", ephemeral=True)
+            await _send_ephemeral(interaction, "Action not found.")
             return
         await _edit_copy_messages(interaction, action, copies)
         action = await asyncio.to_thread(db.get_leader_action_by_id, self.action_id) or action
-        await _refresh_card_message(interaction, action)
         queue_leader_action_feedback_refresh(action.get("action_type"))
-        await interaction.followup.send(f"Updated copy for R{self.action_id}.", ephemeral=True)
+        await _apply_card_update(interaction, action)
 
 
 class DecisionReasonModal(discord.ui.Modal):
@@ -345,7 +368,7 @@ class DecisionReasonModal(discord.ui.Modal):
         self.action_id = int(action["action_id"])
         self.reason = discord.ui.TextInput(
             label="Reason",
-            style=discord.TextStyle.short,
+            style=discord.TextStyle.paragraph,
             max_length=240,
             required=False,
             placeholder="Optional. Example: already handled, not the right call, wait for war reset.",
@@ -368,8 +391,7 @@ class DecisionReasonModal(discord.ui.Modal):
             await _send_ephemeral(interaction, "Action not found.")
             return
         queue_leader_action_feedback_refresh(action.get("action_type"))
-        await _refresh_card_message(interaction, action)
-        await _send_ephemeral(interaction, f"R{self.action_id} declined.")
+        await _apply_card_update(interaction, action)
 
 
 class NoteModal(discord.ui.Modal):
@@ -378,7 +400,7 @@ class NoteModal(discord.ui.Modal):
         self.action_id = int(action["action_id"])
         self.note = discord.ui.TextInput(
             label="Leader note",
-            style=discord.TextStyle.short,
+            style=discord.TextStyle.paragraph,
             max_length=300,
             required=True,
             placeholder="Example: boat defenses already full.",
@@ -406,8 +428,7 @@ class NoteModal(discord.ui.Modal):
             await _send_ephemeral(interaction, "Action not found.")
             return
         queue_leader_action_feedback_refresh(updated.get("action_type"))
-        await _refresh_card_message(interaction, updated)
-        await _send_ephemeral(interaction, f"Noted on R{self.action_id}.")
+        await _apply_card_update(interaction, updated)
 
 
 class LeaderActionButton(discord.ui.Button):
@@ -439,8 +460,7 @@ class LeaderActionButton(discord.ui.Button):
                 emoji="✅",
             )
             queue_leader_action_feedback_refresh(action.get("action_type"))
-            await _refresh_card_message(interaction, updated or action)
-            await _send_ephemeral(interaction, f"R{self.action_id} marked done.")
+            await _apply_card_update(interaction, updated or action)
             return
         if self.kind == "decline":
             await interaction.response.send_modal(DecisionReasonModal(action))
@@ -512,8 +532,7 @@ class DeferSelect(discord.ui.Select):
             await _send_ephemeral(interaction, "Action not found.")
             return
         queue_leader_action_feedback_refresh(action.get("action_type"))
-        await _refresh_card_message(interaction, action)
-        await _send_ephemeral(interaction, f"R{self.action_id} deferred for {days} day{'s' if days != 1 else ''}.")
+        await _apply_card_update(interaction, action)
 
 
 class LeaderActionView(discord.ui.View):
