@@ -1759,7 +1759,29 @@ def _migration_40(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40]
+def _migration_41(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "leader_action_recommendations")
+    for name, sql_type in (
+        ("copy_message_ids_json", "TEXT"),
+        ("copy_original_text", "TEXT"),
+        ("copy_current_text", "TEXT"),
+        ("copy_edited_at", "TEXT"),
+        ("copy_edited_by_discord_user_id", "TEXT"),
+        ("copy_edit_diff_json", "TEXT"),
+        ("defer_days", "INTEGER"),
+        ("deferred_until", "TEXT"),
+        ("is_test", "INTEGER NOT NULL DEFAULT 0"),
+        ("ui_version", "TEXT"),
+    ):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE leader_action_recommendations ADD COLUMN {name} {sql_type}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leader_actions_test_status "
+        "ON leader_action_recommendations(is_test, status, proposed_at DESC)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

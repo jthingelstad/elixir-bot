@@ -1459,10 +1459,10 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
             "action_key": "welcome:#ABC",
             "status": "proposed",
         }) as mock_create,
-        patch("elixir._post_to_elixir", new=AsyncMock(return_value=[
+        patch("runtime.signals.delivery.post_leader_action_card", new=AsyncMock(return_value=[
             SimpleNamespace(id=2000),
             SimpleNamespace(id=2001),
-        ])) as mock_post,
+        ])) as mock_card,
         patch("elixir.db.update_leader_action_message") as mock_update_message,
         patch("elixir.db.update_leader_action_copy_message") as mock_update_copy,
         patch("elixir.db.save_message"),
@@ -1480,10 +1480,10 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
     assert mock_create.call_args.kwargs["prompt_text"] == authored_copy
     assert mock_create.call_args.kwargs["target_player_tag"] == "#ABC"
     assert mock_create.call_args.kwargs["target_player_name"] == "King Levy"
-    posted_result = mock_post.await_args.args[1]
-    assert posted_result["content"][0].startswith("**R43 👋 welcome relay**")
-    assert posted_result["content"][1] == authored_copy
-    assert posted_result["metadata"]["authored_by"] == "elixir_agent"
+    mock_card.assert_awaited_once()
+    assert mock_card.await_args.args[0] is channel
+    assert mock_card.await_args.args[1]["action_id"] == 43
+    assert mock_card.await_args.kwargs["copy_messages"] == [authored_copy]
     mock_update_message.assert_called_once_with(43, source_message_id=2000)
     mock_update_copy.assert_called_once_with(43, copy_message_id=2001)
 
@@ -1554,10 +1554,10 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
             "action_key": "welcome:#ABC",
             "status": "proposed",
         }),
-        patch("elixir._post_to_elixir", new=AsyncMock(return_value=[
+        patch("runtime.signals.delivery.post_leader_action_card", new=AsyncMock(return_value=[
             SimpleNamespace(id=3000),
             SimpleNamespace(id=3001),
-        ])) as mock_post,
+        ])) as mock_card,
         patch("elixir.db.update_leader_action_message"),
         patch("elixir.db.update_leader_action_copy_message"),
         patch("elixir.db.save_message"),
@@ -1570,9 +1570,9 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
     mock_generate.assert_called_once()
     mock_policy.assert_not_called()
     assert "Clan war wins: 421" in mock_generate.call_args.args[2]
-    posted_result = mock_post.await_args.args[1]
-    assert posted_result["content"][0].startswith("**R44 👋 welcome relay**")
-    assert posted_result["content"][1] == authored_copy
+    mock_card.assert_awaited_once()
+    assert mock_card.await_args.args[1]["action_id"] == 44
+    assert mock_card.await_args.kwargs["copy_messages"] == [authored_copy]
     assert not any(
         call.kwargs.get("delivery_status") == "skipped"
         and str(call.kwargs.get("error_detail", "")).startswith("arena_relay_cooldown")
@@ -1680,12 +1680,12 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
             "action_key": "discord:2026-W24",
             "status": "proposed",
         }) as mock_create,
-        patch("elixir._post_to_elixir", new=AsyncMock(return_value=[
+        patch("runtime.signals.delivery.post_leader_action_card", new=AsyncMock(return_value=[
             SimpleNamespace(id=1000),
             SimpleNamespace(id=1001),
             SimpleNamespace(id=1002),
             SimpleNamespace(id=1003),
-        ])) as mock_post,
+        ])) as mock_card,
         patch("elixir.db.update_leader_action_message") as mock_update_message,
         patch("elixir.db.update_leader_action_copy_message") as mock_update_copy,
         patch("elixir.db.save_message"),
@@ -1699,11 +1699,9 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
     assert "Discord-linked clan members: 17/50" in mock_generate.call_args.args[2]
     mock_create.assert_called_once()
     assert mock_create.call_args.kwargs["prompt_text"] == "\n".join(authored_messages)
-    posted_result = mock_post.await_args.args[1]
-    assert posted_result["content"][0].startswith("**R42 💬 Discord invite relay**")
-    assert posted_result["content"][1:] == authored_messages
-    assert posted_result["metadata"]["authored_by"] == "elixir_agent"
-    assert posted_result["metadata"]["relay_copy_count"] == 3
+    mock_card.assert_awaited_once()
+    assert mock_card.await_args.args[1]["action_id"] == 42
+    assert mock_card.await_args.kwargs["copy_messages"] == authored_messages
     mock_update_message.assert_called_once_with(42, source_message_id=1000)
     mock_update_copy.assert_called_once_with(42, copy_message_id=1001)
 
@@ -2240,27 +2238,19 @@ def test_weekly_leader_actions_post_to_arena_relay():
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
         patch("runtime.jobs._core.db.create_leader_action_recommendation", side_effect=created) as mock_create,
-        patch("runtime.jobs._core._post_to_elixir", new=AsyncMock(side_effect=[
-            [SimpleNamespace(id=1000)],
-            [SimpleNamespace(id=1001)],
-            [SimpleNamespace(id=2000)],
-            [SimpleNamespace(id=2001)],
-        ])) as mock_post,
-        patch("runtime.jobs._core.db.update_leader_action_message") as mock_update,
-        patch("runtime.jobs._core.db.update_leader_action_copy_message") as mock_update_copy,
+        patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock(side_effect=[
+            [SimpleNamespace(id=1000), SimpleNamespace(id=1001)],
+            [SimpleNamespace(id=2000), SimpleNamespace(id=2001)],
+        ])) as mock_card,
         patch("runtime.jobs._core.db.save_message") as mock_save,
     ):
         posted = asyncio.run(elixir._post_weekly_leader_action_recommendations())
 
     assert posted == 2
     assert mock_create.call_count == 2
-    assert mock_post.await_count == 4
-    assert mock_update.call_count == 2
-    assert mock_update_copy.call_count == 2
-    assert mock_update.call_args_list[0].kwargs["source_message_id"] == 1000
-    assert mock_update_copy.call_args_list[0].kwargs["copy_message_id"] == 1001
-    assert mock_post.await_args_list[1].args[1]["content"].startswith("Promoting King Levy to Elder")
-    assert mock_post.await_args_list[3].args[1]["content"].startswith("Removing Vijay from the clan")
+    assert mock_card.await_count == 2
+    assert mock_card.await_args_list[0].kwargs["copy_messages"][0].startswith("Promoting King Levy to Elder")
+    assert mock_card.await_args_list[1].kwargs["copy_messages"][0].startswith("Removing Vijay from the clan")
     assert mock_save.call_args.kwargs["workflow"] == "arena-relay"
     assert "clan_chat_copy" in mock_save.call_args.kwargs["raw_json"]
 

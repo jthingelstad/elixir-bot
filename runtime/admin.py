@@ -44,6 +44,7 @@ COMMAND_SPECS = {
     "member.clear": AdminCommandSpec("member.clear", ("member", "clear"), "Clear one member field.", leader_only=True, write=True, event_type="member_clear"),
     "memory.show": AdminCommandSpec("memory.show", ("memory", "show"), "Inspect stored conversation and contextual memory.", leader_only=True, event_type="memory_report"),
     "relay.status": AdminCommandSpec("relay.status", ("relay", "status"), "Show leader action recommendations and reaction decisions.", leader_only=True, event_type="relay_status_report"),
+    "relay.test-card": AdminCommandSpec("relay.test-card", ("relay", "test-card"), "Post a test #arena-relay leader action card for a real action type.", leader_only=True, write=True, event_type="relay_test_card"),
     "signal.show": AdminCommandSpec("signal.show", ("signal", "show"), "Show signal routing, recent routed signals, and pending system signals.", event_type="signals_report"),
     "signal.publish-pending": AdminCommandSpec("signal.publish-pending", ("signal", "publish-pending"), "Queue missing startup signals and publish pending system announcements.", leader_only=True, write=True, event_type="signal_publish_pending"),
     "signal.backfill-joins": AdminCommandSpec("signal.backfill-joins", ("signal", "backfill-joins"), "Send belated welcome messages for members who joined without an announcement.", leader_only=True, write=True, event_type="signal_backfill_joins"),
@@ -446,7 +447,7 @@ def _build_relay_status_report(*, view: str = "all", limit: int = 10, conn=None)
         elif view == "decided":
             actions = [
                 action for action in db.list_leader_actions(limit=limit * 3, conn=conn)
-                if action.get("status") in {db.ACTION_DONE, db.ACTION_REJECTED}
+                if action.get("status") in {db.ACTION_DONE, db.ACTION_DEFERRED, db.ACTION_REJECTED}
             ][:limit]
         else:
             actions = db.list_leader_actions(limit=limit, conn=conn)
@@ -461,7 +462,7 @@ def _build_relay_status_report(*, view: str = "all", limit: int = 10, conn=None)
         pending_count = len(db.list_leader_actions(status=db.ACTION_PROPOSED, limit=50, conn=conn))
         lines = ["**Arena Relay Leader Actions**"]
         lines.append(f"- Pending: {pending_count}")
-        lines.append("- Feedback: ✅/☑️ means done, ❌ means rejected")
+        lines.append("- Feedback: ✅/☑️ means done, ❌ means rejected, defer is terminal")
         lines.append("")
         if not refreshed:
             lines.append("_No leader actions recorded yet._")

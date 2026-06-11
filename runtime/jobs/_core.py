@@ -52,6 +52,7 @@ from runtime.app import (
 )
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id, _safe_create_task
 from runtime.leader_action_policy import can_post_leader_action
+from runtime.leader_action_ui import CLASH_COPY_MAX_LENGTH, LEADER_ACTION_UI_VERSION, post_leader_action_card
 from runtime import status as runtime_status
 from runtime.system_signals import queue_startup_system_signals
 from runtime.jobs._signals import (
@@ -695,7 +696,7 @@ ROLE_ACTION_TYPES = {
     "demotion_recommendation",
     "kick_recommendation",
 }
-CLAN_CHAT_ACTION_COPY_LIMIT = 180
+CLAN_CHAT_ACTION_COPY_LIMIT = CLASH_COPY_MAX_LENGTH
 
 
 def _clip_clan_chat_text(text: str, *, limit: int = CLAN_CHAT_ACTION_COPY_LIMIT) -> str:
@@ -805,6 +806,11 @@ async def _post_leader_action_recommendation(
         action_type=action_type,
         target_player_tag=target_player_tag,
     )
+    clan_chat_copy = _leader_action_clan_chat_copy(
+        action_type=action_type,
+        target_player_name=target_player_name,
+        rationale=rationale,
+    )
     action = await asyncio.to_thread(
         db.create_leader_action_recommendation,
         action_type=action_type,
@@ -815,15 +821,13 @@ async def _post_leader_action_recommendation(
         target_channel_id=getattr(channel, "id", None),
         target_player_tag=target_player_tag,
         target_player_name=target_player_name,
+        copy_original_text=clan_chat_copy,
+        copy_current_text=clan_chat_copy,
+        ui_version=LEADER_ACTION_UI_VERSION,
         baseline=baseline,
     )
     if not action or action.get("source_message_id"):
         return False
-    clan_chat_copy = _leader_action_clan_chat_copy(
-        action_type=action_type,
-        target_player_name=target_player_name,
-        rationale=rationale,
-    )
     content = _format_leader_action_card(
         action,
         title=title,
@@ -831,27 +835,12 @@ async def _post_leader_action_recommendation(
         rationale=rationale,
         clan_chat_copy=clan_chat_copy,
     )
-    sent_messages = await _post_to_elixir(channel, {"content": content})
-    if not isinstance(sent_messages, list):
-        sent_messages = []
-    if clan_chat_copy:
-        copy_messages = await _post_to_elixir(channel, {"content": clan_chat_copy})
-        if isinstance(copy_messages, list):
-            sent_messages.extend(copy_messages)
+    sent_messages = await post_leader_action_card(
+        channel,
+        action,
+        copy_messages=[clan_chat_copy] if clan_chat_copy else [],
+    )
     first_message_id = getattr(sent_messages[0], "id", None) if sent_messages else None
-    if first_message_id is not None:
-        await asyncio.to_thread(
-            db.update_leader_action_message,
-            action["action_id"],
-            source_message_id=first_message_id,
-        )
-    copy_message_id = getattr(sent_messages[1], "id", None) if len(sent_messages) > 1 else None
-    if copy_message_id is not None:
-        await asyncio.to_thread(
-            db.update_leader_action_copy_message,
-            action["action_id"],
-            copy_message_id=copy_message_id,
-        )
     stored_content = "\n\n".join([content, clan_chat_copy] if clan_chat_copy else [content])
     raw_json = {
         "leader_action": action,
