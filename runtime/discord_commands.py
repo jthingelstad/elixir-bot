@@ -12,6 +12,13 @@ from runtime.activities import manual_activity_choices
 from runtime.admin import COMMAND_SPECS, admin_command_requires_leader, dispatch_admin_command, render_admin_help
 
 
+def _is_arena_relay_command_channel(app, channel, command_name: str) -> bool:
+    if not str(command_name or "").startswith("relay."):
+        return False
+    channel_config = app._get_channel_behavior(getattr(channel, "id", 0))
+    return bool(channel_config and (channel_config.get("subagent") or "") == "arena-relay")
+
+
 def register_elixir_app_commands(bot) -> None:
     import runtime.app as app
 
@@ -47,7 +54,10 @@ def register_elixir_app_commands(bot) -> None:
         command_name: str,
         write: bool = False,
     ) -> bool:
-        if not app._is_clanops_channel(interaction.channel):
+        if not (
+            app._is_clanops_channel(interaction.channel)
+            or _is_arena_relay_command_channel(app, interaction.channel, command_name)
+        ):
             await send_interaction_text(interaction, "Use `/elixir ...` in `#clanops`.", ephemeral=True)
             return False
         if admin_command_requires_leader(command_name) and not app._has_leader_role(interaction.user):
