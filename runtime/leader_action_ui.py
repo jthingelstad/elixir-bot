@@ -172,6 +172,10 @@ def _status_label(action: dict) -> str:
     return "Open"
 
 
+def action_is_open(action: dict) -> bool:
+    return (action.get("status") or db.ACTION_PROPOSED) == db.ACTION_PROPOSED
+
+
 def _format_target(action: dict) -> str:
     name = action.get("target_player_name")
     tag = action.get("target_player_tag")
@@ -258,7 +262,7 @@ async def _refresh_card_message(interaction: discord.Interaction, action: dict) 
     try:
         await message.edit(
             embed=build_leader_action_embed(action),
-            view=LeaderActionView(action),
+            view=leader_action_view_for(action),
         )
     except Exception:
         log.warning("leader action card refresh failed action_id=%s", action.get("action_id"), exc_info=True)
@@ -516,7 +520,9 @@ class LeaderActionView(discord.ui.View):
     def __init__(self, action: dict):
         super().__init__(timeout=None)
         spec = leader_action_spec(action.get("action_type"))
-        proposed = (action.get("status") or db.ACTION_PROPOSED) == db.ACTION_PROPOSED
+        proposed = action_is_open(action)
+        if not proposed:
+            return
         copies = action_copy_messages(action)
 
         self.add_item(LeaderActionButton(
@@ -586,6 +592,12 @@ class LeaderActionView(discord.ui.View):
         ))
 
 
+def leader_action_view_for(action: dict) -> LeaderActionView | None:
+    if not action_is_open(action):
+        return None
+    return LeaderActionView(action)
+
+
 async def post_leader_action_card(
     channel,
     action: dict,
@@ -595,7 +607,7 @@ async def post_leader_action_card(
     copies = action_copy_messages(action, copy_messages)
     card = await channel.send(
         embed=build_leader_action_embed(action, copy_messages=copies),
-        view=LeaderActionView(action),
+        view=leader_action_view_for(action),
     )
     await asyncio.to_thread(
         db.update_leader_action_message,
@@ -626,7 +638,10 @@ async def restore_leader_action_views(bot: discord.Client, *, limit: int = 50) -
         if not message_id:
             continue
         try:
-            bot.add_view(LeaderActionView(action), message_id=int(message_id))
+            view = leader_action_view_for(action)
+            if view is None:
+                continue
+            bot.add_view(view, message_id=int(message_id))
             restored += 1
         except Exception:
             log.warning("leader action view restore failed action_id=%s", action.get("action_id"), exc_info=True)
@@ -703,11 +718,13 @@ __all__ = [
     "LEADER_ACTION_UI_VERSION",
     "LeaderActionTypeSpec",
     "LeaderActionView",
+    "action_is_open",
     "action_copy_messages",
     "build_leader_action_embed",
     "default_test_copy",
     "default_test_prompt",
     "leader_action_spec",
+    "leader_action_view_for",
     "leader_action_type_choices",
     "post_leader_action_card",
     "post_test_leader_action_card",

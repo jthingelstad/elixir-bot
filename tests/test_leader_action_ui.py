@@ -3,7 +3,7 @@
 import discord
 
 import db
-from runtime.leader_action_ui import LeaderActionView, build_leader_action_embed
+from runtime.leader_action_ui import LeaderActionView, build_leader_action_embed, leader_action_view_for
 
 
 def _action(action_type: str, **overrides):
@@ -68,14 +68,11 @@ def test_role_action_uses_multi_row_decision_copy_defer_and_context_controls():
     assert any(isinstance(child, discord.ui.Select) and child.row == 2 for child in view.children)
 
 
-def test_terminal_action_disables_decisions_but_keeps_note_available():
+def test_terminal_action_has_no_controls():
     view = LeaderActionView(_action("promotion_recommendation", status=db.ACTION_DONE))
-    by_label = {getattr(child, "label", None): child for child in view.children}
 
-    assert by_label["Promoted"].disabled is True
-    assert by_label["Decline"].disabled is True
-    assert by_label["Edit Copy"].disabled is True
-    assert by_label["Add Note"].disabled is False
+    assert view.children == []
+    assert leader_action_view_for(_action("promotion_recommendation", status=db.ACTION_DONE)) is None
 
 
 def test_embed_marks_test_cards_explicitly():
