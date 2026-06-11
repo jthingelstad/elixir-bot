@@ -1767,6 +1767,73 @@ def test_register_elixir_app_commands_includes_relay_status():
     assert relay_group.get_command("status") is not None
 
 
+def test_slash_relay_status_allowed_in_arena_relay():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+    relay_group = root.get_command("relay")
+    status_command = relay_group.get_command("status")
+
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    followup = SimpleNamespace(send=AsyncMock())
+    interaction = SimpleNamespace(
+        channel=SimpleNamespace(id=300, name="arena-relay", type="text"),
+        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
+        response=response,
+        followup=followup,
+        edit_original_response=AsyncMock(),
+    )
+
+    with (
+        patch("runtime.app._is_clanops_channel", return_value=False),
+        patch("runtime.app._get_channel_behavior", return_value={"name": "#arena-relay", "subagent": "arena-relay"}),
+        patch("runtime.app._has_leader_role", return_value=True),
+        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="relay report")) as mock_dispatch,
+    ):
+        asyncio.run(status_command.callback(interaction, view="pending", limit=5))
+
+    mock_dispatch.assert_awaited_once_with(
+        "relay.status",
+        preview=False,
+        short=False,
+        args={"view": "pending", "limit": "5"},
+    )
+    response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.edit_original_response.assert_awaited_once_with(content="relay report")
+    followup.send.assert_not_awaited()
+
+
+def test_slash_non_relay_command_still_rejected_in_arena_relay():
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    root = bot.tree.commands[0]
+    clan_group = root.get_command("clan")
+    war_status_command = clan_group.get_command("war")
+
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    followup = SimpleNamespace(send=AsyncMock())
+    interaction = SimpleNamespace(
+        channel=SimpleNamespace(id=300, name="arena-relay", type="text"),
+        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
+        response=response,
+        followup=followup,
+        edit_original_response=AsyncMock(),
+    )
+
+    with (
+        patch("runtime.app._is_clanops_channel", return_value=False),
+        patch("runtime.app._get_channel_behavior", return_value={"name": "#arena-relay", "subagent": "arena-relay"}),
+        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="war report")) as mock_dispatch,
+    ):
+        asyncio.run(war_status_command.callback(interaction))
+
+    response.send_message.assert_awaited_once_with("Use `/elixir ...` in `#clanops`.", ephemeral=True)
+    response.defer.assert_not_awaited()
+    mock_dispatch.assert_not_awaited()
+    interaction.edit_original_response.assert_not_awaited()
+    followup.send.assert_not_awaited()
+
+
 def test_register_elixir_app_commands_includes_member_audit_discord():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
