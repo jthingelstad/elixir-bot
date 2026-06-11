@@ -2,7 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 import discord
 
@@ -49,34 +49,38 @@ def test_welcome_relay_has_copy_controls_but_no_defer():
     assert "Posted" in labels
     assert "Skip" in labels
     assert "Edit Copy" in labels
-    assert "Profile" in labels
     assert "Add Note" in labels
+    assert "Preview Copy" not in labels
+    assert "Profile" not in labels
+    assert "War Detail" not in labels
     assert not any(isinstance(child, discord.ui.Select) for child in view.children)
 
 
-def test_war_nudge_has_defer_and_detail_controls_without_copy_editor():
+def test_war_nudge_has_defer_without_copy_or_info_controls():
     view = LeaderActionView(_action("war_nudge_recommendation", copy_current_text=None))
     labels = _labels(view)
 
     assert "Nudged" in labels
     assert "Decline" in labels
+    assert "Add Note" in labels
     assert "Edit Copy" not in labels
-    assert "Profile" in labels
-    assert "War Detail" in labels
+    assert "Preview Copy" not in labels
+    assert "Profile" not in labels
+    assert "War Detail" not in labels
     assert any(isinstance(child, discord.ui.Select) for child in view.children)
 
 
-def test_role_action_uses_multi_row_decision_copy_defer_and_context_controls():
+def test_role_action_uses_multi_row_decision_copy_defer_and_note_controls():
     view = LeaderActionView(_action("kick_recommendation"))
     rows = {getattr(child, "label", None): child.row for child in view.children}
 
     assert rows["Kicked"] == 0
     assert rows["Decline"] == 0
     assert rows["Edit Copy"] == 1
-    assert rows["Preview Copy"] == 1
-    assert rows["Profile"] == 3
-    assert rows["War Detail"] == 3
-    assert rows["Add Note"] == 4
+    assert rows["Add Note"] == 3
+    assert "Preview Copy" not in rows
+    assert "Profile" not in rows
+    assert "War Detail" not in rows
     assert any(isinstance(child, discord.ui.Select) and child.row == 2 for child in view.children)
 
 
@@ -120,3 +124,24 @@ def test_card_update_removes_view_without_sending_confirmation():
     kwargs = interaction.response.edit_message.await_args.kwargs
     assert kwargs["view"] is None
     interaction.response.defer.assert_not_awaited()
+
+
+def test_restore_refreshes_open_card_components():
+    action = _action(
+        "kick_recommendation",
+        source_message_id="456",
+        target_channel_id="123",
+    )
+    message = SimpleNamespace(edit=AsyncMock())
+    channel = SimpleNamespace(fetch_message=AsyncMock(return_value=message))
+    bot = SimpleNamespace(get_channel=Mock(return_value=channel), add_view=Mock())
+
+    with patch.object(leader_action_ui.db, "list_leader_actions", return_value=[action]):
+        restored = asyncio.run(leader_action_ui.restore_leader_action_views(bot))
+
+    assert restored == 1
+    bot.add_view.assert_called_once()
+    assert bot.add_view.call_args.kwargs["message_id"] == 456
+    channel.fetch_message.assert_awaited_once_with(456)
+    message.edit.assert_awaited_once()
+    assert isinstance(message.edit.await_args.kwargs["view"], LeaderActionView)

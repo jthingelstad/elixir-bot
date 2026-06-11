@@ -33,8 +33,6 @@ class LeaderActionTypeSpec:
     decline_label: str = "Decline"
     allow_copy_edit: bool = False
     allow_defer: bool = False
-    show_profile: bool = False
-    show_war: bool = False
     copy_field_label: str = "Clash Copy"
 
 
@@ -47,7 +45,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Posted",
         "Skip",
         allow_copy_edit=True,
-        show_profile=True,
     ),
     "discord_invite_relay": LeaderActionTypeSpec(
         "discord_invite_relay",
@@ -69,7 +66,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Skip",
         allow_copy_edit=True,
         allow_defer=True,
-        show_war=True,
     ),
     "war_nudge_recommendation": LeaderActionTypeSpec(
         "war_nudge_recommendation",
@@ -78,8 +74,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         0xE67E22,
         "Nudged",
         allow_defer=True,
-        show_profile=True,
-        show_war=True,
     ),
     "promotion_recommendation": LeaderActionTypeSpec(
         "promotion_recommendation",
@@ -89,8 +83,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Promoted",
         allow_copy_edit=True,
         allow_defer=True,
-        show_profile=True,
-        show_war=True,
     ),
     "demotion_recommendation": LeaderActionTypeSpec(
         "demotion_recommendation",
@@ -100,8 +92,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Demoted",
         allow_copy_edit=True,
         allow_defer=True,
-        show_profile=True,
-        show_war=True,
     ),
     "kick_recommendation": LeaderActionTypeSpec(
         "kick_recommendation",
@@ -111,8 +101,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Kicked",
         allow_copy_edit=True,
         allow_defer=True,
-        show_profile=True,
-        show_war=True,
     ),
     "celebration_relay": LeaderActionTypeSpec(
         "celebration_relay",
@@ -122,7 +110,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Posted",
         "Skip",
         allow_copy_edit=True,
-        show_profile=True,
     ),
 }
 
@@ -182,20 +169,6 @@ def _format_target(action: dict) -> str:
     if name and tag:
         return f"{name} (`{tag}`)"
     return name or (f"`{tag}`" if tag else "Clan")
-
-
-def _baseline_lines(value, *, limit: int = 8) -> list[str]:
-    if not isinstance(value, dict):
-        return []
-    lines = []
-    for key, raw in value.items():
-        if raw in (None, "", [], {}):
-            continue
-        label = str(key).replace("_", " ")
-        lines.append(f"**{label}:** {raw}")
-        if len(lines) >= limit:
-            break
-    return lines
 
 
 def build_leader_action_embed(action: dict, *, copy_messages: list[str] | None = None) -> discord.Embed:
@@ -471,28 +444,8 @@ class LeaderActionButton(discord.ui.Button):
                 copies = _split_copy_messages(action.get("prompt_text"))
             await interaction.response.send_modal(CopyEditModal(action, copies))
             return
-        if self.kind == "preview_copy":
-            copies = action_copy_messages(action)
-            if not copies:
-                await _send_ephemeral(interaction, "No Clash copy is attached to this action.")
-                return
-            text = "\n\n".join(f"```text\n{copy}\n```" for copy in copies)
-            await _send_ephemeral(interaction, text[:1900])
-            return
         if self.kind == "note":
             await interaction.response.send_modal(NoteModal(action))
-            return
-        if self.kind == "profile":
-            baseline = action.get("baseline") or {}
-            lines = _baseline_lines(baseline.get("member"), limit=10)
-            content = "\n".join(lines) if lines else "No stored player snapshot for this action."
-            await _send_ephemeral(interaction, content[:1900])
-            return
-        if self.kind == "war":
-            baseline = action.get("baseline") or {}
-            lines = _baseline_lines(baseline.get("war_day"), limit=10) + _baseline_lines(baseline.get("war_status"), limit=6)
-            content = "\n".join(lines) if lines else "No stored war snapshot for this action."
-            await _send_ephemeral(interaction, content[:1900])
             return
 
 
@@ -572,42 +525,15 @@ class LeaderActionView(discord.ui.View):
                 row=1,
                 disabled=not proposed,
             ))
-            self.add_item(LeaderActionButton(
-                action,
-                kind="preview_copy",
-                label="Preview Copy",
-                emoji="📋",
-                style=discord.ButtonStyle.secondary,
-                row=1,
-            ))
         if spec.allow_defer and proposed:
             self.add_item(DeferSelect(action))
-        detail_row = 3 if spec.allow_defer else 2
-        if spec.show_profile and action.get("target_player_tag"):
-            self.add_item(LeaderActionButton(
-                action,
-                kind="profile",
-                label="Profile",
-                emoji="👤",
-                style=discord.ButtonStyle.secondary,
-                row=detail_row,
-            ))
-        if spec.show_war:
-            self.add_item(LeaderActionButton(
-                action,
-                kind="war",
-                label="War Detail",
-                emoji="⚔️",
-                style=discord.ButtonStyle.secondary,
-                row=detail_row,
-            ))
         self.add_item(LeaderActionButton(
             action,
             kind="note",
             label="Add Note",
             emoji="📝",
             style=discord.ButtonStyle.secondary,
-            row=4,
+            row=3 if spec.allow_defer else 2,
         ))
 
 
@@ -652,6 +578,7 @@ async def post_leader_action_card(
 async def restore_leader_action_views(bot: discord.Client, *, limit: int = 50) -> int:
     actions = await asyncio.to_thread(db.list_leader_actions, status=db.ACTION_PROPOSED, limit=limit)
     restored = 0
+    refreshed = 0
     for action in actions:
         message_id = action.get("source_message_id")
         if not message_id:
@@ -662,11 +589,58 @@ async def restore_leader_action_views(bot: discord.Client, *, limit: int = 50) -
                 continue
             bot.add_view(view, message_id=int(message_id))
             restored += 1
+            if await _refresh_restored_action_card(bot, action, view):
+                refreshed += 1
         except Exception:
             log.warning("leader action view restore failed action_id=%s", action.get("action_id"), exc_info=True)
     if restored:
-        log.info("Restored %s leader action view(s)", restored)
+        log.info("Restored %s leader action view(s); refreshed %s card(s)", restored, refreshed)
     return restored
+
+
+async def _refresh_restored_action_card(bot: discord.Client, action: dict, view: LeaderActionView) -> bool:
+    message_id = action.get("source_message_id")
+    channel_id = action.get("target_channel_id")
+    if not message_id or not channel_id:
+        return False
+    try:
+        channel_id_int = int(channel_id)
+        message_id_int = int(message_id)
+    except (TypeError, ValueError):
+        return False
+
+    channel = None
+    get_channel = getattr(bot, "get_channel", None)
+    if get_channel is not None:
+        channel = get_channel(channel_id_int)
+    if channel is None:
+        fetch_channel = getattr(bot, "fetch_channel", None)
+        if fetch_channel is not None:
+            try:
+                channel = await fetch_channel(channel_id_int)
+            except Exception:
+                log.warning(
+                    "leader action card channel fetch failed action_id=%s channel_id=%s",
+                    action.get("action_id"),
+                    channel_id,
+                    exc_info=True,
+                )
+                return False
+    if channel is None or not hasattr(channel, "fetch_message"):
+        return False
+
+    try:
+        message = await channel.fetch_message(message_id_int)
+        await message.edit(embed=build_leader_action_embed(action), view=view)
+        return True
+    except Exception:
+        log.warning(
+            "leader action card startup refresh failed action_id=%s message_id=%s",
+            action.get("action_id"),
+            message_id,
+            exc_info=True,
+        )
+        return False
 
 
 def default_test_copy(action_type: str) -> list[str]:
