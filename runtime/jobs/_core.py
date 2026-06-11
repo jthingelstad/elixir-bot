@@ -690,7 +690,66 @@ def _leader_action_reason(member: dict, *, promotion: bool) -> str:
     return "risk data says this member needs roster review"
 
 
-def _format_leader_action_card(action: dict, *, title: str, prompt_text: str, rationale: str) -> str:
+ROLE_ACTION_TYPES = {
+    "promotion_recommendation",
+    "demotion_recommendation",
+    "kick_recommendation",
+}
+CLAN_CHAT_ACTION_COPY_LIMIT = 180
+
+
+def _clip_clan_chat_text(text: str, *, limit: int = CLAN_CHAT_ACTION_COPY_LIMIT) -> str:
+    body = " ".join((text or "").split())
+    if len(body) <= limit:
+        return body
+    return body[: max(0, limit - 3)].rstrip(" .,;:") + "..."
+
+
+def _clan_chat_action_reason(rationale: str) -> str:
+    reason = " ".join((rationale or "").split())
+    reason = reason.rstrip(".")
+    return _clip_clan_chat_text(reason, limit=90)
+
+
+def _leader_action_clan_chat_copy(
+    *,
+    action_type: str,
+    target_player_name: str | None,
+    rationale: str,
+) -> str | None:
+    if action_type not in ROLE_ACTION_TYPES:
+        return None
+    name = " ".join((target_player_name or "this member").split()) or "this member"
+    reason = _clan_chat_action_reason(rationale)
+    if action_type == "promotion_recommendation":
+        text = (
+            f"Promoting {name} to Elder for {reason}. Thanks for helping POAP KINGS."
+            if reason
+            else f"Promoting {name} to Elder. Thanks for helping POAP KINGS."
+        )
+    elif action_type == "demotion_recommendation":
+        text = (
+            f"Moving {name} back to Member for now: {reason}. Roles should match current activity."
+            if reason
+            else f"Moving {name} back to Member for now. Roles should match current activity."
+        )
+    else:
+        text = (
+            f"Removing {name} from the clan for {reason}. Keeping POAP KINGS active and fair."
+            if reason
+            else f"Removing {name} from the clan. Keeping POAP KINGS active and fair."
+        )
+    return _clip_clan_chat_text(text)
+
+
+def _format_leader_action_card(
+    action: dict,
+    *,
+    title: str,
+    prompt_text: str,
+    rationale: str,
+    clan_chat_copy: str | None = None,
+) -> str:
     action_id = action.get("action_id")
     objective = action.get("objective") or "leader_action"
     action_type = action.get("action_type") or ""
@@ -701,12 +760,18 @@ def _format_leader_action_card(action: dict, *, title: str, prompt_text: str, ra
         "demotion_recommendation": "⬇️",
         "kick_recommendation": "🚪",
     }.get(action_type, "⚡")
+    copy_instruction = (
+        "📋 If done, copy the next message into Clash Royale after taking the action.\n\n"
+        if clan_chat_copy
+        else ""
+    )
     return (
         f"**R{action_id} {icon} {title}**\n"
         f"🎯 `{objective}`\n"
         "🛠️ Action\n"
         f"```text\n{prompt_text}\n```\n"
         f"🧠 {rationale}\n\n"
+        f"{copy_instruction}"
         "✅ done  ❌ decline  ↩️ reply with note"
     )
 
@@ -754,15 +819,25 @@ async def _post_leader_action_recommendation(
     )
     if not action or action.get("source_message_id"):
         return False
+    clan_chat_copy = _leader_action_clan_chat_copy(
+        action_type=action_type,
+        target_player_name=target_player_name,
+        rationale=rationale,
+    )
     content = _format_leader_action_card(
         action,
         title=title,
         prompt_text=prompt_text,
         rationale=rationale,
+        clan_chat_copy=clan_chat_copy,
     )
     sent_messages = await _post_to_elixir(channel, {"content": content})
     if not isinstance(sent_messages, list):
         sent_messages = []
+    if clan_chat_copy:
+        copy_messages = await _post_to_elixir(channel, {"content": clan_chat_copy})
+        if isinstance(copy_messages, list):
+            sent_messages.extend(copy_messages)
     first_message_id = getattr(sent_messages[0], "id", None) if sent_messages else None
     if first_message_id is not None:
         await asyncio.to_thread(
@@ -770,17 +845,29 @@ async def _post_leader_action_recommendation(
             action["action_id"],
             source_message_id=first_message_id,
         )
+    copy_message_id = getattr(sent_messages[1], "id", None) if len(sent_messages) > 1 else None
+    if copy_message_id is not None:
+        await asyncio.to_thread(
+            db.update_leader_action_copy_message,
+            action["action_id"],
+            copy_message_id=copy_message_id,
+        )
+    stored_content = "\n\n".join([content, clan_chat_copy] if clan_chat_copy else [content])
+    raw_json = {
+        "leader_action": action,
+        "clan_chat_copy": clan_chat_copy,
+    }
     await asyncio.to_thread(
         db.save_message,
         _channel_scope(channel),
         "assistant",
-        content,
+        stored_content,
         summary=f"Leader action R{action.get('action_id')}: {title}",
         **_channel_msg_kwargs(channel),
         workflow="arena-relay",
         event_type=action_type,
         discord_message_id=first_message_id,
-        raw_json={"leader_action": action},
+        raw_json=raw_json,
     )
     return True
 

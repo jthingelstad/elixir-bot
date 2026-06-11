@@ -1767,6 +1767,31 @@ def test_leader_action_card_uses_categorical_action_icon():
     assert "✅ done  ❌ decline" in card
 
 
+def test_role_action_clan_chat_copy_is_short_and_public_reasoned():
+    from runtime.jobs._core import CLAN_CHAT_ACTION_COPY_LIMIT, _leader_action_clan_chat_copy
+
+    promotion = _leader_action_clan_chat_copy(
+        action_type="promotion_recommendation",
+        target_player_name="King Levy",
+        rationale="220 donations, 4 war races, 90d tenure",
+    )
+    kick = _leader_action_clan_chat_copy(
+        action_type="kick_recommendation",
+        target_player_name="Vijay",
+        rationale="last seen 8 days ago; no war participation",
+    )
+    demotion = _leader_action_clan_chat_copy(
+        action_type="demotion_recommendation",
+        target_player_name="Aaqib",
+        rationale="activity has dropped for several weeks",
+    )
+
+    assert promotion == "Promoting King Levy to Elder for 220 donations, 4 war races, 90d tenure. Thanks for helping POAP KINGS."
+    assert kick == "Removing Vijay from the clan for last seen 8 days ago; no war participation. Keeping POAP KINGS active and fair."
+    assert demotion == "Moving Aaqib back to Member for now: activity has dropped for several weeks. Roles should match current activity."
+    assert all(len(copy) <= CLAN_CHAT_ACTION_COPY_LIMIT for copy in (promotion, kick, demotion))
+
+
 def test_arena_relay_result_builds_copyable_celebration_card():
     from runtime.signals.delivery import _build_arena_relay_result
 
@@ -2215,17 +2240,29 @@ def test_weekly_leader_actions_post_to_arena_relay():
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
         patch("runtime.jobs._core.db.create_leader_action_recommendation", side_effect=created) as mock_create,
-        patch("runtime.jobs._core._post_to_elixir", new=AsyncMock(return_value=[SimpleNamespace(id=999)])) as mock_post,
+        patch("runtime.jobs._core._post_to_elixir", new=AsyncMock(side_effect=[
+            [SimpleNamespace(id=1000)],
+            [SimpleNamespace(id=1001)],
+            [SimpleNamespace(id=2000)],
+            [SimpleNamespace(id=2001)],
+        ])) as mock_post,
         patch("runtime.jobs._core.db.update_leader_action_message") as mock_update,
+        patch("runtime.jobs._core.db.update_leader_action_copy_message") as mock_update_copy,
         patch("runtime.jobs._core.db.save_message") as mock_save,
     ):
         posted = asyncio.run(elixir._post_weekly_leader_action_recommendations())
 
     assert posted == 2
     assert mock_create.call_count == 2
-    assert mock_post.await_count == 2
+    assert mock_post.await_count == 4
     assert mock_update.call_count == 2
+    assert mock_update_copy.call_count == 2
+    assert mock_update.call_args_list[0].kwargs["source_message_id"] == 1000
+    assert mock_update_copy.call_args_list[0].kwargs["copy_message_id"] == 1001
+    assert mock_post.await_args_list[1].args[1]["content"].startswith("Promoting King Levy to Elder")
+    assert mock_post.await_args_list[3].args[1]["content"].startswith("Removing Vijay from the clan")
     assert mock_save.call_args.kwargs["workflow"] == "arena-relay"
+    assert "clan_chat_copy" in mock_save.call_args.kwargs["raw_json"]
 
 
 def test_leadership_action_scan_posts_singular_actions():
