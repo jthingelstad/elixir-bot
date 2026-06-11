@@ -6,7 +6,7 @@ import sqlite3
 from unittest.mock import patch
 
 import db
-from memory_store import create_memory
+from memory_store import create_memory, list_memories
 from runtime import leader_action_policy
 
 
@@ -114,6 +114,73 @@ def test_leader_action_recommendation_records_reaction_decision():
         assert noted["decision_note_message_id"] == "654"
         assert noted["expires_at"] is not None
         assert noted["outcome"]["leader_note"]["category"] == "state_already_satisfied"
+    finally:
+        conn.close()
+
+
+def test_leader_action_feedback_profile_persists_as_elixir_synthesis_memory():
+    conn = db.get_connection(":memory:")
+    try:
+        action = db.create_leader_action_recommendation(
+            action_type="welcome_relay",
+            objective="new_member_welcome",
+            prompt_text="Welcome Gem! 319 wins is strong.",
+            target_player_tag="#GEM",
+            target_player_name="Gem",
+            source_message_id=1234,
+            conn=conn,
+        )
+        db.decide_leader_action_by_message(
+            1234,
+            status=db.ACTION_DONE,
+            discord_user_id=42,
+            emoji="✅",
+            conn=conn,
+        )
+        db.record_leader_action_note_by_message(
+            1234,
+            note="Changed to “Welcome to POAP KINGS Gem! 319 wins!”",
+            discord_user_id=42,
+            note_message_id=5678,
+            conn=conn,
+        )
+
+        context = db.build_leader_action_feedback_synthesis_context(
+            action_type="welcome_relay",
+            conn=conn,
+        )
+        assert context["counts"]["total"] == 1
+        assert context["recent_actions"][0]["action_id"] == action["action_id"]
+        assert "Changed to" in context["recent_actions"][0]["decision_note"]
+
+        memory = db.upsert_leader_action_feedback_profile(
+            action_type="welcome_relay",
+            profile={
+                "action_type": "welcome_relay",
+                "sample_count": 1,
+                "summary": "Leaders prefer short native clan-chat welcomes.",
+                "guidance": ["Use the pattern: Welcome to POAP KINGS NAME! FACT!"],
+                "avoid": ["Phrases like 'is strong' when the leader removes them."],
+                "evidence": [{"action_id": action["action_id"], "lesson": "Leader rewrote the copy into a short in-game welcome."}],
+            },
+            conn=conn,
+        )
+
+        assert memory["source_type"] == "elixir_synthesis"
+        assert memory["event_type"] == db.LEADER_ACTION_FEEDBACK_EVENT_TYPE
+        assert memory["event_id"] == "leader_action_feedback:welcome_relay"
+        assert "Welcome to POAP KINGS NAME! FACT!" in memory["body"]
+
+        profiles = db.list_leader_action_feedback_profiles(action_type="welcome_relay", conn=conn)
+        assert len(profiles) == 1
+        assert profiles[0]["memory_id"] == memory["memory_id"]
+
+        memories = list_memories(
+            viewer_scope="leadership",
+            filters={"event_type": db.LEADER_ACTION_FEEDBACK_EVENT_TYPE},
+            conn=conn,
+        )
+        assert memories[0]["source_type"] == "elixir_synthesis"
     finally:
         conn.close()
 

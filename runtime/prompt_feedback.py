@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 import db
+from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
 
 
 log = logging.getLogger("elixir")
@@ -137,6 +138,7 @@ async def handle_raw_reaction_add(payload) -> None:
                     payload.message_id,
                     payload.user_id,
                 )
+                queue_leader_action_feedback_refresh(action.get("action_type"))
             return
     feedback_value = feedback_value_for_emoji(getattr(payload, "emoji", None))
     if not feedback_value:

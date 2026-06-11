@@ -12,6 +12,7 @@ import cr_api
 import db
 import elixir_agent
 from PIL import Image, ImageOps, UnidentifiedImageError
+from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
 
 _log = logging.getLogger("elixir.channel_router")
 
@@ -602,6 +603,7 @@ async def _handle_arena_relay_action_note(app, message, channel_config, raw_ques
     )
     if not action:
         return False
+    queue_leader_action_feedback_refresh(action.get("action_type"))
     ch = app._channel_msg_kwargs(message.channel)
     author = app._author_msg_kwargs(message.author)
     await asyncio.to_thread(

@@ -162,6 +162,43 @@ def _memory_synthesis_system():
     )
 
 
+def _leader_action_feedback_system():
+    """System prompt for synthesizing arena-relay leader feedback."""
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        prompts.policy(),
+        prompts.channel_section("arena-relay"),
+        "You are updating Elixir's operating memory for #arena-relay leader action cards.\n\n"
+        "The user gives you recent action cards, leader decisions, leader reply notes, and any measured outcomes. "
+        "Your job is not to grade leaders. Your job is to learn how future action cards should change.\n\n"
+        "Write a compact feedback profile that future Elixir turns can use directly. Prefer concrete behavioral guidance over generic advice. "
+        "For copy edits, name the wording pattern leaders changed and the better pattern they demonstrated. "
+        "For rejected recommendations, explain the decision threshold or timing adjustment. "
+        "For done recommendations with good outcomes, preserve what worked. "
+        "If evidence is thin, say so and keep guidance conservative.\n\n"
+        "Hard length limits:\n"
+        "- `summary`: one paragraph, 80 words or fewer.\n"
+        "- `guidance`: 3-5 bullets, each 22 words or fewer.\n"
+        "- `avoid`: 0-3 bullets, each 18 words or fewer.\n"
+        "- `try_next`: 0-3 bullets, each 18 words or fewer.\n"
+        "- `evidence`: 1-5 rows, each `lesson` 24 words or fewer.\n"
+        "If there is too much evidence, choose the highest-signal examples.\n\n"
+        "Do not invent leader preferences that are not grounded in the provided rows. "
+        "Do not output Discord copy. This is internal memory for future arena-relay authoring.\n\n"
+        "Respond with JSON only (no markdown wrapper):\n"
+        "{"
+        '"action_type": "welcome_relay", '
+        '"sample_count": 3, '
+        '"summary": "one concise paragraph", '
+        '"guidance": ["specific future behavior", "specific future behavior"], '
+        '"avoid": ["optional wording or decision pattern to avoid"], '
+        '"try_next": ["optional next experiment"], '
+        '"evidence": [{"action_id": 12, "lesson": "what this row proved"}]'
+        "}\n",
+    )
+
+
 def _intel_report_system():
     """System prompt for the scheduled Clan Wars Intel Report workflow.
 
