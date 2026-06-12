@@ -2364,6 +2364,77 @@ def test_leadership_action_scan_posts_singular_actions():
     mock_failure.assert_not_called()
 
 
+def test_war_nudge_sidecar_skips_recently_declined_targets():
+    """A declined nudge means the leader knows something about that member —
+    don't re-propose the same target on the next battle-day signal."""
+    from types import SimpleNamespace
+    from runtime.signals.delivery import _deliver_war_nudge_sidecars
+
+    candidates = [
+        {"tag": "#DECLINED", "name": "Dez", "war_day_key": "s001-w01-p004", "phase_display": "Battle Day 1"},
+        {"tag": "#FRESH", "name": "Cora", "war_day_key": "s001-w01-p004", "phase_display": "Battle Day 1"},
+    ]
+    channel = SimpleNamespace(id=900, name="arena-relay", type="text")
+    created = {"action_id": 7, "source_message_id": None}
+
+    with (
+        patch("runtime.signals.delivery._facade", return_value=SimpleNamespace(
+            _channel_config_by_key=lambda key: {"id": 900, "name": "arena-relay"},
+        )),
+        patch("runtime.signals.delivery._runtime_app", return_value=SimpleNamespace(
+            bot=SimpleNamespace(get_channel=lambda cid: channel),
+        )),
+        patch("runtime.signals.delivery._war_nudge_candidates", return_value=candidates),
+        patch("runtime.signals.delivery.can_post_leader_action", return_value=(True, None)),
+        patch(
+            "runtime.signals.delivery.db.was_leader_action_declined_recently",
+            side_effect=lambda **kwargs: kwargs.get("target_player_tag") == "#DECLINED",
+        ) as mock_declined,
+        patch("runtime.signals.delivery.db.build_leader_action_baseline", return_value={}),
+        patch("runtime.signals.delivery.db.create_leader_action_recommendation", return_value=created) as mock_create,
+        patch("runtime.signals.delivery.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=1)])),
+        patch("runtime.signals.delivery.db.save_message"),
+    ):
+        posted = asyncio.run(_deliver_war_nudge_sidecars([{"type": "war_battle_day_started"}]))
+
+    assert posted == 1
+    assert mock_create.call_count == 1
+    assert mock_create.call_args.kwargs["target_player_tag"] == "#FRESH"
+    declined_checks = [c.kwargs["target_player_tag"] for c in mock_declined.call_args_list]
+    assert declined_checks == ["#DECLINED", "#FRESH"]
+
+
+def test_leader_action_recommendation_suppressed_after_recent_decline():
+    """Role recommendations the leader declined within the suppression window
+    are not re-proposed, even when the generic dedup window has passed."""
+    from types import SimpleNamespace
+    from runtime.jobs._core import _post_leader_action_recommendation
+
+    channel = SimpleNamespace(id=900)
+    with (
+        patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
+        patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=True) as mock_declined,
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)) as mock_policy,
+        patch("runtime.jobs._core.db.create_leader_action_recommendation") as mock_create,
+    ):
+        posted = asyncio.run(_post_leader_action_recommendation(
+            channel,
+            action_type="promotion_recommendation",
+            objective="reward_and_retention",
+            title="promotion recommendation",
+            prompt_text="Promote King Levy to Elder.",
+            rationale="220 donations",
+            target_player_tag="#ABC123",
+            target_player_name="King Levy",
+        ))
+
+    assert posted is False
+    mock_declined.assert_called_once()
+    assert mock_declined.call_args.kwargs["action_type"] == "promotion_recommendation"
+    mock_policy.assert_not_called()
+    mock_create.assert_not_called()
+
+
 def test_leadership_action_scan_requeues_feedback_synthesis_for_refreshed_outcomes():
     """When outcome evaluation lands (hours after the leader's decision), the
     affected action types must be re-synthesized so feedback profiles learn

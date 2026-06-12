@@ -113,6 +113,10 @@ else:
     )
 LEADERSHIP_ACTION_SCAN_MINUTES = int(os.getenv("LEADERSHIP_ACTION_SCAN_MINUTES", "240"))
 LEADERSHIP_ACTION_SCAN_MAX_ACTIONS = int(os.getenv("LEADERSHIP_ACTION_SCAN_MAX_ACTIONS", "2"))
+# How long a leader's decline suppresses re-proposing the same role action
+# for the same member. Role situations change on roster timescales, so the
+# default is 30 days — much longer than the 7-day unanswered-card dedup.
+LEADER_ACTION_DECLINE_SUPPRESS_HOURS = int(os.getenv("LEADER_ACTION_DECLINE_SUPPRESS_HOURS", "720"))
 WEEKLY_DISCORD_INVITE_RELAY_DAY = os.getenv("WEEKLY_DISCORD_INVITE_RELAY_DAY", "sat")
 WEEKLY_DISCORD_INVITE_RELAY_HOUR = int(os.getenv("WEEKLY_DISCORD_INVITE_RELAY_HOUR", "11"))
 CLANOPS_WEEKLY_REVIEW_DAY = os.getenv("CLANOPS_WEEKLY_REVIEW_DAY", "fri")
@@ -649,6 +653,21 @@ async def _post_leader_action_recommendation(
         objective=objective,
         within_hours=dedupe_hours,
     ):
+        return False
+    # A decline is a deliberate judgment about this member — suppress
+    # re-proposing the same action for much longer than the generic dedup
+    # window, so the leader isn't re-asked weekly about a member they
+    # already said no on.
+    if target_player_tag and await asyncio.to_thread(
+        db.was_leader_action_declined_recently,
+        action_type=action_type,
+        target_player_tag=target_player_tag,
+        within_hours=LEADER_ACTION_DECLINE_SUPPRESS_HOURS,
+    ):
+        log.info(
+            "leader action candidate skipped: %s for %s declined within %sh",
+            action_type, target_player_tag, LEADER_ACTION_DECLINE_SUPPRESS_HOURS,
+        )
         return False
     allowed, reason = await asyncio.to_thread(can_post_leader_action)
     if not allowed:

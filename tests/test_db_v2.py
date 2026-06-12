@@ -118,6 +118,63 @@ def test_leader_action_recommendation_records_reaction_decision():
         conn.close()
 
 
+def test_was_leader_action_declined_recently_cuts_on_decision_time():
+    """A decline suppresses re-proposal based on when the leader said no
+    (decided_at), scoped to the same action_type + target."""
+    conn = db.get_connection(":memory:")
+    try:
+        db.create_leader_action_recommendation(
+            action_type="war_nudge_recommendation",
+            objective="war_participation",
+            prompt_text="Nudge Vijay to use war decks today.",
+            target_player_tag="#VJ1",
+            target_player_name="Vijay",
+            source_message_id=111,
+            conn=conn,
+        )
+        # Not declined yet — no suppression.
+        assert not db.was_leader_action_declined_recently(
+            action_type="war_nudge_recommendation",
+            target_player_tag="#VJ1",
+            within_hours=48,
+            conn=conn,
+        )
+        db.decide_leader_action_by_message(
+            111, status=db.ACTION_REJECTED, discord_user_id=123, emoji="❌", conn=conn,
+        )
+        assert db.was_leader_action_declined_recently(
+            action_type="war_nudge_recommendation",
+            target_player_tag="#VJ1",
+            within_hours=48,
+            conn=conn,
+        )
+        # Different target or action type — not suppressed.
+        assert not db.was_leader_action_declined_recently(
+            action_type="war_nudge_recommendation",
+            target_player_tag="#OTHER",
+            within_hours=48,
+            conn=conn,
+        )
+        assert not db.was_leader_action_declined_recently(
+            action_type="promotion_recommendation",
+            target_player_tag="#VJ1",
+            within_hours=48,
+            conn=conn,
+        )
+        # Decision older than the window — not suppressed.
+        conn.execute(
+            "UPDATE leader_action_recommendations SET decided_at = '2026-01-01T00:00:00'",
+        )
+        assert not db.was_leader_action_declined_recently(
+            action_type="war_nudge_recommendation",
+            target_player_tag="#VJ1",
+            within_hours=48,
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+
 def test_leader_action_defer_is_terminal_with_suppression_window():
     conn = db.get_connection(":memory:")
     try:
