@@ -1291,7 +1291,7 @@ def test_player_intel_refresh_posts_progression_signals():
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[{"type": "player_level_up", "tag": "#ABC", "name": "King Levy", "old_level": 65, "new_level": 66}]),
         patch("elixir.db.snapshot_player_battlelog"),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -1322,7 +1322,7 @@ def test_player_intel_refresh_splits_optional_badge_level_batches():
             {"type": "badge_level_milestone", "tag": "#ABC", "name": "King Levy", "badge_name": "MasteryKnight"},
         ]),
         patch("elixir.db.snapshot_player_battlelog", return_value=[]),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -1354,7 +1354,7 @@ def test_player_intel_refresh_posts_battle_pulse_signals():
             {"type": "battle_hot_streak", "tag": "#ABC", "name": "King Levy", "streak": 4},
             {"type": "battle_trophy_push", "tag": "#ABC", "name": "King Levy", "trophy_delta": 111},
         ]),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -1394,7 +1394,7 @@ def test_player_intel_refresh_does_not_post_baseline_profile_discovery():
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[]),
         patch("elixir.db.snapshot_player_battlelog", return_value=[]),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -1417,7 +1417,7 @@ def test_player_intel_refresh_marks_failure_when_all_player_endpoints_fail():
         patch("elixir.db.snapshot_members"),
         patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
         patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
@@ -1451,7 +1451,7 @@ def test_player_intel_refresh_reports_partial_endpoint_failures_without_hiding_s
         patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[]),
-        patch("runtime.jobs._core._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
         patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
