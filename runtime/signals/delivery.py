@@ -33,6 +33,10 @@ WAR_NUDGE_SIGNAL_TYPES = {
     "war_battle_day_final_hours",
     "war_final_battle_day",
 }
+# A declined nudge usually means the leader knows something about that member
+# (plays late, traveling). Suppress re-nudging the same member on war-day
+# timescales rather than re-proposing every new battle day.
+WAR_NUDGE_DECLINE_SUPPRESS_HOURS = 48
 CRITICAL_LEADER_ACTION_SIGNAL_TYPES = {
     "war_battle_day_final_hours",
     "war_final_battle_day",
@@ -1329,6 +1333,14 @@ async def _deliver_war_nudge_sidecars(signals) -> int:
             return posted
         name = candidate["name"]
         tag = candidate["tag"]
+        if await asyncio.to_thread(
+            db.was_leader_action_declined_recently,
+            action_type="war_nudge_recommendation",
+            target_player_tag=tag,
+            within_hours=WAR_NUDGE_DECLINE_SUPPRESS_HOURS,
+        ):
+            log.info("war nudge sidecar skipped: nudge for %s declined within %sh", tag, WAR_NUDGE_DECLINE_SUPPRESS_HOURS)
+            continue
         prompt_text = f"Nudge {name} to use war decks today."
         if candidate.get("race_completed"):
             rationale = (
