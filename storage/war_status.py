@@ -11,11 +11,11 @@ log = logging.getLogger("elixir_db")
 from db import (
     _canon_tag,
     _current_joined_at,
-    _member_reference_fields,
     _parse_cr_time,
     _rowdicts,
     managed_connection,
 )
+from storage._enrichment import _member_reference_fields
 from storage.war_calendar import (
     FINAL_BATTLE_PERIOD_OFFSET,
     FINAL_PRACTICE_PERIOD_OFFSET,

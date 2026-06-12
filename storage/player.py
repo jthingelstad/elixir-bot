@@ -17,7 +17,6 @@ from db import (
     _ensure_member,
     _hash_payload,
     _json_or_none,
-    _member_reference_fields,
     _tag_key,
     _upsert_member_metadata,
     _utcnow,
@@ -27,6 +26,7 @@ from db import (
     get_connection,
     managed_connection,
 )
+from storage._enrichment import _member_reference_fields
 
 CARD_UPGRADE_SIGNAL_MIN_LEVEL = 16
 MASTERY_BADGE_SIGNAL_MIN_LEVEL = 5

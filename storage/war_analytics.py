@@ -8,11 +8,11 @@ from typing import Optional
 from db import (
     _canon_tag,
     _current_joined_at,
-    _member_reference_fields,
     _parse_cr_time,
     _utcnow,
     managed_connection,
 )
+from storage._enrichment import _member_reference_fields
 from storage.war_status import _season_bounds, get_current_season_id
 
 from storage._formatting import format_member_reference as _format_member_reference
