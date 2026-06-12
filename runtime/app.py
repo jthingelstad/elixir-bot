@@ -174,7 +174,6 @@ from runtime.helpers import (  # noqa: E402,F401
     _build_top_war_contributors_report,
     _build_war_status_report,
     _build_weekly_clan_recap_context,
-    _build_weekly_clanops_review,
     _canon_tag,
     _channel_conversation_scope,
     _channel_msg_kwargs,
@@ -218,8 +217,6 @@ from runtime.helpers import (  # noqa: E402,F401
     _with_leader_ping,
 )
 from runtime.jobs import (  # noqa: E402,F401
-    CLANOPS_WEEKLY_REVIEW_DAY,
-    CLANOPS_WEEKLY_REVIEW_HOUR,
     MEMORY_SYNTHESIS_DAY,
     MEMORY_SYNTHESIS_DRY_RUN,
     MEMORY_SYNTHESIS_HOUR,
@@ -253,7 +250,6 @@ from runtime.jobs import (  # noqa: E402,F401
     _channel_config_by_key,
     _clan_awareness_tick,
     _clan_wars_intel_report,
-    _clanops_weekly_review,
     _commit_site_content_or_raise,
     _daily_quiz_post,
     _db_maintenance_cycle,
@@ -274,7 +270,6 @@ from runtime.jobs import (  # noqa: E402,F401
     _poapkings_publish_fallback,
     _post_signal_memory,
     _post_system_signal_updates,
-    _post_weekly_leader_action_recommendations,
     _preauthored_system_signal_result,
     _progression_signal_batches,
     _promotion_channel_posts,

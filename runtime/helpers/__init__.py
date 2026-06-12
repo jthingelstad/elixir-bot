@@ -38,6 +38,6 @@ from runtime.helpers._reports import (  # noqa: F401
     _db_status_group_for_table, _db_status_group_label,
     _build_db_status_report, _build_clan_status_report,
     _build_war_status_report, _build_clan_status_short_report,
-    _build_help_report, _build_weekly_clanops_review,
+    _build_help_report,
     _build_weekly_clan_recap_context, _load_live_clan_context,
 )

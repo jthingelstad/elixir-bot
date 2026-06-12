@@ -111,6 +111,15 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Skip",
         allow_copy_edit=True,
     ),
+    "memory_review": LeaderActionTypeSpec(
+        "memory_review",
+        "Memory Review",
+        "🧠",
+        0x3498DB,
+        "Fixed",
+        "Dismiss",
+        allow_defer=True,
+    ),
 }
 
 

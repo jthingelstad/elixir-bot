@@ -14,7 +14,7 @@ __all__ = [
     "_db_status_group_for_table", "_db_status_group_label",
     "_build_db_status_report", "_build_clan_status_report",
     "_build_war_status_report", "_build_clan_status_short_report",
-    "_build_help_report", "_build_weekly_clanops_review",
+    "_build_help_report",
     "_build_weekly_clan_recap_context", "_load_live_clan_context",
 ]
 
@@ -605,86 +605,6 @@ def _build_help_report(role: str) -> str:
             "- I am read-only in interactive channels. I do not make admin decisions here.",
         ]
     )
-
-
-def _build_weekly_clanops_review(clan=None, war=None):
-    clan = clan or {}
-    war = war or {}
-    roster = db.get_clan_roster_summary()
-    promotions = db.get_promotion_candidates()
-    at_risk = db.get_members_at_risk(require_war_participation=True)
-    season_summary = db.get_war_season_summary(top_n=3)
-
-    clan_name = clan.get("name") or "Clan"
-    composition = promotions.get("composition") or {}
-    recommended = promotions.get("recommended") or []
-    borderline = promotions.get("borderline") or []
-    flagged = (at_risk or {}).get("members") or []
-    nonparticipants = (season_summary or {}).get("nonparticipants") or []
-
-    def _promotion_reason(member):
-        bits = [
-            f"{_fmt_num(member.get('donations') or 0)} donations",
-            f"{_fmt_num(member.get('war_races_played') or 0)} war races",
-        ]
-        if member.get("tenure_days") is not None:
-            bits.append(f"{member['tenure_days']}d tenure")
-        if member.get("days_inactive") is not None:
-            bits.append(f"seen {member['days_inactive']}d ago")
-        return ", ".join(bits)
-
-    def _risk_reason(member):
-        reasons = member.get("reasons") or []
-        if not reasons:
-            return "needs review"
-        return "; ".join(reason.get("detail") or reason.get("type") for reason in reasons[:3])
-
-    lines = [
-        "**Weekly ClanOps Review**",
-        (
-            f"- **{clan_name}**: {roster.get('active_members', 0)}/50 active | "
-            f"**elders** {composition.get('elders', 0)} | "
-            f"**target elder band** {composition.get('target_elder_min', 0)}-{composition.get('target_elder_max', 0)} | "
-            f"**remaining elder capacity** {composition.get('elder_capacity_remaining', 0)}"
-        ),
-    ]
-
-    if recommended:
-        lines.append(
-            f"- ⬆️ **Promote now ({len(recommended)}):** "
-            + _join_member_bits(recommended, lambda member: f"{_member_label(member)} — {_promotion_reason(member)}", limit=5)
-        )
-    else:
-        lines.append("- ⬆️ **Promote now:** none this week")
-
-    if borderline:
-        lines.append(
-            f"- ⚠️ **Borderline ({len(borderline)}):** "
-            + _join_member_bits(borderline, lambda member: f"{_member_label(member)} — {_promotion_reason(member)}", limit=3)
-        )
-
-    if flagged:
-        lines.append(
-            f"- ⬇️ **Demotion/kick watch ({len(flagged)}):** "
-            + _join_member_bits(flagged, lambda member: f"{_member_label(member)} — {_risk_reason(member)}", limit=5)
-        )
-    else:
-        lines.append("- ⬇️ **Demotion/kick watch:** none right now")
-
-    if nonparticipants:
-        lines.append(
-            f"- 💤 **No war decks this season ({len(nonparticipants)}):** "
-            + _join_member_bits(nonparticipants, lambda member: _member_label(member), limit=5)
-        )
-
-    if war:
-        clan_war = (war or {}).get("clan") or {}
-        if clan_war:
-            lines.append(
-                f"- 🚤 **Current river race:** fame {_fmt_num(clan_war.get('fame'))} | repair {_fmt_num(clan_war.get('repairPoints'))} | score {_fmt_num(clan_war.get('clanScore'))}"
-            )
-
-    return _with_leader_ping("\n".join(lines))
 
 
 def _build_weekly_clan_recap_context(clan=None, war=None):

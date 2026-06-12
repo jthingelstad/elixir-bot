@@ -2,15 +2,14 @@
 
 from runtime.jobs._core import (  # noqa: F401
     WAR_POLL_MINUTE, WAR_AWARENESS_MINUTE,
-    CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR,
     WEEKLY_DISCORD_INVITE_RELAY_DAY, WEEKLY_DISCORD_INVITE_RELAY_HOUR,
     WEEKLY_RECAP_DAY, WEEKLY_RECAP_HOUR,
     _query_or_default, _summarize_member_rows,
     _build_ask_elixir_daily_insight_context, _ask_elixir_daily_insight,
     _clan_awareness_tick, _war_poll_tick, _war_awareness_tick,
     _award_detection_tick,
-    _clanops_weekly_review, _weekly_clan_recap,
-    _leadership_action_scan, _post_weekly_leader_action_recommendations,
+    _weekly_clan_recap,
+    _leadership_action_scan,
     _weekly_discord_invite_relay,
 )
 from runtime.jobs._intel import (  # noqa: F401
@@ -29,10 +28,9 @@ from runtime.jobs._memory import (  # noqa: F401
     _memory_synthesis_cycle, _build_memory_synthesis_context,
     _apply_memory_synthesis_plan,
 )
-# _build_weekly_clanops_review and _build_weekly_clan_recap_context are
-# delegation wrappers in _core.py that forward to runtime.app — re-exporting
-# them here would create a recursive loop when tests access them via the
-# top-level elixir module.
+# _build_weekly_clan_recap_context is a delegation wrapper in _core.py that
+# forwards to runtime.app — re-exporting it here would create a recursive loop
+# when tests access it via the top-level elixir module.
 from runtime.jobs._signals import (  # noqa: F401
     _WEEKLY_RECAP_HEADER_RE,
     _channel_config_by_key, _signal_group_needs_recap_memory,
