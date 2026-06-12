@@ -59,13 +59,13 @@ from db import (
     _ensure_member,
     _get_current_membership,
     _json_or_none,
-    _member_reference_fields,
     _rowdicts,
     _utcnow,
     chicago_date_for_utc_timestamp,
     chicago_today,
     managed_connection,
 )
+from storage._enrichment import _member_reference_fields
 
 
 def _card_mode_value(card: dict, camel_key: str, snake_key: str) -> int | None:

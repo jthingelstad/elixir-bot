@@ -394,7 +394,7 @@ def test_member_reference_fields_includes_rank_fields():
 
 def test_conn_cache_avoids_recomputation():
     """A single conn computes ranks once. Subsequent enrichments hit cache."""
-    from db import _MEMBER_RANKS_CACHE, _clear_member_ranks_cache, _member_reference_fields
+    from storage._enrichment import _MEMBER_RANKS_CACHE, _clear_member_ranks_cache, _member_reference_fields
     _clear_member_ranks_cache()
     conn = db.get_connection(":memory:")
     try:

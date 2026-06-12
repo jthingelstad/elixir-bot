@@ -18,7 +18,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# These call names injected into module globals at import time by
+# Calls names injected into module globals at import time by
 # __export_public; ruff can't see the dynamic namespace merge.
-"db/__init__.py" = ["F821"]
 "runtime/app.py" = ["F821"]
