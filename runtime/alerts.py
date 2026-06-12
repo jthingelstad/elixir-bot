@@ -174,12 +174,27 @@ async def _maybe_alert_llm_failure(context: str) -> bool:
 
 
 def schedule_llm_failure_alert(context: str) -> None:
+    # This is the alert path of last resort — if it fails, an LLM outage and
+    # the failure to report it both go unseen. Every exit short of a
+    # scheduled alert logs at critical so elixir.log still tells the story.
     from runtime import app as runtime_app
 
     loop = getattr(runtime_app.bot, "loop", None)
     if loop is None or loop.is_closed() or not loop.is_running():
+        log.critical(
+            "schedule_llm_failure_alert: event loop unavailable; LLM failure during %s will NOT be alerted to Discord",
+            context,
+        )
         return
     try:
-        asyncio.run_coroutine_threadsafe(_maybe_alert_llm_failure(context), loop)
+        future = asyncio.run_coroutine_threadsafe(_maybe_alert_llm_failure(context), loop)
     except Exception:
-        log.warning("schedule_llm_failure_alert failed", exc_info=True)
+        log.critical("schedule_llm_failure_alert: scheduling failed; LLM failure during %s will NOT be alerted", context, exc_info=True)
+        return
+
+    def _report_alert_outcome(fut) -> None:
+        exc = fut.exception()
+        if exc is not None:
+            log.critical("schedule_llm_failure_alert: alert coroutine failed for %s: %s", context, exc, exc_info=exc)
+
+    future.add_done_callback(_report_alert_outcome)
