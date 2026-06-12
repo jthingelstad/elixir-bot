@@ -45,8 +45,8 @@ def test_role_action_clan_chat_copy_uses_public_reason_and_word_boundary():
     )
 
     assert copy == (
-        "Removing 1spaceO2 from the clan for no battle in 8 days, last login 8 days ago; "
-        "0 donations this week. Keeping POAP KINGS active and fair. Message from Elixir! - E"
+        "Removing 1spaceO2 for now: no battle in 8 days, last login 8 days ago; "
+        "0 donations this week. - E"
     )
     assert "...." not in copy
 

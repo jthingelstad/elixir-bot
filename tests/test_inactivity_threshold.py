@@ -301,6 +301,43 @@ def test_get_members_at_risk_reports_multi_signal_reason():
         conn.close()
 
 
+def test_get_members_at_risk_includes_stale_activity_context_below_threshold():
+    today = date(2026, 6, 12)
+    conn = db.get_connection(":memory:")
+    try:
+        member_id = _seed_member(
+            conn,
+            "#VGC22YGP",
+            "MONICA",
+            trophies=11032,
+            donations_week=0,
+            last_seen=_cr_ts(datetime(2026, 6, 2, 14, 34)),
+            today=today,
+        )
+        _seed_battle(conn, member_id, "20260602T145716.000Z", is_war=0)
+        fresh_id = _seed_member(
+            conn,
+            "#FRESH",
+            "Fresh",
+            trophies=5000,
+            donations_week=200,
+            last_seen=_cr_ts(datetime(2026, 6, 12, 9, 0)),
+            today=today,
+        )
+        _seed_battle(conn, fresh_id, "20260612T090000.000Z", is_war=0)
+
+        result = get_members_at_risk(conn=conn)
+        member = next(m for m in result["members"] if m["tag"] == "#VGC22YGP")
+
+        assert not any(reason["type"] == "inactive" for reason in member["reasons"])
+        assert member["activity_context"]["stale_activity"] is True
+        assert member["activity_context"]["battle_days_ago"] == 10
+        assert member["activity_context"]["login_days_ago"] == 10
+        assert member["activity_context"]["threshold_days"] > 10
+    finally:
+        conn.close()
+
+
 def test_flag_inactive_tightens_with_full_roster():
     """A 10k-trophy member with 8 stale days clears the floor at loose but
     not at tight. The same member flips from safe to flagged as the clan

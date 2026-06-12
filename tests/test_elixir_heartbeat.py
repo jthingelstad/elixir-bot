@@ -1555,7 +1555,7 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
     assert "Max-level cards: 23" in request["context"]
     assert "Include `POAP KINGS` exactly" in request["context"]
     assert "Use short native clan-chat welcomes." in request["context"]
-    signed_copy = f"{authored_copy} Message from Elixir! - E"
+    signed_copy = f"{authored_copy} - E"
     mock_create.assert_called_once()
     assert mock_create.call_args.kwargs["action_type"] == "welcome_relay"
     assert mock_create.call_args.kwargs["prompt_text"] == signed_copy
@@ -1657,7 +1657,7 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
     assert "Include `POAP KINGS` exactly" in request["context"]
     mock_card.assert_awaited_once()
     assert mock_card.await_args.args[1]["action_id"] == 44
-    assert mock_card.await_args.kwargs["copy_messages"] == [f"{authored_copy} Message from Elixir! - E"]
+    assert mock_card.await_args.kwargs["copy_messages"] == [f"{authored_copy} - E"]
     assert not any(
         call.kwargs.get("delivery_status") == "skipped"
         and str(call.kwargs.get("error_detail", "")).startswith("arena_relay_cooldown")
@@ -1783,7 +1783,7 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
     assert request["intent"] == "discord_invite_relay"
     assert request["exact_once_terms"] == ["POAPKINGS . COM > Members"]
     assert "Discord-linked clan members: 17/50" in request["context"]
-    signed_messages = [f"{message} Message from Elixir! - E" for message in authored_messages]
+    signed_messages = [f"{message} - E" for message in authored_messages]
     mock_create.assert_called_once()
     assert mock_create.call_args.kwargs["prompt_text"] == "\n".join(signed_messages)
     mock_card.assert_awaited_once()
@@ -1932,7 +1932,7 @@ def test_leader_action_card_uses_categorical_action_icon():
 
 
 def test_role_action_clan_chat_copy_is_short_and_public_reasoned():
-    from runtime.jobs._core import CLAN_CHAT_ACTION_COPY_LIMIT, _leader_action_clan_chat_copy
+    from runtime.jobs._core import CLAN_CHAT_ACTION_COPY_LIMIT, _leader_action_clan_chat_copy, _leader_action_reason
 
     promotion = _leader_action_clan_chat_copy(
         action_type="promotion_recommendation",
@@ -1957,27 +1957,50 @@ def test_role_action_clan_chat_copy_is_short_and_public_reasoned():
             "0 donations this week; 0 war races played this season"
         ),
     )
+    monica_rationale = _leader_action_reason(
+        {
+            "activity_context": {
+                "stale_activity": True,
+                "battle_days_ago": 10,
+                "login_days_ago": 10,
+                "threshold_days": 10.8,
+            },
+            "reasons": [
+                {"type": "low_donations", "detail": "0 donations this week"},
+                {"type": "low_war_participation", "detail": "0 war races played this season"},
+            ],
+        },
+        promotion=False,
+    )
+    monica_kick = _leader_action_clan_chat_copy(
+        action_type="kick_recommendation",
+        target_player_name="MONICA",
+        rationale=monica_rationale,
+    )
 
     assert promotion == (
-        "Promoting King Levy to Elder for 220 donations, 4 war races, 90d tenure. "
-        "Thanks for helping POAP KINGS. Message from Elixir! - E"
+        "Promoting King Levy to Elder: 220 donations, 4 war races, 90d tenure. Well earned. - E"
     )
     assert kick == (
-        "Removing Vijay from the clan for last seen 8 days ago; no war participation. "
-        "Keeping POAP KINGS active and fair. Message from Elixir! - E"
+        "Removing Vijay for now: last seen 8 days ago; no war participation. - E"
     )
     assert demotion == (
-        "Moving Aaqib back to Member for now: activity has dropped for several weeks. "
-        "Roles should match current activity. Message from Elixir! - E"
+        "Moving Aaqib back to Member for now: activity has dropped for several weeks. - E"
     )
     assert (
         long_kick
-        == "Removing 1spaceO2 from the clan for no battle in 8 days, last login 8 days ago; "
-        "0 donations this week. Keeping POAP KINGS active and fair. Message from Elixir! - E"
+        == "Removing 1spaceO2 for now: no battle in 8 days, last login 8 days ago; "
+        "0 donations this week. - E"
+    )
+    assert monica_rationale == "no activity in 10 days; 0 donations this week; 0 war races played this season"
+    assert monica_kick == (
+        "Removing MONICA for now: no activity in 10 days; 0 donations this week; "
+        "0 war races played this season. - E"
     )
     assert "...." not in long_kick
     assert "donatio..." not in long_kick
-    assert all(len(copy) <= CLAN_CHAT_ACTION_COPY_LIMIT for copy in (promotion, kick, demotion, long_kick))
+    assert "active and fair" not in monica_kick
+    assert all(len(copy) <= CLAN_CHAT_ACTION_COPY_LIMIT for copy in (promotion, kick, demotion, long_kick, monica_kick))
 
 
 def test_arena_relay_result_builds_copyable_celebration_card():
@@ -2415,7 +2438,7 @@ def test_weekly_leader_actions_post_to_arena_relay():
         "promotion_recommendation",
     ]
     assert mock_card.await_count == 2
-    assert mock_card.await_args_list[0].kwargs["copy_messages"][0].startswith("Removing Vijay from the clan")
+    assert mock_card.await_args_list[0].kwargs["copy_messages"][0].startswith("Removing Vijay for now")
     assert mock_card.await_args_list[1].kwargs["copy_messages"][0].startswith("Promoting King Levy to Elder")
     assert mock_save.call_args.kwargs["workflow"] == "arena-relay"
     assert "clan_chat_copy" in mock_save.call_args.kwargs["raw_json"]
@@ -2716,7 +2739,7 @@ def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
     assert "Vijay sealed his comeback" in request["context"]
     assert mock_create.call_args.kwargs["objective"] == "clan_story"
     assert mock_create.call_args.kwargs["source_signal_key"].startswith("weekly_story_relay:")
-    signed_copy = f"{copy_line} Message from Elixir! - E"
+    signed_copy = f"{copy_line} - E"
     assert mock_create.call_args.kwargs["copy_current_text"] == signed_copy
     assert mock_card.await_args.kwargs["copy_messages"] == [signed_copy]
     assert mock_save.call_args.kwargs["event_type"] == "weekly_story_relay"

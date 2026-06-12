@@ -11,7 +11,7 @@ import elixir_agent
 
 CLAN_CHAT_DEFAULT_MAX_CHARS = 240
 CLAN_CHAT_WELCOME_MAX_CHARS = 120
-CLAN_CHAT_SIGNATURE_TEXT = "Message from Elixir! - E"
+CLAN_CHAT_SIGNATURE_TEXT = "- E"
 DISCORD_INVITE_ROUTE = "POAPKINGS . COM > Members"
 
 ROLE_ACTION_TYPES = {
@@ -306,21 +306,21 @@ def role_action_clan_chat_copy(
     reason = _clan_chat_action_reason(rationale)
     if action_type == "promotion_recommendation":
         text = (
-            f"Promoting {name} to Elder for {reason}. Thanks for helping POAP KINGS."
+            f"Promoting {name} to Elder: {reason}. Well earned."
             if reason
-            else f"Promoting {name} to Elder. Thanks for helping POAP KINGS."
+            else f"Promoting {name} to Elder. Well earned."
         )
     elif action_type == "demotion_recommendation":
         text = (
-            f"Moving {name} back to Member for now: {reason}. Roles should match current activity."
+            f"Moving {name} back to Member for now: {reason}."
             if reason
-            else f"Moving {name} back to Member for now. Roles should match current activity."
+            else f"Moving {name} back to Member for now."
         )
     else:
         text = (
-            f"Removing {name} from the clan for {reason}. Keeping POAP KINGS active and fair."
+            f"Removing {name} for now: {reason}."
             if reason
-            else f"Removing {name} from the clan. Keeping POAP KINGS active and fair."
+            else f"Removing {name} for now."
         )
     signed_text = sign_clan_chat_text(text, limit=max_chars, signature=signature)
     result = validate_clan_chat_messages(

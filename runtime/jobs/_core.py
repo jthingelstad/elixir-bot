@@ -483,6 +483,29 @@ def _leader_action_member_tag(member: dict) -> str | None:
     return member.get("player_tag") or member.get("tag") or member.get("member_tag")
 
 
+def _leader_action_activity_reason(member: dict) -> str | None:
+    context = member.get("activity_context") or {}
+    if not context.get("stale_activity"):
+        return None
+    try:
+        battle_days = int(context.get("battle_days_ago")) if context.get("battle_days_ago") is not None else None
+    except (TypeError, ValueError):
+        battle_days = None
+    try:
+        login_days = int(context.get("login_days_ago")) if context.get("login_days_ago") is not None else None
+    except (TypeError, ValueError):
+        login_days = None
+    if battle_days is not None and login_days is not None and battle_days >= 7 and login_days >= 7:
+        return f"no activity in {min(battle_days, login_days)} days"
+    if login_days is not None and login_days >= 7:
+        return f"last seen {login_days} days ago"
+    if battle_days is not None and battle_days >= 90:
+        return "no battles in 90+ days"
+    if battle_days is not None and battle_days >= 7:
+        return f"no battles in {battle_days} days"
+    return None
+
+
 def _leader_action_reason(member: dict, *, promotion: bool) -> str:
     if promotion:
         bits = []
@@ -494,8 +517,20 @@ def _leader_action_reason(member: dict, *, promotion: bool) -> str:
             bits.append(f"{member.get('tenure_days')}d tenure")
         return ", ".join(bits) or "promotion candidate data is above threshold"
     reasons = member.get("reasons") or []
+    has_inactive_reason = any(reason.get("type") == "inactive" for reason in reasons if isinstance(reason, dict))
+    bits = []
+    if not has_inactive_reason:
+        activity_reason = _leader_action_activity_reason(member)
+        if activity_reason:
+            bits.append(activity_reason)
     if reasons:
-        return "; ".join((reason.get("detail") or reason.get("type") or "needs review") for reason in reasons[:3])
+        bits.extend(
+            reason.get("detail") or reason.get("type") or "needs review"
+            for reason in reasons
+            if isinstance(reason, dict)
+        )
+    if bits:
+        return "; ".join(bits[:3])
     return "risk data says this member needs roster review"
 
 

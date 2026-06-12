@@ -543,6 +543,18 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
             item = dict(row)
             item["joined_date"] = joined_date
             item["tenure_days"] = tenure_days
+            item["activity_context"] = {
+                "battle_days_ago": breakdown["battle_days_ago"],
+                "login_days_ago": breakdown["login_days_ago"],
+                "pvp_days_ago": breakdown["pvp_days_ago"],
+                "war_days_ago": breakdown["war_days_ago"],
+                "last_battle_at": breakdown["last_battle_at"],
+                "threshold_days": threshold_days,
+                "stale_activity": (
+                    breakdown["battle_days_ago"] >= 7
+                    or (breakdown["login_days_ago"] is not None and breakdown["login_days_ago"] >= 7)
+                ),
+            }
             item["risk_score"] = len(reasons)
             item["reasons"] = reasons
             if war_races_played is not None:
