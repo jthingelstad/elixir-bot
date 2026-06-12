@@ -614,7 +614,7 @@ async def _post_leader_action_recommendation(
             action_type, target_player_tag, LEADER_ACTION_DECLINE_SUPPRESS_HOURS,
         )
         return False
-    allowed, reason = await asyncio.to_thread(can_post_leader_action)
+    allowed, reason = await asyncio.to_thread(can_post_leader_action, action_type=action_type)
     if not allowed:
         log.info("leader action candidate skipped by policy: %s", reason)
         return False

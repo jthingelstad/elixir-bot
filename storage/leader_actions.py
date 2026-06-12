@@ -677,12 +677,25 @@ def upsert_leader_action_feedback_profile(
     body = _profile_body(profile)
     if not body:
         return None
+    decision_stats = None
+    if clean_type != "all":
+        decision_stats = leader_action_decision_stats(action_type=clean_type, conn=conn)
+        decided = decision_stats.get("decided") or 0
+        if decided:
+            rate = decision_stats.get("decline_rate")
+            rate_text = f"{rate:.0%}" if rate is not None else "n/a"
+            body = (
+                f"Decision stats (last {decision_stats['window_days']}d): "
+                f"done {decision_stats[ACTION_DONE]} · declined {decision_stats[ACTION_REJECTED]} · "
+                f"deferred {decision_stats[ACTION_DEFERRED]} · decline rate {rate_text}\n\n"
+            ) + body
     title = f"Arena Relay Feedback: {clean_type}"
     event_id = _feedback_event_id(clean_type)
     metadata = {
         "action_type": clean_type,
         "sample_count": profile.get("sample_count"),
         "profile": profile,
+        "decision_stats": decision_stats,
     }
     from memory_store import attach_tags, create_memory, list_memories, update_memory
 
@@ -800,6 +813,60 @@ def has_recent_leader_action(
         tuple(params),
     ).fetchone()
     return row is not None
+
+
+@managed_connection
+def leader_action_decision_stats(
+    *,
+    action_type: str | None = None,
+    days: int = 30,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Trailing decision counts and decline rate, per action type.
+
+    decline_rate is rejected / (done + rejected) — defers are neutral and
+    excluded from the denominator. Returns one stats dict when action_type
+    is given, else a mapping of action_type -> stats dict.
+    """
+    window_days = max(1, int(days or 30))
+    cutoff = _cutoff_hours_ago(window_days * 24)
+    where = [
+        "COALESCE(is_test, 0) = 0",
+        "decided_at >= ?",
+        "status IN (?, ?, ?)",
+    ]
+    params: list = [cutoff, ACTION_DONE, ACTION_REJECTED, ACTION_DEFERRED]
+    clean_type = (action_type or "").strip() or None
+    if clean_type:
+        where.append("action_type = ?")
+        params.append(clean_type)
+    rows = conn.execute(
+        f"SELECT action_type, status, COUNT(*) AS cnt FROM leader_action_recommendations "
+        f"WHERE {' AND '.join(where)} GROUP BY action_type, status",
+        tuple(params),
+    ).fetchall()
+
+    def _empty() -> dict:
+        return {
+            "window_days": window_days,
+            ACTION_DONE: 0,
+            ACTION_REJECTED: 0,
+            ACTION_DEFERRED: 0,
+            "decided": 0,
+            "decline_rate": None,
+        }
+
+    by_type: dict[str, dict] = {}
+    for row in rows:
+        stats = by_type.setdefault(row["action_type"], _empty())
+        stats[row["status"]] = int(row["cnt"])
+    for stats in by_type.values():
+        decided = stats[ACTION_DONE] + stats[ACTION_REJECTED]
+        stats["decided"] = decided
+        stats["decline_rate"] = (stats[ACTION_REJECTED] / decided) if decided else None
+    if clean_type:
+        return by_type.get(clean_type) or _empty()
+    return by_type
 
 
 @managed_connection
@@ -1085,6 +1152,7 @@ __all__ = [
     "get_leader_action_by_message",
     "get_recent_leader_action_for_target",
     "has_recent_leader_action",
+    "leader_action_decision_stats",
     "list_leader_action_feedback_profiles",
     "list_leader_actions",
     "record_leader_action_note_by_message",
