@@ -505,13 +505,31 @@ def _clip_clan_chat_text(text: str, *, limit: int = CLAN_CHAT_ACTION_COPY_LIMIT)
     body = " ".join((text or "").split())
     if len(body) <= limit:
         return body
-    return body[: max(0, limit - 3)].rstrip(" .,;:") + "..."
+    clipped = body[: max(0, limit - 3)]
+    word_boundary = clipped.rfind(" ")
+    if word_boundary > 0:
+        clipped = clipped[:word_boundary]
+    return clipped.rstrip(" .,;:") + "..."
 
 
 def _clan_chat_action_reason(rationale: str) -> str:
     reason = " ".join((rationale or "").split())
     reason = reason.rstrip(".")
-    return _clip_clan_chat_text(reason, limit=90)
+    reason = re.sub(r"\s*\([^)]*\)", "", reason)
+    parts = [part.strip(" .,;:") for part in reason.split(";") if part.strip(" .,;:")]
+    if parts:
+        selected: list[str] = []
+        for part in parts:
+            candidate = "; ".join([*selected, part])
+            if len(candidate) <= 90:
+                selected.append(part)
+                continue
+            if not selected:
+                selected.append(_clip_clan_chat_text(part, limit=90).removesuffix("...").rstrip(" .,;:"))
+            break
+        if selected:
+            return "; ".join(selected)
+    return _clip_clan_chat_text(reason, limit=90).removesuffix("...").rstrip(" .,;:")
 
 
 def _leader_action_clan_chat_copy(
