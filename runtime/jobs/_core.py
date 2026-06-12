@@ -25,6 +25,11 @@ import db
 import elixir_agent
 import heartbeat
 import prompts
+from runtime.clan_chat_copy import (
+    clip_clan_chat_text,
+    generate_clan_chat_copy,
+    role_action_clan_chat_copy,
+)
 from modules.poap_kings import site as poap_kings_site
 from storage.contextual_memory import upsert_weekly_summary_memory
 from runtime import app as _app
@@ -494,43 +499,11 @@ def _leader_action_reason(member: dict, *, promotion: bool) -> str:
     return "risk data says this member needs roster review"
 
 
-ROLE_ACTION_TYPES = {
-    "promotion_recommendation",
-    "demotion_recommendation",
-    "kick_recommendation",
-}
 CLAN_CHAT_ACTION_COPY_LIMIT = CLASH_COPY_MAX_LENGTH
 
 
 def _clip_clan_chat_text(text: str, *, limit: int = CLAN_CHAT_ACTION_COPY_LIMIT) -> str:
-    body = " ".join((text or "").split())
-    if len(body) <= limit:
-        return body
-    clipped = body[: max(0, limit - 3)]
-    word_boundary = clipped.rfind(" ")
-    if word_boundary > 0:
-        clipped = clipped[:word_boundary]
-    return clipped.rstrip(" .,;:") + "..."
-
-
-def _clan_chat_action_reason(rationale: str) -> str:
-    reason = " ".join((rationale or "").split())
-    reason = reason.rstrip(".")
-    reason = re.sub(r"\s*\([^)]*\)", "", reason)
-    parts = [part.strip(" .,;:") for part in reason.split(";") if part.strip(" .,;:")]
-    if parts:
-        selected: list[str] = []
-        for part in parts:
-            candidate = "; ".join([*selected, part])
-            if len(candidate) <= 90:
-                selected.append(part)
-                continue
-            if not selected:
-                selected.append(_clip_clan_chat_text(part, limit=90).removesuffix("...").rstrip(" .,;:"))
-            break
-        if selected:
-            return "; ".join(selected)
-    return _clip_clan_chat_text(reason, limit=90).removesuffix("...").rstrip(" .,;:")
+    return clip_clan_chat_text(text, limit=limit)
 
 
 def _leader_action_clan_chat_copy(
@@ -539,29 +512,12 @@ def _leader_action_clan_chat_copy(
     target_player_name: str | None,
     rationale: str,
 ) -> str | None:
-    if action_type not in ROLE_ACTION_TYPES:
-        return None
-    name = " ".join((target_player_name or "this member").split()) or "this member"
-    reason = _clan_chat_action_reason(rationale)
-    if action_type == "promotion_recommendation":
-        text = (
-            f"Promoting {name} to Elder for {reason}. Thanks for helping POAP KINGS."
-            if reason
-            else f"Promoting {name} to Elder. Thanks for helping POAP KINGS."
-        )
-    elif action_type == "demotion_recommendation":
-        text = (
-            f"Moving {name} back to Member for now: {reason}. Roles should match current activity."
-            if reason
-            else f"Moving {name} back to Member for now. Roles should match current activity."
-        )
-    else:
-        text = (
-            f"Removing {name} from the clan for {reason}. Keeping POAP KINGS active and fair."
-            if reason
-            else f"Removing {name} from the clan. Keeping POAP KINGS active and fair."
-        )
-    return _clip_clan_chat_text(text)
+    return role_action_clan_chat_copy(
+        action_type=action_type,
+        target_player_name=target_player_name,
+        rationale=rationale,
+        max_chars=CLAN_CHAT_ACTION_COPY_LIMIT,
+    )
 
 
 def _kick_candidate_priority(member: dict) -> tuple:
@@ -1006,26 +962,19 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
         f"- Plain text only: no markdown, no links, no Discord emoji shortcodes, under {CLAN_CHAT_ACTION_COPY_LIMIT} characters.\n"
         "- Pick the single strongest member story and name the member(s) — recognition is the point.\n"
         "- Write it as something a leader would naturally say in clan chat, not as a broadcast.\n"
-        "- Return `content` as a JSON array containing exactly one string.\n\n"
         "=== THIS WEEK'S RECAP ===\n"
         f"{recap_text}"
     )
-    generated = await asyncio.to_thread(
-        elixir_agent.generate_channel_update,
-        channel_config["name"],
-        channel_config["subagent_key"],
-        context,
+    generated = await generate_clan_chat_copy(
+        intent="weekly_story_relay",
+        context=context,
+        max_messages=1,
+        max_chars=CLAN_CHAT_ACTION_COPY_LIMIT,
+        forbidden_terms=("http://", "https://", "www.", "Discord"),
+        metadata={"channel": channel_config["name"], "subagent": channel_config.get("subagent_key") or "arena-relay"},
     )
-    content = (generated or {}).get("content") if isinstance(generated, dict) else None
-    if isinstance(content, list):
-        copy = str(content[0] or "").strip() if content else ""
-    elif isinstance(content, str):
-        copy = content.strip()
-    else:
-        copy = ""
-    copy = _clip_clan_chat_text(copy)
-    lowered = copy.lower()
-    if not copy or "http://" in lowered or "https://" in lowered:
+    copy = generated.messages[0] if generated and generated.messages else ""
+    if not copy:
         log.info("weekly story relay skipped: no usable clan-chat copy")
         return False
 

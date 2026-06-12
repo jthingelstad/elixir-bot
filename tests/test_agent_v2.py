@@ -1053,7 +1053,7 @@ def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
         patch("agent.core._get_client", return_value=mock_client),
         patch("elixir_agent.runtime_status.record_llm_call"),
     ):
-        for workflow in ("weekly_digest", "tournament_recap", "intel_report", "memory_synthesis", "leader_action_feedback"):
+        for workflow in ("weekly_digest", "tournament_recap", "intel_report", "memory_synthesis", "leader_action_feedback", "clan_chat_copy"):
             elixir_agent._create_chat_completion(
                 workflow=workflow,
                 messages=[{"role": "user", "content": "status"}],
@@ -1085,6 +1085,32 @@ def test_synthesize_leader_action_feedback_uses_strict_profile_schema():
     assert result["summary"] == "Keep welcomes short."
     assert "recent #arena-relay leader feedback" in captured["user_message"]
     assert captured["kwargs"]["workflow"] == "leader_action_feedback"
+    assert captured["kwargs"]["strict_json"] is True
+
+
+def test_generate_clan_chat_copy_uses_dedicated_no_tool_workflow():
+    captured = {}
+
+    def fake_chat_with_tools(system_prompt, user_message, **kwargs):
+        captured["system_prompt"] = system_prompt
+        captured["user_message"] = user_message
+        captured["kwargs"] = kwargs
+        return {"messages": ["Welcome to POAP KINGS, King Levy! 7 years played stands out."]}
+
+    with patch("agent.workflows._chat_with_tools", side_effect=fake_chat_with_tools):
+        result = elixir_agent.generate_clan_chat_copy({
+            "intent": "welcome_relay",
+            "target_surface": "Clash Royale in-game clan chat",
+            "context": "Facts",
+            "required_terms": ["POAP KINGS", "King Levy"],
+        })
+
+    assert result["messages"][0].startswith("Welcome to POAP KINGS")
+    assert "Clash Royale's in-game clan chat" in captured["system_prompt"]
+    assert '"intent": "welcome_relay"' in captured["user_message"]
+    assert captured["kwargs"]["workflow"] == "clan_chat_copy"
+    assert captured["kwargs"]["allowed_tools"] == []
+    assert captured["kwargs"]["response_schema"] == elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW["clan_chat_copy"]
     assert captured["kwargs"]["strict_json"] is True
 
 

@@ -1523,11 +1523,9 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
             "body": "Use short native clan-chat welcomes.",
         }]),
         patch("runtime.signals.delivery.can_post_leader_action", return_value=(True, None)),
-        patch("elixir.elixir_agent.generate_channel_update", return_value={
-            "event_type": "channel_update",
+        patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={
+            "messages": [authored_copy],
             "summary": "Welcome King Levy",
-            "content": authored_copy,
-            "metadata": {"authored": True},
         }) as mock_generate,
         patch("elixir.db.build_leader_action_baseline", return_value={}),
         patch("elixir.db.create_leader_action_recommendation", return_value={
@@ -1549,10 +1547,14 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
         assert asyncio.run(elixir._deliver_signal_group(signals, clan, war))
 
     mock_generate.assert_called_once()
-    assert "Years played/account age: 7 years" in mock_generate.call_args.args[2]
-    assert "Max-level cards: 23" in mock_generate.call_args.args[2]
-    assert "Include `POAP KINGS` exactly" in mock_generate.call_args.args[2]
-    assert mock_generate.call_args.kwargs["memory_context"]["durable_memories"][0]["summary"] == "Use short native clan-chat welcomes."
+    request = mock_generate.call_args.args[0]
+    assert request["intent"] == "welcome_relay"
+    assert request["target_surface"] == "Clash Royale in-game clan chat"
+    assert request["required_terms"] == ["POAP KINGS", "King Levy"]
+    assert "Years played/account age: 7 years" in request["context"]
+    assert "Max-level cards: 23" in request["context"]
+    assert "Include `POAP KINGS` exactly" in request["context"]
+    assert "Use short native clan-chat welcomes." in request["context"]
     mock_create.assert_called_once()
     assert mock_create.call_args.kwargs["action_type"] == "welcome_relay"
     assert mock_create.call_args.kwargs["prompt_text"] == authored_copy
@@ -1622,10 +1624,9 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
         patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
         patch("elixir.db.list_leader_action_feedback_profiles", return_value=[]),
         patch("runtime.signals.delivery.can_post_leader_action", return_value=(False, "daily_cap:4")) as mock_policy,
-        patch("elixir.elixir_agent.generate_channel_update", return_value={
-            "event_type": "channel_update",
+        patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={
+            "messages": [authored_copy],
             "summary": "Welcome King Levy",
-            "content": authored_copy,
         }) as mock_generate,
         patch("elixir.db.build_leader_action_baseline", return_value={}),
         patch("elixir.db.create_leader_action_recommendation", return_value={
@@ -1648,9 +1649,11 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
 
     mock_generate.assert_called_once()
     mock_policy.assert_not_called()
-    assert "Collection Level: 1,597" in mock_generate.call_args.args[2]
-    assert "Fallback only - clan war wins: 421" in mock_generate.call_args.args[2]
-    assert "Include `POAP KINGS` exactly" in mock_generate.call_args.args[2]
+    request = mock_generate.call_args.args[0]
+    assert request["intent"] == "welcome_relay"
+    assert "Collection Level: 1,597" in request["context"]
+    assert "Fallback only - clan war wins: 421" in request["context"]
+    assert "Include `POAP KINGS` exactly" in request["context"]
     mock_card.assert_awaited_once()
     assert mock_card.await_args.args[1]["action_id"] == 44
     assert mock_card.await_args.kwargs["copy_messages"] == [authored_copy]
@@ -1749,11 +1752,9 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
         patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
         patch("elixir.db.list_leader_action_feedback_profiles", return_value=[]),
         patch("runtime.signals.delivery.can_post_leader_action", return_value=(True, None)),
-        patch("elixir.elixir_agent.generate_channel_update", return_value={
-            "event_type": "channel_update",
+        patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={
+            "messages": authored_messages,
             "summary": "Invite Discord",
-            "content": authored_messages,
-            "metadata": {"authored": True},
         }) as mock_generate,
         patch("elixir.db.build_leader_action_baseline", return_value={}),
         patch("elixir.db.create_leader_action_recommendation", return_value={
@@ -1777,7 +1778,10 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
         assert asyncio.run(elixir._deliver_signal_group(signals, clan, war))
 
     mock_generate.assert_called_once()
-    assert "Discord-linked clan members: 17/50" in mock_generate.call_args.args[2]
+    request = mock_generate.call_args.args[0]
+    assert request["intent"] == "discord_invite_relay"
+    assert request["exact_once_terms"] == ["POAPKINGS . COM > Members"]
+    assert "Discord-linked clan members: 17/50" in request["context"]
     mock_create.assert_called_once()
     assert mock_create.call_args.kwargs["prompt_text"] == "\n".join(authored_messages)
     mock_card.assert_awaited_once()
@@ -2642,7 +2646,7 @@ def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
         patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#arena-relay", "subagent_key": "arena-relay"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)) as mock_policy,
-        patch("runtime.jobs._core.elixir_agent.generate_channel_update", return_value={"content": [copy_line]}),
+        patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={"messages": [copy_line]}) as mock_generate,
         patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
         patch("runtime.jobs._core.db.create_leader_action_recommendation", return_value=created) as mock_create,
         patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=77)])) as mock_card,
@@ -2652,6 +2656,10 @@ def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
 
     assert posted is True
     assert mock_policy.call_args.kwargs["action_type"] == "in_game_relay"
+    request = mock_generate.call_args.args[0]
+    assert request["intent"] == "weekly_story_relay"
+    assert request["target_surface"] == "Clash Royale in-game clan chat"
+    assert "Vijay sealed his comeback" in request["context"]
     assert mock_create.call_args.kwargs["objective"] == "clan_story"
     assert mock_create.call_args.kwargs["source_signal_key"].startswith("weekly_story_relay:")
     assert mock_create.call_args.kwargs["copy_current_text"] == copy_line
@@ -2672,7 +2680,7 @@ def test_weekly_story_relay_card_skips_when_copy_unusable():
         patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#arena-relay", "subagent_key": "arena-relay"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
-        patch("runtime.jobs._core.elixir_agent.generate_channel_update", return_value={"content": ["Read more at https://example.com"]}),
+        patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={"messages": ["Read more at https://example.com"]}),
         patch("runtime.jobs._core.db.create_leader_action_recommendation") as mock_create,
     ):
         posted = asyncio.run(_weekly_story_relay_card("recap text"))

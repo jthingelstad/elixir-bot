@@ -23,6 +23,7 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 - `modules/card_training/` — Elixir University card training quiz: question generation, Discord views, and quiz storage
 - `scripts/review_agent_feedback.py` — Review recent LLM/channel failures and `#ask-elixir` feedback from SQLite for debugging and prompt/tool routing analysis
 - `runtime/activities.py` — Canonical registry for recurring automated activities
+- `runtime/clan_chat_copy.py` — Dedicated Clash Royale in-game clan chat copy generation, validation, and fallback guardrails
 - `runtime/channel_subagents.py` — Signal outcome planning, channel-targeted delivery, and subagent memory context
 - `runtime/channel_router.py` — Discord message routing for interactive channels
 - `storage/`, `agent/`, `runtime/` — Domain-first implementation packages for persistence, LLM behavior, and Discord runtime; root modules remain the stable public API surface
@@ -183,7 +184,7 @@ Principle: **Prompts define what Elixir says and why. Code defines when, where, 
 
 ### What stays in code
 
-Activity scheduling, channel routing, signal detection, outcome fan-out, delivery dedupe, tool execution, JSON response contracts, memory enforcement, nickname matching, LLM parameters, and Elixir data normalization.
+Activity scheduling, channel routing, signal detection, outcome fan-out, delivery dedupe, tool execution, JSON response contracts, memory enforcement, nickname matching, LLM parameters, Elixir data normalization, and in-game clan chat copy guardrails.
 
 ## Memory Model
 

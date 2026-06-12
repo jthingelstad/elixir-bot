@@ -28,6 +28,7 @@ def test_registry_generates_compatibility_maps():
         "season_awards",
         "awareness",
         "memory_synthesis",
+        "clan_chat_copy",
     ):
         spec = get_workflow_spec(workflow)
         assert elixir_agent.MAX_ROUNDS_BY_WORKFLOW[workflow] == spec.max_tool_rounds
@@ -51,9 +52,10 @@ def test_registry_model_selection_matches_existing_defaults(monkeypatch):
     assert elixir_agent._model_for_workflow("intel_report") == "chat-model"
     assert elixir_agent._model_for_workflow("leader_action_feedback") == "chat-model"
     assert elixir_agent._model_for_workflow("memory_synthesis") == "chat-model"
+    assert elixir_agent._model_for_workflow("clan_chat_copy") == "chat-model"
     assert elixir_agent._model_for_workflow("observe") == "light-model"
 
 
 def test_empty_toolsets_stay_empty():
-    for workflow in ("reception", "war_recap", "season_awards", "memory_synthesis", "leader_action_feedback"):
+    for workflow in ("reception", "war_recap", "season_awards", "memory_synthesis", "leader_action_feedback", "clan_chat_copy"):
         assert elixir_agent.TOOLSETS_BY_WORKFLOW[workflow] == []
