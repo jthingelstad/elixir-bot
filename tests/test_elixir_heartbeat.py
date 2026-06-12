@@ -2267,37 +2267,6 @@ def test_player_intel_refresh_reports_partial_endpoint_failures_without_hiding_s
     assert "battle log failures 1" in mock_success.call_args.args[1]
 
 
-def test_clanops_weekly_review_posts_to_clanops_channel():
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    channel = AsyncMock()
-    channel.id = 200
-    channel.name = "leader-lounge"
-    channel.type = "text"
-
-    with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "subagent": "leader-lounge", "workflow": "clanops"}]),
-        patch.object(elixir.bot, "get_channel", return_value=channel),
-        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS"}, {"state": "warDay"}))),
-        patch("elixir._build_weekly_clanops_review", return_value="<@&1474762111287824584>\n**Weekly ClanOps Review**") as mock_build,
-        patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
-        patch("elixir.db.save_message") as mock_save,
-        patch("runtime.jobs._core.upsert_weekly_summary_memory") as mock_memory,
-        patch("runtime.jobs._core._post_weekly_leader_action_recommendations", new=AsyncMock(return_value=0)) as mock_actions,
-    ):
-        asyncio.run(elixir._clanops_weekly_review())
-
-    mock_build.assert_called_once_with({"name": "POAP KINGS"}, {"state": "warDay"})
-    mock_post.assert_awaited_once_with(channel, {"content": "<@&1474762111287824584>\n**Weekly ClanOps Review**"})
-    assert mock_save.call_args.kwargs["event_type"] == "weekly_clanops_review"
-    mock_memory.assert_called_once()
-    assert mock_memory.call_args.kwargs["event_type"] == "weekly_clanops_review"
-    assert mock_memory.call_args.kwargs["scope"] == "leadership"
-    mock_actions.assert_awaited_once()
-
-
 def test_weekly_leader_actions_post_to_arena_relay():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -2323,6 +2292,7 @@ def test_weekly_leader_actions_post_to_arena_relay():
             "members": [{"member_ref": "Vijay", "player_tag": "#DEF456", "reasons": [{"detail": "last seen 8 days ago"}]}],
         }),
         patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
+        patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=False),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
         patch("runtime.jobs._core.db.create_leader_action_recommendation", side_effect=created) as mock_create,
@@ -2332,7 +2302,8 @@ def test_weekly_leader_actions_post_to_arena_relay():
         ])) as mock_card,
         patch("runtime.jobs._core.db.save_message") as mock_save,
     ):
-        posted = asyncio.run(elixir._post_weekly_leader_action_recommendations())
+        from runtime.jobs._core import _post_candidate_leader_action_recommendations
+        posted = asyncio.run(_post_candidate_leader_action_recommendations(max_actions=6))
 
     assert posted == 2
     assert mock_create.call_count == 2

@@ -2,7 +2,9 @@
 
 Assembles the week's memories, channel posts, and live clan state, hands
 them to the memory-synthesis LLM workflow, persists the resulting arc
-memories, expires stale entries, and posts the digest to #leader-lounge.
+memories, and expires stale entries. The digest is stored as durable
+memory only; the sole Discord output is one #arena-relay action card per
+flagged contradiction.
 """
 
 __all__ = [
@@ -24,9 +26,9 @@ import elixir_agent
 import prompts
 from storage.contextual_memory import upsert_weekly_summary_memory
 from runtime.app import bot, log
-from runtime.helpers import _channel_msg_kwargs, _channel_scope
+from runtime.helpers import _channel_scope
+from runtime.leader_action_ui import LEADER_ACTION_UI_VERSION, post_leader_action_card
 from runtime import status as runtime_status
-from runtime.jobs._signals import _post_to_elixir
 
 MEMORY_SYNTHESIS_DAY = os.getenv("MEMORY_SYNTHESIS_DAY", "sun")
 MEMORY_SYNTHESIS_HOUR = int(os.getenv("MEMORY_SYNTHESIS_HOUR", "22"))
@@ -36,6 +38,9 @@ MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_PRIOR_ARC_LIM
 MEMORY_SYNTHESIS_POSTS_PER_CHANNEL = int(os.getenv("MEMORY_SYNTHESIS_POSTS_PER_CHANNEL", "12"))
 MEMORY_SYNTHESIS_MEMORY_BODY_CHARS = int(os.getenv("MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", "500"))
 MEMORY_SYNTHESIS_POST_CHARS = int(os.getenv("MEMORY_SYNTHESIS_POST_CHARS", "700"))
+# Cap contradiction cards per weekly run so a bad synthesis can't flood the
+# action board.
+MEMORY_CONTRADICTION_CARD_LIMIT = int(os.getenv("MEMORY_CONTRADICTION_CARD_LIMIT", "3"))
 
 
 def _current_war_week_id(conn=None) -> str | None:
@@ -241,25 +246,83 @@ def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None, dry_run: bo
     return stats
 
 
+async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
+    """Post one arena-relay leader action card per flagged contradiction.
+
+    The card is the actionable residue of the weekly synthesis: the leader
+    either fixes/expires the memory (done) or dismisses the flag (decline).
+    Dedup rides on action_key — the same memory_id with the same stored/live
+    text won't re-post while a card is already open.
+    """
+    if not contradictions:
+        return 0
+    try:
+        channel_config = prompts.discord_singleton_subagent("arena-relay")
+    except Exception:
+        log.info("memory contradiction cards skipped: arena-relay unavailable", exc_info=True)
+        return 0
+    channel = bot.get_channel(channel_config["id"])
+    if not channel:
+        log.warning("memory contradiction cards skipped: arena-relay channel not found")
+        return 0
+
+    posted = 0
+    channel_name = getattr(channel, "name", "arena-relay")
+    channel_kind = getattr(channel, "type", "text")
+    if channel_kind is not None:
+        channel_kind = str(channel_kind)
+    for item in contradictions[:MEMORY_CONTRADICTION_CARD_LIMIT]:
+        memory_id = item.get("memory_id")
+        stored = (item.get("stored") or "").strip() or "—"
+        live = (item.get("live") or "").strip() or "—"
+        suggested = (item.get("suggested_action") or "").strip() or "review"
+        prompt_text = f"Review memory #{memory_id}: stored `{stored}` but live state shows `{live}`."
+        rationale = f"Weekly synthesis flagged this memory as contradicting live clan state. Suggested: {suggested}."
+        action = await asyncio.to_thread(
+            db.create_leader_action_recommendation,
+            action_type="memory_review",
+            objective="memory_hygiene",
+            prompt_text=prompt_text,
+            rationale=rationale,
+            target_channel_key="arena-relay",
+            target_channel_id=channel_config["id"],
+            source_signal_key=f"memory_contradiction:{memory_id}",
+            source_signal_type="memory_contradiction",
+            ui_version=LEADER_ACTION_UI_VERSION,
+        )
+        if not action or action.get("source_message_id"):
+            continue
+        sent_messages = await post_leader_action_card(channel, action, copy_messages=[])
+        if not isinstance(sent_messages, list):
+            sent_messages = []
+        first_message = sent_messages[0] if sent_messages else None
+        await asyncio.to_thread(
+            db.save_message,
+            _channel_scope(channel), "assistant", prompt_text,
+            summary=f"Leader action R{action.get('action_id')}: memory review",
+            channel_id=channel_config["id"],
+            channel_name=channel_name,
+            channel_kind=channel_kind,
+            workflow="arena-relay",
+            event_type="memory_contradiction",
+            discord_message_id=getattr(first_message, "id", None),
+            raw_json={"leader_action": action},
+        )
+        posted += 1
+    return posted
+
+
 async def _memory_synthesis_cycle():
     """Weekly memory-synthesis job.
 
     Runs Sunday late by default. Assembles the week's memories + posts +
     live state, hands them to ``run_memory_synthesis``, persists the
-    resulting arcs, expires stale entries, and posts the digest (plus any
-    contradictions) to #leader-lounge.
+    resulting arcs, and expires stale entries. There is no digest post —
+    the only Discord output is one arena-relay action card per flagged
+    contradiction, so leadership sees actionable memory hygiene instead of
+    a weekly report.
     """
     runtime_status.mark_job_start("memory_synthesis")
-
-    leader_channels = prompts.discord_channels_by_workflow("clanops")
-    if not leader_channels:
-        runtime_status.mark_job_failure("memory_synthesis", "no leadership channel configured")
-        return
-    channel_config = leader_channels[0]
-    channel = bot.get_channel(channel_config["id"])
-    if not channel:
-        runtime_status.mark_job_failure("memory_synthesis", "leadership channel not found")
-        return
 
     try:
         context = await asyncio.to_thread(_build_memory_synthesis_context)
@@ -305,54 +368,36 @@ async def _memory_synthesis_cycle():
 
     digest = (plan.get("digest") or "").strip()
     contradictions = list(plan.get("contradictions") or [])
-    if contradictions:
-        lines = ["", "**Contradictions flagged against live state:**"]
-        for item in contradictions:
-            stored = (item.get("stored") or "").strip() or "—"
-            live = (item.get("live") or "").strip() or "—"
-            action = (item.get("suggested_action") or "").strip() or "review"
-            lines.append(f"- memory #{item.get('memory_id')}: stored=`{stored}` · live=`{live}` · suggested: {action}")
-        digest = f"{digest}\n" + "\n".join(lines) if digest else "\n".join(lines)
-
-    if not digest:
-        runtime_status.mark_job_success(
-            "memory_synthesis",
-            f"quiet week (arcs={stats['arcs_written']}, stale={stats['stale_expired']}, dry_run={MEMORY_SYNTHESIS_DRY_RUN})",
-        )
-        return
 
     if MEMORY_SYNTHESIS_DRY_RUN:
-        log.info("memory_synthesis dry_run digest preview: %s", digest[:400])
+        if digest:
+            log.info("memory_synthesis dry_run digest preview: %s", digest[:400])
         runtime_status.mark_job_success(
             "memory_synthesis",
             f"dry_run: arcs={stats['arcs_requested']} stale={stats['stale_requested']} contradictions={stats['contradictions_flagged']}",
         )
         return
 
-    await _post_to_elixir(channel, {"content": digest})
-    await asyncio.to_thread(
-        db.save_message,
-        _channel_scope(channel), "assistant", digest,
-        **_channel_msg_kwargs(channel),
-        workflow="memory_synthesis",
-        event_type="weekly_memory_synthesis",
-    )
-    await asyncio.to_thread(
-        upsert_weekly_summary_memory,
-        event_type="weekly_memory_synthesis",
-        title="Weekly Memory Synthesis",
-        body=digest,
-        scope="leadership",
-        tags=["weekly", "memory", "synthesis"],
-        metadata={
-            "channel_id": channel.id,
-            "workflow": "memory_synthesis",
-            "arcs_written": stats["arcs_written"],
-            "stale_expired": stats["stale_expired"],
-            "contradictions_flagged": stats["contradictions_flagged"],
-        },
-    )
+    if digest:
+        # The digest stays in durable memory as the week's canonical summary —
+        # it just no longer ships to Discord as a report.
+        await asyncio.to_thread(
+            upsert_weekly_summary_memory,
+            event_type="weekly_memory_synthesis",
+            title="Weekly Memory Synthesis",
+            body=digest,
+            scope="leadership",
+            tags=["weekly", "memory", "synthesis"],
+            metadata={
+                "workflow": "memory_synthesis",
+                "arcs_written": stats["arcs_written"],
+                "stale_expired": stats["stale_expired"],
+                "contradictions_flagged": stats["contradictions_flagged"],
+            },
+        )
+
+    cards_posted = await _post_memory_contradiction_cards(contradictions)
     runtime_status.mark_job_success(
         "memory_synthesis",
-        f"digest posted (arcs={stats['arcs_written']}, stale={stats['stale_expired']}, contradictions={stats['contradictions_flagged']})",
+        f"synthesis complete (arcs={stats['arcs_written']}, stale={stats['stale_expired']}, contradiction_cards={cards_posted})",
     )

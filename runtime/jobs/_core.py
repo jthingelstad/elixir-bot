@@ -3,16 +3,14 @@
 __all__ = [
     "WAR_POLL_MINUTE", "WAR_AWARENESS_MINUTE",
     "LEADERSHIP_ACTION_SCAN_MINUTES", "LEADERSHIP_ACTION_SCAN_MAX_ACTIONS",
-    "CLANOPS_WEEKLY_REVIEW_DAY", "CLANOPS_WEEKLY_REVIEW_HOUR",
     "WEEKLY_RECAP_DAY", "WEEKLY_RECAP_HOUR",
-    "_build_weekly_clanops_review", "_build_weekly_clan_recap_context",
+    "_build_weekly_clan_recap_context",
     "_query_or_default", "_summarize_member_rows",
     "_build_ask_elixir_daily_insight_context",
     "_ask_elixir_daily_insight", "_clan_awareness_tick",
     "_war_poll_tick", "_war_awareness_tick",
-    "_clanops_weekly_review", "_weekly_clan_recap",
+    "_weekly_clan_recap",
     "_leadership_action_scan",
-    "_post_weekly_leader_action_recommendations",
     "_weekly_discord_invite_relay",
     "_clan_wars_intel_report",
 ]
@@ -119,14 +117,8 @@ LEADERSHIP_ACTION_SCAN_MAX_ACTIONS = int(os.getenv("LEADERSHIP_ACTION_SCAN_MAX_A
 LEADER_ACTION_DECLINE_SUPPRESS_HOURS = int(os.getenv("LEADER_ACTION_DECLINE_SUPPRESS_HOURS", "720"))
 WEEKLY_DISCORD_INVITE_RELAY_DAY = os.getenv("WEEKLY_DISCORD_INVITE_RELAY_DAY", "sat")
 WEEKLY_DISCORD_INVITE_RELAY_HOUR = int(os.getenv("WEEKLY_DISCORD_INVITE_RELAY_HOUR", "11"))
-CLANOPS_WEEKLY_REVIEW_DAY = os.getenv("CLANOPS_WEEKLY_REVIEW_DAY", "fri")
-CLANOPS_WEEKLY_REVIEW_HOUR = int(os.getenv("CLANOPS_WEEKLY_REVIEW_HOUR", "19"))
 WEEKLY_RECAP_DAY = os.getenv("WEEKLY_RECAP_DAY", "mon")
 WEEKLY_RECAP_HOUR = int(os.getenv("WEEKLY_RECAP_HOUR", "9"))
-
-
-def _build_weekly_clanops_review(*args, **kwargs):
-    return _app._build_weekly_clanops_review(*args, **kwargs)
 
 
 def _build_weekly_clan_recap_context(*args, **kwargs):
@@ -468,53 +460,6 @@ async def _award_detection_tick():
         runtime_status.mark_job_failure("award_detection", str(e))
 
 
-async def _clanops_weekly_review():
-    runtime_status.mark_job_start("clanops_weekly_review")
-    clanops_channels = prompts.discord_channels_by_workflow("clanops")
-    if not clanops_channels:
-        runtime_status.mark_job_failure("clanops_weekly_review", "no leadership channel configured")
-        return
-
-    target_config = clanops_channels[0]
-    channel = bot.get_channel(target_config["id"])
-    if not channel:
-        runtime_status.mark_job_failure("clanops_weekly_review", "leadership channel not found")
-        return
-
-    clan = {}
-    war = {}
-    try:
-        clan, war = await _load_live_clan_context()
-    except Exception as exc:
-        log.warning("ClanOps weekly review refresh failed: %s", exc)
-
-    review_content = await asyncio.to_thread(_build_weekly_clanops_review, clan, war)
-    if not review_content:
-        runtime_status.mark_job_success("clanops_weekly_review", "no review content")
-        return
-
-    await _post_to_elixir(channel, {"content": review_content})
-    await asyncio.to_thread(
-        db.save_message,
-        _channel_scope(channel), "assistant", review_content,
-        **_channel_msg_kwargs(channel), workflow="clanops",
-        event_type="weekly_clanops_review",
-    )
-    await asyncio.to_thread(
-        upsert_weekly_summary_memory,
-        event_type="weekly_clanops_review",
-        title="Weekly ClanOps Review",
-        body=review_content,
-        scope="leadership",
-        tags=["weekly", "clanops", "review"],
-        metadata={"channel_id": channel.id, "workflow": "clanops"},
-    )
-    action_count = await _post_weekly_leader_action_recommendations()
-    if action_count:
-        log.info("clanops_weekly_review posted %d leader action recommendation(s)", action_count)
-    runtime_status.mark_job_success("clanops_weekly_review", "weekly review posted")
-
-
 def _leader_action_member_label(member: dict) -> str:
     return (
         member.get("member_ref")
@@ -791,10 +736,6 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
         ):
             posted += 1
     return posted
-
-
-async def _post_weekly_leader_action_recommendations() -> int:
-    return await _post_candidate_leader_action_recommendations(max_actions=6)
 
 
 async def _leadership_action_scan():

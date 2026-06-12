@@ -3582,40 +3582,6 @@ def test_build_clan_status_short_report_uses_non_war_risk_watchlist():
     mock_risk.assert_called_once_with(require_war_participation=False)
 
 
-def test_build_weekly_clanops_review_tags_leaders_and_summarizes_actions():
-    with (
-        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21}),
-        patch("elixir.db.get_promotion_candidates", return_value={
-            "composition": {"elders": 5, "target_elder_min": 4, "target_elder_max": 6, "elder_capacity_remaining": 1},
-            "recommended": [
-                {"member_ref": "King Levy (<@1474760692992180429>)", "donations": 220, "war_races_played": 4, "tenure_days": 90, "days_inactive": 0},
-            ],
-            "borderline": [
-                {"member_ref": "Finn", "donations": 120, "war_races_played": 2, "tenure_days": 20, "days_inactive": 1},
-            ],
-        }),
-        patch("elixir.db.get_members_at_risk", return_value={
-            "members": [
-                {"member_ref": "Vijay", "reasons": [{"detail": "last seen 8 days ago"}, {"detail": "0 donations this week"}]},
-            ]
-        }),
-        patch("elixir.db.get_war_season_summary", return_value={"nonparticipants": [{"member_ref": "Chanco"}]}),
-    ):
-        report = elixir._build_weekly_clanops_review(
-            {"name": "POAP KINGS"},
-            {"clan": {"fame": 12345, "repairPoints": 120, "clanScore": 4560}},
-        )
-
-    assert report.startswith(f"<@&{elixir.LEADER_ROLE_ID}>")
-    assert "**Weekly ClanOps Review**" in report
-    assert "- **POAP KINGS**: 21/50 active | **elders** 5 | **target elder band** 4-6 | **remaining elder capacity** 1" in report
-    assert "⬆️ **Promote now (1):** King Levy (<@1474760692992180429>) — 220 donations, 4 war races, 90d tenure, seen 0d ago" in report
-    assert "⚠️ **Borderline (1):** Finn — 120 donations, 2 war races, 20d tenure, seen 1d ago" in report
-    assert "⬇️ **Demotion/kick watch (1):** Vijay — last seen 8 days ago; 0 donations this week" in report
-    assert "💤 **No war decks this season (1):** Chanco" in report
-    assert "🚤 **Current river race:** fame 12,345 | repair 120 | score 4,560" in report
-
-
 def test_build_weekly_clan_recap_context_summarizes_week():
     with (
         patch("elixir.db.get_weekly_digest_summary", return_value={

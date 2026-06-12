@@ -206,6 +206,88 @@ def test_build_context_bounds_memory_count_and_text_size(memdb, monkeypatch):
     assert all(item["body"].endswith("…") for item in context["week_memories"])
 
 
+def test_memory_synthesis_cycle_posts_contradiction_cards_not_digest():
+    """The weekly synthesis keeps its memory writes but ships no digest
+    report — the only Discord output is one arena-relay action card per
+    flagged contradiction."""
+    from types import SimpleNamespace
+
+    channel = MagicMock()
+    channel.name = "arena-relay"
+    channel.type = "text"
+    plan = {
+        "digest": "This week the clan pushed hard.",
+        "arc_memories": [],
+        "stale_memory_ids": [],
+        "contradictions": [
+            {"memory_id": 42, "stored": "Vijay is an Elder", "live": "Vijay is a Member", "suggested_action": "update role"},
+        ],
+    }
+    created = {"action_id": 9, "source_message_id": None}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._memory.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._memory._build_memory_synthesis_context", return_value={"week_window": {"war_week_id": "131:2"}}),
+        patch("runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan),
+        patch("runtime.jobs._memory._apply_memory_synthesis_plan", return_value={
+            "arcs_written": 0, "stale_expired": 0, "contradictions_flagged": 1,
+            "arcs_requested": 0, "stale_requested": 0, "dry_run": False,
+        }),
+        patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
+        patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
+        patch("runtime.jobs._memory.prompts.discord_singleton_subagent", return_value={"id": 900, "name": "#arena-relay"}),
+        patch("runtime.jobs._memory.bot.get_channel", return_value=channel),
+        patch("runtime.jobs._memory.db.create_leader_action_recommendation", return_value=created) as mock_create,
+        patch("runtime.jobs._memory.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=1)])) as mock_card,
+        patch("runtime.jobs._memory.db.save_message") as mock_save,
+        patch("runtime.jobs._memory.runtime_status.mark_job_start"),
+        patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
+    ):
+        asyncio.run(_memory_synthesis_cycle())
+
+    # Digest persists as durable memory, not as a Discord post.
+    mock_memory.assert_called_once()
+    assert mock_memory.call_args.kwargs["event_type"] == "weekly_memory_synthesis"
+    # One action card per contradiction, on arena-relay.
+    assert mock_create.call_args.kwargs["action_type"] == "memory_review"
+    assert mock_create.call_args.kwargs["source_signal_key"] == "memory_contradiction:42"
+    assert "Vijay is an Elder" in mock_create.call_args.kwargs["prompt_text"]
+    mock_card.assert_awaited_once()
+    assert mock_save.call_args.kwargs["event_type"] == "memory_contradiction"
+    assert "contradiction_cards=1" in mock_success.call_args.args[1]
+
+
+def test_memory_synthesis_cycle_quiet_week_posts_nothing():
+    """No contradictions → no Discord output at all."""
+    plan = {"digest": "", "arc_memories": [], "stale_memory_ids": [], "contradictions": []}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._memory.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._memory._build_memory_synthesis_context", return_value={"week_window": {}}),
+        patch("runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan),
+        patch("runtime.jobs._memory._apply_memory_synthesis_plan", return_value={
+            "arcs_written": 0, "stale_expired": 0, "contradictions_flagged": 0,
+            "arcs_requested": 0, "stale_requested": 0, "dry_run": False,
+        }),
+        patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
+        patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
+        patch("runtime.jobs._memory.post_leader_action_card", new=AsyncMock()) as mock_card,
+        patch("runtime.jobs._memory.runtime_status.mark_job_start"),
+        patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
+    ):
+        asyncio.run(_memory_synthesis_cycle())
+
+    mock_memory.assert_not_called()
+    mock_card.assert_not_awaited()
+    assert "contradiction_cards=0" in mock_success.call_args.args[1]
+
+
 def test_memory_synthesis_cycle_marks_structured_agent_error_as_failure():
     channel = MagicMock()
     with (
