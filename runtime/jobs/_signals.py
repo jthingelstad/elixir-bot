@@ -17,11 +17,8 @@ __all__ = [
 
 import asyncio
 import json
-import logging
 import re
 from datetime import datetime, timezone
-
-log = logging.getLogger("elixir")
 
 import db
 import elixir_agent

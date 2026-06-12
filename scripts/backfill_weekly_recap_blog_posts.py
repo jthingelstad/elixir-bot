@@ -74,7 +74,7 @@ def main():
             if result.get("changed"):
                 print(f"    ✓ committed: {result['commit_url']}")
             else:
-                print(f"    – no change")
+                print("    – no change")
         except Exception as exc:
             print(f"    ✗ failed: {exc}")
 

@@ -404,13 +404,6 @@ def maybe_upsert_signal_memory(*, source_signal_key: str, signal_type: str, body
         return None
     memory_event_id = _signal_memory_event_id(source_signal_key, outcome)
     first = (signals or [{}])[0]
-    existing = list_memories(
-        viewer_scope="system_internal",
-        include_system_internal=True,
-        filters={"event_type": signal_type, "event_id": memory_event_id},
-        limit=1,
-        conn=conn,
-    )
     metadata = {
         "source_signal_key": source_signal_key,
         "memory_event_id": memory_event_id,
