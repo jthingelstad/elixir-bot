@@ -2364,6 +2364,32 @@ def test_leadership_action_scan_posts_singular_actions():
     mock_failure.assert_not_called()
 
 
+def test_leadership_action_scan_requeues_feedback_synthesis_for_refreshed_outcomes():
+    """When outcome evaluation lands (hours after the leader's decision), the
+    affected action types must be re-synthesized so feedback profiles learn
+    from measured outcomes, not just the click."""
+    refreshed = [
+        {"action_id": 1, "action_type": "war_nudge_recommendation"},
+        {"action_id": 2, "action_type": "war_nudge_recommendation"},
+        {"action_id": 3, "action_type": "welcome_relay"},
+        {"action_id": 4},  # no action_type — must not queue
+    ]
+    with (
+        patch("runtime.jobs._signals._deliver_war_nudge_sidecars", new=AsyncMock(return_value=0)),
+        patch("runtime.jobs._core._post_candidate_leader_action_recommendations", new=AsyncMock(return_value=0)),
+        patch("runtime.jobs._core.db.refresh_due_leader_action_outcomes", return_value=refreshed),
+        patch("runtime.jobs._core._leadership_scan_has_critical_war_action", return_value=False),
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
+        patch("runtime.jobs._core.runtime_status.mark_job_start"),
+        patch("runtime.jobs._core.runtime_status.mark_job_success"),
+        patch("runtime.leader_action_feedback.queue_leader_action_feedback_refresh") as mock_queue,
+    ):
+        asyncio.run(elixir._leadership_action_scan())
+
+    queued_types = [call.args[0] for call in mock_queue.call_args_list]
+    assert queued_types == ["war_nudge_recommendation", "welcome_relay"]
+
+
 def test_weekly_clan_recap_posts_to_weekly_digest_channel():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
