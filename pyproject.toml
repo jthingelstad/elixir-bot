@@ -1,3 +1,24 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+extend-exclude = ["venv"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    # E402: deferred imports are used deliberately throughout to avoid
+    # circular-import issues between runtime/, storage/, and db/.
+    "E402",
+    # F401: many modules import names solely so the __export_public facade
+    # pattern (db/__init__.py, runtime/app.py, heartbeat/__init__.py) can
+    # re-export them; ruff can't distinguish those from true dead imports.
+    "F401",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# These call names injected into module globals at import time by
+# __export_public; ruff can't see the dynamic namespace merge.
+"db/__init__.py" = ["F821"]
+"runtime/app.py" = ["F821"]
