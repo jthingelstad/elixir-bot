@@ -957,8 +957,17 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 )
                 return True
             if _arena_relay_uses_leader_action_policy(outcome.get("intent")):
-                critical = bool({signal.get("type") for signal in delivery_signals or []} & CRITICAL_LEADER_ACTION_SIGNAL_TYPES)
-                allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
+                signal_types = {signal.get("type") for signal in delivery_signals or []}
+                critical = bool(signal_types & CRITICAL_LEADER_ACTION_SIGNAL_TYPES)
+                # Provisional action type for the earned-frequency check —
+                # mirrors how _arena_relay_copy will classify these signals.
+                if arena_types == {"discord_invite_reminder"}:
+                    provisional_type = "discord_invite_relay"
+                elif signal_types & CELEBRATION_RELAY_SIGNAL_TYPES:
+                    provisional_type = "celebration_relay"
+                else:
+                    provisional_type = "in_game_relay"
+                allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical, action_type=provisional_type)
                 if not allowed:
                     await asyncio.to_thread(
                         db.upsert_signal_outcome,
@@ -1327,7 +1336,7 @@ async def _deliver_war_nudge_sidecars(signals) -> int:
         channel_kind = str(channel_kind)
 
     for candidate in candidates:
-        allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
+        allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical, action_type="war_nudge_recommendation")
         if not allowed:
             log.info("war nudge sidecar skipped by policy: %s", reason)
             return posted

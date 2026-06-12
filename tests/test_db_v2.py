@@ -452,6 +452,99 @@ def test_leader_action_policy_respects_quiet_hours_and_daily_cap():
         conn.close()
 
 
+def test_leader_action_decision_stats_counts_and_decline_rate():
+    conn = db.get_connection(":memory:")
+    try:
+        for index, status in enumerate(["done", "rejected", "rejected", "deferred"]):
+            db.create_leader_action_recommendation(
+                action_type="war_nudge_recommendation",
+                objective="war_participation",
+                prompt_text=f"Nudge member {index}.",
+                target_player_tag=f"#T{index}",
+                source_message_id=1000 + index,
+                conn=conn,
+            )
+            db.decide_leader_action_by_message(
+                1000 + index,
+                status=status,
+                discord_user_id=123,
+                emoji="✅" if status == "done" else "❌",
+                defer_days=3 if status == "deferred" else None,
+                conn=conn,
+            )
+        stats = db.leader_action_decision_stats(action_type="war_nudge_recommendation", conn=conn)
+        assert stats["done"] == 1
+        assert stats["rejected"] == 2
+        assert stats["deferred"] == 1
+        assert stats["decided"] == 3
+        # Defers excluded from the denominator: 2 rejected of 3 decided.
+        assert abs(stats["decline_rate"] - (2 / 3)) < 1e-9
+
+        # Unknown type returns zeroed stats, not a KeyError.
+        empty = db.leader_action_decision_stats(action_type="promotion_recommendation", conn=conn)
+        assert empty["decided"] == 0
+        assert empty["decline_rate"] is None
+    finally:
+        conn.close()
+
+
+def test_leader_action_policy_earned_frequency_throttles_declined_types():
+    """A type the leader keeps declining self-throttles to one card per
+    cooldown; critical bypasses; a well-accepted type is unaffected."""
+    conn = db.get_connection(":memory:")
+    try:
+        chicago_now = datetime.now(db.CHICAGO_TZ)
+        active = chicago_now.replace(hour=12, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+        # Five declined nudges (>= MIN_DECIDED, decline rate 1.0). Backdate
+        # proposed_at out of today's daily-cap window but inside the 72h
+        # earned-frequency cooldown, so this test isolates the new gate.
+        for index in range(5):
+            db.create_leader_action_recommendation(
+                action_type="war_nudge_recommendation",
+                objective="war_participation",
+                prompt_text=f"Nudge member {index}.",
+                target_player_tag=f"#T{index}",
+                source_message_id=2000 + index,
+                conn=conn,
+            )
+            db.decide_leader_action_by_message(
+                2000 + index, status="rejected", discord_user_id=123, emoji="❌", conn=conn,
+            )
+        two_days_ago = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S")
+        conn.execute(
+            "UPDATE leader_action_recommendations SET proposed_at = ?", (two_days_ago,),
+        )
+
+        allowed, reason = leader_action_policy.can_post_leader_action(
+            action_type="war_nudge_recommendation", conn=conn, now=active,
+        )
+        assert not allowed
+        assert reason.startswith("earned_frequency:war_nudge_recommendation")
+
+        # Critical war moments bypass the throttle.
+        allowed, reason = leader_action_policy.can_post_leader_action(
+            action_type="war_nudge_recommendation", critical=True, conn=conn, now=active,
+        )
+        assert allowed
+
+        # A different action type with no decline history is unaffected.
+        allowed, reason = leader_action_policy.can_post_leader_action(
+            action_type="promotion_recommendation", conn=conn, now=active,
+        )
+        assert allowed, reason
+
+        # Once the throttled type's last card ages past the cooldown, it is
+        # allowed again (one card per cooldown, not a permanent ban).
+        conn.execute("UPDATE leader_action_recommendations SET proposed_at = '2026-01-01T00:00:00', expires_at = NULL")
+        allowed, reason = leader_action_policy.can_post_leader_action(
+            action_type="war_nudge_recommendation", conn=conn, now=active,
+        )
+        assert allowed, reason
+    finally:
+        conn.close()
+
+
 def test_get_connection_rebuilds_legacy_database_with_stale_version(tmp_path):
     db_path = tmp_path / "legacy.db"
     legacy = sqlite3.connect(db_path)

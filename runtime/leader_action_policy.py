@@ -12,6 +12,14 @@ CHICAGO = ZoneInfo("America/Chicago")
 LEADER_ACTION_DAILY_CAP = int(os.getenv("LEADER_ACTION_DAILY_CAP", "4"))
 LEADER_ACTION_QUIET_START_HOUR = int(os.getenv("LEADER_ACTION_QUIET_START_HOUR", "22"))
 LEADER_ACTION_QUIET_END_HOUR = int(os.getenv("LEADER_ACTION_QUIET_END_HOUR", "7"))
+# Earned frequency: an action type the leader keeps declining self-throttles.
+# Once at least MIN_DECIDED decisions exist in the trailing window and the
+# decline rate crosses the threshold, that type is limited to one card per
+# cooldown instead of competing for every daily slot. Critical war actions
+# bypass this like they bypass every other gate.
+LEADER_ACTION_DECLINE_RATE_THRESHOLD = float(os.getenv("LEADER_ACTION_DECLINE_RATE_THRESHOLD", "0.6"))
+LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE = int(os.getenv("LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE", "5"))
+LEADER_ACTION_THROTTLED_COOLDOWN_HOURS = int(os.getenv("LEADER_ACTION_THROTTLED_COOLDOWN_HOURS", "72"))
 
 
 def _local_now(now: datetime | None = None) -> datetime:
@@ -53,7 +61,7 @@ def count_actions_today(*, conn=None, now: datetime | None = None) -> int:
             conn.close()
 
 
-def can_post_leader_action(*, critical: bool = False, conn=None, now: datetime | None = None) -> tuple[bool, str | None]:
+def can_post_leader_action(*, critical: bool = False, action_type: str | None = None, conn=None, now: datetime | None = None) -> tuple[bool, str | None]:
     if critical:
         return True, None
     if is_quiet_time(now):
@@ -61,13 +69,31 @@ def can_post_leader_action(*, critical: bool = False, conn=None, now: datetime |
     count = count_actions_today(conn=conn, now=now)
     if count >= LEADER_ACTION_DAILY_CAP:
         return False, f"daily_cap:{LEADER_ACTION_DAILY_CAP}"
+    if action_type:
+        stats = db.leader_action_decision_stats(action_type=action_type, conn=conn)
+        decided = int(stats.get("decided") or 0)
+        rate = stats.get("decline_rate")
+        if (
+            decided >= LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE
+            and rate is not None
+            and rate >= LEADER_ACTION_DECLINE_RATE_THRESHOLD
+            and db.has_recent_leader_action(
+                action_type=action_type,
+                within_hours=LEADER_ACTION_THROTTLED_COOLDOWN_HOURS,
+                conn=conn,
+            )
+        ):
+            return False, f"earned_frequency:{action_type}:decline_rate={rate:.2f}"
     return True, None
 
 
 __all__ = [
     "LEADER_ACTION_DAILY_CAP",
+    "LEADER_ACTION_DECLINE_RATE_THRESHOLD",
+    "LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE",
     "LEADER_ACTION_QUIET_END_HOUR",
     "LEADER_ACTION_QUIET_START_HOUR",
+    "LEADER_ACTION_THROTTLED_COOLDOWN_HOURS",
     "can_post_leader_action",
     "count_actions_today",
     "is_quiet_time",
