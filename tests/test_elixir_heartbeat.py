@@ -1555,15 +1555,16 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
     assert "Max-level cards: 23" in request["context"]
     assert "Include `POAP KINGS` exactly" in request["context"]
     assert "Use short native clan-chat welcomes." in request["context"]
+    signed_copy = f"{authored_copy} Message from Elixir! - E"
     mock_create.assert_called_once()
     assert mock_create.call_args.kwargs["action_type"] == "welcome_relay"
-    assert mock_create.call_args.kwargs["prompt_text"] == authored_copy
+    assert mock_create.call_args.kwargs["prompt_text"] == signed_copy
     assert mock_create.call_args.kwargs["target_player_tag"] == "#ABC"
     assert mock_create.call_args.kwargs["target_player_name"] == "King Levy"
     mock_card.assert_awaited_once()
     assert mock_card.await_args.args[0] is channel
     assert mock_card.await_args.args[1]["action_id"] == 43
-    assert mock_card.await_args.kwargs["copy_messages"] == [authored_copy]
+    assert mock_card.await_args.kwargs["copy_messages"] == [signed_copy]
     mock_update_message.assert_called_once_with(43, source_message_id=2000)
     mock_update_copy.assert_called_once_with(43, copy_message_id=2001)
 
@@ -1656,7 +1657,7 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
     assert "Include `POAP KINGS` exactly" in request["context"]
     mock_card.assert_awaited_once()
     assert mock_card.await_args.args[1]["action_id"] == 44
-    assert mock_card.await_args.kwargs["copy_messages"] == [authored_copy]
+    assert mock_card.await_args.kwargs["copy_messages"] == [f"{authored_copy} Message from Elixir! - E"]
     assert not any(
         call.kwargs.get("delivery_status") == "skipped"
         and str(call.kwargs.get("error_detail", "")).startswith("arena_relay_cooldown")
@@ -1782,11 +1783,12 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
     assert request["intent"] == "discord_invite_relay"
     assert request["exact_once_terms"] == ["POAPKINGS . COM > Members"]
     assert "Discord-linked clan members: 17/50" in request["context"]
+    signed_messages = [f"{message} Message from Elixir! - E" for message in authored_messages]
     mock_create.assert_called_once()
-    assert mock_create.call_args.kwargs["prompt_text"] == "\n".join(authored_messages)
+    assert mock_create.call_args.kwargs["prompt_text"] == "\n".join(signed_messages)
     mock_card.assert_awaited_once()
     assert mock_card.await_args.args[1]["action_id"] == 42
-    assert mock_card.await_args.kwargs["copy_messages"] == authored_messages
+    assert mock_card.await_args.kwargs["copy_messages"] == signed_messages
     mock_update_message.assert_called_once_with(42, source_message_id=1000)
     mock_update_copy.assert_called_once_with(42, copy_message_id=1001)
 
@@ -1956,12 +1958,22 @@ def test_role_action_clan_chat_copy_is_short_and_public_reasoned():
         ),
     )
 
-    assert promotion == "Promoting King Levy to Elder for 220 donations, 4 war races, 90d tenure. Thanks for helping POAP KINGS."
-    assert kick == "Removing Vijay from the clan for last seen 8 days ago; no war participation. Keeping POAP KINGS active and fair."
-    assert demotion == "Moving Aaqib back to Member for now: activity has dropped for several weeks. Roles should match current activity."
+    assert promotion == (
+        "Promoting King Levy to Elder for 220 donations, 4 war races, 90d tenure. "
+        "Thanks for helping POAP KINGS. Message from Elixir! - E"
+    )
+    assert kick == (
+        "Removing Vijay from the clan for last seen 8 days ago; no war participation. "
+        "Keeping POAP KINGS active and fair. Message from Elixir! - E"
+    )
+    assert demotion == (
+        "Moving Aaqib back to Member for now: activity has dropped for several weeks. "
+        "Roles should match current activity. Message from Elixir! - E"
+    )
     assert (
         long_kick
-        == "Removing 1spaceO2 from the clan for no battle in 8 days, last login 8 days ago; 0 donations this week. Keeping POAP KINGS active and fair."
+        == "Removing 1spaceO2 from the clan for no battle in 8 days, last login 8 days ago; "
+        "0 donations this week. Keeping POAP KINGS active and fair. Message from Elixir! - E"
     )
     assert "...." not in long_kick
     assert "donatio..." not in long_kick
@@ -2704,8 +2716,9 @@ def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
     assert "Vijay sealed his comeback" in request["context"]
     assert mock_create.call_args.kwargs["objective"] == "clan_story"
     assert mock_create.call_args.kwargs["source_signal_key"].startswith("weekly_story_relay:")
-    assert mock_create.call_args.kwargs["copy_current_text"] == copy_line
-    assert mock_card.await_args.kwargs["copy_messages"] == [copy_line]
+    signed_copy = f"{copy_line} Message from Elixir! - E"
+    assert mock_create.call_args.kwargs["copy_current_text"] == signed_copy
+    assert mock_card.await_args.kwargs["copy_messages"] == [signed_copy]
     assert mock_save.call_args.kwargs["event_type"] == "weekly_story_relay"
 
 

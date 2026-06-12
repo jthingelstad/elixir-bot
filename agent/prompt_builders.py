@@ -225,7 +225,9 @@ def _clan_chat_copy_system():
         "- If the request includes `required_terms`, include each one exactly.\n"
         "- If the request includes `exact_once_terms`, include each one exactly once across the whole message sequence.\n"
         "- If the request includes `forbidden_terms`, avoid each one exactly.\n"
-        "- If the request includes `signature`, use it only when `signature.enabled` is true. Otherwise do not sign the message.\n\n"
+        "- If the request includes `signature.enabled: true`, append `signature.text` exactly at the end of each message. "
+        "Treat it as part of Elixir's in-game relay persona, not as Discord metadata. "
+        "If `signature.enabled` is false, do not sign the message.\n\n"
         "Return JSON only, with no markdown wrapper:\n"
         "{\"messages\": [\"message 1\", \"message 2\"], \"summary\": \"short summary\"}",
     )
