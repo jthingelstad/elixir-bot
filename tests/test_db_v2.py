@@ -488,6 +488,36 @@ def test_leader_action_decision_stats_counts_and_decline_rate():
         conn.close()
 
 
+def test_leader_action_board_snapshot_splits_open_and_decided():
+    conn = db.get_connection(":memory:")
+    try:
+        for index, status in enumerate([None, "done", "rejected"]):
+            db.create_leader_action_recommendation(
+                action_type="war_nudge_recommendation",
+                objective="war_participation",
+                prompt_text=f"Nudge member {index}.",
+                target_player_tag=f"#T{index}",
+                source_message_id=3000 + index,
+                conn=conn,
+            )
+            if status:
+                db.decide_leader_action_by_message(
+                    3000 + index,
+                    status=status,
+                    discord_user_id=123,
+                    emoji="✅" if status == "done" else "❌",
+                    conn=conn,
+                )
+        board = db.leader_action_board_snapshot(conn=conn)
+        assert [item["target_player_tag"] for item in board["open"]] == ["#T0"]
+        assert {item["status"] for item in board["recent_decisions"]} == {"done", "rejected"}
+        # Compact shape only — no baselines/outcomes/copy bodies.
+        assert "baseline" not in board["open"][0]
+        assert "outcome" not in board["recent_decisions"][0]
+    finally:
+        conn.close()
+
+
 def test_leader_action_policy_earned_frequency_throttles_declined_types():
     """A type the leader keeps declining self-throttles to one card per
     cooldown; critical bypasses; a well-accepted type is unaffected."""

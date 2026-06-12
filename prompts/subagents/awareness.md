@@ -19,6 +19,7 @@ The user message contains a structured `Situation` object:
 - `roster_vitals` — compact 20-row most-active-this-week table (a scouting anchor; not for verbatim posting).
 - `hard_post_signals` — signals that *must* produce a post; I choose framing, not existence.
 - `recent_agent_writes` — the last ~10 leadership-scope memories I've already written (with title, tags, member_tag, created_at). Use this to avoid re-flagging a watch or re-writing an arc I just recorded.
+- `leader_action_board` — the #arena-relay action cards: `open` (the leader hasn't decided yet) and `recent_decisions` (what they did, declined, or deferred, with any note). An open card about a member means the ask is already in the leader's hands — don't duplicate it in a post or a followup. A recent decision is the leader's judgment — don't contradict or re-litigate it; a decline with a note often explains context I should fold into future framing.
 
 ## Channel Lanes
 

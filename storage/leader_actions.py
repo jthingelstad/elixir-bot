@@ -815,6 +815,54 @@ def has_recent_leader_action(
     return row is not None
 
 
+def _compact_action_for_board(action: dict) -> dict:
+    prompt_text = (action.get("prompt_text") or "")[:200]
+    note = (action.get("decision_note") or "")[:200] or None
+    return {
+        "action_id": action.get("action_id"),
+        "action_type": action.get("action_type"),
+        "status": action.get("status"),
+        "prompt_text": prompt_text,
+        "target_player_tag": action.get("target_player_tag"),
+        "target_player_name": action.get("target_player_name"),
+        "proposed_at": action.get("proposed_at"),
+        "decided_at": action.get("decided_at"),
+        "decision_note": note,
+    }
+
+
+@managed_connection
+def leader_action_board_snapshot(
+    *,
+    open_limit: int = 10,
+    decided_limit: int = 10,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Compact view of the arena-relay action board.
+
+    Built for the awareness Situation: ``open`` is what the leader has not
+    decided yet (so the agent doesn't post about a member with a pending
+    card), ``recent_decisions`` is what the leader recently did/declined
+    (so the agent doesn't contradict or re-litigate it).
+    """
+    open_rows = conn.execute(
+        "SELECT * FROM leader_action_recommendations "
+        "WHERE status = ? AND COALESCE(is_test, 0) = 0 "
+        "ORDER BY proposed_at DESC, action_id DESC LIMIT ?",
+        (ACTION_PROPOSED, max(1, min(int(open_limit or 10), 25))),
+    ).fetchall()
+    decided_rows = conn.execute(
+        "SELECT * FROM leader_action_recommendations "
+        "WHERE status IN (?, ?, ?) AND decided_at IS NOT NULL AND COALESCE(is_test, 0) = 0 "
+        "ORDER BY decided_at DESC, action_id DESC LIMIT ?",
+        (ACTION_DONE, ACTION_REJECTED, ACTION_DEFERRED, max(1, min(int(decided_limit or 10), 25))),
+    ).fetchall()
+    return {
+        "open": [_compact_action_for_board(_row_to_action(row)) for row in open_rows],
+        "recent_decisions": [_compact_action_for_board(_row_to_action(row)) for row in decided_rows],
+    }
+
+
 @managed_connection
 def leader_action_decision_stats(
     *,
@@ -1152,6 +1200,7 @@ __all__ = [
     "get_leader_action_by_message",
     "get_recent_leader_action_for_target",
     "has_recent_leader_action",
+    "leader_action_board_snapshot",
     "leader_action_decision_stats",
     "list_leader_action_feedback_profiles",
     "list_leader_actions",
