@@ -325,6 +325,74 @@ def _welcome_copy_mentions_profile_fact(copy: str, profile_facts: list[str] | No
     return any(marker in clean_copy for marker in markers)
 
 
+def _welcome_profile_fact_phrases(profile_facts: list[str] | None) -> list[str]:
+    phrases = []
+    for fact in profile_facts or []:
+        text = str(fact or "").strip()
+        if not text or text.startswith("- Name:") or text.startswith("- Player tag:"):
+            continue
+        label, _, value = text.lstrip("- ").partition(":")
+        value = value.strip()
+        if not value:
+            continue
+        if label == "Years played/account age":
+            phrases.append(f"{value} played")
+        elif label == "Max-level cards":
+            phrases.append(f"{value} max cards")
+        elif label == "Collection Level":
+            phrases.append(f"Collection Level {value}")
+        elif label == "Collection Level badge tier":
+            phrases.append(f"Collection badge {value}")
+        elif label == "Favorite card":
+            phrases.append(f"{value} as a favorite card")
+        elif label == "Highest card level":
+            phrases.append(f"level {value} cards")
+        elif label == "Best challenge run":
+            phrases.append(f"{value} challenge best")
+        elif label == "Banner collection":
+            phrases.append(f"{value} banners")
+        elif label == "Emote collection":
+            phrases.append(f"{value} emotes")
+        elif label.startswith("Fallback only - battle wins"):
+            phrases.append(f"{value} battle wins")
+        elif label.startswith("Fallback only - current trophies"):
+            phrases.append(f"{value} trophies")
+        elif label.startswith("Fallback only - best trophies"):
+            phrases.append(f"{value} best trophies")
+        elif label.startswith("Fallback only - clan war wins"):
+            phrases.append(f"{value} clan war wins")
+    return phrases
+
+
+def _fallback_welcome_relay_copy(signal: dict, profile_facts: list[str] | None) -> str:
+    name = str((signal or {}).get("name") or "new member").strip() or "new member"
+    phrases = _welcome_profile_fact_phrases(profile_facts)
+    if len(phrases) >= 2:
+        fact = f"{phrases[0]} and {phrases[1]}"
+    elif phrases:
+        fact = phrases[0]
+    else:
+        fact = "glad you are here"
+    return _clip_relay_copy(
+        f"Welcome to POAP KINGS, {name}! {fact} stands out.",
+        limit=ARENA_RELAY_WELCOME_MAX_COPY_CHARS,
+    )
+
+
+def _build_fallback_welcome_relay_result(
+    signals: list[dict],
+    *,
+    profile_facts: list[str] | None = None,
+) -> dict | None:
+    primary = (signals or [{}])[0] or {}
+    copy = _fallback_welcome_relay_copy(primary, profile_facts)
+    return _build_generated_welcome_relay_result(
+        signals,
+        {"content": copy},
+        profile_facts=profile_facts,
+    )
+
+
 def _build_generated_welcome_relay_result(
     signals: list[dict],
     generated: dict | None,
@@ -1026,6 +1094,11 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     generated,
                     profile_facts=welcome_profile_facts,
                 )
+                if result is None:
+                    result = _build_fallback_welcome_relay_result(
+                        member_join_signals,
+                        profile_facts=welcome_profile_facts,
+                    )
             else:
                 result = _build_arena_relay_result(delivery_signals)
             if result is not None:
