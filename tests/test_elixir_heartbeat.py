@@ -2001,7 +2001,8 @@ def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
         patch("runtime.jobs._site.poap_kings_site.publish_blog_post", return_value=_publish_result("blog_post")),
         patch("runtime.jobs._core._notify_poapkings_publish", new=AsyncMock()) as mock_notify,
     ):
-        asyncio.run(elixir._weekly_clan_recap())
+        with patch("runtime.jobs._core._weekly_story_relay_card", new=AsyncMock(return_value=False)):
+            asyncio.run(elixir._weekly_clan_recap())
 
     mock_post.assert_awaited_once()
     mock_publish.assert_called_once_with(
@@ -2406,6 +2407,63 @@ def test_leader_action_recommendation_suppressed_after_recent_decline():
     mock_create.assert_not_called()
 
 
+def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
+    """After the recap, its best member story is offered as a clan-chat
+    relay card so the non-Discord majority can be reached through game
+    chat — leader-decided like every other card."""
+    from runtime.jobs._core import _weekly_story_relay_card
+
+    channel = SimpleNamespace(id=900, name="arena-relay", type="text")
+    created = {"action_id": 11, "source_message_id": None}
+    copy_line = "Shoutout to Vijay - three weeks of climbing paid off with a perfect 4/4 colosseum day. POAP KINGS keeps rolling."
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#arena-relay", "subagent_key": "arena-relay"}),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)) as mock_policy,
+        patch("runtime.jobs._core.elixir_agent.generate_channel_update", return_value={"content": [copy_line]}),
+        patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
+        patch("runtime.jobs._core.db.create_leader_action_recommendation", return_value=created) as mock_create,
+        patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=77)])) as mock_card,
+        patch("runtime.jobs._core.db.save_message") as mock_save,
+    ):
+        posted = asyncio.run(_weekly_story_relay_card("**Weekly Recap**\nVijay sealed his comeback..."))
+
+    assert posted is True
+    assert mock_policy.call_args.kwargs["action_type"] == "in_game_relay"
+    assert mock_create.call_args.kwargs["objective"] == "clan_story"
+    assert mock_create.call_args.kwargs["source_signal_key"].startswith("weekly_story_relay:")
+    assert mock_create.call_args.kwargs["copy_current_text"] == copy_line
+    assert mock_card.await_args.kwargs["copy_messages"] == [copy_line]
+    assert mock_save.call_args.kwargs["event_type"] == "weekly_story_relay"
+
+
+def test_weekly_story_relay_card_skips_when_copy_unusable():
+    from runtime.jobs._core import _weekly_story_relay_card
+
+    channel = SimpleNamespace(id=900, name="arena-relay", type="text")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#arena-relay", "subagent_key": "arena-relay"}),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
+        patch("runtime.jobs._core.elixir_agent.generate_channel_update", return_value={"content": ["Read more at https://example.com"]}),
+        patch("runtime.jobs._core.db.create_leader_action_recommendation") as mock_create,
+    ):
+        posted = asyncio.run(_weekly_story_relay_card("recap text"))
+
+    assert posted is False
+    mock_create.assert_not_called()
+
+
 def test_leadership_action_scan_requeues_feedback_synthesis_for_refreshed_outcomes():
     """When outcome evaluation lands (hours after the leader's decision), the
     affected action types must be re-synthesized so feedback profiles learn
@@ -2454,7 +2512,8 @@ def test_weekly_clan_recap_posts_to_weekly_digest_channel():
         patch("elixir.db.save_message") as mock_save,
         patch("runtime.jobs._core.upsert_weekly_summary_memory") as mock_memory,
     ):
-        asyncio.run(elixir._weekly_clan_recap())
+        with patch("runtime.jobs._core._weekly_story_relay_card", new=AsyncMock(return_value=False)):
+            asyncio.run(elixir._weekly_clan_recap())
 
     mock_build.assert_called_once_with({"name": "POAP KINGS"}, {"state": "warDay"})
     mock_generate.assert_called_once_with("=== WEEKLY CLAN RECAP SNAPSHOT ===", "last week's recap")
@@ -2497,7 +2556,8 @@ def test_weekly_clan_recap_marks_failure_when_channel_send_forbidden():
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
         try:
-            asyncio.run(elixir._weekly_clan_recap())
+            with patch("runtime.jobs._core._weekly_story_relay_card", new=AsyncMock(return_value=False)):
+                asyncio.run(elixir._weekly_clan_recap())
             assert False, "expected RuntimeError"
         except RuntimeError as exc:
             assert "weekly recap post failed: missing Discord permissions in #weekly-digest" == str(exc)
