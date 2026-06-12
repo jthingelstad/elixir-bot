@@ -301,6 +301,22 @@ def _recent_agent_writes(limit: int = 10) -> list[dict]:
     return out
 
 
+def _leader_action_board() -> dict:
+    """Compact view of the arena-relay action board for the agent.
+
+    Open cards mean the leader has an undecided ask about that member or
+    topic — the agent should not duplicate it in a post. Recent decisions
+    are the leader's latest judgments — the agent should not contradict or
+    re-litigate them.
+    """
+    try:
+        return db.leader_action_board_snapshot()
+    except Exception:
+        log.warning("leader_action_board load failed", exc_info=True)
+        _note_degraded("leader_action_board")
+        return {"open": [], "recent_decisions": []}
+
+
 def _already_delivered(signal: dict) -> bool:
     """True iff the signal's log key is already in ``signal_log``.
 
@@ -372,6 +388,7 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
         },
         "roster_vitals": _roster_vitals(),
         "recent_agent_writes": _recent_agent_writes(),
+        "leader_action_board": _leader_action_board(),
         "_raw_signal_count": len(signals),
         "_noisy_signal_count": noisy_signal_count,
         "_due_revisit_count": len(due_revisits),

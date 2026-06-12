@@ -216,6 +216,35 @@ def test_build_situation_reports_degraded_blocks_when_loaders_fail():
     assert "season_awards" not in clean["_degraded_blocks"]
 
 
+def test_build_situation_includes_leader_action_board():
+    """The Situation carries the arena-relay action board so the awareness
+    agent doesn't duplicate an open ask or contradict a recent decision."""
+    board = {
+        "open": [{"action_id": 7, "action_type": "promotion_recommendation", "status": "proposed", "target_player_tag": "#ABC"}],
+        "recent_decisions": [{"action_id": 6, "action_type": "war_nudge_recommendation", "status": "rejected", "decision_note": "plays late"}],
+    }
+    bundle = _bundle(signals=[])
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.leader_action_board_snapshot", return_value=board),
+    ):
+        situation = build_situation(bundle)
+    assert situation["leader_action_board"] == board
+
+
+def test_build_situation_leader_action_board_degrades_to_empty():
+    bundle = _bundle(signals=[])
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.leader_action_board_snapshot", side_effect=RuntimeError("boom")),
+    ):
+        situation = build_situation(bundle)
+    assert situation["leader_action_board"] == {"open": [], "recent_decisions": []}
+    assert "leader_action_board" in situation["_degraded_blocks"]
+
+
 def test_build_situation_surfaces_recent_agent_writes_for_dedup():
     """The Situation includes a compact view of recent agent-authored
     leadership memories so the awareness loop can avoid duplicate writes."""
