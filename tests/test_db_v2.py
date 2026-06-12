@@ -420,34 +420,47 @@ def test_recent_leader_action_lookup_finds_completed_kick_target():
         conn.close()
 
 
-def test_leader_action_policy_respects_quiet_hours_and_daily_cap():
+def test_leader_action_policy_runs_24h_and_caps_on_open_backlog():
+    """No quiet hours, no daily quota — posting pauses only while leadership
+    has a full backlog of undecided cards, and resumes as cards get decided."""
     conn = db.get_connection(":memory:")
     try:
-        # Build quiet/active from the real current Chicago day:
-        # create_leader_action_recommendation stamps rows with the real clock,
-        # so a hardcoded date here silently drifts out of count_actions_today's
-        # window (this bit us when the suite ran after 05:00 UTC).
+        # Middle of the night Chicago: still allowed. Clash runs 24 hours.
         chicago_now = datetime.now(db.CHICAGO_TZ)
-        quiet = chicago_now.replace(hour=0, minute=30, second=0, microsecond=0).astimezone(timezone.utc)
-        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=quiet)
-        assert not allowed
-        assert reason == "quiet_hours"
+        late_night = chicago_now.replace(hour=0, minute=30, second=0, microsecond=0).astimezone(timezone.utc)
+        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=late_night)
+        assert allowed, reason
 
-        active = chicago_now.replace(hour=12, minute=0, second=0, microsecond=0).astimezone(timezone.utc)  # noon Chicago
-        for index in range(leader_action_policy.LEADER_ACTION_DAILY_CAP):
+        # Fill the board with undecided cards → backlog gate closes.
+        for index in range(leader_action_policy.LEADER_ACTION_OPEN_CARD_CAP):
             db.create_leader_action_recommendation(
                 action_type="kick_recommendation",
                 objective="roster_health",
                 prompt_text=f"Review member {index}.",
+                source_message_id=4000 + index,
                 conn=conn,
             )
-        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=active)
+        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=late_night)
         assert not allowed
-        assert reason == f"daily_cap:{leader_action_policy.LEADER_ACTION_DAILY_CAP}"
+        assert reason.startswith("open_card_backlog:")
 
-        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=quiet, critical=True)
+        # Critical war moments bypass the backlog.
+        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=late_night, critical=True)
         assert allowed
         assert reason is None
+
+        # The leader deciding a card re-opens the budget — regardless of hour.
+        db.decide_leader_action_by_message(
+            4000, status="done", discord_user_id=123, emoji="✅", conn=conn,
+        )
+        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=late_night)
+        assert allowed, reason
+
+        # Stale open cards age out of the backlog window instead of
+        # deadlocking the board forever.
+        conn.execute("UPDATE leader_action_recommendations SET proposed_at = '2026-01-01T00:00:00'")
+        allowed, reason = leader_action_policy.can_post_leader_action(conn=conn, now=late_night)
+        assert allowed, reason
     finally:
         conn.close()
 
