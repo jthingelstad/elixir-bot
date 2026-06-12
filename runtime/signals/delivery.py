@@ -563,7 +563,7 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
 
     log.info(
         "awareness_tick_result workflow=%r delivered=%d rejected=%d covered=%d considered_skipped=%d "
-        "hard_fallback=%d hard_fallback_failed=%d signals_in=%d skipped_reason=%r",
+        "hard_fallback=%d hard_fallback_failed=%d signals_in=%d degraded_blocks=%d skipped_reason=%r",
         workflow,
         report["delivered"],
         report["rejected"],
@@ -572,6 +572,7 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         len(uncovered),
         len(fallback_failed_keys),
         len(signals or []),
+        len(situation.get("_degraded_blocks") or []),
         (plan or {}).get("skipped_reason"),
     )
 
