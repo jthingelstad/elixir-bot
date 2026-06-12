@@ -2,6 +2,9 @@
 
 Reads markdown files from the prompts/ directory and parses
 configurable values from CLAN.md and DISCORD.md.
+
+Not to be confused with ``agent.prompt_builders``, which composes the
+blocks loaded here into per-workflow system prompts.
 """
 
 import os

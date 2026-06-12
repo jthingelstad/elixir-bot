@@ -11,10 +11,14 @@ log = logging.getLogger("elixir_db")
 from db import (
     _canon_tag,
     _current_joined_at,
-    _member_reference_fields,
     _parse_cr_time,
     _rowdicts,
     managed_connection,
+)
+from storage._enrichment import _member_reference_fields
+from storage._war_shared import (
+    get_latest_logged_race,
+    infer_current_season_id_from_live_state,
 )
 from storage.war_calendar import (
     FINAL_BATTLE_PERIOD_OFFSET,
@@ -53,46 +57,6 @@ def _was_signal_sent_any_date(conn: sqlite3.Connection, signal_type: str) -> boo
         "SELECT 1 FROM signal_log WHERE signal_type = ?",
         (signal_type,),
     ).fetchone() is not None
-
-
-def _get_latest_logged_race(conn: sqlite3.Connection):
-    return conn.execute(
-        "SELECT season_id, section_index, created_date, our_rank, trophy_change, our_fame, total_clans, finish_time "
-        "FROM war_races ORDER BY season_id DESC, section_index DESC, war_race_id DESC LIMIT 1"
-    ).fetchone()
-
-
-def _infer_current_season_id_from_live_state(payload: dict, latest_logged_race) -> Optional[int]:
-    live_season_id = payload.get("seasonId")
-    if live_season_id is not None:
-        return live_season_id
-    if not latest_logged_race:
-        return None
-    live_section_index = payload.get("sectionIndex")
-    logged_section_index = latest_logged_race["section_index"]
-    if (
-        live_section_index is not None
-        and logged_section_index is not None
-        and live_section_index < logged_section_index
-    ):
-        return latest_logged_race["season_id"] + 1
-    return latest_logged_race["season_id"]
-
-
-def _normalize_period_type(period_type: Optional[str]) -> Optional[str]:
-    return normalize_period_type(period_type)
-
-
-def _period_offset(period_index: Optional[int]) -> Optional[int]:
-    return period_offset(period_index)
-
-
-def _resolve_phase(period_type: Optional[str], period_index: Optional[int]) -> Optional[str]:
-    return resolve_phase(period_type, period_index)
-
-
-def _phase_day_number(phase: Optional[str], period_index: Optional[int]) -> Optional[int]:
-    return phase_day_number(phase, period_index)
 
 
 def _resolve_live_race_rank(payload: dict, clan_tag: Optional[str]) -> Optional[int]:
@@ -192,12 +156,12 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
     result = dict(row)
     result.pop("raw_json", None)
 
-    season_id = _infer_current_season_id_from_live_state(payload, latest_logged_race)
+    season_id = infer_current_season_id_from_live_state(payload, latest_logged_race)
     section_index = payload.get("sectionIndex")
     period_index = payload.get("periodIndex")
     period_type = payload.get("periodType")
-    phase = _resolve_phase(period_type, period_index)
-    period_offset = _period_offset(period_index)
+    phase = resolve_phase(period_type, period_index)
+    offset = period_offset(period_index)
     clan_payload = payload.get("clan") or {}
     finish_time, race_completed_at = _finish_time_fields(clan_payload.get("finishTime"))
 
@@ -218,19 +182,19 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
 
     colosseum = is_colosseum_week(period_type)
     result["period_index"] = period_index
-    result["period_offset"] = period_offset
+    result["period_offset"] = offset
     result["period_type"] = period_type
     result["phase"] = phase
     result["colosseum_week"] = colosseum
     result["battle_phase_active"] = phase == "battle"
     result["practice_phase_active"] = phase == "practice"
     result["final_practice_day_active"] = (
-        phase == "practice" and period_offset == FINAL_PRACTICE_PERIOD_OFFSET
+        phase == "practice" and offset == FINAL_PRACTICE_PERIOD_OFFSET
     )
-    result["final_battle_day_active"] = phase == "battle" and period_offset == FINAL_BATTLE_PERIOD_OFFSET
-    result["battle_day_number"] = _phase_day_number(phase, period_index) if phase == "battle" else None
+    result["final_battle_day_active"] = phase == "battle" and offset == FINAL_BATTLE_PERIOD_OFFSET
+    result["battle_day_number"] = phase_day_number(phase, period_index) if phase == "battle" else None
     result["battle_day_total"] = 4 if phase == "battle" else None
-    result["practice_day_number"] = _phase_day_number(phase, period_index) if phase == "practice" else None
+    result["practice_day_number"] = phase_day_number(phase, period_index) if phase == "practice" else None
     result["practice_day_total"] = FIRST_BATTLE_PERIOD_OFFSET if phase == "practice" else None
     result["phase_display"] = (
         f"Battle Day {result['battle_day_number']}"
@@ -284,7 +248,7 @@ def _load_live_war_state_rows(rows, *, latest_logged_race) -> list[dict]:
 
 @managed_connection
 def get_recent_live_war_states(limit: int = 2, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    latest_logged_race = _get_latest_logged_race(conn)
+    latest_logged_race = get_latest_logged_race(conn)
     rows = conn.execute(
         "SELECT war_id, observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json "
         "FROM war_current_state ORDER BY war_id DESC LIMIT ?",
@@ -297,7 +261,7 @@ def get_recent_live_war_states(limit: int = 2, conn: Optional[sqlite3.Connection
 def get_live_war_state_by_id(war_id: Optional[int], conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     if war_id is None:
         return None
-    latest_logged_race = _get_latest_logged_race(conn)
+    latest_logged_race = get_latest_logged_race(conn)
     row = conn.execute(
         "SELECT war_id, observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json "
         "FROM war_current_state WHERE war_id = ?",
@@ -316,7 +280,7 @@ def get_latest_live_war_state_id(conn: Optional[sqlite3.Connection] = None) -> O
 def get_previous_live_war_state_before(before_war_id: Optional[int], conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     if before_war_id is None:
         return None
-    latest_logged_race = _get_latest_logged_race(conn)
+    latest_logged_race = get_latest_logged_race(conn)
     row = conn.execute(
         "SELECT war_id, observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json "
         "FROM war_current_state WHERE war_id < ? ORDER BY war_id DESC LIMIT 1",
@@ -327,7 +291,7 @@ def get_previous_live_war_state_before(before_war_id: Optional[int], conn: Optio
 
 @managed_connection
 def list_live_war_states_after(after_war_id: Optional[int], conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    latest_logged_race = _get_latest_logged_race(conn)
+    latest_logged_race = get_latest_logged_race(conn)
     rows = conn.execute(
         "SELECT war_id, observed_at, war_state, clan_tag, clan_name, fame, repair_points, period_points, clan_score, raw_json "
         "FROM war_current_state WHERE war_id > ? ORDER BY war_id ASC",
@@ -533,7 +497,7 @@ def _get_live_state_for_war_day(
 ) -> Optional[dict]:
     if not war_day_key:
         return None
-    latest_logged_race = _get_latest_logged_race(conn)
+    latest_logged_race = get_latest_logged_race(conn)
     order = "DESC" if newest else "ASC"
     params = []
     where = []
@@ -903,7 +867,7 @@ def get_latest_clan_boat_defense_status(clan_tag: Optional[str] = None, conn: Op
         return None
 
     result = dict(row)
-    phase = _resolve_phase(None, result.get("period_index"))
+    phase = resolve_phase(None, result.get("period_index"))
     result["phase"] = phase
     result["week"] = (
         result["section_index"] + 1
@@ -911,12 +875,12 @@ def get_latest_clan_boat_defense_status(clan_tag: Optional[str] = None, conn: Op
         else None
     )
     result["battle_day_number"] = (
-        _phase_day_number("battle", result.get("period_index"))
+        phase_day_number("battle", result.get("period_index"))
         if phase == "battle"
         else None
     )
     result["practice_day_number"] = (
-        _phase_day_number("practice", result.get("period_index"))
+        phase_day_number("practice", result.get("period_index"))
         if phase == "practice"
         else None
     )

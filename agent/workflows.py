@@ -13,7 +13,7 @@ from agent.core import (
     response_text,
 )
 from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_json_response, _parse_response
-from agent.prompts import (
+from agent.prompt_builders import (
     _arena_relay_observation_system,
     _awareness_system,
     _channel_subagent_system,

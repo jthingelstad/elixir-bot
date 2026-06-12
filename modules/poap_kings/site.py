@@ -730,7 +730,6 @@ def aggregate_card_usage(battle_log, player_tag):
     clean_tag = "#" + player_tag.lstrip("#")
     card_counts = {}
     card_icons = {}
-    card_members = {}
     total_battles = 0
 
     for battle in battle_log:

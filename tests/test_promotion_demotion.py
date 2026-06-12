@@ -129,7 +129,7 @@ def test_promotion_response_includes_demotion_candidates():
     conn = db.get_connection(":memory:")
     try:
         # One promotable member, one demotable elder.
-        m_id = _seed_member(conn, "#STRONG", "Strong", "member", donations_week=300)
+        _seed_member(conn, "#STRONG", "Strong", "member", donations_week=300)
         db.set_member_join_date("#STRONG", "Strong", "2026-01-01", conn=conn)
         e_id = _seed_member(conn, "#WEAK", "WeakElder", "elder", donations_week=5)
         today = datetime(2026, 4, 18, tzinfo=timezone.utc).date()

@@ -2399,12 +2399,12 @@ def test_queue_startup_system_signals_enqueues_well_formed_announcements():
     assert queued_keys == [s["signal_key"] for s in STARTUP_SYSTEM_SIGNALS]
     assert len(queued_keys) == len(set(queued_keys)), "duplicate signal_keys"
 
-    for signal in STARTUP_SYSTEM_SIGNALS:
-        payload = signal["payload"]
-        assert payload.get("title", "").startswith("Achievement Unlocked"), signal["signal_key"]
-        assert payload.get("message"), signal["signal_key"]
-        assert payload.get("capability_area"), signal["signal_key"]
-        assert signal["signal_type"] in {"capability_unlock"}, signal["signal_key"]
+    for system_signal in STARTUP_SYSTEM_SIGNALS:
+        payload = system_signal["payload"]
+        assert payload.get("title", "").startswith("Achievement Unlocked"), system_signal["signal_key"]
+        assert payload.get("message"), system_signal["signal_key"]
+        assert payload.get("capability_area"), system_signal["signal_key"]
+        assert system_signal["signal_type"] in {"capability_unlock"}, system_signal["signal_key"]
 
 
 def test_queue_startup_system_signals_can_seed_pending_signal_in_connection():

@@ -170,6 +170,52 @@ def test_build_situation_drops_already_delivered_signals():
     assert situation["_raw_signal_count"] == 1
 
 
+def test_build_situation_suppresses_signal_when_delivery_lookup_fails():
+    """If the signal_log lookup raises, the signal is suppressed rather than
+    passed through — a missed announcement is recoverable on a later tick,
+    a duplicate post to the clan is not. The suppression is surfaced via
+    _degraded_blocks."""
+    bundle = _bundle(signals=[
+        {
+            "type": "war_battle_rank_change",
+            "signal_log_type": "war_battle_rank_change::s00131-w01-p010::rank1",
+        },
+    ])
+    with patch("runtime.situation.db.was_signal_sent_any_date", side_effect=RuntimeError("db locked")), \
+         patch("runtime.situation.db.list_channel_messages", return_value=[]), \
+         patch("runtime.situation.build_situation_time", return_value=None):
+        situation = build_situation(bundle)
+
+    assert situation["_raw_signal_count"] == 0
+    assert any(
+        block.startswith("already_delivered:") for block in situation["_degraded_blocks"]
+    )
+
+
+def test_build_situation_reports_degraded_blocks_when_loaders_fail():
+    """Loader failures fall back to defaults, but each fallback is recorded
+    in _degraded_blocks so a tick running on partial data is visible instead
+    of silently shrinking the agent's view."""
+    bundle = _bundle(signals=[])
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.get_season_awards_standings", side_effect=RuntimeError("boom")),
+        patch("runtime.situation.db.get_members_on_hot_streak", side_effect=RuntimeError("boom")),
+    ):
+        situation = build_situation(bundle)
+
+    assert "season_awards" in situation["_degraded_blocks"]
+    assert "roster_vitals" in situation["_degraded_blocks"]
+    # Degradation from one call must not leak into the next build.
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+    ):
+        clean = build_situation(_bundle(signals=[]))
+    assert "season_awards" not in clean["_degraded_blocks"]
+
+
 def test_build_situation_surfaces_recent_agent_writes_for_dedup():
     """The Situation includes a compact view of recent agent-authored
     leadership memories so the awareness loop can avoid duplicate writes."""

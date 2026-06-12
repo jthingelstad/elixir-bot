@@ -333,21 +333,21 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     print(f"Errors: {errors}")
     print(f"Off-topic routes (skipped): {skipped}")
     if errors:
-        print(f"\nError details:")
+        print("\nError details:")
         for m, t in all_turns:
             if t.get("error"):
                 print(f"  {m.get('current_name', m.get('player_tag', '?'))} — {t['error']}")
 
-    print(f"\nRoute distribution:")
+    print("\nRoute distribution:")
     for route, n in routes.most_common():
         print(f"  {route:22s} {n:>4}")
-    print(f"\nRoute + mode distribution:")
+    print("\nRoute + mode distribution:")
     for label, n in route_modes.most_common():
         print(f"  {label:25s} {n:>4}")
-    print(f"\nEvent types:")
+    print("\nEvent types:")
     for et, n in event_types.most_common():
         print(f"  {et:28s} {n:>4}")
-    print(f"\nTool call tally:")
+    print("\nTool call tally:")
     for name, n in tools.most_common():
         print(f"  {name:25s} {n:>4}")
 
@@ -367,7 +367,7 @@ def print_summary(all_turns: list[tuple[dict, dict]]) -> None:
     ]
     if war_suggest_turns:
         mismatches = [t for t in war_suggest_turns if t["proposed_decks_count"] != 4]
-        print(f"\nWar deck_suggest validation:")
+        print("\nWar deck_suggest validation:")
         print(f"  {len(war_suggest_turns) - len(mismatches)}/{len(war_suggest_turns)} produced exactly 4 decks")
         for t in mismatches:
             print(f"  MISMATCH: got {t['proposed_decks_count']} decks for Q: {t['question'][:80]!r}")

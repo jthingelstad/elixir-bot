@@ -661,7 +661,7 @@ def _clan_context(clan_data, war_data, roster_data=None, max_members=MAX_CONTEXT
     if omitted_count:
         member_summary.append(f"  ... {omitted_count} more members omitted for context budget")
 
-    result = f"=== CLAN ROSTER ===\n" + "\n".join(member_summary)
+    result = "=== CLAN ROSTER ===\n" + "\n".join(member_summary)
 
     if include_war:
         deck_summary = "No active war data."

@@ -1,25 +1,33 @@
 """Recurring job executors for Elixir."""
 
 from runtime.jobs._core import (  # noqa: F401
-    _player_intel_refresh_minutes, PLAYER_INTEL_REFRESH_MINUTES,
-    PLAYER_INTEL_REFRESH_HOURS, WAR_POLL_MINUTE, WAR_AWARENESS_MINUTE,
-    PLAYER_INTEL_BATCH_SIZE, PLAYER_INTEL_STALE_HOURS,
-    PLAYER_INTEL_REQUEST_SPACING_SECONDS,
+    WAR_POLL_MINUTE, WAR_AWARENESS_MINUTE,
     CLANOPS_WEEKLY_REVIEW_DAY, CLANOPS_WEEKLY_REVIEW_HOUR,
     WEEKLY_DISCORD_INVITE_RELAY_DAY, WEEKLY_DISCORD_INVITE_RELAY_HOUR,
     WEEKLY_RECAP_DAY, WEEKLY_RECAP_HOUR,
-    MEMORY_SYNTHESIS_DAY, MEMORY_SYNTHESIS_HOUR,
-    MEMORY_SYNTHESIS_DRY_RUN, MEMORY_SYNTHESIS_POSTS_PER_CHANNEL,
     _query_or_default, _summarize_member_rows,
     _build_ask_elixir_daily_insight_context, _ask_elixir_daily_insight,
     _clan_awareness_tick, _war_poll_tick, _war_awareness_tick,
     _award_detection_tick,
-    _player_intel_refresh, _clanops_weekly_review, _weekly_clan_recap,
+    _clanops_weekly_review, _weekly_clan_recap,
     _leadership_action_scan, _post_weekly_leader_action_recommendations,
     _weekly_discord_invite_relay,
+)
+from runtime.jobs._intel import (  # noqa: F401
+    _clan_wars_intel_report,
+    _player_intel_refresh_minutes, PLAYER_INTEL_REFRESH_MINUTES,
+    PLAYER_INTEL_REFRESH_HOURS,
+    PLAYER_INTEL_BATCH_SIZE, PLAYER_INTEL_STALE_HOURS,
+    PLAYER_INTEL_REQUEST_SPACING_SECONDS,
+    _player_intel_refresh,
+)
+from runtime.jobs._memory import (  # noqa: F401
+    MEMORY_SYNTHESIS_DAY, MEMORY_SYNTHESIS_HOUR,
+    MEMORY_SYNTHESIS_DRY_RUN, MEMORY_SYNTHESIS_POSTS_PER_CHANNEL,
+    MEMORY_SYNTHESIS_MEMORY_LIMIT, MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT,
+    MEMORY_SYNTHESIS_MEMORY_BODY_CHARS, MEMORY_SYNTHESIS_POST_CHARS,
     _memory_synthesis_cycle, _build_memory_synthesis_context,
     _apply_memory_synthesis_plan,
-    _clan_wars_intel_report,
 )
 # _build_weekly_clanops_review and _build_weekly_clan_recap_context are
 # delegation wrappers in _core.py that forward to runtime.app — re-exporting
