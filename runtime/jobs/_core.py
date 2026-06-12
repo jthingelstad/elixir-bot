@@ -787,6 +787,14 @@ async def _leadership_action_scan():
         refreshed = await asyncio.to_thread(db.refresh_due_leader_action_outcomes)
         if refreshed:
             log.info("leadership action scan refreshed %s due action outcome(s)", len(refreshed))
+            # Measured outcomes (deck usage after a nudge, role changes after a
+            # promotion, ...) land hours after the leader's decision — re-run
+            # feedback synthesis for the affected action types so the lessons
+            # include what actually happened, not just what the leader clicked.
+            from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
+
+            for action_type in sorted({a.get("action_type") for a in refreshed if a.get("action_type")}):
+                queue_leader_action_feedback_refresh(action_type)
         critical = await asyncio.to_thread(_leadership_scan_has_critical_war_action)
         allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
         if not allowed:
