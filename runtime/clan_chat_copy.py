@@ -11,6 +11,7 @@ import elixir_agent
 
 CLAN_CHAT_DEFAULT_MAX_CHARS = 240
 CLAN_CHAT_WELCOME_MAX_CHARS = 120
+CLAN_CHAT_SIGNATURE_TEXT = "Message from Elixir! - E"
 DISCORD_INVITE_ROUTE = "POAPKINGS . COM > Members"
 
 ROLE_ACTION_TYPES = {
@@ -48,6 +49,63 @@ def clip_clan_chat_text(text: str, *, limit: int = CLAN_CHAT_DEFAULT_MAX_CHARS) 
     if word_boundary > 0:
         clipped = clipped[:word_boundary]
     return clipped.rstrip(" .,;:") + "..."
+
+
+def _signature_config(signature: dict[str, Any] | None = None) -> dict[str, Any]:
+    if signature is None:
+        return {
+            "enabled": True,
+            "text": CLAN_CHAT_SIGNATURE_TEXT,
+            "placement": "append",
+        }
+    config = dict(signature)
+    if config.get("enabled", False):
+        config.setdefault("text", CLAN_CHAT_SIGNATURE_TEXT)
+        config.setdefault("placement", "append")
+    return config
+
+
+def _signature_text(signature: dict[str, Any] | None = None) -> str:
+    config = _signature_config(signature)
+    if not config.get("enabled"):
+        return ""
+    return " ".join(str(config.get("text") or CLAN_CHAT_SIGNATURE_TEXT).split())
+
+
+def sign_clan_chat_text(
+    text: str,
+    *,
+    limit: int = CLAN_CHAT_DEFAULT_MAX_CHARS,
+    signature: dict[str, Any] | None = None,
+) -> str:
+    sig = _signature_text(signature)
+    if not sig:
+        return clip_clan_chat_text(text, limit=limit)
+    body = " ".join((text or "").split())
+    body = body.replace(sig, "").strip()
+    if not body:
+        return clip_clan_chat_text(sig, limit=limit)
+    separator = " "
+    reserve = len(separator) + len(sig)
+    if len(body) + reserve <= limit:
+        return f"{body}{separator}{sig}"
+    body_limit = max(0, limit - reserve)
+    clipped_body = clip_clan_chat_text(body, limit=body_limit).strip()
+    if not clipped_body:
+        return clip_clan_chat_text(sig, limit=limit)
+    return f"{clipped_body}{separator}{sig}"
+
+
+def _sign_messages(
+    messages: list[str],
+    *,
+    max_chars: int,
+    signature: dict[str, Any] | None,
+) -> list[str]:
+    return [
+        sign_clan_chat_text(message, limit=max_chars, signature=signature)
+        for message in messages
+    ]
 
 
 def _content_items(value: Any) -> list[str]:
@@ -166,6 +224,7 @@ async def generate_clan_chat_copy(
     signature: dict[str, Any] | None = None,
 ) -> ClanChatCopyResult | None:
     """Generate and validate copy for Clash Royale in-game clan chat."""
+    signature_config = _signature_config(signature)
     request = {
         "intent": intent,
         "target_surface": "Clash Royale in-game clan chat",
@@ -176,11 +235,15 @@ async def generate_clan_chat_copy(
         "required_terms": list(required_terms),
         "exact_once_terms": list(exact_once_terms),
         "forbidden_terms": list(forbidden_terms),
-        "signature": signature or {"enabled": False},
+        "signature": signature_config,
         "metadata": metadata or {},
     }
     generated = await asyncio.to_thread(elixir_agent.generate_clan_chat_copy, request)
-    messages = messages_from_agent_result(generated)
+    messages = _sign_messages(
+        messages_from_agent_result(generated),
+        max_chars=max_chars,
+        signature=signature_config,
+    )
     summary = str((generated or {}).get("summary") or "") if isinstance(generated, dict) else ""
     result = _valid_or_none(
         messages,
@@ -196,7 +259,7 @@ async def generate_clan_chat_copy(
         return result
     if fallback_messages:
         return _valid_or_none(
-            fallback_messages,
+            _sign_messages(fallback_messages, max_chars=max_chars, signature=signature_config),
             max_messages=max_messages,
             max_chars=max_chars,
             required_terms=required_terms,
@@ -234,6 +297,7 @@ def role_action_clan_chat_copy(
     target_player_name: str | None,
     rationale: str,
     max_chars: int = CLAN_CHAT_DEFAULT_MAX_CHARS,
+    signature: dict[str, Any] | None = None,
 ) -> str | None:
     """Deterministic fallback for role-action transparency messages."""
     if action_type not in ROLE_ACTION_TYPES:
@@ -258,8 +322,9 @@ def role_action_clan_chat_copy(
             if reason
             else f"Removing {name} from the clan. Keeping POAP KINGS active and fair."
         )
+    signed_text = sign_clan_chat_text(text, limit=max_chars, signature=signature)
     result = validate_clan_chat_messages(
-        [text],
+        [signed_text],
         max_messages=1,
         max_chars=max_chars,
         required_terms=(),
@@ -271,6 +336,7 @@ def role_action_clan_chat_copy(
 
 __all__ = [
     "CLAN_CHAT_DEFAULT_MAX_CHARS",
+    "CLAN_CHAT_SIGNATURE_TEXT",
     "CLAN_CHAT_WELCOME_MAX_CHARS",
     "DISCORD_INVITE_ROUTE",
     "ClanChatCopyResult",
@@ -278,5 +344,6 @@ __all__ = [
     "generate_clan_chat_copy",
     "messages_from_agent_result",
     "role_action_clan_chat_copy",
+    "sign_clan_chat_text",
     "validate_clan_chat_messages",
 ]

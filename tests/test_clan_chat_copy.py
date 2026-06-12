@@ -46,9 +46,19 @@ def test_role_action_clan_chat_copy_uses_public_reason_and_word_boundary():
 
     assert copy == (
         "Removing 1spaceO2 from the clan for no battle in 8 days, last login 8 days ago; "
-        "0 donations this week. Keeping POAP KINGS active and fair."
+        "0 donations this week. Keeping POAP KINGS active and fair. Message from Elixir! - E"
     )
     assert "...." not in copy
+
+
+def test_sign_clan_chat_text_appends_signature_inside_limit():
+    copy = clan_chat_copy.sign_clan_chat_text(
+        "POAP KINGS had a huge war push from the middle of the roster tonight.",
+        limit=80,
+    )
+
+    assert copy.endswith(clan_chat_copy.CLAN_CHAT_SIGNATURE_TEXT)
+    assert len(copy) <= 80
 
 
 def test_generate_clan_chat_copy_uses_fallback_when_llm_violates_guardrails():
@@ -64,7 +74,11 @@ def test_generate_clan_chat_copy_uses_fallback_when_llm_violates_guardrails():
 
     request = mock_generate.call_args.args[0]
     assert request["target_surface"] == "Clash Royale in-game clan chat"
-    assert request["signature"] == {"enabled": False}
+    assert request["signature"] == {
+        "enabled": True,
+        "text": clan_chat_copy.CLAN_CHAT_SIGNATURE_TEXT,
+        "placement": "append",
+    }
     assert result is not None
     assert result.used_fallback is True
-    assert result.messages == ["POAP KINGS keeps rolling this week."]
+    assert result.messages == [f"POAP KINGS keeps rolling this week. {clan_chat_copy.CLAN_CHAT_SIGNATURE_TEXT}"]
