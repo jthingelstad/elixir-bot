@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import db
 import elixir_agent
+from runtime.leader_action_observability import post_leader_action_skip
 from runtime.leader_action_policy import can_post_leader_action
 from runtime.leader_action_ui import LEADER_ACTION_UI_VERSION, post_leader_action_card
 from runtime.channel_subagents import (
@@ -1037,6 +1038,12 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     provisional_type = "in_game_relay"
                 allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical, action_type=provisional_type)
                 if not allowed:
+                    await post_leader_action_skip(
+                        source="signal_delivery",
+                        action_type=provisional_type,
+                        reason=f"policy:{reason}",
+                        signal_types=signal_types,
+                    )
                     await asyncio.to_thread(
                         db.upsert_signal_outcome,
                         outcome["source_signal_key"],
@@ -1412,6 +1419,14 @@ async def _deliver_war_nudge_sidecars(signals) -> int:
         allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical, action_type="war_nudge_recommendation")
         if not allowed:
             log.info("war nudge sidecar skipped by policy: %s", reason)
+            await post_leader_action_skip(
+                source="war_nudge_sidecar",
+                action_type="war_nudge_recommendation",
+                reason=f"policy:{reason}",
+                target_player_name=candidate.get("name"),
+                target_player_tag=candidate.get("tag"),
+                signal_types=types,
+            )
             return posted
         name = candidate["name"]
         tag = candidate["tag"]
@@ -1422,6 +1437,14 @@ async def _deliver_war_nudge_sidecars(signals) -> int:
             within_hours=WAR_NUDGE_DECLINE_SUPPRESS_HOURS,
         ):
             log.info("war nudge sidecar skipped: nudge for %s declined within %sh", tag, WAR_NUDGE_DECLINE_SUPPRESS_HOURS)
+            await post_leader_action_skip(
+                source="war_nudge_sidecar",
+                action_type="war_nudge_recommendation",
+                reason=f"recent_decline_within:{WAR_NUDGE_DECLINE_SUPPRESS_HOURS}h",
+                target_player_name=name,
+                target_player_tag=tag,
+                signal_types=types,
+            )
             continue
         prompt_text = f"Nudge {name} to use war decks today."
         if candidate.get("race_completed"):
