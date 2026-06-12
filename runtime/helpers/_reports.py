@@ -607,6 +607,56 @@ def _build_help_report(role: str) -> str:
     )
 
 
+def _public_story_arc_lines(*, days: int = 8, limit: int = 8) -> list[str]:
+    """Public-scope narrative memories from the trailing week, compacted for
+    the recap context.
+
+    Pulls the synthesis arcs (written Sunday night, hours before the Monday
+    recap) plus recent public summary memories. viewer_scope='public' is
+    load-bearing: leadership-scoped arcs (watch states, at-risk talk) must
+    never reach a public channel's prompt.
+    """
+    from datetime import timedelta
+
+    try:
+        from memory_store import list_memories
+
+        created_after = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+        arcs = list_memories(
+            viewer_scope="public",
+            filters={"source_type": "elixir_synthesis", "created_after": created_after},
+            limit=limit,
+        )
+        summaries = list_memories(
+            viewer_scope="public",
+            filters={"source_type": "system", "created_after": created_after},
+            limit=limit,
+        )
+    except Exception as exc:
+        _log().warning("Weekly recap story arcs unavailable: %s", exc)
+        return []
+
+    lines: list[str] = []
+    seen_ids: set = set()
+    for row in [*arcs, *summaries]:
+        memory_id = row.get("memory_id")
+        if memory_id in seen_ids:
+            continue
+        seen_ids.add(memory_id)
+        body = " ".join(str(row.get("summary") or row.get("body") or "").split())[:300]
+        if not body:
+            continue
+        title = str(row.get("title") or "").strip()
+        member_tag = row.get("member_tag")
+        bits = [f"- {title}: {body}" if title else f"- {body}"]
+        if member_tag:
+            bits.append(f"(member {member_tag})")
+        lines.append(" ".join(bits))
+        if len(lines) >= limit:
+            break
+    return lines
+
+
 def _build_weekly_clan_recap_context(clan=None, war=None):
     clan = clan or {}
     war = war or {}
@@ -628,6 +678,22 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         f"clan_tag: {clan_tag}",
         f"window_days: {summary.get('window_days', 7)}",
     ]
+
+    # ── STORY ARCS from memory (richest input — written Sunday night by
+    # memory synthesis; only public-scope memories may appear here because
+    # this context feeds a public channel) ───────────────────────────────
+
+    arc_lines = _public_story_arc_lines()
+    if arc_lines:
+        lines.append("")
+        lines.append("=== THIS WEEK'S STORY ARCS (from Elixir's memory — lead with these) ===")
+        lines.append(
+            "These are the week's member stories as I recorded them. Prefer these over raw stats: "
+            "name the members, and when an arc continues something from a prior week, say so — "
+            "continuity ('last week we watched X; this week it paid off') is what makes the recap worth reading. "
+            "Being named in the recap is how quieter members feel seen — favor specific people over clan-level abstractions."
+        )
+        lines.extend(arc_lines)
 
     # ── STORY BEATS (the week's narrative — lead with this) ──────────────
 

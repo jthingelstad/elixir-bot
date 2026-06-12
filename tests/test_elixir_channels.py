@@ -3582,8 +3582,53 @@ def test_build_clan_status_short_report_uses_non_war_risk_watchlist():
     mock_risk.assert_called_once_with(require_war_participation=False)
 
 
+def test_recap_context_leads_with_public_story_arcs():
+    """The recap context includes the week's public-scope memory arcs so the
+    recap can tell continuing member stories instead of narrating stats.
+    viewer_scope='public' is load-bearing: leadership arcs must never reach
+    a public channel's prompt."""
+    arcs = [
+        {"memory_id": 1, "title": "Vijay's comeback", "summary": "Three weeks of climb sealed with a 4/4 colosseum.", "member_tag": "#VJ1"},
+    ]
+    summaries = [
+        {"memory_id": 2, "title": "Race week 3 recap", "summary": "Finished 2nd, best fame total this season.", "member_tag": None},
+    ]
+    calls = []
+
+    def fake_list_memories(**kwargs):
+        calls.append(kwargs)
+        if (kwargs.get("filters") or {}).get("source_type") == "elixir_synthesis":
+            return arcs
+        return summaries
+
+    with (
+        patch("memory_store.list_memories", side_effect=fake_list_memories),
+        patch("elixir.db.get_weekly_digest_summary", return_value={"window_days": 7}),
+        patch("elixir.db.build_clan_trend_summary_context", return_value=""),
+    ):
+        context = elixir._build_weekly_clan_recap_context({"name": "POAP KINGS"}, {})
+
+    assert "=== THIS WEEK'S STORY ARCS" in context
+    assert "Vijay's comeback" in context
+    assert "(member #VJ1)" in context
+    assert "Race week 3 recap" in context
+    # Every memory query for this public context must be public-scoped.
+    assert calls and all(kwargs.get("viewer_scope") == "public" for kwargs in calls)
+
+
+def test_recap_context_omits_arc_block_when_no_public_memories():
+    with (
+        patch("memory_store.list_memories", return_value=[]),
+        patch("elixir.db.get_weekly_digest_summary", return_value={"window_days": 7}),
+        patch("elixir.db.build_clan_trend_summary_context", return_value=""),
+    ):
+        context = elixir._build_weekly_clan_recap_context({"name": "POAP KINGS"}, {})
+    assert "STORY ARCS" not in context
+
+
 def test_build_weekly_clan_recap_context_summarizes_week():
     with (
+        patch("memory_store.list_memories", return_value=[]),
         patch("elixir.db.get_weekly_digest_summary", return_value={
             "window_days": 7,
             "roster": {"active_members": 21, "open_slots": 29, "avg_exp_level": 60.5, "avg_trophies": 7523.4, "donations_week_total": 1400},

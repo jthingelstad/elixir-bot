@@ -901,4 +901,100 @@ async def _weekly_clan_recap():
         except Exception as exc:
             log.error("Weekly recap blog post publish failed: %s", exc, exc_info=True)
             await _notify_poapkings_publish("weekly-recap-blog", error_detail=str(exc))
+    try:
+        await _weekly_story_relay_card(recap_text)
+    except Exception:
+        log.warning("weekly story relay card failed", exc_info=True)
     runtime_status.mark_job_success("weekly_clan_recap", "weekly recap posted")
+
+
+async def _weekly_story_relay_card(recap_text: str) -> bool:
+    """Offer the recap's best beat as a clan-chat relay card in #arena-relay.
+
+    Most of the clan never reads Discord — the recap's strongest member
+    story reaches them only if a leader pastes it into game chat. One card
+    per week, leader-decided; earned frequency learns if these are unwanted.
+    """
+    try:
+        channel_config = _channel_config_by_key("arena-relay")
+    except Exception:
+        log.info("weekly story relay skipped: arena-relay unavailable")
+        return False
+    relay_channel = bot.get_channel(channel_config["id"])
+    if not relay_channel:
+        log.info("weekly story relay skipped: arena-relay channel not found")
+        return False
+    allowed, reason = await asyncio.to_thread(can_post_leader_action, action_type="in_game_relay")
+    if not allowed:
+        log.info("weekly story relay skipped by policy: %s", reason)
+        return False
+
+    context = (
+        "Weekly story relay task:\n"
+        "Compress the weekly recap below into ONE Clash Royale clan-chat message.\n"
+        f"- Plain text only: no markdown, no links, no Discord emoji shortcodes, under {CLAN_CHAT_ACTION_COPY_LIMIT} characters.\n"
+        "- Pick the single strongest member story and name the member(s) — recognition is the point.\n"
+        "- Write it as something a leader would naturally say in clan chat, not as a broadcast.\n"
+        "- Return `content` as a JSON array containing exactly one string.\n\n"
+        "=== THIS WEEK'S RECAP ===\n"
+        f"{recap_text}"
+    )
+    generated = await asyncio.to_thread(
+        elixir_agent.generate_channel_update,
+        channel_config["name"],
+        channel_config["subagent_key"],
+        context,
+    )
+    content = (generated or {}).get("content") if isinstance(generated, dict) else None
+    if isinstance(content, list):
+        copy = str(content[0] or "").strip() if content else ""
+    elif isinstance(content, str):
+        copy = content.strip()
+    else:
+        copy = ""
+    copy = _clip_clan_chat_text(copy)
+    lowered = copy.lower()
+    if not copy or "http://" in lowered or "https://" in lowered:
+        log.info("weekly story relay skipped: no usable clan-chat copy")
+        return False
+
+    week_key = datetime.now(CHICAGO).strftime("%G-W%V")
+    baseline = await asyncio.to_thread(
+        db.build_leader_action_baseline,
+        action_type="in_game_relay",
+        target_player_tag=None,
+    )
+    action = await asyncio.to_thread(
+        db.create_leader_action_recommendation,
+        action_type="in_game_relay",
+        objective="clan_story",
+        prompt_text=f"Relay this week's story into clan chat: {copy}",
+        rationale="Most members never read Discord; the recap's best story reaches them through game chat.",
+        target_channel_key="arena-relay",
+        target_channel_id=channel_config["id"],
+        source_signal_key=f"weekly_story_relay:{week_key}",
+        source_signal_type="weekly_story_relay",
+        copy_original_text=copy,
+        copy_current_text=copy,
+        ui_version=LEADER_ACTION_UI_VERSION,
+        baseline=baseline,
+    )
+    if not action or action.get("source_message_id"):
+        return False
+    sent_messages = await post_leader_action_card(relay_channel, action, copy_messages=[copy])
+    if not isinstance(sent_messages, list):
+        sent_messages = []
+    first_message = sent_messages[0] if sent_messages else None
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(relay_channel), "assistant", copy,
+        summary=f"Leader action R{action.get('action_id')}: weekly story relay",
+        channel_id=channel_config["id"],
+        channel_name=getattr(relay_channel, "name", "arena-relay"),
+        channel_kind=str(getattr(relay_channel, "type", "text")),
+        workflow="arena-relay",
+        event_type="weekly_story_relay",
+        discord_message_id=getattr(first_message, "id", None),
+        raw_json={"leader_action": action},
+    )
+    return True
