@@ -443,7 +443,7 @@ def register_elixir_app_commands(bot) -> None:
             return
 
         # Register and start watching
-        tournament_id = await asyncio.to_thread(db.register_tournament, clean_tag, api_data)
+        await asyncio.to_thread(db.register_tournament, clean_tag, api_data)
         jobs.start_tournament_watch()
 
         members = api_data.get("membersList") or []

@@ -252,7 +252,7 @@ def test_execute_tool_get_member_chests_uses_cr_api():
     with (
         patch("elixir_agent.cr_api.get_player_chests", return_value=[{"name": "Silver Chest", "index": 1}]) as mock_chests,
         patch("elixir_agent.cr_api.get_player", return_value=None),
-        patch("elixir_agent.db") as mock_db,
+        patch("elixir_agent.db"),
     ):
         result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "#ABC123", "include": ["chests"]}))
         assert result["chests"] == [{"name": "Silver Chest", "index": 1}]

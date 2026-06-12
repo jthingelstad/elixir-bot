@@ -251,7 +251,7 @@ def test_elder_eligible_only_for_role_member():
     try:
         m = _seed_member(conn, "#MEM", "M", role="member", donations_week=100)
         e = _seed_member(conn, "#ELD", "E", role="elder", donations_week=100)
-        l = _seed_member(conn, "#LEAD", "L", role="leader", donations_week=100)
+        lead = _seed_member(conn, "#LEAD", "L", role="leader", donations_week=100)
         db.set_member_join_date("#MEM", "M", "2026-01-01", conn=conn)
         db.set_member_join_date("#ELD", "E", "2026-01-01", conn=conn)
         db.set_member_join_date("#LEAD", "L", "2026-01-01", conn=conn)
@@ -259,7 +259,7 @@ def test_elder_eligible_only_for_role_member():
         # Member is the only one whose eligibility predicate runs.
         assert ranks[m]["elder_eligible"] is not None
         assert ranks[e]["elder_eligible"] is None
-        assert ranks[l]["elder_eligible"] is None
+        assert ranks[lead]["elder_eligible"] is None
     finally:
         conn.close()
 
@@ -380,8 +380,8 @@ def test_crossed_this_week_false_when_not_currently_eligible():
 def test_member_reference_fields_includes_rank_fields():
     conn = db.get_connection(":memory:")
     try:
-        a = _seed_member(conn, "#A", "Alice", donations_week=500)
-        b = _seed_member(conn, "#B", "Bob", donations_week=100)
+        _seed_member(conn, "#A", "Alice", donations_week=500)
+        _seed_member(conn, "#B", "Bob", donations_week=100)
         # Drive a real consumer that uses _member_reference_fields.
         result = db.get_promotion_candidates(conn=conn)
         items = result["recommended"] + result["borderline"]
