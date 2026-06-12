@@ -532,9 +532,18 @@ def _kick_candidate_priority(member: dict) -> tuple:
             overdue = float(inactive.get("value") or 0) - float(inactive.get("threshold_days") or 0)
         except (TypeError, ValueError):
             overdue = 0
+    reason_types = {reason.get("type") for reason in reasons if isinstance(reason, dict)}
+    risk_score = int(member.get("risk_score") or len(reasons) or 0)
+    reason_weight = (
+        (3 if "inactive" in reason_types else 0)
+        + (2 if "low_donations" in reason_types else 0)
+        + (1 if "low_war_participation" in reason_types else 0)
+    )
     return (
         0 if inactive else 1,
         -overdue,
+        -risk_score,
+        -reason_weight,
         member.get("clan_rank") if member.get("clan_rank") is not None else 999,
         (member.get("name") or member.get("current_name") or "").lower(),
     )
@@ -720,25 +729,6 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
 
     posted = 0
     max_actions = max(1, int(max_actions or 1))
-    for member in (promotions.get("recommended") or []):
-        if posted >= max_actions:
-            return posted
-        label = _leader_action_member_label(member)
-        tag = _leader_action_member_tag(member)
-        rationale = _leader_action_reason(member, promotion=True)
-        prompt_text = f"Promote {label} to Elder."
-        if await _post_leader_action_recommendation(
-            channel,
-            action_type="promotion_recommendation",
-            objective="reward_and_retention",
-            title="promotion recommendation",
-            prompt_text=prompt_text,
-            rationale=rationale,
-            target_player_tag=tag,
-            target_player_name=label,
-        ):
-            posted += 1
-
     kick_candidates = sorted((at_risk or {}).get("members") or [], key=_kick_candidate_priority)
     for member in kick_candidates:
         if posted >= max_actions:
@@ -752,6 +742,25 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
             action_type="kick_recommendation",
             objective="roster_health",
             title="kick/removal recommendation",
+            prompt_text=prompt_text,
+            rationale=rationale,
+            target_player_tag=tag,
+            target_player_name=label,
+        ):
+            posted += 1
+
+    for member in (promotions.get("recommended") or []):
+        if posted >= max_actions:
+            return posted
+        label = _leader_action_member_label(member)
+        tag = _leader_action_member_tag(member)
+        rationale = _leader_action_reason(member, promotion=True)
+        prompt_text = f"Promote {label} to Elder."
+        if await _post_leader_action_recommendation(
+            channel,
+            action_type="promotion_recommendation",
+            objective="reward_and_retention",
+            title="promotion recommendation",
             prompt_text=prompt_text,
             rationale=rationale,
             target_player_tag=tag,

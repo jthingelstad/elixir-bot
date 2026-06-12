@@ -2368,8 +2368,8 @@ def test_weekly_leader_actions_post_to_arena_relay():
     channel.type = "text"
 
     created = [
-        {"action_id": 1, "action_key": "promotion:1", "status": "proposed", "objective": "reward_and_retention"},
-        {"action_id": 2, "action_key": "kick:1", "status": "proposed", "objective": "roster_health"},
+        {"action_id": 1, "action_key": "kick:1", "status": "proposed", "objective": "roster_health"},
+        {"action_id": 2, "action_key": "promotion:1", "status": "proposed", "objective": "reward_and_retention"},
     ]
 
     with (
@@ -2398,9 +2398,13 @@ def test_weekly_leader_actions_post_to_arena_relay():
 
     assert posted == 2
     assert mock_create.call_count == 2
+    assert [call.kwargs["action_type"] for call in mock_create.call_args_list] == [
+        "kick_recommendation",
+        "promotion_recommendation",
+    ]
     assert mock_card.await_count == 2
-    assert mock_card.await_args_list[0].kwargs["copy_messages"][0].startswith("Promoting King Levy to Elder")
-    assert mock_card.await_args_list[1].kwargs["copy_messages"][0].startswith("Removing Vijay from the clan")
+    assert mock_card.await_args_list[0].kwargs["copy_messages"][0].startswith("Removing Vijay from the clan")
+    assert mock_card.await_args_list[1].kwargs["copy_messages"][0].startswith("Promoting King Levy to Elder")
     assert mock_save.call_args.kwargs["workflow"] == "arena-relay"
     assert "clan_chat_copy" in mock_save.call_args.kwargs["raw_json"]
 
@@ -2466,6 +2470,44 @@ def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppresse
     assert posted == 1
     assert mock_create.call_args.kwargs["target_player_tag"] == "#IDLE"
     assert mock_create.call_args.kwargs["target_player_name"] == "Fresh Idle"
+
+
+def test_kick_candidate_priority_prefers_multi_signal_risk_after_inactive():
+    from runtime.jobs._core import _kick_candidate_priority
+
+    candidates = [
+        {
+            "name": "War Only Rank One",
+            "player_tag": "#WAR",
+            "clan_rank": 1,
+            "risk_score": 1,
+            "reasons": [{"type": "low_war_participation", "detail": "0 war races played this season"}],
+        },
+        {
+            "name": "Monica Style",
+            "player_tag": "#MULTI",
+            "clan_rank": 21,
+            "risk_score": 2,
+            "reasons": [
+                {"type": "low_donations", "detail": "0 donations this week"},
+                {"type": "low_war_participation", "detail": "0 war races played this season"},
+            ],
+        },
+        {
+            "name": "Fresh Idle",
+            "player_tag": "#IDLE",
+            "clan_rank": 30,
+            "risk_score": 2,
+            "reasons": [
+                {"type": "inactive", "detail": "no battle in 10 days", "value": 10, "threshold_days": 8},
+                {"type": "low_war_participation", "detail": "0 war races played this season"},
+            ],
+        },
+    ]
+
+    ordered = sorted(candidates, key=_kick_candidate_priority)
+
+    assert [candidate["player_tag"] for candidate in ordered] == ["#IDLE", "#MULTI", "#WAR"]
 
 
 def test_leadership_action_scan_posts_singular_actions():
