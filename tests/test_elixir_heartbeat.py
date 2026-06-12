@@ -1892,11 +1892,25 @@ def test_role_action_clan_chat_copy_is_short_and_public_reasoned():
         target_player_name="Aaqib",
         rationale="activity has dropped for several weeks",
     )
+    long_kick = _leader_action_clan_chat_copy(
+        action_type="kick_recommendation",
+        target_player_name="1spaceO2",
+        rationale=(
+            "no battle in 8 days, last login 8 days ago (threshold 7.0d at 4914 trophies); "
+            "0 donations this week; 0 war races played this season"
+        ),
+    )
 
     assert promotion == "Promoting King Levy to Elder for 220 donations, 4 war races, 90d tenure. Thanks for helping POAP KINGS."
     assert kick == "Removing Vijay from the clan for last seen 8 days ago; no war participation. Keeping POAP KINGS active and fair."
     assert demotion == "Moving Aaqib back to Member for now: activity has dropped for several weeks. Roles should match current activity."
-    assert all(len(copy) <= CLAN_CHAT_ACTION_COPY_LIMIT for copy in (promotion, kick, demotion))
+    assert (
+        long_kick
+        == "Removing 1spaceO2 from the clan for no battle in 8 days, last login 8 days ago; 0 donations this week. Keeping POAP KINGS active and fair."
+    )
+    assert "...." not in long_kick
+    assert "donatio..." not in long_kick
+    assert all(len(copy) <= CLAN_CHAT_ACTION_COPY_LIMIT for copy in (promotion, kick, demotion, long_kick))
 
 
 def test_arena_relay_result_builds_copyable_celebration_card():
