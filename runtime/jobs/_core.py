@@ -38,6 +38,7 @@ from runtime.app import (
     log,
 )
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id, _safe_create_task
+from runtime.leader_action_observability import post_leader_action_skip
 from runtime.leader_action_policy import can_post_leader_action
 from runtime.leader_action_ui import CLASH_COPY_MAX_LENGTH, LEADER_ACTION_UI_VERSION, post_leader_action_card
 from runtime import status as runtime_status
@@ -636,6 +637,15 @@ async def _post_leader_action_recommendation(
         objective=objective,
         within_hours=dedupe_hours,
     ):
+        await post_leader_action_skip(
+            source="leader_action_candidate_scan",
+            action_type=action_type,
+            reason=f"recent_action_within:{dedupe_hours}h",
+            target_player_name=target_player_name,
+            target_player_tag=target_player_tag,
+            objective=objective,
+            rationale=rationale,
+        )
         return False
     # A decline is a deliberate judgment about this member — suppress
     # re-proposing the same action for much longer than the generic dedup
@@ -651,10 +661,28 @@ async def _post_leader_action_recommendation(
             "leader action candidate skipped: %s for %s declined within %sh",
             action_type, target_player_tag, LEADER_ACTION_DECLINE_SUPPRESS_HOURS,
         )
+        await post_leader_action_skip(
+            source="leader_action_candidate_scan",
+            action_type=action_type,
+            reason=f"recent_decline_within:{LEADER_ACTION_DECLINE_SUPPRESS_HOURS}h",
+            target_player_name=target_player_name,
+            target_player_tag=target_player_tag,
+            objective=objective,
+            rationale=rationale,
+        )
         return False
     allowed, reason = await asyncio.to_thread(can_post_leader_action, action_type=action_type)
     if not allowed:
         log.info("leader action candidate skipped by policy: %s", reason)
+        await post_leader_action_skip(
+            source="leader_action_candidate_scan",
+            action_type=action_type,
+            reason=f"policy:{reason}",
+            target_player_name=target_player_name,
+            target_player_tag=target_player_tag,
+            objective=objective,
+            rationale=rationale,
+        )
         return False
     baseline = await asyncio.to_thread(
         db.build_leader_action_baseline,
@@ -797,6 +825,10 @@ async def _leadership_action_scan():
         critical = await asyncio.to_thread(_leadership_scan_has_critical_war_action)
         allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical)
         if not allowed:
+            await post_leader_action_skip(
+                source="leadership_action_scan",
+                reason=f"policy:{reason}",
+            )
             runtime_status.mark_job_success("leadership_action_scan", f"skipped: {reason}")
             return
         posted += await _deliver_war_nudge_sidecars([{"type": "war_battle_day_live_update"}])

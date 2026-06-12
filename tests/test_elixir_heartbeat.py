@@ -1787,6 +1787,57 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
     mock_update_copy.assert_called_once_with(42, copy_message_id=1001)
 
 
+def test_signal_delivery_logs_leader_action_policy_skip():
+    signals = [{
+        "type": "discord_invite_reminder",
+        "signal_key": "discord_invite_reminder:2026-W24",
+    }]
+    clan = {"memberList": []}
+    war = {}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 1513758211206025227
+    channel.name = "arena-relay"
+    channel.type = "text"
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals.plan_signal_outcomes", return_value=[{
+            "source_signal_key": "discord_invite_reminder:2026-W24",
+            "source_signal_type": "discord_invite_reminder",
+            "target_channel_key": "arena-relay",
+            "target_channel_id": 1513758211206025227,
+            "intent": "discord_invite_relay",
+            "required": False,
+            "payload": {"signals": signals},
+            "delivery_status": "planned",
+        }]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.db.get_signal_outcome", return_value=None),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
+        patch("runtime.signals.delivery.can_post_leader_action", return_value=(False, "open_card_backlog:5/5")),
+        patch("runtime.signals.delivery.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip_log,
+        patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
+        patch("elixir.db.upsert_signal_outcome") as mock_upsert,
+        patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "skipped"}]),
+        patch("runtime.jobs._signals._mark_signal_group_completed"),
+    ):
+        assert asyncio.run(elixir._deliver_signal_group(signals, clan, war))
+
+    mock_generate.assert_not_called()
+    mock_skip_log.assert_awaited_once()
+    assert mock_skip_log.await_args.kwargs["source"] == "signal_delivery"
+    assert mock_skip_log.await_args.kwargs["action_type"] == "discord_invite_relay"
+    assert mock_skip_log.await_args.kwargs["reason"] == "policy:open_card_backlog:5/5"
+    assert mock_skip_log.await_args.kwargs["signal_types"] == {"discord_invite_reminder"}
+    assert mock_upsert.call_args.kwargs["delivery_status"] == "skipped"
+    assert mock_upsert.call_args.kwargs["error_detail"] == "leader_action_policy:open_card_backlog:5/5"
+
+
 def test_arena_relay_cooldown_blocks_recent_posts():
     from datetime import datetime
     from runtime.signals.delivery import _arena_relay_recently_posted
@@ -2434,6 +2485,26 @@ def test_leadership_action_scan_posts_singular_actions():
     mock_failure.assert_not_called()
 
 
+def test_leadership_action_scan_logs_policy_skip():
+    with (
+        patch("runtime.jobs._core.db.refresh_due_leader_action_outcomes", return_value=[]),
+        patch("runtime.jobs._core._leadership_scan_has_critical_war_action", return_value=False),
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(False, "open_card_backlog:5/5")),
+        patch("runtime.jobs._core.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip_log,
+        patch("runtime.jobs._core.runtime_status.mark_job_start"),
+        patch("runtime.jobs._core.runtime_status.mark_job_success") as mock_success,
+        patch("runtime.jobs._core.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(elixir._leadership_action_scan())
+
+    mock_skip_log.assert_awaited_once_with(
+        source="leadership_action_scan",
+        reason="policy:open_card_backlog:5/5",
+    )
+    mock_success.assert_called_once_with("leadership_action_scan", "skipped: open_card_backlog:5/5")
+    mock_failure.assert_not_called()
+
+
 def test_war_nudge_sidecar_skips_recently_declined_targets():
     """A declined nudge means the leader knows something about that member —
     don't re-propose the same target on the next battle-day signal."""
@@ -2463,6 +2534,7 @@ def test_war_nudge_sidecar_skips_recently_declined_targets():
         patch("runtime.signals.delivery.db.build_leader_action_baseline", return_value={}),
         patch("runtime.signals.delivery.db.create_leader_action_recommendation", return_value=created) as mock_create,
         patch("runtime.signals.delivery.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=1)])),
+        patch("runtime.signals.delivery.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip_log,
         patch("runtime.signals.delivery.db.save_message"),
     ):
         posted = asyncio.run(_deliver_war_nudge_sidecars([{"type": "war_battle_day_started"}]))
@@ -2472,6 +2544,10 @@ def test_war_nudge_sidecar_skips_recently_declined_targets():
     assert mock_create.call_args.kwargs["target_player_tag"] == "#FRESH"
     declined_checks = [c.kwargs["target_player_tag"] for c in mock_declined.call_args_list]
     assert declined_checks == ["#DECLINED", "#FRESH"]
+    mock_skip_log.assert_awaited_once()
+    assert mock_skip_log.await_args.kwargs["source"] == "war_nudge_sidecar"
+    assert mock_skip_log.await_args.kwargs["reason"] == "recent_decline_within:48h"
+    assert mock_skip_log.await_args.kwargs["target_player_tag"] == "#DECLINED"
 
 
 def test_leader_action_recommendation_suppressed_after_recent_decline():
@@ -2486,6 +2562,7 @@ def test_leader_action_recommendation_suppressed_after_recent_decline():
         patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=True) as mock_declined,
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)) as mock_policy,
         patch("runtime.jobs._core.db.create_leader_action_recommendation") as mock_create,
+        patch("runtime.jobs._core.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip_log,
     ):
         posted = asyncio.run(_post_leader_action_recommendation(
             channel,
@@ -2503,6 +2580,48 @@ def test_leader_action_recommendation_suppressed_after_recent_decline():
     assert mock_declined.call_args.kwargs["action_type"] == "promotion_recommendation"
     mock_policy.assert_not_called()
     mock_create.assert_not_called()
+    mock_skip_log.assert_awaited_once()
+    assert mock_skip_log.await_args.kwargs["source"] == "leader_action_candidate_scan"
+    assert mock_skip_log.await_args.kwargs["action_type"] == "promotion_recommendation"
+    assert mock_skip_log.await_args.kwargs["reason"] == "recent_decline_within:720h"
+    assert mock_skip_log.await_args.kwargs["target_player_tag"] == "#ABC123"
+
+
+def test_leader_action_recommendation_logs_policy_skip_with_candidate_context():
+    from types import SimpleNamespace
+    from runtime.jobs._core import _post_leader_action_recommendation
+
+    channel = SimpleNamespace(id=900)
+    with (
+        patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
+        patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=False),
+        patch(
+            "runtime.jobs._core.can_post_leader_action",
+            return_value=(False, "earned_frequency:kick_recommendation:decline_rate=0.80"),
+        ),
+        patch("runtime.jobs._core.db.create_leader_action_recommendation") as mock_create,
+        patch("runtime.jobs._core.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip_log,
+    ):
+        posted = asyncio.run(_post_leader_action_recommendation(
+            channel,
+            action_type="kick_recommendation",
+            objective="roster_health",
+            title="kick/removal recommendation",
+            prompt_text="Review Vijay for removal from the clan.",
+            rationale="last seen 8 days ago; no war participation",
+            target_player_tag="#DEF456",
+            target_player_name="Vijay",
+        ))
+
+    assert posted is False
+    mock_create.assert_not_called()
+    mock_skip_log.assert_awaited_once()
+    assert mock_skip_log.await_args.kwargs["source"] == "leader_action_candidate_scan"
+    assert mock_skip_log.await_args.kwargs["action_type"] == "kick_recommendation"
+    assert mock_skip_log.await_args.kwargs["reason"] == "policy:earned_frequency:kick_recommendation:decline_rate=0.80"
+    assert mock_skip_log.await_args.kwargs["target_player_name"] == "Vijay"
+    assert mock_skip_log.await_args.kwargs["target_player_tag"] == "#DEF456"
+    assert mock_skip_log.await_args.kwargs["rationale"] == "last seen 8 days ago; no war participation"
 
 
 def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
