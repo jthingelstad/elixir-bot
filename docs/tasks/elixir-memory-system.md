@@ -118,6 +118,10 @@ Responsible for:
 - auditability
 
 ### `memory_reasoner`
+> Removed 2026-06-11: this package was built but never wired into the runtime —
+> prompt packaging and summarization ended up living in `agent/` and
+> `runtime/helpers/` instead. Kept here as the original design intent.
+
 Responsible for:
 
 - summarization

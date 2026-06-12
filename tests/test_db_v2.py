@@ -1702,7 +1702,7 @@ def test_get_member_card_collection_returns_collection_summary_and_levels():
 
 
 def test_card_mode_fields_interpret_observed_evo_and_hero_mapping():
-    from storage import roster
+    from storage import cards
 
     cases = [
         ({}, (False, False, False, False, None, None)),
@@ -1715,7 +1715,7 @@ def test_card_mode_fields_interpret_observed_evo_and_hero_mapping():
     ]
 
     for card, expected in cases:
-        interpreted = roster._card_mode_fields(card)
+        interpreted = cards._card_mode_fields(card)
         assert (
             interpreted["supports_evo"],
             interpreted["supports_hero"],
@@ -2055,6 +2055,8 @@ def test_member_daily_battle_rollups_group_by_chicago_day_and_mode_group():
             conn=conn,
         )
 
+        # Pin "today" near the fixture dates so the days window never expires
+        # as the wall clock advances.
         with patch("storage.player.chicago_today", return_value="2026-01-12"):
             rollups = db.list_member_daily_battle_rollups("#ABC123", days=120, conn=conn)
 
@@ -2157,6 +2159,8 @@ def test_clan_daily_battle_rollups_aggregate_member_daily_rollups():
             conn=conn,
         )
 
+        # Pin "today" near the fixture dates so the days window never expires
+        # as the wall clock advances.
         with patch("storage.player.chicago_today", return_value="2026-01-12"):
             rollups = db.list_clan_daily_battle_rollups(days=120, conn=conn)
 

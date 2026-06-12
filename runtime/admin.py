@@ -524,7 +524,7 @@ def _build_poap_kings_status_report() -> str:
     lines.append(f"- Enabled: {'yes' if enabled else 'no'}")
     lines.append(f"- Repo: `{repo}`")
     lines.append(f"- Branch: `{branch}`")
-    lines.append(f"- Visibility channel: `#poapkings-com`")
+    lines.append("- Visibility channel: `#poapkings-com`")
     lines.append("- Targets:")
     for target in ("all", "data", "home", "members", "roster-bios", "promote"):
         lines.append(f"  - `{target}`")

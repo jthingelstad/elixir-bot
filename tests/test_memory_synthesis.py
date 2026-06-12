@@ -16,12 +16,12 @@ from agent.tool_policy import (
     TOOLSETS_BY_WORKFLOW,
 )
 from memory_store import SOURCE_TYPES, create_memory, list_memories
-from runtime.jobs._core import (
+from runtime.jobs._memory import (
     _apply_memory_synthesis_plan,
     _build_memory_synthesis_context,
     _memory_synthesis_cycle,
 )
-import runtime.jobs._core as core
+import runtime.jobs._memory as memory_job
 
 
 @pytest.fixture
@@ -186,8 +186,8 @@ def test_build_context_returns_expected_keys(memdb):
 
 
 def test_build_context_bounds_memory_count_and_text_size(memdb, monkeypatch):
-    monkeypatch.setattr(core, "MEMORY_SYNTHESIS_MEMORY_LIMIT", 2)
-    monkeypatch.setattr(core, "MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", 24)
+    monkeypatch.setattr(memory_job, "MEMORY_SYNTHESIS_MEMORY_LIMIT", 2)
+    monkeypatch.setattr(memory_job, "MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", 24)
     for idx in range(4):
         create_memory(
             title=f"recent {idx}",
@@ -209,11 +209,11 @@ def test_build_context_bounds_memory_count_and_text_size(memdb, monkeypatch):
 def test_memory_synthesis_cycle_marks_structured_agent_error_as_failure():
     channel = MagicMock()
     with (
-        patch("runtime.jobs._core.prompts.discord_channels_by_workflow", return_value=[{"id": 42}]),
-        patch("runtime.jobs._core.bot.get_channel", return_value=channel),
-        patch("runtime.jobs._core._build_memory_synthesis_context", return_value={"week_window": {}}),
+        patch("runtime.jobs._memory.prompts.discord_channels_by_workflow", return_value=[{"id": 42}]),
+        patch("runtime.jobs._memory.bot.get_channel", return_value=channel),
+        patch("runtime.jobs._memory._build_memory_synthesis_context", return_value={"week_window": {}}),
         patch(
-            "runtime.jobs._core.elixir_agent.run_memory_synthesis",
+            "runtime.jobs._memory.elixir_agent.run_memory_synthesis",
             return_value={
                 "_error": {
                     "kind": "truncation",
@@ -222,8 +222,8 @@ def test_memory_synthesis_cycle_marks_structured_agent_error_as_failure():
                 }
             },
         ),
-        patch("runtime.jobs._core.runtime_status.mark_job_start") as mock_start,
-        patch("runtime.jobs._core.runtime_status.mark_job_failure") as mock_failure,
+        patch("runtime.jobs._memory.runtime_status.mark_job_start") as mock_start,
+        patch("runtime.jobs._memory.runtime_status.mark_job_failure") as mock_failure,
     ):
         asyncio.run(_memory_synthesis_cycle())
 

@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import importlib
 import json
 import logging
 import os
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable, Optional
 from zoneinfo import ZoneInfo
@@ -419,70 +421,6 @@ def _parse_optional_int(value: Optional[str], *, field_name: str, minimum: int, 
     return parsed
 
 
-def _member_reference_fields(conn: sqlite3.Connection, member_id: int, item: dict) -> dict:
-    from storage._formatting import callable_name
-
-    tag = item.get("player_tag") or item.get("tag")
-    if not tag:
-        row = conn.execute(
-            "SELECT player_tag FROM members WHERE member_id = ?",
-            (member_id,),
-        ).fetchone()
-        tag = row["player_tag"] if row else None
-    if not tag:
-        return item
-    item["member_ref"] = format_member_reference(tag, conn=conn)
-    # Substitute readable forms for every name field surfaced to the LLM so
-    # ²⁸/Ｓｈａｆｉｔｈ-style names get narrated as "28" / "Shafith Nihal" instead
-    # of the literal unicode. The DB columns stay literal — only the dict
-    # passed to callers (and the LLM) is transformed.
-    for name_field in ("current_name", "name", "player_name", "member_name"):
-        if item.get(name_field):
-            item[name_field] = callable_name(item[name_field])
-    item.update(_member_ranks_for(conn, member_id))
-    return item
-
-
-# Member-rank cache keyed on id(conn). sqlite3.Connection rejects arbitrary
-# attribute assignment, so we can't stash this on the conn itself. Bounded
-# size keeps memory predictable; FIFO eviction keeps the policy simple.
-# Connections are short-lived (managed_connection opens fresh per public
-# call), so id-collision after close is theoretically possible but rare —
-# tests can call _clear_member_ranks_cache() to reset between assertions.
-_MEMBER_RANKS_CACHE: dict[int, dict] = {}
-_MEMBER_RANKS_CACHE_MAX = 16
-
-
-def _clear_member_ranks_cache() -> None:
-    """Test hook to drop all cached rank tables."""
-    _MEMBER_RANKS_CACHE.clear()
-
-
-def _member_ranks_for(conn: sqlite3.Connection, member_id: int) -> dict:
-    """Return rank fields for one member.
-
-    The full rank table is computed once per connection and cached at the
-    module level keyed on id(conn). Subsequent lookups are O(1) — important
-    because ``_member_reference_fields`` is called per-row in roster,
-    digest, and promotion-candidate flows. Inactive members and members
-    with insufficient data get every field set to ``None`` so consumers
-    can distinguish "no data" from a real rank.
-    """
-    from storage.member_ranks import RANK_FIELDS, compute_member_ranks
-
-    key = id(conn)
-    cache = _MEMBER_RANKS_CACHE.get(key)
-    if cache is None:
-        cache = compute_member_ranks(conn=conn)
-        if len(_MEMBER_RANKS_CACHE) >= _MEMBER_RANKS_CACHE_MAX:
-            _MEMBER_RANKS_CACHE.pop(next(iter(_MEMBER_RANKS_CACHE)))
-        _MEMBER_RANKS_CACHE[key] = cache
-    member_entry = cache.get(member_id)
-    if member_entry is None:
-        return {field: None for field in RANK_FIELDS}
-    return dict(member_entry)
-
-
 def _ensure_channel(conn: sqlite3.Connection, channel_id, channel_name=None, channel_kind=None) -> None:
     if channel_id is None:
         return
@@ -648,7 +586,20 @@ def managed_connection(fn: Callable) -> Callable:
     return wrapper
 
 
-# Allow storage submodules to import db's internal helpers during package init.
+# ---------------------------------------------------------------------------
+# Storage facade
+#
+# db re-exports every public storage function so callers can write
+# db.snapshot_members(...) etc. The storage modules are imported lazily, on
+# first attribute access (PEP 562), NOT at import time. This matters: storage
+# modules import db's core helpers above, so an eager import here would make
+# db <-> storage a bidirectional import-time cycle whose behavior depends on
+# which side happens to be imported first (a storage module imported before
+# db would be only partially initialized when __export_public scanned it,
+# silently dropping names from the facade). Lazy loading guarantees every
+# storage module is fully initialized before its names are merged.
+# ---------------------------------------------------------------------------
+
 def __export_public(module):
     names = getattr(module, "__all__", None) or [
         name for name in vars(module) if not name.startswith("__")
@@ -658,40 +609,43 @@ def __export_public(module):
     return names
 
 
-from storage import identity as _identity_module
-from storage import war as _war_module
-from storage import roster as _roster_module
-from storage import player as _player_module
-from storage import trends as _trends_module
-from storage import messages as _messages_module
-from storage import metadata as _metadata_module
-from storage import tournament as _tournament_module
-from storage import card_catalog as _card_catalog_module
-from storage import revisits as _revisits_module
-from storage import awards as _awards_module
-from storage import member_ranks as _member_ranks_module
-from storage import leader_actions as _leader_actions_module
-from storage import runtime_status as _runtime_status_module
-from storage import screenshot_observations as _screenshot_observations_module
+_STORAGE_FACADE_MODULES = (
+    "storage.identity",
+    "storage.war",
+    "storage.roster",
+    "storage.cards",
+    "storage.player",
+    "storage.trends",
+    "storage.messages",
+    "storage.metadata",
+    "storage.tournament",
+    "storage.card_catalog",
+    "storage.revisits",
+    "storage.awards",
+    "storage.member_ranks",
+    "storage.leader_actions",
+    "storage.runtime_status",
+    "storage.screenshot_observations",
+)
 
-__all__ = [name for name in globals() if not name.startswith("__")]
-for _module in (
-    _identity_module,
-    _war_module,
-    _roster_module,
-    _player_module,
-    _trends_module,
-    _messages_module,
-    _metadata_module,
-    _tournament_module,
-    _card_catalog_module,
-    _revisits_module,
-    _awards_module,
-    _member_ranks_module,
-    _leader_actions_module,
-    _runtime_status_module,
-    _screenshot_observations_module,
-):
-    __export_public(_module)
+_facade_lock = threading.RLock()
+_facade_loaded = False
 
-__all__ = [name for name in globals() if not name.startswith("__")]
+
+def _load_storage_facade() -> None:
+    global _facade_loaded
+    with _facade_lock:
+        if _facade_loaded:
+            return
+        for module_name in _STORAGE_FACADE_MODULES:
+            __export_public(importlib.import_module(module_name))
+        globals()["__all__"] = [name for name in globals() if not name.startswith("__")]
+        _facade_loaded = True
+
+
+def __getattr__(name):
+    if not _facade_loaded:
+        _load_storage_facade()
+        if name in globals():
+            return globals()[name]
+    raise AttributeError(f"module 'db' has no attribute {name!r}")

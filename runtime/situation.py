@@ -156,6 +156,17 @@ def _build_standing(war: dict | None) -> dict | None:
     }
 
 
+# Names of situation blocks whose loader raised during the current
+# build_situation call. Reset at the top of build_situation; surfaced in the
+# returned dict as ``_degraded_blocks`` so degradation shows up in tick logs
+# instead of silently shrinking the agent's view of the clan.
+_degraded_blocks: list[str] = []
+
+
+def _note_degraded(block: str) -> None:
+    _degraded_blocks.append(block)
+
+
 def _clan_phase_block() -> dict | None:
     """Clan age + phase classification (founding/establishing/established/
     mature). Always included so the awareness agent can frame posts against
@@ -165,6 +176,7 @@ def _clan_phase_block() -> dict | None:
         return prompts.clan_phase()
     except Exception:
         log.warning("clan_phase_block load failed", exc_info=True)
+        _note_degraded("clan_phase")
         return None
 
 
@@ -180,6 +192,7 @@ def _season_awards_block() -> dict | None:
         return db.get_season_awards_standings()
     except Exception:
         log.warning("season_awards_block load failed", exc_info=True)
+        _note_degraded("season_awards")
         return None
 
 
@@ -194,6 +207,7 @@ def _channel_memory_for(subagent_key: str, *, recent_limit: int = 5) -> dict:
         recent = db.list_channel_messages(config["id"], recent_limit, "assistant") or []
     except Exception:
         log.warning("channel_memory load failed for %s", subagent_key, exc_info=True)
+        _note_degraded(f"channel_memory:{subagent_key}")
         recent = []
     return {
         "channel_id": config["id"],
@@ -226,6 +240,7 @@ def _roster_vitals(limit: int = 20) -> list[dict]:
             })
     except Exception:
         log.warning("roster_vitals: hot streak load failed", exc_info=True)
+        _note_degraded("roster_vitals")
     return out
 
 
@@ -238,6 +253,7 @@ def _due_revisits(limit: int = 20) -> list[dict]:
         rows = db.list_due_revisits(limit=limit)
     except Exception:
         log.warning("due_revisits lookup failed", exc_info=True)
+        _note_degraded("due_revisits")
         return []
     return [
         {
@@ -266,6 +282,8 @@ def _recent_agent_writes(limit: int = 10) -> list[dict]:
         # the filter API only supports a single source_type at a time.
         memories = list_memories(viewer_scope="leadership", limit=limit * 3)
     except Exception:
+        log.warning("recent_agent_writes load failed", exc_info=True)
+        _note_degraded("recent_agent_writes")
         return []
     out = []
     for m in memories:
@@ -290,6 +308,11 @@ def _already_delivered(signal: dict) -> bool:
     detector-level check is missed (restart, cursor reset, concurrent tick),
     this filter drops the signal before the agent can re-cover it. Safer than
     relying on the agent to read channel_memory and self-skip.
+
+    On lookup error the signal is treated as delivered (suppressed): a missed
+    announcement is recoverable on a later tick, while a duplicate post to the
+    clan is the failure this filter exists to prevent. The suppression is
+    logged at error level and surfaced via ``_degraded_blocks``.
     """
     log_type = (signal or {}).get("signal_log_type")
     if not log_type:
@@ -297,8 +320,9 @@ def _already_delivered(signal: dict) -> bool:
     try:
         return db.was_signal_sent_any_date(log_type)
     except Exception:
-        log.warning("_already_delivered lookup failed for %s", log_type, exc_info=True)
-        return False
+        log.error("_already_delivered lookup failed for %s; suppressing signal to avoid double-post", log_type, exc_info=True)
+        _note_degraded(f"already_delivered:{log_type}")
+        return True
 
 
 def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -> dict:
@@ -314,6 +338,7 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
     before assembly — preventing the agent from re-covering a signal that was
     already announced.
     """
+    del _degraded_blocks[:]
     all_signals = list(getattr(tick_result, "signals", None) or [])
     signals = [s for s in all_signals if not _already_delivered(s)]
     dropped = len(all_signals) - len(signals)
@@ -334,7 +359,7 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
 
     due_revisits = _due_revisits()
 
-    return {
+    situation = {
         "time": build_situation_time(),
         "standing": _build_standing(war),
         "season_awards": _season_awards_block(),
@@ -352,6 +377,15 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
         "_due_revisit_count": len(due_revisits),
         "_clan_tag": (clan.get("tag") or "").strip(),
     }
+    if _degraded_blocks:
+        # One consolidated error line so several blocks failing in one tick
+        # reads as systemic degradation, not scattered warnings.
+        log.error(
+            "build_situation: %d block(s) degraded this tick: %s",
+            len(_degraded_blocks), ", ".join(_degraded_blocks),
+        )
+    situation["_degraded_blocks"] = list(_degraded_blocks)
+    return situation
 
 
 def situation_is_quiet(situation: dict) -> bool:

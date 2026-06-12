@@ -6,11 +6,11 @@ from typing import Optional
 
 from db import (
     _canon_tag,
-    _member_reference_fields,
     _rowdicts,
     chicago_today,
     managed_connection,
 )
+from storage._enrichment import _member_reference_fields
 
 
 def _cutoff_date(days: int) -> str:

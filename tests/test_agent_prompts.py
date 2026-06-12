@@ -1,4 +1,4 @@
-from agent.prompts import _deck_review_system, _discord_emoji_guidance, _promote_system
+from agent.prompt_builders import _deck_review_system, _discord_emoji_guidance, _promote_system
 from runtime.emoji import available_emoji_names
 
 

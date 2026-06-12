@@ -242,7 +242,7 @@ def test_tournament_system_prompt_excludes_clan_events_prose():
     """The tournament system prompt loads its own subagent file — it must not
     drag in clan-events.md content (that's the channel whose prompt caused
     the war-context confusion we're fixing)."""
-    from agent.prompts import _tournament_update_system
+    from agent.prompt_builders import _tournament_update_system
 
     prompt = _tournament_update_system()
     # Positive signal: tournament-specific content is present.
