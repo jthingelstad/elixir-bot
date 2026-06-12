@@ -136,6 +136,14 @@ _WORKFLOW_SPECS = (
         model_family="chat",
         tools_allowed=False,
     ),
+    WorkflowSpec(
+        "clan_chat_copy",
+        response_schema={"required": ["messages"]},
+        tools=[],
+        max_tool_rounds=1,
+        model_family="chat",
+        tools_allowed=False,
+    ),
     WorkflowSpec("weekly_digest", model_family="chat"),
     WorkflowSpec("site_promote_content", model_family="promotion"),
 )

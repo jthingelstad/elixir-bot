@@ -9,6 +9,15 @@ from datetime import datetime, timedelta, timezone
 
 import db
 import elixir_agent
+from runtime.clan_chat_copy import (
+    CLAN_CHAT_DEFAULT_MAX_CHARS,
+    CLAN_CHAT_WELCOME_MAX_CHARS,
+    DISCORD_INVITE_ROUTE,
+    ClanChatCopyResult,
+    clip_clan_chat_text,
+    generate_clan_chat_copy,
+    messages_from_agent_result,
+)
 from runtime.leader_action_observability import post_leader_action_skip
 from runtime.leader_action_policy import can_post_leader_action
 from runtime.leader_action_ui import LEADER_ACTION_UI_VERSION, post_leader_action_card
@@ -23,8 +32,8 @@ from runtime.helpers import _channel_scope
 log = logging.getLogger("elixir")
 
 ARENA_RELAY_COOLDOWN_HOURS = 18
-ARENA_RELAY_MAX_COPY_CHARS = 240
-ARENA_RELAY_WELCOME_MAX_COPY_CHARS = 120
+ARENA_RELAY_MAX_COPY_CHARS = CLAN_CHAT_DEFAULT_MAX_CHARS
+ARENA_RELAY_WELCOME_MAX_COPY_CHARS = CLAN_CHAT_WELCOME_MAX_CHARS
 ARENA_RELAY_MAX_NUDGE_ACTIONS = 3
 PUBLIC_DEPARTURE_MIN_TENURE_DAYS = 14
 WAR_NUDGE_SIGNAL_TYPES = {
@@ -54,8 +63,6 @@ CELEBRATION_RELAY_SIGNAL_TYPES = {
     "member_birthday",
     "clan_birthday",
 }
-DISCORD_INVITE_ROUTE = "POAPKINGS . COM > Members"
-
 
 def _memory_context_with_leader_action_feedback(memory_context: dict | None, profiles: list[dict] | None) -> dict | None:
     profiles = profiles or []
@@ -76,10 +83,7 @@ def _memory_context_with_leader_action_feedback(memory_context: dict | None, pro
 
 
 def _clip_relay_copy(text: str, limit: int = ARENA_RELAY_MAX_COPY_CHARS) -> str:
-    body = " ".join((text or "").split())
-    if len(body) <= limit:
-        return body
-    return body[: max(0, limit - 3)].rstrip() + "..."
+    return clip_clan_chat_text(text, limit=limit)
 
 
 def _ordinal(value) -> str | None:
@@ -134,14 +138,31 @@ def _discord_invite_relay_context(base_context: str | None) -> str:
     return instructions
 
 
+def _with_clan_chat_feedback_context(base_context: str, memory_context: dict | None) -> str:
+    durable = (memory_context or {}).get("durable_memories") or []
+    lines = []
+    for item in durable[:3]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or item.get("event_id") or item.get("memory_id") or "").strip()
+        body = str(item.get("body") or item.get("summary") or "").strip()
+        if title and body:
+            lines.append(f"- {title}: {body}")
+        elif body:
+            lines.append(f"- {body}")
+    if not lines:
+        return base_context
+    return f"{base_context}\n\nRecent leader feedback for this clan-chat copy type:\n" + "\n".join(lines)
+
+
 def _result_content_items(result: dict | None) -> list[str]:
+    if isinstance(result, ClanChatCopyResult):
+        return list(result.messages)
     if not isinstance(result, dict):
         return []
-    content = result.get("content")
-    if isinstance(content, list):
-        return [str(item or "").strip() for item in content if str(item or "").strip()]
-    if isinstance(content, str) and content.strip():
-        return [content.strip()]
+    messages = messages_from_agent_result(result)
+    if messages:
+        return messages
     return []
 
 
@@ -1067,14 +1088,17 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                         limit=1,
                     ),
                 )
-                generated = await asyncio.to_thread(
-                    elixir_agent.generate_channel_update,
-                    channel_config["name"],
-                    channel_config["subagent_key"],
-                    _discord_invite_relay_context(context),
-                    recent_posts=recent_posts,
-                    memory_context=action_memory_context,
-                    leadership=(channel_config["memory_scope"] == "leadership"),
+                generated = await generate_clan_chat_copy(
+                    intent="discord_invite_relay",
+                    context=_with_clan_chat_feedback_context(
+                        _discord_invite_relay_context(context),
+                        action_memory_context,
+                    ),
+                    max_messages=3,
+                    max_chars=ARENA_RELAY_MAX_COPY_CHARS,
+                    exact_once_terms=(DISCORD_INVITE_ROUTE,),
+                    forbidden_terms=("http://", "https://", "www."),
+                    metadata={"channel": channel_config["name"], "subagent": channel_config["subagent_key"]},
                 )
                 result = _build_generated_discord_invite_relay_result(delivery_signals, generated)
             elif outcome.get("intent") == "welcome_relay" and member_join_signals:
@@ -1087,14 +1111,20 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                         limit=1,
                     ),
                 )
-                generated = await asyncio.to_thread(
-                    elixir_agent.generate_channel_update,
-                    channel_config["name"],
-                    channel_config["subagent_key"],
-                    _member_join_welcome_context(context, member_join_signals[0], profile_facts=welcome_profile_facts),
-                    recent_posts=recent_posts,
-                    memory_context=action_memory_context,
-                    leadership=(channel_config["memory_scope"] == "leadership"),
+                name = str(member_join_signals[0].get("name") or "").strip()
+                required_terms = ("POAP KINGS", name) if name else ("POAP KINGS",)
+                generated = await generate_clan_chat_copy(
+                    intent="welcome_relay",
+                    context=_with_clan_chat_feedback_context(
+                        _member_join_welcome_context(context, member_join_signals[0], profile_facts=welcome_profile_facts),
+                        action_memory_context,
+                    ),
+                    max_messages=1,
+                    max_chars=ARENA_RELAY_WELCOME_MAX_COPY_CHARS,
+                    required_terms=required_terms,
+                    forbidden_terms=("Discord", "boat defenses", "onboarding", "http://", "https://", "www."),
+                    fallback_messages=[_fallback_welcome_relay_copy(member_join_signals[0], welcome_profile_facts)],
+                    metadata={"channel": channel_config["name"], "subagent": channel_config["subagent_key"]},
                 )
                 result = _build_generated_welcome_relay_result(
                     member_join_signals,

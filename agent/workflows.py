@@ -17,6 +17,7 @@ from agent.prompt_builders import (
     _arena_relay_observation_system,
     _awareness_system,
     _channel_subagent_system,
+    _clan_chat_copy_system,
     _clanops_system,
     _deck_review_system,
     _event_system,
@@ -353,6 +354,25 @@ def generate_channel_update(channel_name, subagent_key, context, *,
         allowed_tools=TOOLSETS_BY_WORKFLOW[workflow],
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW[workflow],
         strict_json=True,
+    )
+
+
+def generate_clan_chat_copy(request: dict):
+    """Generate copy intended for Clash Royale in-game clan chat only."""
+    public_request = {k: v for k, v in (request or {}).items() if not str(k).startswith("_")}
+    user_msg = (
+        "Generate Clash Royale in-game clan chat copy for this request. "
+        "Follow the system guardrails exactly and return only the JSON object.\n\n"
+        f"```json\n{json.dumps(public_request, indent=2, default=str)}\n```"
+    )
+    return _chat_with_tools(
+        _clan_chat_copy_system(),
+        user_msg,
+        workflow="clan_chat_copy",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["clan_chat_copy"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["clan_chat_copy"],
+        strict_json=True,
+        max_tokens=900,
     )
 
 
@@ -1231,6 +1251,7 @@ def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_co
 __all__ = [
     "observe_and_post",
     "generate_channel_update",
+    "generate_clan_chat_copy",
     "generate_intel_report",
     "run_memory_synthesis",
     "run_awareness_tick",
