@@ -1,3 +1,11 @@
+"""agent.prompt_builders — programmatic system-prompt builders for agent workflows.
+
+Not to be confused with the root-level ``prompts`` module, which loads and
+parses the externalized markdown files under prompts/ (CLAN.md, DISCORD.md,
+SOUL.md, ...). This module composes those loaded blocks into per-workflow
+system prompts (deck review, promotion, war observations, etc.).
+"""
+
 import prompts
 
 from agent.core import _build_system_prompt

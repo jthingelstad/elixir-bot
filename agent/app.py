@@ -32,7 +32,7 @@ def __export_public(module):
     return names
 
 
-from agent import prompts as _prompts_module
+from agent import prompt_builders as _prompt_builders_module
 from agent import tool_defs as _tool_defs_module
 from agent import tool_policy as _tool_policy_module
 from agent import tool_exec as _tool_exec_module
@@ -41,7 +41,7 @@ from agent import workflows as _workflows_module
 
 __all__ = [name for name in globals() if not name.startswith("__")]
 for _module in (
-    _prompts_module,
+    _prompt_builders_module,
     _tool_defs_module,
     _tool_policy_module,
     _tool_exec_module,

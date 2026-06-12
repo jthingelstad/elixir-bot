@@ -1,6 +1,6 @@
 """Tests for prompts.py — prompt file loading and config parsing."""
 
-import agent.prompts as agent_prompts
+import agent.prompt_builders as agent_prompts
 import prompts
 
 
