@@ -610,6 +610,7 @@ _STORAGE_FACADE_MODULES = (
     "storage.identity",
     "storage.war",
     "storage.roster",
+    "storage.cards",
     "storage.player",
     "storage.trends",
     "storage.messages",

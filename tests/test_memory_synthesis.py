@@ -15,7 +15,7 @@ from agent.tool_policy import (
     TOOLSETS_BY_WORKFLOW,
 )
 from memory_store import SOURCE_TYPES, create_memory, list_memories
-from runtime.jobs._core import (
+from runtime.jobs._memory import (
     _apply_memory_synthesis_plan,
     _build_memory_synthesis_context,
 )

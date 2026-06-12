@@ -1157,7 +1157,7 @@ def test_get_member_card_collection_returns_collection_summary_and_levels():
 
 
 def test_card_mode_fields_interpret_observed_evo_and_hero_mapping():
-    from storage import roster
+    from storage import cards
 
     cases = [
         ({}, (False, False, False, False, None, None)),
@@ -1170,7 +1170,7 @@ def test_card_mode_fields_interpret_observed_evo_and_hero_mapping():
     ]
 
     for card, expected in cases:
-        interpreted = roster._card_mode_fields(card)
+        interpreted = cards._card_mode_fields(card)
         assert (
             interpreted["supports_evo"],
             interpreted["supports_hero"],
