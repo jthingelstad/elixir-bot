@@ -545,6 +545,26 @@ def _leader_action_clan_chat_copy(
     return _clip_clan_chat_text(text)
 
 
+def _kick_candidate_priority(member: dict) -> tuple:
+    reasons = member.get("reasons") or []
+    inactive = next(
+        (reason for reason in reasons if reason.get("type") == "inactive"),
+        None,
+    )
+    overdue = 0
+    if inactive:
+        try:
+            overdue = float(inactive.get("value") or 0) - float(inactive.get("threshold_days") or 0)
+        except (TypeError, ValueError):
+            overdue = 0
+    return (
+        0 if inactive else 1,
+        -overdue,
+        member.get("clan_rank") if member.get("clan_rank") is not None else 999,
+        (member.get("name") or member.get("current_name") or "").lower(),
+    )
+
+
 def _format_leader_action_card(
     action: dict,
     *,
@@ -698,7 +718,7 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
 
     posted = 0
     max_actions = max(1, int(max_actions or 1))
-    for member in (promotions.get("recommended") or [])[:3]:
+    for member in (promotions.get("recommended") or []):
         if posted >= max_actions:
             return posted
         label = _leader_action_member_label(member)
@@ -717,7 +737,8 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
         ):
             posted += 1
 
-    for member in ((at_risk or {}).get("members") or [])[:3]:
+    kick_candidates = sorted((at_risk or {}).get("members") or [], key=_kick_candidate_priority)
+    for member in kick_candidates:
         if posted >= max_actions:
             return posted
         label = _leader_action_member_label(member)

@@ -1449,6 +1449,27 @@ def test_generated_welcome_relay_result_clips_to_clan_chat_length():
     assert result["content"][1] == copy
 
 
+def test_fallback_welcome_relay_result_uses_profile_facts_when_generation_is_empty():
+    from runtime.signals.delivery import _build_fallback_welcome_relay_result
+
+    result = _build_fallback_welcome_relay_result(
+        [{"type": "member_join", "tag": "#ABC", "name": "King Levy"}],
+        profile_facts=[
+            "- Name: King Levy",
+            "- Player tag: #ABC",
+            "- Collection Level: 1,597",
+            "- Favorite card: Bowler",
+        ],
+    )
+
+    assert result is not None
+    copy = result["metadata"]["relay_copy"]
+    assert "POAP KINGS" in copy
+    assert "King Levy" in copy
+    assert "1,597" in copy
+    assert result["metadata"]["target_player_tag"] == "#ABC"
+
+
 def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
     signals = [{
         "type": "member_join",
@@ -2313,6 +2334,69 @@ def test_weekly_leader_actions_post_to_arena_relay():
     assert mock_card.await_args_list[1].kwargs["copy_messages"][0].startswith("Removing Vijay from the clan")
     assert mock_save.call_args.kwargs["workflow"] == "arena-relay"
     assert "clan_chat_copy" in mock_save.call_args.kwargs["raw_json"]
+
+
+def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppressed_targets():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 1513758211206025227
+    channel.name = "arena-relay"
+    channel.type = "text"
+
+    def has_recent(**kwargs):
+        return kwargs.get("target_player_tag") == "#SUPPRESS"
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#arena-relay"}),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("runtime.jobs._core.db.get_promotion_candidates", return_value={"recommended": []}),
+        patch("runtime.jobs._core.db.get_members_at_risk", return_value={
+            "members": [
+                {
+                    "member_ref": "Low Donation",
+                    "player_tag": "#LOW",
+                    "clan_rank": 1,
+                    "reasons": [{"type": "low_donations", "detail": "0 donations this week"}],
+                },
+                {
+                    "member_ref": "Suppressed Idle",
+                    "player_tag": "#SUPPRESS",
+                    "clan_rank": 2,
+                    "reasons": [{"type": "inactive", "detail": "no battle in 12 days", "value": 12, "threshold_days": 7}],
+                },
+                {
+                    "member_ref": "Fresh Idle",
+                    "player_tag": "#IDLE",
+                    "clan_rank": 30,
+                    "reasons": [{"type": "inactive", "detail": "no battle in 10 days", "value": 10, "threshold_days": 8}],
+                },
+            ],
+        }),
+        patch("runtime.jobs._core.db.has_recent_leader_action", side_effect=has_recent),
+        patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=False),
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
+        patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
+        patch("runtime.jobs._core.db.create_leader_action_recommendation", return_value={
+            "action_id": 21,
+            "action_key": "kick:#IDLE",
+            "status": "proposed",
+            "objective": "roster_health",
+        }) as mock_create,
+        patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock(return_value=[
+            SimpleNamespace(id=2100),
+            SimpleNamespace(id=2101),
+        ])),
+        patch("runtime.jobs._core.db.save_message"),
+    ):
+        from runtime.jobs._core import _post_candidate_leader_action_recommendations
+        posted = asyncio.run(_post_candidate_leader_action_recommendations(max_actions=1))
+
+    assert posted == 1
+    assert mock_create.call_args.kwargs["target_player_tag"] == "#IDLE"
+    assert mock_create.call_args.kwargs["target_player_name"] == "Fresh Idle"
 
 
 def test_leadership_action_scan_posts_singular_actions():
