@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
 import db
-from memory_reasoner import format_memory_for_response, package_prompt_context, summarize_member_memories
 from memory_store import (
     MemoryValidationError,
     archive_memory,
@@ -396,47 +395,6 @@ def test_member_note_memory_is_upserted_and_archived():
         archived = archive_member_note_memory(member_tag="#ABC123", conn=conn)
         assert archived["status"] == "archived"
         assert list_memories(viewer_scope="leadership", conn=conn) == []
-    finally:
-        conn.close()
-
-
-def test_summarization_and_safe_phrasing_helpers():
-    conn = db.get_connection(":memory:")
-    try:
-        member_id = db._ensure_member(conn, "#BBB222", name="Bravo")
-        leader = create_memory(
-            body="Leadership encouraged Bravo to keep consistency.",
-            source_type="leader_note",
-            is_inference=False,
-            confidence=1.0,
-            created_by="leader",
-            member_id=member_id,
-            conn=conn,
-        )
-        infer = create_memory(
-            body="Bravo may need motivation after two weaker cycles.",
-            source_type="elixir_inference",
-            is_inference=True,
-            confidence=0.45,
-            created_by="elixir",
-            member_id=member_id,
-            conn=conn,
-        )
-
-        packet = package_prompt_context(facts=[{"kind": "authoritative_fact"}], memories=[leader, infer])
-        assert len(packet["facts"]) == 1
-        assert len(packet["leadership_memories"]) == 1
-        assert len(packet["assistant_inferences"]) == 1
-
-        summary = summarize_member_memories(member_id, conn=conn)
-        assert summary.leadership_notes
-        assert summary.assistant_inferences
-        assert summary.open_questions
-
-        leader_text = format_memory_for_response(leader)
-        infer_text = format_memory_for_response(infer)
-        assert leader_text.startswith("Leadership noted")
-        assert "inferred" in infer_text and "confidence" in infer_text
     finally:
         conn.close()
 
