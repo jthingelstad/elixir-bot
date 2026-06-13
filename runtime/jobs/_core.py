@@ -125,6 +125,38 @@ WEEKLY_DISCORD_INVITE_RELAY_DAY = os.getenv("WEEKLY_DISCORD_INVITE_RELAY_DAY", "
 WEEKLY_DISCORD_INVITE_RELAY_HOUR = int(os.getenv("WEEKLY_DISCORD_INVITE_RELAY_HOUR", "11"))
 WEEKLY_RECAP_DAY = os.getenv("WEEKLY_RECAP_DAY", "mon")
 WEEKLY_RECAP_HOUR = int(os.getenv("WEEKLY_RECAP_HOUR", "9"))
+KICK_RECOMMENDATION_POLICY_CONTEXT = {
+    "primary_signal": "inactivity_or_absence",
+    "supporting_signals": ["donations", "war_participation"],
+    "faq_alignment": [
+        "Wars are encouraged, not required.",
+        "Real life comes first when members communicate.",
+        "Removal recommendations are for ghosting or inactivity without a heads-up.",
+    ],
+}
+_AVAILABILITY_MEMORY_TERMS = (
+    "away",
+    "camping",
+    "limited signal",
+    "vacation",
+    "travel",
+    "travelling",
+    "traveling",
+    "unavailable",
+    "offline",
+    "break",
+    "heads-up",
+    "headsup",
+    "real life",
+)
+_RETURN_MEMORY_TERMS = (
+    "returned",
+    "return from",
+    "came back",
+    "is back",
+    "ready to participate",
+    "active participation",
+)
 
 
 def _build_weekly_clan_recap_context(*args, **kwargs):
@@ -537,6 +569,67 @@ def _leader_action_reason(member: dict, *, promotion: bool) -> str:
 CLAN_CHAT_ACTION_COPY_LIMIT = CLASH_COPY_MAX_LENGTH
 
 
+def _kick_candidate_inactive_reason(member: dict) -> dict | None:
+    for reason in member.get("reasons") or []:
+        if isinstance(reason, dict) and reason.get("type") == "inactive":
+            return reason
+    return None
+
+
+def _availability_memory_matches(memory: dict) -> bool:
+    tags = {str(tag or "").strip().lower() for tag in (memory.get("tags") or [])}
+    text = " ".join(
+        str(memory.get(key) or "")
+        for key in ("title", "summary", "body")
+    ).lower()
+    if any(term in text for term in _RETURN_MEMORY_TERMS):
+        return False
+    return "availability" in tags or any(term in text for term in _AVAILABILITY_MEMORY_TERMS)
+
+
+def _kick_candidate_availability_memory(member: dict, *, conn=None) -> dict | None:
+    """Return an active availability memory that should suppress a kick card."""
+    candidate_keys = [
+        _leader_action_member_tag(member),
+        member.get("member_ref"),
+        member.get("name"),
+        member.get("current_name"),
+    ]
+    seen = set()
+    from memory_store import list_memories
+
+    for key in candidate_keys:
+        if not key:
+            continue
+        canon = db._canon_tag(str(key))
+        if not canon or canon in seen:
+            continue
+        seen.add(canon)
+        try:
+            memories = list_memories(
+                viewer_scope="leadership",
+                filters={"member_tag": canon},
+                limit=5,
+                conn=conn,
+            )
+        except Exception:
+            log.warning("kick candidate availability memory lookup failed for %s", canon, exc_info=True)
+            continue
+        for memory in memories or []:
+            if _availability_memory_matches(memory):
+                return memory
+    return None
+
+
+def _kick_candidate_ineligibility_reason(member: dict, *, conn=None) -> str | None:
+    if not _kick_candidate_inactive_reason(member):
+        return "no_inactivity_signal"
+    availability_memory = _kick_candidate_availability_memory(member, conn=conn)
+    if availability_memory:
+        return f"availability_memory:{availability_memory.get('memory_id')}"
+    return None
+
+
 def _clip_clan_chat_text(text: str, *, limit: int = CLAN_CHAT_ACTION_COPY_LIMIT) -> str:
     return clip_clan_chat_text(text, limit=limit)
 
@@ -688,6 +781,9 @@ async def _post_leader_action_recommendation(
         action_type=action_type,
         target_player_tag=target_player_tag,
     )
+    if action_type == "kick_recommendation":
+        baseline = dict(baseline or {})
+        baseline["policy_context"] = KICK_RECOMMENDATION_POLICY_CONTEXT
     clan_chat_copy = _leader_action_clan_chat_copy(
         action_type=action_type,
         target_player_name=target_player_name,
@@ -769,6 +865,19 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
             return posted
         label = _leader_action_member_label(member)
         tag = _leader_action_member_tag(member)
+        ineligible_reason = await asyncio.to_thread(_kick_candidate_ineligibility_reason, member)
+        if ineligible_reason:
+            rationale = _leader_action_reason(member, promotion=False)
+            await post_leader_action_skip(
+                source="leader_action_candidate_scan",
+                action_type="kick_recommendation",
+                reason=f"ineligible:{ineligible_reason}",
+                target_player_name=label,
+                target_player_tag=tag,
+                objective="roster_health",
+                rationale=rationale,
+            )
+            continue
         rationale = _leader_action_reason(member, promotion=False)
         prompt_text = f"Review {label} for removal from the clan."
         if await _post_leader_action_recommendation(
