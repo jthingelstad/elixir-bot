@@ -5593,6 +5593,16 @@ def test_promotion_candidates_use_v2_review_logic():
         )
         db.set_member_join_date("#DEF456", "Vijay", "2025-10-01", conn=conn)
         db.set_member_join_date("#GHI789", "Finn", "2026-03-01", conn=conn)
+        conn.execute(
+            "INSERT INTO member_battle_facts (member_id, battle_time, battle_type, outcome) "
+            "SELECT member_id, '20260307T110000.000Z', 'PvP', 'win' "
+            "FROM members WHERE player_tag = '#DEF456'"
+        )
+        conn.execute(
+            "INSERT INTO member_battle_facts (member_id, battle_time, battle_type, outcome) "
+            "SELECT member_id, '20260307T100000.000Z', 'PvP', 'win' "
+            "FROM members WHERE player_tag = '#GHI789'"
+        )
         db.store_war_log(
             {
                 "items": [
@@ -5621,11 +5631,30 @@ def test_promotion_candidates_use_v2_review_logic():
             "J2RGCRVG",
             conn=conn,
         )
+        db.upsert_war_current_state(
+            {
+                "state": "full",
+                "seasonId": 129,
+                "sectionIndex": 1,
+                "periodIndex": 3,
+                "periodType": "warDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 0,
+                    "repairPoints": 0,
+                    "periodPoints": 0,
+                    "clanScore": 100,
+                    "participants": [],
+                },
+            },
+            conn=conn,
+        )
 
         review = db.get_promotion_candidates(conn=conn)
         assert review["recommended"][0]["tag"] == "#DEF456"
         assert review["borderline"][0]["tag"] == "#GHI789"
-        assert review["borderline"][0]["missing"] == ["donations", "tenure"]
+        assert review["borderline"][0]["missing"] == ["war"]
         assert review["composition"]["elder_capacity_remaining"] >= 0
     finally:
         conn.close()

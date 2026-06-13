@@ -2349,7 +2349,8 @@ def test_weekly_leader_actions_post_to_arena_relay():
 
     created = [
         {"action_id": 1, "action_key": "kick:1", "status": "proposed", "objective": "roster_health"},
-        {"action_id": 2, "action_key": "promotion:1", "status": "proposed", "objective": "reward_and_retention"},
+        {"action_id": 2, "action_key": "demotion:1", "status": "proposed", "objective": "role_health"},
+        {"action_id": 3, "action_key": "promotion:1", "status": "proposed", "objective": "reward_and_retention"},
     ]
 
     with (
@@ -2357,7 +2358,8 @@ def test_weekly_leader_actions_post_to_arena_relay():
         patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.db.get_promotion_candidates", return_value={
-            "recommended": [{"member_ref": "King Levy", "player_tag": "#ABC123", "donations": 220, "war_races_played": 4, "tenure_days": 90}],
+            "recommended": [{"member_ref": "King Levy", "player_tag": "#ABC123", "elder_donation_rank": 2, "elder_target_rank": 10, "rolling_donations_avg": 220.0, "donations": 220, "war_races_played": 4, "days_since_battle": 0}],
+            "demotion_candidates": [{"member_ref": "Aaqib", "player_tag": "#AAA111", "reason": "outside Elder cap: rank 11/10 on 4-week donation average 30.0", "war_races_played": 1, "days_since_battle": 0}],
         }),
         patch("runtime.jobs._core.db.get_members_at_risk", return_value={
             "members": [{
@@ -2375,23 +2377,27 @@ def test_weekly_leader_actions_post_to_arena_relay():
         patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock(side_effect=[
             [SimpleNamespace(id=1000), SimpleNamespace(id=1001)],
             [SimpleNamespace(id=2000), SimpleNamespace(id=2001)],
+            [SimpleNamespace(id=3000), SimpleNamespace(id=3001)],
         ])) as mock_card,
         patch("runtime.jobs._core.db.save_message") as mock_save,
     ):
         from runtime.jobs._core import _post_candidate_leader_action_recommendations
         posted = asyncio.run(_post_candidate_leader_action_recommendations(max_actions=6))
 
-    assert posted == 2
-    assert mock_create.call_count == 2
+    assert posted == 3
+    assert mock_create.call_count == 3
     assert [call.kwargs["action_type"] for call in mock_create.call_args_list] == [
         "kick_recommendation",
+        "demotion_recommendation",
         "promotion_recommendation",
     ]
     assert mock_create.call_args_list[0].kwargs["baseline"]["policy_context"]["primary_signal"] == "inactivity_or_absence"
     assert "policy_context" not in mock_create.call_args_list[1].kwargs["baseline"]
-    assert mock_card.await_count == 2
+    assert "policy_context" not in mock_create.call_args_list[2].kwargs["baseline"]
+    assert mock_card.await_count == 3
     assert mock_card.await_args_list[0].kwargs["copy_messages"][0].startswith("Removing Vijay for now")
-    assert mock_card.await_args_list[1].kwargs["copy_messages"][0].startswith("Promoting King Levy to Elder")
+    assert mock_card.await_args_list[1].kwargs["copy_messages"][0].startswith("Moving Aaqib back to Member")
+    assert mock_card.await_args_list[2].kwargs["copy_messages"][0].startswith("Promoting King Levy to Elder")
     assert mock_save.call_args.kwargs["workflow"] == "arena-relay"
     assert "clan_chat_copy" in mock_save.call_args.kwargs["raw_json"]
 

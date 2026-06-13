@@ -541,13 +541,25 @@ def _leader_action_activity_reason(member: dict) -> str | None:
 def _leader_action_reason(member: dict, *, promotion: bool) -> str:
     if promotion:
         bits = []
+        rank = member.get("elder_donation_rank")
+        target = member.get("elder_target_rank")
+        rolling = member.get("rolling_donations_avg")
+        if rank is not None and target is not None and rolling is not None:
+            bits.append(f"rank {rank}/{target} on recent donations (avg {rolling}/week)")
         if member.get("donations") is not None:
-            bits.append(f"{member.get('donations')} donations")
+            bits.append(f"{member.get('donations')} current donations")
         if member.get("war_races_played") is not None:
-            bits.append(f"{member.get('war_races_played')} war races")
-        if member.get("tenure_days") is not None:
-            bits.append(f"{member.get('tenure_days')}d tenure")
-        return ", ".join(bits) or "promotion candidate data is above threshold"
+            bits.append(f"{member.get('war_races_played')} recent war races")
+        if member.get("days_since_battle") is not None:
+            bits.append(f"battle activity {member.get('days_since_battle')}d ago")
+        return ", ".join(bits) or "inside Elder donation leaderboard"
+    if member.get("reason"):
+        bits = [str(member.get("reason"))]
+        if member.get("war_races_played") is not None:
+            bits.append(f"{member.get('war_races_played')} recent war races")
+        if member.get("days_since_battle") is not None:
+            bits.append(f"battle activity {member.get('days_since_battle')}d ago")
+        return "; ".join(bits[:3])
     reasons = member.get("reasons") or []
     has_inactive_reason = any(reason.get("type") == "inactive" for reason in reasons if isinstance(reason, dict))
     bits = []
@@ -885,6 +897,25 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
             action_type="kick_recommendation",
             objective="roster_health",
             title="kick/removal recommendation",
+            prompt_text=prompt_text,
+            rationale=rationale,
+            target_player_tag=tag,
+            target_player_name=label,
+        ):
+            posted += 1
+
+    for member in (promotions.get("demotion_candidates") or []):
+        if posted >= max_actions:
+            return posted
+        label = _leader_action_member_label(member)
+        tag = _leader_action_member_tag(member)
+        rationale = _leader_action_reason(member, promotion=False)
+        prompt_text = f"Move {label} from Elder back to Member."
+        if await _post_leader_action_recommendation(
+            channel,
+            action_type="demotion_recommendation",
+            objective="role_health",
+            title="demotion recommendation",
             prompt_text=prompt_text,
             rationale=rationale,
             target_player_tag=tag,

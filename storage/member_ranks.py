@@ -1,20 +1,15 @@
 """storage.member_ranks — in-clan comparative ranks for active members.
 
 Computes 1-indexed ranks (donation_rank_week, donation_rank_season,
-war_fame_rank_current_race, war_fame_rank_season) and elder-eligibility
-booleans (elder_eligible, elder_eligible_crossed_this_week) for every
-active member in a single pass. Consumers (via _member_reference_fields)
-look up by member_id rather than re-deriving from raw rows.
-
-The eligibility predicate here is the single source of truth: storage.
-war_analytics.get_promotion_candidates calls evaluate_elder_eligibility
-so the boolean and the candidate list can never disagree.
+war_fame_rank_current_race, war_fame_rank_season) and Elder-board booleans
+(elder_eligible, elder_eligible_crossed_this_week) for every active member
+in a single pass. Consumers (via _member_reference_fields) look up by
+member_id rather than re-deriving from raw rows.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
 from typing import Optional
 
 from db import managed_connection
@@ -28,12 +23,12 @@ __all__ = [
 ]
 
 
-# Same defaults used by storage.war_analytics.get_promotion_candidates.
+# Same gate defaults used by storage.war_analytics.get_promotion_candidates.
 ELDER_ELIGIBILITY_DEFAULTS = {
-    "min_donations_week": 50,
-    "min_tenure_days": 21,
+    "min_tenure_days": 0,
     "active_within_days": 7,
     "min_war_races": 1,
+    "rolling_donation_weeks": 4,
 }
 
 # Field names every active member reference picks up. Inactive members get
@@ -50,25 +45,26 @@ RANK_FIELDS = (
 
 def evaluate_elder_eligibility(
     *,
-    donations_week: Optional[int],
-    tenure_days: Optional[int],
-    days_inactive: Optional[int],
-    war_races_played: Optional[int],
-    season_id: Optional[int],
-    min_donations_week: int = ELDER_ELIGIBILITY_DEFAULTS["min_donations_week"],
+    tenure_days: Optional[int] = None,
+    days_since_battle: Optional[int] = None,
+    days_inactive: Optional[int] = None,
+    war_races_played: Optional[int] = None,
+    season_id: Optional[int] = None,
     min_tenure_days: int = ELDER_ELIGIBILITY_DEFAULTS["min_tenure_days"],
     active_within_days: int = ELDER_ELIGIBILITY_DEFAULTS["active_within_days"],
     min_war_races: int = ELDER_ELIGIBILITY_DEFAULTS["min_war_races"],
+    donations_week: Optional[int] = None,
+    min_donations_week: Optional[int] = None,
 ) -> dict:
-    """Pure eligibility predicate. Returns ``{checks, all_passed}``.
+    """Pure activity gate predicate. Returns ``{checks, all_passed}``.
 
-    The single source of truth for "is this member elder-eligible right now."
-    War check is skipped (passed) when ``season_id`` is None.
+    Donation volume is intentionally not an absolute check here. Elder
+    recommendations are relative to the smoothed donation leaderboard.
     """
+    activity_days = days_since_battle if days_since_battle is not None else days_inactive
     checks = {
-        "donations": (donations_week or 0) >= min_donations_week,
-        "tenure": tenure_days is not None and tenure_days >= min_tenure_days,
-        "activity": days_inactive is not None and days_inactive <= active_within_days,
+        "tenure": min_tenure_days <= 0 or (tenure_days is not None and tenure_days >= min_tenure_days),
+        "activity": activity_days is not None and activity_days <= active_within_days,
         "war": season_id is None or (war_races_played or 0) >= min_war_races,
     }
     return {
@@ -85,7 +81,6 @@ def compute_member_ranks(conn: Optional[sqlite3.Connection] = None) -> dict[int,
     Inactive members are omitted entirely; the calling enricher fills None
     for any member_id not present.
     """
-    from db import _current_joined_at, _parse_cr_time
     from storage.war_analytics import _member_activity_anchor
     from storage.war_status import get_current_season_id
 
@@ -235,79 +230,17 @@ def _populate_war_fame_rank_season(conn, ranks, season_id):
 
 
 def _populate_elder_eligibility(conn, ranks, today, season_id):
-    """Set elder_eligible + elder_eligible_crossed_this_week for active
-    members in the role 'member'. Leaders, co-leaders, and existing elders
-    stay at ``None`` — the predicate does not apply to them.
-    """
-    from db import _current_joined_at, _parse_cr_time
+    """Set member-facing Elder-board flags from the shared role review."""
+    from storage.war_analytics import _elder_role_review
 
-    rows = conn.execute(
-        "SELECT m.member_id, cs.role, cs.donations_week, cs.last_seen_api "
-        "FROM members m "
-        "JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "WHERE m.status = 'active' AND cs.role = 'member'"
-    ).fetchall()
-    for row in rows:
-        member_id = row["member_id"]
+    review = _elder_role_review(conn=conn, enrich=False)
+    for item in review.get("reviewed") or []:
+        member_id = item.get("member_id")
         if member_id not in ranks:
             continue
-        joined_date = _current_joined_at(conn, member_id)
-        tenure_days = None
-        if joined_date:
-            try:
-                tenure_days = (today - datetime.strptime(joined_date[:10], "%Y-%m-%d").date()).days
-            except ValueError:
-                tenure_days = None
-        last_seen = _parse_cr_time(row["last_seen_api"])
-        days_inactive = (today - last_seen.date()).days if last_seen else None
-        war_races_played = 0
-        if season_id is not None:
-            war_races_played = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM war_participation wp "
-                "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-                "WHERE wr.season_id = ? AND wp.member_id = ? AND COALESCE(wp.decks_used, 0) > 0",
-                (season_id, member_id),
-            ).fetchone()["cnt"]
-
-        eligibility = evaluate_elder_eligibility(
-            donations_week=row["donations_week"],
-            tenure_days=tenure_days,
-            days_inactive=days_inactive,
-            war_races_played=war_races_played,
-            season_id=season_id,
-        )
-        ranks[member_id]["elder_eligible"] = eligibility["all_passed"]
-        ranks[member_id]["elder_eligible_crossed_this_week"] = (
-            _crossed_this_week(conn, member_id, today, eligibility["all_passed"], tenure_days)
-        )
-
-
-def _crossed_this_week(
-    conn, member_id, today, currently_eligible: bool, tenure_days: Optional[int]
-) -> bool:
-    """Conservative: True only when there's strong evidence the member was
-    NOT eligible 7 days ago. Returns False whenever evidence is missing.
-
-    Strong evidence sources:
-    - Tenure: tenure_now < 28 means tenure was < 21 seven days ago.
-    - Donations: a daily-metrics row from 7±1 days ago shows
-      donations_week below the threshold.
-    """
-    if not currently_eligible:
-        return False
-    threshold = ELDER_ELIGIBILITY_DEFAULTS["min_tenure_days"]
-    if tenure_days is not None and tenure_days < threshold + 7:
-        return True
-    seven_days_ago = today - timedelta(days=7)
-    # Allow ±1 day for snapshot-cadence drift (some days may be missing).
-    window_start = (seven_days_ago - timedelta(days=1)).isoformat()
-    window_end = (seven_days_ago + timedelta(days=1)).isoformat()
-    row = conn.execute(
-        "SELECT donations_week FROM member_daily_metrics "
-        "WHERE member_id = ? AND metric_date BETWEEN ? AND ? "
-        "ORDER BY metric_date DESC LIMIT 1",
-        (member_id, window_start, window_end),
-    ).fetchone()
-    if not row or row["donations_week"] is None:
-        return False
-    return row["donations_week"] < ELDER_ELIGIBILITY_DEFAULTS["min_donations_week"]
+        if item.get("role") != "member":
+            continue
+        ranks[member_id]["elder_eligible"] = bool(item.get("in_elder_target"))
+        # The old threshold-crossing field no longer has a reliable meaning in
+        # a relative leaderboard model, so keep it conservative.
+        ranks[member_id]["elder_eligible_crossed_this_week"] = False
