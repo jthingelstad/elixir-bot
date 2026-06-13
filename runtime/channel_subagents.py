@@ -110,6 +110,7 @@ WAR_RELAY_SIGNAL_TYPES = {
     "war_attacks_complete",
     "war_week_complete",
     "war_completed",
+    "war_champ_standings",
     "war_season_complete",
 }
 
@@ -431,6 +432,7 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
 
     if any(signal.get("type") in SEASON_AWARDS_SIGNAL_TYPES for signal in signals):
         add("clan-events", "season_awards_post", required=True)
+        add("arena-relay", "war_champ_winner_relay", required=False)
         return outcomes
 
     if any(is_clan_event_signal(signal) for signal in signals):
