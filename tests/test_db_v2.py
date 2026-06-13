@@ -5494,6 +5494,63 @@ def test_risk_and_trending_war_queries_use_v2_rollups():
         conn.close()
 
 
+def test_at_risk_uses_battle_activity_not_login_only():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {
+                    "tag": "#LOG1N",
+                    "name": "Daily Collector",
+                    "role": "member",
+                    "expLevel": 50,
+                    "trophies": 5000,
+                    "clanRank": 10,
+                    "donations": 100,
+                    "lastSeen": "20260613T120000.000Z",
+                },
+                {
+                    "tag": "#PVP123",
+                    "name": "Casual Battler",
+                    "role": "member",
+                    "expLevel": 50,
+                    "trophies": 5000,
+                    "clanRank": 11,
+                    "donations": 0,
+                    "lastSeen": "20260613T120000.000Z",
+                },
+            ],
+            conn=conn,
+        )
+        battler = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = ?",
+            ("#PVP123",),
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO member_battle_facts (member_id, battle_time, battle_type, is_war) "
+            "VALUES (?, ?, ?, ?)",
+            (battler["member_id"], "20260613T110000.000Z", "PvP", 0),
+        )
+
+        risk = db.get_members_at_risk(
+            inactivity_days=7,
+            min_donations_week=0,
+            require_war_participation=False,
+            conn=conn,
+        )
+        by_tag = {member["tag"]: member for member in risk["members"]}
+
+        assert "#LOG1N" in by_tag
+        inactive_reason = next(
+            reason for reason in by_tag["#LOG1N"]["reasons"] if reason["type"] == "inactive"
+        )
+        assert inactive_reason["battle_days_ago"] == 90
+        assert inactive_reason["login_days_ago"] == 0
+        assert "#PVP123" not in by_tag
+    finally:
+        conn.close()
+
+
 def test_promotion_candidates_use_v2_review_logic():
     conn = db.get_connection(":memory:")
     try:
