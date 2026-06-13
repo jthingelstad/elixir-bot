@@ -135,3 +135,27 @@ def test_restore_refreshes_open_card_components():
     channel.fetch_message.assert_awaited_once_with(456)
     message.edit.assert_awaited_once()
     assert isinstance(message.edit.await_args.kwargs["view"], LeaderActionView)
+
+
+def test_restore_refreshes_terminal_cards_without_components():
+    action = _action(
+        "kick_recommendation",
+        status=db.ACTION_REJECTED,
+        source_message_id="456",
+        target_channel_id="123",
+    )
+    message = SimpleNamespace(edit=AsyncMock())
+    channel = SimpleNamespace(fetch_message=AsyncMock(return_value=message))
+    bot = SimpleNamespace(get_channel=Mock(return_value=channel), add_view=Mock())
+
+    def fake_list_leader_actions(*, status=None, limit=50):
+        return [] if status == db.ACTION_PROPOSED else [action]
+
+    with patch.object(leader_action_ui.db, "list_leader_actions", side_effect=fake_list_leader_actions):
+        restored = asyncio.run(leader_action_ui.restore_leader_action_views(bot))
+
+    assert restored == 0
+    bot.add_view.assert_not_called()
+    channel.fetch_message.assert_awaited_once_with(456)
+    message.edit.assert_awaited_once()
+    assert message.edit.await_args.kwargs["view"] is None

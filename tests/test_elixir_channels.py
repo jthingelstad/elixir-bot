@@ -436,6 +436,7 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
             "status": "done",
         }) as mock_decide,
         patch("runtime.prompt_feedback.queue_leader_action_feedback_refresh") as mock_feedback_refresh,
+        patch("runtime.prompt_feedback.refresh_leader_action_card", new=AsyncMock()) as mock_refresh_card,
     ):
         asyncio.run(elixir.on_raw_reaction_add(payload))
 
@@ -446,6 +447,8 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
         emoji="✅",
     )
     mock_feedback_refresh.assert_called_once_with("in_game_relay")
+    mock_refresh_card.assert_awaited_once()
+    assert mock_refresh_card.await_args.args[1]["status"] == "done"
 
 
 def test_arena_relay_reply_records_action_note():

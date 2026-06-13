@@ -577,29 +577,35 @@ async def post_leader_action_card(
 
 
 async def restore_leader_action_views(bot: discord.Client, *, limit: int = 50) -> int:
-    actions = await asyncio.to_thread(db.list_leader_actions, status=db.ACTION_PROPOSED, limit=limit)
+    open_actions = await asyncio.to_thread(db.list_leader_actions, status=db.ACTION_PROPOSED, limit=limit)
+    recent_actions = await asyncio.to_thread(db.list_leader_actions, limit=limit)
+    actions_by_id = {}
+    for action in recent_actions + open_actions:
+        action_id = action.get("action_id")
+        if action_id is not None:
+            actions_by_id[int(action_id)] = action
+
     restored = 0
     refreshed = 0
-    for action in actions:
+    for action in actions_by_id.values():
         message_id = action.get("source_message_id")
         if not message_id:
             continue
         try:
             view = leader_action_view_for(action)
-            if view is None:
-                continue
-            bot.add_view(view, message_id=int(message_id))
-            restored += 1
-            if await _refresh_restored_action_card(bot, action, view):
+            if view is not None:
+                bot.add_view(view, message_id=int(message_id))
+                restored += 1
+            if await refresh_leader_action_card(bot, action):
                 refreshed += 1
         except Exception:
             log.warning("leader action view restore failed action_id=%s", action.get("action_id"), exc_info=True)
-    if restored:
+    if restored or refreshed:
         log.info("Restored %s leader action view(s); refreshed %s card(s)", restored, refreshed)
     return restored
 
 
-async def _refresh_restored_action_card(bot: discord.Client, action: dict, view: LeaderActionView) -> bool:
+async def refresh_leader_action_card(bot: discord.Client, action: dict) -> bool:
     message_id = action.get("source_message_id")
     channel_id = action.get("target_channel_id")
     if not message_id or not channel_id:
@@ -632,7 +638,7 @@ async def _refresh_restored_action_card(bot: discord.Client, action: dict, view:
 
     try:
         message = await channel.fetch_message(message_id_int)
-        await message.edit(embed=build_leader_action_embed(action), view=view)
+        await message.edit(embed=build_leader_action_embed(action), view=leader_action_view_for(action))
         return True
     except Exception:
         log.warning(
@@ -718,5 +724,6 @@ __all__ = [
     "leader_action_type_choices",
     "post_leader_action_card",
     "post_test_leader_action_card",
+    "refresh_leader_action_card",
     "restore_leader_action_views",
 ]
