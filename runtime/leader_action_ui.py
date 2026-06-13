@@ -576,9 +576,17 @@ async def post_leader_action_card(
     return sent
 
 
-async def restore_leader_action_views(bot: discord.Client, *, limit: int = 50) -> int:
+async def restore_leader_action_views(
+    bot: discord.Client,
+    *,
+    limit: int = 50,
+    terminal_cleanup_limit: int = 3,
+) -> int:
     open_actions = await asyncio.to_thread(db.list_leader_actions, status=db.ACTION_PROPOSED, limit=limit)
-    recent_actions = await asyncio.to_thread(db.list_leader_actions, limit=limit)
+    recent_actions = await asyncio.to_thread(
+        db.list_leader_actions,
+        limit=max(0, min(int(terminal_cleanup_limit or 0), int(limit or 0))),
+    )
     actions_by_id = {}
     for action in recent_actions + open_actions:
         action_id = action.get("action_id")
