@@ -1727,7 +1727,7 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
 
     authored_messages = [
         "Discord check: 17 of us are already there, and it is where the useful clan stuff lands first.",
-        "Deck screenshots, war nudges, milestone shoutouts, leader relay notes: Discord keeps that out of game chat clutter.",
+        "Deck screenshots, war coordination, milestone shoutouts, leader relay notes: Discord keeps that out of game chat clutter.",
         "Join through POAPKINGS . COM > Members.",
     ]
 
@@ -1858,76 +1858,21 @@ def test_arena_relay_cooldown_blocks_recent_posts():
     )
 
 
-def test_war_nudge_candidates_only_on_battle_days():
-    from runtime.signals.delivery import _war_nudge_candidates
-
-    with patch("runtime.signals.delivery.db.get_current_war_day_state", return_value={
-        "phase": "battle",
-        "war_day_key": "s001-w01-p004",
-        "phase_display": "Battle Day 1",
-        "time_left_text": "3h 10m",
-        "used_none": [
-            {"tag": "#AAA", "name": "Aaqib", "role": "member"},
-            {"tag": "#BBB", "name": "Bada", "role": "member"},
-            {"tag": "#CCC", "name": "Cora", "role": "member"},
-            {"tag": "#DDD", "name": "Dez", "role": "member"},
-        ],
-    }):
-        candidates = _war_nudge_candidates(limit=3)
-
-    assert [item["name"] for item in candidates] == ["Aaqib", "Bada", "Cora"]
-    assert candidates[0]["war_day_key"] == "s001-w01-p004"
-
-    with patch("runtime.signals.delivery.db.get_current_war_day_state", return_value={
-        "phase": "practice",
-        "used_none": [{"tag": "#AAA", "name": "Aaqib"}],
-    }):
-        assert _war_nudge_candidates() == []
-
-
-def test_war_nudge_candidates_skip_leaders_and_coleaders():
-    from runtime.signals.delivery import _war_nudge_candidates
-
-    roles = {
-        "#KING": {"role": "leader"},
-        "#RAQ": {"role": "coLeader"},
-        "#ELDER": {"role": "elder"},
-        "#MEMBER": {"role": "member"},
-    }
-    with (
-        patch("runtime.signals.delivery.db.get_current_war_day_state", return_value={
-            "phase": "battle",
-            "war_day_key": "s001-w01-p004",
-            "phase_display": "Battle Day 1",
-            "used_none": [
-                {"tag": "#KING", "name": "King Thing"},
-                {"tag": "#RAQ", "name": "Raquaza"},
-                {"tag": "#ELDER", "name": "Ollie"},
-                {"tag": "#MEMBER", "name": "Aaqib"},
-            ],
-        }),
-        patch("runtime.signals.delivery.db.get_member_profile", side_effect=lambda tag: roles[tag]),
-    ):
-        candidates = _war_nudge_candidates(limit=3)
-
-    assert [item["name"] for item in candidates] == ["Ollie", "Aaqib"]
-
-
 def test_leader_action_card_uses_categorical_action_icon():
-    from runtime.signals.delivery import _format_leader_action_card
+    from runtime.jobs._core import _format_leader_action_card
 
     card = _format_leader_action_card(
         {
             "action_id": 22,
-            "action_type": "war_nudge_recommendation",
-            "objective": "war_participation",
+            "action_type": "kick_recommendation",
+            "objective": "roster_health",
         },
-        title="war nudge recommendation",
-        prompt_text="Nudge Aaqib to use war decks today.",
-        rationale="Aaqib has not used war decks on Battle Day 1.",
+        title="kick recommendation",
+        prompt_text="Kick Aaqib for extended inactivity.",
+        rationale="Aaqib has not been active for 10 days.",
     )
 
-    assert card.startswith("**R22 👋 war nudge recommendation**")
+    assert card.startswith("**R22 🚪 kick recommendation**")
     assert "✅ done  ❌ decline" in card
 
 
@@ -2547,7 +2492,6 @@ def test_kick_candidate_priority_prefers_multi_signal_risk_after_inactive():
 
 def test_leadership_action_scan_posts_singular_actions():
     with (
-        patch("runtime.jobs._signals._deliver_war_nudge_sidecars", new=AsyncMock(return_value=1)) as mock_nudge,
         patch("runtime.jobs._core._post_candidate_leader_action_recommendations", new=AsyncMock(return_value=2)) as mock_candidates,
         patch("runtime.jobs._core.db.refresh_due_leader_action_outcomes", return_value=[{"action_id": 1}]) as mock_refresh,
         patch("runtime.jobs._core._leadership_scan_has_critical_war_action", return_value=False),
@@ -2560,9 +2504,8 @@ def test_leadership_action_scan_posts_singular_actions():
 
     mock_start.assert_called_once_with("leadership_action_scan")
     mock_refresh.assert_called_once()
-    mock_nudge.assert_awaited_once_with([{"type": "war_battle_day_live_update"}])
-    mock_candidates.assert_awaited_once_with(max_actions=1)
-    mock_success.assert_called_once_with("leadership_action_scan", "posted 3 action(s)")
+    mock_candidates.assert_awaited_once_with(max_actions=2)
+    mock_success.assert_called_once_with("leadership_action_scan", "posted 2 action(s)")
     mock_failure.assert_not_called()
 
 
@@ -2584,51 +2527,6 @@ def test_leadership_action_scan_logs_policy_skip():
     )
     mock_success.assert_called_once_with("leadership_action_scan", "skipped: open_card_backlog:5/5")
     mock_failure.assert_not_called()
-
-
-def test_war_nudge_sidecar_skips_recently_declined_targets():
-    """A declined nudge means the leader knows something about that member —
-    don't re-propose the same target on the next battle-day signal."""
-    from types import SimpleNamespace
-    from runtime.signals.delivery import _deliver_war_nudge_sidecars
-
-    candidates = [
-        {"tag": "#DECLINED", "name": "Dez", "war_day_key": "s001-w01-p004", "phase_display": "Battle Day 1"},
-        {"tag": "#FRESH", "name": "Cora", "war_day_key": "s001-w01-p004", "phase_display": "Battle Day 1"},
-    ]
-    channel = SimpleNamespace(id=900, name="arena-relay", type="text")
-    created = {"action_id": 7, "source_message_id": None}
-
-    with (
-        patch("runtime.signals.delivery._facade", return_value=SimpleNamespace(
-            _channel_config_by_key=lambda key: {"id": 900, "name": "arena-relay"},
-        )),
-        patch("runtime.signals.delivery._runtime_app", return_value=SimpleNamespace(
-            bot=SimpleNamespace(get_channel=lambda cid: channel),
-        )),
-        patch("runtime.signals.delivery._war_nudge_candidates", return_value=candidates),
-        patch("runtime.signals.delivery.can_post_leader_action", return_value=(True, None)),
-        patch(
-            "runtime.signals.delivery.db.was_leader_action_declined_recently",
-            side_effect=lambda **kwargs: kwargs.get("target_player_tag") == "#DECLINED",
-        ) as mock_declined,
-        patch("runtime.signals.delivery.db.build_leader_action_baseline", return_value={}),
-        patch("runtime.signals.delivery.db.create_leader_action_recommendation", return_value=created) as mock_create,
-        patch("runtime.signals.delivery.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=1)])),
-        patch("runtime.signals.delivery.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip_log,
-        patch("runtime.signals.delivery.db.save_message"),
-    ):
-        posted = asyncio.run(_deliver_war_nudge_sidecars([{"type": "war_battle_day_started"}]))
-
-    assert posted == 1
-    assert mock_create.call_count == 1
-    assert mock_create.call_args.kwargs["target_player_tag"] == "#FRESH"
-    declined_checks = [c.kwargs["target_player_tag"] for c in mock_declined.call_args_list]
-    assert declined_checks == ["#DECLINED", "#FRESH"]
-    mock_skip_log.assert_awaited_once()
-    assert mock_skip_log.await_args.kwargs["source"] == "war_nudge_sidecar"
-    assert mock_skip_log.await_args.kwargs["reason"] == "recent_decline_within:48h"
-    assert mock_skip_log.await_args.kwargs["target_player_tag"] == "#DECLINED"
 
 
 def test_leader_action_recommendation_suppressed_after_recent_decline():
@@ -2856,13 +2754,12 @@ def test_leadership_action_scan_requeues_feedback_synthesis_for_refreshed_outcom
     affected action types must be re-synthesized so feedback profiles learn
     from measured outcomes, not just the click."""
     refreshed = [
-        {"action_id": 1, "action_type": "war_nudge_recommendation"},
-        {"action_id": 2, "action_type": "war_nudge_recommendation"},
+        {"action_id": 1, "action_type": "promotion_recommendation"},
+        {"action_id": 2, "action_type": "promotion_recommendation"},
         {"action_id": 3, "action_type": "welcome_relay"},
         {"action_id": 4},  # no action_type — must not queue
     ]
     with (
-        patch("runtime.jobs._signals._deliver_war_nudge_sidecars", new=AsyncMock(return_value=0)),
         patch("runtime.jobs._core._post_candidate_leader_action_recommendations", new=AsyncMock(return_value=0)),
         patch("runtime.jobs._core.db.refresh_due_leader_action_outcomes", return_value=refreshed),
         patch("runtime.jobs._core._leadership_scan_has_critical_war_action", return_value=False),
@@ -2874,7 +2771,7 @@ def test_leadership_action_scan_requeues_feedback_synthesis_for_refreshed_outcom
         asyncio.run(elixir._leadership_action_scan())
 
     queued_types = [call.args[0] for call in mock_queue.call_args_list]
-    assert queued_types == ["war_nudge_recommendation", "welcome_relay"]
+    assert queued_types == ["promotion_recommendation", "welcome_relay"]
 
 
 def test_weekly_clan_recap_posts_to_weekly_digest_channel():

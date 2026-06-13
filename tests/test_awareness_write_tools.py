@@ -128,7 +128,7 @@ def test_record_leadership_followup_creates_leadership_inference_memory(memdb):
         "record_leadership_followup",
         {
             "topic": "Week 3 no-shows",
-            "recommendation": "Consider nudging the three members who skipped all battle days.",
+            "recommendation": "Review the three members who skipped all battle days.",
         },
         workflow="awareness",
     )

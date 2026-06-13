@@ -23,8 +23,8 @@ import db
 # How many undecided (proposed) cards may sit on the board before Elixir
 # stops posting non-critical ones.
 LEADER_ACTION_OPEN_CARD_CAP = int(os.getenv("LEADER_ACTION_OPEN_CARD_CAP", "5"))
-# Open cards older than this stop counting against the backlog — a stale
-# nudge from a finished war shouldn't deadlock the board forever.
+# Open cards older than this stop counting against the backlog so a stale
+# action from a finished war cannot deadlock the board forever.
 LEADER_ACTION_BACKLOG_WINDOW_DAYS = int(os.getenv("LEADER_ACTION_BACKLOG_WINDOW_DAYS", "7"))
 # Earned frequency: an action type the leader keeps declining self-throttles.
 # Once at least MIN_DECIDED decisions exist in the trailing window and the

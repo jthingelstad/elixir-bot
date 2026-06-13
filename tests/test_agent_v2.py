@@ -1335,7 +1335,7 @@ def test_chat_with_tools_returns_empty_response_after_max_tool_rounds(caplog):
     assert result["_error"]["kind"] == "empty_response"
     assert result["_error"]["phase"] == "final_response"
     assert any("empty_final_response" in rec.message for rec in caplog.records)
-    # Verify the explicit nudge was appended before the final call
+    # Verify the explicit final-response instruction was appended before the final call.
     final_call_messages = captured_messages[-1]
     assert any(
         m["role"] == "user" and "Do not request any more tools" in m.get("content", "")
