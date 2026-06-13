@@ -1084,71 +1084,74 @@ def _donations_peaks_in_window(conn, member_id: int, today, *, days_back_start: 
     return int(row["peak"])
 
 
-@managed_connection
-def get_demotion_candidates(min_donations_week: int = 50, conn: Optional[sqlite3.Connection] = None) -> dict:
-    """Active elders whose donations have been below the meaningful threshold
-    for two consecutive weeks. Leaders demote based on this list.
+ELDER_DONATION_ROLLING_WEEKS = 4
 
-    Two-week test approximated from member_daily_metrics:
-      - last week peak: highest donations_week observed in days [-14, -7]
-      - this week peak: highest donations_week observed in days [-7, today]
-    Both must be < min_donations_week to count as a sustained dip.
 
-    Members without enough history (less than ~14 days of snapshots) are
-    skipped so we don't demote brand-new elders on insufficient data.
-    """
-    today = _member_activity_anchor(conn).date()
-    rows = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
-        "cs.role, cs.trophies, cs.donations_week, cs.last_seen_api "
-        "FROM members m JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "WHERE m.status = 'active' AND cs.role = 'elder' "
-        "ORDER BY cs.donations_week ASC, m.current_name COLLATE NOCASE"
+def _last_battle_days_ago(conn, member_id: int, today) -> Optional[int]:
+    row = conn.execute(
+        "SELECT MAX(battle_time) AS last_battle_at "
+        "FROM member_battle_facts WHERE member_id = ?",
+        (member_id,),
+    ).fetchone()
+    last_battle_at = row["last_battle_at"] if row else None
+    parsed = _parse_cr_time(last_battle_at)
+    if not parsed:
+        return None
+    return max(0, (today - parsed.date()).days)
+
+
+def _war_races_played_in_recent_races(conn, member_id: int, *, race_window: int = 4) -> int:
+    race_window = max(1, int(race_window or 1))
+    recent = conn.execute(
+        "SELECT war_race_id FROM war_races "
+        "ORDER BY season_id DESC, section_index DESC LIMIT ?",
+        (race_window,),
     ).fetchall()
-    flagged = []
-    for row in rows:
-        last_week_peak = _donations_peaks_in_window(
-            conn, row["member_id"], today, days_back_start=14, days_back_end=8
-        )
-        this_week_peak = _donations_peaks_in_window(
-            conn, row["member_id"], today, days_back_start=7, days_back_end=0
-        )
-        # Skip if we don't have at least two weeks of data — don't demote on
-        # insufficient evidence.
-        if last_week_peak is None or this_week_peak is None:
-            continue
-        if last_week_peak >= min_donations_week or this_week_peak >= min_donations_week:
-            continue
-        joined_date = _current_joined_at(conn, row["member_id"])
-        item = {
-            "tag": row["tag"],
-            "name": row["name"],
-            "trophies": row["trophies"],
-            "donations_this_week": this_week_peak,
-            "donations_last_week": last_week_peak,
-            "threshold": min_donations_week,
-            "joined_date": joined_date,
-            "reason": (
-                f"two-week donation dip: last week {last_week_peak}, "
-                f"this week {this_week_peak} (threshold {min_donations_week})"
-            ),
-        }
-        flagged.append(_member_reference_fields(conn, row["member_id"], item))
+    race_ids = [row["war_race_id"] for row in recent]
+    if not race_ids:
+        return 0
+    placeholders = ",".join("?" for _ in race_ids)
+    return conn.execute(
+        f"SELECT COUNT(*) AS cnt FROM war_participation "
+        f"WHERE member_id = ? AND war_race_id IN ({placeholders}) "
+        "AND COALESCE(decks_used, 0) > 0",
+        (member_id, *race_ids),
+    ).fetchone()["cnt"]
 
-    flagged.sort(key=lambda item: (item["donations_this_week"] + item["donations_last_week"], (item.get("name") or "").lower()))
+
+def _rolling_donation_stats(conn, member_id: int, today, *, weeks: int = ELDER_DONATION_ROLLING_WEEKS) -> dict:
+    """Smoothed donation score using weekly peaks from recent daily snapshots."""
+    weeks = max(1, int(weeks or 1))
+    start = (today - timedelta(days=(weeks * 7) - 1)).isoformat()
+    end = today.isoformat()
+    rows = conn.execute(
+        """
+        SELECT strftime('%Y-%W', metric_date) AS week_key,
+               MAX(COALESCE(donations_week, 0)) AS week_peak
+        FROM member_daily_metrics
+        WHERE member_id = ? AND metric_date BETWEEN ? AND ?
+        GROUP BY week_key
+        ORDER BY week_key DESC
+        LIMIT ?
+        """,
+        (member_id, start, end, weeks),
+    ).fetchall()
+    peaks = [int(row["week_peak"] or 0) for row in rows]
+    if not peaks:
+        row = conn.execute(
+            "SELECT donations_week FROM member_current_state WHERE member_id = ?",
+            (member_id,),
+        ).fetchone()
+        peaks = [int(row["donations_week"] or 0)] if row else [0]
+    average = sum(peaks) / len(peaks) if peaks else 0
     return {
-        "criteria": {
-            "min_donations_week": min_donations_week,
-            "consecutive_weeks_below_threshold": 2,
-        },
-        "members": flagged,
+        "rolling_donations_avg": round(average, 1),
+        "donation_week_peaks": peaks,
+        "donation_weeks_count": len(peaks),
     }
 
 
-@managed_connection
-def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int = 21, active_within_days: int = 7,
-                             min_war_races: int = 1, conn: Optional[sqlite3.Connection] = None) -> dict:
-    season_id = get_current_season_id(conn=conn)
+def _elder_role_counts(conn) -> dict:
     counts = conn.execute(
         "SELECT "
         "SUM(CASE WHEN cs.role IN ('leader', 'coLeader') THEN 1 ELSE 0 END) AS leaders, "
@@ -1160,26 +1163,47 @@ def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int 
     ).fetchone()
     active_members = counts["active_members"] or 0
     target_elder_min = max(0, round(active_members * 0.2))
-    # Hard cap: 3 elders per 10 active members. Promotion recommendations
-    # respect this — leaders may exceed it, but the tool does not push
-    # toward exceeding it.
-    target_elder_max = max(target_elder_min, round(active_members * 0.3))
+    target_elder_max = max(1 if active_members else 0, target_elder_min, round(active_members * 0.3))
     current_elders = counts["elders"] or 0
-    elder_capacity_remaining = max(0, target_elder_max - current_elders)
-    elder_cap_reached = elder_capacity_remaining == 0
+    return {
+        "active_members": active_members,
+        "leaders": counts["leaders"] or 0,
+        "elders": current_elders,
+        "members": counts["members"] or 0,
+        "target_elder_min": target_elder_min,
+        "target_elder_max": target_elder_max,
+        "elder_capacity_remaining": max(0, target_elder_max - current_elders),
+        "elder_cap_reached": current_elders >= target_elder_max if target_elder_max else current_elders > 0,
+        "elder_cap_rule": "top 30% of active clan members may hold Elder",
+    }
+
+
+def _elder_role_review(
+    *,
+    min_tenure_days: int = 0,
+    active_within_days: int = 7,
+    min_war_races: int = 1,
+    rolling_weeks: int = ELDER_DONATION_ROLLING_WEEKS,
+    war_race_window: int = 4,
+    conn,
+    enrich: bool = True,
+) -> dict:
+    season_id = get_current_season_id(conn=conn)
+    today = _member_activity_anchor(conn).date()
+    composition = _elder_role_counts(conn)
+    cap = int(composition["target_elder_max"] or 0)
 
     rows = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.role, cs.exp_level, cs.trophies, cs.best_trophies, "
-        "cs.clan_rank, cs.donations_week AS donations, cs.donations_received_week AS donations_received, cs.last_seen_api AS last_seen "
+        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
+        "cs.role, cs.exp_level, cs.trophies, cs.best_trophies, cs.clan_rank, "
+        "cs.donations_week AS donations, cs.donations_received_week AS donations_received "
         "FROM members m "
         "JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "WHERE m.status = 'active' AND cs.role = 'member' "
-        "ORDER BY cs.donations_week DESC, cs.trophies DESC, m.current_name COLLATE NOCASE",
+        "WHERE m.status = 'active' AND cs.role IN ('member', 'elder')",
     ).fetchall()
-    recommended = []
-    borderline = []
-    today = _member_activity_anchor(conn).date()
 
+    leaderboard = []
+    by_tag = {}
     for row in rows:
         joined_date = _current_joined_at(conn, row["member_id"])
         tenure_days = None
@@ -1188,34 +1212,28 @@ def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int 
                 tenure_days = (today - datetime.strptime(joined_date[:10], "%Y-%m-%d").date()).days
             except ValueError:
                 tenure_days = None
-        last_seen = _parse_cr_time(row["last_seen"])
-        days_inactive = (today - last_seen.date()).days if last_seen else None
-        war_races_played = 0
-        if season_id is not None:
-            war_races_played = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM war_participation wp "
-                "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-                "WHERE wr.season_id = ? AND wp.member_id = ? AND COALESCE(wp.decks_used, 0) > 0",
-                (season_id, row["member_id"]),
-            ).fetchone()["cnt"]
+        days_since_battle = _last_battle_days_ago(conn, row["member_id"], today)
+        war_races_played = _war_races_played_in_recent_races(
+            conn, row["member_id"], race_window=war_race_window
+        )
+        donation_stats = _rolling_donation_stats(conn, row["member_id"], today, weeks=rolling_weeks)
 
         from storage.member_ranks import evaluate_elder_eligibility
         eligibility = evaluate_elder_eligibility(
-            donations_week=row["donations"],
             tenure_days=tenure_days,
-            days_inactive=days_inactive,
+            days_since_battle=days_since_battle,
             war_races_played=war_races_played,
             season_id=season_id,
-            min_donations_week=min_donations_week,
             min_tenure_days=min_tenure_days,
             active_within_days=active_within_days,
             min_war_races=min_war_races,
         )
         checks = eligibility["checks"]
-        score = sum(1 for passed in checks.values() if passed)
         item = {
+            "member_id": row["member_id"],
             "tag": row["tag"],
             "name": row["name"],
+            "role": row["role"],
             "exp_level": row["exp_level"],
             "trophies": row["trophies"],
             "best_trophies": row["best_trophies"],
@@ -1224,49 +1242,146 @@ def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int 
             "donations_received": row["donations_received"] or 0,
             "joined_date": joined_date,
             "tenure_days": tenure_days,
-            "days_inactive": days_inactive,
+            "days_since_battle": days_since_battle,
+            "days_inactive": days_since_battle,
             "war_races_played": war_races_played,
-            "score": score,
+            "rolling_donations_avg": donation_stats["rolling_donations_avg"],
+            "donation_week_peaks": donation_stats["donation_week_peaks"],
+            "donation_weeks_count": donation_stats["donation_weeks_count"],
             "checks": checks,
             "missing": [key for key, passed in checks.items() if not passed],
+            "eligible_for_elder_board": eligibility["all_passed"],
         }
+        item["score"] = sum(1 for passed in checks.values() if passed)
         item["cr_account_age_years"] = _get_account_age_years(conn, row["member_id"])
         item["war_player_type"] = _war_player_type(conn, row["member_id"])
-        item = _member_reference_fields(conn, row["member_id"], item)
-        if eligibility["all_passed"]:
+        leaderboard.append(item)
+        by_tag[item["tag"]] = item
+
+    eligible_board = [item for item in leaderboard if item["eligible_for_elder_board"]]
+    eligible_board.sort(
+        key=lambda item: (
+            -float(item.get("rolling_donations_avg") or 0),
+            -(item.get("donations") or 0),
+            -(item.get("war_races_played") or 0),
+            -(item.get("trophies") or 0),
+            (item.get("name") or "").lower(),
+        )
+    )
+    for index, item in enumerate(eligible_board, start=1):
+        item["elder_donation_rank"] = index
+        item["elder_target_rank"] = cap
+        item["in_elder_target"] = index <= cap
+        item["reason"] = (
+            f"ranked {index}/{cap} on recent donations "
+            f"(avg {item['rolling_donations_avg']}/week)"
+        )
+
+    desired_tags = {item["tag"] for item in eligible_board[:cap]}
+    current_elder_tags = {item["tag"] for item in leaderboard if item.get("role") == "elder"}
+
+    recommended = []
+    demotion_candidates = []
+    borderline = []
+    for item in eligible_board:
+        if item["tag"] in desired_tags and item.get("role") == "member":
             recommended.append(item)
-        elif score >= 2:
+        elif item["tag"] not in desired_tags and item.get("role") == "member":
+            item["reason"] = (
+                f"just outside Elder group: rank {item['elder_donation_rank']}/{cap} "
+                f"on recent donations (avg {item['rolling_donations_avg']}/week)"
+            )
             borderline.append(item)
 
-    recommended.sort(key=lambda item: (-item["score"], -item["donations"], -item["war_races_played"], -item["trophies"]))
-    borderline.sort(key=lambda item: (-item["score"], -item["donations"], -item["war_races_played"], -item["trophies"]))
-    composition = {
-        "active_members": active_members,
-        "leaders": counts["leaders"] or 0,
-        "elders": current_elders,
-        "members": counts["members"] or 0,
-        "target_elder_min": target_elder_min,
-        "target_elder_max": target_elder_max,
-        "elder_capacity_remaining": elder_capacity_remaining,
-        "elder_cap_reached": elder_cap_reached,
-        "elder_cap_rule": "no more than 3 elders per 10 active members",
-    }
-    # Pull demotion candidates in the same response so leaders see both sides
-    # of the elder roster in one tool call.
-    demotion = get_demotion_candidates(min_donations_week=min_donations_week, conn=conn)
-    return {
+    for item in leaderboard:
+        if item["tag"] not in current_elder_tags:
+            continue
+        if item["tag"] in desired_tags:
+            continue
+        if item["eligible_for_elder_board"]:
+            rank = item.get("elder_donation_rank")
+            item["reason"] = (
+                f"outside Elder group: rank {rank}/{cap} on recent donations "
+                f"(avg {item['rolling_donations_avg']}/week)"
+            )
+        else:
+            missing = ", ".join(item.get("missing") or ["activity"])
+            item["reason"] = f"missing Elder activity gate: {missing}"
+        demotion_candidates.append(item)
+
+    for item in leaderboard:
+        if item["eligible_for_elder_board"]:
+            continue
+        if item.get("role") == "member" and item.get("score", 0) >= 1:
+            borderline.append(item)
+
+    demotion_candidates.sort(
+        key=lambda item: (
+            0 if not item.get("eligible_for_elder_board") else 1,
+            item.get("elder_donation_rank") or 999,
+            float(item.get("rolling_donations_avg") or 0),
+            (item.get("name") or "").lower(),
+        )
+    )
+    borderline.sort(
+        key=lambda item: (
+            item.get("elder_donation_rank") or 999,
+            -float(item.get("rolling_donations_avg") or 0),
+            (item.get("name") or "").lower(),
+        )
+    )
+
+    def _public(item: dict) -> dict:
+        public = dict(item)
+        if enrich:
+            public.pop("member_id", None)
+            return _member_reference_fields(conn, item["member_id"], public)
+        return public
+
+    result = {
         "season_id": season_id,
         "criteria": {
-            "min_donations_week": min_donations_week,
+            "model": "smoothed_donation_leaderboard",
+            "rolling_donation_weeks": rolling_weeks,
+            "war_race_window": war_race_window,
             "min_tenure_days": min_tenure_days,
             "active_within_days": active_within_days,
             "min_war_races": min_war_races,
+            "donation_rule": "relative rank by rolling weekly donation peaks; no fixed donation floor",
         },
         "composition": composition,
-        "recommended": recommended,
-        "borderline": borderline,
-        "demotion_candidates": demotion["members"],
+        "leaderboard": [_public(item) for item in eligible_board],
+        "recommended": [_public(item) for item in recommended],
+        "borderline": [_public(item) for item in borderline],
+        "demotion_candidates": [_public(item) for item in demotion_candidates],
     }
+    if not enrich:
+        result["reviewed"] = [_public(item) for item in leaderboard]
+    return result
+
+
+@managed_connection
+def get_demotion_candidates(min_donations_week: int = 50, conn: Optional[sqlite3.Connection] = None) -> dict:
+    """Current elders who no longer belong inside the capped Elder board."""
+    review = _elder_role_review(conn=conn)
+    return {
+        "criteria": review["criteria"],
+        "composition": review["composition"],
+        "members": review["demotion_candidates"],
+    }
+
+
+@managed_connection
+def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int = 0, active_within_days: int = 7,
+                             min_war_races: int = 1, conn: Optional[sqlite3.Connection] = None) -> dict:
+    # ``min_donations_week`` is kept for backward-compatible callers. Elder
+    # selection is now relative: a smoothed donation leaderboard under the cap.
+    return _elder_role_review(
+        min_tenure_days=min_tenure_days,
+        active_within_days=active_within_days,
+        min_war_races=min_war_races,
+        conn=conn,
+    )
 
 
 _WAR_DECK_BATTLE_TYPES = {"riverRacePvP", "riverRaceDuel", "riverRaceDuelColosseum"}

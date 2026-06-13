@@ -1,23 +1,23 @@
 """Promotion + demotion recommendation logic.
 
-Rules under test:
-- Promotion floor: 21 days in clan.
-- Elder cap: ~3 per 10 active members; cap_reached flag.
-- Donations must be meaningful — same threshold as promotion.
-- Demotion when donations are below the threshold for two consecutive weeks.
+Elder is selected by a smoothed, relative donation leaderboard:
+- active member/elder only
+- recent battle activity required
+- recent war participation required
+- no absolute donation floor
+- top members inside the Elder cap should hold Elder
 """
 
 from datetime import datetime, timedelta, timezone
 
 import db
-from storage.war_analytics import (
-    get_promotion_candidates,
-    get_demotion_candidates,
-    _donations_peaks_in_window,
-)
+from storage.war_analytics import get_demotion_candidates, get_promotion_candidates
 
 
-def _seed_member(conn, tag, name, role, trophies=8000, donations_week=200, last_seen="20260418T120000.000Z"):
+ANCHOR = datetime(2026, 4, 18, tzinfo=timezone.utc).date()
+
+
+def _seed_member(conn, tag, name, role, trophies=8000, donations_week=20, last_seen="20260418T120000.000Z"):
     db.snapshot_members(
         [{"tag": tag, "name": name, "role": role, "expLevel": 60,
           "trophies": trophies, "clanRank": 1, "donations": donations_week,
@@ -27,117 +27,150 @@ def _seed_member(conn, tag, name, role, trophies=8000, donations_week=200, last_
     return conn.execute("SELECT member_id FROM members WHERE player_tag = ?", (tag,)).fetchone()["member_id"]
 
 
-def _seed_daily_metrics(conn, member_id, *, today, points: list[tuple[int, int]]):
-    """points: list of (days_back, donations_week_value)."""
-    for days_back, donations in points:
-        date_str = (today - timedelta(days=days_back)).isoformat()
+def _seed_war_race(conn, season_id=131, section_index=0):
+    conn.execute(
+        "INSERT INTO war_races "
+        "(season_id, section_index, created_date, our_rank, our_fame, total_clans, finish_time) "
+        "VALUES (?, ?, '20260418T100000.000Z', 1, 10000, 5, '20260418T120000.000Z')",
+        (season_id, section_index),
+    )
+    war_race_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    db.upsert_war_current_state(
+        {
+            "state": "full",
+            "seasonId": season_id,
+            "sectionIndex": section_index,
+            "periodIndex": 3,
+            "periodType": "warDay",
+            "clan": {
+                "tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 0,
+                "repairPoints": 0, "periodPoints": 0, "clanScore": 100,
+                "participants": [],
+            },
+        },
+        conn=conn,
+    )
+    return war_race_id
+
+
+def _seed_war_participation(conn, war_race_id, member_id, tag, decks=4):
+    conn.execute(
+        "INSERT INTO war_participation "
+        "(war_race_id, member_id, player_tag, player_name, fame, decks_used) "
+        "VALUES (?, ?, ?, 'T', 1000, ?)",
+        (war_race_id, member_id, tag, decks),
+    )
+
+
+def _seed_battle(conn, member_id, days_back=0):
+    battle_date = ANCHOR - timedelta(days=days_back)
+    conn.execute(
+        "INSERT INTO member_battle_facts (member_id, battle_time, battle_type, outcome) "
+        "VALUES (?, ?, 'PvP', 'win')",
+        (member_id, f"{battle_date:%Y%m%d}T120000.000Z"),
+    )
+
+
+def _seed_daily_metrics(conn, member_id, *, peaks: list[int]):
+    for week_index, peak in enumerate(peaks):
+        metric_date = ANCHOR - timedelta(days=week_index * 7)
         conn.execute(
             "INSERT OR REPLACE INTO member_daily_metrics "
             "(member_id, metric_date, donations_week) VALUES (?, ?, ?)",
-            (member_id, date_str, donations),
+            (member_id, metric_date.isoformat(), peak),
         )
     conn.commit()
 
 
-def test_promotion_min_tenure_is_21_days():
+def _make_eligible(conn, war_race_id, tag, name, role="member", peaks=None, donations_week=None):
+    peaks = peaks or [20]
+    member_id = _seed_member(
+        conn,
+        tag,
+        name,
+        role,
+        donations_week=donations_week if donations_week is not None else peaks[0],
+    )
+    _seed_daily_metrics(conn, member_id, peaks=peaks)
+    _seed_battle(conn, member_id)
+    _seed_war_participation(conn, war_race_id, member_id, tag)
+    return member_id
+
+
+def test_promotion_has_no_absolute_donation_floor():
     conn = db.get_connection(":memory:")
     try:
-        # Two strong members, one over the new 21-day floor, one under.
-        _seed_member(conn, "#OLD", "OldHand", "member", donations_week=300)
-        _seed_member(conn, "#NEW", "Newcomer", "member", donations_week=300)
-        db.set_member_join_date("#OLD", "OldHand", "2026-03-15", conn=conn)  # well over 21d
-        db.set_member_join_date("#NEW", "Newcomer", "2026-04-10", conn=conn)  # ~8d
+        race = _seed_war_race(conn)
+        for idx, peak in enumerate([40, 30, 20, 10, 8, 6, 4, 3, 2, 1]):
+            _make_eligible(conn, race, f"#M{idx}", f"M{idx}", peaks=[peak, peak])
+
         result = get_promotion_candidates(min_donations_week=50, conn=conn)
-        recommended_tags = {m["tag"] for m in result["recommended"]}
-        assert "#OLD" in recommended_tags
-        assert "#NEW" not in recommended_tags
-    finally:
-        conn.close()
 
-
-def test_elder_cap_reached_flag_set_when_at_3_per_10():
-    conn = db.get_connection(":memory:")
-    try:
-        # 10 active members, 3 elders → cap reached.
-        for i in range(7):
-            _seed_member(conn, f"#M{i:02d}", f"M{i}", "member", donations_week=10)
-        for i in range(3):
-            _seed_member(conn, f"#E{i:02d}", f"E{i}", "elder", donations_week=200)
-        result = get_promotion_candidates(conn=conn)
-        assert result["composition"]["active_members"] == 10
+        assert result["criteria"]["donation_rule"].startswith("relative rank")
         assert result["composition"]["target_elder_max"] == 3
-        assert result["composition"]["elder_capacity_remaining"] == 0
-        assert result["composition"]["elder_cap_reached"] is True
+        assert [m["tag"] for m in result["recommended"]] == ["#M0", "#M1", "#M2"]
+        assert all(m["rolling_donations_avg"] < 50 for m in result["recommended"])
     finally:
         conn.close()
 
 
-def test_demotion_flagged_after_two_consecutive_weak_weeks():
+def test_role_review_recommends_promotions_and_demotions_from_same_board():
     conn = db.get_connection(":memory:")
     try:
-        member_id = _seed_member(conn, "#ELDER1", "WeakElder", "elder", donations_week=10,
-                                  last_seen="20260418T120000.000Z")
-        today = datetime(2026, 4, 18, tzinfo=timezone.utc).date()
-        # Two weeks of low donations: peak <50 in both windows.
-        _seed_daily_metrics(conn, member_id, today=today, points=[
-            (1, 10), (2, 8), (3, 6),    # this week
-            (8, 12), (9, 10), (10, 8),  # last week
-        ])
-        result = get_demotion_candidates(min_donations_week=50, conn=conn)
-        tags = {m["tag"] for m in result["members"]}
-        assert "#ELDER1" in tags
+        race = _seed_war_race(conn)
+        _make_eligible(conn, race, "#E1", "Top Elder", role="elder", peaks=[100, 100])
+        _make_eligible(conn, race, "#E2", "Middle Elder", role="elder", peaks=[90, 90])
+        _make_eligible(conn, race, "#E3", "Low Elder", role="elder", peaks=[5, 5])
+        _make_eligible(conn, race, "#M1", "Top Member", peaks=[95, 95])
+        for idx, peak in enumerate([30, 25, 20, 15, 10, 1]):
+            _make_eligible(conn, race, f"#F{idx}", f"F{idx}", peaks=[peak, peak])
+
+        result = get_promotion_candidates(conn=conn)
+        demotions = get_demotion_candidates(conn=conn)
+
+        assert result["composition"]["target_elder_max"] == 3
+        assert [m["tag"] for m in result["recommended"]] == ["#M1"]
+        assert [m["tag"] for m in result["demotion_candidates"]] == ["#E3"]
+        assert [m["tag"] for m in demotions["members"]] == ["#E3"]
+        assert "outside Elder group" in result["demotion_candidates"][0]["reason"]
     finally:
         conn.close()
 
 
-def test_demotion_not_flagged_when_one_week_was_strong():
+def test_recent_battle_activity_is_required_for_elder_board():
     conn = db.get_connection(":memory:")
     try:
-        member_id = _seed_member(conn, "#ELDER2", "GoodWeek", "elder", donations_week=20)
-        today = datetime(2026, 4, 18, tzinfo=timezone.utc).date()
-        _seed_daily_metrics(conn, member_id, today=today, points=[
-            (1, 20),                # this week is weak
-            (8, 200), (9, 150),     # last week was meaningful — not a sustained dip
-        ])
-        result = get_demotion_candidates(min_donations_week=50, conn=conn)
-        tags = {m["tag"] for m in result["members"]}
-        assert "#ELDER2" not in tags
+        race = _seed_war_race(conn)
+        stale_id = _seed_member(conn, "#STALE", "Stale", "member", donations_week=500)
+        _seed_daily_metrics(conn, stale_id, peaks=[500, 500])
+        _seed_battle(conn, stale_id, days_back=12)
+        _seed_war_participation(conn, race, stale_id, "#STALE")
+        for idx, peak in enumerate([40, 30, 20, 10, 5, 4, 3, 2, 1]):
+            _make_eligible(conn, race, f"#M{idx}", f"M{idx}", peaks=[peak, peak])
+
+        result = get_promotion_candidates(conn=conn)
+        stale = next(m for m in result["borderline"] if m["tag"] == "#STALE")
+
+        assert "#STALE" not in {m["tag"] for m in result["recommended"]}
+        assert "activity" in stale["missing"]
     finally:
         conn.close()
 
 
-def test_demotion_skipped_when_history_is_insufficient():
-    """A brand-new elder with <14 days of snapshots must not be demoted on
-    insufficient evidence."""
+def test_war_activity_is_required_for_elder_board():
     conn = db.get_connection(":memory:")
     try:
-        member_id = _seed_member(conn, "#NEWELDER", "FreshElder", "elder", donations_week=10)
-        today = datetime(2026, 4, 18, tzinfo=timezone.utc).date()
-        # Only this week's snapshots — last week has nothing.
-        _seed_daily_metrics(conn, member_id, today=today, points=[
-            (1, 5), (2, 5), (3, 5),
-        ])
-        result = get_demotion_candidates(min_donations_week=50, conn=conn)
-        tags = {m["tag"] for m in result["members"]}
-        assert "#NEWELDER" not in tags
-    finally:
-        conn.close()
+        race = _seed_war_race(conn)
+        no_war_id = _seed_member(conn, "#NOWAR", "NoWar", "member", donations_week=500)
+        _seed_daily_metrics(conn, no_war_id, peaks=[500, 500])
+        _seed_battle(conn, no_war_id)
+        for idx, peak in enumerate([40, 30, 20, 10, 5, 4, 3, 2, 1]):
+            _make_eligible(conn, race, f"#M{idx}", f"M{idx}", peaks=[peak, peak])
 
+        result = get_promotion_candidates(conn=conn)
+        no_war = next(m for m in result["borderline"] if m["tag"] == "#NOWAR")
 
-def test_promotion_response_includes_demotion_candidates():
-    """get_promotion_candidates returns both lists in one response."""
-    conn = db.get_connection(":memory:")
-    try:
-        # One promotable member, one demotable elder.
-        _seed_member(conn, "#STRONG", "Strong", "member", donations_week=300)
-        db.set_member_join_date("#STRONG", "Strong", "2026-01-01", conn=conn)
-        e_id = _seed_member(conn, "#WEAK", "WeakElder", "elder", donations_week=5)
-        today = datetime(2026, 4, 18, tzinfo=timezone.utc).date()
-        _seed_daily_metrics(conn, e_id, today=today, points=[
-            (1, 5), (2, 5), (8, 10), (10, 8),
-        ])
-        result = get_promotion_candidates(min_donations_week=50, conn=conn)
-        assert any(m["tag"] == "#STRONG" for m in result["recommended"])
-        assert any(m["tag"] == "#WEAK" for m in result["demotion_candidates"])
+        assert "#NOWAR" not in {m["tag"] for m in result["recommended"]}
+        assert "war" in no_war["missing"]
     finally:
         conn.close()

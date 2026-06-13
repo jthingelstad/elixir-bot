@@ -76,6 +76,14 @@ def _seed_war_participation(conn, war_race_id, member_id, tag, fame, decks=16):
     )
 
 
+def _seed_battle(conn, member_id, battle_time="20260420T100000.000Z"):
+    conn.execute(
+        "INSERT INTO member_battle_facts (member_id, battle_time, battle_type, outcome) "
+        "VALUES (?, ?, 'PvP', 'win')",
+        (member_id, battle_time),
+    )
+
+
 def _seed_daily_metric(conn, member_id, days_back, donations_week, today=None):
     today = today or date.today()
     metric_date = (today - timedelta(days=days_back)).isoformat()
@@ -276,17 +284,21 @@ def test_elder_eligible_true_when_all_criteria_pass():
         # War participation in current season.
         race = _seed_war_race(conn, season_id=131, section_index=0)
         _seed_war_participation(conn, race, m, "#MEM", fame=2000)
+        _seed_battle(conn, m)
         ranks = compute_member_ranks(conn=conn)
         assert ranks[m]["elder_eligible"] is True
     finally:
         conn.close()
 
 
-def test_elder_eligible_false_when_donations_below_threshold():
+def test_elder_eligible_false_without_recent_battle_activity():
     conn = db.get_connection(":memory:")
     try:
-        m = _seed_member(conn, "#MEM", "M", role="member", donations_week=10)
+        m = _seed_member(conn, "#MEM", "M", role="member", donations_week=500)
         db.set_member_join_date("#MEM", "M", "2026-02-19", conn=conn)
+        race = _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_war_participation(conn, race, m, "#MEM", fame=2000)
+        _seed_battle(conn, m, battle_time="20260401T100000.000Z")
         ranks = compute_member_ranks(conn=conn)
         assert ranks[m]["elder_eligible"] is False
     finally:
@@ -295,39 +307,30 @@ def test_elder_eligible_false_when_donations_below_threshold():
 
 # ── elder_eligible_crossed_this_week ───────────────────────────────────────
 
-def test_crossed_this_week_true_when_tenure_just_crossed_21():
-    """A member at tenure 24 days was at tenure 17 seven days ago — under 21."""
+def test_crossed_this_week_false_for_relative_elder_board():
+    """Relative Elder ranking has no simple threshold-crossing moment."""
     conn = db.get_connection(":memory:")
     try:
         m = _seed_member(conn, "#MEM", "M", role="member", donations_week=200)
-        # Tenure 24 days from current_state's last_seen anchor.
-        # _member_activity_anchor uses MAX(last_seen_api). seed sets it to
-        # 2026-04-20T12:00:00.000Z, so anchor.date() = 2026-04-20.
-        # 24 days back → 2026-03-27.
-        db.set_member_join_date("#MEM", "M", "2026-03-27", conn=conn)
+        race = _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_war_participation(conn, race, m, "#MEM", fame=2000)
+        _seed_battle(conn, m)
         ranks = compute_member_ranks(conn=conn)
         assert ranks[m]["elder_eligible"] is True
-        assert ranks[m]["elder_eligible_crossed_this_week"] is True
+        assert ranks[m]["elder_eligible_crossed_this_week"] is False
     finally:
         conn.close()
 
 
-def test_crossed_this_week_true_when_donations_just_crossed():
+def test_elder_eligible_ignores_absolute_donation_floor():
     conn = db.get_connection(":memory:")
     try:
-        m = _seed_member(conn, "#MEM", "M", role="member", donations_week=200)
-        # Long tenure — tenure can't be the trigger.
-        db.set_member_join_date("#MEM", "M", "2026-01-01", conn=conn)
-        # Daily metric 7 days ago shows donations were 10 (below threshold).
-        # Anchor = 2026-04-20 → 7 days ago = 2026-04-13.
-        conn.execute(
-            "INSERT INTO member_daily_metrics "
-            "(member_id, metric_date, donations_week) VALUES (?, '2026-04-13', 10)",
-            (m,),
-        )
+        m = _seed_member(conn, "#MEM", "M", role="member", donations_week=10)
+        race = _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_war_participation(conn, race, m, "#MEM", fame=2000)
+        _seed_battle(conn, m)
         ranks = compute_member_ranks(conn=conn)
         assert ranks[m]["elder_eligible"] is True
-        assert ranks[m]["elder_eligible_crossed_this_week"] is True
     finally:
         conn.close()
 
@@ -337,8 +340,9 @@ def test_crossed_this_week_false_when_no_historical_data():
     conn = db.get_connection(":memory:")
     try:
         m = _seed_member(conn, "#MEM", "M", role="member", donations_week=200)
-        # Long tenure (not the trigger), no daily_metrics seeded.
-        db.set_member_join_date("#MEM", "M", "2026-01-01", conn=conn)
+        race = _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_war_participation(conn, race, m, "#MEM", fame=2000)
+        _seed_battle(conn, m)
         ranks = compute_member_ranks(conn=conn)
         assert ranks[m]["elder_eligible"] is True
         assert ranks[m]["elder_eligible_crossed_this_week"] is False
@@ -350,7 +354,9 @@ def test_crossed_this_week_false_when_donations_already_strong_last_week():
     conn = db.get_connection(":memory:")
     try:
         m = _seed_member(conn, "#MEM", "M", role="member", donations_week=200)
-        db.set_member_join_date("#MEM", "M", "2026-01-01", conn=conn)
+        race = _seed_war_race(conn, season_id=131, section_index=0)
+        _seed_war_participation(conn, race, m, "#MEM", fame=2000)
+        _seed_battle(conn, m)
         # 7 days ago they were already above threshold.
         conn.execute(
             "INSERT INTO member_daily_metrics "
@@ -367,7 +373,6 @@ def test_crossed_this_week_false_when_not_currently_eligible():
     conn = db.get_connection(":memory:")
     try:
         m = _seed_member(conn, "#MEM", "M", role="member", donations_week=10)
-        db.set_member_join_date("#MEM", "M", "2026-01-01", conn=conn)
         ranks = compute_member_ranks(conn=conn)
         assert ranks[m]["elder_eligible"] is False
         assert ranks[m]["elder_eligible_crossed_this_week"] is False
@@ -416,7 +421,7 @@ def test_conn_cache_avoids_recomputation():
 
 def test_evaluate_elder_eligibility_all_pass():
     out = evaluate_elder_eligibility(
-        donations_week=100, tenure_days=30, days_inactive=2,
+        donations_week=100, tenure_days=30, days_since_battle=2,
         war_races_played=1, season_id=131,
     )
     assert out["all_passed"] is True
@@ -425,27 +430,26 @@ def test_evaluate_elder_eligibility_all_pass():
 
 def test_evaluate_elder_eligibility_war_skipped_without_season():
     out = evaluate_elder_eligibility(
-        donations_week=100, tenure_days=30, days_inactive=2,
+        donations_week=100, tenure_days=30, days_since_battle=2,
         war_races_played=0, season_id=None,
     )
     assert out["checks"]["war"] is True
     assert out["all_passed"] is True
 
 
-def test_evaluate_elder_eligibility_thresholds_match_defaults():
-    # 50 donations and 21 days are the documented bars.
-    on_bar = evaluate_elder_eligibility(
-        donations_week=ELDER_ELIGIBILITY_DEFAULTS["min_donations_week"],
+def test_evaluate_elder_eligibility_checks_activity_and_war_gates():
+    active = evaluate_elder_eligibility(
+        donations_week=0,
         tenure_days=ELDER_ELIGIBILITY_DEFAULTS["min_tenure_days"],
-        days_inactive=ELDER_ELIGIBILITY_DEFAULTS["active_within_days"],
+        days_since_battle=ELDER_ELIGIBILITY_DEFAULTS["active_within_days"],
         war_races_played=1, season_id=131,
     )
-    assert on_bar["all_passed"] is True
-    just_below = evaluate_elder_eligibility(
-        donations_week=ELDER_ELIGIBILITY_DEFAULTS["min_donations_week"] - 1,
+    assert active["all_passed"] is True
+    stale = evaluate_elder_eligibility(
+        donations_week=999,
         tenure_days=ELDER_ELIGIBILITY_DEFAULTS["min_tenure_days"],
-        days_inactive=ELDER_ELIGIBILITY_DEFAULTS["active_within_days"],
+        days_since_battle=ELDER_ELIGIBILITY_DEFAULTS["active_within_days"] + 1,
         war_races_played=1, season_id=131,
     )
-    assert just_below["all_passed"] is False
-    assert just_below["checks"]["donations"] is False
+    assert stale["all_passed"] is False
+    assert stale["checks"]["activity"] is False
