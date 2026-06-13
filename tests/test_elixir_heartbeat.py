@@ -922,13 +922,13 @@ def test_deliver_signal_group_skips_post_when_llm_returns_no_post_decision():
         return fn(*args, **kwargs)
 
     channel = AsyncMock()
-    channel.name = "trophy-case"
+    channel.name = "player-highlights"
     channel.type = "text"
 
     refusal_result = {
         "event_type": "channel_update",
         "summary": "PB bump does not meet durable-milestone bar",
-        "content": "This signal does not warrant a post in #trophy-case...",
+        "content": "This signal does not warrant a post in #player-highlights...",
         "metadata": {"decision": "no_post", "reason": "routine_ladder_movement"},
     }
 
@@ -1368,7 +1368,7 @@ def test_member_join_welcome_context_gives_elixir_profile_facts():
             "name": "King Levy",
         })
 
-    assert "Arena-relay new-member welcome task:" in context
+    assert "Leader-actions new-member welcome task:" in context
     assert "Name: King Levy" in context
     assert "Player tag: #ABC" in context
     assert "Years played/account age: 7 years" in context
@@ -1485,7 +1485,7 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
 
     channel = AsyncMock()
     channel.id = 1513758211206025227
-    channel.name = "arena-relay"
+    channel.name = "leader-actions"
     channel.type = "text"
 
     authored_copy = "Welcome to POAP KINGS, King Levy! 7 years played and 23 max cards is a cool profile."
@@ -1594,7 +1594,7 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
 
     channel = AsyncMock()
     channel.id = 1513758211206025227
-    channel.name = "arena-relay"
+    channel.name = "leader-actions"
     channel.type = "text"
 
     authored_copy = "Welcome to POAP KINGS, King Levy! Collection Level 1,597 already stands out."
@@ -1722,7 +1722,7 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
 
     channel = AsyncMock()
     channel.id = 1513758211206025227
-    channel.name = "arena-relay"
+    channel.name = "leader-actions"
     channel.type = "text"
 
     authored_messages = [
@@ -1806,7 +1806,7 @@ def test_signal_delivery_logs_leader_action_policy_skip():
 
     channel = AsyncMock()
     channel.id = 1513758211206025227
-    channel.name = "arena-relay"
+    channel.name = "leader-actions"
     channel.type = "text"
 
     with (
@@ -2344,7 +2344,7 @@ def test_weekly_leader_actions_post_to_arena_relay():
 
     channel = AsyncMock()
     channel.id = 1513758211206025227
-    channel.name = "arena-relay"
+    channel.name = "leader-actions"
     channel.type = "text"
 
     created = [
@@ -2354,7 +2354,7 @@ def test_weekly_leader_actions_post_to_arena_relay():
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#arena-relay"}),
+        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.db.get_promotion_candidates", return_value={
             "recommended": [{"member_ref": "King Levy", "player_tag": "#ABC123", "donations": 220, "war_races_played": 4, "tenure_days": 90}],
@@ -2395,7 +2395,7 @@ def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppresse
 
     channel = AsyncMock()
     channel.id = 1513758211206025227
-    channel.name = "arena-relay"
+    channel.name = "leader-actions"
     channel.type = "text"
 
     def has_recent(**kwargs):
@@ -2403,7 +2403,7 @@ def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppresse
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#arena-relay"}),
+        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.db.get_promotion_candidates", return_value={"recommended": []}),
         patch("runtime.jobs._core.db.get_members_at_risk", return_value={
@@ -2693,7 +2693,7 @@ def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
     chat — leader-decided like every other card."""
     from runtime.jobs._core import _weekly_story_relay_card
 
-    channel = SimpleNamespace(id=900, name="arena-relay", type="text")
+    channel = SimpleNamespace(id=900, name="leader-actions", type="text")
     created = {"action_id": 11, "source_message_id": None}
     copy_line = "Shoutout to Vijay - three weeks of climbing paid off with a perfect 4/4 colosseum day. POAP KINGS keeps rolling."
 
@@ -2702,7 +2702,7 @@ def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#arena-relay", "subagent_key": "arena-relay"}),
+        patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#leader-actions", "subagent_key": "arena-relay"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)) as mock_policy,
         patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={"messages": [copy_line]}) as mock_generate,
@@ -2730,14 +2730,14 @@ def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
 def test_weekly_story_relay_card_skips_when_copy_unusable():
     from runtime.jobs._core import _weekly_story_relay_card
 
-    channel = SimpleNamespace(id=900, name="arena-relay", type="text")
+    channel = SimpleNamespace(id=900, name="leader-actions", type="text")
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#arena-relay", "subagent_key": "arena-relay"}),
+        patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#leader-actions", "subagent_key": "arena-relay"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={"messages": ["Read more at https://example.com"]}),
@@ -3111,7 +3111,7 @@ def test_notify_poapkings_publish_posts_success_to_poapkings_channel():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("runtime.jobs._site._channel_config_by_key", return_value={
             "id": 900,
-            "name": "#site-builder",
+            "name": "#website-updates",
             "subagent_key": "poapkings-com",
             "memory_scope": "public",
         }),

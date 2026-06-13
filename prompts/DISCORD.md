@@ -8,7 +8,7 @@
 - leader_role: 1474762111287824584
 - bot_role: 1477050812789293117
 
-## #reception
+## #welcome
 
 ID: 1476456514121109514
 Subagent: reception
@@ -29,7 +29,7 @@ Elixir's onboarding and verification channel.
 - If someone is not in the clan roster yet, tell them plainly that they need to join the clan first.
 - Useful references: https://poapkings.com/ and https://poapkings.com/faq/
 
-## #royal-decrees
+## #announcements
 
 ID: 1474760975851982959
 Subagent: announcements
@@ -60,10 +60,10 @@ Elixir's public River Race scoreboard and recap channel.
 
 - Use this channel for River Race scoreboard updates, meaningful momentum changes, weekly/season recaps, War Champ leader updates, and major contributor recognition.
 - Keep frequency lower than the raw war signal stream. Prefer fewer, better posts that tell members something they would not get by opening Clash Royale.
-- Do not use this channel for leader action requests or copy/paste clan-chat prompts; those belong in #arena-relay.
+- Do not use this channel for leader action requests or copy/paste clan-chat prompts; those belong in #leader-actions.
 - Do not use this channel for general war Q&A; members can ask in #ask-elixir or mention Elixir in #clan-chat.
 
-## #arena-relay
+## #leader-actions
 
 ID: 1513758211206025227
 Subagent: arena-relay
@@ -86,9 +86,9 @@ Elixir's leader action board.
 - Leaders can also start a new message with Clash Royale screenshots as observation evidence. Elixir reads visible UI state, replies with a concise readout, and may include short copy/paste in-game text when useful.
 - Elixir stores the decision timestamp and later compares clan or member data against the captured baseline.
 - Any action card still showing buttons is open. Completed, declined, or deferred cards should have controls removed and function as the record of what happened.
-- Broader reasoning, debate, and exploratory leadership questions belong in #king-tower; this channel is the crisp action queue.
+- Broader reasoning, debate, and exploratory leadership questions belong in #leaders; this channel is the crisp action queue.
 
-## #trophy-case
+## #player-highlights
 
 ID: 1482352147029950474
 Subagent: member-highlights
@@ -106,7 +106,7 @@ Elixir's curated player-story stream.
 - Prefer curated posts over volume. Routine badge ticks or small trophy movement should usually be skipped.
 - No war coordination, clan lifecycle events, leadership notes, or recruiting copy here.
 
-## #clan-chronicle
+## #clan-events
 
 ID: 1482352241628414013
 Subagent: clan-events
@@ -124,7 +124,7 @@ Elixir's clan-wide celebration and recognition stream.
 - This is the place for clan-centric moments, not tactical war chatter.
 - Posts here should feel like shared clan milestones.
 
-## #recruiting-camp
+## #recruiting
 
 ID: 1475138086957613197
 Subagent: promote-the-clan
@@ -142,7 +142,7 @@ Elixir's recruiting copy channel.
 - For Discord recruiting copy, the bolded subject/title line should end with the required trophies in square brackets, like `[2000]`.
 - This channel exists to help members spread the word about what makes POAP KINGS different.
 
-## #site-builder
+## #website-updates
 
 ID: 1482333970816434346
 Subagent: poapkings-com
@@ -202,7 +202,7 @@ Elixir's dedicated conversation and screenshot-help channel.
 - Elixir can be more exploratory and follow-up friendly here than in `#clan-chat`.
 - Follow-up questions are often appropriate here when they help a member explore something further.
 
-## #training-camp
+## #card-quiz
 
 ID: 1490929895034064966
 
@@ -216,7 +216,7 @@ Elixir University's card quiz channel.
 - Daily streaks are tracked for consecutive correct answers on the daily question.
 - All quiz questions are generated from the Clash Royale card catalog data.
 
-## #king-tower
+## #leaders
 
 ID: 1475139718525227089
 Subagent: leader-lounge
@@ -229,7 +229,7 @@ DurableMemory: true
 Elixir's private leadership and clan operations channel.
 
 - This is where leaders discuss clan operations, policy, edge cases, and deeper data questions with Elixir.
-- Routine actionable recommendations belong in #arena-relay as atomic cards, not as long prose in this channel.
+- Routine actionable recommendations belong in #leader-actions as atomic cards, not as long prose in this channel.
 - Elixir should be candid, operational, evidence-based, and direct here.
 - Elixir should act like part of leadership, not like an outside observer waiting for permission to have an opinion.
 - Use tools freely to ground claims about members, donations, war performance, inactivity, and roster health.

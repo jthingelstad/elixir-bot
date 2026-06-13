@@ -44,7 +44,7 @@ COMMAND_SPECS = {
     "member.clear": AdminCommandSpec("member.clear", ("member", "clear"), "Clear one member field.", leader_only=True, write=True, event_type="member_clear"),
     "memory.show": AdminCommandSpec("memory.show", ("memory", "show"), "Inspect stored conversation and contextual memory.", leader_only=True, event_type="memory_report"),
     "relay.status": AdminCommandSpec("relay.status", ("relay", "status"), "Show leader action recommendations and reaction decisions.", leader_only=True, event_type="relay_status_report"),
-    "relay.test-card": AdminCommandSpec("relay.test-card", ("relay", "test-card"), "Post a test #arena-relay leader action card for a real action type.", leader_only=True, write=True, event_type="relay_test_card"),
+    "relay.test-card": AdminCommandSpec("relay.test-card", ("relay", "test-card"), "Post a test #leader-actions leader action card for a real action type.", leader_only=True, write=True, event_type="relay_test_card"),
     "signal.show": AdminCommandSpec("signal.show", ("signal", "show"), "Show signal routing, recent routed signals, and pending system signals.", event_type="signals_report"),
     "signal.publish-pending": AdminCommandSpec("signal.publish-pending", ("signal", "publish-pending"), "Queue missing startup signals and publish pending system announcements.", leader_only=True, write=True, event_type="signal_publish_pending"),
     "signal.backfill-joins": AdminCommandSpec("signal.backfill-joins", ("signal", "backfill-joins"), "Send belated welcome messages for members who joined without an announcement.", leader_only=True, write=True, event_type="signal_backfill_joins"),
@@ -518,7 +518,7 @@ def _build_poap_kings_status_report() -> str:
     lines.append(f"- Enabled: {'yes' if enabled else 'no'}")
     lines.append(f"- Repo: `{repo}`")
     lines.append(f"- Branch: `{branch}`")
-    lines.append("- Visibility channel: `#site-builder`")
+    lines.append("- Visibility channel: `#website-updates`")
     lines.append("- Targets:")
     for target in ("all", "data", "home", "members", "roster-bios", "promote"):
         lines.append(f"  - `{target}`")

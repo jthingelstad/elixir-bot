@@ -3,7 +3,7 @@
 Assembles the week's memories, channel posts, and live clan state, hands
 them to the memory-synthesis LLM workflow, persists the resulting arc
 memories, and expires stale entries. The digest is stored as durable
-memory only; the sole Discord output is one #arena-relay action card per
+memory only; the sole Discord output is one #leader-actions action card per
 flagged contradiction.
 """
 
@@ -247,7 +247,7 @@ def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None, dry_run: bo
 
 
 async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
-    """Post one arena-relay leader action card per flagged contradiction.
+    """Post one #leader-actions card per flagged contradiction.
 
     The card is the actionable residue of the weekly synthesis: the leader
     either fixes/expires the memory (done) or dismisses the flag (decline).
@@ -318,7 +318,7 @@ async def _memory_synthesis_cycle():
     Runs Sunday late by default. Assembles the week's memories + posts +
     live state, hands them to ``run_memory_synthesis``, persists the
     resulting arcs, and expires stale entries. There is no digest post —
-    the only Discord output is one arena-relay action card per flagged
+    the only Discord output is one #leader-actions card per flagged
     contradiction, so leadership sees actionable memory hygiene instead of
     a weekly report.
     """

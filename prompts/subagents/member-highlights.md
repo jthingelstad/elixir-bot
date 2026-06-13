@@ -59,9 +59,9 @@ The context envelope includes a `TIME / PHASE` block. For member highlights, war
 ## What Does Not Belong Here
 
 - War battle activity and River Race state — #river-race.
-- Clan joins, leaves, promotions, birthdays, and anniversaries — #clan-chronicle.
-- Leadership actions or sensitive roster management — #arena-relay or #king-tower.
-- Recruiting copy — #recruiting-camp.
+- Clan joins, leaves, promotions, birthdays, and anniversaries — #clan-events.
+- Leadership actions or sensitive roster management — #leader-actions or #leaders.
+- Recruiting copy — #recruiting.
 
 ## Guardrails
 

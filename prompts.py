@@ -107,18 +107,24 @@ CHANNEL_SUBAGENT_CONFIG = {
 
 SUBAGENT_ALIASES = {
     "onboarding": "reception",
+    "welcome": "reception",
     "join_gate": "reception",
     "join-gate": "reception",
     "weekly_digest": "announcements",
     "royal_decrees": "announcements",
     "royal-decrees": "announcements",
     "promotion": "promote-the-clan",
+    "recruiting": "promote-the-clan",
     "recruiting_camp": "promote-the-clan",
     "recruiting-camp": "promote-the-clan",
     "river_race": "river-race",
     "arena_relay": "arena-relay",
+    "leader_actions": "arena-relay",
+    "leader-actions": "arena-relay",
     "member_highlights": "member-highlights",
     "member-highlights": "member-highlights",
+    "player_highlights": "member-highlights",
+    "player-highlights": "member-highlights",
     "trophy_case": "member-highlights",
     "trophy-case": "member-highlights",
     "player_progress": "member-highlights",
@@ -129,12 +135,15 @@ SUBAGENT_ALIASES = {
     "clan_chronicle": "clan-events",
     "clan-chronicle": "clan-events",
     "clanops": "leader-lounge",
+    "leaders": "leader-lounge",
     "king_tower": "leader-lounge",
     "king-tower": "leader-lounge",
     "clan_chat": "general",
     "clan-chat": "general",
     "ask_elixir": "ask-elixir",
     "poapkings_com": "poapkings-com",
+    "website_updates": "poapkings-com",
+    "website-updates": "poapkings-com",
     "site_builder": "poapkings-com",
     "site-builder": "poapkings-com",
 }
@@ -316,7 +325,7 @@ def policy():
 def channel_section(channel_name):
     """Extract a single channel's section from DISCORD.md.
 
-    channel_name: e.g. "#ask-elixir", "#king-tower", "#reception"
+    channel_name: e.g. "#ask-elixir", "#leaders", "#welcome"
     Returns the text from that channel's heading to the next ## heading (or EOF).
     """
     channel = resolve_channel_reference(channel_name)

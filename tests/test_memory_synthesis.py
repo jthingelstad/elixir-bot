@@ -213,7 +213,7 @@ def test_memory_synthesis_cycle_posts_contradiction_cards_not_digest():
     from types import SimpleNamespace
 
     channel = MagicMock()
-    channel.name = "arena-relay"
+    channel.name = "leader-actions"
     channel.type = "text"
     plan = {
         "digest": "This week the clan pushed hard.",
@@ -238,7 +238,7 @@ def test_memory_synthesis_cycle_posts_contradiction_cards_not_digest():
         }),
         patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
-        patch("runtime.jobs._memory.prompts.discord_singleton_subagent", return_value={"id": 900, "name": "#arena-relay"}),
+        patch("runtime.jobs._memory.prompts.discord_singleton_subagent", return_value={"id": 900, "name": "#leader-actions"}),
         patch("runtime.jobs._memory.bot.get_channel", return_value=channel),
         patch("runtime.jobs._memory.db.create_leader_action_recommendation", return_value=created) as mock_create,
         patch("runtime.jobs._memory.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=1)])) as mock_card,

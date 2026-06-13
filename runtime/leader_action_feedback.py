@@ -1,4 +1,4 @@
-"""Agentic synthesis loop for #arena-relay leader action feedback."""
+"""Agentic synthesis loop for #leader-actions leader action feedback."""
 
 from __future__ import annotations
 

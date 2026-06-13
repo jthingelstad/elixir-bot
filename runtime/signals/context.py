@@ -192,7 +192,7 @@ def _build_outcome_context(outcome, signals, clan, war):
         elif signal_types and signal_types & BATTLE_MODE_SIGNAL_TYPES:
             lines.extend([
                 "",
-                "This #trophy-case batch mixes durable progress with current battle-mode momentum. Write one cohesive player-story post instead of pretending these are separate channels.",
+                "This #player-highlights batch mixes durable progress with current battle-mode momentum. Write one cohesive player-story post instead of pretending these are separate channels.",
             ])
         else:
             lines.extend(["", "Focus on the player's achievement and why it is worth celebrating."])
@@ -211,7 +211,7 @@ def _build_outcome_context(outcome, signals, clan, war):
         else:
             lines.extend(["", "Focus on the communal clan moment and keep the tone welcoming and proud."])
     elif channel_key == "leader-lounge":
-        lines.extend(["", "This is a #king-tower leadership-facing factual note. Include useful operational context, not public hype."])
+        lines.extend(["", "This is a #leaders leadership-facing factual note. Include useful operational context, not public hype."])
         tag = first.get("tag")
         if tag:
             try:

@@ -9,7 +9,7 @@ from memory_store import list_memories
 from storage.contextual_memory import upsert_summary_memory
 
 # Durable milestones — celebratory and infrequent, per-player. Routed to
-# #trophy-case. Clan-aggregate records (clan_war_trophies_record) live
+# #player-highlights. Clan-aggregate records (clan_war_trophies_record) live
 # in CLAN_EVENT_SIGNAL_TYPES instead — not a personal achievement.
 PROGRESSION_SIGNAL_TYPES = {
     "arena_change",
@@ -29,7 +29,7 @@ PROGRESSION_SIGNAL_TYPES = {
 
 # Volatile battle-mode activity outside of war — hot streaks, trophy pushes,
 # Path of Legends promotions/demotions, Ultimate Champion reaches, global
-# rank attainments. Routed to #trophy-case.
+# rank attainments. Routed to #player-highlights.
 BATTLE_MODE_SIGNAL_TYPES = {
     "battle_hot_streak",
     "battle_trophy_push",
@@ -90,7 +90,7 @@ TOURNAMENT_SIGNAL_TYPES = {
 # War-recap signals — routed through a dedicated clean-context generator to
 # keep the LLM from confabulating season/standings details from RAG memory
 # or stale clan context (the 04-19 "Season 130 closes" misfire). Channels
-# stay as normal (#river-race, #royal-decrees, #king-tower) via the
+# stay as normal (#river-race, #announcements, #leaders) via the
 # existing war routing rule; only the generator changes.
 WAR_RECAP_SIGNAL_TYPES = {
     "war_completed",
@@ -114,7 +114,7 @@ WAR_RELAY_SIGNAL_TYPES = {
     "war_season_complete",
 }
 
-# Season awards — one aggregated post to #clan-chronicle when a season's
+# Season awards — one aggregated post to #clan-events when a season's
 # podium grants land. Replaces the old per-award Discord spam (~12 fires).
 # Uses a dedicated clean-context generator so the signal payload is the
 # only ground truth for names, fame, and ranks.

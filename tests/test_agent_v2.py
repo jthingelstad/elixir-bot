@@ -906,7 +906,7 @@ def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
         elixir_agent.analyze_arena_relay_screenshot(
             "Shared Clash Royale screenshot image(s).",
             author_name="Jamie",
-            channel_name="#arena-relay",
+            channel_name="#leader-actions",
             memory_context={},
             image_blocks=[image_block],
         )
@@ -1083,7 +1083,7 @@ def test_synthesize_leader_action_feedback_uses_strict_profile_schema():
         })
 
     assert result["summary"] == "Keep welcomes short."
-    assert "recent #arena-relay leader feedback" in captured["user_message"]
+    assert "recent #leader-actions leader feedback" in captured["user_message"]
     assert captured["kwargs"]["workflow"] == "leader_action_feedback"
     assert captured["kwargs"]["strict_json"] is True
 
