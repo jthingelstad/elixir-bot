@@ -67,14 +67,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         allow_copy_edit=True,
         allow_defer=True,
     ),
-    "war_nudge_recommendation": LeaderActionTypeSpec(
-        "war_nudge_recommendation",
-        "War Nudge",
-        "⚔️",
-        0xE67E22,
-        "Nudged",
-        allow_defer=True,
-    ),
     "promotion_recommendation": LeaderActionTypeSpec(
         "promotion_recommendation",
         "Promotion Recommendation",
@@ -659,8 +651,6 @@ def default_test_copy(action_type: str) -> list[str]:
             "TEST ONLY: Discord invite relay interaction check.",
             "TEST ONLY: Do not paste this into Clash Royale.",
         ]
-    if action_type in {"war_nudge_recommendation"}:
-        return []
     return [f"TEST ONLY: {spec.label} interaction check. Do not paste this into Clash Royale."]
 
 
@@ -672,8 +662,6 @@ def default_test_prompt(action_type: str, target_name: str | None = None) -> str
         return f"Review {name} for demotion."
     if action_type == "kick_recommendation":
         return f"Review {name} for removal from the clan."
-    if action_type == "war_nudge_recommendation":
-        return f"Nudge {name} to use war decks."
     if action_type == "welcome_relay":
         return f"Welcome {name} with a short profile-specific clan-chat note."
     if action_type == "celebration_relay":

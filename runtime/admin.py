@@ -402,12 +402,6 @@ def _format_leader_action_outcome(action: dict) -> str:
         changed = outcome.get("changed") or {}
         if changed:
             return " | ".join(f"{key} changed {'yes' if value else 'no'}" for key, value in changed.items())
-    if action.get("action_type") == "war_nudge_recommendation":
-        result = outcome.get("nudge_result") or {}
-        if result:
-            played = "yes" if result.get("played_after_nudge") else "no"
-            decks = result.get("decks_used_today")
-            return f"played after nudge {played} | decks today {decks if decks is not None else 'n/a'}"
     return "outcome pending"
 
 

@@ -56,18 +56,8 @@ def test_welcome_relay_has_copy_controls_but_no_defer():
     assert not any(isinstance(child, discord.ui.Select) for child in view.children)
 
 
-def test_war_nudge_has_defer_without_copy_or_info_controls():
-    view = LeaderActionView(_action("war_nudge_recommendation", copy_current_text=None))
-    labels = _labels(view)
-
-    assert "Nudged" in labels
-    assert "Decline" in labels
-    assert "Add Note" in labels
-    assert "Edit Copy" not in labels
-    assert "Preview Copy" not in labels
-    assert "Profile" not in labels
-    assert "War Detail" not in labels
-    assert any(isinstance(child, discord.ui.Select) for child in view.children)
+def test_war_nudge_action_type_is_not_registered():
+    assert "war_nudge_recommendation" not in leader_action_ui.leader_action_type_choices()
 
 
 def test_role_action_uses_multi_row_decision_copy_defer_and_note_controls():

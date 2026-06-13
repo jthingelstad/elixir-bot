@@ -597,7 +597,6 @@ def _format_leader_action_card(
     action_type = action.get("action_type") or ""
     icon = {
         "in_game_relay": "📣",
-        "war_nudge_recommendation": "👋",
         "promotion_recommendation": "⬆️",
         "demotion_recommendation": "⬇️",
         "kick_recommendation": "🚪",
@@ -809,13 +808,11 @@ async def _leadership_action_scan():
     runtime_status.mark_job_start("leadership_action_scan")
     posted = 0
     try:
-        from runtime.jobs._signals import _deliver_war_nudge_sidecars
-
         refreshed = await asyncio.to_thread(db.refresh_due_leader_action_outcomes)
         if refreshed:
             log.info("leadership action scan refreshed %s due action outcome(s)", len(refreshed))
-            # Measured outcomes (deck usage after a nudge, role changes after a
-            # promotion, ...) land hours after the leader's decision — re-run
+            # Measured outcomes (role changes after a promotion, etc.) land
+            # hours after the leader's decision — re-run
             # feedback synthesis for the affected action types so the lessons
             # include what actually happened, not just what the leader clicked.
             from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
@@ -831,7 +828,6 @@ async def _leadership_action_scan():
             )
             runtime_status.mark_job_success("leadership_action_scan", f"skipped: {reason}")
             return
-        posted += await _deliver_war_nudge_sidecars([{"type": "war_battle_day_live_update"}])
         remaining = max(0, LEADERSHIP_ACTION_SCAN_MAX_ACTIONS - posted)
         if remaining:
             posted += await _post_candidate_leader_action_recommendations(max_actions=remaining)

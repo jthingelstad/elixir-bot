@@ -221,7 +221,7 @@ def test_build_situation_includes_leader_action_board():
     agent doesn't duplicate an open ask or contradict a recent decision."""
     board = {
         "open": [{"action_id": 7, "action_type": "promotion_recommendation", "status": "proposed", "target_player_tag": "#ABC"}],
-        "recent_decisions": [{"action_id": 6, "action_type": "war_nudge_recommendation", "status": "rejected", "decision_note": "plays late"}],
+        "recent_decisions": [{"action_id": 6, "action_type": "kick_recommendation", "status": "rejected", "decision_note": "temporary absence explained"}],
     }
     bundle = _bundle(signals=[])
     with (

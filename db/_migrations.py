@@ -1781,7 +1781,96 @@ def _migration_41(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41]
+def _migration_42(conn: sqlite3.Connection) -> None:
+    """Retire war nudge leader actions and clean historical nudge data."""
+    tables = _existing_tables(conn)
+    conn.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS _war_nudge_cleanup_action_ids (action_id INTEGER PRIMARY KEY)"
+    )
+    conn.execute("DELETE FROM _war_nudge_cleanup_action_ids")
+    if "leader_action_recommendations" in tables:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO _war_nudge_cleanup_action_ids (action_id)
+            SELECT action_id
+            FROM leader_action_recommendations
+            WHERE action_type = 'war_nudge_recommendation'
+               OR source_signal_type = 'war_nudge_recommendation'
+               OR source_signal_key LIKE 'war_nudge:%'
+            """
+        )
+
+    if "messages" in tables:
+        conn.execute(
+            """
+            DELETE FROM messages
+            WHERE event_type = 'war_nudge_recommendation'
+               OR (
+                    event_type = 'leader_action_note'
+                    AND json_valid(raw_json)
+                    AND CAST(json_extract(raw_json, '$.leader_action_id') AS INTEGER)
+                        IN (SELECT action_id FROM _war_nudge_cleanup_action_ids)
+               )
+            """
+        )
+
+    if "signal_outcomes" in tables:
+        conn.execute(
+            """
+            DELETE FROM signal_outcomes
+            WHERE source_signal_type = 'war_nudge_recommendation'
+               OR source_signal_key LIKE 'war_nudge:%'
+            """
+        )
+
+    if "leader_action_recommendations" in tables:
+        conn.execute(
+            """
+            DELETE FROM leader_action_recommendations
+            WHERE action_id IN (SELECT action_id FROM _war_nudge_cleanup_action_ids)
+            """
+        )
+
+    conn.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS _war_nudge_cleanup_memory_ids (memory_id INTEGER PRIMARY KEY)"
+    )
+    conn.execute("DELETE FROM _war_nudge_cleanup_memory_ids")
+    if "clan_memories" in tables:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO _war_nudge_cleanup_memory_ids (memory_id)
+            SELECT memory_id
+            FROM clan_memories
+            WHERE event_type = 'leader_action_feedback_profile'
+              AND (
+                    event_id = 'leader_action_feedback:war_nudge_recommendation'
+                    OR metadata_json LIKE '%war_nudge_recommendation%'
+              )
+            """
+        )
+
+    for table_name in (
+        "clan_memory_tag_links",
+        "clan_memory_member_links",
+        "clan_memory_event_links",
+        "clan_memory_evidence_refs",
+        "clan_memory_versions",
+        "clan_memory_audit_log",
+        "clan_memory_embeddings",
+        "clan_memory_vec",
+    ):
+        if table_name in tables:
+            conn.execute(
+                f"DELETE FROM {table_name} WHERE memory_id IN (SELECT memory_id FROM _war_nudge_cleanup_memory_ids)"
+            )
+
+    if "clan_memories" in tables:
+        conn.execute(
+            "DELETE FROM clan_memories WHERE memory_id IN (SELECT memory_id FROM _war_nudge_cleanup_memory_ids)"
+        )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

@@ -18,7 +18,6 @@ ACTION_DEFERRED = "deferred"
 ACTION_PROPOSED = "proposed"
 ACTION_REJECTED = "rejected"
 ACTION_OUTCOME_DELAY_HOURS = {
-    "war_nudge_recommendation": 2,
     "in_game_relay": 24,
     "celebration_relay": 24,
     "welcome_relay": 24,
@@ -210,20 +209,9 @@ def build_leader_action_baseline(
         "promotion_recommendation",
         "kick_recommendation",
         "demotion_recommendation",
-        "war_nudge_recommendation",
         "welcome_relay",
     }:
         baseline["member"] = _member_baseline(target_player_tag, conn=conn)
-        if action_type == "war_nudge_recommendation":
-            war_day = _db.get_current_war_day_state(conn=conn) or {}
-            baseline["war_day"] = {
-                "war_day_key": war_day.get("war_day_key"),
-                "observed_at": war_day.get("observed_at"),
-                "phase": war_day.get("phase"),
-                "phase_display": war_day.get("phase_display"),
-                "finished_count": war_day.get("finished_count"),
-                "untouched_count": war_day.get("untouched_count"),
-            }
     return baseline
 
 
@@ -268,29 +256,6 @@ def evaluate_leader_action(action: dict, *, conn) -> dict:
         outcome["changed"] = {
             "role": base_member.get("role") != current.get("role"),
             "status": base_member.get("status") != current.get("status"),
-        }
-    elif action_type == "war_nudge_recommendation":
-        current = _db.get_current_war_day_state(conn=conn) or {}
-        target_tag = _db._canon_tag(action.get("target_player_tag"))
-        participants = current.get("participants") or []
-        participant = next(
-            (
-                item for item in participants
-                if _db._canon_tag(item.get("tag") or item.get("player_tag")) == target_tag
-            ),
-            {},
-        )
-        outcome["member"] = _member_baseline(target_tag, conn=conn)
-        outcome["war_day"] = {
-            "war_day_key": current.get("war_day_key"),
-            "observed_at": current.get("observed_at"),
-            "phase": current.get("phase"),
-            "phase_display": current.get("phase_display"),
-        }
-        outcome["nudge_result"] = {
-            "decks_used_today": participant.get("decks_used_today"),
-            "decks_used_total": participant.get("decks_used_total"),
-            "played_after_nudge": bool((participant.get("decks_used_today") or 0) > 0),
         }
     return outcome
 

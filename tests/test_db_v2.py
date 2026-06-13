@@ -50,6 +50,131 @@ def test_v2_schema_initializes_core_tables():
         conn.close()
 
 
+def test_war_nudge_cleanup_migration_removes_retired_action_data():
+    conn = db.get_connection(":memory:")
+    try:
+        nudge = db.create_leader_action_recommendation(
+            action_type="war_nudge_recommendation",
+            objective="war_participation",
+            prompt_text="Ask Vijay to use war decks.",
+            target_player_tag="#VJ1",
+            target_player_name="Vijay",
+            source_signal_key="war_nudge:#VJ1:s134-w3-d2",
+            source_signal_type="war_nudge_recommendation",
+            source_message_id=101,
+            conn=conn,
+        )
+        kept = db.create_leader_action_recommendation(
+            action_type="promotion_recommendation",
+            objective="role_review",
+            prompt_text="Promote King Levy.",
+            target_player_tag="#KING",
+            target_player_name="King Levy",
+            source_signal_key="promotion:#KING",
+            source_signal_type="promotion_recommendation",
+            source_message_id=102,
+            conn=conn,
+        )
+        db.save_message(
+            "channel",
+            "assistant",
+            "Retired nudge card",
+            channel_id=900,
+            channel_name="arena-relay",
+            workflow="arena-relay",
+            event_type="war_nudge_recommendation",
+            discord_message_id=101,
+            raw_json={"leader_action": nudge},
+            conn=conn,
+        )
+        db.save_message(
+            "channel",
+            "user",
+            "Already handled.",
+            channel_id=900,
+            channel_name="arena-relay",
+            workflow="arena-relay",
+            event_type="leader_action_note",
+            discord_message_id=201,
+            raw_json={"leader_action_id": nudge["action_id"]},
+            conn=conn,
+        )
+        db.save_message(
+            "channel",
+            "assistant",
+            "Kept promotion card",
+            channel_id=900,
+            channel_name="arena-relay",
+            workflow="arena-relay",
+            event_type="promotion_recommendation",
+            discord_message_id=102,
+            raw_json={"leader_action": kept},
+            conn=conn,
+        )
+        db.upsert_signal_outcome(
+            "war_nudge:#VJ1:s134-w3-d2",
+            "war_nudge_recommendation",
+            "arena-relay",
+            900,
+            "war_nudge_recommendation",
+            delivery_status="delivered",
+            conn=conn,
+        )
+        db.upsert_signal_outcome(
+            "promotion:#KING",
+            "promotion_recommendation",
+            "arena-relay",
+            900,
+            "promotion_recommendation",
+            delivery_status="delivered",
+            conn=conn,
+        )
+        db.upsert_leader_action_feedback_profile(
+            action_type="war_nudge_recommendation",
+            profile={
+                "summary": "War nudges were declined as too fast for Elixir.",
+                "avoid": ["Do not recommend war nudges."],
+                "sample_count": 1,
+            },
+            conn=conn,
+        )
+
+        db._MIGRATIONS[-1](conn)
+
+        assert conn.execute(
+            "SELECT COUNT(*) FROM leader_action_recommendations WHERE action_type = 'war_nudge_recommendation'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM leader_action_recommendations WHERE action_type = 'promotion_recommendation'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE event_type = 'war_nudge_recommendation'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            """
+            SELECT COUNT(*) FROM messages
+            WHERE event_type = 'leader_action_note'
+              AND json_valid(raw_json)
+              AND CAST(json_extract(raw_json, '$.leader_action_id') AS INTEGER) = ?
+            """,
+            (nudge["action_id"],),
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE event_type = 'promotion_recommendation'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM signal_outcomes WHERE source_signal_type = 'war_nudge_recommendation'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM signal_outcomes WHERE source_signal_type = 'promotion_recommendation'"
+        ).fetchone()[0] == 1
+        assert db.list_leader_action_feedback_profiles(
+            action_type="war_nudge_recommendation", conn=conn
+        ) == []
+    finally:
+        conn.close()
+
+
 def test_leader_action_recommendation_records_reaction_decision():
     conn = db.get_connection(":memory:")
     try:
@@ -124,9 +249,9 @@ def test_was_leader_action_declined_recently_cuts_on_decision_time():
     conn = db.get_connection(":memory:")
     try:
         db.create_leader_action_recommendation(
-            action_type="war_nudge_recommendation",
-            objective="war_participation",
-            prompt_text="Nudge Vijay to use war decks today.",
+            action_type="promotion_recommendation",
+            objective="role_review",
+            prompt_text="Promote Vijay for sustained clan contributions.",
             target_player_tag="#VJ1",
             target_player_name="Vijay",
             source_message_id=111,
@@ -134,7 +259,7 @@ def test_was_leader_action_declined_recently_cuts_on_decision_time():
         )
         # Not declined yet — no suppression.
         assert not db.was_leader_action_declined_recently(
-            action_type="war_nudge_recommendation",
+            action_type="promotion_recommendation",
             target_player_tag="#VJ1",
             within_hours=48,
             conn=conn,
@@ -143,20 +268,20 @@ def test_was_leader_action_declined_recently_cuts_on_decision_time():
             111, status=db.ACTION_REJECTED, discord_user_id=123, emoji="❌", conn=conn,
         )
         assert db.was_leader_action_declined_recently(
-            action_type="war_nudge_recommendation",
+            action_type="promotion_recommendation",
             target_player_tag="#VJ1",
             within_hours=48,
             conn=conn,
         )
         # Different target or action type — not suppressed.
         assert not db.was_leader_action_declined_recently(
-            action_type="war_nudge_recommendation",
+            action_type="promotion_recommendation",
             target_player_tag="#OTHER",
             within_hours=48,
             conn=conn,
         )
         assert not db.was_leader_action_declined_recently(
-            action_type="promotion_recommendation",
+            action_type="kick_recommendation",
             target_player_tag="#VJ1",
             within_hours=48,
             conn=conn,
@@ -166,7 +291,7 @@ def test_was_leader_action_declined_recently_cuts_on_decision_time():
             "UPDATE leader_action_recommendations SET decided_at = '2026-01-01T00:00:00'",
         )
         assert not db.was_leader_action_declined_recently(
-            action_type="war_nudge_recommendation",
+            action_type="promotion_recommendation",
             target_player_tag="#VJ1",
             within_hours=48,
             conn=conn,
@@ -470,9 +595,9 @@ def test_leader_action_decision_stats_counts_and_decline_rate():
     try:
         for index, status in enumerate(["done", "rejected", "rejected", "deferred"]):
             db.create_leader_action_recommendation(
-                action_type="war_nudge_recommendation",
-                objective="war_participation",
-                prompt_text=f"Nudge member {index}.",
+                action_type="promotion_recommendation",
+                objective="role_review",
+                prompt_text=f"Promote member {index}.",
                 target_player_tag=f"#T{index}",
                 source_message_id=1000 + index,
                 conn=conn,
@@ -485,7 +610,7 @@ def test_leader_action_decision_stats_counts_and_decline_rate():
                 defer_days=3 if status == "deferred" else None,
                 conn=conn,
             )
-        stats = db.leader_action_decision_stats(action_type="war_nudge_recommendation", conn=conn)
+        stats = db.leader_action_decision_stats(action_type="promotion_recommendation", conn=conn)
         assert stats["done"] == 1
         assert stats["rejected"] == 2
         assert stats["deferred"] == 1
@@ -494,7 +619,7 @@ def test_leader_action_decision_stats_counts_and_decline_rate():
         assert abs(stats["decline_rate"] - (2 / 3)) < 1e-9
 
         # Unknown type returns zeroed stats, not a KeyError.
-        empty = db.leader_action_decision_stats(action_type="promotion_recommendation", conn=conn)
+        empty = db.leader_action_decision_stats(action_type="kick_recommendation", conn=conn)
         assert empty["decided"] == 0
         assert empty["decline_rate"] is None
     finally:
@@ -506,9 +631,9 @@ def test_leader_action_board_snapshot_splits_open_and_decided():
     try:
         for index, status in enumerate([None, "done", "rejected"]):
             db.create_leader_action_recommendation(
-                action_type="war_nudge_recommendation",
-                objective="war_participation",
-                prompt_text=f"Nudge member {index}.",
+                action_type="promotion_recommendation",
+                objective="role_review",
+                prompt_text=f"Promote member {index}.",
                 target_player_tag=f"#T{index}",
                 source_message_id=3000 + index,
                 conn=conn,
@@ -539,14 +664,14 @@ def test_leader_action_policy_earned_frequency_throttles_declined_types():
         chicago_now = datetime.now(db.CHICAGO_TZ)
         active = chicago_now.replace(hour=12, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
 
-        # Five declined nudges (>= MIN_DECIDED, decline rate 1.0). Backdate
+        # Five declined promotions (>= MIN_DECIDED, decline rate 1.0). Backdate
         # proposed_at out of today's daily-cap window but inside the 72h
         # earned-frequency cooldown, so this test isolates the new gate.
         for index in range(5):
             db.create_leader_action_recommendation(
-                action_type="war_nudge_recommendation",
-                objective="war_participation",
-                prompt_text=f"Nudge member {index}.",
+                action_type="promotion_recommendation",
+                objective="role_review",
+                prompt_text=f"Promote member {index}.",
                 target_player_tag=f"#T{index}",
                 source_message_id=2000 + index,
                 conn=conn,
@@ -560,20 +685,20 @@ def test_leader_action_policy_earned_frequency_throttles_declined_types():
         )
 
         allowed, reason = leader_action_policy.can_post_leader_action(
-            action_type="war_nudge_recommendation", conn=conn, now=active,
+            action_type="promotion_recommendation", conn=conn, now=active,
         )
         assert not allowed
-        assert reason.startswith("earned_frequency:war_nudge_recommendation")
+        assert reason.startswith("earned_frequency:promotion_recommendation")
 
-        # Critical war moments bypass the throttle.
+        # Critical moments bypass the throttle.
         allowed, reason = leader_action_policy.can_post_leader_action(
-            action_type="war_nudge_recommendation", critical=True, conn=conn, now=active,
+            action_type="promotion_recommendation", critical=True, conn=conn, now=active,
         )
         assert allowed
 
         # A different action type with no decline history is unaffected.
         allowed, reason = leader_action_policy.can_post_leader_action(
-            action_type="promotion_recommendation", conn=conn, now=active,
+            action_type="kick_recommendation", conn=conn, now=active,
         )
         assert allowed, reason
 
@@ -581,7 +706,7 @@ def test_leader_action_policy_earned_frequency_throttles_declined_types():
         # allowed again (one card per cooldown, not a permanent ban).
         conn.execute("UPDATE leader_action_recommendations SET proposed_at = '2026-01-01T00:00:00', expires_at = NULL")
         allowed, reason = leader_action_policy.can_post_leader_action(
-            action_type="war_nudge_recommendation", conn=conn, now=active,
+            action_type="promotion_recommendation", conn=conn, now=active,
         )
         assert allowed, reason
     finally:
@@ -1230,8 +1355,8 @@ def test_memory_context_includes_scoped_durable_memories():
     try:
         create_memory(
             title="Leadership context",
-            body="King Levy prefers late-war nudges.",
-            summary="Prefers late-war nudges",
+            body="King Levy prefers late-war recaps.",
+            summary="Prefers late-war recaps",
             source_type="leader_note",
             is_inference=False,
             confidence=1.0,

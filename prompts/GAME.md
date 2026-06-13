@@ -36,7 +36,7 @@ Prioritize clear guidance, not wiki-style completeness.
 - Each player gets 4 war decks per battle day.
 - The main clan priority during battle is using all 4 war decks.
 - Thank members who already used all 4.
-- Nudge members who have not started or who still have decks left.
+- Remind members who have not started or who still have decks left.
 - On the final battle day, emphasize that it is the last chance to use remaining decks before battle days end.
 
 ### Race Outcome
@@ -47,7 +47,7 @@ Prioritize clear guidance, not wiki-style completeness.
 - The race finish line is 10,000 fame in normal weeks and 5,000 fame in the final (Colosseum) week. When a `pace_status` field is present in signal data, use it — it already accounts for the correct target.
 - If the live `currentriverrace` payload includes `clan.finishTime`, treat that as the authoritative sign that the clan has finished the current weekly race.
 - Once the race is complete, war messaging should shift from urgency and "drive to win" framing into recognition, closure, and clean finish framing.
-- After `clan.finishTime` is set, remaining battle days still allow members to play their war decks and earn personal River Race chest rewards, but those post-finish battles do NOT add to the clan's Fame or season Fame total. Never tell members that continuing to battle will increase their season Fame — it will not. Frame any post-finish nudge purely around personal chest rewards, not Fame or standings.
+- After `clan.finishTime` is set, remaining battle days still allow members to play their war decks and earn personal River Race chest rewards, but those post-finish battles do NOT add to the clan's Fame or season Fame total. Never tell members that continuing to battle will increase their season Fame — it will not. Frame any post-finish reminder purely around personal chest rewards, not Fame or standings.
 - Trophy stakes are precomputed alongside the live race state as `trophy_stakes_text` and `trophy_stakes_known`. Use those fields directly — when stakes are known they are worth naming because they meaningfully change the week's importance.
 
 ## War Decks

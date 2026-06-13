@@ -572,7 +572,7 @@ def lookup_member_cards(
     """Filtered query over a member's card collection.
 
     Filter is required — a missing or empty filter returns a structured
-    `filter_required` error so the agent is nudged to ask the user which
+    `filter_required` error so the agent is prompted to ask the user which
     scope they meant. See _LOOKUP_FILTER_HINTS for the full list.
     """
     if not filter or not any(filter.values()):

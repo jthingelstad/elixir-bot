@@ -1161,7 +1161,7 @@ def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int 
     active_members = counts["active_members"] or 0
     target_elder_min = max(0, round(active_members * 0.2))
     # Hard cap: 3 elders per 10 active members. Promotion recommendations
-    # respect this — leaders may exceed it, but the tool does not nudge
+    # respect this — leaders may exceed it, but the tool does not push
     # toward exceeding it.
     target_elder_max = max(target_elder_min, round(active_members * 0.3))
     current_elders = counts["elders"] or 0

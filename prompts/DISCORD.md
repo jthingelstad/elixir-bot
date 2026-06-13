@@ -75,7 +75,7 @@ DurableMemory: false
 
 Elixir's leader action board.
 
-- Use this channel for concrete leader actions, not discussion: in-game relay prompts, war nudges, promotion recommendations, demotion recommendations, and kick/removal recommendations.
+- Use this channel for concrete leader actions, not discussion: in-game relay prompts, promotion recommendations, demotion recommendations, and kick/removal recommendations.
 - Messages here are practical handoff cards: crisp, brief, bold ID first, emoji-scannable labels, clear action boundaries, and no hunting for where the usable text starts or stops.
 - For in-game relay prompts, include one clearly marked copy/paste block and keep the Clash Royale clan-chat copy under 240 characters whenever possible.
 - Do not ping members or include Discord-only formatting in copy/paste text intended for Clash Royale clan chat.
