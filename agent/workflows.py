@@ -12,7 +12,7 @@ from agent.core import (
     log,
     response_text,
 )
-from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_json_response, _parse_response
+from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_response
 from agent.prompt_builders import (
     _arena_relay_observation_system,
     _awareness_system,
@@ -29,7 +29,6 @@ from agent.prompt_builders import (
     _members_message_system,
     _memory_synthesis_system,
     _observe_system,
-    _quiz_explain_system,
     _promote_system,
     _reception_system,
     _roster_bios_system,
@@ -916,54 +915,6 @@ def generate_message(event, context, recent_posts=None):
     )
 
 
-def explain_quiz_answer(*, question_text: str, correct_answer: str, context: str) -> str | None:
-    """Write a 1-2 sentence tactical explanation for a quiz answer.
-
-    The deterministic quiz scaffold has already picked the cards, computed
-    the math, and flagged the correct option. This call only narrates *why
-    the answer is correct* and what it means in play. Routes to the
-    lightweight model via ``event:quiz_explain``. Returns text or None on
-    failure; callers must have a templated fallback ready.
-    """
-    user_msg = (
-        f"QUESTION: {question_text}\n"
-        f"CORRECT ANSWER: {correct_answer}\n\n"
-        f"CONTEXT:\n{context}\n\n"
-        "Write the explanation."
-    )
-    messages = [
-        {"role": "user", "content": user_msg},
-    ]
-    try:
-        resp = _create_chat_completion(
-            workflow="event:quiz_explain",
-            system=_quiz_explain_system(),
-            messages=messages,
-            temperature=0.7,
-            max_tokens=200,
-            timeout=30,
-        )
-        raw = (response_text(resp) or "").strip()
-    except (APIError, APIConnectionError) as exc:
-        log.warning("explain_quiz_answer API error: %s", exc)
-        return None
-    if not raw:
-        return None
-    # The prompt asks for JSON with an "explanation" key. Haiku sometimes
-    # wraps its answer in ```json ... ``` fences — use the shared parser
-    # that already handles that case, falling through to raw text if all
-    # else fails.
-    try:
-        parsed = _parse_json_response(raw)
-        if isinstance(parsed, dict):
-            text = (parsed.get("explanation") or "").strip()
-            if text:
-                return text
-    except (json.JSONDecodeError, TypeError, ValueError):
-        pass
-    return raw
-
-
 # ── Site content generation for poapkings.com ────────────────────────────────
 
 def _generate_simple_message(system_prompt, user_msg, *, workflow, temperature=0.8,
@@ -1261,7 +1212,6 @@ __all__ = [
     "respond_to_help_request",
     "analyze_arena_relay_screenshot",
     "generate_message",
-    "explain_quiz_answer",
     "generate_home_message",
     "generate_members_message",
     "generate_roster_bios",

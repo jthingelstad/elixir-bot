@@ -1,8 +1,7 @@
 """Card catalog storage layer.
 
 Syncs and queries the Clash Royale card catalog from the /cards API endpoint.
-Provides the data foundation for the lookup_cards LLM tool and the card
-training quiz module.
+Provides the data foundation for the lookup_cards LLM tool.
 """
 
 import json
@@ -179,38 +178,6 @@ def get_card_by_name(name: str, conn=None) -> dict | None:
         (f"%{_escape_like(name)}%",),
     ).fetchone()
     return _row_to_dict(row) if row else None
-
-
-@managed_connection
-def get_random_cards(
-    count: int,
-    *,
-    card_type=None,
-    rarity=None,
-    exclude_ids=None,
-    conn=None,
-) -> list[dict]:
-    """Return random cards from the catalog for quiz question generation."""
-    clauses = []
-    params = []
-
-    if card_type:
-        clauses.append("card_type = ?")
-        params.append(card_type.lower())
-    if rarity:
-        clauses.append("rarity = ?")
-        params.append(rarity.lower())
-    if exclude_ids:
-        placeholders = ",".join("?" for _ in exclude_ids)
-        clauses.append(f"card_id NOT IN ({placeholders})")
-        params.extend(exclude_ids)
-
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    sql = f"SELECT * FROM card_catalog{where} ORDER BY RANDOM() LIMIT ?"
-    params.append(count)
-
-    rows = conn.execute(sql, params).fetchall()
-    return [_row_to_dict(r) for r in rows]
 
 
 @managed_connection

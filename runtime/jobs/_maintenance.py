@@ -1,9 +1,9 @@
-"""DB maintenance, card catalog sync, and daily quiz."""
+"""DB maintenance, card catalog sync, and API sentinel jobs."""
 
 __all__ = [
     "API_SENTINEL_POLL_MINUTES",
     "_format_size", "_build_maintenance_report",
-    "_daily_quiz_post", "_card_catalog_sync", "_api_sentinel_tick", "_db_maintenance_cycle",
+    "_card_catalog_sync", "_api_sentinel_tick", "_db_maintenance_cycle",
 ]
 
 import asyncio
@@ -71,33 +71,6 @@ def _build_maintenance_report(size_before, size_after, purge_stats, backup_resul
         lines.append("No expired rows to remove this cycle.")
 
     return "\n".join(lines)
-
-
-async def _daily_quiz_post():
-    """Post the daily Elixir University quiz question."""
-    from modules.card_training.views import CARD_TRAINING_CHANNEL_ID, post_daily_question
-
-    runtime_status.mark_job_start("daily_quiz")
-
-    if not CARD_TRAINING_CHANNEL_ID:
-        runtime_status.mark_job_failure("daily_quiz", "CARD_TRAINING_CHANNEL_ID not configured for #card-quiz")
-        return
-
-    channel = bot.get_channel(CARD_TRAINING_CHANNEL_ID)
-    if not channel:
-        runtime_status.mark_job_failure("daily_quiz", f"channel {CARD_TRAINING_CHANNEL_ID} not found")
-        return
-
-    try:
-        message = await post_daily_question(channel)
-        if message:
-            runtime_status.mark_job_success("daily_quiz", f"posted daily question (msg {message.id})")
-            log.info("Daily quiz posted to #card-quiz (msg %s)", message.id)
-        else:
-            runtime_status.mark_job_failure("daily_quiz", "no question generated (card catalog may be empty)")
-    except Exception as exc:
-        log.error("Daily quiz post failed: %s", exc, exc_info=True)
-        runtime_status.mark_job_failure("daily_quiz", str(exc))
 
 
 async def _card_catalog_sync():

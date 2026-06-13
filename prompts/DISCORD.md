@@ -202,20 +202,6 @@ Elixir's dedicated conversation and screenshot-help channel.
 - Elixir can be more exploratory and follow-up friendly here than in `#clan-chat`.
 - Follow-up questions are often appropriate here when they help a member explore something further.
 
-## #card-quiz
-
-ID: 1490929895034064966
-
-Elixir University's card quiz channel.
-
-- This channel is managed entirely through Discord interactions (slash commands and buttons), not through the LLM subagent system.
-- `/elixir quiz start` — start an interactive card quiz (ephemeral, private to the member).
-- `/elixir quiz stats` — view personal quiz stats and daily streak.
-- `/elixir quiz leaderboard` — view the daily quiz streak leaderboard.
-- A daily quiz question is posted here automatically each morning. Members answer via buttons and receive ephemeral feedback.
-- Daily streaks are tracked for consecutive correct answers on the daily question.
-- All quiz questions are generated from the Clash Royale card catalog data.
-
 ## #leaders
 
 ID: 1475139718525227089

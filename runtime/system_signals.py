@@ -48,44 +48,6 @@ STARTUP_SYSTEM_SIGNALS = [
         },
     },
     {
-        "signal_key": "feature_card_quiz_v1",
-        "signal_type": "capability_unlock",
-        "payload": {
-            "title": "Achievement Unlocked: Card Quiz",
-            "message": (
-                "Elixir now has a card training quiz in #card-quiz. "
-                "Members can test their Clash Royale card knowledge with interactive quizzes and a daily question with streak tracking."
-            ),
-            "discord_content": (
-                "**Achievement Unlocked: Card Quiz** :elixir_hype:\n\n"
-                "POAP KINGS just got a new training ground. **#card-quiz** is live — "
-                "a dedicated channel where you can sharpen your Clash Royale card knowledge with real quizzes.\n\n"
-                "**What's in there:**\n"
-                "- `/elixir quiz start` — take a quick quiz (1-10 questions). "
-                "Elixir will test you on elixir costs, rarities, card types, Evo/Hero modes, and Champions — "
-                "all with card images pulled straight from the game.\n"
-                "- **Daily question** — a new question drops every morning. "
-                "Answer it to start building a streak. Come back tomorrow to keep it alive.\n"
-                "- `/elixir quiz stats` — check your accuracy and streak.\n"
-                "- `/elixir quiz leaderboard` — see who's running the longest daily streak in the clan.\n\n"
-                "**Why it matters:**\n"
-                "Knowing your cards is knowing your matchups. "
-                "Whether it's the elixir cost of a counter or which cards have Evo, "
-                "the quiz is built to make that knowledge stick.\n\n"
-                "Head to **#card-quiz** and see what you know. :elixir_trophy:"
-            ),
-            "details": [
-                "New #card-quiz channel with interactive quizzes and a daily question.",
-                "Six question types covering elixir cost, rarity, card type, Evo/Hero capability, and Champion identification.",
-                "All questions generated from a synced Clash Royale card catalog with card images.",
-                "Daily streak tracking for consecutive correct answers on the daily question.",
-                "Elixir now has a lookup_cards tool for accurate card data in #ask-elixir conversations.",
-            ],
-            "audience": "clan",
-            "capability_area": "card_quiz",
-        },
-    },
-    {
         "signal_key": "capability_deck_review_v1",
         "signal_type": "capability_unlock",
         "payload": {
@@ -276,49 +238,6 @@ STARTUP_SYSTEM_SIGNALS = [
             ],
             "audience": "clan",
             "capability_area": "clan_keep",
-        },
-    },
-    {
-        "signal_key": "capability_elixir_counting_v1",
-        "signal_type": "capability_unlock",
-        "payload": {
-            "title": "Achievement Unlocked: Elixir Counting",
-            "message": (
-                "The quiz module is now about learning to play better, not learning card trivia. "
-                "Trade math, cycle cost, cost discipline — the skills that actually decide ladder matches. "
-                "Every question includes the card icons and every correct answer ends with why it matters in play."
-            ),
-            "discord_content": (
-                "**Achievement Unlocked: Elixir Counting** :elixir:\n\n"
-                "The quiz used to ask what rarity a card was. Now it asks what the trade was worth. "
-                "That's the actual skill that separates ladder decisions from guesses.\n\n"
-                "**What's new in `/quiz start`:**\n"
-                "- **Trade math** — \"You Fireball a Musketeer and an Ice Spirit. Is this trade +1, even, or -1?\" "
-                "Real scenarios; the seed list is canonical Clash Royale value trades.\n"
-                "- **Cycle cost** — sum a 4-card rotation. Tells you what your deck actually costs to play.\n"
-                "- **Cycle back** — given your rotation, how much elixir to get your win condition back in hand? "
-                "This is the math you do before every big push.\n"
-                "- **Cost comparison** tightened — four cards of the same type within a narrow cost band. "
-                "Not \"is a Rocket more than a Goblin,\" but \"is a Fireball more than a Poison.\"\n\n"
-                "**What's gone:** rarity, card type, evo/hero mode, champion identification. "
-                "All trivia, all replaced with questions about how to play.\n\n"
-                "**Every answer now closes with why it matters in play.** "
-                "Explanations are written in voice, short, tactical. If an Archer Queen push costs 11 to cycle back to, "
-                "the explanation tells you what that means for your defense.\n\n"
-                "**Card icons appear in the question.** Cycle questions and trade scenarios ship a side-by-side "
-                "strip of the cards involved. No more reading names and guessing — see the card.\n\n"
-                "This is **Elixir v4.7 \"Elixir Counting\"** — /quiz start any time."
-            ),
-            "details": [
-                "Retired trivia questions: rarity, card type, evo/hero, champion ID — all obvious from the icon or irrelevant to play.",
-                "Added positive_trade (~20 curated canonical scenarios), cycle_total, cycle_back — all test real in-game decisions.",
-                "cost_comparison upgraded to filter to 4 cards of the same card_type within a 3-elixir cost band.",
-                "Every explanation is LLM-written via the new event:quiz_explain workflow (Haiku, ~$0.30/month), closing with why it matters in play. Deterministic fallback if the call fails.",
-                "Multi-card questions render a composite card-icon strip as an embed attachment — names with visuals.",
-                "Four rapid fixes landed during live testing: null-cost crash (#15), interaction timeout (#16), JSON fence leak (#17), cost-in-question giveaway (#18).",
-            ],
-            "audience": "clan",
-            "capability_area": "elixir_counting",
         },
     },
     {

@@ -20,7 +20,6 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
 - `prompts/subagents/` — Channel-named subagent prompt files
 - `modules/poap_kings/` — POAP KINGS-specific site integration and GitHub publishing
-- `modules/card_training/` — Elixir University card training quiz: question generation, Discord views, and quiz storage
 - `scripts/review_agent_feedback.py` — Review recent LLM/channel failures and `#ask-elixir` feedback from SQLite for debugging and prompt/tool routing analysis
 - `runtime/activities.py` — Canonical registry for recurring automated activities
 - `runtime/clan_chat_copy.py` — Dedicated Clash Royale in-game clan chat copy generation, validation, and fallback guardrails
@@ -59,7 +58,7 @@ regenerate it after any deliberate dependency upgrade.
 - **Always use `./venv/bin/pytest`** — do not use bare `pytest` or `python3 -m pytest`. The Homebrew `pytest` binary runs in its own isolated env and cannot import project dependencies.
 - `pyproject.toml` configures `pythonpath = ["."]` so all project imports resolve without install.
 - Tests use in-memory SQLite and mocked external services (no API keys needed).
-- Test fixtures (e.g. `quiz_db`) handle DB connection lifecycle — use `pytest.fixture` instead of manual try/finally.
+- Test fixtures handle DB connection lifecycle — use `pytest.fixture` instead of manual try/finally.
 
 ## Cleanup
 

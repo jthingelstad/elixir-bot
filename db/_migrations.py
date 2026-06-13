@@ -1904,7 +1904,30 @@ def _migration_43(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43]
+def _migration_44(conn: sqlite3.Connection) -> None:
+    """Remove the retired Discord card quiz feature and its runtime state."""
+    conn.executescript(
+        """
+        DROP TABLE IF EXISTS quiz_responses;
+        DROP TABLE IF EXISTS quiz_sessions;
+        DROP TABLE IF EXISTS quiz_daily_streaks;
+        """
+    )
+    conn.execute(
+        "DELETE FROM runtime_job_status WHERE job_name IN (?, ?)",
+        ("daily_quiz", "daily-quiz"),
+    )
+    conn.execute(
+        "DELETE FROM signal_outcomes WHERE source_signal_key IN (?, ?)",
+        ("feature_card_quiz_v1", "capability_elixir_counting_v1"),
+    )
+    conn.execute(
+        "DELETE FROM system_signals WHERE signal_key IN (?, ?)",
+        ("feature_card_quiz_v1", "capability_elixir_counting_v1"),
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

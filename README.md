@@ -163,8 +163,6 @@ Persistence and intelligence:
 Modules:
 - [modules/poap_kings/](modules/poap_kings/)
   POAP KINGS website integration and GitHub publishing.
-- [modules/card_training/](modules/card_training/)
-  Elixir University card training quiz — interactive and daily quizzes in #card-quiz.
 
 ## Prompt Model
 
