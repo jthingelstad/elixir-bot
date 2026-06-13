@@ -2579,9 +2579,7 @@ def test_leader_action_scan_skips_active_low_donation_war_candidates():
     assert posted == 0
     mock_create.assert_not_called()
     mock_card.assert_not_awaited()
-    mock_skip.assert_awaited_once()
-    assert mock_skip.await_args.kwargs["reason"] == "ineligible:no_inactivity_signal"
-    assert mock_skip.await_args.kwargs["target_player_name"] == "angecleowill"
+    mock_skip.assert_not_awaited()
 
 
 def test_kick_candidate_ineligibility_honors_availability_memory():

@@ -846,7 +846,18 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
 
     posted = 0
     max_actions = max(1, int(max_actions or 1))
-    kick_candidates = sorted((at_risk or {}).get("members") or [], key=_kick_candidate_priority)
+    at_risk_members = (at_risk or {}).get("members") or []
+    kick_candidates = [
+        member for member in at_risk_members
+        if _kick_candidate_inactive_reason(member)
+    ]
+    ignored_count = len(at_risk_members) - len(kick_candidates)
+    if ignored_count:
+        log.info(
+            "kick candidate scan ignored %s non-inactive at-risk member(s)",
+            ignored_count,
+        )
+    kick_candidates = sorted(kick_candidates, key=_kick_candidate_priority)
     for member in kick_candidates:
         if posted >= max_actions:
             return posted
