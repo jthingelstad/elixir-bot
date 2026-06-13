@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -94,6 +95,29 @@ def _ordinal(value) -> str | None:
     else:
         suffix = {1: "st", 2: "nd", 3: "rd"}.get(value % 10, "th")
     return f"{value}{suffix}"
+
+
+def _war_week_number(signal: dict) -> int | None:
+    week = signal.get("week")
+    if isinstance(week, int) and week > 0:
+        return week
+    section_index = signal.get("section_index")
+    if isinstance(section_index, int) and section_index >= 0:
+        return section_index + 1
+    return None
+
+
+def _war_period_label(signals: list[dict], *, include_week: bool = True) -> str | None:
+    for signal in signals or []:
+        season_id = signal.get("season_id")
+        if not isinstance(season_id, int):
+            continue
+        if include_week:
+            week = _war_week_number(signal)
+            if week is not None:
+                return f"S{season_id} W{week}"
+        return f"S{season_id}"
+    return None
 
 
 def _signal_names(signals: list[dict], limit: int = 4) -> list[str]:
@@ -464,6 +488,292 @@ def _build_generated_welcome_relay_result(
             "authored_by": "elixir_agent",
         },
     }
+
+
+def _top_war_champ_entries(signals: list[dict], *, limit: int = 3) -> list[dict]:
+    for signal in signals or []:
+        if signal.get("type") != "war_champ_standings":
+            continue
+        standings = signal.get("standings")
+        if isinstance(standings, list):
+            return [entry for entry in standings[:limit] if isinstance(entry, dict)]
+    for signal in signals or []:
+        if signal.get("type") != "season_awards_granted":
+            continue
+        standings = signal.get("war_champ")
+        if isinstance(standings, list):
+            return [entry for entry in standings[:limit] if isinstance(entry, dict)]
+    return []
+
+
+def _war_champ_entry_name(entry: dict) -> str | None:
+    name = str(entry.get("name") or entry.get("player_name") or "").strip()
+    return name or None
+
+
+def _war_champ_entry_fame(entry: dict) -> int | None:
+    for key in ("total_fame", "metric_value", "fame"):
+        value = entry.get(key)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _format_war_champ_standings_line(entries: list[dict], *, label: str | None) -> str | None:
+    if not entries:
+        return None
+    leader = entries[0]
+    leader_name = _war_champ_entry_name(leader)
+    if not leader_name:
+        return None
+    leader_fame = _war_champ_entry_fame(leader)
+    prefix = f"War Champ after {label}" if label else "War Champ race"
+    if leader_fame is not None:
+        line = f"{prefix}: {leader_name} leads with {leader_fame:,} fame"
+    else:
+        line = f"{prefix}: {leader_name} leads"
+    chasers = [_war_champ_entry_name(entry) for entry in entries[1:3]]
+    chasers = [name for name in chasers if name]
+    if len(chasers) == 1:
+        line += f"; {chasers[0]} is chasing"
+    elif len(chasers) >= 2:
+        line += f"; {chasers[0]} and {chasers[1]} are chasing"
+    return f"{line}."
+
+
+def _fallback_war_relay_messages(signals: list[dict]) -> list[str]:
+    signals = signals or []
+    label = _war_period_label(signals)
+    messages: list[str] = []
+    week_signal = next(
+        (
+            signal for signal in signals
+            if signal.get("type") in {"war_week_complete", "war_completed"}
+        ),
+        None,
+    )
+    if week_signal:
+        rank = _ordinal(week_signal.get("our_rank") or week_signal.get("race_rank"))
+        fame = week_signal.get("our_fame") or week_signal.get("clan_fame") or week_signal.get("fame")
+        prefix = f"{label} war recap" if label else "War week recap"
+        if rank and isinstance(fame, int):
+            messages.append(
+                f"{prefix}: POAP KINGS finished {rank} with {fame:,} fame. Thanks to everyone who used decks."
+            )
+        elif rank:
+            messages.append(
+                f"{prefix}: POAP KINGS finished {rank}. Thanks to everyone who used decks."
+            )
+        else:
+            messages.append(
+                f"{prefix}: thanks to everyone who used decks and kept POAP KINGS moving."
+            )
+
+    champ_line = _format_war_champ_standings_line(
+        _top_war_champ_entries(signals),
+        label=label,
+    )
+    if champ_line:
+        messages.append(champ_line)
+
+    if not messages and any(signal.get("type") == "war_season_complete" for signal in signals):
+        season_label = _war_period_label(signals, include_week=False)
+        prefix = f"{season_label} war season" if season_label else "War season"
+        messages.append(f"{prefix} complete. Thanks to everyone who kept showing up for POAP KINGS.")
+
+    return messages[:2]
+
+
+def _war_relay_context(base_context: str | None, signals: list[dict], memory_context: dict | None) -> str:
+    label = _war_period_label(signals)
+    required_label = f"- Use the short in-game label `{label}` exactly once or more." if label else "- If season/week is missing, do not invent it."
+    instructions = (
+        "Arena-relay Clan Wars recap task:\n"
+        f"{required_label}\n"
+        "- Author one or two short Clash Royale clan-chat messages a leader can copy/paste.\n"
+        "- If a completed week is present, include the weekly recap: finish rank, fame, and a concise thanks to people who used decks.\n"
+        "- If War Champ standings are present, include the current War Champ leader and one or two chasers. This can be a second message.\n"
+        "- Use the exact in-game compact style for clan wars labels: Season 134 Week 3 is `S134 W3`.\n"
+        "- Sound like a real clan leader in Clash Royale chat, not a Discord announcement or newsletter.\n"
+        "- Do not over-explain rules, fairness, Discord, APIs, prompts, or hidden system behavior.\n"
+        "- Do not include raw URLs, markdown links, Discord-only formatting, message numbers, or labels inside the copy/paste messages.\n"
+        f"- Keep each copy/paste message under {ARENA_RELAY_MAX_COPY_CHARS} characters.\n"
+        "- Return `content` as a JSON array containing only the Clash Royale copy/paste messages. The code will add the arena-relay action card.\n\n"
+        "War signals:\n"
+        f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```"
+    )
+    context = f"{base_context}\n\n{instructions}" if base_context else instructions
+    return _with_clan_chat_feedback_context(context, memory_context)
+
+
+def _build_generated_war_relay_result(signals: list[dict], generated: ClanChatCopyResult | dict | None) -> dict | None:
+    copies = [_clip_relay_copy(item) for item in _result_content_items(generated)]
+    copies = [item for item in copies if item]
+    if not copies:
+        return None
+    copies = copies[:2]
+    label = _war_period_label(signals)
+    has_standings = bool(_top_war_champ_entries(signals))
+    objective = "war_recap_and_champ_race" if has_standings else "war_recap"
+    reason = (
+        "Weekly war recaps and War Champ standings belong in game chat because many contributors never see Discord."
+        if has_standings
+        else "Weekly war recaps belong in game chat because many contributors never see Discord."
+    )
+    title = "Clan Wars relay"
+    copy_instruction = (
+        "📋 Copy the next message into Clash Royale."
+        if len(copies) == 1
+        else f"📋 Copy the next {len(copies)} messages into Clash Royale in order."
+    )
+    card = (
+        f"**R? 📣 {title}**\n"
+        f"🎯 `{objective}`\n"
+        f"{copy_instruction}\n"
+        f"🧠 {reason}\n\n"
+        "✅ done  ❌ decline  ↩️ reply with note"
+    )
+    relay_copy = copies[0] if len(copies) == 1 else copies
+    relay_copy_text = "\n".join(copies)
+    return {
+        "event_type": "war_relay_brief",
+        "summary": f"In-game war relay suggestion: {relay_copy_text}",
+        "content": [card, *copies],
+        "metadata": {
+            "action_type": "in_game_relay",
+            "objective": objective,
+            "rationale": reason,
+            "relay_copy": relay_copy,
+            "relay_copy_text": relay_copy_text,
+            "relay_copy_count": len(copies),
+            "relay_target": "clash_royale_clan_chat",
+            "copy_message_index": 1,
+            "war_period_label": label,
+            "authored_by": "elixir_agent",
+        },
+    }
+
+
+async def _generate_war_relay_result(
+    signals: list[dict],
+    *,
+    base_context: str | None = None,
+    memory_context: dict | None = None,
+) -> dict | None:
+    label = _war_period_label(signals)
+    required_terms = (label,) if label else ()
+    if _top_war_champ_entries(signals):
+        required_terms = tuple(term for term in (*required_terms, "War Champ") if term)
+    generated = await generate_clan_chat_copy(
+        intent="war_weekly_recap_relay",
+        context=_war_relay_context(base_context, signals, memory_context),
+        max_messages=2,
+        max_chars=ARENA_RELAY_MAX_COPY_CHARS,
+        required_terms=required_terms,
+        forbidden_terms=("Discord", "http://", "https://", "www."),
+        fallback_messages=_fallback_war_relay_messages(signals),
+        metadata={"subagent": "arena-relay", "war_period_label": label},
+    )
+    return _build_generated_war_relay_result(signals, generated)
+
+
+def _season_awards_context(base_context: str | None, signals: list[dict], memory_context: dict | None) -> str:
+    label = _war_period_label(signals, include_week=False)
+    required_label = f"- Use the short season label `{label}` exactly once or more." if label else "- If season is missing, do not invent it."
+    instructions = (
+        "Arena-relay War Champ winner task:\n"
+        f"{required_label}\n"
+        "- Author one short Clash Royale clan-chat message a leader can copy/paste.\n"
+        "- Announce the final War Champ winner for the completed season.\n"
+        "- Include `War Champ`, the winner's name, and fame if provided.\n"
+        "- Mention POAP KINGS only if it fits naturally.\n"
+        "- Sound like in-game clan chat, not a trophy ceremony script.\n"
+        "- Do not include raw URLs, markdown links, Discord-only formatting, message numbers, or labels inside the copy/paste message.\n"
+        f"- Keep the copy/paste message under {ARENA_RELAY_MAX_COPY_CHARS} characters.\n"
+        "- Return `content` as a single string containing only the Clash Royale copy/paste message. The code will add the arena-relay action card.\n\n"
+        "Season awards signal:\n"
+        f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```"
+    )
+    context = f"{base_context}\n\n{instructions}" if base_context else instructions
+    return _with_clan_chat_feedback_context(context, memory_context)
+
+
+def _fallback_war_champ_winner_message(signals: list[dict]) -> str | None:
+    entries = _top_war_champ_entries(signals, limit=1)
+    if not entries:
+        return None
+    winner = entries[0]
+    name = _war_champ_entry_name(winner)
+    if not name:
+        return None
+    fame = _war_champ_entry_fame(winner)
+    label = _war_period_label(signals, include_week=False)
+    prefix = f"{label} War Champ" if label else "War Champ"
+    if fame is not None:
+        return f"{prefix}: {name} wins it with {fame:,} fame. Huge season."
+    return f"{prefix}: {name} wins it. Huge season."
+
+
+def _build_generated_war_champ_winner_result(signals: list[dict], generated: ClanChatCopyResult | dict | None) -> dict | None:
+    copies = [_clip_relay_copy(item) for item in _result_content_items(generated)]
+    copies = [item for item in copies if item]
+    if not copies:
+        return None
+    copy = copies[0]
+    winner = (_top_war_champ_entries(signals, limit=1) or [{}])[0]
+    reason = "The final War Champ winner is one of the clan's clearest season honors and belongs in game chat."
+    card = (
+        "**R? 📣 War Champ relay**\n"
+        "🎯 `war_champ_winner`\n"
+        "📋 Copy the next message into Clash Royale.\n"
+        f"🧠 {reason}\n\n"
+        "✅ done  ❌ decline  ↩️ reply with note"
+    )
+    return {
+        "event_type": "war_champ_winner_relay",
+        "summary": f"In-game War Champ relay suggestion: {copy}",
+        "content": [card, copy],
+        "metadata": {
+            "action_type": "in_game_relay",
+            "objective": "war_champ_winner",
+            "rationale": reason,
+            "relay_copy": copy,
+            "relay_copy_text": copy,
+            "relay_copy_count": 1,
+            "relay_target": "clash_royale_clan_chat",
+            "copy_message_index": 1,
+            "target_player_tag": winner.get("tag"),
+            "target_player_name": _war_champ_entry_name(winner),
+            "war_period_label": _war_period_label(signals, include_week=False),
+            "authored_by": "elixir_agent",
+        },
+    }
+
+
+async def _generate_war_champ_winner_result(
+    signals: list[dict],
+    *,
+    base_context: str | None = None,
+    memory_context: dict | None = None,
+) -> dict | None:
+    winner_message = _fallback_war_champ_winner_message(signals)
+    if not winner_message:
+        return None
+    winner = (_top_war_champ_entries(signals, limit=1) or [{}])[0]
+    winner_name = _war_champ_entry_name(winner)
+    label = _war_period_label(signals, include_week=False)
+    required_terms = tuple(term for term in (label, "War Champ", winner_name) if term)
+    generated = await generate_clan_chat_copy(
+        intent="war_champ_winner_relay",
+        context=_season_awards_context(base_context, signals, memory_context),
+        max_messages=1,
+        max_chars=ARENA_RELAY_MAX_COPY_CHARS,
+        required_terms=required_terms,
+        forbidden_terms=("Discord", "http://", "https://", "www."),
+        fallback_messages=[winner_message],
+        metadata={"subagent": "arena-relay", "war_period_label": label},
+    )
+    return _build_generated_war_champ_winner_result(signals, generated)
 
 
 def _is_low_value_public_departure(signal: dict) -> bool:
@@ -880,6 +1190,8 @@ def _arena_relay_uses_cooldown(intent: str | None) -> bool:
     """Cooldown is for generic broadcast relays; action cards use policy caps."""
     return intent not in {
         "welcome_relay",
+        "war_relay_brief",
+        "war_champ_winner_relay",
     }
 
 
@@ -1136,6 +1448,34 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                         member_join_signals,
                         profile_facts=welcome_profile_facts,
                     )
+            elif outcome.get("intent") == "war_relay_brief":
+                action_memory_context = _memory_context_with_leader_action_feedback(
+                    memory_context,
+                    await asyncio.to_thread(
+                        db.list_leader_action_feedback_profiles,
+                        action_type="in_game_relay",
+                        limit=1,
+                    ),
+                )
+                result = await _generate_war_relay_result(
+                    delivery_signals,
+                    base_context=context,
+                    memory_context=action_memory_context,
+                )
+            elif outcome.get("intent") == "war_champ_winner_relay":
+                action_memory_context = _memory_context_with_leader_action_feedback(
+                    memory_context,
+                    await asyncio.to_thread(
+                        db.list_leader_action_feedback_profiles,
+                        action_type="in_game_relay",
+                        limit=1,
+                    ),
+                )
+                result = await _generate_war_champ_winner_result(
+                    delivery_signals,
+                    base_context=context,
+                    memory_context=action_memory_context,
+                )
             else:
                 result = _build_arena_relay_result(delivery_signals)
             if result is not None:

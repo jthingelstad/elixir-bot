@@ -560,15 +560,16 @@ def test_season_awards_granted_returns_none_when_only_participants():
     assert _build_season_awards_signal(131, per_award, "2026-04-06") is None
 
 
-def test_season_awards_signal_routes_to_clan_events():
-    """plan_signal_outcomes sends season_awards_granted to #clan-events."""
+def test_season_awards_signal_routes_to_clan_events_and_arena_relay():
+    """plan_signal_outcomes sends season awards to Discord and a final War Champ relay."""
     from runtime.channel_subagents import plan_signal_outcomes
     signal = {"type": "season_awards_granted", "season_id": 131}
     outcomes = plan_signal_outcomes([signal])
-    assert len(outcomes) == 1
-    assert outcomes[0]["target_channel_key"] == "clan-events"
-    assert outcomes[0]["intent"] == "season_awards_post"
-    assert outcomes[0]["required"] is True
+    assert len(outcomes) == 2
+    assert [(outcome["target_channel_key"], outcome["intent"], outcome["required"]) for outcome in outcomes] == [
+        ("clan-events", "season_awards_post", True),
+        ("arena-relay", "war_champ_winner_relay", False),
+    ]
 
 
 # -- list_awards + award_leaderboard helpers ---------------------------------

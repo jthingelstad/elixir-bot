@@ -2705,6 +2705,90 @@ def test_leader_action_recommendation_logs_policy_skip_with_candidate_context():
     assert mock_skip_log.await_args.kwargs["rationale"] == "last seen 8 days ago; no war participation"
 
 
+def test_war_champ_standings_routes_to_arena_relay():
+    outcomes = plan_signal_outcomes([
+        {"type": "war_champ_standings", "season_id": 134, "section_index": 2},
+    ])
+
+    assert any(
+        outcome["target_channel_key"] == "arena-relay"
+        and outcome["intent"] == "war_relay_brief"
+        and outcome["required"] is False
+        for outcome in outcomes
+    )
+
+
+def test_war_relay_copy_uses_short_season_week_label_and_champ_standings():
+    from runtime.clan_chat_copy import ClanChatCopyResult
+    from runtime.signals.delivery import _generate_war_relay_result
+
+    generated = ClanChatCopyResult(messages=[
+        "S134 W3 recap: POAP KINGS finished 1st with 14,000 fame. Thanks for using decks. - E",
+        "War Champ after S134 W3: Alice leads with 12,300 fame; Bob and Cam are chasing. - E",
+    ])
+    signals = [
+        {
+            "type": "war_week_complete",
+            "season_id": 134,
+            "section_index": 2,
+            "week": 3,
+            "our_rank": 1,
+            "our_fame": 14000,
+        },
+        {
+            "type": "war_champ_standings",
+            "season_id": 134,
+            "section_index": 2,
+            "week": 3,
+            "standings": [
+                {"name": "Alice", "tag": "#A", "total_fame": 12300},
+                {"name": "Bob", "tag": "#B", "total_fame": 11100},
+                {"name": "Cam", "tag": "#C", "total_fame": 10900},
+            ],
+        },
+    ]
+
+    with patch("runtime.signals.delivery.generate_clan_chat_copy", new=AsyncMock(return_value=generated)) as mock_generate:
+        result = asyncio.run(_generate_war_relay_result(signals))
+
+    assert result["event_type"] == "war_relay_brief"
+    assert result["metadata"]["objective"] == "war_recap_and_champ_race"
+    assert result["metadata"]["relay_copy_count"] == 2
+    assert result["metadata"]["war_period_label"] == "S134 W3"
+    request = mock_generate.await_args.kwargs
+    assert request["intent"] == "war_weekly_recap_relay"
+    assert request["required_terms"] == ("S134 W3", "War Champ")
+    assert "Season 134 Week 3 is `S134 W3`" in request["context"]
+
+
+def test_war_champ_winner_relay_uses_final_season_label_and_winner():
+    from runtime.clan_chat_copy import ClanChatCopyResult
+    from runtime.signals.delivery import _generate_war_champ_winner_result
+
+    generated = ClanChatCopyResult(messages=[
+        "S134 War Champ: Alice wins it with 48,000 fame. Huge season. - E",
+    ])
+    signals = [{
+        "type": "season_awards_granted",
+        "season_id": 134,
+        "war_champ": [
+            {"rank": 1, "name": "Alice", "tag": "#A", "metric_value": 48000, "metric_unit": "fame"},
+            {"rank": 2, "name": "Bob", "tag": "#B", "metric_value": 44000, "metric_unit": "fame"},
+        ],
+    }]
+
+    with patch("runtime.signals.delivery.generate_clan_chat_copy", new=AsyncMock(return_value=generated)) as mock_generate:
+        result = asyncio.run(_generate_war_champ_winner_result(signals))
+
+    assert result["event_type"] == "war_champ_winner_relay"
+    assert result["metadata"]["objective"] == "war_champ_winner"
+    assert result["metadata"]["target_player_name"] == "Alice"
+    assert result["metadata"]["war_period_label"] == "S134"
+    request = mock_generate.await_args.kwargs
+    assert request["intent"] == "war_champ_winner_relay"
+    assert request["required_terms"] == ("S134", "War Champ", "Alice")
+
+
 def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
     """After the recap, its best member story is offered as a clan-chat
     relay card so the non-Discord majority can be reached through game
