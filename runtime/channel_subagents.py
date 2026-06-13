@@ -9,7 +9,7 @@ from memory_store import list_memories
 from storage.contextual_memory import upsert_summary_memory
 
 # Durable milestones — celebratory and infrequent, per-player. Routed to
-# #player-progress. Clan-aggregate records (clan_war_trophies_record) live
+# #trophy-case. Clan-aggregate records (clan_war_trophies_record) live
 # in CLAN_EVENT_SIGNAL_TYPES instead — not a personal achievement.
 PROGRESSION_SIGNAL_TYPES = {
     "arena_change",
@@ -29,7 +29,7 @@ PROGRESSION_SIGNAL_TYPES = {
 
 # Volatile battle-mode activity outside of war — hot streaks, trophy pushes,
 # Path of Legends promotions/demotions, Ultimate Champion reaches, global
-# rank attainments. Routed to #trophy-road.
+# rank attainments. Routed to #trophy-case.
 BATTLE_MODE_SIGNAL_TYPES = {
     "battle_hot_streak",
     "battle_trophy_push",
@@ -90,7 +90,7 @@ TOURNAMENT_SIGNAL_TYPES = {
 # War-recap signals — routed through a dedicated clean-context generator to
 # keep the LLM from confabulating season/standings details from RAG memory
 # or stale clan context (the 04-19 "Season 130 closes" misfire). Channels
-# stay as normal (#river-race, #announcements, #leader-lounge) via the
+# stay as normal (#river-race, #royal-decrees, #king-tower) via the
 # existing war routing rule; only the generator changes.
 WAR_RECAP_SIGNAL_TYPES = {
     "war_completed",
@@ -114,7 +114,7 @@ WAR_RELAY_SIGNAL_TYPES = {
     "war_season_complete",
 }
 
-# Season awards — one aggregated post to #clan-events when a season's
+# Season awards — one aggregated post to #clan-chronicle when a season's
 # podium grants land. Replaces the old per-award Discord spam (~12 fires).
 # Uses a dedicated clean-context generator so the signal payload is the
 # only ground truth for names, fame, and ranks.
@@ -155,21 +155,21 @@ def signal_routing_summary() -> list[dict]:
             "family": "badge_level_milestone",
             "match": "all signals in the batch are badge level milestones",
             "targets": [
-                {"subagent": "player-progress", "intent": "player_progress", "required": False},
+                {"subagent": "member-highlights", "intent": "player_progress", "required": False},
             ],
         },
         {
             "family": "battle_mode",
             "match": "all signals in the batch are battle-mode signals (hot streak, trophy push, PoL promotion)",
             "targets": [
-                {"subagent": "trophy-road", "intent": "battle_mode_update", "required": True},
+                {"subagent": "member-highlights", "intent": "battle_mode_update", "required": True},
             ],
         },
         {
             "family": "progression",
             "match": "all signals in the batch are non-optional durable milestones",
             "targets": [
-                {"subagent": "player-progress", "intent": "player_progress", "required": True},
+                {"subagent": "member-highlights", "intent": "player_progress", "required": True},
             ],
         },
         {
@@ -384,28 +384,27 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
         return outcomes
 
     if all((signal.get("type") in OPTIONAL_PROGRESSION_SIGNAL_TYPES) for signal in signals):
-        add("player-progress", "player_progress", required=False)
+        add("member-highlights", "player_progress", required=False)
         return outcomes
 
     if all(is_battle_mode_signal(signal) for signal in signals):
-        add("trophy-road", "battle_mode_update", required=True)
+        add("member-highlights", "battle_mode_update", required=True)
         return outcomes
 
     if all(is_progression_signal(signal) for signal in signals):
-        add("player-progress", "player_progress", required=True)
+        add("member-highlights", "player_progress", required=True)
         if any(is_arena_relay_celebration_signal(signal) for signal in signals):
             add("arena-relay", "celebration_relay", required=False)
         return outcomes
 
-    # Mixed durable + battle-mode batches: split so each lane gets only its kind.
+    # Mixed durable + battle-mode batches now share one public player-story lane.
     if all(
         is_progression_signal(signal) or is_battle_mode_signal(signal)
         for signal in signals
     ):
-        if any(is_progression_signal(signal) for signal in signals):
-            add("player-progress", "player_progress", required=True)
-        if any(is_battle_mode_signal(signal) for signal in signals):
-            add("trophy-road", "battle_mode_update", required=True)
+        add("member-highlights", "member_highlights", required=True)
+        if any(is_arena_relay_celebration_signal(signal) for signal in signals):
+            add("arena-relay", "celebration_relay", required=False)
         return outcomes
 
     if any((signal.get("type") == "member_join") for signal in signals):

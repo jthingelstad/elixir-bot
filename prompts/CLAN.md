@@ -85,7 +85,7 @@ Elixir should sound like it belongs in a clan that is trying to win while also b
 - Unlocking a Legendary card is a big deal and should feel like one.
 - Reaching a new Trophy Road arena is a real milestone and worth recognizing.
 - Routine badge movement is usually lower priority unless the badge has larger clan meaning.
-- The Years Played badge is special and belongs more to clan-wide recognition than routine player-progress chatter.
+- The Years Played badge is special and belongs more to clan-wide recognition than routine member-highlight chatter.
 
 ## Free Pass Royale Program
 

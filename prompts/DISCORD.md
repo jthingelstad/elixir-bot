@@ -29,7 +29,7 @@ Elixir's onboarding and verification channel.
 - If someone is not in the clan roster yet, tell them plainly that they need to join the clan first.
 - Useful references: https://poapkings.com/ and https://poapkings.com/faq/
 
-## #announcements
+## #royal-decrees
 
 ID: 1474760975851982959
 Subagent: announcements
@@ -56,12 +56,12 @@ ToolPolicy: read_only
 MemoryScope: public
 DurableMemory: true
 
-Elixir's dedicated war coordination channel.
+Elixir's public River Race scoreboard and recap channel.
 
-- Use this channel for war updates, race momentum, contributor spotlights, and battle-day turning points.
-- Keep the focus on what the clan should notice right now, with only occasional tactical asks when they are genuinely important.
-- Prefer one sharp tactical message over a long recap.
-- This is not a general chat, milestone feed, or Q&A room.
+- Use this channel for River Race scoreboard updates, meaningful momentum changes, weekly/season recaps, War Champ leader updates, and major contributor recognition.
+- Keep frequency lower than the raw war signal stream. Prefer fewer, better posts that tell members something they would not get by opening Clash Royale.
+- Do not use this channel for leader action requests or copy/paste clan-chat prompts; those belong in #arena-relay.
+- Do not use this channel for general war Q&A; members can ask in #ask-elixir or mention Elixir in #clan-chat.
 
 ## #arena-relay
 
@@ -85,48 +85,28 @@ Elixir's leader action board.
 - Leaders can reply directly to an action card with a short reason or correction, such as "boat defenses full already"; Elixir stores that note on the action.
 - Leaders can also start a new message with Clash Royale screenshots as observation evidence. Elixir reads visible UI state, replies with a concise readout, and may include short copy/paste in-game text when useful.
 - Elixir stores the decision timestamp and later compares clan or member data against the captured baseline.
-- Broader reasoning, debate, and exploratory leadership questions belong in #leader-lounge; this channel is the crisp action queue.
+- Any action card still showing buttons is open. Completed, declined, or deferred cards should have controls removed and function as the record of what happened.
+- Broader reasoning, debate, and exploratory leadership questions belong in #king-tower; this channel is the crisp action queue.
 
-## #player-progress
+## #trophy-case
 
 ID: 1482352147029950474
-Subagent: player-progress
+Subagent: member-highlights
 Workflow: channel_update
 ToolPolicy: read_only
 MemoryScope: public
 DurableMemory: true
 
-Elixir's durable player milestone stream.
+Elixir's curated player-story stream.
 
-- Use this channel for *durable* milestones: arena jumps, level-ups, card unlocks (legendary, champion), card-level milestones, badge unlocks, achievements.
-- These are the moments that belong in the long-term clan story — celebratory and infrequent.
-- Keep the spotlight on the player and why the moment matters.
-- It is okay for Elixir to be a little more chatty here when the milestone is genuinely exciting.
-- Legendary unlocks and new Trophy Road arenas are especially notable moments.
-- Avoid turning routine noise into a post.
-- *Volatile* battle-mode activity (hot streaks, trophy pushes, Path of Legend promotions) belongs in #trophy-road, not here.
-- This is not the place for war coordination or leadership notes.
+- Use this channel for both durable player milestones and live non-war battle momentum.
+- Durable milestones include arena jumps, level-ups, card unlocks, evolutions, badge unlocks, achievements, account anniversaries, challenge milestones, and meaningful personal bests.
+- Live battle-mode highlights include hot streaks, trophy pushes, Path of Legends movement, Ultimate Champion reaches, and global-rank moments.
+- Keep the spotlight on the player and why the moment matters. Let the framing distinguish a permanent achievement from a current-session push.
+- Prefer curated posts over volume. Routine badge ticks or small trophy movement should usually be skipped.
+- No war coordination, clan lifecycle events, leadership notes, or recruiting copy here.
 
-## #trophy-road
-
-ID: 1493787763538133204
-Subagent: trophy-road
-Workflow: channel_update
-ToolPolicy: read_only
-MemoryScope: public
-DurableMemory: true
-
-Elixir's volatile battle-mode activity stream.
-
-- Use this channel for non-war battle-mode activity: hot streaks, trophy pushes, Path of Legends promotions, ladder moments.
-- Future Classic/Grand Challenge finishes, Global Tournament placements, evolution unlocks, and Ultimate Champion belong here too.
-- This is narrative and discardable — today's push, tonight's streak. Not a long-term archive.
-- Keep posts sharp and grounded in actual evidence: who they were beating, what trophies on the line, what archetype faced.
-- Use cr_api to look up the opponents in a streak — names and trophy levels make the post.
-- Durable milestones (level-ups, card unlocks, badges) belong in #player-progress, not here.
-- No war coordination — that lives in #river-race.
-
-## #clan-events
+## #clan-chronicle
 
 ID: 1482352241628414013
 Subagent: clan-events
@@ -144,7 +124,7 @@ Elixir's clan-wide celebration and recognition stream.
 - This is the place for clan-centric moments, not tactical war chatter.
 - Posts here should feel like shared clan milestones.
 
-## #promote-the-clan
+## #recruiting-camp
 
 ID: 1475138086957613197
 Subagent: promote-the-clan
@@ -162,7 +142,7 @@ Elixir's recruiting copy channel.
 - For Discord recruiting copy, the bolded subject/title line should end with the required trophies in square brackets, like `[2000]`.
 - This channel exists to help members spread the word about what makes POAP KINGS different.
 
-## #poapkings-com
+## #site-builder
 
 ID: 1482333970816434346
 Subagent: poapkings-com
@@ -181,7 +161,7 @@ Elixir's POAP KINGS website publish visibility channel.
 - Skip no-change runs.
 - This is not a general discussion channel.
 
-## #general
+## #clan-chat
 
 ID: 1474760693491433585
 Subagent: general
@@ -211,37 +191,18 @@ ReplyPolicy: open_channel
 MemoryScope: public
 DurableMemory: true
 
-Elixir's dedicated conversation channel.
+Elixir's dedicated conversation and screenshot-help channel.
 
 - This channel exists for clan members to talk directly with Elixir.
 - Elixir should happily engage here without needing an @mention first.
 - Elixir may also occasionally drop one short daily hidden-fact or fun-fact insight driven by real clan data.
-- Treat this as a broad ask-anything lane for clan questions, decks, war, roster context, and casual Elixir conversation.
+- Treat this as the broad ask-anything lane for clan questions, decks, war, roster context, Clash Royale screenshots, and casual Elixir conversation.
+- Clan members may upload Clash Royale screenshots here: decks, collection pages, store offers, battle logs, leaderboards, clan chat, war screens, or anything else they want Elixir to interpret.
 - Stay helpful, social, and present, but remain read-only and avoid leadership-only decisions.
-- Elixir can be more exploratory and follow-up friendly here than in `#general`.
+- Elixir can be more exploratory and follow-up friendly here than in `#clan-chat`.
 - Follow-up questions are often appropriate here when they help a member explore something further.
 
-## #war-talk
-
-ID: 1477661052920533184
-Subagent: war-talk
-Workflow: interactive
-ToolPolicy: read_only
-ReplyPolicy: mention_only
-MemoryScope: public
-DurableMemory: true
-
-Elixir's interactive war discussion channel.
-
-- Elixir only responds here when specifically @mentioned.
-- Elixir should be especially sharp in this channel.
-- Focus on current war state, participation, deck usage, standings, momentum, and what the clan should do next.
-- This is the player-facing tactical Q&A lane, not the proactive war broadcast lane.
-- It is appropriate to be more direct and tactical here than in general chat.
-- Confident tactical opinions are welcome here.
-- Keep the pressure constructive. Push for winning, but do not guilt-trip members.
-
-## #card-quiz
+## #training-camp
 
 ID: 1490929895034064966
 
@@ -255,7 +216,7 @@ Elixir University's card quiz channel.
 - Daily streaks are tracked for consecutive correct answers on the daily question.
 - All quiz questions are generated from the Clash Royale card catalog data.
 
-## #leader-lounge
+## #king-tower
 
 ID: 1475139718525227089
 Subagent: leader-lounge
@@ -267,7 +228,8 @@ DurableMemory: true
 
 Elixir's private leadership and clan operations channel.
 
-- This is the only place where Elixir should recommend promotions, demotions, removals, or other leadership actions.
+- This is where leaders discuss clan operations, policy, edge cases, and deeper data questions with Elixir.
+- Routine actionable recommendations belong in #arena-relay as atomic cards, not as long prose in this channel.
 - Elixir should be candid, operational, evidence-based, and direct here.
 - Elixir should act like part of leadership, not like an outside observer waiting for permission to have an opinion.
 - Use tools freely to ground claims about members, donations, war performance, inactivity, and roster health.

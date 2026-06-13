@@ -911,7 +911,7 @@ def test_deliver_signal_group_saves_multipart_channel_update_as_separate_message
 
 
 def test_deliver_signal_group_skips_post_when_llm_returns_no_post_decision():
-    """Backstop for the #player-progress 2026-04-20 incidents: when the LLM
+    """Backstop for public highlight incidents: when the LLM
     returns metadata.decision == "no_post", the pipeline must not post the
     refusal text to Discord and must mark the outcome as skipped."""
     signals = [{"type": "best_trophies_peak", "tag": "#ABC123", "old_best": 6560, "new_best": 6593}]
@@ -922,13 +922,13 @@ def test_deliver_signal_group_skips_post_when_llm_returns_no_post_decision():
         return fn(*args, **kwargs)
 
     channel = AsyncMock()
-    channel.name = "player-progress"
+    channel.name = "trophy-case"
     channel.type = "text"
 
     refusal_result = {
         "event_type": "channel_update",
         "summary": "PB bump does not meet durable-milestone bar",
-        "content": "This signal does not warrant a post in #player-progress...",
+        "content": "This signal does not warrant a post in #trophy-case...",
         "metadata": {"decision": "no_post", "reason": "routine_ladder_movement"},
     }
 
@@ -937,7 +937,7 @@ def test_deliver_signal_group_skips_post_when_llm_returns_no_post_decision():
         patch("runtime.jobs._signals.plan_signal_outcomes", return_value=[{
             "source_signal_key": "best_trophies_peak||#ABC123||||||",
             "source_signal_type": "best_trophies_peak",
-            "target_channel_key": "player-progress",
+            "target_channel_key": "member-highlights",
             "target_channel_id": "1482352147029950474",
             "intent": "player_progress",
             "required": False,
@@ -1154,7 +1154,7 @@ def test_plan_signal_outcomes_routes_leadership_audience_system_signal_to_leader
     assert outcomes[0]["target_channel_key"] == "leader-lounge"
 
 
-def test_plan_signal_outcomes_routes_battle_hot_streak_to_trophy_road():
+def test_plan_signal_outcomes_routes_battle_hot_streak_to_member_highlights():
     outcomes = plan_signal_outcomes([{
         "type": "battle_hot_streak",
         "tag": "#ABC",
@@ -1163,12 +1163,12 @@ def test_plan_signal_outcomes_routes_battle_hot_streak_to_trophy_road():
     }])
 
     assert len(outcomes) == 1
-    assert outcomes[0]["target_channel_key"] == "trophy-road"
+    assert outcomes[0]["target_channel_key"] == "member-highlights"
     assert outcomes[0]["intent"] == "battle_mode_update"
     assert outcomes[0]["required"] is True
 
 
-def test_plan_signal_outcomes_routes_path_of_legend_promotion_to_trophy_road():
+def test_plan_signal_outcomes_routes_path_of_legend_promotion_to_member_highlights():
     outcomes = plan_signal_outcomes([{
         "type": "path_of_legend_promotion",
         "tag": "#ABC",
@@ -1177,10 +1177,10 @@ def test_plan_signal_outcomes_routes_path_of_legend_promotion_to_trophy_road():
     }])
 
     assert len(outcomes) == 1
-    assert outcomes[0]["target_channel_key"] == "trophy-road"
+    assert outcomes[0]["target_channel_key"] == "member-highlights"
 
 
-def test_plan_signal_outcomes_routes_durable_milestone_to_player_progress():
+def test_plan_signal_outcomes_routes_durable_milestone_to_member_highlights():
     outcomes = plan_signal_outcomes([{
         "type": "new_card_unlocked",
         "tag": "#ABC",
@@ -1190,7 +1190,7 @@ def test_plan_signal_outcomes_routes_durable_milestone_to_player_progress():
     }])
 
     channels = [outcome["target_channel_key"] for outcome in outcomes]
-    assert channels == ["player-progress", "arena-relay"]
+    assert channels == ["member-highlights", "arena-relay"]
     assert outcomes[0]["required"] is True
     assert outcomes[1]["intent"] == "celebration_relay"
     assert outcomes[1]["required"] is False
@@ -1216,7 +1216,7 @@ def test_plan_signal_outcomes_routes_cr_account_anniversary_to_arena_relay_sidec
     }])
 
     channels = [outcome["target_channel_key"] for outcome in outcomes]
-    assert channels == ["player-progress", "arena-relay"]
+    assert channels == ["member-highlights", "arena-relay"]
     assert outcomes[1]["intent"] == "celebration_relay"
 
 
@@ -1227,8 +1227,8 @@ def test_plan_signal_outcomes_splits_mixed_durable_and_battle_mode_batch():
     ])
 
     channels = [o["target_channel_key"] for o in outcomes]
-    assert "trophy-road" in channels
-    assert "player-progress" in channels
+    assert channels == ["member-highlights"]
+    assert outcomes[0]["intent"] == "member_highlights"
 
 
 def test_battle_mode_group_classifies_known_modes():
@@ -1253,7 +1253,7 @@ def test_plan_signal_outcomes_makes_badge_level_only_batches_optional():
     }])
 
     assert len(outcomes) == 1
-    assert outcomes[0]["target_channel_key"] == "player-progress"
+    assert outcomes[0]["target_channel_key"] == "member-highlights"
     assert outcomes[0]["required"] is False
 
 
@@ -3111,7 +3111,7 @@ def test_notify_poapkings_publish_posts_success_to_poapkings_channel():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("runtime.jobs._site._channel_config_by_key", return_value={
             "id": 900,
-            "name": "#poapkings-com",
+            "name": "#site-builder",
             "subagent_key": "poapkings-com",
             "memory_scope": "public",
         }),

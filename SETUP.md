@@ -256,7 +256,7 @@ POAP KINGS website publishes:
 grep "POAP KINGS" /path/to/elixir.log | tail -20
 ```
 
-If GitHub-backed publishes are working, Elixir should also post operational visibility into `#poapkings-com`.
+If GitHub-backed publishes are working, Elixir should also post operational visibility into `#site-builder`.
 
 ### Prompt failure review
 
@@ -358,7 +358,7 @@ The following are common sources of stale docs or stale assumptions:
 - activity cadence changed in `runtime/activities.py`
 - channel contract changed in `prompts/DISCORD.md`
 - reply policy changed for a channel like `#ask-elixir`
-- a new operational channel like `#poapkings-com` was added
+- a new operational channel like `#site-builder` was added
 - startup behavior changed in `runtime/app.py`
 
 When in doubt, trust code over prose:

@@ -206,7 +206,7 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario(
         "single_hot_streak",
-        "One battle_hot_streak signal. Should produce one #trophy-road post that "
+        "One battle_hot_streak signal. Should produce one #trophy-case post that "
         "ideally cites opponent evidence via cr_api lookup.",
         scenario_single_hot_streak,
     ),
@@ -217,24 +217,23 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario(
         "member_join_pair",
-        "Two new members joined. Hard-floor for both. Should land on #clan-events "
-        "(public welcome) and #leader-lounge (ops note).",
+        "Two new members joined. Hard-floor for both. Should land on #clan-chronicle "
+        "(public welcome) and #king-tower (ops note).",
         scenario_member_join_pair,
     ),
     Scenario(
         "card_unlock",
-        "Durable milestone. Should land on #player-progress (NOT #trophy-road).",
+        "Durable milestone. Should land on #trophy-case.",
         scenario_card_unlock,
     ),
     Scenario(
         "arena_change",
-        "Durable milestone. Should land on #player-progress.",
+        "Durable milestone. Should land on #trophy-case.",
         scenario_arena_change,
     ),
     Scenario(
         "path_of_legend",
-        "Volatile battle-mode signal (Phase 3 reroute). Should land on #trophy-road, "
-        "NOT #player-progress.",
+        "Volatile battle-mode signal. Should land on #trophy-case with live-push framing.",
         scenario_path_of_legend,
     ),
     Scenario(
@@ -251,7 +250,7 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario(
         "capability_unlock",
-        "System signal. Hard-floor; should land on #announcements.",
+        "System signal. Hard-floor; should land on #royal-decrees.",
         scenario_capability_unlock,
     ),
 ]

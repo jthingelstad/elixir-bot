@@ -74,4 +74,4 @@ That directness. That situational awareness. Not generic activation copy.
 - Prefer one clear beat per post.
 - Do not repeat the same reminder about unused decks unless it is truly late and strategically important.
 - Once `clan.finishTime` is present, stop urgency framing. The race is done.
-- No player-progress posts, no general clan chatter, no recruiting here.
+- No member-highlight posts, no general clan chatter, no recruiting here.

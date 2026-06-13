@@ -6,7 +6,7 @@ import json
 import logging
 
 import db
-from runtime.channel_subagents import CLAN_RECORD_SIGNAL_TYPES
+from runtime.channel_subagents import BATTLE_MODE_SIGNAL_TYPES, CLAN_RECORD_SIGNAL_TYPES
 
 log = logging.getLogger("elixir")
 
@@ -181,24 +181,26 @@ def _build_outcome_context(outcome, signals, clan, war):
             lines.extend(["", "=== RACE STANDINGS ==="] + standings_lines)
         lines.extend(["", "=== BACKGROUND DATA (for reasoning, do not restate as-is) ==="])
         lines.extend(_build_compact_war_context(war))
-    elif channel_key == "player-progress":
-        lines.extend(["", "Focus on the player's achievement and why it is worth celebrating."])
+    elif channel_key == "member-highlights":
+        signal_types = {signal.get("type") for signal in (signals or [])}
+        if signal_types and signal_types <= BATTLE_MODE_SIGNAL_TYPES:
+            lines.extend([
+                "",
+                "Focus on the *push happening right now* — non-war battle activity. Investigate before you post: when a streak names a player, "
+                "use cr_api(aspect='player_battles') to see who they were beating, then cr_api(aspect='player') on a notable opponent if it sharpens the post.",
+            ])
+        elif signal_types and signal_types & BATTLE_MODE_SIGNAL_TYPES:
+            lines.extend([
+                "",
+                "This #trophy-case batch mixes durable progress with current battle-mode momentum. Write one cohesive player-story post instead of pretending these are separate channels.",
+            ])
+        else:
+            lines.extend(["", "Focus on the player's achievement and why it is worth celebrating."])
         tag = first.get("tag")
         if tag:
             insight_lines = _build_player_insight_context(tag)
             if insight_lines:
                 lines.extend(["", "=== PLAYER CONTEXT (use to interpret the achievement) ==="] + insight_lines)
-    elif channel_key == "trophy-road":
-        lines.extend([
-            "",
-            "Focus on the *push happening right now* \u2014 non-war battle activity. Investigate before you post: when a streak names a player, "
-            "use cr_api(aspect='player_battles') to see who they were beating, then cr_api(aspect='player') on a notable opponent if it sharpens the post.",
-        ])
-        tag = first.get("tag")
-        if tag:
-            insight_lines = _build_player_insight_context(tag)
-            if insight_lines:
-                lines.extend(["", "=== PLAYER CONTEXT (current form / streak / trend) ==="] + insight_lines)
     elif channel_key == "clan-events":
         has_likely_kick = any(s.get("likely_kicked") for s in (signals or []))
         is_clan_record = any((s.get("type") in CLAN_RECORD_SIGNAL_TYPES) for s in (signals or []))
@@ -209,7 +211,7 @@ def _build_outcome_context(outcome, signals, clan, war):
         else:
             lines.extend(["", "Focus on the communal clan moment and keep the tone welcoming and proud."])
     elif channel_key == "leader-lounge":
-        lines.extend(["", "This is a leadership-facing factual note. Include useful operational context, not public hype."])
+        lines.extend(["", "This is a #king-tower leadership-facing factual note. Include useful operational context, not public hype."])
         tag = first.get("tag")
         if tag:
             try:

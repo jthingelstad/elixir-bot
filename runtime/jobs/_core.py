@@ -431,7 +431,7 @@ async def _award_detection_tick():
     check is more than enough. Runs the same detectors the war-awareness
     pipeline used to fire hourly, now isolated to its own activity and
     routed through the normal signal delivery path so new grants still
-    surface in #clan-events.
+    surface in #clan-chronicle.
     """
     from heartbeat._awards import (
         detect_season_awards,

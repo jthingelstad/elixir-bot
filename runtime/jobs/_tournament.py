@@ -282,14 +282,14 @@ def _format_tournament_close_post(tournament_name: str, api_data: dict, *, top_n
 
 
 async def _post_tournament_close(tournament_tag: str, api_data: dict) -> None:
-    """Post the deterministic close-out (facts + leaderboard) to #clan-events."""
+    """Post the deterministic close-out (facts + leaderboard) to #clan-chronicle."""
     try:
         tournament = await asyncio.to_thread(db.get_tournament_by_tag, tournament_tag)
         tournament_name = (tournament or {}).get("name") or api_data.get("name") or tournament_tag
         text = _format_tournament_close_post(tournament_name, api_data)
         channel_id = _get_singleton_channel_id("clan-events")
         if not channel_id:
-            log.error("Tournament close: #clan-events channel not configured")
+            log.error("Tournament close: #clan-chronicle channel not configured")
             return
         channel = bot.get_channel(channel_id)
         if not channel:
@@ -345,7 +345,7 @@ async def resume_pending_tournament_recaps() -> None:
 
 
 async def _tournament_recap(tournament_tag: str):
-    """Generate and post a tournament recap to #clan-events."""
+    """Generate and post a tournament recap to #clan-chronicle."""
     try:
         context = await asyncio.to_thread(db.build_tournament_recap_context, tournament_tag)
         if not context:
@@ -364,7 +364,7 @@ async def _tournament_recap(tournament_tag: str):
 
         channel_id = _get_singleton_channel_id("clan-events")
         if not channel_id:
-            log.error("Tournament recap: #clan-events channel not configured")
+            log.error("Tournament recap: #clan-chronicle channel not configured")
             return
         channel = bot.get_channel(channel_id)
         if not channel:

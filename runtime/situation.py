@@ -52,8 +52,7 @@ HARD_POST_SIGNAL_TYPES = frozenset({
 # there.
 CHANNEL_LANES: dict[str, set[str]] = {
     "river-race": {"war"},
-    "trophy-road": {"battle_mode"},
-    "player-progress": {"milestone"},
+    "member-highlights": {"battle_mode", "milestone"},
     "clan-events": {"clan_event"},
     "leader-lounge": {"war", "leadership", "clan_event"},
     "announcements": {"system"},
