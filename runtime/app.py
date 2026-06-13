@@ -253,7 +253,6 @@ from runtime.jobs import (  # noqa: E402,F401
     _clan_awareness_tick,
     _clan_wars_intel_report,
     _commit_site_content_or_raise,
-    _daily_quiz_post,
     _db_maintenance_cycle,
     _deliver_signal_group,
     _deliver_signal_outcome,
@@ -407,12 +406,6 @@ async def on_ready():
             bot.loop.create_task(_card_catalog_sync())
         except Exception as exc:
             log.warning("Startup card catalog sync failed: %s", exc)
-        # Re-register persistent daily quiz view
-        try:
-            from modules.card_training.views import restore_daily_view
-            await restore_daily_view(bot)
-        except Exception as exc:
-            log.warning("Daily quiz view restore failed: %s", exc)
         try:
             from runtime.leader_action_ui import restore_leader_action_views
             await restore_leader_action_views(bot)

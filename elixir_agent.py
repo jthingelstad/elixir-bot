@@ -39,7 +39,6 @@ from agent.chat import (
 from agent.tool_exec import _execute_tool
 from agent.workflows import (
     analyze_arena_relay_screenshot,
-    explain_quiz_answer,
     generate_channel_update,
     generate_clan_chat_copy,
     generate_home_message,
@@ -77,7 +76,6 @@ __all__ = [
     "analyze_arena_relay_screenshot",
     "cr_api",
     "db",
-    "explain_quiz_answer",
     "generate_channel_update",
     "generate_clan_chat_copy",
     "generate_home_message",

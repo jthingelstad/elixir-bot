@@ -237,21 +237,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         legacy_commands=("promotion",),
     ),
     ActivityDefinition(
-        activity_key="daily-quiz",
-        owner_subagent="ask-elixir",
-        purpose="Post the daily Elixir University quiz question in #card-quiz.",
-        job_id="daily-quiz",
-        job_function="_daily_quiz_post",
-        schedule_kind="cron",
-        schedule_config={
-            "hour": _attr("DAILY_QUIZ_HOUR", 10),
-            "minute": 0,
-        },
-        delivery_targets=(
-            "Discord: #card-quiz",
-        ),
-    ),
-    ActivityDefinition(
         activity_key="card-catalog-sync",
         owner_subagent="leader-lounge",
         purpose="Sync the Clash Royale card catalog from the API.",
