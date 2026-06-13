@@ -75,6 +75,39 @@ def _clip_relay_copy(text: str, limit: int = ARENA_RELAY_MAX_COPY_CHARS) -> str:
     return clip_clan_chat_text(text, limit=limit)
 
 
+def _first_text(mapping: dict, keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        value = mapping.get(key)
+        if value is None:
+            continue
+        text = " ".join(str(value).split())
+        if text:
+            return text
+    return None
+
+
+def _leader_action_skip_target(signals: list[dict] | tuple[dict, ...] | None) -> tuple[str | None, str | None]:
+    """Best-effort target extraction for #elixir-log skip decisions."""
+    name_keys = ("target_player_name", "player_name", "member_name", "current_name", "name")
+    tag_keys = ("target_player_tag", "player_tag", "member_tag", "tag")
+    for signal in signals or []:
+        if not isinstance(signal, dict):
+            continue
+        name = _first_text(signal, name_keys)
+        tag = _first_text(signal, tag_keys)
+        if name or tag:
+            return name, tag
+        for nested_key in ("target", "player", "member"):
+            nested = signal.get(nested_key)
+            if not isinstance(nested, dict):
+                continue
+            name = _first_text(nested, name_keys)
+            tag = _first_text(nested, tag_keys)
+            if name or tag:
+                return name, tag
+    return None, None
+
+
 def _ordinal(value) -> str | None:
     if not isinstance(value, int) or value <= 0:
         return None
@@ -1286,10 +1319,13 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     provisional_type = "in_game_relay"
                 allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical, action_type=provisional_type)
                 if not allowed:
+                    target_name, target_tag = _leader_action_skip_target(delivery_signals)
                     await post_leader_action_skip(
                         source="signal_delivery",
                         action_type=provisional_type,
                         reason=f"policy:{reason}",
+                        target_player_name=target_name,
+                        target_player_tag=target_tag,
                         signal_types=signal_types,
                     )
                     await asyncio.to_thread(

@@ -1854,6 +1854,73 @@ def test_signal_delivery_logs_leader_action_policy_skip():
     assert mock_upsert.call_args.kwargs["error_detail"] == "leader_action_policy:open_card_backlog:5/5"
 
 
+def test_signal_delivery_policy_skip_includes_player_target():
+    signals = [{
+        "type": "career_wins_milestone",
+        "signal_key": "career_wins_milestone:#DEF456:10000",
+        "name": "Vijay",
+        "tag": "#DEF456",
+    }]
+    clan = {"memberList": []}
+    war = {}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 1513758211206025227
+    channel.name = "leader-actions"
+    channel.type = "text"
+
+    with (
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals.plan_signal_outcomes", return_value=[{
+            "source_signal_key": "career_wins_milestone:#DEF456:10000",
+            "source_signal_type": "career_wins_milestone",
+            "target_channel_key": "arena-relay",
+            "target_channel_id": 1513758211206025227,
+            "intent": "celebration_relay",
+            "required": False,
+            "payload": {"signals": signals},
+            "delivery_status": "planned",
+        }]),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir.db.get_signal_outcome", return_value=None),
+        patch("elixir.db.list_channel_messages", return_value=[]),
+        patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
+        patch("runtime.signals.delivery.can_post_leader_action", return_value=(False, "daily_cap:4")),
+        patch("runtime.signals.delivery.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip_log,
+        patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
+        patch("elixir.db.upsert_signal_outcome") as mock_upsert,
+        patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "skipped"}]),
+        patch("runtime.jobs._signals._mark_signal_group_completed"),
+    ):
+        assert asyncio.run(elixir._deliver_signal_group(signals, clan, war))
+
+    mock_generate.assert_not_called()
+    mock_skip_log.assert_awaited_once()
+    assert mock_skip_log.await_args.kwargs["source"] == "signal_delivery"
+    assert mock_skip_log.await_args.kwargs["action_type"] == "celebration_relay"
+    assert mock_skip_log.await_args.kwargs["reason"] == "policy:daily_cap:4"
+    assert mock_skip_log.await_args.kwargs["target_player_name"] == "Vijay"
+    assert mock_skip_log.await_args.kwargs["target_player_tag"] == "#DEF456"
+    assert mock_skip_log.await_args.kwargs["signal_types"] == {"career_wins_milestone"}
+    assert mock_upsert.call_args.kwargs["delivery_status"] == "skipped"
+    assert mock_upsert.call_args.kwargs["error_detail"] == "leader_action_policy:daily_cap:4"
+
+
+def test_leader_action_skip_target_extracts_nested_member_fields():
+    from runtime.signals.delivery import _leader_action_skip_target
+
+    name, tag = _leader_action_skip_target([{
+        "type": "career_wins_milestone",
+        "member": {"player_name": "River", "player_tag": "#RIVER"},
+    }])
+
+    assert name == "River"
+    assert tag == "#RIVER"
+
+
 def test_arena_relay_cooldown_blocks_recent_posts():
     from datetime import datetime
     from runtime.signals.delivery import _arena_relay_recently_posted
