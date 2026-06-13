@@ -5,6 +5,7 @@ import logging
 
 import db
 from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
+from runtime.leader_action_ui import refresh_leader_action_card
 
 
 log = logging.getLogger("elixir")
@@ -139,6 +140,7 @@ async def handle_raw_reaction_add(payload) -> None:
                     payload.user_id,
                 )
                 queue_leader_action_feedback_refresh(action.get("action_type"))
+                await refresh_leader_action_card(app.bot, action)
             return
     feedback_value = feedback_value_for_emoji(getattr(payload, "emoji", None))
     if not feedback_value:
@@ -218,6 +220,7 @@ async def handle_raw_reaction_remove(payload) -> None:
                     payload.message_id,
                     payload.user_id,
                 )
+                await refresh_leader_action_card(app.bot, action)
             return
     feedback_value = feedback_value_for_emoji(getattr(payload, "emoji", None))
     if not feedback_value:
