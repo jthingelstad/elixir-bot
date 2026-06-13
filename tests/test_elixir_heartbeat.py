@@ -2360,8 +2360,13 @@ def test_weekly_leader_actions_post_to_arena_relay():
             "recommended": [{"member_ref": "King Levy", "player_tag": "#ABC123", "donations": 220, "war_races_played": 4, "tenure_days": 90}],
         }),
         patch("runtime.jobs._core.db.get_members_at_risk", return_value={
-            "members": [{"member_ref": "Vijay", "player_tag": "#DEF456", "reasons": [{"detail": "last seen 8 days ago"}]}],
+            "members": [{
+                "member_ref": "Vijay",
+                "player_tag": "#DEF456",
+                "reasons": [{"type": "inactive", "detail": "last seen 8 days ago", "value": 8, "threshold_days": 7}],
+            }],
         }),
+        patch("runtime.jobs._core._kick_candidate_availability_memory", return_value=None),
         patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
         patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=False),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
@@ -2382,6 +2387,8 @@ def test_weekly_leader_actions_post_to_arena_relay():
         "kick_recommendation",
         "promotion_recommendation",
     ]
+    assert mock_create.call_args_list[0].kwargs["baseline"]["policy_context"]["primary_signal"] == "inactivity_or_absence"
+    assert "policy_context" not in mock_create.call_args_list[1].kwargs["baseline"]
     assert mock_card.await_count == 2
     assert mock_card.await_args_list[0].kwargs["copy_messages"][0].startswith("Removing Vijay for now")
     assert mock_card.await_args_list[1].kwargs["copy_messages"][0].startswith("Promoting King Levy to Elder")
@@ -2428,6 +2435,7 @@ def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppresse
                 },
             ],
         }),
+        patch("runtime.jobs._core._kick_candidate_availability_memory", return_value=None),
         patch("runtime.jobs._core.db.has_recent_leader_action", side_effect=has_recent),
         patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=False),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
@@ -2450,6 +2458,87 @@ def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppresse
     assert posted == 1
     assert mock_create.call_args.kwargs["target_player_tag"] == "#IDLE"
     assert mock_create.call_args.kwargs["target_player_name"] == "Fresh Idle"
+
+
+def test_leader_action_scan_skips_active_low_donation_war_candidates():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 1513758211206025227
+    channel.name = "leader-actions"
+    channel.type = "text"
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("runtime.jobs._core.db.get_promotion_candidates", return_value={"recommended": []}),
+        patch("runtime.jobs._core.db.get_members_at_risk", return_value={
+            "members": [
+                {
+                    "member_ref": "angecleowill",
+                    "player_tag": "#P00C20YRJ",
+                    "clan_rank": 21,
+                    "activity_context": {"battle_days_ago": 0, "login_days_ago": 0},
+                    "reasons": [
+                        {"type": "low_donations", "detail": "0 donations this week"},
+                        {"type": "low_war_participation", "detail": "0 war races played this season"},
+                    ],
+                },
+            ],
+        }),
+        patch("runtime.jobs._core.db.create_leader_action_recommendation") as mock_create,
+        patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock()) as mock_card,
+        patch("runtime.jobs._core.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip,
+    ):
+        from runtime.jobs._core import _post_candidate_leader_action_recommendations
+        posted = asyncio.run(_post_candidate_leader_action_recommendations(max_actions=1))
+
+    assert posted == 0
+    mock_create.assert_not_called()
+    mock_card.assert_not_awaited()
+    mock_skip.assert_awaited_once()
+    assert mock_skip.await_args.kwargs["reason"] == "ineligible:no_inactivity_signal"
+    assert mock_skip.await_args.kwargs["target_player_name"] == "angecleowill"
+
+
+def test_kick_candidate_ineligibility_honors_availability_memory():
+    from memory_store import create_memory
+    from runtime.jobs._core import _kick_candidate_ineligibility_reason
+
+    active = {
+        "member_ref": "angecleowill",
+        "player_tag": "#P00C20YRJ",
+        "reasons": [
+            {"type": "low_donations", "detail": "0 donations this week"},
+            {"type": "low_war_participation", "detail": "0 war races played this season"},
+        ],
+    }
+    assert _kick_candidate_ineligibility_reason(active) == "no_inactivity_signal"
+
+    conn = db.get_connection(":memory:")
+    try:
+        memory = create_memory(
+            title="Fullboat limited availability",
+            body="Screenshot shows Fullboat said they will be camping for a week and may have limited signal.",
+            summary="Fullboat is camping with limited signal.",
+            source_type="elixir_inference",
+            is_inference=True,
+            confidence=0.9,
+            created_by="elixir:screenshot",
+            scope="leadership",
+            member_tag="#FULLBOAT",
+            conn=conn,
+        )
+        inactive = {
+            "member_ref": "Fullboat",
+            "player_tag": "#8U2P0JPR",
+            "reasons": [{"type": "inactive", "detail": "no battle in 9 days", "value": 9, "threshold_days": 7}],
+        }
+        assert _kick_candidate_ineligibility_reason(inactive, conn=conn) == f"availability_memory:{memory['memory_id']}"
+    finally:
+        conn.close()
 
 
 def test_kick_candidate_priority_prefers_multi_signal_risk_after_inactive():
