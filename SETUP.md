@@ -172,6 +172,8 @@ Current recurring activity set:
   Every hour at `:05` CT.
 - `player-progression`
   Every 30 minutes.
+- `api-sentinel`
+  Every 4 hours.
 - `daily-clan-insight`
   Daily at 12:00 PM CT.
 - `leadership-review`

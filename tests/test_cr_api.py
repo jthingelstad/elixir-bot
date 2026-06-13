@@ -11,8 +11,9 @@ import cr_api
 @pytest.fixture(autouse=True)
 def _clear_cr_api_cache():
     cr_api._cache_clear()
-    yield
-    cr_api._cache_clear()
+    with patch("cr_api._persist_raw_payload"):
+        yield
+        cr_api._cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -319,5 +320,35 @@ def test_get_cards_returns_none_on_error(mock_get, mock_record, mock_sleep):
     mock_get.side_effect = requests.Timeout("slow")
 
     result = cr_api.get_cards()
+
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# get_events tests
+# ---------------------------------------------------------------------------
+
+@patch("cr_api.runtime_status.record_api_call")
+@patch("cr_api.requests.get")
+def test_get_events_success(mock_get, mock_record):
+    """get_events returns the bare /events array."""
+    events = [{"eventTag": "#2PRC9GU0", "title": "Princess Gambit"}]
+    mock_get.return_value = _mock_response(events)
+
+    result = cr_api.get_events()
+
+    assert result == events
+    call_url = mock_get.call_args[0][0]
+    assert call_url.endswith("/events")
+
+
+@patch("cr_api.time.sleep")
+@patch("cr_api.runtime_status.record_api_call")
+@patch("cr_api.requests.get")
+def test_get_events_returns_none_on_error(mock_get, mock_record, mock_sleep):
+    """get_events returns None on RequestException."""
+    mock_get.side_effect = requests.Timeout("slow")
+
+    result = cr_api.get_events()
 
     assert result is None

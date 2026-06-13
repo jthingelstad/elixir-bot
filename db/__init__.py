@@ -617,6 +617,7 @@ _STORAGE_FACADE_MODULES = (
     "storage.player",
     "storage.trends",
     "storage.messages",
+    "storage.api_sentinel",
     "storage.metadata",
     "storage.tournament",
     "storage.card_catalog",

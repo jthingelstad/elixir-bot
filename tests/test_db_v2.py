@@ -41,6 +41,7 @@ def test_v2_schema_initializes_core_tables():
             "war_participation",
             "war_period_clan_status",
             "raw_api_payloads",
+            "api_sentinel_observations",
             "leader_action_recommendations",
             "runtime_job_status",
             "arena_relay_screenshot_observations",
@@ -139,7 +140,7 @@ def test_war_nudge_cleanup_migration_removes_retired_action_data():
             conn=conn,
         )
 
-        db._MIGRATIONS[-1](conn)
+        next(fn for fn in db._MIGRATIONS if fn.__name__ == "_migration_42")(conn)
 
         assert conn.execute(
             "SELECT COUNT(*) FROM leader_action_recommendations WHERE action_type = 'war_nudge_recommendation'"
@@ -1655,6 +1656,92 @@ def test_system_signal_queue_round_trips_pending_and_announced_state():
         db.mark_system_signal_announced("capability_boat_defense_intelligence_v1", conn=conn)
 
         assert db.list_pending_system_signals(conn=conn) == []
+    finally:
+        conn.close()
+
+
+def test_api_sentinel_baselines_existing_payloads_without_signals():
+    conn = db.get_connection(":memory:")
+    try:
+        payload = {
+            "tag": "#ABC",
+            "name": "King Thing",
+            "badges": [{"name": "CollectionLevel", "progress": 1597}],
+            "progress": {"seasonal-trophy-road-202606": {"wins": 2}},
+        }
+        db._store_raw_payload(conn, "player", "ABC", payload)
+        conn.commit()
+
+        result = db.bootstrap_api_sentinel_baseline(conn=conn)
+
+        assert result["bootstrapped"] is True
+        assert result["payloads"] == 1
+        observations = db.list_api_sentinel_observations(limit=100, conn=conn)
+        observed = {(item["sentinel_type"], item["scope"], item["name"]) for item in observations}
+        assert ("badge_name", "player.badges", "CollectionLevel") in observed
+        assert ("progress_key", "player.progress", "seasonal-trophy-road-202606") in observed
+        assert ("schema_path", "player", "badges[].name") in observed
+        assert db.list_pending_system_signals(conn=conn) == []
+    finally:
+        conn.close()
+
+
+def test_api_sentinel_queues_schema_signal_for_new_observations():
+    conn = db.get_connection(":memory:")
+    try:
+        db.record_api_payload_sentinel_observations(
+            "player",
+            "ABC",
+            {"tag": "#ABC", "badges": [{"name": "CollectionLevel"}]},
+            announce=False,
+            conn=conn,
+        )
+
+        db.record_api_payload_sentinel_observations(
+            "player",
+            "ABC",
+            {
+                "tag": "#ABC",
+                "newTopLevelField": True,
+                "badges": [{"name": "ClanVoyageMaybe"}],
+                "progress": {"MergeTactics_2026_Season_9": {"score": 12}},
+            },
+            conn=conn,
+        )
+
+        pending = db.list_pending_system_signals(conn=conn)
+        assert len(pending) == 1
+        assert pending[0]["type"] == "api_schema_sentinel"
+        assert pending[0]["audience"] == "leadership"
+        assert "ClanVoyageMaybe" in pending[0]["discord_content"]
+        assert "MergeTactics_2026_Season_9" in pending[0]["discord_content"]
+        assert "newTopLevelField" in pending[0]["discord_content"]
+    finally:
+        conn.close()
+
+
+def test_api_sentinel_queues_event_signal_for_new_events():
+    conn = db.get_connection(":memory:")
+    try:
+        db.record_api_payload_sentinel_observations(
+            "events",
+            "global",
+            [
+                {
+                    "eventTag": "#2PRC9GU0",
+                    "title": "Princess Gambit",
+                    "description": None,
+                }
+            ],
+            conn=conn,
+        )
+
+        pending = db.list_pending_system_signals(conn=conn)
+        assert len(pending) == 1
+        assert pending[0]["type"] == "api_event_sentinel"
+        assert pending[0]["audience"] == "leadership"
+        assert "Princess Gambit" in pending[0]["discord_content"]
+        assert "#2PRC9GU0" in pending[0]["discord_content"]
     finally:
         conn.close()
 

@@ -2777,6 +2777,10 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert "db-maintenance" in specs
     assert specs["db-maintenance"]["owner_subagent"] == "elixir-log"
     assert "Discord webhook: #elixir-log" in specs["db-maintenance"]["delivery_targets"]
+    assert "api-sentinel" in specs
+    assert specs["api-sentinel"]["owner_subagent"] == "leader-lounge"
+    assert specs["api-sentinel"]["schedule"] == "Every 240 minutes."
+    assert "Discord: #leaders on first-seen CR API schema or event drift" in specs["api-sentinel"]["delivery_targets"]
     assert "promotion-content" in specs
     assert "Discord: #recruiting" in specs["promotion-content"]["delivery_targets"]
     assert "POAP KINGS: promotion payloads" in specs["promotion-content"]["delivery_targets"]
@@ -2811,6 +2815,7 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
         "promotion-content",
         "daily-quiz",
         "card-catalog-sync",
+        "api-sentinel",
         "db-maintenance",
     }
     assert "war-poll" in job_ids
@@ -2818,6 +2823,44 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
     assert "daily-clan-insight" in job_ids
     assert "weekly-discord-invite-relay" in job_ids
     assert "promotion-content" in job_ids
+    assert "api-sentinel" in job_ids
+
+
+def test_api_sentinel_tick_polls_events_and_publishes_only_sentinel_signals():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    sentinel_signal = {
+        "type": "api_event_sentinel",
+        "signal_type": "api_event_sentinel",
+        "signal_key": "api_event_sentinel:202606130101:abc123",
+    }
+    other_signal = {
+        "type": "capability_unlock",
+        "signal_type": "capability_unlock",
+        "signal_key": "capability_unrelated_v1",
+    }
+
+    with (
+        patch("runtime.jobs._maintenance.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._maintenance.db.bootstrap_api_sentinel_baseline", return_value={
+            "bootstrapped": True,
+            "payloads": 3,
+            "observations": 9,
+        }),
+        patch("runtime.jobs._maintenance.cr_api.get_events", return_value=[{"eventTag": "#E", "title": "Event"}]),
+        patch("runtime.jobs._maintenance.db.list_pending_system_signals", return_value=[sentinel_signal, other_signal]),
+        patch("runtime.jobs._maintenance._post_system_signal_updates", new=AsyncMock()) as mock_post,
+        patch("runtime.jobs._maintenance.runtime_status.mark_job_start") as mock_start,
+        patch("runtime.jobs._maintenance.runtime_status.mark_job_success") as mock_success,
+        patch("runtime.jobs._maintenance.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(elixir._api_sentinel_tick())
+
+    mock_start.assert_called_once_with("api_sentinel")
+    mock_post.assert_awaited_once_with([sentinel_signal], {}, {})
+    mock_success.assert_called_once()
+    mock_failure.assert_not_called()
 
 
 def test_manual_activity_choices_exclude_internal_war_poll():

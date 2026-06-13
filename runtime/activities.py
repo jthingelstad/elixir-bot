@@ -267,6 +267,23 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         ),
     ),
     ActivityDefinition(
+        activity_key="api-sentinel",
+        owner_subagent="leader-lounge",
+        purpose="Track first-seen Clash Royale API schema paths and current game-mode events as the game evolves.",
+        job_id="api-sentinel",
+        job_function="_api_sentinel_tick",
+        schedule_kind="interval",
+        schedule_config={
+            "minutes": _attr("API_SENTINEL_POLL_MINUTES", 240),
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Storage: api_sentinel_observations",
+            "Discord: #leaders on first-seen CR API schema or event drift",
+        ),
+    ),
+    ActivityDefinition(
         activity_key="db-maintenance",
         owner_subagent="elixir-log",
         purpose="Purge expired data, VACUUM the database, and report space reclaimed.",
