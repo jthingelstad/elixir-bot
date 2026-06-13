@@ -2370,7 +2370,6 @@ def test_weekly_leader_actions_post_to_arena_relay():
         }),
         patch("runtime.jobs._core._kick_candidate_availability_memory", return_value=None),
         patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
-        patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=False),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
         patch("runtime.jobs._core.db.create_leader_action_recommendation", side_effect=created) as mock_create,
@@ -2443,7 +2442,6 @@ def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppresse
         }),
         patch("runtime.jobs._core._kick_candidate_availability_memory", return_value=None),
         patch("runtime.jobs._core.db.has_recent_leader_action", side_effect=has_recent),
-        patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=False),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
         patch("runtime.jobs._core.db.create_leader_action_recommendation", return_value={
@@ -2624,43 +2622,6 @@ def test_leadership_action_scan_logs_policy_skip():
     mock_failure.assert_not_called()
 
 
-def test_leader_action_recommendation_suppressed_after_recent_decline():
-    """Role recommendations the leader declined within the suppression window
-    are not re-proposed, even when the generic dedup window has passed."""
-    from types import SimpleNamespace
-    from runtime.jobs._core import _post_leader_action_recommendation
-
-    channel = SimpleNamespace(id=900)
-    with (
-        patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
-        patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=True) as mock_declined,
-        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)) as mock_policy,
-        patch("runtime.jobs._core.db.create_leader_action_recommendation") as mock_create,
-        patch("runtime.jobs._core.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip_log,
-    ):
-        posted = asyncio.run(_post_leader_action_recommendation(
-            channel,
-            action_type="promotion_recommendation",
-            objective="reward_and_retention",
-            title="promotion recommendation",
-            prompt_text="Promote King Levy to Elder.",
-            rationale="220 donations",
-            target_player_tag="#ABC123",
-            target_player_name="King Levy",
-        ))
-
-    assert posted is False
-    mock_declined.assert_called_once()
-    assert mock_declined.call_args.kwargs["action_type"] == "promotion_recommendation"
-    mock_policy.assert_not_called()
-    mock_create.assert_not_called()
-    mock_skip_log.assert_awaited_once()
-    assert mock_skip_log.await_args.kwargs["source"] == "leader_action_candidate_scan"
-    assert mock_skip_log.await_args.kwargs["action_type"] == "promotion_recommendation"
-    assert mock_skip_log.await_args.kwargs["reason"] == "recent_decline_within:720h"
-    assert mock_skip_log.await_args.kwargs["target_player_tag"] == "#ABC123"
-
-
 def test_leader_action_recommendation_logs_policy_skip_with_candidate_context():
     from types import SimpleNamespace
     from runtime.jobs._core import _post_leader_action_recommendation
@@ -2668,7 +2629,6 @@ def test_leader_action_recommendation_logs_policy_skip_with_candidate_context():
     channel = SimpleNamespace(id=900)
     with (
         patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
-        patch("runtime.jobs._core.db.was_leader_action_declined_recently", return_value=False),
         patch(
             "runtime.jobs._core.can_post_leader_action",
             return_value=(False, "earned_frequency:kick_recommendation:decline_rate=0.80"),

@@ -1085,6 +1085,9 @@ def _donations_peaks_in_window(conn, member_id: int, today, *, days_back_start: 
 
 
 ELDER_DONATION_ROLLING_WEEKS = 4
+ELDER_DEMOTION_RANK_BUFFER = 2
+ELDER_DEMOTION_SCORE_RATIO = 0.8
+ELDER_DEMOTION_ACTIVITY_DAYS = 14
 
 
 def _last_battle_days_ago(conn, member_id: int, today) -> Optional[int]:
@@ -1165,6 +1168,9 @@ def _elder_role_counts(conn) -> dict:
     target_elder_min = max(0, round(active_members * 0.2))
     target_elder_max = max(1 if active_members else 0, target_elder_min, round(active_members * 0.3))
     current_elders = counts["elders"] or 0
+    elder_selection_count = min(current_elders, target_elder_max)
+    if active_members and target_elder_max and current_elders == 0:
+        elder_selection_count = 1
     return {
         "active_members": active_members,
         "leaders": counts["leaders"] or 0,
@@ -1172,9 +1178,11 @@ def _elder_role_counts(conn) -> dict:
         "members": counts["members"] or 0,
         "target_elder_min": target_elder_min,
         "target_elder_max": target_elder_max,
+        "elder_selection_count": elder_selection_count,
         "elder_capacity_remaining": max(0, target_elder_max - current_elders),
         "elder_cap_reached": current_elders >= target_elder_max if target_elder_max else current_elders > 0,
-        "elder_cap_rule": "top 30% of active clan members may hold Elder",
+        "elder_cap_rule": "top 30% of active clan members may hold Elder; cap is not a target",
+        "elder_selection_rule": "review current Elder count against the smoothed board; recommend swaps, not cap-filling",
     }
 
 
@@ -1192,6 +1200,7 @@ def _elder_role_review(
     today = _member_activity_anchor(conn).date()
     composition = _elder_role_counts(conn)
     cap = int(composition["target_elder_max"] or 0)
+    selection_count = int(composition.get("elder_selection_count") or 0)
 
     rows = conn.execute(
         "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
@@ -1270,25 +1279,29 @@ def _elder_role_review(
     )
     for index, item in enumerate(eligible_board, start=1):
         item["elder_donation_rank"] = index
-        item["elder_target_rank"] = cap
-        item["in_elder_target"] = index <= cap
+        item["elder_target_rank"] = selection_count
+        item["elder_cap_rank"] = cap
+        item["in_elder_target"] = index <= selection_count
         item["reason"] = (
-            f"ranked {index}/{cap} on recent donations "
+            f"ranked {index}/{selection_count} on recent donations "
             f"(avg {item['rolling_donations_avg']}/week)"
         )
 
-    desired_tags = {item["tag"] for item in eligible_board[:cap]}
+    desired_tags = {item["tag"] for item in eligible_board[:selection_count]}
     current_elder_tags = {item["tag"] for item in leaderboard if item.get("role") == "elder"}
+    selection_cutoff_avg = None
+    if selection_count > 0 and len(eligible_board) >= selection_count:
+        selection_cutoff_avg = float(eligible_board[selection_count - 1].get("rolling_donations_avg") or 0)
 
-    recommended = []
+    promotion_candidates = []
     demotion_candidates = []
     borderline = []
     for item in eligible_board:
         if item["tag"] in desired_tags and item.get("role") == "member":
-            recommended.append(item)
+            promotion_candidates.append(item)
         elif item["tag"] not in desired_tags and item.get("role") == "member":
             item["reason"] = (
-                f"just outside Elder group: rank {item['elder_donation_rank']}/{cap} "
+                f"just outside Elder group: rank {item['elder_donation_rank']}/{selection_count} "
                 f"on recent donations (avg {item['rolling_donations_avg']}/week)"
             )
             borderline.append(item)
@@ -1300,14 +1313,52 @@ def _elder_role_review(
             continue
         if item["eligible_for_elder_board"]:
             rank = item.get("elder_donation_rank")
+            score = float(item.get("rolling_donations_avg") or 0)
+            rank_gap = (rank or 999) - selection_count
+            score_gap_ok = (
+                selection_cutoff_avg is None
+                or selection_cutoff_avg <= 0
+                or score < selection_cutoff_avg * ELDER_DEMOTION_SCORE_RATIO
+            )
+            if rank_gap <= ELDER_DEMOTION_RANK_BUFFER or not score_gap_ok:
+                item["reason"] = (
+                    f"Elder protected by hysteresis: rank {rank}/{selection_count}, "
+                    f"recent donations avg {item['rolling_donations_avg']}/week"
+                )
+                borderline.append(item)
+                continue
             item["reason"] = (
-                f"outside Elder group: rank {rank}/{cap} on recent donations "
+                f"outside Elder group: rank {rank}/{selection_count} on recent donations "
                 f"(avg {item['rolling_donations_avg']}/week)"
             )
         else:
-            missing = ", ".join(item.get("missing") or ["activity"])
+            missing_items = item.get("missing") or ["activity"]
+            missing = ", ".join(missing_items)
+            battle_days = item.get("days_since_battle")
+            activity_is_sustained = (
+                "activity" not in missing_items
+                or battle_days is None
+                or battle_days >= ELDER_DEMOTION_ACTIVITY_DAYS
+            )
+            if "war" not in missing_items and not activity_is_sustained:
+                item["reason"] = (
+                    f"Elder protected by activity grace: battle activity {battle_days}d ago"
+                )
+                borderline.append(item)
+                continue
             item["reason"] = f"missing Elder activity gate: {missing}"
         demotion_candidates.append(item)
+
+    promotion_slots = len(demotion_candidates)
+    if not current_elder_tags and selection_count > 0:
+        promotion_slots = max(promotion_slots, 1)
+    recommended = promotion_candidates[:promotion_slots]
+    for item in promotion_candidates[promotion_slots:]:
+        item["reason"] = (
+            f"promotion held until an Elder slot opens: rank {item['elder_donation_rank']}/"
+            f"{selection_count}, recent donations avg {item['rolling_donations_avg']}/week"
+        )
+        borderline.append(item)
 
     for item in leaderboard:
         if item["eligible_for_elder_board"]:
@@ -1347,6 +1398,9 @@ def _elder_role_review(
             "min_tenure_days": min_tenure_days,
             "active_within_days": active_within_days,
             "min_war_races": min_war_races,
+            "demotion_rank_buffer": ELDER_DEMOTION_RANK_BUFFER,
+            "demotion_score_ratio": ELDER_DEMOTION_SCORE_RATIO,
+            "demotion_activity_days": ELDER_DEMOTION_ACTIVITY_DAYS,
             "donation_rule": "relative rank by rolling weekly donation peaks; no fixed donation floor",
         },
         "composition": composition,

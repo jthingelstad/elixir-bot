@@ -316,7 +316,7 @@ TOOLS = [
             "- hot_streaks: members on a current winning streak\n"
             "- losing_streaks: members on a current losing streak\n"
             "- trophy_drops: members with notable trophy drops\n"
-            "- promotion_candidates: Elder role review using a smoothed rolling donation leaderboard. Active battle play and recent war participation are required; there is no fixed donation-count floor. Returns non-Elders inside the capped Elder set, current Elders outside it (`demotion_candidates`), the ranked leaderboard, and composition/cap fields."
+            "- promotion_candidates: Elder role review using a smoothed rolling donation leaderboard. Active battle play and recent war participation are required; there is no fixed donation-count floor. The Elder cap is a maximum, not a target; demotions use hysteresis to avoid role flapping. Returns promotion candidates, demotion candidates, the ranked leaderboard, and composition/cap fields."
         ),
         "input_schema": {
             "type": "object",

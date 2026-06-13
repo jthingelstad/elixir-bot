@@ -5,7 +5,7 @@ Elder is selected by a smoothed, relative donation leaderboard:
 - recent battle activity required
 - recent war participation required
 - no absolute donation floor
-- top members inside the Elder cap should hold Elder
+- the Elder cap is a maximum, not a target
 """
 
 from datetime import datetime, timedelta, timezone
@@ -108,7 +108,8 @@ def test_promotion_has_no_absolute_donation_floor():
 
         assert result["criteria"]["donation_rule"].startswith("relative rank")
         assert result["composition"]["target_elder_max"] == 3
-        assert [m["tag"] for m in result["recommended"]] == ["#M0", "#M1", "#M2"]
+        assert result["composition"]["elder_selection_count"] == 1
+        assert [m["tag"] for m in result["recommended"]] == ["#M0"]
         assert all(m["rolling_donations_avg"] < 50 for m in result["recommended"])
     finally:
         conn.close()
@@ -133,6 +134,49 @@ def test_role_review_recommends_promotions_and_demotions_from_same_board():
         assert [m["tag"] for m in result["demotion_candidates"]] == ["#E3"]
         assert [m["tag"] for m in demotions["members"]] == ["#E3"]
         assert "outside Elder group" in result["demotion_candidates"][0]["reason"]
+    finally:
+        conn.close()
+
+
+def test_elder_cap_is_not_filled_when_current_elder_group_is_stable():
+    conn = db.get_connection(":memory:")
+    try:
+        race = _seed_war_race(conn)
+        _make_eligible(conn, race, "#E1", "Top Elder", role="elder", peaks=[100, 100])
+        for idx, peak in enumerate([90, 80, 70, 60, 50, 40, 30, 20, 10]):
+            _make_eligible(conn, race, f"#M{idx}", f"M{idx}", peaks=[peak, peak])
+
+        result = get_promotion_candidates(conn=conn)
+
+        assert result["composition"]["target_elder_max"] == 3
+        assert result["composition"]["elder_selection_count"] == 1
+        assert result["recommended"] == []
+        assert result["demotion_candidates"] == []
+        assert {m["tag"] for m in result["borderline"]} >= {"#M0", "#M1"}
+    finally:
+        conn.close()
+
+
+def test_elder_demotion_has_rank_hysteresis_to_avoid_flapping():
+    conn = db.get_connection(":memory:")
+    try:
+        race = _seed_war_race(conn)
+        _make_eligible(conn, race, "#E1", "Top Elder", role="elder", peaks=[100, 100])
+        _make_eligible(conn, race, "#E2", "Second Elder", role="elder", peaks=[90, 90])
+        _make_eligible(conn, race, "#M1", "Rising Member", peaks=[85, 85])
+        _make_eligible(conn, race, "#E3", "Near Elder", role="elder", peaks=[80, 80])
+        for idx, peak in enumerate([30, 25, 20, 15, 10, 5]):
+            _make_eligible(conn, race, f"#F{idx}", f"F{idx}", peaks=[peak, peak])
+
+        result = get_promotion_candidates(conn=conn)
+
+        assert result["composition"]["elder_selection_count"] == 3
+        assert result["recommended"] == []
+        assert result["demotion_candidates"] == []
+        protected = next(m for m in result["borderline"] if m["tag"] == "#E3")
+        held = next(m for m in result["borderline"] if m["tag"] == "#M1")
+        assert "protected by hysteresis" in protected["reason"]
+        assert "until an Elder slot opens" in held["reason"]
     finally:
         conn.close()
 

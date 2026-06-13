@@ -883,45 +883,6 @@ def leader_action_decision_stats(
 
 
 @managed_connection
-def was_leader_action_declined_recently(
-    *,
-    action_type: str,
-    target_player_tag: str | None = None,
-    objective: str | None = None,
-    within_hours: int = 720,
-    conn: Optional[sqlite3.Connection] = None,
-) -> bool:
-    """True iff the leader declined a matching action within the window.
-
-    Cuts on decided_at (when the leader said no), not proposed_at — a decline
-    is a deliberate judgment about this target/action and should suppress
-    re-proposal for longer than an unanswered card does.
-    """
-    where = [
-        "action_type = ?",
-        "status = ?",
-        "decided_at >= ?",
-        "COALESCE(is_test, 0) = 0",
-    ]
-    params: list = [
-        (action_type or "").strip(),
-        ACTION_REJECTED,
-        _cutoff_hours_ago(within_hours),
-    ]
-    if target_player_tag:
-        where.append("target_player_tag = ?")
-        params.append(_db._canon_tag(target_player_tag))
-    if objective:
-        where.append("objective = ?")
-        params.append((objective or "").strip())
-    row = conn.execute(
-        f"SELECT 1 FROM leader_action_recommendations WHERE {' AND '.join(where)} LIMIT 1",
-        tuple(params),
-    ).fetchone()
-    return row is not None
-
-
-@managed_connection
 def decide_leader_action_by_message(
     source_message_id: str | int,
     *,
@@ -1177,5 +1138,4 @@ __all__ = [
     "update_leader_action_copy_message",
     "update_leader_action_copy_text",
     "upsert_leader_action_feedback_profile",
-    "was_leader_action_declined_recently",
 ]
