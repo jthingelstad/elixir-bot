@@ -36,14 +36,14 @@ def test_clan_loads():
 def test_discord_loads():
     """DISCORD.md loads and contains channel definitions."""
     text = prompts.discord()
-    assert "#leader-lounge" in text
+    assert "#king-tower" in text
     assert "#reception" in text
-    assert "#poapkings-com" in text
+    assert "#site-builder" in text
 
 
 def test_channel_section_leader():
-    """Extracts #leader-lounge section."""
-    section = prompts.channel_section("#leader-lounge")
+    """Extracts #king-tower section."""
+    section = prompts.channel_section("#king-tower")
     assert "leader-lounge" in section.lower()
     assert "leader" in section.lower()
 
@@ -61,8 +61,8 @@ def test_reception_channel_is_open_channel():
 
 
 def test_channel_section_poapkings_com():
-    """Extracts #poapkings-com section."""
-    section = prompts.channel_section("#poapkings-com")
+    """Extracts #site-builder section."""
+    section = prompts.channel_section("#site-builder")
     assert "publish visibility" in section.lower()
     assert "github-backed site publish" in section.lower()
 
@@ -75,6 +75,20 @@ def test_arena_relay_channel_is_configured():
     section = prompts.channel_section("#arena-relay")
     assert "leader action board" in section.lower()
     assert "✅/☑️" in section
+
+
+def test_member_highlights_channel_replaces_old_progression_split():
+    channel = prompts.discord_singleton_subagent("member-highlights")
+    assert channel["id"] == 1482352147029950474
+    assert channel["name"] == "#trophy-case"
+    assert channel["reply_policy"] == "disabled"
+    section = prompts.channel_section("#trophy-case")
+    assert "curated player-story stream" in section.lower()
+    assert "live non-war battle momentum" in section.lower()
+    assert prompts.resolve_channel_reference("player-progress")["subagent"] == "member-highlights"
+    assert prompts.resolve_channel_reference("trophy-road")["subagent"] == "member-highlights"
+    assert prompts.resolve_channel_reference("trophy-case")["subagent"] == "member-highlights"
+    assert "Member Highlights Lane" in prompts.subagent_prompt("player-progress")
 
 
 def test_channel_section_nonexistent():

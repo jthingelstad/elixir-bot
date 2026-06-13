@@ -1,7 +1,7 @@
 """Evaluate the intent router against LLM-generated user questions.
 
 Round 1: ask Claude to generate a diverse batch of realistic clan-member questions
-across clan/deck/trophy-road/general categories. Run each through the router.
+across clan/deck/member-highlight/general categories. Run each through the router.
 Tally: route distribution, low-confidence cases, fallbacks, suspicious choices.
 
 Run with:  python scripts/eval_intent_router.py [--rounds N] [--per-round N]

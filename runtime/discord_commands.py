@@ -785,7 +785,7 @@ def _register_quiz_commands(bot, app) -> None:
         msg = (
             f"Use this command in <#{CARD_TRAINING_CHANNEL_ID}>."
             if CARD_TRAINING_CHANNEL_ID
-            else "The #card-quiz channel is not configured yet."
+            else "The #training-camp channel is not configured yet."
         )
         await interaction.response.send_message(msg, ephemeral=True)
         return False

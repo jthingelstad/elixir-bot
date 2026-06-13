@@ -751,8 +751,8 @@ def test_respond_in_channel_uses_clanops_workflow():
         assert mock_chat.call_args.kwargs["allowed_tools"] == elixir_agent.TOOLSETS_BY_WORKFLOW["clanops"]
 
 
-def test_respond_in_channel_injects_war_context_for_war_talk():
-    """War context should be injected for #war-talk channel."""
+def test_respond_in_channel_injects_war_context_for_war_question():
+    """War context should be injected when an interactive question asks about war."""
     with (
         patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "ok"}) as mock_chat,
         patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
@@ -784,7 +784,7 @@ def test_respond_in_channel_injects_war_context_for_war_talk():
         elixir_agent.respond_in_channel(
             question="How's the race going?",
             author_name="Jamie",
-            channel_name="#war-talk",
+            channel_name="#ask-elixir",
             workflow="interactive",
             clan_data={"memberList": []},
             war_data={"state": "warDay"},

@@ -2669,7 +2669,7 @@ def test_build_schedule_report_includes_promotion_content_sync():
 
     assert "promote-the-clan" in report
     assert "promotion-content" in report
-    assert "Discord: #promote-the-clan" in report
+    assert "Discord: #recruiting-camp" in report
     assert "POAP KINGS: promotion payloads" in report
     assert "Every Fri at 09:00 CT." in report
 
@@ -2703,7 +2703,7 @@ def test_build_schedule_report_shows_30_minute_player_intel_refresh():
     ):
         report = elixir._build_schedule_report()
 
-    assert "player-progress" in report
+    assert "member-highlights" in report
     assert "player-progression" in report
     assert "Every 30 minutes." in report
 
@@ -2726,7 +2726,7 @@ def test_build_schedule_report_includes_clock_aligned_war_pipeline():
     assert "Every hour at :00 CT." in report
     assert "war-awareness" in report
     assert "Every hour at :05 CT." in report
-    assert "Discord routed outcomes: #river-race, optional #arena-relay leader actions, optional #leader-lounge" in report
+    assert "Discord routed outcomes: #river-race, optional #arena-relay leader actions, optional #king-tower" in report
 
 
 def test_activity_registry_has_unique_keys_and_required_fields():
@@ -2775,7 +2775,7 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert specs["db-maintenance"]["owner_subagent"] == "elixir-log"
     assert "Discord webhook: #elixir-log" in specs["db-maintenance"]["delivery_targets"]
     assert "promotion-content" in specs
-    assert "Discord: #promote-the-clan" in specs["promotion-content"]["delivery_targets"]
+    assert "Discord: #recruiting-camp" in specs["promotion-content"]["delivery_targets"]
     assert "POAP KINGS: promotion payloads" in specs["promotion-content"]["delivery_targets"]
 
 

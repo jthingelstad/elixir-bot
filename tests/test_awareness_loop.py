@@ -70,7 +70,7 @@ def test_classify_signal_lane_covers_all_v47_signal_types():
         "path_of_legend_global_rank_attained": "battle_mode",
         # clan_event — roster lifecycle
         "member_active_again": "clan_event",
-        # clan_event — tournaments ship to #clan-events too
+        # clan_event — tournaments ship to #clan-chronicle too
         "tournament_started": "clan_event",
         "tournament_lead_change": "clan_event",
         "tournament_ended": "clan_event",

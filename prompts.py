@@ -55,15 +55,7 @@ CHANNEL_SUBAGENT_CONFIG = {
         "memory_scope": "leadership",
         "durable_memory_enabled": False,
     },
-    "player-progress": {
-        "workflow": "channel_update",
-        "tool_policy": "read_only",
-        "reply_policy": "disabled",
-        "singleton": True,
-        "memory_scope": "public",
-        "durable_memory_enabled": True,
-    },
-    "trophy-road": {
+    "member-highlights": {
         "workflow": "channel_update",
         "tool_policy": "read_only",
         "reply_policy": "disabled",
@@ -103,14 +95,6 @@ CHANNEL_SUBAGENT_CONFIG = {
         "memory_scope": "public",
         "durable_memory_enabled": True,
     },
-    "war-talk": {
-        "workflow": "interactive",
-        "tool_policy": "read_only",
-        "reply_policy": "mention_only",
-        "singleton": True,
-        "memory_scope": "public",
-        "durable_memory_enabled": True,
-    },
     "leader-lounge": {
         "workflow": "clanops",
         "tool_policy": "read_write",
@@ -123,22 +107,51 @@ CHANNEL_SUBAGENT_CONFIG = {
 
 SUBAGENT_ALIASES = {
     "onboarding": "reception",
+    "join_gate": "reception",
+    "join-gate": "reception",
     "weekly_digest": "announcements",
+    "royal_decrees": "announcements",
+    "royal-decrees": "announcements",
     "promotion": "promote-the-clan",
+    "recruiting_camp": "promote-the-clan",
+    "recruiting-camp": "promote-the-clan",
     "river_race": "river-race",
     "arena_relay": "arena-relay",
-    "player_progress": "player-progress",
-    "trophy_road": "trophy-road",
+    "member_highlights": "member-highlights",
+    "member-highlights": "member-highlights",
+    "trophy_case": "member-highlights",
+    "trophy-case": "member-highlights",
+    "player_progress": "member-highlights",
+    "player-progress": "member-highlights",
+    "trophy_road": "member-highlights",
+    "trophy-road": "member-highlights",
     "clan_events": "clan-events",
+    "clan_chronicle": "clan-events",
+    "clan-chronicle": "clan-events",
     "clanops": "leader-lounge",
+    "king_tower": "leader-lounge",
+    "king-tower": "leader-lounge",
+    "clan_chat": "general",
+    "clan-chat": "general",
     "ask_elixir": "ask-elixir",
     "poapkings_com": "poapkings-com",
+    "site_builder": "poapkings-com",
+    "site-builder": "poapkings-com",
 }
 
 
 def _normalize_subagent_name(value: str | None) -> str:
     key = (value or "").strip().lower()
+    if key.startswith("#"):
+        key = key[1:]
     return SUBAGENT_ALIASES.get(key, key)
+
+
+def _normalize_channel_ref(value: str | None) -> str:
+    key = (value or "").strip().lower()
+    if key.startswith("#"):
+        key = key[1:]
+    return key
 
 
 VALID_CHANNEL_WORKFLOWS = {
@@ -295,7 +308,7 @@ def policy():
 
     Loaded only by leadership-context system prompts (leader-lounge, awareness,
     memory-synthesis, weekly digest). Member-facing lanes do not see this
-    content — keeps reception, war-talk, ask-elixir, and others lean.
+    content — keeps reception, ask-elixir, and others lean.
     """
     return _load("POLICY.md")
 
@@ -303,13 +316,11 @@ def policy():
 def channel_section(channel_name):
     """Extract a single channel's section from DISCORD.md.
 
-    channel_name: e.g. "#ask-elixir", "#leader-lounge", "#reception"
+    channel_name: e.g. "#ask-elixir", "#king-tower", "#reception"
     Returns the text from that channel's heading to the next ## heading (or EOF).
     """
-    for channel in discord_channel_configs():
-        if channel["name"] == channel_name:
-            return channel["section"]
-    return ""
+    channel = resolve_channel_reference(channel_name)
+    return channel["section"] if channel else ""
 
 
 def _channel_subagent_key(channel_name: str) -> str:
@@ -328,9 +339,9 @@ def subagent_key_for_channel(channel_name: str, workflow: str | None = None) -> 
     """
     query = (channel_name or "").strip().lower()
     if query:
-        for channel in discord_channel_configs():
-            if channel["name"].lower() == query:
-                return channel["subagent_key"]
+        channel = resolve_channel_reference(query)
+        if channel is not None:
+            return channel["subagent_key"]
 
     workflow_key = (workflow or "").strip().lower()
     if workflow_key.startswith("interactive"):
@@ -447,11 +458,11 @@ def discord_singleton_channel(role):
 
 def resolve_channel_reference(value):
     """Resolve a channel by exact heading name or singleton subagent."""
-    query = (value or "").strip().lower()
+    query = _normalize_channel_ref(value)
     if not query:
         return None
     for channel in discord_channel_configs():
-        if channel["name"].lower() == query:
+        if _normalize_channel_ref(channel["name"]) == query:
             return channel
     query = _normalize_subagent_name(query)
     subagent_config = CHANNEL_SUBAGENT_CONFIG.get(query)
@@ -464,7 +475,7 @@ def resolve_channel_reference(value):
 
 def subagent_prompt(subagent_key: str) -> str:
     """Load a subagent prompt file from prompts/subagents."""
-    key = (subagent_key or "").strip().lower()
+    key = _normalize_subagent_name(subagent_key)
     if not key:
         return ""
     filename = f"{key}.md"

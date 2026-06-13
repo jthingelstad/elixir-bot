@@ -154,7 +154,7 @@ async def _share_channel_result(result, workflow):
     share_content = result.get("share_content", "")
     if not share_content:
         return
-    target_ref = result.get("share_channel") or "#clan-events"
+    target_ref = result.get("share_channel") or "#clan-chronicle"
     target = prompts.resolve_channel_reference(target_ref)
     if not target:
         _log().warning("Unknown share target channel: %s", target_ref)

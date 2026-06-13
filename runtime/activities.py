@@ -44,7 +44,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord routed outcomes: #clan-events, #leader-lounge",
+            "Discord routed outcomes: #clan-chronicle, #king-tower",
         ),
         legacy_commands=("heartbeat",),
     ),
@@ -78,13 +78,13 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord routed outcomes: #river-race, optional #arena-relay leader actions, optional #leader-lounge",
+            "Discord routed outcomes: #river-race, optional #arena-relay leader actions, optional #king-tower",
         ),
     ),
     ActivityDefinition(
         activity_key="player-progression",
-        owner_subagent="player-progress",
-        purpose="Refresh player intelligence and emit progression milestones.",
+        owner_subagent="member-highlights",
+        purpose="Refresh player intelligence and emit curated member highlights.",
         job_id="player-progression",
         job_function="_player_intel_refresh",
         schedule_kind="interval",
@@ -94,7 +94,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord: #player-progress",
+            "Discord: #trophy-case",
         ),
         legacy_commands=("player-intel",),
     ),
@@ -113,7 +113,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=(
             "Storage: durable awards rows",
-            "Discord routed outcomes: #clan-events on new grants",
+            "Discord routed outcomes: #clan-chronicle on new grants",
         ),
     ),
     ActivityDefinition(
@@ -180,7 +180,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "minute": 0,
         },
         delivery_targets=(
-            "Discord: #leader-lounge",
+            "Discord: #king-tower",
         ),
     ),
     ActivityDefinition(
@@ -196,7 +196,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "minute": 0,
         },
         delivery_targets=(
-            "Discord: #announcements",
+            "Discord: #royal-decrees",
             "POAP KINGS: weekly members payload",
         ),
     ),
@@ -231,7 +231,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "minute": 0,
         },
         delivery_targets=(
-            "Discord: #promote-the-clan",
+            "Discord: #recruiting-camp",
             "POAP KINGS: promotion payloads",
         ),
         legacy_commands=("promotion",),
@@ -239,7 +239,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ActivityDefinition(
         activity_key="daily-quiz",
         owner_subagent="ask-elixir",
-        purpose="Post the daily Elixir University quiz question in #card-quiz.",
+        purpose="Post the daily Elixir University quiz question in #training-camp.",
         job_id="daily-quiz",
         job_function="_daily_quiz_post",
         schedule_kind="cron",
@@ -248,7 +248,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "minute": 0,
         },
         delivery_targets=(
-            "Discord: #card-quiz",
+            "Discord: #training-camp",
         ),
     ),
     ActivityDefinition(
