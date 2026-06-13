@@ -1,8 +1,9 @@
 """DB maintenance, card catalog sync, and daily quiz."""
 
 __all__ = [
+    "API_SENTINEL_POLL_MINUTES",
     "_format_size", "_build_maintenance_report",
-    "_daily_quiz_post", "_card_catalog_sync", "_db_maintenance_cycle",
+    "_daily_quiz_post", "_card_catalog_sync", "_api_sentinel_tick", "_db_maintenance_cycle",
 ]
 
 import asyncio
@@ -15,6 +16,11 @@ from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_
 from runtime import elixir_log
 from runtime import status as runtime_status
 from runtime.jobs._signals import _post_to_elixir
+from runtime.signals.system import _post_system_signal_updates
+from storage.api_sentinel import EVENT_SENTINEL_SIGNAL_TYPE, SCHEMA_SENTINEL_SIGNAL_TYPE
+
+
+API_SENTINEL_POLL_MINUTES = int(os.getenv("API_SENTINEL_POLL_MINUTES", "240"))
 
 
 def _format_size(size_bytes):
@@ -108,6 +114,39 @@ async def _card_catalog_sync():
     except Exception as exc:
         log.error("Card catalog sync failed: %s", exc, exc_info=True)
         runtime_status.mark_job_failure("card_catalog_sync", str(exc))
+
+
+async def _api_sentinel_tick():
+    """Poll low-volume CR API discovery endpoints and publish first-seen drift."""
+    runtime_status.mark_job_start("api_sentinel")
+    try:
+        baseline = await asyncio.to_thread(db.bootstrap_api_sentinel_baseline)
+        events = await asyncio.to_thread(cr_api.get_events)
+        if events is None:
+            runtime_status.mark_job_failure("api_sentinel", "events API returned None")
+            return
+
+        pending = await asyncio.to_thread(db.list_pending_system_signals)
+        sentinel_pending = [
+            signal for signal in pending
+            if signal.get("signal_type") in {EVENT_SENTINEL_SIGNAL_TYPE, SCHEMA_SENTINEL_SIGNAL_TYPE}
+        ]
+        if sentinel_pending:
+            await _post_system_signal_updates(sentinel_pending, {}, {})
+
+        event_count = len(events) if isinstance(events, list) else 0
+        details = [f"events checked ({event_count} active)"]
+        if baseline.get("bootstrapped"):
+            details.append(
+                f"baseline {baseline.get('observations', 0)} observation(s) "
+                f"from {baseline.get('payloads', 0)} raw payload(s)"
+            )
+        if sentinel_pending:
+            details.append(f"published {len(sentinel_pending)} sentinel signal(s)")
+        runtime_status.mark_job_success("api_sentinel", "; ".join(details))
+    except Exception as exc:
+        log.error("API sentinel failed: %s", exc, exc_info=True)
+        runtime_status.mark_job_failure("api_sentinel", str(exc))
 
 
 async def _db_maintenance_cycle():

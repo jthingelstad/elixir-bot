@@ -157,6 +157,8 @@ Current recurring activities:
   Reads stored war data, processes war-only signals, and owns scheduled River Race coordination across `#river-race` and optional leadership notes.
 - **Every 30 minutes** — `player-progression` via `_player_intel_refresh()`
   Refreshes stored player profile and battle intelligence, then emits member highlights to `#player-highlights`.
+- **Every 4 hours** — `api-sentinel` via `_api_sentinel_tick()`
+  Records first-seen Clash Royale API schema paths and `/events` game-mode entries, then posts leadership-only drift notes to `#leaders`.
 - **Daily at 12:00 PM Chicago** — `daily-clan-insight` via `_ask_elixir_daily_insight()`
   Posts one short data-driven hidden fact in `#ask-elixir` when the data supports a genuinely interesting insight.
 - **Friday 7:00 PM Chicago** — `leadership-review` via `_clanops_weekly_review()`

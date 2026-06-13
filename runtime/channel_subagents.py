@@ -123,6 +123,8 @@ SEASON_AWARDS_SIGNAL_TYPES = {
 }
 
 LEADERSHIP_ONLY_SIGNAL_TYPES = {
+    "api_event_sentinel",
+    "api_schema_sentinel",
     "inactive_members",
 }
 

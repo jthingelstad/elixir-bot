@@ -61,8 +61,9 @@ from runtime.jobs._tournament import (  # noqa: F401
     start_tournament_watch, stop_tournament_watch,
 )
 from runtime.jobs._maintenance import (  # noqa: F401
+    API_SENTINEL_POLL_MINUTES,
     _format_size, _build_maintenance_report, _daily_quiz_post,
-    _card_catalog_sync, _db_maintenance_cycle,
+    _card_catalog_sync, _api_sentinel_tick, _db_maintenance_cycle,
 )
 
 # Re-export runtime_status so `runtime_jobs.runtime_status` still works

@@ -1154,6 +1154,16 @@ def test_plan_signal_outcomes_routes_leadership_audience_system_signal_to_leader
     assert outcomes[0]["target_channel_key"] == "leader-lounge"
 
 
+def test_plan_signal_outcomes_routes_api_sentinel_to_leader_lounge():
+    outcomes = plan_signal_outcomes([{
+        "type": "api_event_sentinel",
+        "signal_key": "api_event_sentinel:202606130101:abc123",
+    }])
+
+    assert len(outcomes) == 1
+    assert outcomes[0]["target_channel_key"] == "leader-lounge"
+
+
 def test_plan_signal_outcomes_routes_battle_hot_streak_to_member_highlights():
     outcomes = plan_signal_outcomes([{
         "type": "battle_hot_streak",

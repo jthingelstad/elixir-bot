@@ -119,6 +119,19 @@ class TestExecuteCrApiDispatch:
             result = execute_cr_api({"aspect": "player", "tag": "#PYLQ2"})
             assert result == {"error": "not_found_or_unavailable"}
 
+    def test_events_aspect_does_not_require_tag(self, execute_cr_api):
+        with patch("cr_api.get_events", return_value=[
+            {"eventTag": "#2PRC9GU0", "title": "Princess Gambit", "description": None},
+        ]):
+            result = execute_cr_api({"aspect": "events"})
+
+        assert result == {
+            "events": [
+                {"eventTag": "#2PRC9GU0", "title": "Princess Gambit", "description": None},
+            ],
+            "count": 1,
+        }
+
 
 # ---------------------------------------------------------------------------
 # Filters — envelope size + field whitelisting

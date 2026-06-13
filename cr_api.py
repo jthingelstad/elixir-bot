@@ -36,8 +36,17 @@ def _persist_raw_payload(endpoint_name: str, entity_key: str | None, payload) ->
     try:
         conn = db.get_connection()
         try:
+            try:
+                db.bootstrap_api_sentinel_baseline(conn=conn)
+            except Exception:
+                log.exception("api_sentinel_baseline_failed")
             db._store_raw_payload(conn, label, key, payload)
             conn.commit()
+            try:
+                db.record_api_payload_sentinel_observations(label, key, payload, conn=conn)
+            except Exception:
+                conn.rollback()
+                log.exception("api_sentinel_observation_failed endpoint=%s entity=%s", label, key)
         finally:
             conn.close()
     except Exception:
@@ -331,5 +340,16 @@ def get_cards():
     """
     try:
         return _request_json("/cards", endpoint_name="cards")
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def get_events():
+    """Fetch current live Clash Royale game modes/events.
+
+    Returns a bare list of event dicts or None on error.
+    """
+    try:
+        return _request_json("/events", endpoint_name="events")
     except (requests.RequestException, ValueError):
         return None

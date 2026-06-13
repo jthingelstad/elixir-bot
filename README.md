@@ -68,6 +68,8 @@ Current activities:
   Every hour at `:05` CT. Reads stored war data, then owns scheduled River Race coordination and war-only signal handling.
 - `player-progression`
   Every 30 minutes. Refreshes player profiles and battle logs, then emits curated member highlights.
+- `api-sentinel`
+  Every 4 hours. Records first-seen Clash Royale API schema paths and `/events` game-mode entries, then alerts `#leaders` on new drift.
 - `daily-clan-insight`
   Daily in `#ask-elixir` at 12:00 PM CT. Posts one short hidden fact when the data supports a genuinely interesting insight.
 - `leadership-review`

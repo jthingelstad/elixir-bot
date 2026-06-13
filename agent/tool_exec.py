@@ -983,6 +983,19 @@ def _filter_cr_tournament(payload, *, limit):
     }
 
 
+def _filter_cr_events(payload):
+    events = []
+    for event in payload or []:
+        if not isinstance(event, dict):
+            continue
+        events.append({
+            "eventTag": event.get("eventTag"),
+            "title": event.get("title"),
+            "description": event.get("description"),
+        })
+    return {"events": events, "count": len(events)}
+
+
 def _execute_get_clan_intel_report(arguments):
     """Build a threat analysis for a competitor in our current river race.
 
@@ -1030,6 +1043,10 @@ def _execute_cr_api(arguments):
     aspect = arguments.get("aspect")
     if not aspect:
         return {"error": "aspect is required"}
+    if aspect == "events":
+        payload = cr_api.get_events()
+        return _filter_cr_events(payload) if payload is not None else {"error": "not_found_or_unavailable"}
+
     raw_tag = arguments.get("tag")
     try:
         normalized_tag = cr_api._normalize_cr_tag(raw_tag)

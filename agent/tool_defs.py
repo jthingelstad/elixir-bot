@@ -540,7 +540,8 @@ TOOLS = [
             "- clan_members: top-N members with tags, roles, trophies, donations\n"
             "- clan_war: current river race for ANY clan (standings, top participants)\n"
             "- clan_war_log: historical river race results\n"
-            "- tournament: profile + top members by score\n\n"
+            "- tournament: profile + top members by score\n"
+            "- events: current live game modes/events from /events; no tag required\n\n"
             "If the user asks about something the CR API does not expose — battle IDs, match IDs, "
             "historical clan rosters, deck tags — say so plainly. Do not improvise a workaround."
         ),
@@ -552,13 +553,13 @@ TOOLS = [
                     "enum": [
                         "player", "player_battles", "player_chests",
                         "clan", "clan_members", "clan_war", "clan_war_log",
-                        "tournament",
+                        "tournament", "events",
                     ],
                     "description": "Which CR API slice to fetch.",
                 },
                 "tag": {
                     "type": "string",
-                    "description": "CR tag (#-prefixed, e.g. '#J2RGCRVG'). Required for every aspect.",
+                    "description": "CR tag (#-prefixed, e.g. '#J2RGCRVG'). Required except for aspect='events'.",
                 },
                 "limit": {
                     "type": "integer",
@@ -574,7 +575,7 @@ TOOLS = [
                     "description": "Optional client-side filter for aspect='player_battles'.",
                 },
             },
-            "required": ["aspect", "tag"],
+            "required": ["aspect"],
         },
     },
     {
