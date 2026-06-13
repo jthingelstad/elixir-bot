@@ -153,7 +153,7 @@ def _poapkings_publish_context(activity_key: str, *, publish_result=None, error_
     changed_content_types = result.get("changed_content_types") or []
     changed_paths = result.get("changed_paths") or []
     lines = [
-        "Write one short operational update for #site-builder.",
+        "Write one short operational update for #website-updates.",
         "This channel exists only for POAP KINGS website publish visibility.",
         f"Activity key: {activity_key}",
         f"Publish status: {status}",

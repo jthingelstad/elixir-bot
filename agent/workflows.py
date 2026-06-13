@@ -385,14 +385,14 @@ def run_memory_synthesis(context: dict):
 
     The job function (``_memory_synthesis_cycle``) is responsible for
     persisting arc memories, marking stale entries expired, and posting the
-    digest to #king-tower. This agent call just produces the plan.
+    digest to #leaders. This agent call just produces the plan.
     """
     public_context = {k: v for k, v in (context or {}).items() if not k.startswith("_")}
     user_msg = (
         "Here is the week's memory context. Decide which arcs belong in the "
         "clan's long-term memory, which stored memories are stale, which "
         "stored memories contradict the live clan state, and write a short "
-        "digest for #king-tower. Follow the output schema in your system "
+        "digest for #leaders. Follow the output schema in your system "
         "prompt exactly.\n\n"
         f"```json\n{json.dumps(public_context, indent=2, default=str)}\n```\n"
     )
@@ -409,10 +409,10 @@ def run_memory_synthesis(context: dict):
 
 
 def synthesize_leader_action_feedback(context: dict):
-    """Synthesize leader action reactions/notes into future arena-relay guidance."""
+    """Synthesize leader action reactions/notes into future leader-action guidance."""
     public_context = {k: v for k, v in (context or {}).items() if not k.startswith("_")}
     user_msg = (
-        "Here is recent #arena-relay leader feedback. Synthesize what Elixir should learn "
+        "Here is recent #leader-actions leader feedback. Synthesize what Elixir should learn "
         "for future cards of this action type. Focus on authoring choices, timing thresholds, "
         "decision standards, and follow-up expectations.\n\n"
         f"```json\n{json.dumps(public_context, indent=2, default=str)}\n```\n"
@@ -464,7 +464,7 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None):
 
 
 def respond_in_reception(question, author_name, clan_data, memory_context=None):
-    """Onboarding Q&A in #reception. No tools needed. Returns dict or None."""
+    """Onboarding Q&A in #welcome. No tools needed. Returns dict or None."""
     members = clan_data.get("memberList", clan_data.get("members", []))
     roster = "\n".join(
         f"  {m.get('name', '?')} ({m.get('tag', '?')})"
@@ -803,12 +803,12 @@ def _arena_relay_action_context(limit: int = 5) -> str:
 
 def analyze_arena_relay_screenshot(question, *, author_name, channel_name,
                                    memory_context=None, image_blocks=None):
-    """Analyze leader-submitted Clash Royale screenshots posted to #arena-relay."""
+    """Analyze leader-submitted Clash Royale screenshots posted to #leader-actions."""
     user_msg = (
         f"Leader '{author_name}' posted screenshot evidence in {channel_name}.\n\n"
         f"{question}\n\n"
         "Read the attached screenshot(s) as operational evidence. "
-        "Return a crisp arena-relay readout, not a conversational answer."
+        "Return a crisp #leader-actions readout, not a conversational answer."
     )
     war_ctx = _war_status_prompt_context()
     if war_ctx:
@@ -1103,7 +1103,7 @@ def generate_season_awards_post(signals, *, recent_posts=None, memory_context=No
     posts.
     """
     user_msg = (
-        "Write the Season Awards post for #clan-chronicle. Base the post on "
+        "Write the Season Awards post for #clan-events. Base the post on "
         "the signal payload below — the war_champ / iron_kings / "
         "donation_champs / rookie_mvps arrays are the only source of "
         "truth for names, ranks, and metrics. Do not fill in facts from "
@@ -1111,7 +1111,7 @@ def generate_season_awards_post(signals, *, recent_posts=None, memory_context=No
         "Signal:\n"
         f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```\n"
     )
-    user_msg += _format_recent_posts(recent_posts, channel_label="#clan-chronicle")
+    user_msg += _format_recent_posts(recent_posts, channel_label="#clan-events")
     user_msg += _format_memory_context(memory_context)
     return _chat_with_tools(
         _season_awards_system(),
@@ -1166,21 +1166,21 @@ def generate_tournament_update(signals, *, recent_posts=None, memory_context=Non
     """Generate a live tournament post for a batch of tournament_* signals.
 
     Runs with a dedicated tournament prompt and a self-contained context —
-    just the signals themselves and recent posts in #clan-chronicle, no war
+    just the signals themselves and recent posts in #clan-events, no war
     state and no river-race context. The clan-events subagent is still the
     destination, but the prompt and inputs are tournament-only.
 
     Returns the parsed response dict (with ``content`` as a string) or None.
     """
     user_msg = (
-        "Write a tournament post for #clan-chronicle. Base the post on the "
+        "Write a tournament post for #clan-events. Base the post on the "
         "signals below — their payload is the only ground truth. Do not "
         "reference war/river-race state, Battle Day N, or any clock outside "
         "the tournament's own start/end times.\n\n"
         "Signals:\n"
         f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```\n"
     )
-    user_msg += _format_recent_posts(recent_posts, channel_label="#clan-chronicle")
+    user_msg += _format_recent_posts(recent_posts, channel_label="#clan-events")
     user_msg += _format_memory_context(memory_context)
     return _chat_with_tools(
         _tournament_update_system(),

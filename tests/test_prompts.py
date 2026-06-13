@@ -36,21 +36,21 @@ def test_clan_loads():
 def test_discord_loads():
     """DISCORD.md loads and contains channel definitions."""
     text = prompts.discord()
-    assert "#king-tower" in text
-    assert "#reception" in text
-    assert "#site-builder" in text
+    assert "#leaders" in text
+    assert "#welcome" in text
+    assert "#website-updates" in text
 
 
 def test_channel_section_leader():
-    """Extracts #king-tower section."""
-    section = prompts.channel_section("#king-tower")
+    """Extracts #leaders section."""
+    section = prompts.channel_section("#leaders")
     assert "leader-lounge" in section.lower()
     assert "leader" in section.lower()
 
 
 def test_channel_section_reception():
-    """Extracts #reception section."""
-    section = prompts.channel_section("#reception")
+    """Extracts #welcome section."""
+    section = prompts.channel_section("#welcome")
     assert "onboarding" in section.lower()
     assert "nickname" in section.lower()
 
@@ -61,8 +61,8 @@ def test_reception_channel_is_open_channel():
 
 
 def test_channel_section_poapkings_com():
-    """Extracts #site-builder section."""
-    section = prompts.channel_section("#site-builder")
+    """Extracts #website-updates section."""
+    section = prompts.channel_section("#website-updates")
     assert "publish visibility" in section.lower()
     assert "github-backed site publish" in section.lower()
 
@@ -70,24 +70,28 @@ def test_channel_section_poapkings_com():
 def test_arena_relay_channel_is_configured():
     channel = prompts.discord_singleton_subagent("arena-relay")
     assert channel["id"] == 1513758211206025227
+    assert channel["name"] == "#leader-actions"
     assert channel["reply_policy"] == "disabled"
     assert channel["memory_scope"] == "leadership"
-    section = prompts.channel_section("#arena-relay")
+    section = prompts.channel_section("#leader-actions")
     assert "leader action board" in section.lower()
     assert "✅/☑️" in section
+    assert prompts.resolve_channel_reference("leader-actions")["subagent"] == "arena-relay"
+    assert prompts.resolve_channel_reference("arena-relay")["name"] == "#leader-actions"
 
 
 def test_member_highlights_channel_replaces_old_progression_split():
     channel = prompts.discord_singleton_subagent("member-highlights")
     assert channel["id"] == 1482352147029950474
-    assert channel["name"] == "#trophy-case"
+    assert channel["name"] == "#player-highlights"
     assert channel["reply_policy"] == "disabled"
-    section = prompts.channel_section("#trophy-case")
+    section = prompts.channel_section("#player-highlights")
     assert "curated player-story stream" in section.lower()
     assert "live non-war battle momentum" in section.lower()
     assert prompts.resolve_channel_reference("player-progress")["subagent"] == "member-highlights"
     assert prompts.resolve_channel_reference("trophy-road")["subagent"] == "member-highlights"
     assert prompts.resolve_channel_reference("trophy-case")["subagent"] == "member-highlights"
+    assert prompts.resolve_channel_reference("player-highlights")["subagent"] == "member-highlights"
     assert "Member Highlights Lane" in prompts.subagent_prompt("player-progress")
 
 

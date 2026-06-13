@@ -1,4 +1,4 @@
-"""Tests for #reception onboarding — name matching and event handlers."""
+"""Tests for #welcome onboarding — name matching and event handlers."""
 
 import asyncio
 from types import SimpleNamespace

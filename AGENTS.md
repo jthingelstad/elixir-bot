@@ -109,7 +109,7 @@ Elixir is the single authority for all dynamic data on poapkings.com. All Elixir
 
 Filenames are camelCase (not hyphenated) because 11ty uses the filename stem as the data key — `elixirClan.json` becomes `elixirClan` in templates. The POAP KINGS integration publishes these files directly to GitHub paths in the site repo; local sibling-repo writes are now a legacy/dev-only path. `site.json` contains only static site config (url, joinUrl, discordUrl, tagline, clanTag).
 
-Website publish visibility lives in `#site-builder`. Elixir posts there for real GitHub-backed publish outcomes:
+Website publish visibility lives in `#website-updates`. Elixir posts there for real GitHub-backed publish outcomes:
 - `site-content`
 - `weekly-recap` site sync
 - `promotion-content`
@@ -124,17 +124,17 @@ Elixir now uses channel-named subagents: one Elixir identity, many focused lanes
 Core rule: one signal is not one post. A signal can fan out into multiple channel outcomes, each generated for the destination channel only.
 
 Current primary subagents:
-- `reception` — onboarding and verification (`#reception`)
+- `reception` — onboarding and verification (`#welcome`)
 - `general` — mention-driven general Q&A (`#clan-chat`)
 - `ask-elixir` — open-channel clan conversation and Clash Royale screenshot help
-- `leader-lounge` — private leadership and clan operations (`#king-tower`)
+- `leader-lounge` — private leadership and clan operations (`#leaders`)
 - `arena-relay` — crisp leader action cards and leader-posted Clash Royale screenshot observation readouts
 - `river-race` — River Race scoreboard, recap, and major war-momentum updates
-- `member-highlights` — curated player milestones and non-war battle pushes (`#trophy-case`)
-- `clan-events` — joins, promotions, anniversaries, and clan recognitions (`#clan-chronicle`)
-- `announcements` — weekly recap and clan-wide Elixir system updates (`#royal-decrees`)
-- `promote-the-clan` — recruiting copy for Discord and the website (`#recruiting-camp`)
-- `poapkings-com` — website publish visibility only (`#site-builder`)
+- `member-highlights` — curated player milestones and non-war battle pushes (`#player-highlights`)
+- `clan-events` — joins, promotions, anniversaries, and clan recognitions (`#clan-events`)
+- `announcements` — weekly recap and clan-wide Elixir system updates (`#announcements`)
+- `promote-the-clan` — recruiting copy for Discord and the website (`#recruiting`)
+- `poapkings-com` — website publish visibility only (`#website-updates`)
 
 ## Recurring Activities
 
@@ -150,23 +150,23 @@ Each activity declares:
 
 Current recurring activities:
 - **Every 30 minutes, 24/7** — `clan-awareness` via `_clan_awareness_tick()`
-  Processes non-war clan signals and routes outcomes into channels like `#clan-chronicle` and `#king-tower`.
+  Processes non-war clan signals and routes outcomes into channels like `#clan-events` and `#leaders`.
 - **Every hour at :00 Chicago** — `war-poll` via `_war_poll_tick()`
   Polls live River Race state and stores the hourly war snapshot pipeline.
 - **Every hour at :05 Chicago** — `war-awareness` via `_war_awareness_tick()`
   Reads stored war data, processes war-only signals, and owns scheduled River Race coordination across `#river-race` and optional leadership notes.
 - **Every 30 minutes** — `player-progression` via `_player_intel_refresh()`
-  Refreshes stored player profile and battle intelligence, then emits member highlights to `#trophy-case`.
+  Refreshes stored player profile and battle intelligence, then emits member highlights to `#player-highlights`.
 - **Daily at 12:00 PM Chicago** — `daily-clan-insight` via `_ask_elixir_daily_insight()`
   Posts one short data-driven hidden fact in `#ask-elixir` when the data supports a genuinely interesting insight.
 - **Friday 7:00 PM Chicago** — `leadership-review` via `_clanops_weekly_review()`
-  Posts the weekly leadership review in `#king-tower`.
+  Posts the weekly leadership review in `#leaders`.
 - **Monday 9:00 AM Chicago** — `weekly-recap` via `_weekly_clan_recap()`
   Posts the public weekly clan recap and syncs the members-page payload to the website.
 - **6:00 PM Chicago** — `site-content` via `_site_content_cycle()`
   Refreshes daily POAP KINGS site content and publishes roster, clan, and home payloads to GitHub.
 - **Friday 9:00 AM Chicago** — `promotion-content` via `_promotion_content_cycle()`
-  Generates recruiting content for `#recruiting-camp` and the website promotion payload.
+  Generates recruiting content for `#recruiting` and the website promotion payload.
 
 ## Architecture: Prompts vs Code
 
@@ -221,10 +221,10 @@ Important rules:
 - Loop telemetry is logged per request: workflow, tool rounds, tools called, denied tools, validation failures, prompt/completion size estimates, and completion latencies.
 - Channel/reception failures are also persisted in `prompt_failures` with the cleaned question text, workflow, failure type/stage, Discord metadata, result preview/raw JSON, and the last LLM error/model snapshot.
 - Reply behavior is enforced in code from channel config:
-  - `mention_only` for channels like `#clan-chat` and `#king-tower`
+  - `mention_only` for channels like `#clan-chat` and `#leaders`
   - `open_channel` for `#ask-elixir`
-  - `disabled` for notification-only channels like `#site-builder`, `#river-race`, and `#royal-decrees`
-- `#arena-relay` is normally action-board style with disabled general replies, but `runtime/channel_router.py` special-cases leader-posted Clash Royale screenshots as observation evidence and replies with a concise `arena_relay_screenshot_observation` readout.
+  - `disabled` for notification-only channels like `#website-updates`, `#river-race`, and `#announcements`
+- `#leader-actions` is normally action-board style with disabled general replies, but `runtime/channel_router.py` special-cases leader-posted Clash Royale screenshots as observation evidence and replies with a concise `arena_relay_screenshot_observation` readout.
 
 ### Agent Feedback Review
 

@@ -431,7 +431,7 @@ async def _award_detection_tick():
     check is more than enough. Runs the same detectors the war-awareness
     pipeline used to fire hourly, now isolated to its own activity and
     routed through the normal signal delivery path so new grants still
-    surface in #clan-chronicle.
+    surface in #clan-events.
     """
     from heartbeat._awards import (
         detect_season_awards,
@@ -976,7 +976,7 @@ async def _weekly_clan_recap():
 
 
 async def _weekly_story_relay_card(recap_text: str) -> bool:
-    """Offer the recap's best beat as a clan-chat relay card in #arena-relay.
+    """Offer the recap's best beat as a clan-chat relay card in #leader-actions.
 
     Most of the clan never reads Discord — the recap's strongest member
     story reaches them only if a leader pastes it into game chat. One card

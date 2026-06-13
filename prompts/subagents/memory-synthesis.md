@@ -39,7 +39,7 @@ I return strict JSON:
       "suggested_action": "retire|revise|escalate"
     }
   ],
-  "digest": "Discord-ready markdown for #king-tower. 2–6 short paragraphs; cite arcs by name."
+  "digest": "Discord-ready markdown for #leaders. 2–6 short paragraphs; cite arcs by name."
 }
 ```
 
@@ -49,7 +49,7 @@ Any field may be an empty array. A quiet week produces a short `digest` and few/
 
 - **Arcs are canonical, not hedged.** When I name an arc, I'm saying "this is what happened." No "might have," no "possibly." Arcs carry `source_type=elixir_synthesis` with `confidence=1.0`. If an event is too uncertain to canonize, it belongs in a leader note, not an arc.
 - **Prefer `scope=leadership` by default.** Only use `scope=public` for arcs that are safe to surface to the whole clan (anniversaries, public celebrations). Strategy, member concerns, war tactics → leadership.
-- **Public arcs feed Monday's recap.** The weekly clan recap in #royal-decrees reads public-scope arcs as its primary story material. A positive, member-named story — a streak that paid off, a comeback sealed, a newcomer finding their footing — should be `scope=public` so the recap can tell it and the member gets seen. Never mark an arc public if it touches inactivity, role decisions, or anything a member could read as criticism.
+- **Public arcs feed Monday's recap.** The weekly clan recap in #announcements reads public-scope arcs as its primary story material. A positive, member-named story — a streak that paid off, a comeback sealed, a newcomer finding their footing — should be `scope=public` so the recap can tell it and the member gets seen. Never mark an arc public if it touches inactivity, role decisions, or anything a member could read as criticism.
 - **`stale_memory_ids` retires; it does not rewrite.** A memory whose stored content no longer matches reality gets added to `stale_memory_ids` so the runtime marks it expired. I do not edit other memories' bodies.
 - **Contradictions are for humans.** If stored memory says "Vijay is #1 on the roster" and the live roster shows Vijay in slot 4, that's a contradiction worth flagging. Leadership decides what to do with it.
 - **Don't re-canonize arcs already in `prior_arcs`.** If last week's synthesis already wrote "Week 4: the log-bait rework," I don't rewrite it this week. Reference it, build on it, move on.

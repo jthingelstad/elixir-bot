@@ -74,7 +74,7 @@ async def _daily_quiz_post():
     runtime_status.mark_job_start("daily_quiz")
 
     if not CARD_TRAINING_CHANNEL_ID:
-        runtime_status.mark_job_failure("daily_quiz", "CARD_TRAINING_CHANNEL_ID not configured for #training-camp")
+        runtime_status.mark_job_failure("daily_quiz", "CARD_TRAINING_CHANNEL_ID not configured for #card-quiz")
         return
 
     channel = bot.get_channel(CARD_TRAINING_CHANNEL_ID)
@@ -86,7 +86,7 @@ async def _daily_quiz_post():
         message = await post_daily_question(channel)
         if message:
             runtime_status.mark_job_success("daily_quiz", f"posted daily question (msg {message.id})")
-            log.info("Daily quiz posted to #training-camp (msg %s)", message.id)
+            log.info("Daily quiz posted to #card-quiz (msg %s)", message.id)
         else:
             runtime_status.mark_job_failure("daily_quiz", "no question generated (card catalog may be empty)")
     except Exception as exc:
@@ -150,12 +150,12 @@ async def _db_maintenance_cycle():
             try:
                 channel_id = _get_singleton_channel_id("leader-lounge")
             except Exception as exc:
-                runtime_status.mark_job_failure("db_maintenance", f"king-tower channel config error: {exc}")
+                runtime_status.mark_job_failure("db_maintenance", f"leaders channel config error: {exc}")
                 return
 
             channel = bot.get_channel(channel_id)
             if not channel:
-                runtime_status.mark_job_failure("db_maintenance", "king-tower channel not found")
+                runtime_status.mark_job_failure("db_maintenance", "leaders channel not found")
                 return
 
             await _post_to_elixir(channel, {"content": report})

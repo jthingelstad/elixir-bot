@@ -20,18 +20,18 @@ Useful companion docs:
 Elixir currently handles four main kinds of work:
 
 1. Discord conversation
-   Elixir answers questions in the right channel with the right lane behavior. `#ask-elixir` is open conversation and screenshot help, `#clan-chat` is mention-driven, and `#king-tower` is private clan operations.
+   Elixir answers questions in the right channel with the right lane behavior. `#ask-elixir` is open conversation and screenshot help, `#clan-chat` is mention-driven, and `#leaders` is private clan operations.
 
 2. Signal-driven clan updates
    Elixir detects roster, war, and progression signals, then fans one source event into one or more destination-specific outcomes. A new member join can become:
-   - a public welcome in `#clan-chronicle`
-   - a factual leadership note in `#king-tower`
+   - a public welcome in `#clan-events`
+   - a factual leadership note in `#leaders`
 
 3. Scheduled recurring activities
    Elixir runs recurring activities like `clan-awareness`, `war-poll`, `war-awareness`, `player-progression`, `weekly-recap`, `promotion-content`, and the daily `#ask-elixir` hidden-fact post.
 
 4. POAP KINGS website publishing
-   Elixir generates and publishes structured data for poapkings.com, pushes it to GitHub, and reports publish outcomes in `#site-builder`.
+   Elixir generates and publishes structured data for poapkings.com, pushes it to GitHub, and reports publish outcomes in `#website-updates`.
 
 ## Current Channel Model
 
@@ -39,17 +39,17 @@ Elixir now uses channel-named subagents instead of one overloaded public stream.
 
 Primary public/proactive lanes:
 - `#river-race` for River Race scoreboards, recaps, and meaningful war momentum
-- `#trophy-case` for curated player milestones and non-war battle pushes
-- `#clan-chronicle` for joins, promotions, anniversaries, and clan recognitions
-- `#royal-decrees` for the weekly recap and important clan-wide Elixir updates
-- `#recruiting-camp` for recruiting copy members can reuse
-- `#site-builder` for website publish visibility
+- `#player-highlights` for curated player milestones and non-war battle pushes
+- `#clan-events` for joins, promotions, anniversaries, and clan recognitions
+- `#announcements` for the weekly recap and important clan-wide Elixir updates
+- `#recruiting` for recruiting copy members can reuse
+- `#website-updates` for website publish visibility
 
 Primary interactive lanes:
 - `#ask-elixir` for open conversation with Elixir
 - `#clan-chat` for mention-driven general questions
-- `#reception` for onboarding and identity verification
-- `#king-tower` for leadership and clan operations
+- `#welcome` for onboarding and identity verification
+- `#leaders` for leadership and clan operations
 
 Legacy:
 
@@ -71,13 +71,13 @@ Current activities:
 - `daily-clan-insight`
   Daily in `#ask-elixir` at 12:00 PM CT. Posts one short hidden fact when the data supports a genuinely interesting insight.
 - `leadership-review`
-  Weekly post in `#king-tower`.
+  Weekly post in `#leaders`.
 - `weekly-recap`
-  Weekly public recap in `#royal-decrees`, plus members-page sync for the website.
+  Weekly public recap in `#announcements`, plus members-page sync for the website.
 - `site-content`
   Daily POAP KINGS website sync for clan, roster, and home payloads.
 - `promotion-content`
-  Weekly recruiting content for both `#recruiting-camp` and the website.
+  Weekly recruiting content for both `#recruiting` and the website.
 
 ## Quick Start
 
@@ -162,7 +162,7 @@ Modules:
 - [modules/poap_kings/](modules/poap_kings/)
   POAP KINGS website integration and GitHub publishing.
 - [modules/card_training/](modules/card_training/)
-  Elixir University card training quiz — interactive and daily quizzes in #training-camp.
+  Elixir University card training quiz — interactive and daily quizzes in #card-quiz.
 
 ## Prompt Model
 
@@ -215,7 +215,7 @@ Elixir owns the dynamic site data written to poapkings.com:
 
 GitHub-backed site publishing lives in [modules/poap_kings/site.py](modules/poap_kings/site.py).
 
-When a real publish happens, Elixir reports it in `#site-builder` with:
+When a real publish happens, Elixir reports it in `#website-updates` with:
 - success or failure
 - commit SHA
 - direct GitHub commit URL
@@ -226,7 +226,7 @@ No-change publishes stay quiet.
 
 ## Admin and Operations
 
-Elixir's operator commands live in Discord `#king-tower`; routine runtime notices go to `#elixir-log` when `ELIXIR_LOG_WEBHOOK_URL` is configured.
+Elixir's operator commands live in Discord `#leaders`; routine runtime notices go to `#elixir-log` when `ELIXIR_LOG_WEBHOOK_URL` is configured.
 
 Use slash commands under `/elixir ...`.
 

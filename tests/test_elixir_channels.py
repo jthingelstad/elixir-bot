@@ -349,7 +349,7 @@ def test_on_message_routes_reception_without_mention():
         patch("elixir._is_bot_mentioned", return_value=False),
         patch("elixir._get_channel_behavior", return_value={
             "id": 1476456514121109514,
-            "name": "#reception",
+            "name": "#welcome",
             "subagent": "reception",
             "workflow": "reception",
             "reply_policy": "open_channel",
@@ -427,7 +427,7 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
-            "name": "#arena-relay",
+            "name": "#leader-actions",
             "subagent": "arena-relay",
         }),
         patch("runtime.prompt_feedback.db.decide_leader_action_by_message", return_value={
@@ -465,7 +465,7 @@ def test_arena_relay_reply_records_action_note():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
-            "name": "#arena-relay",
+            "name": "#leader-actions",
             "subagent": "arena-relay",
             "workflow": "channel_update",
             "reply_policy": "disabled",
@@ -517,7 +517,7 @@ def test_arena_relay_leader_screenshot_is_observed():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
-            "name": "#arena-relay",
+            "name": "#leader-actions",
             "subagent": "arena-relay",
             "workflow": "channel_update",
             "reply_policy": "disabled",
@@ -549,7 +549,7 @@ def test_arena_relay_leader_screenshot_is_observed():
     kwargs = mock_analyze.call_args.kwargs
     assert "Shared Clash Royale screenshot image" in question
     assert "boat-defense.jpg" in question
-    assert kwargs["channel_name"] == "#arena-relay"
+    assert kwargs["channel_name"] == "#leader-actions"
     assert kwargs["image_blocks"][0]["source"]["media_type"] == "image/jpeg"
     assert kwargs["image_blocks"][0]["source"]["data"] == "Ym9hdHN0YXRl"
     event_types = [call.kwargs.get("event_type") for call in mock_save.call_args_list]
@@ -597,7 +597,7 @@ def test_arena_relay_screenshot_persists_structured_memories():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
-            "name": "#arena-relay",
+            "name": "#leader-actions",
             "subagent": "arena-relay",
             "workflow": "channel_update",
             "reply_policy": "disabled",
@@ -698,7 +698,7 @@ def test_arena_relay_leader_multi_screenshot_corrects_media_types():
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
-            "name": "#arena-relay",
+            "name": "#leader-actions",
             "subagent": "arena-relay",
             "workflow": "channel_update",
             "reply_policy": "disabled",
@@ -1305,7 +1305,7 @@ def test_startup_channel_audit_reports_missing_or_unwritable_channels():
 
 
 def test_startup_channel_audit_flags_missing_soft_perms():
-    # The 2026-04-25 #reception incident: bot could view + send but lacked
+    # The 2026-04-25 #welcome incident: bot could view + send but lacked
     # read_message_history, so message.reply() 403'd. Audit must catch this.
     perms_missing_history = SimpleNamespace(
         view_channel=True,
@@ -1352,7 +1352,7 @@ def test_startup_channel_audit_flags_missing_soft_perms():
         patch(
             "elixir.prompts.discord_channel_configs",
             return_value=[
-                {"id": 200, "name": "#reception", "workflow": "reception"},
+                {"id": 200, "name": "#welcome", "workflow": "reception"},
                 {"id": 300, "name": "#ask-elixir", "workflow": "interactive"},
                 {"id": 400, "name": "#leader-lounge", "workflow": "clanops"},
             ],
@@ -1361,7 +1361,7 @@ def test_startup_channel_audit_flags_missing_soft_perms():
         summary = asyncio.run(elixir._startup_channel_audit_summary())
 
     assert "Channel audit: 1/3 active channels reachable and writable." in summary
-    assert "#reception missing perms: read_message_history" in summary
+    assert "#welcome missing perms: read_message_history" in summary
     assert "#ask-elixir missing perms: add_reactions, use_external_emojis" in summary
 
 
@@ -1777,7 +1777,7 @@ def test_slash_relay_status_allowed_in_arena_relay():
     response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
-        channel=SimpleNamespace(id=300, name="arena-relay", type="text"),
+        channel=SimpleNamespace(id=300, name="leader-actions", type="text"),
         user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
         response=response,
         followup=followup,
@@ -1786,7 +1786,7 @@ def test_slash_relay_status_allowed_in_arena_relay():
 
     with (
         patch("runtime.app._is_clanops_channel", return_value=False),
-        patch("runtime.app._get_channel_behavior", return_value={"name": "#arena-relay", "subagent": "arena-relay"}),
+        patch("runtime.app._get_channel_behavior", return_value={"name": "#leader-actions", "subagent": "arena-relay"}),
         patch("runtime.app._has_leader_role", return_value=True),
         patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="relay report")) as mock_dispatch,
     ):
@@ -1813,7 +1813,7 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
     response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
     interaction = SimpleNamespace(
-        channel=SimpleNamespace(id=300, name="arena-relay", type="text"),
+        channel=SimpleNamespace(id=300, name="leader-actions", type="text"),
         user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[SimpleNamespace(name="Leader")]),
         response=response,
         followup=followup,
@@ -1822,7 +1822,7 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
 
     with (
         patch("runtime.app._is_clanops_channel", return_value=False),
-        patch("runtime.app._get_channel_behavior", return_value={"name": "#arena-relay", "subagent": "arena-relay"}),
+        patch("runtime.app._get_channel_behavior", return_value={"name": "#leader-actions", "subagent": "arena-relay"}),
         patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="war report")) as mock_dispatch,
     ):
         asyncio.run(war_status_command.callback(interaction))
@@ -2669,7 +2669,7 @@ def test_build_schedule_report_includes_promotion_content_sync():
 
     assert "promote-the-clan" in report
     assert "promotion-content" in report
-    assert "Discord: #recruiting-camp" in report
+    assert "Discord: #recruiting" in report
     assert "POAP KINGS: promotion payloads" in report
     assert "Every Fri at 09:00 CT." in report
 
@@ -2726,7 +2726,7 @@ def test_build_schedule_report_includes_clock_aligned_war_pipeline():
     assert "Every hour at :00 CT." in report
     assert "war-awareness" in report
     assert "Every hour at :05 CT." in report
-    assert "Discord routed outcomes: #river-race, optional #arena-relay leader actions, optional #king-tower" in report
+    assert "Discord routed outcomes: #river-race, optional #leader-actions leader actions, optional #leaders" in report
 
 
 def test_activity_registry_has_unique_keys_and_required_fields():
@@ -2766,16 +2766,16 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert "leadership-action-scan" in specs
     assert specs["leadership-action-scan"]["owner_subagent"] == "arena-relay"
     assert specs["leadership-action-scan"]["schedule"] == "Every 240 minutes."
-    assert "Discord: #arena-relay singular leader action cards" in specs["leadership-action-scan"]["delivery_targets"]
+    assert "Discord: #leader-actions singular leader action cards" in specs["leadership-action-scan"]["delivery_targets"]
     assert "weekly-discord-invite-relay" in specs
     assert specs["weekly-discord-invite-relay"]["owner_subagent"] == "arena-relay"
     assert specs["weekly-discord-invite-relay"]["schedule"] == "Every Sat at 11:00 CT."
-    assert "Discord: #arena-relay weekly no-link Discord invite copy" in specs["weekly-discord-invite-relay"]["delivery_targets"]
+    assert "Discord: #leader-actions weekly no-link Discord invite copy" in specs["weekly-discord-invite-relay"]["delivery_targets"]
     assert "db-maintenance" in specs
     assert specs["db-maintenance"]["owner_subagent"] == "elixir-log"
     assert "Discord webhook: #elixir-log" in specs["db-maintenance"]["delivery_targets"]
     assert "promotion-content" in specs
-    assert "Discord: #recruiting-camp" in specs["promotion-content"]["delivery_targets"]
+    assert "Discord: #recruiting" in specs["promotion-content"]["delivery_targets"]
     assert "POAP KINGS: promotion payloads" in specs["promotion-content"]["delivery_targets"]
 
 

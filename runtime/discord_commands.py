@@ -279,7 +279,7 @@ def register_elixir_app_commands(bot) -> None:
             return
         await send_interaction_text(
             interaction,
-            f"Posted test {action_type} card as R{action.get('action_id')} in #arena-relay.",
+            f"Posted test {action_type} card as R{action.get('action_id')} in #leader-actions.",
             use_followup=True,
         )
 
@@ -785,7 +785,7 @@ def _register_quiz_commands(bot, app) -> None:
         msg = (
             f"Use this command in <#{CARD_TRAINING_CHANNEL_ID}>."
             if CARD_TRAINING_CHANNEL_ID
-            else "The #training-camp channel is not configured yet."
+            else "The #card-quiz channel is not configured yet."
         )
         await interaction.response.send_message(msg, ephemeral=True)
         return False

@@ -422,7 +422,7 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member):
-    """Welcome new Discord members in #reception."""
+    """Welcome new Discord members in #welcome."""
     await onboarding.handle_member_join(member)
 
 

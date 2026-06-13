@@ -214,7 +214,7 @@ async def handle_member_join(member: discord.Member):
         "discord_member_join",
         (
             f"A new user '{member.display_name}' ({member.mention}) just joined the Discord server. "
-            f"Welcome them in #reception and explain how to set their server nickname "
+            f"Welcome them in #welcome and explain how to set their server nickname "
             f"to match their Clash Royale in-game name to get verified."
         ),
         (
@@ -254,7 +254,7 @@ async def handle_member_update(before: discord.Member, after: discord.Member):
             (
                 f"User {after.mention} set their nickname to '{after.nick}' but it doesn't "
                 f"match anyone in the clan roster. Let them know and suggest they check "
-                f"the spelling or join the clan first. Channel: #reception."
+                f"the spelling or join the clan first. Channel: #welcome."
             ),
             f"Hmm {after.mention}, I don't see **{after.nick}** in our roster.",
         )
@@ -277,7 +277,7 @@ async def handle_member_update(before: discord.Member, after: discord.Member):
             (
                 f"Matched user {after.mention} to clan member '{cr_name}' ({tag}) but "
                 f"couldn't assign the member role due to permissions. Let them know "
-                f"a leader will help. Channel: #reception."
+                f"a leader will help. Channel: #welcome."
             ),
             message,
         )
@@ -288,7 +288,7 @@ async def handle_member_update(before: discord.Member, after: discord.Member):
         (
             f"User {after.mention} set their nickname to '{cr_name}' which matches "
             f"clan member tag {tag}. They've been granted the member role. "
-            f"Welcome them and let them know they have full access. Channel: #reception."
+            f"Welcome them and let them know they have full access. Channel: #welcome."
         ),
         f"Welcome aboard, {cr_name}! You now have full access.",
     )

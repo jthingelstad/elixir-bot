@@ -136,14 +136,14 @@ def _discord_invite_relay_context(base_context: str | None) -> str:
     else:
         count_line = "- Discord-linked clan member count: unavailable"
     instructions = (
-        "Arena-relay Discord invite task:\n"
+        "Leader-actions Discord invite task:\n"
         f"{count_line}\n"
         "- Author 2-3 short Clash Royale clan-chat messages a leader can copy/paste in sequence.\n"
         "- Highlight why Discord is worth joining: war coordination, deck/screenshot help, milestone shoutouts, leader relay notes, or recent useful coordination.\n"
         f"- Include `{DISCORD_INVITE_ROUTE}` exactly once, preferably in the final copy/paste message.\n"
         "- Do not include raw URLs, markdown links, Discord-only formatting, message numbers, or labels inside the copy/paste messages.\n"
         f"- Keep each copy/paste message under {ARENA_RELAY_MAX_COPY_CHARS} characters.\n"
-        "- Return `content` as a JSON array containing only the Clash Royale copy/paste messages. The code will add the arena-relay action card.\n"
+        "- Return `content` as a JSON array containing only the Clash Royale copy/paste messages. The code will add the leader-action card.\n"
     )
     if base_context:
         return f"{base_context}\n\n{instructions}"
@@ -308,7 +308,7 @@ def _member_join_welcome_context(base_context: str | None, signal: dict, profile
     facts = profile_facts if profile_facts is not None else _member_join_profile_facts(signal)
     fact_block = "\n".join(facts) if facts else "- No profile facts available beyond the join signal."
     instructions = (
-        "Arena-relay new-member welcome task:\n"
+        "Leader-actions new-member welcome task:\n"
         f"{fact_block}\n"
         "- Author one short Clash Royale clan-chat welcome a leader can copy/paste.\n"
         "- Include the member name exactly as provided when available.\n"
@@ -322,7 +322,7 @@ def _member_join_welcome_context(base_context: str | None, signal: dict, profile
         "- Do not invent achievements, personality, role, Discord status, or future behavior.\n"
         "- Do not include raw URLs, markdown links, Discord-only formatting, message numbers, or labels inside the copy/paste message.\n"
         f"- Keep the copy/paste message under {ARENA_RELAY_WELCOME_MAX_COPY_CHARS} characters and ideally under 18 words.\n"
-        "- Return `content` as a single string containing only the Clash Royale copy/paste message. The code will add the arena-relay action card.\n"
+        "- Return `content` as a single string containing only the Clash Royale copy/paste message. The code will add the leader-action card.\n"
     )
     if base_context:
         return f"{base_context}\n\n{instructions}"
@@ -581,7 +581,7 @@ def _war_relay_context(base_context: str | None, signals: list[dict], memory_con
         "- Do not over-explain rules, fairness, Discord, APIs, prompts, or hidden system behavior.\n"
         "- Do not include raw URLs, markdown links, Discord-only formatting, message numbers, or labels inside the copy/paste messages.\n"
         f"- Keep each copy/paste message under {ARENA_RELAY_MAX_COPY_CHARS} characters.\n"
-        "- Return `content` as a JSON array containing only the Clash Royale copy/paste messages. The code will add the arena-relay action card.\n\n"
+        "- Return `content` as a JSON array containing only the Clash Royale copy/paste messages. The code will add the leader-action card.\n\n"
         "War signals:\n"
         f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```"
     )
@@ -673,7 +673,7 @@ def _season_awards_context(base_context: str | None, signals: list[dict], memory
         "- Sound like in-game clan chat, not a trophy ceremony script.\n"
         "- Do not include raw URLs, markdown links, Discord-only formatting, message numbers, or labels inside the copy/paste message.\n"
         f"- Keep the copy/paste message under {ARENA_RELAY_MAX_COPY_CHARS} characters.\n"
-        "- Return `content` as a single string containing only the Clash Royale copy/paste message. The code will add the arena-relay action card.\n\n"
+        "- Return `content` as a single string containing only the Clash Royale copy/paste message. The code will add the leader-action card.\n\n"
         "Season awards signal:\n"
         f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```"
     )

@@ -53,12 +53,12 @@ STARTUP_SYSTEM_SIGNALS = [
         "payload": {
             "title": "Achievement Unlocked: Card Quiz",
             "message": (
-                "Elixir now has a card training quiz in #training-camp. "
+                "Elixir now has a card training quiz in #card-quiz. "
                 "Members can test their Clash Royale card knowledge with interactive quizzes and a daily question with streak tracking."
             ),
             "discord_content": (
                 "**Achievement Unlocked: Card Quiz** :elixir_hype:\n\n"
-                "POAP KINGS just got a new training ground. **#training-camp** is live — "
+                "POAP KINGS just got a new training ground. **#card-quiz** is live — "
                 "a dedicated channel where you can sharpen your Clash Royale card knowledge with real quizzes.\n\n"
                 "**What's in there:**\n"
                 "- `/elixir quiz start` — take a quick quiz (1-10 questions). "
@@ -72,10 +72,10 @@ STARTUP_SYSTEM_SIGNALS = [
                 "Knowing your cards is knowing your matchups. "
                 "Whether it's the elixir cost of a counter or which cards have Evo, "
                 "the quiz is built to make that knowledge stick.\n\n"
-                "Head to **#training-camp** and see what you know. :elixir_trophy:"
+                "Head to **#card-quiz** and see what you know. :elixir_trophy:"
             ),
             "details": [
-                "New #training-camp channel with interactive quizzes and a daily question.",
+                "New #card-quiz channel with interactive quizzes and a daily question.",
                 "Six question types covering elixir cost, rarity, card type, Evo/Hero capability, and Champion identification.",
                 "All questions generated from a synced Clash Royale card catalog with card images.",
                 "Daily streak tracking for consecutive correct answers on the daily question.",
@@ -222,7 +222,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "- **I'm allowed to be silent.** When the data has already gone stale (a hot-streak signal whose live battle log shows the streak broke), I skip and log why. Silence is a real choice now.\n"
                 "- **I always know what time it is.** Hours-remaining, day index, war phase, and colosseum status attach to every post — no waiting for a checkpoint to fire to talk about the clock.\n\n"
                 "**Member highlights are consolidated**\n"
-                "- Volatile non-war battle activity and durable progression now land together in **#trophy-case**.\n"
+                "- Volatile non-war battle activity and durable progression now land together in **#player-highlights**.\n"
                 "- I still distinguish a live push from a permanent milestone; the difference is in the framing, not another channel to watch.\n\n"
                 "This is **Elixir v4.5 \"Coherent\"** — one mind per tick, watching the whole situation, deciding what's worth your attention."
             ),
@@ -232,7 +232,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "Coherent timing: related signals (war cascade, mixed milestone+roster batches) collapse into one sequenced post per channel instead of N independent posts.",
                 "Genuine silence is allowed — stale signals get caught and skipped with a logged reason; quiet ticks fast-path skip the LLM call entirely.",
                 "Hard-post-floor fallback guarantees coverage for member_join, war_battle_rank_change, capability_unlock, and week/season completion signals.",
-                "#trophy-case consolidates volatile battle-mode activity and durable player milestones with different framing rules.",
+                "#player-highlights consolidates volatile battle-mode activity and durable player milestones with different framing rules.",
                 "Time/phase/standing context now attaches to every channel post, not just war checkpoints.",
             ],
             "audience": "clan",
@@ -256,20 +256,20 @@ STARTUP_SYSTEM_SIGNALS = [
                 "- **I keep watch.** When I notice a member going quiet, sliding in trophies, or missing war days, "
                 "I can flag them for leadership — a durable note that persists across ticks so the pattern doesn't get lost in the scroll.\n"
                 "- **I queue follow-ups.** When the data suggests a leadership action (promotion review, kick conversation, "
-                "deck check), I write a concrete recommendation to #king-tower instead of hoping someone notices.\n"
+                "deck check), I write a concrete recommendation to #leaders instead of hoping someone notices.\n"
                 "- **I schedule revisits.** Mid-arc situations — a win streak during battle day, a silent member before Friday — "
                 "I can tell my future self to check back. The revisit surfaces in a later tick and I decide then whether to act.\n"
                 "- **I synthesize the week.** Every Sunday night I read back through the week's signals, posts, and memories, "
                 "write canonical arc memories (\"Week 5 colosseum: the Gareth push\"), retire entries that no longer match "
                 "reality, and flag contradictions for leadership.\n\n"
                 "All writes are leadership-scoped and budget-capped at 3 per tick. The weekly synthesis digest lands in "
-                "#king-tower.\n\n"
+                "#leaders.\n\n"
                 "This is **Elixir v4.6 \"Clan Keep\"** — the keep at the center of the castle, holding what matters."
             ),
             "details": [
                 "Awareness write surface: save_clan_memory, flag_member_watch, record_leadership_followup — all leadership-scoped, capped at 3 per tick.",
                 "Self-scheduled revisits: schedule_revisit(signal_key, at, rationale) persists to a revisits table and surfaces in future Situations.",
-                "Weekly memory synthesis: Sunday job writes elixir_synthesis arc memories, expires stale entries, flags contradictions, posts digest to #king-tower.",
+                "Weekly memory synthesis: Sunday job writes elixir_synthesis arc memories, expires stale entries, flags contradictions, posts digest to #leaders.",
                 "Emoji fix: agent prompts enumerate real custom emoji; hallucinated shortcodes stripped before posting.",
                 "Feature flag cleanup: ELIXIR_AWARENESS_LOOP retired; awareness loop is the only path.",
                 "Signal dedup fix: arena_change and war_rollover signals no longer re-fire across ticks.",
@@ -345,7 +345,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "**What's new on poapkings.com:**\n"
                 "- Every member card now shows a **trophy case** — inline, newest first.\n"
                 "- A new **`/members/trophy/<season>`** page collects every award from every season, with tabs.\n\n"
-                "**In Discord:** each grant fires a fresh `award_earned` signal into #clan-chronicle. Live, durable, and something I'll remember forever.\n\n"
+                "**In Discord:** each grant fires a fresh `award_earned` signal into #clan-events. Live, durable, and something I'll remember forever.\n\n"
                 "This is **Elixir v4.8 \"Trophy Hall\"** — earn it once, it's yours for good."
             ),
             "details": [
@@ -353,7 +353,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "Seven award types across season and weekly scopes; podium awards store rank 1/2/3, pass/fail awards always rank 1.",
                 "Iron King / Perfect Week use war_participant_snapshots; Donation Champ sums weekly MAX across the season; Rookie MVP filters by clan_memberships.joined_at.",
                 "Season close detected by the presence of a newer season_id in war_races — grants back-fill automatically with no timing-sensitive trigger.",
-                "award_earned signal routed to #clan-chronicle and stored as a public clan_memories row so the trophy history is durable across conversations.",
+                "award_earned signal routed to #clan-events and stored as a public clan_memories row so the trophy history is durable across conversations.",
                 "POAP KINGS site: per-member trophy_case on roster/members + new elixirAwards.json for the /members/trophy page.",
             ],
             "audience": "clan",
