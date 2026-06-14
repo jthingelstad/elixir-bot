@@ -772,6 +772,7 @@ def test_arena_relay_clan_voyage_screenshot_persists_capture():
             "entries": [
                 {"rank": 1, "player_name": "Aaqib Javed", "role": "Member", "points": 388, "source_image_index": 1, "confidence": 0.93},
                 {"rank": 2, "player_name": "The Joesma", "role": "Member", "points": 243, "source_image_index": 1, "confidence": 0.9},
+                {"rank": 18, "player_name": "THIS_GUY", "role": "Elder", "points": 94, "source_image_index": 4, "confidence": 0.87},
             ],
         },
     }
@@ -791,6 +792,23 @@ def test_arena_relay_clan_voyage_screenshot_persists_capture():
         patch("runtime.channel_router.db.build_memory_context", return_value={}),
         patch("runtime.channel_router.db.save_message", return_value=111) as mock_save,
         patch("runtime.channel_router.db.save_arena_relay_screenshot_observation", return_value={"screenshot_type": "clan_voyage_leaderboard", "image_count": 10}),
+        patch("runtime.channel_router.db.build_clan_voyage_roster_choices", return_value=[
+            {"player_tag": "#TH15GUY", "name": "TH15_Guy", "role": "elder", "aliases": [], "ocr_key": "thisguy"},
+        ]) as mock_roster,
+        patch("runtime.channel_router.elixir_agent.reconcile_clan_voyage_entries", return_value={
+            "entries": [
+                {"rank": 1, "visible_name": "Aaqib Javed", "matched_player_tag": None, "confidence": 0.0, "reason": "not in minimal test roster"},
+                {"rank": 2, "visible_name": "The Joesma", "matched_player_tag": None, "confidence": 0.0, "reason": "not in minimal test roster"},
+                {"rank": 18, "visible_name": "THIS_GUY", "matched_player_tag": "#TH15GUY", "matched_name": "TH15_Guy", "confidence": 0.93, "reason": "OCR 15/IS visual match"},
+            ],
+            "summary": "Matched one OCR-styled row.",
+        }) as mock_reconcile,
+        patch("runtime.channel_router.db.validate_clan_voyage_entry_match", return_value={
+            "accepted": True,
+            "score": 0.97,
+            "reason": "ocr_exact",
+            "matched_name": "TH15_Guy",
+        }) as mock_validate,
         patch("runtime.channel_router.db.upsert_clan_voyage_capture", return_value={
             "voyage_id": 44,
             "season_key": "2026-06",
@@ -802,15 +820,21 @@ def test_arena_relay_clan_voyage_screenshot_persists_capture():
 
     assert len(mock_analyze.call_args.kwargs["image_blocks"]) == 10
     assert "voyage-9.jpg" in mock_analyze.call_args.args[0]
+    mock_roster.assert_called_once()
+    mock_reconcile.assert_called_once()
+    mock_validate.assert_called_once_with("THIS_GUY", "#TH15GUY", min_similarity=0.70)
     mock_voyage.assert_called_once()
     kwargs = mock_voyage.call_args.kwargs
     assert kwargs["source_message_id"] == 555
     assert kwargs["image_count"] == 10
     assert kwargs["event_name"] == "Clan Voyage"
     assert kwargs["entries"][0]["player_name"] == "Aaqib Javed"
+    assert kwargs["entries"][2]["player_tag"] == "#TH15GUY"
+    assert kwargs["entries"][2]["matched_name"] == "TH15_Guy"
     message.reply.assert_awaited_once_with(
         "**Read:** Clan Voyage complete. Top: Aaqib Javed 388.\n\n"
-        "Stored Clan Voyage: 2 visible rank(s) captured for 2026-06."
+        "Stored Clan Voyage: 3 visible rank(s) captured for 2026-06.\n\n"
+        "Roster match: 1/3 rows matched. Unresolved: R1 Aaqib Javed, R2 The Joesma."
     )
     saved_raw = mock_save.call_args_list[-1].kwargs["raw_json"]
     assert saved_raw["clan_voyage_id"] == 44

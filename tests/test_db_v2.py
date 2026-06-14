@@ -1385,9 +1385,18 @@ def test_clan_voyage_capture_merges_pages_and_resolves_members():
             [
                 {"tag": "#AAA111", "name": "Aaqib Javed", "role": "member", "trophies": 9000, "clanRank": 1},
                 {"tag": "#KING001", "name": "King Thing", "role": "leader", "trophies": 11000, "clanRank": 2},
+                {"tag": "#TH15GUY", "name": "TH15_Guy", "role": "elder", "trophies": 8500, "clanRank": 18},
             ],
             conn=conn,
         )
+        choices = db.build_clan_voyage_roster_choices(conn=conn)
+        th15 = next(choice for choice in choices if choice["player_tag"] == "#TH15GUY")
+        assert th15["name"] == "TH15_Guy"
+        assert th15["ocr_key"] == "thisguy"
+        validation = db.validate_clan_voyage_entry_match("THIS_GUY", "#TH15GUY", conn=conn)
+        assert validation["accepted"] is True
+        assert validation["reason"] == "ocr_exact"
+
         first = db.upsert_clan_voyage_capture(
             source_message_id=1001,
             channel_id=1513758211206025227,

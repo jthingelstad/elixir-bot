@@ -21,6 +21,7 @@ def test_registry_generates_compatibility_maps():
         "reception",
         "roster_bios",
         "deck_review",
+        "clan_voyage_reconciliation",
         "intel_report",
         "tournament_recap",
         "tournament_update",
@@ -57,5 +58,5 @@ def test_registry_model_selection_matches_existing_defaults(monkeypatch):
 
 
 def test_empty_toolsets_stay_empty():
-    for workflow in ("reception", "war_recap", "season_awards", "memory_synthesis", "leader_action_feedback", "clan_chat_copy"):
+    for workflow in ("reception", "war_recap", "season_awards", "memory_synthesis", "leader_action_feedback", "clan_chat_copy", "clan_voyage_reconciliation"):
         assert elixir_agent.TOOLSETS_BY_WORKFLOW[workflow] == []

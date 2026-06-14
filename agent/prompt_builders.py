@@ -566,6 +566,31 @@ def _arena_relay_observation_system(channel_name: str):
     return _build_system_prompt(purpose, knowledge, channel_context, guidance)
 
 
+def _clan_voyage_reconciliation_system():
+    """System prompt for reconciling Clan Voyage OCR rows to active roster members."""
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.channel_section("arena-relay"),
+        "You are reconciling Clash Royale Clan Voyage screenshot OCR rows to the current POAP KINGS roster.\n\n"
+        "Input contains two lists: `visible_rows` from screenshot extraction and `roster_choices` from the live active roster. "
+        "Your job is not to reread screenshots. Your job is to choose the roster player tag that best matches each visible row, or null if uncertain.\n\n"
+        "Important OCR/name rules:\n"
+        "- Clash names are stylized. Treat `1`, `I`, `l`, and `i` as visually confusable.\n"
+        "- Treat `5` and `S`, `0` and `O`, `_`, spaces, hyphens, and capitalization as visually confusable.\n"
+        "- Preserve the visible name exactly as provided; do not rewrite the screenshot evidence.\n"
+        "- Pick only from `roster_choices.player_tag`. Never invent tags or names.\n"
+        "- If two roster names are plausible, return null and explain the ambiguity.\n"
+        "- Prefer exact/near-exact roster name or alias matches over rank/role hints. Rank and role are secondary tie-breakers only.\n\n"
+        "Return one entry per visible row, preserving rank and visible_name. "
+        "`confidence` should be 0.0-1.0. Use >=0.85 only for clear matches; use null tag below that.\n\n"
+        "Respond with JSON only (no markdown wrapper):\n"
+        "{\"entries\": [{\"rank\": 18, \"visible_name\": \"THIS_GUY\", "
+        "\"matched_player_tag\": \"#ABC123\", \"matched_name\": \"TH15_Guy\", "
+        "\"confidence\": 0.92, \"reason\": \"OCR 15/IS visual match\"}], "
+        "\"summary\": \"short summary\"}",
+    )
+
+
 def _reception_system():
     reception = prompts.discord_singleton_subagent("reception")
     purpose, _, channel_context = _subagent_base(reception["name"], reception["subagent_key"])
@@ -924,6 +949,7 @@ __all__ = [
     "_interactive_system",
     "_clanops_system",
     "_arena_relay_observation_system",
+    "_clan_voyage_reconciliation_system",
     "_reception_system",
     "_channel_subagent_system",
     "_home_message_system",
