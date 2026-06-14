@@ -13,7 +13,10 @@ import cr_api
 import db
 import elixir_agent
 from PIL import Image, ImageOps, UnidentifiedImageError
+from runtime.clan_chat_copy import generate_clan_chat_copy
 from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
+from runtime.leader_action_ui import CLASH_COPY_MAX_LENGTH, LEADER_ACTION_UI_VERSION, post_leader_action_card
+from runtime.helpers import _channel_msg_kwargs, _channel_scope
 
 _log = logging.getLogger("elixir.channel_router")
 
@@ -755,6 +758,172 @@ def _append_clan_voyage_reconciliation_note(content: str, result: dict) -> str:
     return f"{content.rstrip()}\n\n{note}"
 
 
+def _clan_voyage_sorted_entries(voyage: dict | None) -> list[dict]:
+    entries = (voyage or {}).get("entries") or []
+    visible = [entry for entry in entries if isinstance(entry, dict)]
+    return sorted(
+        visible,
+        key=lambda item: (
+            _clan_voyage_entry_rank(item) or 9999,
+            -(_clan_voyage_entry_points(item) or 0),
+        ),
+    )
+
+
+def _clan_voyage_entry_display_name(entry: dict) -> str:
+    return " ".join(str(
+        entry.get("player_name_raw")
+        or entry.get("player_name")
+        or entry.get("name")
+        or ""
+    ).split())
+
+
+def _clan_voyage_recognition_source_key(voyage: dict) -> str:
+    voyage_id = voyage.get("voyage_id")
+    if voyage_id is not None:
+        return f"clan_voyage_recognition:{voyage_id}"
+    return f"clan_voyage_recognition:{voyage.get('voyage_key') or voyage.get('season_key') or 'latest'}"
+
+
+def _fallback_clan_voyage_recognition_copy(voyage: dict) -> str:
+    top = []
+    for entry in _clan_voyage_sorted_entries(voyage)[:3]:
+        name = _clan_voyage_entry_display_name(entry)
+        points = _clan_voyage_entry_points(entry)
+        if name and points is not None:
+            top.append(f"{name} ({points})")
+        elif name:
+            top.append(name)
+    if top:
+        names = ", ".join(top)
+        return f"Clan Voyage complete: POAP KINGS finished it. Big thanks to {names}, and everyone who chipped in."
+    return "Clan Voyage complete: POAP KINGS finished it. Thanks to everyone who chipped in."
+
+
+def _clan_voyage_recognition_context(voyage: dict) -> str:
+    entries = _clan_voyage_sorted_entries(voyage)
+    top_lines = []
+    for entry in entries[:8]:
+        rank = _clan_voyage_entry_rank(entry)
+        name = _clan_voyage_entry_display_name(entry)
+        points = _clan_voyage_entry_points(entry)
+        if not name:
+            continue
+        detail = f"#{rank} {name}" if rank is not None else name
+        if points is not None:
+            detail += f" - {points} points"
+        top_lines.append(f"- {detail}")
+    participants = len(entries)
+    top_block = "\n".join(top_lines) if top_lines else "- No visible contributor rows"
+    return (
+        "Clan Voyage recognition relay task:\n"
+        "- Target surface: Clash Royale in-game clan chat.\n"
+        "- Author one short message a leader can copy/paste.\n"
+        "- POAP KINGS completed Clan Voyage from leader-submitted screenshots.\n"
+        f"- Visible participants captured: {participants}.\n"
+        "- Thank the whole clan and mention one to three top contributors if it fits naturally.\n"
+        "- Sound like native Clash Royale clan chat, not a Discord recap.\n"
+        "- Do not include Discord formatting, labels, links, or hidden system details.\n"
+        f"- Keep the message under {CLASH_COPY_MAX_LENGTH} characters.\n\n"
+        "Top visible contributors:\n"
+        f"{top_block}"
+    )
+
+
+async def _post_clan_voyage_recognition_action(channel, voyage: dict | None) -> dict | None:
+    if not voyage or not voyage.get("completed"):
+        return None
+    entries = _clan_voyage_sorted_entries(voyage)
+    if not entries:
+        return None
+
+    source_key = _clan_voyage_recognition_source_key(voyage)
+    fallback = _fallback_clan_voyage_recognition_copy(voyage)
+    generated = await generate_clan_chat_copy(
+        intent="clan_voyage_recognition_relay",
+        context=_clan_voyage_recognition_context(voyage),
+        max_messages=1,
+        max_chars=CLASH_COPY_MAX_LENGTH,
+        required_terms=("POAP KINGS",),
+        forbidden_terms=("Discord", "http://", "https://", "www."),
+        fallback_messages=[fallback],
+        metadata={
+            "subagent": "arena-relay",
+            "clan_voyage_id": voyage.get("voyage_id"),
+            "season_key": voyage.get("season_key"),
+        },
+    )
+    copy = generated.messages[0] if generated and generated.messages else ""
+    if not copy:
+        return None
+
+    signal = {
+        "type": "clan_voyage_complete",
+        "signal_key": source_key,
+        "voyage_id": voyage.get("voyage_id"),
+        "season_key": voyage.get("season_key"),
+        "participants": len(entries),
+    }
+    rationale = (
+        "Clan Voyage is not visible in the Clash Royale API, so a completed screenshot capture "
+        "is the best moment to recognize contributors in game chat."
+    )
+    baseline = await asyncio.to_thread(
+        db.build_leader_action_baseline,
+        action_type="celebration_relay",
+        signals=[signal],
+    )
+    action = await asyncio.to_thread(
+        db.create_leader_action_recommendation,
+        action_type="celebration_relay",
+        objective="clan_voyage_recognition",
+        prompt_text="Post Clan Voyage recognition in clan chat.",
+        rationale=rationale,
+        target_channel_key="arena-relay",
+        target_channel_id=getattr(channel, "id", None),
+        source_signal_key=source_key,
+        source_signal_type="clan_voyage_complete",
+        copy_original_text=copy,
+        copy_current_text=copy,
+        ui_version=LEADER_ACTION_UI_VERSION,
+        baseline=baseline,
+    )
+    if not action or action.get("source_message_id"):
+        return action
+
+    sent_messages = await post_leader_action_card(channel, action, copy_messages=[copy])
+    first_message_id = getattr(sent_messages[0], "id", None) if sent_messages else None
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(channel),
+        "assistant",
+        copy,
+        summary=f"Leader action R{action.get('action_id')}: Clan Voyage recognition relay",
+        **_channel_msg_kwargs(channel),
+        workflow="arena-relay",
+        event_type="clan_voyage_recognition_relay",
+        discord_message_id=first_message_id,
+        raw_json={
+            "leader_action": action,
+            "clan_voyage_id": voyage.get("voyage_id"),
+            "copy": copy,
+            "generated": {
+                "summary": getattr(generated, "summary", ""),
+                "used_fallback": getattr(generated, "used_fallback", False),
+                "metadata": getattr(generated, "metadata", {}),
+            },
+        },
+    )
+    _log.info(
+        "clan_voyage_recognition_action_posted voyage_id=%s action_id=%s source_message_id=%s",
+        voyage.get("voyage_id"),
+        action.get("action_id"),
+        first_message_id,
+    )
+    return action
+
+
 async def _post_conversation_memory(
     user_message_id, assistant_message_id,
     user_content, assistant_content,
@@ -1091,6 +1260,11 @@ async def _handle_arena_relay_screenshot_observation(
                 "clan_voyage_id": clan_voyage.get("voyage_id") if clan_voyage else None,
             },
         )
+        if clan_voyage:
+            try:
+                await _post_clan_voyage_recognition_action(message.channel, clan_voyage)
+            except Exception:
+                _log.error("clan voyage recognition leader action failed", exc_info=True)
         return True
 
 

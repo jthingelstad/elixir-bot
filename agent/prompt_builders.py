@@ -551,6 +551,7 @@ def _arena_relay_observation_system(channel_name: str):
         "`observation.actionable_facts` should list short visible facts a leader might act on or analyze later. "
         "`observation.uncertainty` should briefly name what was cropped, blurry, or not visible, or null.\n\n"
         "If a copy/paste in-game message would help, include one short line clearly labeled `Copy:` and keep it under 240 characters. "
+        "Exception: for completed Clan Voyage leaderboard screenshots, give the factual readout only; code creates the leader-action clan-chat recognition card separately. "
         "Do not include check/cross reaction instructions; this is an observation readout, not an action card. "
         "Keep the whole response crisp enough for #leader-actions.\n\n"
         f"{_discord_formatting_guidance()}"

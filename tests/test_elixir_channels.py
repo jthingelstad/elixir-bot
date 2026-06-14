@@ -20,6 +20,7 @@ from runtime.activities import (
     schedule_specs_from_registry,
 )
 from runtime.admin import admin_command_requires_leader
+from runtime.clan_chat_copy import ClanChatCopyResult
 from runtime.discord_commands import register_elixir_app_commands
 
 
@@ -812,8 +813,26 @@ def test_arena_relay_clan_voyage_screenshot_persists_capture():
         patch("runtime.channel_router.db.upsert_clan_voyage_capture", return_value={
             "voyage_id": 44,
             "season_key": "2026-06",
+            "completed": True,
             "entries": result["clan_voyage"]["entries"],
         }) as mock_voyage,
+        patch("runtime.channel_router.generate_clan_chat_copy", new=AsyncMock(return_value=ClanChatCopyResult(
+            messages=["Clan Voyage complete: POAP KINGS finished it. Big thanks to Aaqib Javed, The Joesma, and everyone who chipped in. - E"],
+            summary="Generated Clan Voyage recognition.",
+        ))) as mock_copy,
+        patch("runtime.channel_router.db.build_leader_action_baseline", return_value={}) as mock_baseline,
+        patch("runtime.channel_router.db.create_leader_action_recommendation", return_value={
+            "action_id": 45,
+            "action_type": "celebration_relay",
+            "objective": "clan_voyage_recognition",
+            "status": "proposed",
+            "prompt_text": "Post Clan Voyage recognition in clan chat.",
+            "copy_current_text": "Clan Voyage complete: POAP KINGS finished it. Big thanks to Aaqib Javed, The Joesma, and everyone who chipped in. - E",
+        }) as mock_create_action,
+        patch("runtime.channel_router.post_leader_action_card", new=AsyncMock(return_value=[
+            SimpleNamespace(id=991),
+            SimpleNamespace(id=992),
+        ])) as mock_post_action,
         patch("runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot", return_value=result) as mock_analyze,
     ):
         asyncio.run(elixir.on_message(message))
@@ -831,13 +850,32 @@ def test_arena_relay_clan_voyage_screenshot_persists_capture():
     assert kwargs["entries"][0]["player_name"] == "Aaqib Javed"
     assert kwargs["entries"][2]["player_tag"] == "#TH15GUY"
     assert kwargs["entries"][2]["matched_name"] == "TH15_Guy"
+    mock_copy.assert_awaited_once()
+    assert mock_copy.call_args.kwargs["intent"] == "clan_voyage_recognition_relay"
+    assert "Aaqib Javed" in mock_copy.call_args.kwargs["context"]
+    mock_baseline.assert_called_once()
+    mock_create_action.assert_called_once()
+    assert mock_create_action.call_args.kwargs["action_type"] == "celebration_relay"
+    assert mock_create_action.call_args.kwargs["objective"] == "clan_voyage_recognition"
+    assert mock_create_action.call_args.kwargs["source_signal_type"] == "clan_voyage_complete"
+    mock_post_action.assert_awaited_once()
     message.reply.assert_awaited_once_with(
         "**Read:** Clan Voyage complete. Top: Aaqib Javed 388.\n\n"
         "Stored Clan Voyage: 3 visible rank(s) captured for 2026-06.\n\n"
         "Roster match: 1/3 rows matched. Unresolved: R1 Aaqib Javed, R2 The Joesma."
     )
-    saved_raw = mock_save.call_args_list[-1].kwargs["raw_json"]
+    screenshot_save = [
+        call for call in mock_save.call_args_list
+        if call.kwargs.get("event_type") == "arena_relay_screenshot_observation"
+    ][-1]
+    saved_raw = screenshot_save.kwargs["raw_json"]
     assert saved_raw["clan_voyage_id"] == 44
+    action_save = [
+        call for call in mock_save.call_args_list
+        if call.kwargs.get("event_type") == "clan_voyage_recognition_relay"
+    ][-1]
+    assert action_save.kwargs["discord_message_id"] == 991
+    assert action_save.kwargs["raw_json"]["leader_action"]["action_id"] == 45
     mock_process.assert_not_awaited()
 
 
