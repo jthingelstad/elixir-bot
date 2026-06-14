@@ -534,6 +534,7 @@ def _arena_relay_observation_system(channel_name: str):
         "Extract every visible leaderboard row across all attached images. Keep raw player names exactly as visible, include rank, role label if visible, points, source_image_index, and confidence. "
         "Do not invent unseen lower ranks. If the leaderboard is incomplete or cropped, say which ranks are missing. "
         "If the clan completed the Voyage and the top contributors are clear, include one short `Copy:` line leaders could paste into Clash Royale to recognize the completion and top contributors. "
+        "Keep `content` short: top contributors, visible rank count, uncertainty, and optional Copy line only. Do not list the full leaderboard in `content`; the full rows belong only in `clan_voyage.entries`. "
         "Include a `clan_voyage` object: {\"event_name\":\"Clan Voyage\", \"clan_name\":\"POAP KINGS\", \"completed\": true/false/null, \"ends_in_text\":\"visible time remaining or null\", \"season_key\": null, \"event_end_at\": null, \"entries\": [{\"rank\":1,\"player_name\":\"name\",\"role\":\"Member\",\"points\":388,\"source_image_index\":1,\"confidence\":0.9}]}. "
         "Use `screenshot_type` = `clan_voyage_leaderboard` for these screens.\n\n"
         "If it shows a deck or collection screen, extract visible player-state details: deck cards, average elixir, card levels, maxed/evo/hero indicators, upgrade progress counts, tower troop or king tower state, collection level, gold, gems, and pass/reward progress. "
