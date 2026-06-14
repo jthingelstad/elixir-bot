@@ -45,6 +45,8 @@ def test_v2_schema_initializes_core_tables():
             "leader_action_recommendations",
             "runtime_job_status",
             "arena_relay_screenshot_observations",
+            "clan_voyages",
+            "clan_voyage_entries",
         }
         assert expected.issubset(tables)
     finally:
@@ -1372,6 +1374,65 @@ def test_arena_relay_screenshot_observation_round_trips():
         assert rows[0]["actionable_facts_json"] == ["At least three boat defense slots are visible."]
         assert rows[0]["image_metadata_json"][0]["filename"] == "boat.png"
         assert rows[0]["result_json"]["event_type"] == "arena_relay_screenshot_observation"
+    finally:
+        conn.close()
+
+
+def test_clan_voyage_capture_merges_pages_and_resolves_members():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {"tag": "#AAA111", "name": "Aaqib Javed", "role": "member", "trophies": 9000, "clanRank": 1},
+                {"tag": "#KING001", "name": "King Thing", "role": "leader", "trophies": 11000, "clanRank": 2},
+            ],
+            conn=conn,
+        )
+        first = db.upsert_clan_voyage_capture(
+            source_message_id=1001,
+            channel_id=1513758211206025227,
+            channel_name="leader-actions",
+            observed_at="2026-06-14T11:23:00",
+            clan_name="POAP KINGS",
+            completed=True,
+            ends_in_text="21h 36min",
+            image_count=6,
+            entries=[
+                {"rank": 1, "player_name": "Aaqib Javed", "role": "Member", "points": 388, "source_image_index": 1, "confidence": 0.93},
+                {"rank": 11, "player_name": "King Thing", "role": "Leader", "points": 148, "source_image_index": 3, "confidence": 0.9},
+            ],
+            conn=conn,
+        )
+        second = db.upsert_clan_voyage_capture(
+            source_message_id=1002,
+            channel_id=1513758211206025227,
+            channel_name="leader-actions",
+            observed_at="2026-06-14T11:30:00",
+            clan_name="POAP KINGS",
+            completed=True,
+            ends_in_text="21h 29min",
+            image_count=4,
+            entries=[
+                {"rank": 2, "player_name": "The Joesma", "role": "Member", "points": 243, "source_image_index": 1, "confidence": 0.88},
+            ],
+            conn=conn,
+        )
+
+        assert first["voyage_id"] == second["voyage_id"]
+        latest = db.get_latest_clan_voyage(include_entries=True, conn=conn)
+        assert latest["completed"] is True
+        assert latest["season_key"] == "2026-06"
+        assert latest["event_end_at"] == "2026-06-15T08:59:00"
+        assert latest["source_message_ids_json"] == ["1001", "1002"]
+        assert latest["image_count"] == 10
+        assert [entry["rank"] for entry in latest["entries"]] == [1, 2, 11]
+        assert latest["entries"][0]["player_tag"] == "#AAA111"
+        assert latest["entries"][1]["player_tag"] is None
+
+        summary = db.get_member_clan_voyage_summary("#KING001", conn=conn)
+        assert summary["best_rank"] == 11
+        assert summary["latest_points"] == 148
+        assert "Clan Voyage" in db.build_clan_voyage_context(conn=conn)
     finally:
         conn.close()
 

@@ -7,6 +7,7 @@ import base64
 import io
 import logging
 import mimetypes
+from datetime import timezone
 
 import cr_api
 import db
@@ -17,7 +18,7 @@ from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
 _log = logging.getLogger("elixir.channel_router")
 
 SUPPORTED_IMAGE_MEDIA_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-MAX_SCREENSHOT_ATTACHMENTS = 3
+MAX_SCREENSHOT_ATTACHMENTS = 12
 MAX_SCREENSHOT_READ_BYTES = 12 * 1024 * 1024
 MAX_SCREENSHOT_SUBMIT_BYTES = 900 * 1024
 MAX_SCREENSHOT_LONG_EDGE = 1440
@@ -500,6 +501,104 @@ def _persist_arena_relay_screenshot_observation(
     )
 
 
+def _message_observed_at(message) -> str | None:
+    created_at = getattr(message, "created_at", None)
+    if created_at is None:
+        return None
+    if getattr(created_at, "tzinfo", None) is not None:
+        created_at = created_at.astimezone(timezone.utc).replace(tzinfo=None)
+    return created_at.replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _clan_voyage_payload_from_result(result: dict) -> dict | None:
+    if not isinstance(result, dict):
+        return None
+    observation = result.get("observation") if isinstance(result.get("observation"), dict) else {}
+    screenshot_type = (
+        observation.get("screenshot_type")
+        or observation.get("type")
+        or result.get("screenshot_type")
+        or ""
+    )
+    voyage = (
+        result.get("clan_voyage")
+        or observation.get("clan_voyage")
+        or result.get("voyage")
+        or {}
+    )
+    if not isinstance(voyage, dict):
+        voyage = {}
+    event_name = (
+        voyage.get("event_name")
+        or observation.get("event_name")
+        or result.get("event_name")
+        or ""
+    )
+    entries = (
+        voyage.get("entries")
+        or voyage.get("leaderboard")
+        or observation.get("entries")
+        or observation.get("leaderboard")
+        or result.get("leaderboard")
+        or []
+    )
+    is_voyage = (
+        str(screenshot_type).strip().lower().replace(" ", "_") in {"clan_voyage", "clan_voyage_leaderboard"}
+        or "clan voyage" in str(event_name).lower()
+        or bool(voyage.get("is_clan_voyage"))
+    )
+    if not is_voyage:
+        return None
+    return {
+        "clan_tag": voyage.get("clan_tag") or observation.get("clan_tag"),
+        "clan_name": voyage.get("clan_name") or observation.get("clan_name"),
+        "event_name": event_name or "Clan Voyage",
+        "season_key": voyage.get("season_key") or observation.get("season_key"),
+        "event_end_at": voyage.get("event_end_at") or observation.get("event_end_at"),
+        "ends_in_text": voyage.get("ends_in_text") or observation.get("ends_in_text"),
+        "completed": voyage.get("completed") if "completed" in voyage else observation.get("completed"),
+        "status": voyage.get("status") or observation.get("status"),
+        "entries": entries if isinstance(entries, list) else [],
+        "raw_observation": {
+            "observation": observation,
+            "clan_voyage": voyage,
+            "summary": result.get("summary"),
+        },
+    }
+
+
+def _persist_clan_voyage_capture(result: dict, *, message, image_metadata: list[dict]) -> dict | None:
+    payload = _clan_voyage_payload_from_result(result)
+    if not payload:
+        return None
+    return db.upsert_clan_voyage_capture(
+        source_message_id=message.id,
+        channel_id=message.channel.id,
+        channel_name=getattr(message.channel, "name", None),
+        author_discord_user_id=message.author.id,
+        author_display_name=getattr(message.author, "display_name", None),
+        observed_at=_message_observed_at(message),
+        image_count=len(image_metadata),
+        image_metadata=image_metadata,
+        **payload,
+    )
+
+
+def _append_clan_voyage_storage_note(content: str, voyage: dict | None) -> str:
+    if not voyage:
+        return content
+    entries = voyage.get("entries") or []
+    if not entries:
+        return content
+    note = (
+        f"Stored Clan Voyage: {len(entries)} visible rank(s) captured"
+        f" for {voyage.get('season_key') or 'this event'}."
+    )
+    if note in content:
+        return content
+    return f"{content.rstrip()}\n\n{note}"
+
+
 async def _post_conversation_memory(
     user_message_id, assistant_message_id,
     user_content, assistant_content,
@@ -774,6 +873,25 @@ async def _handle_arena_relay_screenshot_observation(
             except Exception:
                 _log.error("arena relay screenshot memory persistence failed", exc_info=True)
 
+        clan_voyage = None
+        try:
+            clan_voyage = await asyncio.to_thread(
+                _persist_clan_voyage_capture,
+                result,
+                message=message,
+                image_metadata=image_metadata,
+            )
+            if clan_voyage:
+                content = _append_clan_voyage_storage_note(content, clan_voyage)
+                _log.info(
+                    "clan_voyage_capture_saved source_message_id=%s voyage_id=%s entries=%s",
+                    message.id,
+                    clan_voyage.get("voyage_id"),
+                    len(clan_voyage.get("entries") or []),
+                )
+        except Exception:
+            _log.error("clan voyage screenshot persistence failed", exc_info=True)
+
         try:
             observation = await asyncio.to_thread(
                 _persist_arena_relay_screenshot_observation,
@@ -808,9 +926,10 @@ async def _handle_arena_relay_screenshot_observation(
                 "input_message_id": user_msg_id,
                 "image_blocks_read": len(image_blocks),
                 "image_metadata": image_metadata,
+                "clan_voyage_id": clan_voyage.get("voyage_id") if clan_voyage else None,
             },
         )
-    return True
+        return True
 
 
 async def _save_reply_save(app, message, conversation_scope, raw_question, content, workflow, event_type):

@@ -83,7 +83,7 @@ Elixir's leader action board.
 - Weekly Discord invite relays must not include raw links. Use no-link copy such as `Join clan Discord! POAPKINGS . COM > Members`.
 - Leaders react ✅/☑️ when the action was done and ❌ when they disagree or did not do it.
 - Leaders can reply directly to an action card with a short reason or correction, such as "boat defenses full already"; Elixir stores that note on the action.
-- Leaders can also start a new message with Clash Royale screenshots as observation evidence. Elixir reads visible UI state, replies with a concise readout, and may include short copy/paste in-game text when useful.
+- Leaders can also start a new message with Clash Royale screenshots as observation evidence. Elixir reads visible UI state, replies with a concise readout, and may include short copy/paste in-game text when useful. Clan Voyage leaderboard screenshots are stored as durable manual clan-activity captures because the Clash Royale API does not expose that event.
 - Elixir stores the decision timestamp and later compares clan or member data against the captured baseline.
 - Any action card still showing buttons is open. Completed, declined, or deferred cards should have controls removed and function as the record of what happened.
 - Broader reasoning, debate, and exploratory leadership questions belong in #leaders; this channel is the crisp action queue.

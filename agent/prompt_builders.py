@@ -525,11 +525,17 @@ def _arena_relay_observation_system(channel_name: str):
     guidance = (
         "You are reading leader-submitted Clash Royale screenshot evidence in #leader-actions. "
         "This is not a normal conversation and not a new action card unless the screenshot clearly supports one.\n\n"
-        "Inspect the visible UI first. Screenshots may show boat defenses, clan chat, war activity, leaderboards, profiles, rewards, store offers, or battle logs. "
+        "Inspect the visible UI first. Screenshots may show boat defenses, clan chat, Clan Voyage leaderboards, war activity, leaderboards, profiles, rewards, store offers, or battle logs. "
         "Name only what you can read or reasonably identify. Say plainly when text, counts, names, or state are cropped, blurry, or uncertain.\n\n"
         "Connect the screenshot to leadership usefulness: observed state, operational implication, and whether a leader relay/nudge/follow-up is useful now. "
         "If it shows boat defenses, estimate visible open defense slots and visible member names, but do not claim the full boat state unless the screenshot shows it. "
         "If it shows clan chat, identify useful social/context signals without turning one message into a personality verdict.\n\n"
+        "If it shows Clan Voyage, treat it as durable manually captured clan-activity evidence because Clash Royale does not expose Clan Voyage in the API. "
+        "Extract every visible leaderboard row across all attached images. Keep raw player names exactly as visible, include rank, role label if visible, points, source_image_index, and confidence. "
+        "Do not invent unseen lower ranks. If the leaderboard is incomplete or cropped, say which ranks are missing. "
+        "If the clan completed the Voyage and the top contributors are clear, include one short `Copy:` line leaders could paste into Clash Royale to recognize the completion and top contributors. "
+        "Include a `clan_voyage` object: {\"event_name\":\"Clan Voyage\", \"clan_name\":\"POAP KINGS\", \"completed\": true/false/null, \"ends_in_text\":\"visible time remaining or null\", \"season_key\": null, \"event_end_at\": null, \"entries\": [{\"rank\":1,\"player_name\":\"name\",\"role\":\"Member\",\"points\":388,\"source_image_index\":1,\"confidence\":0.9}]}. "
+        "Use `screenshot_type` = `clan_voyage_leaderboard` for these screens.\n\n"
         "If it shows a deck or collection screen, extract visible player-state details: deck cards, average elixir, card levels, maxed/evo/hero indicators, upgrade progress counts, tower troop or king tower state, collection level, gold, gems, and pass/reward progress. "
         "Frame these as screenshot-observed facts. Only infer a leadership implication when it is clear and useful.\n\n"
         "When the screenshot reveals a durable fact leaders should remember later, include a `memories` array. "
@@ -539,7 +545,7 @@ def _arena_relay_observation_system(channel_name: str):
         "Use `member_tag` when the fact is about one visible/resolvable member, otherwise null. "
         "If no durable facts should be saved, use an empty memories array.\n\n"
         "Also include an `observation` object so Elixir can track screenshot learning over time. "
-        "`observation.screenshot_type` must be one of: clan_chat, boat_defense, deck, collection, war_activity, leaderboard, profile, reward, store_offer, battle_log, unknown. "
+        "`observation.screenshot_type` must be one of: clan_chat, boat_defense, clan_voyage_leaderboard, deck, collection, war_activity, leaderboard, profile, reward, store_offer, battle_log, unknown. "
         "`observation.players` should list visible player names or tags. "
         "`observation.actionable_facts` should list short visible facts a leader might act on or analyze later. "
         "`observation.uncertainty` should briefly name what was cropped, blurry, or not visible, or null.\n\n"
@@ -553,6 +559,7 @@ def _arena_relay_observation_system(channel_name: str):
         '"summary": "one sentence observation summary", '
         '"content": "Discord-ready concise readout", '
         '"observation": {"screenshot_type": "boat_defense", "players": [], "actionable_facts": [], "uncertainty": null}, '
+        '"clan_voyage": null, '
         '"memories": []}'
     )
     return _build_system_prompt(purpose, knowledge, channel_context, guidance)

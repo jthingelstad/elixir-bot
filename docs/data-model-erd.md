@@ -350,6 +350,33 @@ erDiagram
         text payload_json
     }
 
+    clan_voyages {
+        integer voyage_id PK
+        text voyage_key UK
+        text clan_tag
+        text clan_name
+        text event_name
+        text season_key
+        text event_end_at
+        text observed_at
+        integer completed
+        text status
+        text source_message_ids_json
+    }
+
+    clan_voyage_entries {
+        integer entry_id PK
+        integer voyage_id FK
+        integer rank
+        text player_name_raw
+        text player_tag
+        integer member_id FK
+        text role_label
+        integer points
+        real confidence
+        text source_message_id
+    }
+
     signal_log {
         text signal_date
         text signal_type
@@ -389,4 +416,6 @@ erDiagram
     members ||--o{ war_day_status : daily_war
     war_races ||--o{ war_participation : includes
     members o|--o{ war_participation : contributes
+    clan_voyages ||--o{ clan_voyage_entries : captures
+    members o|--o{ clan_voyage_entries : resolves
 ```
