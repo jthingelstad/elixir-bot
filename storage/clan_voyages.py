@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 from typing import Optional
 
 from db import _canon_tag, _json_or_none, _rowdicts, _utcnow, managed_connection
+from storage._formatting import callable_name
 from storage.roster import resolve_member
 
 DEFAULT_CLAN_TAG = "#J2RGCRVG"
@@ -120,6 +123,38 @@ def _first_present(*values):
     return None
 
 
+_OCR_TRANSLATION = str.maketrans({
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+})
+
+
+def _plain_name_key(value: str | None) -> str:
+    text = callable_name(value or "")
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _ocr_name_key(value: str | None) -> str:
+    return _plain_name_key(value).translate(_OCR_TRANSLATION)
+
+
+def _name_similarity(left: str | None, right: str | None) -> float:
+    left_key = _plain_name_key(left)
+    right_key = _plain_name_key(right)
+    if not left_key or not right_key:
+        return 0.0
+    return max(
+        SequenceMatcher(None, left_key, right_key).ratio(),
+        SequenceMatcher(None, _ocr_name_key(left), _ocr_name_key(right)).ratio(),
+    )
+
+
 def _member_id_for_tag(player_tag: str | None, *, conn) -> int | None:
     tag = _canon_tag(player_tag)
     if not tag:
@@ -149,6 +184,104 @@ def _resolve_visible_member(name: str, player_tag: str | None = None, *, conn) -
     if not confident:
         return None, None, min(0.65, first_score / 1000)
     return first.get("player_tag"), first.get("member_id"), min(0.95, first_score / 1000)
+
+
+@managed_connection
+def build_clan_voyage_roster_choices(conn=None) -> list[dict]:
+    """Return active roster choices for screenshot name reconciliation."""
+    rows = conn.execute(
+        """
+        SELECT m.member_id, m.player_tag, m.current_name, cs.role, cs.clan_rank
+        FROM members m
+        LEFT JOIN member_current_state cs ON cs.member_id = m.member_id
+        WHERE m.status = 'active'
+        ORDER BY COALESCE(cs.clan_rank, 999), m.current_name COLLATE NOCASE
+        """
+    ).fetchall()
+    aliases = {}
+    for row in conn.execute("SELECT member_id, alias FROM member_aliases").fetchall():
+        aliases.setdefault(row["member_id"], []).append(callable_name(row["alias"]))
+    choices = []
+    for row in rows:
+        name = callable_name(row["current_name"])
+        choices.append({
+            "player_tag": row["player_tag"],
+            "name": name,
+            "role": row["role"],
+            "clan_rank": row["clan_rank"],
+            "aliases": aliases.get(row["member_id"], []),
+            "plain_key": _plain_name_key(name),
+            "ocr_key": _ocr_name_key(name),
+        })
+    return choices
+
+
+@managed_connection
+def validate_clan_voyage_entry_match(
+    visible_name: str,
+    player_tag: str | None,
+    *,
+    min_similarity: float = 0.78,
+    conn=None,
+) -> dict:
+    """Validate a roster match proposed for a screenshot-visible name."""
+    tag = _canon_tag(player_tag)
+    if not visible_name or not tag:
+        return {"accepted": False, "score": 0.0, "reason": "missing_name_or_tag"}
+    row = conn.execute(
+        """
+        SELECT m.member_id, m.player_tag, m.current_name, m.status
+        FROM members m
+        WHERE m.player_tag = ?
+        """,
+        (tag,),
+    ).fetchone()
+    if not row:
+        return {"accepted": False, "score": 0.0, "reason": "unknown_tag"}
+    if row["status"] != "active":
+        return {"accepted": False, "score": 0.0, "reason": "inactive_member"}
+
+    names = [row["current_name"]]
+    names.extend(
+        alias_row["alias"]
+        for alias_row in conn.execute(
+            "SELECT alias FROM member_aliases WHERE member_id = ?",
+            (row["member_id"],),
+        ).fetchall()
+    )
+    visible_plain = _plain_name_key(visible_name)
+    visible_ocr = _ocr_name_key(visible_name)
+    best_score = 0.0
+    best_name = None
+    for name in names:
+        plain = _plain_name_key(name)
+        ocr = _ocr_name_key(name)
+        if visible_plain and visible_plain == plain:
+            return {
+                "accepted": True,
+                "score": 1.0,
+                "reason": "plain_exact",
+                "matched_name": callable_name(name),
+            }
+        if visible_ocr and visible_ocr == ocr:
+            return {
+                "accepted": True,
+                "score": 0.97,
+                "reason": "ocr_exact",
+                "matched_name": callable_name(name),
+            }
+        score = _name_similarity(visible_name, name)
+        if score > best_score:
+            best_score = score
+            best_name = name
+
+    accepted = best_score >= min_similarity
+    return {
+        "accepted": accepted,
+        "score": round(best_score, 3),
+        "reason": "similarity" if accepted else "below_similarity_threshold",
+        "matched_name": callable_name(best_name) if best_name else None,
+    }
 
 
 def _entry_payload(entry: dict, source_message_id: str | int | None) -> dict | None:
@@ -468,10 +601,12 @@ def build_clan_voyage_context(*, limit: int = 3, conn=None) -> str:
 
 __all__ = [
     "build_clan_voyage_context",
+    "build_clan_voyage_roster_choices",
     "get_clan_voyage",
     "get_clan_voyage_entries",
     "get_latest_clan_voyage",
     "get_member_clan_voyage_summary",
     "list_clan_voyages",
     "upsert_clan_voyage_capture",
+    "validate_clan_voyage_entry_match",
 ]

@@ -923,6 +923,37 @@ def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
     assert mock_chat.call_args.kwargs["workflow"] == "arena_relay_observation"
 
 
+def test_reconcile_clan_voyage_entries_uses_roster_context():
+    with patch(
+        "elixir_agent._chat_with_tools",
+        return_value={
+            "entries": [
+                {
+                    "rank": 18,
+                    "visible_name": "THIS_GUY",
+                    "matched_player_tag": "#TH15",
+                    "matched_name": "TH15_Guy",
+                    "confidence": 0.93,
+                    "reason": "OCR 15/IS visual match",
+                }
+            ]
+        },
+    ) as mock_chat:
+        result = elixir_agent.reconcile_clan_voyage_entries(
+            visible_rows=[{"rank": 18, "visible_name": "THIS_GUY", "points": 94}],
+            roster_choices=[{"player_tag": "#TH15", "name": "TH15_Guy", "aliases": []}],
+        )
+
+    system_prompt = mock_chat.call_args.args[0]
+    user_msg = mock_chat.call_args.args[1]
+    assert result["entries"][0]["matched_player_tag"] == "#TH15"
+    assert "OCR/name rules" in system_prompt
+    assert "THIS_GUY" in user_msg
+    assert "TH15_Guy" in user_msg
+    assert mock_chat.call_args.kwargs["workflow"] == "clan_voyage_reconciliation"
+    assert mock_chat.call_args.kwargs["allowed_tools"] == []
+
+
 def _mock_anthropic_response(text="ok", input_tokens=10, output_tokens=20):
     """Build a mock Anthropic Messages response."""
     return SimpleNamespace(

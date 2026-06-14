@@ -567,6 +567,138 @@ def _clan_voyage_payload_from_result(result: dict) -> dict | None:
     }
 
 
+def _clan_voyage_entry_rank(entry: dict) -> int | None:
+    value = entry.get("rank") or entry.get("place")
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _clan_voyage_entry_name(entry: dict) -> str:
+    return " ".join(str(
+        entry.get("player_name")
+        or entry.get("name")
+        or entry.get("player_name_raw")
+        or ""
+    ).split())
+
+
+def _clan_voyage_entry_points(entry: dict) -> int | None:
+    for key in ("points", "score", "crowns"):
+        value = entry.get(key)
+        if value is None:
+            continue
+        try:
+            return int(str(value).replace(",", "").strip())
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _reconciliation_confidence(value) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _reconcile_clan_voyage_result(result: dict) -> dict:
+    payload = _clan_voyage_payload_from_result(result)
+    if not payload:
+        return result
+    entries = payload.get("entries") or []
+    if not entries:
+        return result
+
+    visible_rows = []
+    for entry in entries:
+        rank = _clan_voyage_entry_rank(entry)
+        name = _clan_voyage_entry_name(entry)
+        if rank is None or not name:
+            continue
+        visible_rows.append({
+            "rank": rank,
+            "visible_name": name,
+            "points": _clan_voyage_entry_points(entry),
+            "role": entry.get("role") or entry.get("role_label"),
+            "source_image_index": entry.get("source_image_index") or entry.get("image_index"),
+        })
+    if not visible_rows:
+        return result
+
+    roster_choices = db.build_clan_voyage_roster_choices()
+    if not roster_choices:
+        return result
+
+    reconciliation = elixir_agent.reconcile_clan_voyage_entries(
+        visible_rows=visible_rows,
+        roster_choices=roster_choices,
+        context={
+            "source": "arena_relay_screenshot",
+            "event_name": payload.get("event_name") or "Clan Voyage",
+            "completed": payload.get("completed"),
+        },
+    )
+    if not isinstance(reconciliation, dict) or reconciliation.get("_error"):
+        _log.warning("clan_voyage_reconciliation_failed result=%r", reconciliation)
+        return result
+
+    by_rank = {}
+    for match in reconciliation.get("entries") or []:
+        try:
+            rank = int(str(match.get("rank")).strip())
+        except (TypeError, ValueError):
+            continue
+        by_rank[rank] = match
+
+    matched = 0
+    rejected = []
+    unresolved = []
+    for entry in entries:
+        rank = _clan_voyage_entry_rank(entry)
+        if rank is None:
+            continue
+        visible_name = _clan_voyage_entry_name(entry)
+        match = by_rank.get(rank) or {}
+        tag = match.get("matched_player_tag") or match.get("player_tag") or match.get("tag")
+        confidence = _reconciliation_confidence(match.get("confidence"))
+        if tag and confidence >= 0.7:
+            validation = db.validate_clan_voyage_entry_match(
+                visible_name,
+                tag,
+                min_similarity=0.70 if confidence >= 0.9 else 0.78,
+            )
+            if validation.get("accepted"):
+                entry["player_tag"] = tag
+                entry["matched_name"] = match.get("matched_name") or validation.get("matched_name")
+                entry["match_confidence"] = min(confidence, float(validation.get("score") or confidence))
+                entry["match_method"] = "llm_roster_reconciliation"
+                entry["match_reason"] = match.get("reason") or validation.get("reason")
+                entry["match_validation"] = validation
+                matched += 1
+                continue
+            rejected.append({
+                "rank": rank,
+                "visible_name": visible_name,
+                "proposed_tag": tag,
+                "reason": validation.get("reason"),
+                "score": validation.get("score"),
+            })
+        unresolved.append({"rank": rank, "visible_name": visible_name})
+
+    voyage = result.get("clan_voyage")
+    if isinstance(voyage, dict):
+        voyage["reconciliation"] = {
+            "matched_count": matched,
+            "row_count": len(visible_rows),
+            "unresolved": unresolved,
+            "rejected": rejected,
+            "summary": reconciliation.get("summary"),
+        }
+    return result
+
+
 def _persist_clan_voyage_capture(result: dict, *, message, image_metadata: list[dict]) -> dict | None:
     payload = _clan_voyage_payload_from_result(result)
     if not payload:
@@ -594,6 +726,30 @@ def _append_clan_voyage_storage_note(content: str, voyage: dict | None) -> str:
         f"Stored Clan Voyage: {len(entries)} visible rank(s) captured"
         f" for {voyage.get('season_key') or 'this event'}."
     )
+    if note in content:
+        return content
+    return f"{content.rstrip()}\n\n{note}"
+
+
+def _append_clan_voyage_reconciliation_note(content: str, result: dict) -> str:
+    voyage = result.get("clan_voyage") if isinstance(result.get("clan_voyage"), dict) else {}
+    reconciliation = voyage.get("reconciliation") if isinstance(voyage, dict) else None
+    if not isinstance(reconciliation, dict):
+        return content
+    row_count = int(reconciliation.get("row_count") or 0)
+    matched = int(reconciliation.get("matched_count") or 0)
+    if row_count <= 0:
+        return content
+    unresolved = reconciliation.get("unresolved") or []
+    note = f"Roster match: {matched}/{row_count} rows matched."
+    if unresolved:
+        names = ", ".join(
+            f"R{item.get('rank')} {item.get('visible_name')}"
+            for item in unresolved[:8]
+            if item.get("rank") and item.get("visible_name")
+        )
+        if names:
+            note += f" Unresolved: {names}."
     if note in content:
         return content
     return f"{content.rstrip()}\n\n{note}"
@@ -839,6 +995,11 @@ async def _handle_arena_relay_screenshot_observation(
             await app._safe_reply(message, "I saw the screenshot, but hit an error reading it. Try again in a sec.")
             return True
 
+        try:
+            result = await asyncio.to_thread(_reconcile_clan_voyage_result, result)
+        except Exception:
+            _log.error("clan voyage screenshot reconciliation failed", exc_info=True)
+
         content = result.get("content") or result.get("summary") or ""
         if not content:
             app._log_prompt_failure(
@@ -883,6 +1044,7 @@ async def _handle_arena_relay_screenshot_observation(
             )
             if clan_voyage:
                 content = _append_clan_voyage_storage_note(content, clan_voyage)
+                content = _append_clan_voyage_reconciliation_note(content, result)
                 _log.info(
                     "clan_voyage_capture_saved source_message_id=%s voyage_id=%s entries=%s",
                     message.id,

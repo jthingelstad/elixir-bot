@@ -17,6 +17,7 @@ from agent.prompt_builders import (
     _arena_relay_observation_system,
     _awareness_system,
     _channel_subagent_system,
+    _clan_voyage_reconciliation_system,
     _clan_chat_copy_system,
     _clanops_system,
     _deck_review_system,
@@ -829,6 +830,30 @@ def analyze_arena_relay_screenshot(question, *, author_name, channel_name,
     )
 
 
+def reconcile_clan_voyage_entries(*, visible_rows: list[dict], roster_choices: list[dict], context: dict | None = None):
+    """Reconcile Clan Voyage OCR rows against the active roster."""
+    request = {
+        "visible_rows": visible_rows or [],
+        "roster_choices": roster_choices or [],
+        "context": context or {},
+    }
+    user_msg = (
+        "Match these Clan Voyage screenshot rows to active POAP KINGS roster choices. "
+        "Return only the JSON object required by the system prompt.\n\n"
+        f"```json\n{json.dumps(request, indent=2, default=str)}\n```"
+    )
+    return _chat_with_tools(
+        _clan_voyage_reconciliation_system(),
+        user_msg,
+        workflow="clan_voyage_reconciliation",
+        allowed_tools=TOOLSETS_BY_WORKFLOW["clan_voyage_reconciliation"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["clan_voyage_reconciliation"],
+        strict_json=True,
+        return_errors=True,
+        max_tokens=4500,
+    )
+
+
 def respond_in_channel(question, author_name, channel_name, workflow, clan_data, war_data,
                        conversation_history=None, memory_context=None, image_blocks=None):
     """Channel Q&A for interactive/clanops workflows."""
@@ -1211,6 +1236,7 @@ __all__ = [
     "respond_in_deck_review",
     "respond_to_help_request",
     "analyze_arena_relay_screenshot",
+    "reconcile_clan_voyage_entries",
     "generate_message",
     "generate_home_message",
     "generate_members_message",
