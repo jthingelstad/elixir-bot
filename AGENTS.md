@@ -80,6 +80,7 @@ SQLite at `elixir.db` (auto-created, gitignored). The project now uses the basel
 - Clan/member state: `clan_memberships`, `member_current_state`, `member_state_snapshots`, `member_daily_metrics`
 - Player analytics: `player_profile_snapshots`, `member_card_collection_snapshots`, `member_deck_snapshots`, `member_card_usage_snapshots`, `member_battle_facts`, `member_recent_form`
 - War: `war_current_state`, `war_day_status`, `war_races`, `war_participation`
+- Manual activity capture: `clan_voyages`, `clan_voyage_entries`, `arena_relay_screenshot_observations`
 - Raw ingest + signals: `raw_api_payloads`, `signal_log`, `cake_day_announcements`
 
 All `db` module functions accept an optional `conn` parameter — pass one in tests, omit in production.

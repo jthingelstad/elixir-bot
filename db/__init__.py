@@ -627,6 +627,7 @@ _STORAGE_FACADE_MODULES = (
     "storage.leader_actions",
     "storage.runtime_status",
     "storage.screenshot_observations",
+    "storage.clan_voyages",
 )
 
 _facade_lock = threading.RLock()

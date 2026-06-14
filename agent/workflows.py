@@ -825,7 +825,7 @@ def analyze_arena_relay_screenshot(question, *, author_name, channel_name,
         response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["arena_relay_observation"],
         strict_json=True,
         return_errors=True,
-        max_tokens=1400,
+        max_tokens=3600,
     )
 
 

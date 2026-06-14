@@ -732,6 +732,91 @@ def test_arena_relay_leader_multi_screenshot_corrects_media_types():
     mock_process.assert_not_awaited()
 
 
+def test_arena_relay_clan_voyage_screenshot_persists_capture():
+    attachments = [
+        SimpleNamespace(
+            filename=f"voyage-{idx}.jpg",
+            content_type="image/jpeg",
+            size=12,
+            read=AsyncMock(return_value=b"\xff\xd8\xffvoyage"),
+        )
+        for idx in range(10)
+    ]
+    message = _make_message(
+        1513758211206025227,
+        "leader-actions",
+        "completed voyage",
+        roles=[SimpleNamespace(id=elixir.LEADER_ROLE_ID)],
+        attachments=attachments,
+    )
+    message.reply = AsyncMock(return_value=SimpleNamespace(id=990))
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    result = {
+        "event_type": "arena_relay_screenshot_observation",
+        "summary": "POAP KINGS completed Clan Voyage.",
+        "content": "**Read:** Clan Voyage complete. Top: Aaqib Javed 388.",
+        "observation": {
+            "screenshot_type": "clan_voyage_leaderboard",
+            "players": ["Aaqib Javed", "The Joesma"],
+            "actionable_facts": ["POAP KINGS completed the event."],
+            "uncertainty": "lower ranks after 22 not visible",
+        },
+        "clan_voyage": {
+            "event_name": "Clan Voyage",
+            "clan_name": "POAP KINGS",
+            "completed": True,
+            "ends_in_text": "21h 36min",
+            "entries": [
+                {"rank": 1, "player_name": "Aaqib Javed", "role": "Member", "points": 388, "source_image_index": 1, "confidence": 0.93},
+                {"rank": 2, "player_name": "The Joesma", "role": "Member", "points": 243, "source_image_index": 1, "confidence": 0.9},
+            ],
+        },
+    }
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1513758211206025227,
+            "name": "#leader-actions",
+            "subagent": "arena-relay",
+            "workflow": "channel_update",
+            "reply_policy": "disabled",
+            "memory_scope": "leadership",
+        }),
+        patch("runtime.channel_router.db.upsert_discord_user"),
+        patch("runtime.channel_router.db.build_memory_context", return_value={}),
+        patch("runtime.channel_router.db.save_message", return_value=111) as mock_save,
+        patch("runtime.channel_router.db.save_arena_relay_screenshot_observation", return_value={"screenshot_type": "clan_voyage_leaderboard", "image_count": 10}),
+        patch("runtime.channel_router.db.upsert_clan_voyage_capture", return_value={
+            "voyage_id": 44,
+            "season_key": "2026-06",
+            "entries": result["clan_voyage"]["entries"],
+        }) as mock_voyage,
+        patch("runtime.channel_router.elixir_agent.analyze_arena_relay_screenshot", return_value=result) as mock_analyze,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    assert len(mock_analyze.call_args.kwargs["image_blocks"]) == 10
+    assert "voyage-9.jpg" in mock_analyze.call_args.args[0]
+    mock_voyage.assert_called_once()
+    kwargs = mock_voyage.call_args.kwargs
+    assert kwargs["source_message_id"] == 555
+    assert kwargs["image_count"] == 10
+    assert kwargs["event_name"] == "Clan Voyage"
+    assert kwargs["entries"][0]["player_name"] == "Aaqib Javed"
+    message.reply.assert_awaited_once_with(
+        "**Read:** Clan Voyage complete. Top: Aaqib Javed 388.\n\n"
+        "Stored Clan Voyage: 2 visible rank(s) captured for 2026-06."
+    )
+    saved_raw = mock_save.call_args_list[-1].kwargs["raw_json"]
+    assert saved_raw["clan_voyage_id"] == 44
+    mock_process.assert_not_awaited()
+
+
 def test_collect_screenshot_payload_resizes_large_images():
     raw = io.BytesIO()
     Image.new("RGB", (1400, 2600), (20, 80, 140)).save(raw, format="PNG")

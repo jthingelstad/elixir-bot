@@ -663,6 +663,26 @@ def _execute_get_clan_health(arguments, workflow=None):
         return {"error": f"Unknown aspect: {aspect}"}
 
 
+def _execute_get_clan_voyage(arguments):
+    """Execute the Clan Voyage manual-capture history tool."""
+    aspect = arguments.get("aspect", "latest")
+    limit = arguments.get("limit", 5)
+    if aspect == "latest":
+        return db.get_latest_clan_voyage(include_entries=True) or {
+            "summary": "No Clan Voyage screenshots have been captured yet.",
+            "entries": [],
+        }
+    if aspect == "history":
+        return {
+            "voyages": db.list_clan_voyages(limit=limit, include_entries=True),
+            "context": db.build_clan_voyage_context(limit=limit),
+        }
+    if aspect == "member":
+        member_tag = _resolve_member_tag(arguments["member_tag"])
+        return db.get_member_clan_voyage_summary(member_tag, limit=limit)
+    return {"error": f"Unknown aspect: {aspect}"}
+
+
 
 
 # ── Write tools execution ─────────────────────────────────────────────────
@@ -1238,6 +1258,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_clan_roster(arguments)
         elif name == "get_clan_health":
             result = _execute_get_clan_health(arguments, workflow=workflow)
+        elif name == "get_clan_voyage":
+            result = _execute_get_clan_voyage(arguments)
         elif name == "lookup_cards":
             result = db.lookup_cards(
                 name=arguments.get("name"),

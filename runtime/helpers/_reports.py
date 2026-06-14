@@ -666,6 +666,11 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
     except Exception as exc:
         _log().warning("Weekly recap clan trend summary unavailable: %s", exc)
         clan_trend_summary = ""
+    try:
+        clan_voyage_context = db.build_clan_voyage_context(limit=2)
+    except Exception as exc:
+        _log().warning("Weekly recap Clan Voyage context unavailable: %s", exc)
+        clan_voyage_context = ""
     roster = summary.get("roster") or {}
     war_score_trend = summary.get("war_score_trend") or {}
     season_summary = summary.get("war_season_summary") or {}
@@ -699,6 +704,10 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
 
     lines.append("")
     lines.append("=== STORY BEATS (the week's narrative — lead with this) ===")
+
+    if clan_voyage_context and "No Clan Voyage screenshots" not in clan_voyage_context:
+        lines.append("manual Clan Voyage activity: use only as positive recognition; screenshots may be partial")
+        lines.append(clan_voyage_context)
 
     if war_score_trend:
         lines.append(
