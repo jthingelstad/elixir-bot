@@ -249,7 +249,7 @@ def upsert_clan_voyage_capture(
     completed_value = 1 if bool(completed) else 0
     clean_status = (
         status
-        or ("completed_partial" if completed_value and incoming_entries else "partial")
+        or ("completed" if completed_value else "partial")
     )
 
     conn.execute(
