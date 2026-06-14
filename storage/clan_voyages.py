@@ -110,6 +110,16 @@ def _as_confidence(value, default: float = 0.75) -> float:
         return default
 
 
+def _first_present(*values):
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return None
+
+
 def _member_id_for_tag(player_tag: str | None, *, conn) -> int | None:
     tag = _canon_tag(player_tag)
     if not tag:
@@ -142,8 +152,8 @@ def _resolve_visible_member(name: str, player_tag: str | None = None, *, conn) -
 
 
 def _entry_payload(entry: dict, source_message_id: str | int | None) -> dict | None:
-    rank = _as_int(entry.get("rank") or entry.get("place"))
-    points = _as_int(entry.get("points") or entry.get("score") or entry.get("crowns"))
+    rank = _as_int(_first_present(entry.get("rank"), entry.get("place")))
+    points = _as_int(_first_present(entry.get("points"), entry.get("score"), entry.get("crowns")))
     name = " ".join(str(entry.get("player_name") or entry.get("name") or entry.get("player_name_raw") or "").split())
     if rank is None or points is None or not name:
         return None

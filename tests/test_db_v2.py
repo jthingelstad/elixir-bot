@@ -1414,6 +1414,7 @@ def test_clan_voyage_capture_merges_pages_and_resolves_members():
             image_count=4,
             entries=[
                 {"rank": 2, "player_name": "The Joesma", "role": "Member", "points": 243, "source_image_index": 1, "confidence": 0.88},
+                {"rank": 37, "player_name": "EddiePlayz", "role": "Member", "points": 0, "source_image_index": 4, "confidence": 0.86},
             ],
             conn=conn,
         )
@@ -1425,9 +1426,10 @@ def test_clan_voyage_capture_merges_pages_and_resolves_members():
         assert latest["event_end_at"] == "2026-06-15T08:59:00"
         assert latest["source_message_ids_json"] == ["1001", "1002"]
         assert latest["image_count"] == 10
-        assert [entry["rank"] for entry in latest["entries"]] == [1, 2, 11]
+        assert [entry["rank"] for entry in latest["entries"]] == [1, 2, 11, 37]
         assert latest["entries"][0]["player_tag"] == "#AAA111"
         assert latest["entries"][1]["player_tag"] is None
+        assert latest["entries"][3]["points"] == 0
 
         summary = db.get_member_clan_voyage_summary("#KING001", conn=conn)
         assert summary["best_rank"] == 11
