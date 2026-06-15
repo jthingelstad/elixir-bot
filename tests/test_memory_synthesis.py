@@ -143,18 +143,55 @@ def test_apply_plan_dry_run_persists_nothing(memdb):
     assert list_memories(viewer_scope="leadership") == []
 
 
-def test_apply_plan_counts_contradictions_without_mutating(memdb):
+def test_apply_plan_auto_expires_non_leader_contradictions(memdb):
+    metric_memory = create_memory(
+        title="donation snapshot",
+        body="TDuck led donations with 527.",
+        source_type="elixir_inference",
+        is_inference=True,
+        confidence=0.7,
+        created_by="elixir",
+        scope="leadership",
+    )
+    human_memory = create_memory(
+        title="availability note",
+        body="Fullboat is a member camping through war week.",
+        source_type="elixir_inference",
+        is_inference=True,
+        confidence=0.7,
+        created_by="elixir",
+        scope="leadership",
+    )
     plan = {
         "arc_memories": [],
         "stale_memory_ids": [],
         "contradictions": [
-            {"memory_id": 42, "stored": "A", "live": "B", "suggested_action": "escalate"},
-            {"memory_id": 99, "stored": "C", "live": "D", "suggested_action": "retire"},
+            {
+                "memory_id": metric_memory["memory_id"],
+                "stored": "TDuck led donations with 527.",
+                "live": "Donation leaderboard changed.",
+                "suggested_action": "retire",
+                "category": "metric_snapshot",
+                "needs_leader_review": False,
+            },
+            {
+                "memory_id": human_memory["memory_id"],
+                "stored": "Fullboat is a member camping through war week.",
+                "live": "Leader note may mean they are back now.",
+                "suggested_action": "escalate",
+                "category": "human_context",
+                "needs_leader_review": True,
+            },
         ],
         "digest": "flagged",
     }
     stats = _apply_memory_synthesis_plan(plan, week_id=None, dry_run=False)
     assert stats["contradictions_flagged"] == 2
+    assert stats["contradictions_auto_expired"] == 1
+    assert stats["contradictions_leader_review"] == 1
+    visible = {m["memory_id"] for m in list_memories(viewer_scope="leadership")}
+    assert metric_memory["memory_id"] not in visible
+    assert human_memory["memory_id"] in visible
 
 
 # ---------------------------------------------------------------------------
@@ -206,10 +243,10 @@ def test_build_context_bounds_memory_count_and_text_size(memdb, monkeypatch):
     assert all(item["body"].endswith("…") for item in context["week_memories"])
 
 
-def test_memory_synthesis_cycle_posts_contradiction_cards_not_digest():
+def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
     """The weekly synthesis keeps its memory writes but ships no digest
-    report — the only Discord output is one arena-relay action card per
-    flagged contradiction."""
+    report. Derived-state contradictions are auto-expired/logged; only
+    human-judgment contradictions become arena-relay action cards."""
     from types import SimpleNamespace
 
     channel = MagicMock()
@@ -220,7 +257,22 @@ def test_memory_synthesis_cycle_posts_contradiction_cards_not_digest():
         "arc_memories": [],
         "stale_memory_ids": [],
         "contradictions": [
-            {"memory_id": 42, "stored": "Vijay is an Elder", "live": "Vijay is a Member", "suggested_action": "update role"},
+            {
+                "memory_id": 41,
+                "stored": "TDuck led donations with 527.",
+                "live": "Donation leaderboard changed.",
+                "suggested_action": "retire",
+                "category": "metric_snapshot",
+                "needs_leader_review": False,
+            },
+            {
+                "memory_id": 42,
+                "stored": "Fullboat is a member camping through war week.",
+                "live": "Leader note may mean they are back now.",
+                "suggested_action": "escalate",
+                "category": "human_context",
+                "needs_leader_review": True,
+            },
         ],
     }
     created = {"action_id": 9, "source_message_id": None}
@@ -233,11 +285,13 @@ def test_memory_synthesis_cycle_posts_contradiction_cards_not_digest():
         patch("runtime.jobs._memory._build_memory_synthesis_context", return_value={"week_window": {"war_week_id": "131:2"}}),
         patch("runtime.jobs._memory.elixir_agent.run_memory_synthesis", return_value=plan),
         patch("runtime.jobs._memory._apply_memory_synthesis_plan", return_value={
-            "arcs_written": 0, "stale_expired": 0, "contradictions_flagged": 1,
+            "arcs_written": 0, "stale_expired": 1, "contradictions_flagged": 2,
+            "contradictions_auto_expired": 1, "contradictions_leader_review": 1,
             "arcs_requested": 0, "stale_requested": 0, "dry_run": False,
         }),
         patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
+        patch("runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()) as mock_elixir_log,
         patch("runtime.jobs._memory.prompts.discord_singleton_subagent", return_value={"id": 900, "name": "#leader-actions"}),
         patch("runtime.jobs._memory.bot.get_channel", return_value=channel),
         patch("runtime.jobs._memory.db.create_leader_action_recommendation", return_value=created) as mock_create,
@@ -251,12 +305,14 @@ def test_memory_synthesis_cycle_posts_contradiction_cards_not_digest():
     # Digest persists as durable memory, not as a Discord post.
     mock_memory.assert_called_once()
     assert mock_memory.call_args.kwargs["event_type"] == "weekly_memory_synthesis"
-    # One action card per contradiction, on arena-relay.
+    # One action card for the leader-judgment contradiction only.
     assert mock_create.call_args.kwargs["action_type"] == "memory_review"
     assert mock_create.call_args.kwargs["source_signal_key"] == "memory_contradiction:42"
-    assert "Vijay is an Elder" in mock_create.call_args.kwargs["prompt_text"]
+    assert "Fullboat is a member camping" in mock_create.call_args.kwargs["prompt_text"]
     mock_card.assert_awaited_once()
     assert mock_save.call_args.kwargs["event_type"] == "memory_contradiction"
+    mock_elixir_log.assert_awaited_once()
+    assert "Auto-expired metric/current-state memories: 1" in mock_elixir_log.call_args.args[0]
     assert "contradiction_cards=1" in mock_success.call_args.args[1]
 
 
@@ -277,6 +333,7 @@ def test_memory_synthesis_cycle_quiet_week_posts_nothing():
         }),
         patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
+        patch("runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()) as mock_elixir_log,
         patch("runtime.jobs._memory.post_leader_action_card", new=AsyncMock()) as mock_card,
         patch("runtime.jobs._memory.runtime_status.mark_job_start"),
         patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
@@ -285,6 +342,7 @@ def test_memory_synthesis_cycle_quiet_week_posts_nothing():
 
     mock_memory.assert_not_called()
     mock_card.assert_not_awaited()
+    mock_elixir_log.assert_not_awaited()
     assert "contradiction_cards=0" in mock_success.call_args.args[1]
 
 
