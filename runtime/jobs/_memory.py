@@ -3,8 +3,8 @@
 Assembles the week's memories, channel posts, and live clan state, hands
 them to the memory-synthesis LLM workflow, persists the resulting arc
 memories, and expires stale entries. The digest is stored as durable
-memory only; the sole Discord output is one #leader-actions action card per
-flagged contradiction.
+memory only. Derived-state memory contradictions are handled automatically;
+only genuine leader-judgment contradictions are eligible for #leader-actions.
 """
 
 __all__ = [
@@ -24,7 +24,9 @@ from datetime import datetime, timedelta, timezone
 import db
 import elixir_agent
 import prompts
+from memory_store import update_memory
 from storage.contextual_memory import upsert_weekly_summary_memory
+from runtime import elixir_log
 from runtime.app import bot, log
 from runtime.helpers import _channel_scope
 from runtime.leader_action_ui import LEADER_ACTION_UI_VERSION, post_leader_action_card
@@ -41,6 +43,45 @@ MEMORY_SYNTHESIS_POST_CHARS = int(os.getenv("MEMORY_SYNTHESIS_POST_CHARS", "700"
 # Cap contradiction cards per weekly run so a bad synthesis can't flood the
 # action board.
 MEMORY_CONTRADICTION_CARD_LIMIT = int(os.getenv("MEMORY_CONTRADICTION_CARD_LIMIT", "3"))
+
+DERIVED_STATE_CONTRADICTION_TERMS = {
+    "arena",
+    "badge",
+    "battle",
+    "battles",
+    "card",
+    "collection",
+    "deck",
+    "donation",
+    "donations",
+    "elder",
+    "fame",
+    "level",
+    "points",
+    "rank",
+    "role",
+    "roster",
+    "season",
+    "trophies",
+    "trophy",
+    "war",
+    "wins",
+}
+DERIVED_STATE_CONTRADICTION_CATEGORIES = {
+    "metric_snapshot",
+    "derived_state",
+    "stale_state",
+    "current_state",
+    "calculation",
+}
+LEADER_REVIEW_CONTRADICTION_CATEGORIES = {
+    "human_context",
+    "policy_or_preference",
+    "leader_preference",
+    "clan_policy",
+    "identity_ambiguity",
+    "leader_judgment",
+}
 
 
 def _current_war_week_id(conn=None) -> str | None:
@@ -95,6 +136,71 @@ def _compact_post_row(row: dict) -> dict:
         "workflow": row.get("workflow"),
         "event_type": row.get("event_type"),
     }
+
+
+def _contradiction_text(item: dict) -> str:
+    fields = (
+        "stored",
+        "live",
+        "suggested_action",
+        "category",
+        "reason",
+        "rationale",
+    )
+    return " ".join(str(item.get(key) or "") for key in fields).lower()
+
+
+def _contradiction_category(item: dict) -> str:
+    return str(item.get("category") or item.get("contradiction_type") or "").strip().lower()
+
+
+def _is_derived_state_contradiction(item: dict) -> bool:
+    category = _contradiction_category(item)
+    if category in DERIVED_STATE_CONTRADICTION_CATEGORIES:
+        return True
+    text = _contradiction_text(item)
+    return any(term in text for term in DERIVED_STATE_CONTRADICTION_TERMS)
+
+
+def _requires_leader_memory_review(item: dict) -> bool:
+    category = _contradiction_category(item)
+    if category in DERIVED_STATE_CONTRADICTION_CATEGORIES:
+        return False
+    if category in LEADER_REVIEW_CONTRADICTION_CATEGORIES:
+        return True
+    for key in ("needs_leader_review", "requires_leader_review", "requires_leader_judgment"):
+        if item.get(key) is True:
+            return True
+    review_scope = str(item.get("review_scope") or "").strip().lower()
+    if review_scope in {"leader", "leadership", "human"}:
+        return True
+    if _is_derived_state_contradiction(item):
+        return False
+    return True
+
+
+def _auto_expire_contradiction_ids(contradictions: list[dict]) -> list[int]:
+    ids = []
+    for item in contradictions or []:
+        if not isinstance(item, dict):
+            continue
+        if _requires_leader_memory_review(item):
+            continue
+        memory_id = item.get("memory_id")
+        try:
+            clean_id = int(memory_id)
+        except (TypeError, ValueError):
+            continue
+        if clean_id not in ids:
+            ids.append(clean_id)
+    return ids
+
+
+def _leader_review_contradictions(contradictions: list[dict]) -> list[dict]:
+    return [
+        item for item in contradictions or []
+        if isinstance(item, dict) and _requires_leader_memory_review(item)
+    ]
 
 
 def _build_memory_synthesis_context():
@@ -178,16 +284,20 @@ def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None, dry_run: bo
     through ``asyncio.to_thread``. In dry-run mode the function returns
     counts without persisting anything.
     """
-    from memory_store import create_memory, update_memory
+    from memory_store import create_memory
 
     arcs = list(plan.get("arc_memories") or [])
     stale_ids = list(plan.get("stale_memory_ids") or [])
     contradictions = list(plan.get("contradictions") or [])
+    auto_expire_ids = _auto_expire_contradiction_ids(contradictions)
+    leader_review_items = _leader_review_contradictions(contradictions)
 
     stats = {
         "arcs_written": 0,
         "stale_expired": 0,
         "contradictions_flagged": len(contradictions),
+        "contradictions_auto_expired": 0,
+        "contradictions_leader_review": len(leader_review_items),
         "arcs_requested": len(arcs),
         "stale_requested": len(stale_ids),
         "dry_run": bool(dry_run),
@@ -236,10 +346,21 @@ def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None, dry_run: bo
     # Stale entries get expires_at = today; list_memories' expires_at filter
     # ignores anything that has expired, so stale rows vanish from readers
     # without losing audit history.
-    for memory_id in stale_ids:
+    stale_or_auto_ids = []
+    for memory_id in [*stale_ids, *auto_expire_ids]:
         try:
-            update_memory(int(memory_id), actor=actor, expires_at=now_stamp)
+            clean_id = int(memory_id)
+        except (TypeError, ValueError):
+            continue
+        if clean_id not in stale_or_auto_ids:
+            stale_or_auto_ids.append(clean_id)
+
+    for memory_id in stale_or_auto_ids:
+        try:
+            update_memory(memory_id, actor=actor, expires_at=now_stamp)
             stats["stale_expired"] += 1
+            if memory_id in auto_expire_ids:
+                stats["contradictions_auto_expired"] += 1
         except Exception:
             log.warning("memory synthesis: expire %s failed", memory_id, exc_info=True)
 
@@ -247,14 +368,14 @@ def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None, dry_run: bo
 
 
 async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
-    """Post one #leader-actions card per flagged contradiction.
+    """Post one #leader-actions card per leader-judgment contradiction.
 
-    The card is the actionable residue of the weekly synthesis: the leader
-    either fixes/expires the memory (done) or dismisses the flag (decline).
-    Dedup rides on action_key — the same memory_id with the same stored/live
-    text won't re-post while a card is already open.
+    Metric and current-state contradictions are handled automatically by
+    expiring the stale memory. Cards are reserved for cases Elixir cannot
+    recompute, such as policy, leader preference, or human context.
     """
-    if not contradictions:
+    review_items = _leader_review_contradictions(contradictions)
+    if not review_items:
         return 0
     try:
         channel_config = prompts.discord_singleton_subagent("arena-relay")
@@ -271,7 +392,7 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
     channel_kind = getattr(channel, "type", "text")
     if channel_kind is not None:
         channel_kind = str(channel_kind)
-    for item in contradictions[:MEMORY_CONTRADICTION_CARD_LIMIT]:
+    for item in review_items[:MEMORY_CONTRADICTION_CARD_LIMIT]:
         memory_id = item.get("memory_id")
         stored = (item.get("stored") or "").strip() or "—"
         live = (item.get("live") or "").strip() or "—"
@@ -317,10 +438,10 @@ async def _memory_synthesis_cycle():
 
     Runs Sunday late by default. Assembles the week's memories + posts +
     live state, hands them to ``run_memory_synthesis``, persists the
-    resulting arcs, and expires stale entries. There is no digest post —
-    the only Discord output is one #leader-actions card per flagged
-    contradiction, so leadership sees actionable memory hygiene instead of
-    a weekly report.
+    resulting arcs, and expires stale entries. There is no digest post.
+    Metric/current-state contradictions are expired automatically and logged
+    to #elixir-log; only human-judgment contradictions may create
+    #leader-actions cards.
     """
     runtime_status.mark_job_start("memory_synthesis")
 
@@ -397,7 +518,23 @@ async def _memory_synthesis_cycle():
         )
 
     cards_posted = await _post_memory_contradiction_cards(contradictions)
+    if stats.get("contradictions_auto_expired") or stats.get("contradictions_leader_review"):
+        lines = [
+            "🧠 Memory synthesis hygiene",
+            f"Auto-expired metric/current-state memories: {stats.get('contradictions_auto_expired', 0)}",
+            f"Leader-review cards: {cards_posted}",
+        ]
+        auto_ids = _auto_expire_contradiction_ids(contradictions)
+        if auto_ids:
+            lines.append("Auto-expired IDs: " + ", ".join(f"`#{memory_id}`" for memory_id in auto_ids[:8]))
+        try:
+            await elixir_log.post_event_async("\n".join(lines))
+        except Exception:
+            log.warning("memory_synthesis: elixir-log hygiene summary failed", exc_info=True)
     runtime_status.mark_job_success(
         "memory_synthesis",
-        f"synthesis complete (arcs={stats['arcs_written']}, stale={stats['stale_expired']}, contradiction_cards={cards_posted})",
+        "synthesis complete "
+        f"(arcs={stats['arcs_written']}, stale={stats['stale_expired']}, "
+        f"auto_expired={stats.get('contradictions_auto_expired', 0)}, "
+        f"contradiction_cards={cards_posted})",
     )
