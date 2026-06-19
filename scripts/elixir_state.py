@@ -42,6 +42,7 @@ def _line_items(title: str, rows: list[dict], *, empty: str) -> list[str]:
             or row.get("intent_type")
             or row.get("project_key")
             or row.get("case_key")
+            or row.get("rollup_key")
             or row.get("event_key")
             or row.get("intent_key")
         )
@@ -63,6 +64,7 @@ def _summary_payload(args) -> dict:
         "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
         "recent_intents": db.list_recent_communication_intents(limit=limit),
         "failed_intents": db.list_recent_communication_intents(status="failed", limit=limit),
+        "recent_rollups": db.list_event_rollups(scope=args.scope, limit=limit),
     }
 
 
@@ -103,6 +105,9 @@ def _print_summary(data: dict) -> None:
         print(line)
     print("")
     for line in _line_items("Failed Communication Intents", data.get("failed_intents") or [], empty="none"):
+        print(line)
+    print("")
+    for line in _line_items("Recent Event Rollups", data.get("recent_rollups") or [], empty="none"):
         print(line)
 
 
@@ -170,6 +175,21 @@ def _intents_payload(args) -> dict:
     }
 
 
+def _rollups_payload(args) -> dict:
+    scope = None if args.scope == "all" else args.scope
+    return {
+        "rollups": db.list_event_rollups(
+            rollup_type=args.rollup_type,
+            scope=scope,
+            subject_type=args.subject_type,
+            subject_key=args.subject_key,
+            project_key=args.project_key,
+            season_id=args.season_id,
+            limit=args.limit,
+        )
+    }
+
+
 def _print_generic(data: dict) -> None:
     for key, value in data.items():
         if isinstance(value, list):
@@ -221,6 +241,15 @@ def build_parser() -> argparse.ArgumentParser:
     intents.add_argument("--workflow")
     intents.add_argument("--target-channel-key")
 
+    rollups = sub.add_parser("rollups", help="Show long-term event rollups.")
+    _add_common(rollups)
+    rollups.add_argument("--rollup-type", choices=("member_90d", "war_cycle", "project_summary", "case_history"))
+    rollups.add_argument("--scope", choices=("all", "public", "leadership", "system_internal"), default="all")
+    rollups.add_argument("--subject-type")
+    rollups.add_argument("--subject-key")
+    rollups.add_argument("--project-key")
+    rollups.add_argument("--season-id")
+
     return parser
 
 
@@ -245,6 +274,8 @@ def main(argv: list[str] | None = None) -> int:
         data = _cases_payload(args)
     elif args.command == "intents":
         data = _intents_payload(args)
+    elif args.command == "rollups":
+        data = _rollups_payload(args)
     else:
         parser.error(f"unknown command: {args.command}")
         return 2

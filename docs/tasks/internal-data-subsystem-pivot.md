@@ -1,5 +1,10 @@
 # Plan: Elixir Internal Data Subsystem Pivot
 
+Status: Phases 1-8 have been implemented. The canonical internal data
+subsystem is now `game_event_stream` -> `elixir_projects` /
+`decision_cases` -> `communication_intents`, with `event_rollups` preserving
+long-term summaries beyond the 90-day operational stream.
+
 ## Purpose
 
 Elixir has outgrown the original "detector emits signal, router picks channel,
@@ -529,6 +534,19 @@ Exit criteria:
 ### Phase 8: Rollups, Backfill, Cleanup, and Retention
 
 Goal: Make the new subsystem sustainable.
+
+Implementation status:
+
+- `event_rollups` stores `member_90d`, `war_cycle`, `project_summary`, and
+  `case_history` summaries.
+- `get_event_rollups` and `scripts/elixir_state.py rollups` expose long-term
+  summaries.
+- Weekly database maintenance writes rollups before pruning
+  `game_event_stream` rows older than 90 days.
+- Historical backfill is intentionally conservative: authoritative fact tables,
+  projects, cases, messages, and awards remain the source for old history; the
+  event stream is not bulk-reconstructed from raw Discord history unless a
+  future analytics need justifies that one-off backfill.
 
 Tasks:
 

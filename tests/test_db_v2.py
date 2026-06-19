@@ -43,6 +43,7 @@ def test_v2_schema_initializes_core_tables():
             "raw_api_payloads",
             "api_sentinel_observations",
             "game_event_stream",
+            "event_rollups",
             "elixir_projects",
             "project_event_links",
             "decision_cases",
@@ -232,6 +233,104 @@ def test_projects_link_stream_events_idempotently():
         assert detail["project"]["project_key"] == "war_season:129"
         assert detail["events"][0]["event_key"] == event["event_key"]
         assert detail["communication_intents"][0]["intent_id"] == intent["intent_id"]
+    finally:
+        conn.close()
+
+
+def test_event_rollups_write_before_stream_pruning():
+    conn = db.get_connection(":memory:")
+    try:
+        old_member = db.record_game_event(
+            event_type="member_join",
+            source_system="test",
+            source_signal_key="join:#AAA",
+            observed_at="2026-02-01T12:00:00",
+            scope="public",
+            subject_type="member",
+            subject_key="#AAA",
+            payload={"name": "Alpha"},
+            conn=conn,
+        )
+        old_war = db.record_game_event(
+            event_type="war_battle_day_complete",
+            source_system="test",
+            source_signal_key="war:s129:w1",
+            observed_at="2026-02-02T12:00:00",
+            scope="public",
+            subject_type="war",
+            subject_key="season:129:week:1",
+            season_id="129",
+            war_week="1",
+            payload={"rank": 1},
+            conn=conn,
+        )
+        db.record_game_event(
+            event_type="promotion_review",
+            source_system="test",
+            source_signal_key="promotion:#AAA",
+            observed_at="2026-02-03T12:00:00",
+            scope="leadership",
+            subject_type="member",
+            subject_key="#AAA",
+            payload={"name": "Alpha"},
+            conn=conn,
+        )
+        recent = db.record_game_event(
+            event_type="arena_change",
+            source_system="test",
+            source_signal_key="arena:#AAA",
+            observed_at="2026-06-01T12:00:00",
+            scope="public",
+            subject_type="member",
+            subject_key="#AAA",
+            payload={"arena": "Legendary Arena"},
+            conn=conn,
+        )
+        project = db.upsert_project(
+            project_key="war_season:129",
+            project_type="war_season",
+            title="War Season 129",
+            status="completed",
+            subject_type="war",
+            subject_key="season:129",
+            season_id="129",
+            conn=conn,
+        )
+        db.link_project_event(
+            project_id=project["project_id"],
+            event_key=old_war["event_key"],
+            conn=conn,
+        )
+        case = db.upsert_decision_case(
+            case_type="promotion_review",
+            title="Promotion review: Alpha",
+            target_player_tag="#AAA",
+            target_player_name="Alpha",
+            source_event_key=old_member["event_key"],
+            conn=conn,
+        )
+        db.resolve_decision_case(case["case_id"], resolution="promoted", conn=conn)
+
+        result = db.prune_event_stream_with_rollups(
+            retention_days=90,
+            now="2026-06-19T12:00:00",
+            conn=conn,
+        )
+
+        assert result["old_event_count"] == 3
+        assert result["pruned"] == 3
+        assert result["rollups"]["total_written"] >= 4
+        remaining = db.list_recent_events(days=365, conn=conn)
+        assert [event["event_key"] for event in remaining] == [recent["event_key"]]
+
+        rollups = db.list_event_rollups(limit=20, conn=conn)
+        by_type = {rollup["rollup_type"]: rollup for rollup in rollups}
+        assert {"member_90d", "war_cycle", "project_summary", "case_history"}.issubset(by_type)
+        assert by_type["member_90d"]["subject_key"] == "#AAA"
+        assert by_type["member_90d"]["summary"]["by_scope"] == {"leadership": 1, "public": 1}
+        assert by_type["war_cycle"]["season_id"] == "129"
+        assert by_type["project_summary"]["project_key"] == "war_season:129"
+        assert by_type["case_history"]["summary"]["resolution"] == "promoted"
     finally:
         conn.close()
 

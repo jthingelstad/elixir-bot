@@ -365,6 +365,7 @@ def _clanops_system(channel_name):
         "Use aspect='decision_cases' for open/due recommendations, aspect='communication_intents' for recent planned/skipped/delivered/failed communications, "
         "aspect='projects' or aspect='project_detail' for active missions such as the war season, "
         "aspect='event_summary' or aspect='recent_events' for the signal stream, and aspect='communication_trace' with a Discord message id when explaining a specific post. "
+        "For history older than the 90-day event stream, use `get_event_rollups` instead of assuming the raw event rows still exist. "
         "Do not reconstruct this from Discord history alone when structured state is available.\n\n"
         "The cr_api tool is your bridge to the live Clash Royale API for ANY external player, clan, or tournament by tag. "
         "Reach for it when a user hands you a tag — e.g. 'tell me about player #ABC', 'how is clan #XYZ', 'scout the clan I just lost to'. "

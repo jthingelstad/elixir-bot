@@ -51,11 +51,13 @@ python scripts/elixir_state.py events --days 28 --scope leadership
 python scripts/elixir_state.py cases --status due
 python scripts/elixir_state.py intents --status failed --json
 python scripts/elixir_state.py projects --project-key war_season:133 --json
+python scripts/elixir_state.py rollups --rollup-type war_cycle --json
 ```
 
 Use this when you need to answer "what is Elixir monitoring?", "what
 recommendations are open?", or "what recent communications failed?" without
-reading raw Discord history.
+reading raw Discord history. The `rollups` view is the long-term companion to
+the 90-day event stream.
 
 ### `clean.py`
 Remove local cache/build cruft.

@@ -603,6 +603,72 @@ def test_execute_tool_get_elixir_state_reads_intents_for_leadership_workflow():
     )
 
 
+def test_execute_tool_get_event_rollups_public_scope_filtered():
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.list_event_rollups.return_value = [
+            {"rollup_key": "member_90d:#ABC", "scope": "public"},
+        ]
+
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_event_rollups",
+                {"rollup_type": "member_90d", "limit": 5},
+                workflow="interactive",
+            )
+        )
+
+    assert result["scope"] == "public"
+    assert result["rollups"][0]["scope"] == "public"
+    mock_db.list_event_rollups.assert_called_once_with(
+        rollup_type="member_90d",
+        scope="public",
+        subject_type=None,
+        subject_key=None,
+        project_key=None,
+        season_id=None,
+        limit=5,
+    )
+
+
+def test_execute_tool_get_event_rollups_blocks_leadership_scope_in_interactive():
+    result = json.loads(
+        elixir_agent._execute_tool(
+            "get_event_rollups",
+            {"scope": "leadership"},
+            workflow="interactive",
+        )
+    )
+
+    assert result["error"] == "leadership_state_unavailable"
+
+
+def test_execute_tool_get_event_rollups_all_scope_for_clanops():
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.list_event_rollups.return_value = [
+            {"rollup_key": "case_history:9", "scope": "leadership"},
+        ]
+
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_event_rollups",
+                {"scope": "all", "rollup_type": "case_history"},
+                workflow="clanops",
+            )
+        )
+
+    assert result["scope"] == "all"
+    assert result["rollups"][0]["scope"] == "leadership"
+    mock_db.list_event_rollups.assert_called_once_with(
+        rollup_type="case_history",
+        scope=None,
+        subject_type=None,
+        subject_key=None,
+        project_key=None,
+        season_id=None,
+        limit=25,
+    )
+
+
 def test_execute_tool_get_river_race_standings():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_current_war_status.return_value = {
