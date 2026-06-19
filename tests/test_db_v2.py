@@ -5715,6 +5715,44 @@ def test_record_join_date_upgrades_existing_membership_to_observed_join():
         conn.close()
 
 
+def test_member_membership_summary_marks_returning_member():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "MONICA", "role": "member", "clanRank": 1}],
+            conn=conn,
+        )
+        member_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#ABC123'"
+        ).fetchone()["member_id"]
+        conn.execute("DELETE FROM clan_memberships WHERE member_id = ?", (member_id,))
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-04-04', '2026-04-24', 'observed_join', 'manual_clear')",
+            (member_id,),
+        )
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-04-26', '2026-06-12', 'observed_join', 'manual_clear')",
+            (member_id,),
+        )
+        conn.execute(
+            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, '2026-06-19', NULL, 'observed_join', NULL)",
+            (member_id,),
+        )
+        conn.commit()
+
+        summary = db.get_member_membership_summary("#ABC123", conn=conn)
+        profile = db.get_member_profile("#ABC123", conn=conn)
+
+        assert summary["is_returning"] is True
+        assert summary["join_count"] == 3
+        assert summary["prior_stints"] == 2
+        assert summary["current_joined_at"] == "2026-06-19"
+        assert summary["last_left_at"] == "2026-06-12"
+        assert profile["membership_summary"]["is_returning"] is True
+    finally:
+        conn.close()
+
+
 def test_current_joined_at_ignores_bootstrap_and_backfill_duplicates():
     conn = db.get_connection(":memory:")
     try:

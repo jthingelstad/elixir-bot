@@ -126,6 +126,7 @@ else:
     )
 LEADERSHIP_ACTION_SCAN_MINUTES = int(os.getenv("LEADERSHIP_ACTION_SCAN_MINUTES", "240"))
 LEADERSHIP_ACTION_SCAN_MAX_ACTIONS = int(os.getenv("LEADERSHIP_ACTION_SCAN_MAX_ACTIONS", "2"))
+KICK_RECOMMENDATION_FRESH_JOIN_GRACE_DAYS = int(os.getenv("KICK_RECOMMENDATION_FRESH_JOIN_GRACE_DAYS", "7"))
 # How long a leader's decline suppresses re-proposing the same role action
 # for the same member. Role situations change on roster timescales, so the
 # default is 30 days — much longer than the 7-day unanswered-card dedup.
@@ -634,6 +635,35 @@ def _kick_candidate_inactive_reason(member: dict) -> dict | None:
     return None
 
 
+def _date_from_iso_prefix(value: str | None):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _kick_candidate_fresh_membership_reason(member: dict, *, conn=None) -> str | None:
+    tag = _leader_action_member_tag(member)
+    if not tag:
+        return None
+    try:
+        summary = db.get_member_membership_summary(tag, conn=conn) or {}
+    except Exception:
+        log.warning("kick candidate membership lookup failed for %s", tag, exc_info=True)
+        return None
+    joined_date = _date_from_iso_prefix(summary.get("current_joined_at"))
+    if not joined_date:
+        return None
+    age_days = (datetime.now(timezone.utc).date() - joined_date).days
+    grace_days = max(0, KICK_RECOMMENDATION_FRESH_JOIN_GRACE_DAYS)
+    if age_days < grace_days:
+        return f"fresh_membership:{age_days}d<{grace_days}d"
+    return None
+
+
 def _availability_memory_matches(memory: dict) -> bool:
     tags = {str(tag or "").strip().lower() for tag in (memory.get("tags") or [])}
     text = " ".join(
@@ -682,6 +712,9 @@ def _kick_candidate_availability_memory(member: dict, *, conn=None) -> dict | No
 def _kick_candidate_ineligibility_reason(member: dict, *, conn=None) -> str | None:
     if not _kick_candidate_inactive_reason(member):
         return "no_inactivity_signal"
+    fresh_membership = _kick_candidate_fresh_membership_reason(member, conn=conn)
+    if fresh_membership:
+        return fresh_membership
     availability_memory = _kick_candidate_availability_memory(member, conn=conn)
     if availability_memory:
         return f"availability_memory:{availability_memory.get('memory_id')}"
