@@ -7,8 +7,8 @@ since the last tick grouped by lane, recent channel posts (memory), roster
 vitals, and an explicit list of hard-post-floor signals.
 
 The assembler is pure: it takes a heartbeat tick result + clan/war and
-queries the local DB for memory, event history, and form data. It does no Discord I/O and
-no LLM calls — that's the agent's job.
+queries the local DB for memory, event history, durable projects, and form
+data. It does no Discord I/O and no LLM calls — that's the agent's job.
 """
 
 from __future__ import annotations
@@ -394,6 +394,17 @@ def _recent_events_block(*, include_leadership: bool, recent_limit: int = 20) ->
         }
 
 
+def _projects_block() -> dict:
+    try:
+        return {
+            "war_season": db.get_active_war_season_project_snapshot(),
+        }
+    except Exception:
+        log.warning("projects load failed", exc_info=True)
+        _note_degraded("projects")
+        return {"war_season": None}
+
+
 def _already_delivered(signal: dict) -> bool:
     """True iff the signal's log key is already in ``signal_log``.
 
@@ -429,8 +440,8 @@ def build_situation(
     ``tick_result`` is a ``HeartbeatTickResult`` (signals + clan + war).
     Returns a dict whose top-level keys are stable for the agent's prompt:
     ``time``, ``standing``, ``signals_by_lane``, ``hard_post_signals``,
-    ``channel_memory``, ``recent_events``, ``roster_vitals``, ``due_revisits``,
-    ``recent_agent_writes``.
+    ``channel_memory``, ``recent_events``, ``projects``, ``roster_vitals``,
+    ``due_revisits``, ``recent_agent_writes``.
 
     Signals whose ``signal_log_type`` is already in ``signal_log`` are dropped
     before assembly — preventing the agent from re-covering a signal that was
@@ -473,6 +484,7 @@ def build_situation(
         "recent_events": _recent_events_block(
             include_leadership=bool(include_leadership_events),
         ),
+        "projects": _projects_block(),
         "channel_memory": {
             key: _channel_memory_for(key) for key in channel_keys
         },

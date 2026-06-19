@@ -425,6 +425,10 @@ async def _war_awareness_tick():
         detection_result = await asyncio.to_thread(
             heartbeat.detect_war_signals_from_storage,
         )
+        try:
+            await asyncio.to_thread(db.refresh_active_war_season_project)
+        except Exception:
+            log.warning("War awareness: active war-season project refresh failed", exc_info=True)
         signals = detection_result.signals
 
         if not signals:

@@ -43,6 +43,8 @@ def test_v2_schema_initializes_core_tables():
             "raw_api_payloads",
             "api_sentinel_observations",
             "game_event_stream",
+            "elixir_projects",
+            "project_event_links",
             "leader_action_recommendations",
             "runtime_job_status",
             "arena_relay_screenshot_observations",
@@ -161,6 +163,169 @@ def test_event_stream_query_windows_and_subject_lookup():
         assert summary["90d"]["total"] == 3
         assert summary["90d"]["by_scope"] == {"leadership": 1, "public": 2}
         assert summary["56d"]["by_type"]["war_battle_rank_change"] == 1
+    finally:
+        conn.close()
+
+
+def test_projects_link_stream_events_idempotently():
+    conn = db.get_connection(":memory:")
+    try:
+        event = db.record_game_event(
+            event_type="war_battle_rank_change",
+            source_system="test",
+            source_signal_key="war_rank:s129:w2",
+            observed_at="2026-06-19T12:00:00",
+            scope="public",
+            subject_type="war",
+            subject_key="season:129:week:2",
+            season_id="129",
+            war_week="2",
+            payload={"rank": 1},
+            conn=conn,
+        )
+        project = db.upsert_project(
+            project_key="war_season:129",
+            project_type="war_season",
+            title="War Season 129",
+            subject_type="war",
+            subject_key="season:129",
+            season_id="129",
+            state={"season_id": 129, "week": 2},
+            conn=conn,
+        )
+
+        first = db.link_project_event(
+            project_id=project["project_id"],
+            event_key=event["event_key"],
+            conn=conn,
+        )
+        second = db.link_project_event(
+            project_id=project["project_id"],
+            event_key=event["event_key"],
+            conn=conn,
+        )
+
+        assert first["link_id"] == second["link_id"]
+        links = db.list_project_event_links(project["project_id"], conn=conn)
+        assert [link["event_key"] for link in links] == [event["event_key"]]
+        stored = db.get_project("war_season:129", conn=conn)
+        assert stored["linked_event_count"] == 1
+        assert stored["state"]["week"] == 2
+    finally:
+        conn.close()
+
+
+def test_refresh_active_war_season_project_from_live_war_state():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [
+                {
+                    "tag": "#AAA111",
+                    "name": "Alpha",
+                    "role": "member",
+                    "expLevel": 14,
+                    "trophies": 7000,
+                    "clanRank": 1,
+                },
+                {
+                    "tag": "#BBB222",
+                    "name": "Beta",
+                    "role": "member",
+                    "expLevel": 13,
+                    "trophies": 6500,
+                    "clanRank": 2,
+                },
+            ],
+            conn=conn,
+        )
+        event = db.record_game_event(
+            event_type="war_battle_rank_change",
+            source_system="war_awareness",
+            source_signal_key="rank:s129:w2",
+            observed_at="2026-06-19T12:00:00",
+            scope="public",
+            subject_type="war",
+            subject_key="season:129:week:2",
+            season_id="129",
+            war_week="2",
+            payload={"rank": 1},
+            conn=conn,
+        )
+        db.upsert_war_current_state(
+            {
+                "state": "warDay",
+                "seasonId": 129,
+                "sectionIndex": 1,
+                "periodIndex": 10,
+                "periodType": "warDay",
+                "clan": {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": 12000,
+                    "repairPoints": 0,
+                    "periodPoints": 3000,
+                    "clanScore": 150,
+                    "participants": [
+                        {
+                            "tag": "#AAA111",
+                            "name": "Alpha",
+                            "fame": 500,
+                            "repairPoints": 0,
+                            "boatAttacks": 0,
+                            "decksUsed": 4,
+                            "decksUsedToday": 4,
+                        },
+                        {
+                            "tag": "#BBB222",
+                            "name": "Beta",
+                            "fame": 0,
+                            "repairPoints": 0,
+                            "boatAttacks": 0,
+                            "decksUsed": 0,
+                            "decksUsedToday": 0,
+                        },
+                    ],
+                },
+                "clans": [
+                    {
+                        "tag": "#J2RGCRVG",
+                        "name": "POAP KINGS",
+                        "fame": 12000,
+                        "repairPoints": 0,
+                        "periodPoints": 3000,
+                        "clanScore": 150,
+                    },
+                    {
+                        "tag": "#RIVAL",
+                        "name": "Rivals",
+                        "fame": 11000,
+                        "repairPoints": 0,
+                        "periodPoints": 2900,
+                        "clanScore": 145,
+                    },
+                ],
+            },
+            conn=conn,
+        )
+
+        project = db.get_active_war_season_project(conn=conn)
+        assert project["project_key"] == "war_season:129"
+        assert project["summary"] == "Season 129; Week 2; Battle Day 1; rank 1; 1/2 engaged today"
+        state = project["state"]
+        assert state["race"]["rank"] == 1
+        assert state["race"]["standings"][0]["is_us"] is True
+        assert state["participation_health"]["engaged_count"] == 1
+        assert state["participation_health"]["untouched_count"] == 1
+        assert state["active_risks"]["no_participation_count"] == 2
+
+        links = db.list_project_event_links(project["project_id"], conn=conn)
+        assert [link["event_key"] for link in links] == [event["event_key"]]
+
+        snapshot = db.get_active_war_season_project_snapshot(conn=conn)
+        assert snapshot["project_key"] == "war_season:129"
+        assert snapshot["linked_event_count"] == 1
+        assert snapshot["state"]["phase_display"] == "Battle Day 1"
     finally:
         conn.close()
 
