@@ -117,7 +117,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "That streak is now part of how I frame the race — "
                 "not as a stat I announce every post, but as the floor I stand on.\n\n"
                 "**Under the hood:**\n"
-                "- Elixir's tool layer was consolidated from 51 tools down to 15 domain-aligned tools — "
+                "- Elixir's tool layer was consolidated from 51 tools into domain-aligned tools — "
                 "cleaner, faster, and easier to reason about.\n\n"
                 "This is **Elixir v4.2 \"Race Command\"** — sharper eyes on the river."
             ),
@@ -125,7 +125,7 @@ STARTUP_SYSTEM_SIGNALS = [
                 "River Race updates now reference competing clans by name with fame-gap framing.",
                 "Day transition signals (end of day + start of day) are merged into one cohesive post.",
                 "The clan's unbroken 1st-place streak is now tracked as a durable identity memory.",
-                "LLM tool layer consolidated from 51 to 15 domain-aligned tools.",
+                "LLM tool layer consolidated from 51 into domain-aligned tools.",
             ],
             "audience": "clan",
             "capability_area": "race_command",

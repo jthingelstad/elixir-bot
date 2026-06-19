@@ -711,6 +711,9 @@ def list_recent_communication_intents(
     *,
     status: str | None = None,
     workflow: str | None = None,
+    project_id: int | None = None,
+    case_id: int | None = None,
+    target_channel_key: str | None = None,
     limit: int = 25,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
@@ -722,6 +725,15 @@ def list_recent_communication_intents(
     if workflow:
         clauses.append("workflow = ?")
         params.append(_clean_text(workflow))
+    if project_id is not None:
+        clauses.append("project_id = ?")
+        params.append(int(project_id))
+    if case_id is not None:
+        clauses.append("case_id = ?")
+        params.append(int(case_id))
+    if target_channel_key:
+        clauses.append("target_channel_key = ?")
+        params.append(_clean_text(target_channel_key))
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(
         f"SELECT * FROM communication_intents {where} "

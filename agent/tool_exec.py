@@ -683,6 +683,192 @@ def _execute_get_clan_voyage(arguments):
     return {"error": f"Unknown aspect: {aspect}"}
 
 
+_ELIXIR_STATE_WINDOWS = (7, 28, 56, 90)
+
+
+def _state_limit(arguments, *, default: int = 25, maximum: int = 100) -> int:
+    try:
+        value = int(arguments.get("limit", default))
+    except (TypeError, ValueError):
+        return default
+    if value < 1:
+        return default
+    return min(value, maximum)
+
+
+def _state_windows(arguments) -> tuple[int, ...]:
+    raw = arguments.get("windows")
+    if not raw:
+        return _ELIXIR_STATE_WINDOWS
+    windows = []
+    for item in raw:
+        try:
+            days = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= days <= 90:
+            windows.append(days)
+    return tuple(dict.fromkeys(windows)) or _ELIXIR_STATE_WINDOWS
+
+
+def _state_days(arguments) -> int:
+    try:
+        days = int(arguments.get("days", 7))
+    except (TypeError, ValueError):
+        return 7
+    return min(max(days, 1), 90)
+
+
+def _workflow_can_read_leadership_state(workflow: str | None) -> bool:
+    return _memory_viewer_scope_for_workflow(workflow) == "leadership"
+
+
+def _state_scope(arguments, workflow: str | None) -> tuple[str | None, dict | None]:
+    requested = (arguments.get("scope") or "").strip()
+    if not _workflow_can_read_leadership_state(workflow):
+        if requested and requested != "public":
+            return None, {
+                "error": "leadership_state_unavailable",
+                "detail": "Only leadership workflows can read leadership or all-scope Elixir state.",
+            }
+        return "public", None
+    if requested in {"", "all"}:
+        return None, None
+    if requested in {"public", "leadership", "system_internal"}:
+        return requested, None
+    return None, {"error": "invalid_scope", "detail": f"Unknown state scope: {requested}"}
+
+
+def _require_leadership_state(workflow: str | None) -> dict | None:
+    if _workflow_can_read_leadership_state(workflow):
+        return None
+    return {
+        "error": "leadership_state_unavailable",
+        "detail": "This Elixir state view is available only in leadership workflows.",
+    }
+
+
+def _status_filter(arguments, *, default: tuple[str, ...] | None = None) -> tuple[str, ...] | None:
+    status = (arguments.get("status") or "").strip()
+    if not status:
+        return default
+    if status == "all":
+        return None
+    if status == "due":
+        return ("due",)
+    return (status,)
+
+
+def _execute_get_elixir_state(arguments, workflow=None):
+    """Read Elixir's internal event/project/case/intent state with scope gates."""
+    aspect = arguments.get("aspect", "operational_summary")
+    limit = _state_limit(arguments)
+
+    if aspect == "event_summary":
+        scope, error = _state_scope(arguments, workflow)
+        if error:
+            return error
+        return db.summarize_events_by_window(
+            windows=_state_windows(arguments),
+            scope=scope,
+            subject_type=arguments.get("subject_type"),
+            subject_key=arguments.get("subject_key"),
+        )
+
+    if aspect == "recent_events":
+        scope, error = _state_scope(arguments, workflow)
+        if error:
+            return error
+        return {
+            "scope": scope or "all",
+            "days": _state_days(arguments),
+            "events": db.list_recent_events(
+                days=_state_days(arguments),
+                scope=scope,
+                event_type=arguments.get("event_type"),
+                subject_type=arguments.get("subject_type"),
+                subject_key=arguments.get("subject_key"),
+                limit=limit,
+            ),
+        }
+
+    leadership_error = _require_leadership_state(workflow)
+    if leadership_error:
+        return leadership_error
+
+    if aspect == "projects":
+        statuses = _status_filter(arguments, default=("active",))
+        return {
+            "projects": db.list_projects(
+                project_type=arguments.get("project_type"),
+                statuses=statuses,
+                limit=limit,
+            )
+        }
+
+    if aspect == "project_detail":
+        project_key = (arguments.get("project_key") or "").strip()
+        if not project_key:
+            project = db.get_active_project(arguments.get("project_type") or "war_season")
+            project_key = (project or {}).get("project_key") or ""
+        if not project_key:
+            return {"error": "project_key_required", "detail": "No project_key was provided and no active project matched."}
+        return db.get_project_detail(project_key, event_limit=limit, intent_limit=limit) or {
+            "error": "project_not_found",
+            "project_key": project_key,
+        }
+
+    if aspect == "decision_cases":
+        status = (arguments.get("status") or "").strip()
+        case_type = arguments.get("case_type")
+        if status == "due":
+            return {
+                "due": db.list_due_decision_cases(case_type=case_type, limit=limit),
+            }
+        if status and status != "all":
+            return {
+                "cases": db.list_decision_cases(
+                    statuses=(status,),
+                    case_type=case_type,
+                    limit=limit,
+                ),
+            }
+        return db.decision_case_snapshot(open_limit=limit, due_limit=limit)
+
+    if aspect == "communication_intents":
+        status = (arguments.get("status") or "").strip()
+        return {
+            "intents": db.list_recent_communication_intents(
+                status=status if status and status != "all" else None,
+                workflow=arguments.get("workflow"),
+                target_channel_key=arguments.get("target_channel_key"),
+                limit=limit,
+            )
+        }
+
+    if aspect == "communication_trace":
+        message_id = (arguments.get("message_id") or "").strip()
+        if not message_id:
+            return {"error": "message_id_required"}
+        return db.get_communication_trace_for_message(message_id) or {
+            "error": "message_not_found",
+            "message_id": message_id,
+        }
+
+    if aspect == "operational_summary":
+        return {
+            "event_windows": db.summarize_events_by_window(windows=_ELIXIR_STATE_WINDOWS, scope=None),
+            "recent_events": db.list_recent_events(days=7, limit=10),
+            "active_war_project": db.get_active_war_season_project_snapshot(),
+            "active_projects": db.list_projects(statuses=("active",), limit=10),
+            "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
+            "recent_intents": db.list_recent_communication_intents(limit=limit),
+            "failed_intents": db.list_recent_communication_intents(status="failed", limit=limit),
+        }
+
+    return {"error": f"Unknown aspect: {aspect}"}
+
+
 
 
 # ── Write tools execution ─────────────────────────────────────────────────
@@ -1306,6 +1492,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_clan_health(arguments, workflow=workflow)
         elif name == "get_clan_voyage":
             result = _execute_get_clan_voyage(arguments)
+        elif name == "get_elixir_state":
+            result = _execute_get_elixir_state(arguments, workflow=workflow)
         elif name == "lookup_cards":
             result = db.lookup_cards(
                 name=arguments.get("name"),

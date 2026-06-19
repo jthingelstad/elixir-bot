@@ -214,6 +214,24 @@ def test_projects_link_stream_events_idempotently():
         stored = db.get_project("war_season:129", conn=conn)
         assert stored["linked_event_count"] == 1
         assert stored["state"]["week"] == 2
+
+        intent = db.upsert_communication_intent(
+            intent_key="test:intent:war-season-129",
+            workflow="river-race",
+            intent_type="post",
+            target_channel_key="river-race",
+            project_id=project["project_id"],
+            summary="War rank changed.",
+            event_keys=[event["event_key"]],
+            conn=conn,
+        )
+        listed = db.list_projects(project_type="war_season", statuses=("active",), conn=conn)
+        assert [item["project_key"] for item in listed] == ["war_season:129"]
+
+        detail = db.get_project_detail("war_season:129", conn=conn)
+        assert detail["project"]["project_key"] == "war_season:129"
+        assert detail["events"][0]["event_key"] == event["event_key"]
+        assert detail["communication_intents"][0]["intent_id"] == intent["intent_id"]
     finally:
         conn.close()
 
