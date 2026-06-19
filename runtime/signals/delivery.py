@@ -53,6 +53,43 @@ CELEBRATION_RELAY_SIGNAL_TYPES = {
     "clan_birthday",
 }
 
+
+async def _record_signal_events_shadow(
+    signals: list[dict] | tuple[dict, ...] | None,
+    *,
+    source_system: str,
+    source_detector: str | None = None,
+) -> int:
+    """Record signal observations into the shadow event stream.
+
+    This must never block delivery. The event stream is an observation ledger,
+    not the source of truth for whether the current post should go out.
+    """
+    recordable = [
+        signal for signal in (signals or [])
+        if isinstance(signal, dict) and not signal.get("event_key")
+    ]
+    if not recordable:
+        return 0
+    try:
+        events = await asyncio.to_thread(
+            db.record_signal_events,
+            recordable,
+            source_system=source_system,
+            source_detector=source_detector,
+        )
+        return len(events or [])
+    except Exception:
+        log.warning(
+            "shadow event stream insert failed source_system=%s source_detector=%s signals=%d",
+            source_system,
+            source_detector,
+            len(recordable),
+            exc_info=True,
+        )
+        return 0
+
+
 def _memory_context_with_leader_action_feedback(memory_context: dict | None, profiles: list[dict] | None) -> dict | None:
     profiles = profiles or []
     if not profiles:
@@ -1684,8 +1721,13 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         return False
 
 
-async def _deliver_signal_group(signals, clan, war):
+async def _deliver_signal_group(signals, clan, war, *, source_system: str = "signal_delivery", source_detector: str | None = None):
     facade = _facade()
+    await _record_signal_events_shadow(
+        signals,
+        source_system=source_system,
+        source_detector=source_detector,
+    )
     outcomes = facade.plan_signal_outcomes(signals)
     if not outcomes:
         return False
@@ -1883,6 +1925,11 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
     from heartbeat import HeartbeatTickResult
     from runtime.situation import build_situation, situation_is_quiet
 
+    await _record_signal_events_shadow(
+        signals,
+        source_system=workflow or "awareness",
+        source_detector=workflow,
+    )
     bundle = HeartbeatTickResult(signals=signals or [], clan=clan or {}, war=war or {})
     situation = build_situation(bundle)
 
