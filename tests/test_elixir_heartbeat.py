@@ -2447,7 +2447,7 @@ def test_weekly_leader_actions_post_to_arena_relay():
         }),
         patch("runtime.jobs._core._kick_candidate_availability_memory", return_value=None),
         patch("runtime.jobs._core.db.list_due_decision_cases", return_value=[]),
-        patch("runtime.jobs._core.db.upsert_member_review_case", return_value={"case_id": 99}),
+        patch("runtime.jobs._core.db.upsert_member_review_case", return_value={"case_id": 99}) as mock_case,
         patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
@@ -2463,12 +2463,18 @@ def test_weekly_leader_actions_post_to_arena_relay():
         posted = asyncio.run(_post_candidate_leader_action_recommendations(max_actions=6))
 
     assert posted == 3
+    assert [call.kwargs["case_type"] for call in mock_case.call_args_list] == [
+        "inactivity_review",
+        "demotion_review",
+        "promotion_review",
+    ]
     assert mock_create.call_count == 3
     assert [call.kwargs["action_type"] for call in mock_create.call_args_list] == [
         "kick_recommendation",
         "demotion_recommendation",
         "promotion_recommendation",
     ]
+    assert [call.kwargs["case_id"] for call in mock_create.call_args_list] == [99, 99, 99]
     assert mock_create.call_args_list[0].kwargs["baseline"]["policy_context"]["primary_signal"] == "inactivity_or_absence"
     assert "policy_context" not in mock_create.call_args_list[1].kwargs["baseline"]
     assert "policy_context" not in mock_create.call_args_list[2].kwargs["baseline"]
