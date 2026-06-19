@@ -1028,6 +1028,37 @@ def test_deliver_signal_group_posts_preauthored_system_signal_without_llm():
     assert mock_save.call_args.args[2] == "**Subject**\n\nPreauthored body."
 
 
+def test_system_signal_updates_deliver_preauthored_posts_through_awareness_intent():
+    signal = {
+        "type": "capability_unlock",
+        "signal_key": "capability_test_v1",
+        "payload": {
+            "title": "Achievement Unlocked: Test",
+            "discord_content": "**Subject**\n\nPreauthored body.",
+            "audience": "clan",
+        },
+    }
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.signals.system.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals._deliver_awareness_post", new=AsyncMock(return_value=True)) as mock_post,
+        patch("runtime.jobs._signals._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_awareness,
+        patch("runtime.jobs._signals._mark_signal_group_completed", new=AsyncMock()) as mock_completed,
+    ):
+        asyncio.run(elixir._post_system_signal_updates([signal], {}, {}))
+
+    mock_awareness.assert_not_awaited()
+    mock_post.assert_awaited_once()
+    post = mock_post.await_args.args[0]
+    assert post["channel"] == "announcements"
+    assert post["content"] == "**Subject**\n\nPreauthored body."
+    assert post["covers_signal_keys"] == ["capability_test_v1"]
+    mock_completed.assert_awaited_once_with([signal])
+
+
 def test_deliver_signal_group_stores_war_recap_memory_for_river_race_batch():
     signals = [{"type": "war_battle_day_complete", "season_id": 129, "week": 2, "day_number": 1}]
     clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
@@ -2240,7 +2271,7 @@ def test_player_intel_refresh_posts_progression_signals():
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[{"type": "player_level_up", "tag": "#ABC", "name": "King Levy", "old_level": 65, "new_level": 66}]),
         patch("elixir.db.snapshot_player_battlelog"),
-        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -2248,6 +2279,7 @@ def test_player_intel_refresh_posts_progression_signals():
     args = mock_deliver.await_args.args
     assert args[0][0]["type"] == "player_level_up"
     assert args[1] == clan
+    assert mock_deliver.await_args.kwargs["workflow"] == "player_intel"
 
 
 def test_player_intel_refresh_splits_optional_badge_level_batches():
@@ -2271,7 +2303,7 @@ def test_player_intel_refresh_splits_optional_badge_level_batches():
             {"type": "badge_level_milestone", "tag": "#ABC", "name": "King Levy", "badge_name": "MasteryKnight"},
         ]),
         patch("elixir.db.snapshot_player_battlelog", return_value=[]),
-        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -2280,6 +2312,7 @@ def test_player_intel_refresh_splits_optional_badge_level_batches():
     second_batch = mock_deliver.await_args_list[1].args[0]
     assert [signal["type"] for signal in first_batch] == ["player_level_up"]
     assert [signal["type"] for signal in second_batch] == ["badge_level_milestone"]
+    assert all(call.kwargs["workflow"] == "player_intel" for call in mock_deliver.await_args_list)
 
 
 def test_player_intel_refresh_posts_battle_pulse_signals():
@@ -2303,13 +2336,14 @@ def test_player_intel_refresh_posts_battle_pulse_signals():
             {"type": "battle_hot_streak", "tag": "#ABC", "name": "King Levy", "streak": 4},
             {"type": "battle_trophy_push", "tag": "#ABC", "name": "King Levy", "trophy_delta": 111},
         ]),
-        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
     mock_deliver.assert_awaited_once()
     signal_types = [signal["type"] for signal in mock_deliver.await_args.args[0]]
     assert signal_types == ["battle_hot_streak", "battle_trophy_push"]
+    assert mock_deliver.await_args.kwargs["workflow"] == "player_intel"
 
 
 def test_player_intel_refresh_does_not_post_baseline_profile_discovery():
@@ -2343,7 +2377,7 @@ def test_player_intel_refresh_does_not_post_baseline_profile_discovery():
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[]),
         patch("elixir.db.snapshot_player_battlelog", return_value=[]),
-        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
@@ -2366,7 +2400,7 @@ def test_player_intel_refresh_marks_failure_when_all_player_endpoints_fail():
         patch("elixir.db.snapshot_members"),
         patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
-        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
         patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
@@ -2400,7 +2434,7 @@ def test_player_intel_refresh_reports_partial_endpoint_failures_without_hiding_s
         patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[]),
-        patch("runtime.jobs._intel._deliver_signal_group", new=AsyncMock()) as mock_deliver,
+        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
         patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,

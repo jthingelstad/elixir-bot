@@ -17,7 +17,7 @@ from runtime import app as _app
 from runtime.app import bot, log
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
-from runtime.jobs._signals import _deliver_signal_group, _post_to_elixir
+from runtime.jobs._signals import _deliver_signal_group_via_awareness, _post_to_elixir
 
 
 TOURNAMENT_POLL_MINUTES = int(os.getenv("TOURNAMENT_POLL_MINUTES", "5"))
@@ -230,10 +230,17 @@ async def _tournament_watch_tick():
             _schedule_tournament_recap(tag, delay_seconds=TOURNAMENT_RECAP_DELAY_SECONDS)
             stop_tournament_watch()
 
-        # Deliver live signals
-        for signal in live_signals:
+        # Deliver live signals through awareness so events/intents stay unified.
+        if live_signals:
             try:
-                await _deliver_signal_group([signal], {}, {})
+                ok = await _deliver_signal_group_via_awareness(
+                    live_signals,
+                    {},
+                    {},
+                    workflow="tournament_watch",
+                )
+                if not ok:
+                    log.warning("Tournament watch: one or more signal deliveries failed")
             except Exception as e:
                 log.warning("Tournament watch: signal delivery failed: %s", e)
 

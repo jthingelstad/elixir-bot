@@ -1934,6 +1934,12 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
 
 
 async def _deliver_signal_group(signals, clan, war, *, source_system: str = "signal_delivery", source_detector: str | None = None):
+    """Transition-only legacy signal router.
+
+    Scheduled/runtime paths should use `_deliver_signal_group_via_awareness`
+    or an intent-first specialized path. This remains for legacy behavior
+    coverage and for narrow compatibility while direct callers are retired.
+    """
     facade = _facade()
     await _record_signal_events(
         signals,

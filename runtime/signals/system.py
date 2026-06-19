@@ -36,13 +36,55 @@ def _preauthored_system_signal_result(signal):
 
 
 async def _post_system_signal_updates(signals, clan, war):
-    from runtime.jobs._signals import _deliver_signal_group
+    from runtime.jobs._signals import (
+        _deliver_awareness_post,
+        _deliver_signal_group_via_awareness,
+        _mark_signal_group_completed,
+    )
 
     system_signals = _system_signal_updates(signals)
     if not system_signals:
         return
+
+    await asyncio.to_thread(
+        db.record_signal_events,
+        system_signals,
+        source_system="system_signals",
+        source_detector="system_signals",
+    )
+
+    remaining = []
     for signal in system_signals:
-        await _deliver_signal_group([signal], clan, war)
+        result = _preauthored_system_signal_result(signal)
+        if not result:
+            remaining.append(signal)
+            continue
+        source_key = signal.get("signal_key") or signal.get("signal_log_type")
+        post = {
+            "channel": "announcements",
+            "leads_with": "system",
+            "event_type": result.get("event_type") or "channel_update",
+            "summary": result.get("summary"),
+            "content": result.get("content"),
+            "covers_signal_keys": [source_key] if source_key else [],
+        }
+        intent = await asyncio.to_thread(
+            db.create_awareness_post_intent,
+            post,
+            [signal],
+            workflow="system_signals",
+        )
+        delivered = await _deliver_awareness_post(post, [signal], intent=intent)
+        if delivered:
+            await _mark_signal_group_completed([signal])
+
+    if remaining:
+        await _deliver_signal_group_via_awareness(
+            remaining,
+            clan,
+            war,
+            workflow="system_signals",
+        )
 
 
 async def _publish_pending_system_signal_updates(*, seed_startup_signals: bool = False) -> int:

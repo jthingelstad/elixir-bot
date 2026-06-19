@@ -523,7 +523,7 @@ def register_elixir_app_commands(bot) -> None:
         status_label = {"inPreparation": "In Preparation", "inProgress": "In Progress"}.get(api_status, api_status)
 
         # Announce the watch to the clan via the awareness pipeline.
-        from runtime.jobs._signals import _deliver_signal_group
+        from runtime.jobs._signals import _deliver_signal_group_via_awareness
         watching_signal = {
             "type": "tournament_watching_started",
             "signal_key": f"tournament_watching_started|{clean_tag}",
@@ -545,7 +545,12 @@ def register_elixir_app_commands(bot) -> None:
             "poll_interval_minutes": jobs.TOURNAMENT_POLL_MINUTES,
         }
         try:
-            await _deliver_signal_group([watching_signal], {}, {})
+            await _deliver_signal_group_via_awareness(
+                [watching_signal],
+                {},
+                {},
+                workflow="tournament_watch",
+            )
         except Exception as exc:
             app.log.warning("tournament_watching_started delivery failed: %s", exc)
 
