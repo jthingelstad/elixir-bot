@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if [ ! -d tools/docs-build/node_modules ]; then
+  echo "Installing docs build dependencies..."
+  npm ci --prefix tools/docs-build
+fi
+
+echo "Running docs build..."
+npm --prefix tools/docs-build run build

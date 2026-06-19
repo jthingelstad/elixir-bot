@@ -1,0 +1,361 @@
+{
+  "baseUrl": "https://api.clashroyale.com/v1",
+  "verifiedAgainstOfficialDocs": "2026-06-17",
+  "verifiedAgainstLiveApi": "2026-03 to 2026-05",
+  "notes": [
+    "All endpoints require Bearer authentication.",
+    "Tag path parameters must be URL-encoded.",
+    "Presence of paging, not items, is the reliable pagination signal.",
+    "The official Swagger UI lists classic clan war endpoints even though live behavior marks them removed or disabled.",
+    "GET /challenges is not currently shown in the official Swagger UI."
+  ],
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/players/{playerTag}",
+      "group": "players",
+      "doc": "players.md",
+      "models": ["models/players.md", "models/common.md"],
+      "responseShape": "object",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["tag_path_param_must_be_url_encoded", "optional_fields_often_absent"]
+    },
+    {
+      "method": "GET",
+      "path": "/players/{playerTag}/battlelog",
+      "group": "players",
+      "doc": "players.md",
+      "models": ["models/battles.md", "models/players.md", "models/common.md"],
+      "responseShape": "bare_array",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["tag_path_param_must_be_url_encoded", "returns_recent_battles_only", "winner_must_be_inferred"]
+    },
+    {
+      "method": "GET",
+      "path": "/players/{playerTag}/upcomingchests",
+      "group": "players",
+      "doc": "players.md",
+      "models": ["models/players.md"],
+      "responseShape": "items_wrapper",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["tag_path_param_must_be_url_encoded", "chest_indices_are_not_contiguous"]
+    },
+    {
+      "method": "POST",
+      "path": "/players/{playerTag}/verifytoken",
+      "group": "players",
+      "doc": "players.md",
+      "models": ["models/errors.md"],
+      "responseShape": "object_or_error",
+      "pagination": false,
+      "status": "restricted",
+      "quirks": [
+        "not_shown_in_official_swagger_operations",
+        "official_verify_token_models_exist",
+        "requires_additional_api_key_scope",
+        "tag_path_param_must_be_url_encoded",
+        "player_token_goes_in_json_body"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/clans/{clanTag}",
+      "group": "clans",
+      "doc": "clans.md",
+      "models": ["models/clans.md", "models/common.md"],
+      "responseShape": "object",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["tag_path_param_must_be_url_encoded", "badge_urls_not_present"]
+    },
+    {
+      "method": "GET",
+      "path": "/clans/{clanTag}/members",
+      "group": "clans",
+      "doc": "clans.md",
+      "models": ["models/clans.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["tag_path_param_must_be_url_encoded"]
+    },
+    {
+      "method": "GET",
+      "path": "/clans/{clanTag}/currentriverrace",
+      "group": "clans",
+      "doc": "clans.md",
+      "models": ["models/river-race.md"],
+      "responseShape": "object",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["tag_path_param_must_be_url_encoded", "period_type_tracks_daily_phase", "finish_time_sentinel_possible"]
+    },
+    {
+      "method": "GET",
+      "path": "/clans/{clanTag}/riverracelog",
+      "group": "clans",
+      "doc": "clans.md",
+      "models": ["models/river-race.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["tag_path_param_must_be_url_encoded", "default_limit_observed_as_10", "season_id_is_sequential_integer"]
+    },
+    {
+      "method": "GET",
+      "path": "/clans/{clanTag}/currentwar",
+      "group": "clans",
+      "doc": "clans.md",
+      "models": ["models/clans.md"],
+      "responseShape": "error",
+      "pagination": false,
+      "status": "removed",
+      "quirks": ["official_docs_list_endpoint", "returns_410_gone"]
+    },
+    {
+      "method": "GET",
+      "path": "/clans/{clanTag}/warlog",
+      "group": "clans",
+      "doc": "clans.md",
+      "models": ["models/clans.md"],
+      "responseShape": "error",
+      "pagination": false,
+      "status": "disabled",
+      "quirks": ["official_docs_list_endpoint", "returns_404_not_found"]
+    },
+    {
+      "method": "GET",
+      "path": "/clans",
+      "group": "clans",
+      "doc": "clans.md",
+      "models": ["models/clans.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["at_least_one_filter_required", "name_not_required_if_other_filters_present"]
+    },
+    {
+      "method": "GET",
+      "path": "/cards",
+      "group": "cards",
+      "doc": "cards.md",
+      "models": ["models/cards-events.md", "models/players.md"],
+      "responseShape": "object",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["pagination_params_ignored", "support_items_are_tower_troops"]
+    },
+    {
+      "method": "GET",
+      "path": "/tournaments",
+      "group": "tournaments",
+      "doc": "tournaments.md",
+      "models": ["models/tournaments.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["at_least_one_filter_required", "search_is_discovery_not_archive"]
+    },
+    {
+      "method": "GET",
+      "path": "/tournaments/{tournamentTag}",
+      "group": "tournaments",
+      "doc": "tournaments.md",
+      "models": ["models/tournaments.md"],
+      "responseShape": "object",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["tag_path_param_must_be_url_encoded", "ended_tournaments_accessible_by_direct_tag"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md", "models/common.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["returns_all_locations_without_limit"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/{locationId}",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md", "models/common.md"],
+      "responseShape": "object",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["country_code_absent_for_regions"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/{locationId}/rankings/players",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["may_return_empty_early_in_season"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/{locationId}/rankings/clans",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["previous_rank_minus_one_means_new_or_unranked"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/{locationId}/rankings/clanwars",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["clan_score_reflects_war_performance"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/{locationId}/pathoflegend/players",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["distinct_from_trophy_rankings"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/global/rankings/tournaments/{tournamentTag}",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md", "models/tournaments.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["requires_global_tournament_tag"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/global/seasons",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md"],
+      "responseShape": "items_wrapper_with_empty_paging",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["season_ids_use_yyyy_mm", "early_seasons_can_have_duplicates"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/global/seasonsV2",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md"],
+      "responseShape": "items_wrapper_with_empty_paging",
+      "pagination": false,
+      "status": "broken",
+      "quirks": ["returns_null_fields", "use_seasons_v1_instead"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/global/seasons/{seasonId}",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md"],
+      "responseShape": "object",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["season_id_uses_yyyy_mm"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/global/seasons/{seasonId}/rankings/players",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md"],
+      "responseShape": "error",
+      "pagination": true,
+      "status": "broken",
+      "quirks": ["returns_not_found_for_tested_2024_to_2026_seasons", "use_path_of_legend_season_rankings"]
+    },
+    {
+      "method": "GET",
+      "path": "/locations/global/pathoflegend/{seasonId}/rankings/players",
+      "group": "locations",
+      "doc": "locations.md",
+      "models": ["models/locations-rankings.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["season_id_uses_yyyy_mm"]
+    },
+    {
+      "method": "GET",
+      "path": "/events",
+      "group": "events",
+      "doc": "events.md",
+      "models": ["models/cards-events.md"],
+      "responseShape": "bare_array",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["query_params_ignored", "description_can_be_null"]
+    },
+    {
+      "method": "GET",
+      "path": "/leaderboards",
+      "group": "leaderboards",
+      "doc": "leaderboards.md",
+      "models": ["models/leaderboards.md"],
+      "responseShape": "items_wrapper",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["multiple_leaderboards_can_share_name"]
+    },
+    {
+      "method": "GET",
+      "path": "/leaderboard/{leaderboardId}",
+      "group": "leaderboards",
+      "doc": "leaderboards.md",
+      "models": ["models/leaderboards.md"],
+      "responseShape": "paginated_items",
+      "pagination": true,
+      "status": "active",
+      "quirks": ["singular_path", "no_default_limit_returns_up_to_10000_observed"]
+    },
+    {
+      "method": "GET",
+      "path": "/globaltournaments",
+      "group": "globaltournaments",
+      "doc": "globaltournaments.md",
+      "models": ["models/tournaments.md"],
+      "responseShape": "items_wrapper",
+      "pagination": false,
+      "status": "active",
+      "quirks": ["returns_empty_items_when_none_active"]
+    },
+    {
+      "method": "GET",
+      "path": "/challenges",
+      "group": "challenges",
+      "doc": "challenges.md",
+      "models": ["models/cards-events.md"],
+      "responseShape": "error",
+      "pagination": false,
+      "status": "undocumented_not_found",
+      "quirks": ["not_shown_in_official_swagger_ui", "use_events_for_active_challenge_like_events"]
+    }
+  ]
+}

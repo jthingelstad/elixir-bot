@@ -1,0 +1,27 @@
+name: Docs Build
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  docs-build:
+    name: Docs build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tools/docs-build/package-lock.json
+
+      - name: Install docs build dependencies
+        run: npm ci --prefix tools/docs-build
+
+      - name: Run docs build
+        run: npm --prefix tools/docs-build run build
