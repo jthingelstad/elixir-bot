@@ -60,13 +60,13 @@ CELEBRATION_RELAY_SIGNAL_TYPES = {
 }
 
 
-async def _record_signal_events_shadow(
+async def _record_signal_events(
     signals: list[dict] | tuple[dict, ...] | None,
     *,
     source_system: str,
     source_detector: str | None = None,
 ) -> int:
-    """Record signal observations into the shadow event stream.
+    """Record signal observations into the canonical event stream.
 
     This must never block delivery. The event stream is an observation ledger,
     not the source of truth for whether the current post should go out.
@@ -87,7 +87,7 @@ async def _record_signal_events_shadow(
         return len(events or [])
     except Exception:
         log.warning(
-            "shadow event stream insert failed source_system=%s source_detector=%s signals=%d",
+            "event stream insert failed source_system=%s source_detector=%s signals=%d",
             source_system,
             source_detector,
             len(recordable),
@@ -96,7 +96,7 @@ async def _record_signal_events_shadow(
         return 0
 
 
-async def _upsert_decision_cases_shadow(
+async def _upsert_decision_cases_from_signals(
     signals: list[dict] | tuple[dict, ...] | None,
     *,
     source_system: str | None = None,
@@ -117,6 +117,26 @@ async def _upsert_decision_cases_shadow(
             exc_info=True,
         )
         return 0
+
+
+async def _create_awareness_coverage_gap_intent(
+    signals: list[dict] | tuple[dict, ...] | None,
+    *,
+    workflow: str | None,
+    situation: dict | None,
+    reason: str,
+) -> dict | None:
+    try:
+        return await asyncio.to_thread(
+            db.create_awareness_coverage_gap_intent,
+            signals or [],
+            workflow=workflow or "awareness",
+            reason=reason,
+            situation=situation,
+        )
+    except Exception:
+        log.warning("communication coverage-gap intent create failed for workflow=%r", workflow, exc_info=True)
+        return None
 
 
 def _memory_context_with_leader_action_feedback(memory_context: dict | None, profiles: list[dict] | None) -> dict | None:
@@ -1915,12 +1935,12 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
 
 async def _deliver_signal_group(signals, clan, war, *, source_system: str = "signal_delivery", source_detector: str | None = None):
     facade = _facade()
-    await _record_signal_events_shadow(
+    await _record_signal_events(
         signals,
         source_system=source_system,
         source_detector=source_detector,
     )
-    await _upsert_decision_cases_shadow(signals, source_system=source_system)
+    await _upsert_decision_cases_from_signals(signals, source_system=source_system)
     outcomes = facade.plan_signal_outcomes(signals)
     if not outcomes:
         return False
@@ -2205,7 +2225,19 @@ async def _deliver_awareness_post_plan(
     covered: set[str] = set()
     attempted: set[str] = set()
     if not posts:
-        await _create_awareness_skip_intent(plan or {}, signals or [], workflow=workflow, situation=situation)
+        hard_required_keys = {hp.get("signal_key") for hp in ((situation or {}).get("hard_post_signals") or [])}
+        skippable_signals = [
+            signal for signal in (signals or [])
+            if signal_source_key(signal) not in hard_required_keys
+        ]
+        due_cases = ((situation or {}).get("decision_cases") or {}).get("due") or []
+        if skippable_signals or due_cases:
+            await _create_awareness_skip_intent(
+                plan or {},
+                skippable_signals,
+                workflow=workflow,
+                situation=situation,
+            )
     for post in posts:
         post_keys = {str(key) for key in (post.get("covers_signal_keys") or []) if key}
         attempted |= post_keys
@@ -2243,12 +2275,12 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
     from heartbeat import HeartbeatTickResult
     from runtime.situation import build_situation, situation_is_quiet
 
-    await _record_signal_events_shadow(
+    await _record_signal_events(
         signals,
         source_system=workflow or "awareness",
         source_detector=workflow,
     )
-    await _upsert_decision_cases_shadow(signals, source_system=workflow or "awareness")
+    await _upsert_decision_cases_from_signals(signals, source_system=workflow or "awareness")
     bundle = HeartbeatTickResult(signals=signals or [], clan=clan or {}, war=war or {})
     situation = build_situation(bundle)
 
@@ -2270,8 +2302,43 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         plan = None
 
     if plan is None:
-        log.warning("awareness loop returned no plan; falling back to per-signal delivery")
-        return await facade._deliver_signal_group(signals, clan, war)
+        log.warning("awareness loop returned no plan; recording coverage gap")
+        await _create_awareness_coverage_gap_intent(
+            signals or [],
+            workflow=workflow,
+            situation=situation,
+            reason="awareness loop returned no post plan",
+        )
+        try:
+            await asyncio.to_thread(
+                db.record_awareness_tick,
+                workflow=workflow,
+                signals_in=len(signals or []),
+                posts_delivered=0,
+                posts_rejected=0,
+                covered_keys=0,
+                considered_skipped=0,
+                hard_fallback=len(situation.get("hard_post_signals") or []),
+                hard_fallback_failed=len(situation.get("hard_post_signals") or []),
+                all_ok=False,
+                skipped_reason="awareness loop returned no post plan",
+                signal_outcomes=[
+                    {
+                        "signal_key": signal_source_key(signal),
+                        "signal_type": signal.get("type") or "",
+                        "event_key": signal.get("event_key"),
+                        "event_id": signal.get("event_id"),
+                        "status": "coverage_gap",
+                    }
+                    for signal in (signals or [])
+                ],
+                write_calls_issued=int(tool_stats.get("write_calls_issued", 0)),
+                write_calls_succeeded=int(tool_stats.get("write_calls_succeeded", 0)),
+                write_calls_denied=int(tool_stats.get("write_calls_denied", 0)),
+            )
+        except Exception:
+            log.warning("record_awareness_tick failed", exc_info=True)
+        return False
 
     report = await facade._deliver_awareness_post_plan(
         plan,
@@ -2288,18 +2355,19 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         if signal_source_key(signal) in hard_required_keys
         and signal_source_key(signal) not in covered_keys
     ]
-    fallback_failed_keys: set[str] = set()
     all_ok = True
     if uncovered:
         log.warning(
-            "awareness loop: %d hard-post-floor signal(s) uncovered; falling back per-signal",
+            "awareness loop: %d hard-post-floor signal(s) uncovered by post plan",
             len(uncovered),
         )
-        for signal in uncovered:
-            ok = await facade._deliver_signal_group([signal], clan, war)
-            if not ok:
-                fallback_failed_keys.add(signal_source_key(signal))
-            all_ok = all_ok and ok
+        await _create_awareness_coverage_gap_intent(
+            uncovered,
+            workflow=workflow,
+            situation=situation,
+            reason="hard-post-floor signal was not covered by the awareness post plan",
+        )
+        all_ok = False
 
     attempted_keys = report.get("attempted_signal_keys") or set()
     # Soft signals the agent planned to post but whose delivery failed. Do NOT
@@ -2316,7 +2384,6 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
     considered_skipped = [
         signal for signal in (signals or [])
         if signal_source_key(signal) not in covered_keys
-        and signal_source_key(signal) not in fallback_failed_keys
         and signal_source_key(signal) not in hard_required_keys
         and signal_source_key(signal) not in post_failed_keys
     ]
@@ -2334,14 +2401,13 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
 
     log.info(
         "awareness_tick_result workflow=%r delivered=%d rejected=%d covered=%d considered_skipped=%d "
-        "hard_fallback=%d hard_fallback_failed=%d relay_sidecars=%d signals_in=%d degraded_blocks=%d skipped_reason=%r",
+        "hard_uncovered=%d relay_sidecars=%d signals_in=%d degraded_blocks=%d skipped_reason=%r",
         workflow,
         report["delivered"],
         report["rejected"],
         len(covered_keys),
         len(considered_skipped),
         len(uncovered),
-        len(fallback_failed_keys),
         relay_sidecars,
         len(signals or []),
         len(situation.get("_degraded_blocks") or []),
@@ -2354,10 +2420,8 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         key = signal_source_key(signal)
         if key in covered_keys:
             status = "covered"
-        elif key in fallback_failed_keys:
-            status = "fallback_failed"
         elif key in uncovered_keys:
-            status = "fallback"
+            status = "coverage_gap"
         elif key in post_failed_keys:
             status = "post_failed"
         else:
@@ -2379,7 +2443,7 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
             covered_keys=len(covered_keys),
             considered_skipped=len(considered_skipped),
             hard_fallback=len(uncovered),
-            hard_fallback_failed=len(fallback_failed_keys),
+            hard_fallback_failed=len(uncovered),
             all_ok=all_ok,
             skipped_reason=(plan or {}).get("skipped_reason"),
             signal_outcomes=signal_outcomes,

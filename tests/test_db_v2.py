@@ -647,6 +647,35 @@ def test_awareness_skip_intent_records_due_case_silence():
         conn.close()
 
 
+def test_awareness_coverage_gap_intent_records_failed_required_signal():
+    conn = db.get_connection(":memory:")
+    try:
+        signal = {
+            "type": "member_join",
+            "signal_key": "join:#ABC",
+            "event_key": "game_event:join",
+            "tag": "#ABC",
+            "name": "Alice",
+        }
+        intent = db.create_awareness_coverage_gap_intent(
+            [signal],
+            workflow="clan_awareness",
+            reason="hard-post-floor signal was not covered",
+            conn=conn,
+        )
+
+        assert intent["status"] == "failed"
+        assert intent["intent_type"] == "coverage_gap"
+        assert intent["source_signal_key"] == "join:#ABC"
+        assert intent["source_signal_type"] == "member_join"
+        assert intent["covers_signal_keys"] == ["join:#ABC"]
+        assert intent["event_keys"] == ["game_event:join"]
+        assert intent["error_detail"] == "hard-post-floor signal was not covered"
+        assert intent["payload"]["signals_uncovered"] == 1
+    finally:
+        conn.close()
+
+
 def test_war_nudge_cleanup_migration_removes_retired_action_data():
     conn = db.get_connection(":memory:")
     try:

@@ -542,9 +542,9 @@ def test_deliver_awareness_post_marks_intent_failed_when_rejected():
     assert "unknown channel" in mock_failed.call_args.kwargs["error_detail"]
 
 
-def test_deliver_signal_group_via_awareness_falls_back_for_uncovered_hard_floor():
-    """When the agent omits a hard-post-floor signal, we fall back to the
-    legacy per-signal delivery path so coverage is guaranteed."""
+def test_deliver_signal_group_via_awareness_records_coverage_gap_for_uncovered_hard_floor():
+    """When the agent omits a hard-post-floor signal, awareness records the
+    gap in communication_intents and leaves the signal uncompleted for retry."""
     member_join = {
         "type": "member_join",
         "signal_key": "join:abc",
@@ -563,8 +563,11 @@ def test_deliver_signal_group_via_awareness_falls_back_for_uncovered_hard_floor(
         patch("runtime.situation.db.list_channel_messages", return_value=[]),
         patch("runtime.situation.build_situation_time", return_value=None),
         patch("runtime.situation.db.get_members_on_hot_streak", return_value=[]),
+        patch("runtime.situation.db.decision_case_snapshot", return_value={"due": [], "open": []}),
         patch("runtime.jobs._signals.elixir_agent.run_awareness_tick", return_value=empty_plan),
-        patch("runtime.jobs._signals.db.record_awareness_tick"),
+        patch("runtime.jobs._signals.db.record_awareness_tick") as mock_record,
+        patch("runtime.jobs._signals.db.create_awareness_coverage_gap_intent", return_value={"intent_id": 88}) as mock_gap,
+        patch("runtime.jobs._signals.db.create_awareness_skip_intent") as mock_skip,
         patch(
             "runtime.jobs._signals._deliver_signal_group",
             new=AsyncMock(return_value=True),
@@ -574,11 +577,14 @@ def test_deliver_signal_group_via_awareness_falls_back_for_uncovered_hard_floor(
             signals_module._deliver_signal_group_via_awareness([member_join], {}, {})
         )
 
-    assert ok is True
-    # Legacy path was invoked with just the uncovered hard-floor signal.
-    mock_legacy.assert_awaited_once()
-    args, _ = mock_legacy.await_args
-    assert args[0] == [member_join]
+    assert ok is False
+    mock_legacy.assert_not_awaited()
+    mock_skip.assert_not_called()
+    mock_gap.assert_called_once()
+    assert mock_gap.call_args.args[0] == [member_join]
+    assert "hard-post-floor" in mock_gap.call_args.kwargs["reason"]
+    signal_outcomes = mock_record.call_args.kwargs["signal_outcomes"]
+    assert signal_outcomes[0]["status"] == "coverage_gap"
 
 
 def test_deliver_signal_group_via_awareness_invokes_arena_relay_sidecar_for_war():
