@@ -22,11 +22,30 @@ CASE_TYPES = {
     "war_recovery",
 }
 
+_LEADER_REVIEW_CASES = {
+    "kick_recommendation": {
+        "case_type": "inactivity_review",
+        "title": "Inactivity review",
+        "priority": 50,
+    },
+    "demotion_recommendation": {
+        "case_type": "demotion_review",
+        "title": "Demotion review",
+        "priority": 30,
+    },
+    "promotion_recommendation": {
+        "case_type": "promotion_review",
+        "title": "Promotion review",
+        "priority": 20,
+    },
+}
+
 __all__ = [
     "CASE_DEFERRED",
     "CASE_DISMISSED",
     "CASE_OPEN",
     "CASE_RESOLVED",
+    "backfill_decision_cases_from_leader_actions",
     "upsert_decision_case",
     "get_decision_case",
     "get_decision_case_by_id",
@@ -305,12 +324,13 @@ def resolve_decision_case(
     *,
     status: str = CASE_RESOLVED,
     resolution: str | None = None,
+    resolved_at: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict | None:
     clean_status = _normalize_case_status(status)
     if clean_status not in {CASE_RESOLVED, CASE_DISMISSED}:
         raise ValueError("resolved case status must be resolved or dismissed")
-    now = _db._utcnow()
+    now = _clean_text(resolved_at) or _db._utcnow()
     conn.execute(
         """
         UPDATE decision_cases
@@ -321,6 +341,200 @@ def resolve_decision_case(
     )
     conn.commit()
     return get_decision_case_by_id(case_id, conn=conn)
+
+
+def _leader_action_case_config(action_type: str | None) -> dict | None:
+    return _LEADER_REVIEW_CASES.get((action_type or "").strip())
+
+
+def _is_action_expired(action: dict, *, now: str | None = None) -> bool:
+    if action.get("status") != "proposed" or not action.get("expires_at"):
+        return False
+    expires_at = _parse_utc(action.get("expires_at"))
+    current = _parse_utc(now) or _utcnow_dt()
+    return bool(expires_at and expires_at <= current)
+
+
+def _case_lifecycle_from_action(action: dict, *, now: str | None = None) -> tuple[str, str]:
+    status = (action.get("status") or "").strip()
+    if _is_action_expired(action, now=now):
+        return CASE_DISMISSED, "expired"
+    if status == "proposed":
+        return CASE_OPEN, "recommended"
+    if status == "deferred":
+        return CASE_DEFERRED, "deferred"
+    if status == "done":
+        return CASE_RESOLVED, "accepted"
+    if status == "rejected":
+        return CASE_DISMISSED, "rejected"
+    return CASE_OPEN, status or "unknown"
+
+
+def _leader_action_resolution(action: dict, outcome: str) -> str | None:
+    note = _clean_text(action.get("decision_note"))
+    if note:
+        return note
+    if outcome == "accepted":
+        return "Leader accepted the recommended action."
+    if outcome == "rejected":
+        return "Leader declined the recommended action."
+    if outcome == "expired":
+        return "Recommendation expired before a leader decision was recorded."
+    if outcome == "deferred":
+        days = action.get("defer_days")
+        return f"Deferred for {days} day(s)." if days else "Deferred for leader review."
+    return None
+
+
+def _leader_action_case_state(action: dict, *, outcome: str, backfilled_at: str) -> dict:
+    return {
+        "leader_action": {
+            "action_id": action.get("action_id"),
+            "action_key": action.get("action_key"),
+            "action_type": action.get("action_type"),
+            "objective": action.get("objective"),
+            "status": action.get("status"),
+            "outcome": outcome,
+            "source_message_id": action.get("source_message_id"),
+            "proposed_at": action.get("proposed_at"),
+            "decided_at": action.get("decided_at"),
+            "decided_by_discord_user_id": action.get("decided_by_discord_user_id"),
+            "decision_emoji": action.get("decision_emoji"),
+            "decision_note": action.get("decision_note"),
+            "decision_note_at": action.get("decision_note_at"),
+            "defer_days": action.get("defer_days"),
+            "deferred_until": action.get("deferred_until"),
+            "expires_at": action.get("expires_at"),
+        },
+        "backfill": {
+            "source": "leader_action_recommendations",
+            "backfilled_at": backfilled_at,
+        },
+    }
+
+
+def _source_event_key_for_signal(source_signal_key: str | None, *, conn: sqlite3.Connection) -> str | None:
+    signal_key = _clean_text(source_signal_key)
+    if not signal_key:
+        return None
+    row = conn.execute(
+        "SELECT event_key FROM game_event_stream WHERE source_signal_key = ? ORDER BY observed_at DESC LIMIT 1",
+        (signal_key,),
+    ).fetchone()
+    return row["event_key"] if row else None
+
+
+@managed_connection
+def backfill_decision_cases_from_leader_actions(
+    *,
+    now: str | None = None,
+    limit: int | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Create/link decision cases for historical member-review action cards."""
+    review_types = tuple(_LEADER_REVIEW_CASES)
+    params: list = list(review_types)
+    limit_sql = ""
+    if limit is not None:
+        limit_sql = " LIMIT ?"
+        params.append(max(1, min(int(limit or 1), 1000)))
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM leader_action_recommendations
+        WHERE action_type IN ({",".join("?" * len(review_types))})
+          AND COALESCE(is_test, 0) = 0
+          AND target_player_tag IS NOT NULL
+        ORDER BY proposed_at ASC, action_id ASC
+        {limit_sql}
+        """,
+        params,
+    ).fetchall()
+
+    backfilled_at = _clean_text(now) or _db._utcnow()
+    summary = {
+        "scanned": 0,
+        "created": 0,
+        "updated": 0,
+        "linked": 0,
+        "deferred": 0,
+        "resolved": 0,
+        "dismissed": 0,
+        "expired": 0,
+        "skipped": 0,
+    }
+    for row in rows:
+        action = dict(row)
+        summary["scanned"] += 1
+        config = _leader_action_case_config(action.get("action_type"))
+        tag = _db._canon_tag(action.get("target_player_tag")) if action.get("target_player_tag") else None
+        if not config or not tag:
+            summary["skipped"] += 1
+            continue
+
+        case_type = config["case_type"]
+        case_key = _case_key(case_type, target_player_tag=tag)
+        existing = get_decision_case(case_key, conn=conn)
+        case_status, outcome = _case_lifecycle_from_action(action, now=now)
+        due_at = action.get("deferred_until") if outcome == "deferred" else None
+        name = _clean_text(action.get("target_player_name")) or tag
+        title = f"{config['title']}: {name}"
+        recommendation = _clean_text(action.get("prompt_text")) or f"Review {name}."
+        rationale = _clean_text(action.get("rationale")) or _leader_action_resolution(action, outcome)
+        case = upsert_decision_case(
+            case_type=case_type,
+            title=title,
+            recommendation=recommendation,
+            rationale=rationale,
+            subject_type="member",
+            subject_key=f"member:{tag}",
+            target_player_tag=tag,
+            target_player_name=name,
+            priority=int(config.get("priority") or 0),
+            source_signal_key=action.get("source_signal_key"),
+            source_signal_type=action.get("source_signal_type"),
+            source_event_key=_source_event_key_for_signal(action.get("source_signal_key"), conn=conn),
+            due_at=due_at,
+            status=case_status if case_status in {CASE_OPEN, CASE_DEFERRED} else CASE_OPEN,
+            state=_leader_action_case_state(action, outcome=outcome, backfilled_at=backfilled_at),
+            case_key=case_key,
+            conn=conn,
+        )
+        if not case:
+            summary["skipped"] += 1
+            continue
+        if existing:
+            summary["updated"] += 1
+        else:
+            summary["created"] += 1
+        if action.get("case_id") != case["case_id"]:
+            link_leader_action_to_case(action["action_id"], case["case_id"], conn=conn)
+            summary["linked"] += 1
+
+        if outcome == "deferred" and due_at:
+            defer_decision_case(
+                case["case_id"],
+                due_at=due_at,
+                resolution=_leader_action_resolution(action, outcome),
+                conn=conn,
+            )
+            summary["deferred"] += 1
+        elif outcome in {"accepted", "rejected", "expired"}:
+            terminal_status = CASE_RESOLVED if outcome == "accepted" else CASE_DISMISSED
+            resolve_decision_case(
+                case["case_id"],
+                status=terminal_status,
+                resolution=_leader_action_resolution(action, outcome),
+                resolved_at=action.get("decided_at") or action.get("expires_at"),
+                conn=conn,
+            )
+            if terminal_status == CASE_RESOLVED:
+                summary["resolved"] += 1
+            else:
+                summary["dismissed"] += 1
+            if outcome == "expired":
+                summary["expired"] += 1
+    return summary
 
 
 @managed_connection

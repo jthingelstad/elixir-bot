@@ -533,6 +533,144 @@ def test_decision_case_tracks_inactivity_review_deferral_lifecycle():
         conn.close()
 
 
+def test_backfill_leader_actions_links_historical_deferrals_to_due_cases():
+    conn = db.get_connection(":memory:")
+    try:
+        for name, tag, message_id, decided_at in [
+            ("xian", "#UGQPVQ9U9", 1001, "2026-06-17T14:57:06"),
+            ("pigsareus", "#20CGPVUL92", 1002, "2026-06-17T14:55:55"),
+        ]:
+            action = db.create_leader_action_recommendation(
+                action_type="kick_recommendation",
+                objective="roster_health",
+                prompt_text=f"Review {name} for removal from the clan.",
+                rationale="10 days inactive; over threshold.",
+                target_player_tag=tag,
+                target_player_name=name,
+                source_signal_key=f"inactive:{tag}",
+                source_signal_type="inactive_members",
+                source_message_id=message_id,
+                conn=conn,
+            )
+            db.decide_leader_action(
+                action["action_id"],
+                status=db.ACTION_DEFERRED,
+                discord_user_id="leader-1",
+                emoji="⏳",
+                defer_days=3,
+                decision_note="Deferred for 3 days.",
+                decided_at=decided_at,
+                conn=conn,
+            )
+
+        summary = db.backfill_decision_cases_from_leader_actions(
+            now="2026-06-20T15:00:00",
+            conn=conn,
+        )
+
+        assert summary["scanned"] == 2
+        assert summary["created"] == 2
+        assert summary["linked"] == 2
+        assert summary["deferred"] == 2
+
+        due = db.list_due_decision_cases(now="2026-06-20T15:00:00", conn=conn)
+        due_tags = {item["target_player_tag"] for item in due}
+        assert due_tags == {"#UGQPVQ9U9", "#20CGPVUL92"}
+        xian = db.get_decision_case("inactivity_review:member:#UGQPVQ9U9", conn=conn)
+        assert xian["status"] == db.CASE_DEFERRED
+        assert xian["due_at"] == "2026-06-20T14:57:06"
+        assert xian["state"]["leader_action"]["outcome"] == "deferred"
+
+        action = db.get_leader_action_by_message(1001, conn=conn)
+        assert action["case_id"] == xian["case_id"]
+
+        again = db.backfill_decision_cases_from_leader_actions(
+            now="2026-06-20T15:00:00",
+            conn=conn,
+        )
+        assert again["created"] == 0
+        assert again["linked"] == 0
+        assert conn.execute("SELECT COUNT(*) FROM decision_cases").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_backfill_leader_actions_maps_terminal_and_expired_case_outcomes():
+    conn = db.get_connection(":memory:")
+    try:
+        promotion = db.create_leader_action_recommendation(
+            action_type="promotion_recommendation",
+            objective="reward_and_retention",
+            prompt_text="Promote Atlas to Elder.",
+            target_player_tag="#PROMO1",
+            target_player_name="Atlas",
+            source_message_id=2001,
+            conn=conn,
+        )
+        db.decide_leader_action(
+            promotion["action_id"],
+            status=db.ACTION_REJECTED,
+            discord_user_id="leader-1",
+            emoji="❌",
+            decision_note="Wait one more week.",
+            decided_at="2026-06-18T12:00:00",
+            conn=conn,
+        )
+        kick = db.create_leader_action_recommendation(
+            action_type="kick_recommendation",
+            objective="roster_health",
+            prompt_text="Remove OfflineKing from the clan.",
+            target_player_tag="#KICK1",
+            target_player_name="OfflineKing",
+            source_message_id=2002,
+            conn=conn,
+        )
+        db.decide_leader_action(
+            kick["action_id"],
+            status=db.ACTION_DONE,
+            discord_user_id="leader-1",
+            emoji="✅",
+            decided_at="2026-06-18T13:00:00",
+            conn=conn,
+        )
+        db.create_leader_action_recommendation(
+            action_type="demotion_recommendation",
+            objective="role_review",
+            prompt_text="Review Nova for demotion.",
+            target_player_tag="#EXPIRE1",
+            target_player_name="Nova",
+            source_message_id=2003,
+            expires_at="2026-06-17T12:00:00",
+            conn=conn,
+        )
+
+        summary = db.backfill_decision_cases_from_leader_actions(
+            now="2026-06-19T12:00:00",
+            conn=conn,
+        )
+
+        assert summary["resolved"] == 1
+        assert summary["dismissed"] == 2
+        assert summary["expired"] == 1
+
+        promotion_case = db.get_decision_case("promotion_review:member:#PROMO1", conn=conn)
+        assert promotion_case["status"] == db.CASE_DISMISSED
+        assert promotion_case["resolution"] == "Wait one more week."
+        assert promotion_case["resolved_at"] == "2026-06-18T12:00:00"
+        assert promotion_case["state"]["leader_action"]["outcome"] == "rejected"
+
+        kick_case = db.get_decision_case("inactivity_review:member:#KICK1", conn=conn)
+        assert kick_case["status"] == db.CASE_RESOLVED
+        assert kick_case["state"]["leader_action"]["outcome"] == "accepted"
+
+        expired_case = db.get_decision_case("demotion_review:member:#EXPIRE1", conn=conn)
+        assert expired_case["status"] == db.CASE_DISMISSED
+        assert expired_case["resolution"] == "Recommendation expired before a leader decision was recorded."
+        assert expired_case["state"]["leader_action"]["outcome"] == "expired"
+    finally:
+        conn.close()
+
+
 def test_communication_intent_traces_message_to_case_project_and_event():
     conn = db.get_connection(":memory:")
     try:
