@@ -29,6 +29,17 @@ def _card_mode_value(card: dict, camel_key: str, snake_key: str) -> int | None:
 
 
 def _card_mode_fields(card: dict) -> dict:
+    """Derive Evo/Hero capability and unlock labels for a collection card.
+
+    `maxEvolutionLevel` encodes which alternate modes a card *supports*:
+    1 = Evo-capable, 2 = Hero-capable, 3 = both. This mapping is inferred
+    empirically from live payloads (it lines up with the presence of
+    `evolutionMedium`/`heroMedium`) — it is an interpretation layer for
+    player-facing output, not a documented guarantee. `evolutionLevel` here
+    means *ownership* (which modes the player has unlocked), distinct from
+    how a card was deployed in a battle/deck — for that see `_played_as` in
+    db/__init__.py.
+    """
     max_evolution_level = _card_mode_value(card, "maxEvolutionLevel", "max_evolution_level")
     evolution_level = _card_mode_value(card, "evolutionLevel", "evolution_level")
 
@@ -402,7 +413,13 @@ def _king_tower_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int
 def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     """Compact card-collection digest. Always small (~3KB), always answers
     broad questions ("how am I doing on cards", "what should I upgrade")
-    without sending raw card lists."""
+    without sending raw card lists.
+
+    Reads *ownership* state from the player_profile_snapshots collection —
+    what the player has unlocked — not played-as/deployment state. For "how
+    was this card actually played" (e.g. signature card as Evo), read
+    `currentDeck` / battle-log `deck_json` instead.
+    """
     snapshot = _load_collection(conn, tag)
     if snapshot is None:
         return None
@@ -569,7 +586,8 @@ def lookup_member_cards(
     limit: int = 20,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
-    """Filtered query over a member's card collection.
+    """Filtered query over a member's card collection (ownership state, not
+    played-as/deployment — see `get_member_card_profile`).
 
     Filter is required — a missing or empty filter returns a structured
     `filter_required` error so the agent is prompted to ask the user which
