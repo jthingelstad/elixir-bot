@@ -4,6 +4,7 @@ import re
 import cr_api
 
 from agent.core import log
+from storage.game_modes import battle_matches_mode
 
 
 class _ModuleProxy:
@@ -93,6 +94,41 @@ def _enrich_member_profile(result):
     profile_badge_summary = _badge_profile_metrics_summary(enriched)
     if profile_badge_summary:
         enriched["profile_badge_metrics_summary"] = profile_badge_summary
+
+    def _parse_json_object(field):
+        try:
+            value = json.loads(enriched.get(field) or "{}")
+        except (TypeError, ValueError):
+            return None
+        return value if isinstance(value, dict) and value else None
+
+    ranked_current = _parse_json_object("current_path_of_legend_season_result_json")
+    ranked_last = _parse_json_object("last_path_of_legend_season_result_json")
+    ranked_best = _parse_json_object("best_path_of_legend_season_result_json")
+    if ranked_current or ranked_last or ranked_best:
+        enriched["ranked_status"] = {
+            "current": ranked_current,
+            "last": ranked_last,
+            "best": ranked_best,
+            "wording": "Say Ranked to players; API fields use Path of Legend/pathOfLegend.",
+        }
+        if ranked_current:
+            league = ranked_current.get("leagueNumber")
+            trophies = ranked_current.get("trophies")
+            rank = ranked_current.get("rank")
+            bits = []
+            if league is not None:
+                bits.append(f"league {league}")
+            if trophies is not None:
+                bits.append(f"{trophies} ranked trophies")
+            if rank is not None:
+                bits.append(f"rank #{rank}")
+            if bits:
+                enriched["ranked_summary"] = "Ranked current season: " + ", ".join(bits)
+
+    progress = _parse_json_object("progress_json")
+    if progress:
+        enriched["side_mode_progress_keys"] = sorted(str(key) for key in progress.keys())
 
     enriched.update(_resource_constraints_note())
     return enriched
@@ -309,6 +345,12 @@ def _execute_get_member(arguments, workflow=None):
 
     if "history" in include:
         result["history"] = db.get_member_history(member_tag, days=days)
+
+    if "ranked" in include:
+        result["ranked"] = db.get_member_ranked_status(member_tag, days=days)
+
+    if "mode_activity" in include:
+        result["mode_activity"] = db.get_member_mode_activity(member_tag, days=days)
 
     if "memories" in include:
         from memory_store import list_memories
@@ -663,6 +705,43 @@ def _execute_get_clan_health(arguments, workflow=None):
         return {"error": f"Unknown aspect: {aspect}"}
 
 
+def _execute_get_clan_game_modes(arguments):
+    aspect = arguments.get("aspect", "summary")
+    days = arguments.get("days", 30)
+    limit = arguments.get("limit", 10)
+    mode_group = arguments.get("mode_group")
+    if aspect == "ranked":
+        mode_group = "ranked"
+    elif aspect == "events":
+        mode_group = "special_event"
+    summary = db.get_clan_game_mode_summary(days=days, mode_group=mode_group, limit=limit)
+    if aspect == "ranked":
+        return {
+            "aspect": aspect,
+            "window_days": summary["window_days"],
+            "mode_mix": summary["by_group"],
+            "ranked_activity": summary["ranked_activity"],
+            "ranked_profiles": summary["ranked_profiles"],
+        }
+    if aspect == "side_modes":
+        return {
+            "aspect": aspect,
+            "window_days": summary["window_days"],
+            "side_mode_progress": summary["side_mode_progress"],
+            "leaderboards": summary["leaderboards"],
+            "mode_mix": summary["by_group"],
+        }
+    if aspect == "events":
+        return {
+            "aspect": aspect,
+            "window_days": summary["window_days"],
+            "event_activity": summary["by_game_mode"],
+            "active_events": summary["active_events"],
+            "mode_mix": summary["by_group"],
+        }
+    return {"aspect": aspect, **summary}
+
+
 def _execute_get_clan_voyage(arguments):
     """Execute the Clan Voyage manual-capture history tool."""
     aspect = arguments.get("aspect", "latest")
@@ -988,14 +1067,31 @@ def _filter_cr_player_battles(payload, *, limit, mode):
     battles = payload if isinstance(payload, list) else payload.get("items") or []
     trimmed = []
     for battle in battles:
-        game_mode = (battle.get("gameMode") or {}).get("name")
+        game_mode_payload = battle.get("gameMode") or {}
+        game_mode = game_mode_payload.get("name")
+        game_mode_id = game_mode_payload.get("id")
         battle_type = battle.get("type") or ""
-        if mode and not _battle_matches_mode(mode, battle_type, game_mode):
+        if mode and not battle_matches_mode(
+            mode,
+            battle_type=battle_type,
+            game_mode_id=game_mode_id,
+            game_mode_name=game_mode,
+            deck_selection=battle.get("deckSelection"),
+            event_tag=battle.get("eventTag"),
+            tournament_tag=battle.get("tournamentTag"),
+            is_hosted_match=battle.get("isHostedMatch"),
+            team_size=len(battle.get("team") or []),
+            opponent_size=len(battle.get("opponent") or []),
+        ):
             continue
         trimmed.append({
             "battleTime": battle.get("battleTime"),
             "type": battle_type,
             "gameMode": game_mode,
+            "gameModeId": game_mode_id,
+            "deckSelection": battle.get("deckSelection"),
+            "eventTag": battle.get("eventTag"),
+            "tournamentTag": battle.get("tournamentTag"),
             "arena": (battle.get("arena") or {}).get("name"),
             "team": [_filter_cr_battle_participant(p) for p in (battle.get("team") or [])],
             "opponent": [_filter_cr_battle_participant(p) for p in (battle.get("opponent") or [])],
@@ -1003,23 +1099,6 @@ def _filter_cr_player_battles(payload, *, limit, mode):
         if len(trimmed) >= limit:
             break
     return {"battles": trimmed, "count": len(trimmed)}
-
-
-def _battle_matches_mode(mode, battle_type, game_mode_name):
-    """Client-side filter for player_battles `mode` argument."""
-    battle_type_l = (battle_type or "").lower()
-    game_mode_l = (game_mode_name or "").lower()
-    if mode == "ladder":
-        return "ladder" in battle_type_l or "pvp" in battle_type_l
-    if mode == "path_of_legends":
-        return "pathoflegend" in battle_type_l or "path_of_legend" in battle_type_l or "path of legend" in game_mode_l
-    if mode == "war":
-        return "riverracepvp" in battle_type_l or "boat" in battle_type_l or "clanwar" in battle_type_l or "war" in game_mode_l
-    if mode == "tournament":
-        return "tournament" in battle_type_l or "tournament" in game_mode_l
-    if mode == "challenge":
-        return "challenge" in battle_type_l or "challenge" in game_mode_l
-    return True
 
 
 def _filter_cr_battle_participant(p):
@@ -1225,6 +1304,57 @@ def _filter_cr_events(payload):
     return {"events": events, "count": len(events)}
 
 
+def _filter_cr_ranking_list(payload, *, limit, score_field="eloRating"):
+    limit = _clamp_limit(limit, 20, 50)
+    items = (payload or {}).get("items") if isinstance(payload, dict) else []
+    rows = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        clan = item.get("clan") or {}
+        rows.append({
+            "rank": item.get("rank"),
+            "tag": item.get("tag"),
+            "name": item.get("name"),
+            "expLevel": item.get("expLevel"),
+            score_field: item.get(score_field),
+            "clan": {"tag": clan.get("tag"), "name": clan.get("name")} if clan else None,
+        })
+        if len(rows) >= limit:
+            break
+    return {"items": rows, "count": len(rows)}
+
+
+def _filter_cr_leaderboards(payload):
+    items = (payload or {}).get("items") if isinstance(payload, dict) else []
+    boards = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        boards.append({"id": item.get("id"), "name": item.get("name")})
+    return {"leaderboards": boards, "count": len(boards)}
+
+
+def _filter_cr_leaderboard(payload, *, limit):
+    limit = _clamp_limit(limit, 20, 50)
+    items = (payload or {}).get("items") if isinstance(payload, dict) else []
+    rows = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        clan = item.get("clan") or {}
+        rows.append({
+            "rank": item.get("rank"),
+            "score": item.get("score"),
+            "tag": item.get("tag"),
+            "name": item.get("name"),
+            "clan": {"tag": clan.get("tag"), "name": clan.get("name")} if clan else None,
+        })
+        if len(rows) >= limit:
+            break
+    return {"items": rows, "count": len(rows)}
+
+
 def _execute_get_clan_intel_report(arguments):
     """Build a threat analysis for a competitor in our current river race.
 
@@ -1272,9 +1402,34 @@ def _execute_cr_api(arguments):
     aspect = arguments.get("aspect")
     if not aspect:
         return {"error": "aspect is required"}
+    limit = arguments.get("limit")
     if aspect == "events":
         payload = cr_api.get_events()
         return _filter_cr_events(payload) if payload is not None else {"error": "not_found_or_unavailable"}
+    if aspect == "pathoflegend_location_rankings":
+        payload = cr_api.get_pathoflegend_location_rankings(arguments.get("location_id") or "global", limit=limit or 20)
+        return _filter_cr_ranking_list(payload, limit=limit) if payload is not None else {"error": "not_found_or_unavailable"}
+    if aspect == "pathoflegend_season_rankings":
+        season_id = arguments.get("season_id")
+        if not season_id:
+            return {"error": "season_id is required"}
+        try:
+            payload = cr_api.get_pathoflegend_season_rankings(season_id, limit=limit or 20)
+        except cr_api.InvalidTagError as exc:
+            return {"error": "invalid_season_id", "detail": str(exc)}
+        return _filter_cr_ranking_list(payload, limit=limit) if payload is not None else {"error": "not_found_or_unavailable"}
+    if aspect == "leaderboards":
+        payload = cr_api.get_leaderboards()
+        return _filter_cr_leaderboards(payload) if payload is not None else {"error": "not_found_or_unavailable"}
+    if aspect == "leaderboard":
+        leaderboard_id = arguments.get("leaderboard_id")
+        if leaderboard_id is None:
+            return {"error": "leaderboard_id is required"}
+        try:
+            payload = cr_api.get_leaderboard(leaderboard_id, limit=limit or 20)
+        except cr_api.InvalidTagError as exc:
+            return {"error": "invalid_leaderboard_id", "detail": str(exc)}
+        return _filter_cr_leaderboard(payload, limit=limit) if payload is not None else {"error": "not_found_or_unavailable"}
 
     raw_tag = arguments.get("tag")
     try:
@@ -1282,7 +1437,6 @@ def _execute_cr_api(arguments):
     except cr_api.InvalidTagError as exc:
         return {"error": "invalid_tag", "detail": str(exc)}
 
-    limit = arguments.get("limit")
     mode = arguments.get("mode")
 
     if aspect in ("clan", "clan_members") and normalized_tag == cr_api.CLAN_TAG:
@@ -1513,6 +1667,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_clan_roster(arguments)
         elif name == "get_clan_health":
             result = _execute_get_clan_health(arguments, workflow=workflow)
+        elif name == "get_clan_game_modes":
+            result = _execute_get_clan_game_modes(arguments)
         elif name == "get_clan_voyage":
             result = _execute_get_clan_voyage(arguments)
         elif name == "get_elixir_state":

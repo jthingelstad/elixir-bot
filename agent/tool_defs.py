@@ -3,7 +3,8 @@
 # Consolidated domain-aligned tools:
 #   Member domain:  resolve_member, get_member, get_member_war_detail
 #   River Race:     get_river_race, get_war_season
-#   Clan domain:    get_clan_roster, get_clan_health, get_clan_voyage
+#   Clan domain:    get_clan_roster, get_clan_health, get_clan_game_modes,
+#                   get_clan_voyage
 #   Cards:          lookup_cards (catalog), get_member_card_profile (digest),
 #                   lookup_member_cards (filtered slice)
 #   Elixir state:   get_elixir_state, get_event_rollups
@@ -61,6 +62,8 @@ TOOLS = [
             "- deck: current deck + signature cards (most-used from battle logs)\n"
             "- losses: top opponent cards seen in recent losses + crown deficit + loss-streak context (uses scope param to pick mode: war_10/ladder_ranked_10/competitive_10/overall_10)\n"
             "- history: trophy and donation history from snapshots\n"
+            "- ranked: Ranked / Path of Legend status and recent Ranked activity, separate from Trophy Road\n"
+            "- mode_activity: 7/30-day activity by mode family (Trophy Road, Ranked, Events, War, etc.)\n"
             "- memories: stored memories/observations about this member\n"
             "- chests: upcoming chest cycle (live API)\n"
             "- awards: the member's trophy case — every season-wide award they've earned "
@@ -87,7 +90,7 @@ TOOLS = [
                         "type": "string",
                         "enum": [
                             "profile", "form", "battles", "war", "trend",
-                            "deck", "losses", "history", "memories",
+                            "deck", "losses", "history", "ranked", "mode_activity", "memories",
                             "chests", "awards",
                         ],
                     },
@@ -99,7 +102,7 @@ TOOLS = [
                 },
                 "scope": {
                     "type": "string",
-                    "description": "Recent form scope (for 'form' include). Default: competitive_10.",
+                    "description": "Recent form/loss scope. Options include overall_10, competitive_10, ladder_ranked_10, ladder_10, ranked_10, event_10, tournament_10, two_v_two_10, friendly_10, war_10. Default: competitive_10.",
                     "default": "competitive_10",
                 },
                 "days": {
@@ -124,7 +127,7 @@ TOOLS = [
                 },
                 "battles_scope": {
                     "type": "string",
-                    "description": "Battle scope filter for the 'battles' include: overall_10 (all modes), competitive_10, ladder_ranked_10, war_10. Default: overall_10.",
+                    "description": "Battle scope filter for the 'battles' include: overall_10, competitive_10, ladder_ranked_10, ladder_10, ranked_10, event_10, tournament_10, two_v_two_10, friendly_10, war_10. Default: overall_10.",
                     "default": "overall_10",
                 },
             },
@@ -360,6 +363,49 @@ TOOLS = [
                 "season_id": {
                     "type": "integer",
                     "description": "Optional season ID for war participation checks.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_clan_game_modes",
+        "description": (
+            "Summarize how the clan is playing across Clash Royale game modes. Use this for "
+            "questions about Ranked, Trophy Road, events, tournaments, 2v2, friendly play, "
+            "side-mode progress such as Merge Tactics, or overall mode mix.\n\n"
+            "Aspects:\n"
+            "- summary: mode mix across the requested window\n"
+            "- ranked: Ranked / Path of Legend roster activity and current profile standings\n"
+            "- side_modes: Player.progress mode-season keys and top side-mode progress\n"
+            "- events: event and special-mode battle activity from battle logs"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "aspect": {
+                    "type": "string",
+                    "description": "Which view to retrieve. Default: summary.",
+                    "default": "summary",
+                    "enum": ["summary", "ranked", "side_modes", "events"],
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Lookback window in days. Default 30.",
+                    "default": 30,
+                },
+                "mode_group": {
+                    "type": "string",
+                    "description": "Optional mode-group filter.",
+                    "enum": [
+                        "ladder", "ranked", "war", "special_event",
+                        "tournament", "two_v_two", "friendly", "side_mode", "other",
+                    ],
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum rows per ranked/top list. Default 10.",
+                    "default": 10,
                 },
             },
             "required": [],
@@ -700,13 +746,13 @@ TOOLS = [
             "player, clan, or tournament by CR tag — e.g. 'tell me about player #ABC', "
             "'how is clan #XYZ', 'scout the clan I just lost to'.\n\n"
             "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, "
-            "get_clan_health, get_river_race) — local data is deeper and covers longer history. "
+            "get_clan_health, get_clan_game_modes, get_river_race) — local data is deeper and covers longer history. "
             "For CARD data, use lookup_cards, NOT this tool.\n\n"
             "Aspects:\n"
             "- player: profile, trophies, clan, current deck, favourite card\n"
             "- player_battles: recent battle log with opponent tags preserved (chain into "
             "aspect='player' or 'clan' to scout opponents). Optional mode filter: "
-            "ladder / war / tournament / challenge / path_of_legends. "
+            "ladder / ranked / war / tournament / event / two_v_two / friendly. "
             "For OUR clan members, prefer get_member include=['battles'] — deeper history, "
             "no live API call, and opponent tags cross-reference our roster.\n"
             "- player_chests: upcoming chest cycle\n"
@@ -715,7 +761,11 @@ TOOLS = [
             "- clan_war: current river race for ANY clan (standings, top participants)\n"
             "- clan_war_log: historical river race results\n"
             "- tournament: profile + top members by score\n"
-            "- events: current live game modes/events from /events; no tag required\n\n"
+            "- events: current live game modes/events from /events; no tag required\n"
+            "- pathoflegend_location_rankings: current Ranked / Path of Legend rankings for a location; no tag required\n"
+            "- pathoflegend_season_rankings: global Ranked / Path of Legend rankings for a season id; no tag required\n"
+            "- leaderboards: game-mode / side-mode leaderboard metadata; no tag required\n"
+            "- leaderboard: one game-mode / side-mode leaderboard by integer leaderboard_id; no tag required\n\n"
             "If the user asks about something the CR API does not expose — battle IDs, match IDs, "
             "historical clan rosters, deck tags — say so plainly. Do not improvise a workaround."
         ),
@@ -728,6 +778,10 @@ TOOLS = [
                         "player", "player_battles", "player_chests",
                         "clan", "clan_members", "clan_war", "clan_war_log",
                         "tournament", "events",
+                        "pathoflegend_location_rankings",
+                        "pathoflegend_season_rankings",
+                        "leaderboards",
+                        "leaderboard",
                     ],
                     "description": "Which CR API slice to fetch.",
                 },
@@ -745,8 +799,20 @@ TOOLS = [
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["ladder", "war", "tournament", "challenge", "path_of_legends"],
+                    "enum": ["ladder", "ranked", "war", "tournament", "challenge", "path_of_legends", "event", "two_v_two", "friendly"],
                     "description": "Optional client-side filter for aspect='player_battles'.",
+                },
+                "location_id": {
+                    "type": "string",
+                    "description": "Location id for aspect='pathoflegend_location_rankings'. Default: global.",
+                },
+                "season_id": {
+                    "type": "string",
+                    "description": "Season id such as 2026-06 for aspect='pathoflegend_season_rankings'.",
+                },
+                "leaderboard_id": {
+                    "type": "integer",
+                    "description": "Integer leaderboard id for aspect='leaderboard'.",
                 },
             },
             "required": ["aspect"],

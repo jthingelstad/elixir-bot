@@ -34,7 +34,7 @@ PROGRESSION_SIGNAL_TYPES = {
 }
 
 # Volatile battle-mode activity outside of war — hot streaks, trophy pushes,
-# Path of Legends promotions/demotions, Ultimate Champion reaches, global
+# Ranked / Path of Legend promotions/demotions, Ultimate Champion reaches, global
 # rank attainments. Routed to #player-highlights.
 BATTLE_MODE_SIGNAL_TYPES = {
     "battle_hot_streak",

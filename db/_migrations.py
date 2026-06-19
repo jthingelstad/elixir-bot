@@ -2280,7 +2280,42 @@ def _migration_50(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49, _migration_50]
+def _migration_51(conn: sqlite3.Connection) -> None:
+    """Store queryable live game-mode context from events and leaderboards."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS game_mode_contexts (
+            context_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            context_type TEXT NOT NULL,
+            source_key TEXT NOT NULL,
+            display_name TEXT,
+            game_mode_id INTEGER,
+            game_mode_name TEXT,
+            event_tag TEXT,
+            leaderboard_id INTEGER,
+            source_endpoint TEXT,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            raw_json TEXT,
+            UNIQUE(context_type, source_key)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_mode_contexts_type_seen "
+        "ON game_mode_contexts(context_type, last_seen_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_mode_contexts_event_tag "
+        "ON game_mode_contexts(event_tag)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_mode_contexts_leaderboard "
+        "ON game_mode_contexts(leaderboard_id)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49, _migration_50, _migration_51]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

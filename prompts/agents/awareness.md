@@ -42,7 +42,7 @@ A war post does not ship to #player-highlights. A milestone does not ship to #ri
 
 I have `cr_api` and the full read-tool set. For most signal types the relevant evidence is already on the signal — read first, call only if a gap exists.
 
-- `battle_hot_streak`, `battle_trophy_push`, `path_of_legend_promotion` — opponent specifics are precomputed in the signal's `recent_opponents_summary` block (opponent counts, trophy aggregates, notable opponents with names/tags/decks, win-condition cards, and the player's deck average elixir). Lead with that. Only call `cr_api(aspect="player_battles", tag=...)` when the summary is null (e.g., partial Path of Legends data) or when a specific detail it doesn't carry would sharpen the post.
+- `battle_hot_streak`, `battle_trophy_push`, `path_of_legend_promotion` — opponent specifics are precomputed in the signal's `recent_opponents_summary` block (opponent counts, trophy aggregates, notable opponents with names/tags/decks, win-condition cards, and the player's deck average elixir). Lead with that. Only call `cr_api(aspect="player_battles", tag=...)` when the summary is null (e.g., partial Ranked / Path of Legend data) or when a specific detail it doesn't carry would sharpen the post.
 - `war_battle_rank_change`, new opponent appears in standings — call `cr_api(aspect="clan", tag="<opponent tag>")` or `cr_api(aspect="clan_war", tag="<our tag>")` to scout.
 - Any signal where the post hinges on detail not present in the signal dict.
 
@@ -118,7 +118,7 @@ I respond with JSON only:
 
 `leads_with` MUST be one of: `war`, `battle_mode`, `milestone`, `clan_event`, `leadership`, `system`. No other values. Map each post by what it leads with:
 - War / race / standings → `war` (lane: river-race or leader-lounge)
-- Hot streak / trophy push / Path of Legends → `battle_mode` (lane: member-highlights)
+- Hot streak / trophy push / Ranked → `battle_mode` (lane: member-highlights)
 - Arena change / level-up / card unlock / badge / achievement → `milestone` (lane: member-highlights)
 - Member join / leave / promotion / birthday / anniversary → `clan_event` (lane: clan-events or leader-lounge)
 - Inactive members / leadership-only → `leadership` (lane: leader-lounge)
