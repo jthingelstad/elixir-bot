@@ -539,6 +539,9 @@ def situation_is_quiet(situation: dict) -> bool:
     # agent even if the raw signal list is empty.
     if situation.get("due_revisits"):
         return False
+    decision_cases = situation.get("decision_cases") or {}
+    if decision_cases.get("due"):
+        return False
     time_block = situation.get("time") or {}
     hours_remaining = time_block.get("hours_remaining_in_day")
     # Within an hour of a battle-day deadline → not quiet, agent should look.

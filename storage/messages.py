@@ -184,6 +184,7 @@ def upsert_signal_outcome(
     delivery_status: str = "planned",
     payload: Optional[dict] = None,
     error_detail: Optional[str] = None,
+    intent_id: Optional[int] = None,
     mark_attempt: bool = False,
     delivered: bool = False,
     conn: Optional[sqlite3.Connection] = None,
@@ -196,8 +197,8 @@ def upsert_signal_outcome(
         INSERT INTO signal_outcomes (
             source_signal_key, source_signal_type, target_channel_key, target_channel_id,
             intent, required, delivery_status, payload_json, error_detail,
-            created_at, updated_at, last_attempt_at, delivered_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            intent_id, created_at, updated_at, last_attempt_at, delivered_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_signal_key, target_channel_key, intent) DO UPDATE SET
             source_signal_type = excluded.source_signal_type,
             target_channel_id = excluded.target_channel_id,
@@ -205,6 +206,7 @@ def upsert_signal_outcome(
             delivery_status = excluded.delivery_status,
             payload_json = excluded.payload_json,
             error_detail = excluded.error_detail,
+            intent_id = COALESCE(excluded.intent_id, signal_outcomes.intent_id),
             updated_at = excluded.updated_at,
             last_attempt_at = COALESCE(excluded.last_attempt_at, signal_outcomes.last_attempt_at),
             delivered_at = COALESCE(excluded.delivered_at, signal_outcomes.delivered_at)
@@ -219,6 +221,7 @@ def upsert_signal_outcome(
             delivery_status,
             _json_or_none(payload),
             error_detail,
+            int(intent_id) if intent_id is not None else None,
             now,
             now,
             last_attempt_at,
@@ -360,7 +363,7 @@ def was_signal_outcome_delivered(source_signal_key: str, target_channel_key: str
 def save_message(scope: str, author_type: str, content: str, summary: Optional[str] = None, channel_id: Optional[str | int] = None, channel_name: Optional[str] = None,
                  channel_kind: Optional[str] = None, discord_user_id: Optional[str | int] = None, username: Optional[str] = None, display_name: Optional[str] = None,
                  member_tag: Optional[str] = None, workflow: Optional[str] = None, event_type: Optional[str] = None, discord_message_id: Optional[str | int] = None,
-                 raw_json: Optional[dict] = None, conn: Optional[sqlite3.Connection] = None) -> int:
+                 raw_json: Optional[dict] = None, intent_id: Optional[int] = None, conn: Optional[sqlite3.Connection] = None) -> int:
     member_id = None
     if member_tag:
         member_id = _ensure_member(conn, member_tag)
@@ -384,8 +387,8 @@ def save_message(scope: str, author_type: str, content: str, summary: Optional[s
     now = _utcnow()
     summary = summary if summary is not None else (content[:200] if content else "")
     conn.execute(
-        "INSERT INTO messages (discord_message_id, thread_id, channel_id, discord_user_id, member_id, author_type, workflow, event_type, content, summary, created_at, raw_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (discord_message_id, thread_id, channel_id, discord_user_id, member_id, author_type, workflow, event_type, content, summary, created_at, raw_json, intent_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             str(discord_message_id) if discord_message_id is not None else None,
             thread_id,
@@ -399,6 +402,7 @@ def save_message(scope: str, author_type: str, content: str, summary: Optional[s
             summary,
             now,
             _json_or_none(raw_json),
+            int(intent_id) if intent_id is not None else None,
         ),
     )
     message_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
@@ -520,7 +524,7 @@ def update_message_summary(message_id: int, summary: str, conn: Optional[sqlite3
 def get_message_by_discord_message_id(discord_message_id: str | int, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
         "SELECT message_id, discord_message_id, thread_id, channel_id, discord_user_id, member_id, "
-        "author_type, workflow, event_type, content, summary, created_at "
+        "author_type, workflow, event_type, content, summary, created_at, intent_id "
         "FROM messages WHERE discord_message_id = ?",
         (str(discord_message_id),),
     ).fetchone()

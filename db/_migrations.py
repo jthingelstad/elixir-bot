@@ -2149,7 +2149,94 @@ def _migration_48(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48]
+def _migration_49(conn: sqlite3.Connection) -> None:
+    """Add durable communication intents before delivery side effects."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS communication_intents (
+            intent_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            intent_key TEXT NOT NULL UNIQUE,
+            workflow TEXT NOT NULL,
+            intent_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'planned',
+            target_channel_key TEXT,
+            target_channel_id TEXT,
+            source_signal_key TEXT,
+            source_signal_type TEXT,
+            covers_signal_keys_json TEXT NOT NULL DEFAULT '[]',
+            event_keys_json TEXT NOT NULL DEFAULT '[]',
+            project_id INTEGER REFERENCES elixir_projects(project_id) ON DELETE SET NULL,
+            case_id INTEGER REFERENCES decision_cases(case_id) ON DELETE SET NULL,
+            summary TEXT,
+            content_preview TEXT,
+            skipped_reason TEXT,
+            error_detail TEXT,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            delivered_at TEXT,
+            failed_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_communication_intents_status "
+        "ON communication_intents(status, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_communication_intents_channel "
+        "ON communication_intents(target_channel_key, status, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_communication_intents_source "
+        "ON communication_intents(source_signal_key, status, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_communication_intents_project "
+        "ON communication_intents(project_id, status, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_communication_intents_case "
+        "ON communication_intents(case_id, status, updated_at DESC)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS communication_intent_event_links (
+            link_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            intent_id INTEGER NOT NULL REFERENCES communication_intents(intent_id) ON DELETE CASCADE,
+            event_id INTEGER REFERENCES game_event_stream(event_id) ON DELETE SET NULL,
+            event_key TEXT NOT NULL,
+            relationship TEXT NOT NULL DEFAULT 'evidence',
+            created_at TEXT NOT NULL,
+            UNIQUE(intent_id, event_key, relationship)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_communication_intent_event_links_intent "
+        "ON communication_intent_event_links(intent_id, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_communication_intent_event_links_event "
+        "ON communication_intent_event_links(event_key, relationship)"
+    )
+    message_columns = _table_columns(conn, "messages")
+    if "intent_id" not in message_columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN intent_id INTEGER")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_intent "
+        "ON messages(intent_id, created_at DESC)"
+    )
+    outcome_columns = _table_columns(conn, "signal_outcomes")
+    if "intent_id" not in outcome_columns:
+        conn.execute("ALTER TABLE signal_outcomes ADD COLUMN intent_id INTEGER")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_signal_outcomes_intent "
+        "ON signal_outcomes(intent_id, delivery_status, updated_at DESC)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
