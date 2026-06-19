@@ -23,19 +23,40 @@ from storage.identity import save_memory_episode, save_memory_fact, upsert_disco
 # -- Signal and announcement logs ------------------------------------------
 
 @managed_connection
-def was_signal_sent(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> bool:
+def was_signal_completed(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> bool:
+    """Return whether this signal key has already completed delivery.
+
+    The underlying table is still named ``signal_log`` for compatibility, but
+    the row is a delivery-completion marker/detector cursor. It is not the
+    observation ledger; new observations belong in ``game_event_stream``.
+    """
     return conn.execute("SELECT 1 FROM signal_log WHERE signal_type = ? AND signal_date = ?", (signal_type, date_str)).fetchone() is not None
 
 
 @managed_connection
-def was_signal_sent_any_date(signal_type: str, conn: Optional[sqlite3.Connection] = None) -> bool:
+def was_signal_completed_any_date(signal_type: str, conn: Optional[sqlite3.Connection] = None) -> bool:
     return conn.execute("SELECT 1 FROM signal_log WHERE signal_type = ?", (signal_type,)).fetchone() is not None
 
 
 @managed_connection
-def mark_signal_sent(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> None:
+def mark_signal_completed(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> None:
     conn.execute("INSERT OR IGNORE INTO signal_log (signal_type, signal_date) VALUES (?, ?)", (signal_type, date_str))
     conn.commit()
+
+
+def was_signal_sent(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> bool:
+    """Compatibility alias for ``was_signal_completed``."""
+    return was_signal_completed(signal_type, date_str, conn=conn)
+
+
+def was_signal_sent_any_date(signal_type: str, conn: Optional[sqlite3.Connection] = None) -> bool:
+    """Compatibility alias for ``was_signal_completed_any_date``."""
+    return was_signal_completed_any_date(signal_type, conn=conn)
+
+
+def mark_signal_sent(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> None:
+    """Compatibility alias for ``mark_signal_completed``."""
+    mark_signal_completed(signal_type, date_str, conn=conn)
 
 
 @managed_connection

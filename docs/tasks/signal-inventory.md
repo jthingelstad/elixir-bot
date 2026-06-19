@@ -5,7 +5,7 @@ awareness and delivery flows. It also defines the guardrails for the internal
 data subsystem pivot: event identity, event-stream retention, and which
 workflow layers may write which durable objects.
 
-Last updated: 2026-06-19, after the `event_rollups` retention layer.
+Last updated: 2026-06-19, after formalizing `signal_log` as a completed-signal marker.
 
 ## Signal Lifecycle
 
@@ -15,11 +15,13 @@ Current proactive flow:
 2. Detectors emit signal dictionaries.
 3. `storage.event_stream.record_signal_events()` records those signals in
    `game_event_stream`.
-4. Situation, project, case, and communication-intent layers read that stream as
+4. Completed-signal markers in `signal_log` may suppress repeat delivery, but
+   only after the observation has been recorded into `game_event_stream`.
+5. Situation, project, case, and communication-intent layers read that stream as
    operational context.
-5. Delivery state is tracked by `communication_intents`, `signal_outcomes`, and
-   `messages`; `signal_log` remains a compatibility/dedupe table for older
-   detector paths.
+6. Delivery state is tracked by `communication_intents`, `signal_outcomes`, and
+   `messages`; `signal_log` is a compatibility table for completed-signal
+   markers used by detector dedupe and duplicate-post protection.
 
 Awareness-loop delivery no longer falls back to the legacy per-signal router
 when a hard-post-floor signal is not covered by the agent's post plan. Instead,
@@ -30,6 +32,13 @@ startup/system signals.
 
 Important distinction: the event stream is an observation ledger, not a posting
 queue and not a delivery ledger.
+
+`signal_log` invariant: a row in `signal_log` means "Elixir has already handled
+this signal key for delivery/dedupe purposes." It does not mean "Elixir observed
+this fact." Observations belong in `game_event_stream` even when the signal is
+already completed and will be suppressed before agent planning. New code should
+prefer `was_signal_completed*` and `mark_signal_completed`; the older
+`was_signal_sent*` and `mark_signal_sent` names remain compatibility aliases.
 
 ## Event Identity Policy
 

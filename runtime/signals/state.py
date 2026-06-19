@@ -21,11 +21,11 @@ def _mark_delivered_signals(signals, *, today: str | None = None):
         signal_date = signal.get("signal_date") or today or db.chicago_today()
         signal_type = signal.get("signal_log_type") or signal.get("type")
         if signal_type:
-            db.mark_signal_sent(signal_type, signal_date)
+            db.mark_signal_completed(signal_type, signal_date)
         for member in signal.get("members") or []:
             member_log_type = (member or {}).get("signal_log_type")
             if member_log_type:
-                db.mark_signal_sent(member_log_type, signal_date)
+                db.mark_signal_completed(member_log_type, signal_date)
         if signal.get("type") == "clan_birthday":
             db.mark_announcement_sent(signal_date, "clan_birthday", None)
         elif signal.get("type") == "join_anniversary":

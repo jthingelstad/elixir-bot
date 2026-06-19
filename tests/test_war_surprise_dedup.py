@@ -79,7 +79,7 @@ def test_mark_delivered_signals_records_per_member_log_type():
     from unittest.mock import patch
 
     calls = []
-    with patch.object(db, "mark_signal_sent", side_effect=lambda t, d: calls.append((t, d))):
+    with patch.object(db, "mark_signal_completed", side_effect=lambda t, d: calls.append((t, d))):
         signal = {
             "type": "war_surprise_participant",
             "signal_date": "2026-04-18",

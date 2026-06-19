@@ -218,7 +218,7 @@ def test_clan_events_skips_low_tenure_voluntary_departure():
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir.db.upsert_signal_outcome") as mock_upsert,
         patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "skipped"}]),
-        patch("elixir.db.mark_signal_sent"),
+        patch("elixir.db.mark_signal_completed"),
         patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
     ):
@@ -887,7 +887,7 @@ def test_deliver_signal_group_saves_multipart_channel_update_as_separate_message
         patch("elixir.db.upsert_signal_outcome"),
         patch("elixir.db.save_message") as mock_save,
         patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "delivered"}]),
-        patch("elixir.db.mark_signal_sent"),
+        patch("elixir.db.mark_signal_completed"),
         patch("elixir.elixir_agent.generate_channel_update", return_value={
             "event_type": "channel_update",
             "summary": "War update",
@@ -950,7 +950,7 @@ def test_deliver_signal_group_skips_post_when_llm_returns_no_post_decision():
         patch("elixir.db.upsert_signal_outcome") as mock_upsert,
         patch("elixir.db.save_message") as mock_save,
         patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "skipped"}]),
-        patch("elixir.db.mark_signal_sent"),
+        patch("elixir.db.mark_signal_completed"),
         patch("elixir.elixir_agent.generate_channel_update", return_value=refusal_result),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("runtime.jobs._signals.maybe_upsert_signal_memory"),
@@ -1007,7 +1007,7 @@ def test_deliver_signal_group_posts_preauthored_system_signal_without_llm():
         patch("elixir.db.upsert_signal_outcome"),
         patch("elixir.db.save_message") as mock_save,
         patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "delivered"}]),
-        patch("elixir.db.mark_signal_sent"),
+        patch("elixir.db.mark_signal_completed"),
         patch("elixir.db.mark_system_signal_announced"),
         patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
@@ -1058,7 +1058,7 @@ def test_deliver_signal_group_stores_war_recap_memory_for_river_race_batch():
         patch("elixir.db.upsert_signal_outcome"),
         patch("elixir.db.save_message"),
         patch("elixir.db.list_signal_outcomes", return_value=[{"delivery_status": "delivered"}]),
-        patch("elixir.db.mark_signal_sent"),
+        patch("elixir.db.mark_signal_completed"),
         patch("elixir.elixir_agent.generate_channel_update", return_value={
             "event_type": "channel_update",
             "summary": "Battle day recap",
@@ -1096,7 +1096,7 @@ def test_clan_awareness_tick_posts_join_messages_through_shared_sender():
 
 def test_clan_awareness_tick_marks_non_system_signal_sent_after_successful_post():
     signals = [{"type": "war_week_rollover", "season_id": 130, "week": 1}]
-    with patch("elixir.db.mark_signal_sent") as mock_mark_signal_sent:
+    with patch("elixir.db.mark_signal_completed") as mock_mark_signal_sent:
         asyncio.run(elixir._mark_signal_group_completed(signals))
     mock_mark_signal_sent.assert_called_once_with("war_week_rollover", db.chicago_today())
 
@@ -2081,7 +2081,7 @@ def test_clan_awareness_tick_does_not_mark_system_signal_sent_before_success():
     with (
         patch("elixir.heartbeat.tick", return_value=bundle),
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.db.mark_signal_sent") as mock_mark_signal_sent,
+        patch("elixir.db.mark_signal_completed") as mock_mark_signal_sent,
         patch("elixir.db.mark_system_signal_announced") as mock_mark_announced,
         patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=False)) as mock_deliver,
     ):
@@ -3555,7 +3555,7 @@ def test_clan_awareness_tick_marks_cake_day_announcements_after_successful_post(
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
         patch("runtime.jobs._core.heartbeat.tick", return_value=bundle),
         patch("runtime.jobs._core._deliver_signal_group_via_awareness", side_effect=fake_deliver),
-        patch("elixir.db.mark_signal_sent") as mock_mark_signal_sent,
+        patch("elixir.db.mark_signal_completed") as mock_mark_signal_sent,
         patch("elixir.db.mark_announcement_sent") as mock_mark_announcement_sent,
     ):
         asyncio.run(elixir._clan_awareness_tick())
