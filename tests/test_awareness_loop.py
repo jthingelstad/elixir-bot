@@ -609,6 +609,40 @@ def test_deliver_signal_group_via_awareness_invokes_arena_relay_sidecar_for_war(
     mock_relay.assert_awaited_once_with([war_signal], {}, {})
 
 
+def test_arena_relay_sidecar_uses_communication_intent_planner():
+    signal = {
+        "type": "member_join",
+        "signal_key": "join:A",
+        "tag": "#ABC",
+        "name": "Alice",
+    }
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._signals.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals._channel_config_by_key", return_value={
+            "id": 999,
+            "name": "leader-actions",
+            "subagent_key": "arena-relay",
+            "memory_scope": "leadership",
+        }),
+        patch("runtime.jobs._signals.plan_signal_outcomes", side_effect=AssertionError("legacy planner should not run")),
+        patch("runtime.jobs._signals.db.upsert_communication_intent", return_value={"intent_id": 123}) as mock_intent,
+        patch("runtime.jobs._signals._deliver_signal_outcome", new=AsyncMock(return_value=True)) as mock_deliver,
+    ):
+        delivered = asyncio.run(signals_module._deliver_arena_relay_sidecars([signal], {}, {}))
+
+    assert delivered == 1
+    assert mock_intent.call_args.kwargs["intent_key"] == "arena_relay:join:A:welcome_relay"
+    assert mock_intent.call_args.kwargs["intent_type"] == "action_card"
+    outcome = mock_deliver.await_args.args[0]
+    assert outcome["target_channel_key"] == "arena-relay"
+    assert outcome["intent"] == "welcome_relay"
+    assert outcome["communication_intent_id"] == 123
+
+
 def test_deliver_signal_group_via_awareness_skips_quiet_tick():
     """When situation is quiet, the agent is never called."""
 
@@ -620,6 +654,7 @@ def test_deliver_signal_group_via_awareness_skips_quiet_tick():
         patch("runtime.situation.db.list_channel_messages", return_value=[]),
         patch("runtime.situation.build_situation_time", return_value={"phase": "practice", "hours_remaining_in_day": 18}),
         patch("runtime.situation.db.get_members_on_hot_streak", return_value=[]),
+        patch("runtime.situation.db.decision_case_snapshot", return_value={"due": [], "open": []}),
         patch(
             "runtime.jobs._signals.elixir_agent.run_awareness_tick",
         ) as mock_agent,
