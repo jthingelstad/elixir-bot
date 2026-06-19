@@ -6,6 +6,7 @@
 #   Clan domain:    get_clan_roster, get_clan_health, get_clan_voyage
 #   Cards:          lookup_cards (catalog), get_member_card_profile (digest),
 #                   lookup_member_cards (filtered slice)
+#   Elixir state:   get_elixir_state
 #   Utility:        update_member, save_clan_memory
 
 TOOLS = [
@@ -390,6 +391,101 @@ TOOLS = [
                     "type": "integer",
                     "description": "Maximum voyages or member entries to return. Default 5.",
                     "default": 5,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_elixir_state",
+        "description": (
+            "Inspect Elixir's internal operating state: the normalized game-event stream, "
+            "active projects, project details, open/due decision cases, communication intents, "
+            "and message-to-intent traces. Use this when leaders ask what Elixir is monitoring, "
+            "which recommendations are open, why something was posted or skipped, or what Elixir "
+            "would do next. Leadership-only aspects are blocked outside leadership workflows. "
+            "Public workflows can only read public event-stream views."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "aspect": {
+                    "type": "string",
+                    "description": "Which internal-state view to retrieve. Default: operational_summary.",
+                    "default": "operational_summary",
+                    "enum": [
+                        "operational_summary",
+                        "event_summary",
+                        "recent_events",
+                        "projects",
+                        "project_detail",
+                        "decision_cases",
+                        "communication_intents",
+                        "communication_trace",
+                    ],
+                },
+                "scope": {
+                    "type": "string",
+                    "description": (
+                        "Event-stream scope: public, leadership, system_internal, or all. "
+                        "Non-leadership workflows are forced to public."
+                    ),
+                    "enum": ["public", "leadership", "system_internal", "all"],
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Lookback window in days for recent_events. Default 7, max 90.",
+                    "default": 7,
+                },
+                "windows": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Lookback windows in days for event_summary. Default [7, 28, 56, 90].",
+                },
+                "event_type": {
+                    "type": "string",
+                    "description": "Optional event type filter for recent_events.",
+                },
+                "subject_type": {
+                    "type": "string",
+                    "description": "Optional subject type filter for event views, e.g. member, war, clan.",
+                },
+                "subject_key": {
+                    "type": "string",
+                    "description": "Optional subject key filter for event views.",
+                },
+                "project_type": {
+                    "type": "string",
+                    "description": "Optional project type filter, e.g. war_season.",
+                },
+                "project_key": {
+                    "type": "string",
+                    "description": "Project key for aspect='project_detail', e.g. war_season:133.",
+                },
+                "case_type": {
+                    "type": "string",
+                    "description": "Optional decision case type filter.",
+                },
+                "status": {
+                    "type": "string",
+                    "description": "Optional status filter for projects, decision cases, or communication intents.",
+                },
+                "workflow": {
+                    "type": "string",
+                    "description": "Optional workflow filter for communication intents.",
+                },
+                "target_channel_key": {
+                    "type": "string",
+                    "description": "Optional target channel key filter for communication intents.",
+                },
+                "message_id": {
+                    "type": "string",
+                    "description": "Discord message id for aspect='communication_trace'.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum rows to return. Default 25, max 100.",
+                    "default": 25,
                 },
             },
             "required": [],

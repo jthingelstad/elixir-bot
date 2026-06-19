@@ -251,6 +251,7 @@ def test_interactive_workflow_exposes_all_read_tools():
     # sensitive aspects (at_risk, promotion_candidates) are gated at execution time.
     assert "get_clan_health" in interactive_names
     assert "get_member" in interactive_names
+    assert "get_elixir_state" in interactive_names
 
 
 def test_execute_tool_get_member_resolves_handle_before_refresh():
@@ -493,6 +494,113 @@ def test_execute_tool_get_clan_health_sensitive_aspect_blocked_in_interactive():
     )
     assert "error" in result
     assert "leadership channels" in result["error"]
+
+
+def test_execute_tool_get_elixir_state_public_events_are_scope_filtered():
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.list_recent_events.return_value = [
+            {"event_key": "game_event:public", "scope": "public"},
+        ]
+
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_elixir_state",
+                {"aspect": "recent_events", "days": 14, "limit": 3},
+                workflow="interactive",
+            )
+        )
+
+    assert result["scope"] == "public"
+    assert result["events"][0]["scope"] == "public"
+    mock_db.list_recent_events.assert_called_once_with(
+        days=14,
+        scope="public",
+        event_type=None,
+        subject_type=None,
+        subject_key=None,
+        limit=3,
+    )
+
+
+def test_execute_tool_get_elixir_state_blocks_leadership_scope_in_interactive():
+    result = json.loads(
+        elixir_agent._execute_tool(
+            "get_elixir_state",
+            {"aspect": "recent_events", "scope": "leadership"},
+            workflow="interactive",
+        )
+    )
+
+    assert result["error"] == "leadership_state_unavailable"
+
+
+def test_execute_tool_get_elixir_state_blocks_decision_cases_in_interactive():
+    result = json.loads(
+        elixir_agent._execute_tool(
+            "get_elixir_state",
+            {"aspect": "decision_cases"},
+            workflow="interactive",
+        )
+    )
+
+    assert result["error"] == "leadership_state_unavailable"
+
+
+def test_execute_tool_get_elixir_state_reads_due_cases_for_clanops():
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.list_due_decision_cases.return_value = [
+            {
+                "case_id": 9,
+                "case_type": "inactivity_review",
+                "target_player_name": "xian",
+                "is_due": True,
+            }
+        ]
+
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_elixir_state",
+                {"aspect": "decision_cases", "status": "due", "case_type": "inactivity_review"},
+                workflow="clanops",
+            )
+        )
+
+    assert result["due"][0]["case_id"] == 9
+    mock_db.list_due_decision_cases.assert_called_once_with(
+        case_type="inactivity_review",
+        limit=25,
+    )
+
+
+def test_execute_tool_get_elixir_state_reads_intents_for_leadership_workflow():
+    with patch("elixir_agent.db") as mock_db:
+        mock_db.list_recent_communication_intents.return_value = [
+            {
+                "intent_id": 5,
+                "status": "failed",
+                "target_channel_key": "arena-relay",
+            }
+        ]
+
+        result = json.loads(
+            elixir_agent._execute_tool(
+                "get_elixir_state",
+                {
+                    "aspect": "communication_intents",
+                    "status": "failed",
+                    "target_channel_key": "arena-relay",
+                },
+                workflow="channel_update_leadership",
+            )
+        )
+
+    assert result["intents"][0]["intent_id"] == 5
+    mock_db.list_recent_communication_intents.assert_called_once_with(
+        status="failed",
+        workflow=None,
+        target_channel_key="arena-relay",
+        limit=25,
+    )
 
 
 def test_execute_tool_get_river_race_standings():

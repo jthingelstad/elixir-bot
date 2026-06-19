@@ -274,12 +274,13 @@ This keeps feature announcements discoverable: future changes should usually mea
 
 ## Query Layer (Current)
 
-Elixir’s core member/leader questions should be answered from structured query helpers and tools, not prompt reconstruction. The LLM has 15 domain-aligned tools organized into four groups:
+Elixir’s core member/leader questions should be answered from structured query helpers and tools, not prompt reconstruction. The LLM has 20 domain-aligned tools organized into five groups:
 
-- **Member domain**: `resolve_member`, `get_member` (include: profile, form, war, trend, deck, cards, history, memories, chests), `get_member_war_detail` (aspect: summary, attendance, battles, missed_days, vs_clan_avg)
-- **River Race domain**: `get_river_race` (live race state + competing clan standings), `get_war_season` (aspect: summary, standings, win_rates, boat_battles, score_trend, season_comparison, trending, perfect_attendance, no_participation), `get_war_member_standings` (metric: fame, win_rate, attendance)
-- **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards), `get_clan_health` (aspect: at_risk, hot_streaks, losing_streaks, trophy_drops, promotion_candidates), `get_clan_trends`
-- **Utility**: `lookup_cards`, `cr_api` (live Clash Royale API bridge for any external player/clan/tournament), `update_member`, `save_clan_memory`
+- **Member domain**: `resolve_member`, `get_member` (include: profile, form, battles, war, trend, deck, losses, history, memories, chests, awards), `get_member_war_detail` (aspect: summary, attendance, battles, missed_days, vs_clan_avg, war_decks)
+- **River Race domain**: `get_river_race` (live race state + competing clan standings), `get_war_season` (aspect: summary, standings, win_rates, boat_battles, score_trend, season_comparison, trending, perfect_attendance, no_participation), `get_clan_intel_report`
+- **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards, trends), `get_clan_health` (aspect: at_risk, hot_streaks, losing_streaks, trophy_drops, promotion_candidates), `get_clan_voyage`
+- **Card + awards domain**: `lookup_cards`, `get_member_card_profile`, `lookup_member_cards`, `get_awards`
+- **Elixir state + utility**: `get_elixir_state` (event stream, projects, decision cases, communication intents), `cr_api` (live Clash Royale API bridge for any external player/clan/tournament), `update_member`, `save_clan_memory`, `flag_member_watch`, `record_leadership_followup`, `schedule_revisit`
 
 War tools include `war_player_type` (regular/occasional/rare/never) per member. Leadership evaluations include CR account age. Sensitive aspects (at_risk, promotion_candidates) are gated to leadership workflows at execution time.
 

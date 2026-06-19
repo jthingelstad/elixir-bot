@@ -21,7 +21,9 @@ WAR_PROJECT_RECENT_COMMUNICATION_LIMIT = 5
 __all__ = [
     "upsert_project",
     "get_project",
+    "get_project_detail",
     "get_active_project",
+    "list_projects",
     "link_project_event",
     "link_project_events_for_subject",
     "list_project_event_links",
@@ -172,6 +174,34 @@ def get_active_project(
 
 
 @managed_connection
+def list_projects(
+    *,
+    project_type: str | None = None,
+    statuses: tuple[str, ...] | list[str] | None = None,
+    limit: int = 25,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    where = []
+    params: list = []
+    if project_type:
+        where.append("project_type = ?")
+        params.append(_clean_text(project_type))
+    clean_statuses = [status for status in (statuses or []) if _clean_text(status)]
+    if clean_statuses:
+        placeholders = ",".join("?" * len(clean_statuses))
+        where.append(f"status IN ({placeholders})")
+        params.extend(clean_statuses)
+    sql_where = f"WHERE {' AND '.join(where)}" if where else ""
+    rows = conn.execute(
+        f"SELECT * FROM elixir_projects {sql_where} "
+        "ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END, "
+        "updated_at DESC, project_id DESC LIMIT ?",
+        (*params, max(1, min(int(limit or 25), 100))),
+    ).fetchall()
+    return [_row_to_project(row, conn) for row in rows]
+
+
+@managed_connection
 def link_project_event(
     *,
     project_id: int | None = None,
@@ -287,6 +317,81 @@ def list_project_event_links(
         (int(project_id), max(1, int(limit or 50))),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _project_events(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    limit: int = 25,
+) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT e.*, l.relationship, l.created_at AS linked_at
+        FROM project_event_links l
+        LEFT JOIN game_event_stream e ON e.event_key = l.event_key
+        WHERE l.project_id = ?
+        ORDER BY l.created_at DESC, l.link_id DESC
+        LIMIT ?
+        """,
+        (int(project_id), max(1, min(int(limit or 25), 100))),
+    ).fetchall()
+    events = []
+    for row in rows:
+        item = dict(row)
+        payload_raw = item.pop("payload_json", "{}")
+        item["payload"] = _json_loads(payload_raw)
+        events.append(item)
+    return events
+
+
+def _project_intents(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    limit: int = 25,
+) -> list[dict]:
+    from storage.communication_intents import list_recent_communication_intents
+
+    return list_recent_communication_intents(
+        project_id=int(project_id),
+        limit=limit,
+        conn=conn,
+    )
+
+
+@managed_connection
+def get_project_detail(
+    project_key: str | None = None,
+    *,
+    project_id: int | None = None,
+    event_limit: int = 25,
+    intent_limit: int = 25,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict | None:
+    if project_id is not None:
+        row = conn.execute(
+            "SELECT * FROM elixir_projects WHERE project_id = ?",
+            (int(project_id),),
+        ).fetchone()
+        project = _row_to_project(row, conn)
+    else:
+        project = get_project(project_key or "", conn=conn)
+    if not project:
+        return None
+    return {
+        "project": project,
+        "events": _project_events(
+            conn,
+            project_id=int(project["project_id"]),
+            limit=event_limit,
+        ),
+        "communication_intents": _project_intents(
+            conn,
+            project_id=int(project["project_id"]),
+            limit=intent_limit,
+        ),
+    }
 
 
 def _compact_member(item: dict | None) -> dict:
