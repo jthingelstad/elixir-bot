@@ -119,6 +119,29 @@ def test_flag_member_watch_rejects_missing_args(memdb):
     assert "error" in result
 
 
+def test_flag_member_watch_can_upsert_decision_case(memdb):
+    db.snapshot_members(
+        [{"tag": "#ABC123", "name": "Vijay", "role": "member"}],
+    )
+
+    raw = tool_exec._execute_tool(
+        "flag_member_watch",
+        {
+            "member_tag": "Vijay",
+            "reason": "Silent past the inactivity threshold; review removal.",
+            "case_type": "inactivity_review",
+        },
+        workflow="awareness",
+    )
+    result = json.loads(raw)
+
+    assert result["success"] is True
+    assert result["case_id"]
+    case = db.get_decision_case_by_id(result["case_id"])
+    assert case["case_type"] == "inactivity_review"
+    assert case["target_player_tag"] == "#ABC123"
+
+
 # ---------------------------------------------------------------------------
 # record_leadership_followup
 # ---------------------------------------------------------------------------

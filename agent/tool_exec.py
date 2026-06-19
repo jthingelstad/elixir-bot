@@ -1122,6 +1122,7 @@ def _execute_flag_member_watch(arguments):
     member_tag_input = arguments.get("member_tag")
     reason = (arguments.get("reason") or "").strip()
     expires_at = arguments.get("expires_at")
+    case_type = (arguments.get("case_type") or "").strip()
 
     if not member_tag_input or not reason:
         return {"error": "flag_member_watch requires member_tag and reason"}
@@ -1147,12 +1148,29 @@ def _execute_flag_member_watch(arguments):
         return {"error": "flag_member_watch_failed", "detail": str(exc)}
 
     attach_tags(memory["memory_id"], ["watch-list"], actor="elixir:awareness-tool")
-    return {
+    case = None
+    if case_type:
+        try:
+            case = db.upsert_member_review_case(
+                case_type=case_type,
+                member={"tag": resolved_tag},
+                title=f"Watch: {resolved_tag}",
+                recommendation=reason,
+                rationale=reason,
+                due_at=expires_at,
+            )
+        except Exception as exc:
+            log.warning("flag_member_watch case upsert failed: %s", exc)
+    result = {
         "success": True,
         "memory_id": memory["memory_id"],
         "member_tag": resolved_tag,
         "type": "watch",
     }
+    if case:
+        result["case_id"] = case.get("case_id")
+        result["case_key"] = case.get("case_key")
+    return result
 
 
 def _execute_schedule_revisit(arguments):
@@ -1202,6 +1220,7 @@ def _execute_record_leadership_followup(arguments):
     topic = (arguments.get("topic") or "").strip()
     recommendation = (arguments.get("recommendation") or "").strip()
     member_tag_input = arguments.get("member_tag")
+    case_type = (arguments.get("case_type") or "").strip()
 
     if not topic or not recommendation:
         return {"error": "record_leadership_followup requires topic and recommendation"}
@@ -1226,12 +1245,39 @@ def _execute_record_leadership_followup(arguments):
         return {"error": "record_leadership_followup_failed", "detail": str(exc)}
 
     attach_tags(memory["memory_id"], ["followup"], actor="elixir:awareness-tool")
-    return {
+    case = None
+    if case_type:
+        try:
+            if resolved_tag:
+                case = db.upsert_member_review_case(
+                    case_type=case_type,
+                    member={"tag": resolved_tag},
+                    title=f"Followup: {topic}",
+                    recommendation=recommendation,
+                    rationale=recommendation,
+                )
+            else:
+                case = db.upsert_decision_case(
+                    case_type=case_type,
+                    title=f"Followup: {topic}",
+                    recommendation=recommendation,
+                    rationale=recommendation,
+                    subject_type="operation",
+                    subject_key=topic,
+                    state={"topic": topic},
+                )
+        except Exception as exc:
+            log.warning("record_leadership_followup case upsert failed: %s", exc)
+    result = {
         "success": True,
         "memory_id": memory["memory_id"],
         "member_tag": resolved_tag,
         "type": "followup",
     }
+    if case:
+        result["case_id"] = case.get("case_id")
+        result["case_key"] = case.get("case_key")
+    return result
 
 
 # ── Main dispatch ─────────────────────────────────────────────────────────

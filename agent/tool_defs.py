@@ -689,6 +689,11 @@ TOOLS = [
                     "type": "string",
                     "description": "Optional ISO date or ISO datetime after which the flag should be ignored (e.g. '2026-04-30'). Omit for an open-ended flag.",
                 },
+                "case_type": {
+                    "type": "string",
+                    "enum": ["inactivity_review", "promotion_review", "demotion_review", "war_recovery"],
+                    "description": "Optional durable decision-case type to create or update when this watch is actionable.",
+                },
             },
             "required": ["member_tag", "reason"],
         },
@@ -716,6 +721,11 @@ TOOLS = [
                 "member_tag": {
                     "type": "string",
                     "description": "Player tag, name, or Discord handle if the followup is scoped to a specific member. Optional.",
+                },
+                "case_type": {
+                    "type": "string",
+                    "enum": ["inactivity_review", "promotion_review", "demotion_review", "war_recovery"],
+                    "description": "Optional durable decision-case type to create or update when the followup is an actionable recommendation.",
                 },
             },
             "required": ["topic", "recommendation"],

@@ -2446,6 +2446,8 @@ def test_weekly_leader_actions_post_to_arena_relay():
             }],
         }),
         patch("runtime.jobs._core._kick_candidate_availability_memory", return_value=None),
+        patch("runtime.jobs._core.db.list_due_decision_cases", return_value=[]),
+        patch("runtime.jobs._core.db.upsert_member_review_case", return_value={"case_id": 99}),
         patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
@@ -2518,6 +2520,8 @@ def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppresse
             ],
         }),
         patch("runtime.jobs._core._kick_candidate_availability_memory", return_value=None),
+        patch("runtime.jobs._core.db.list_due_decision_cases", return_value=[]),
+        patch("runtime.jobs._core.db.upsert_member_review_case", return_value={"case_id": 99}),
         patch("runtime.jobs._core.db.has_recent_leader_action", side_effect=has_recent),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
@@ -2539,6 +2543,61 @@ def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppresse
     assert posted == 1
     assert mock_create.call_args.kwargs["target_player_tag"] == "#IDLE"
     assert mock_create.call_args.kwargs["target_player_name"] == "Fresh Idle"
+
+
+def test_leader_action_scan_posts_due_inactivity_case():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 1513758211206025227
+    channel.name = "leader-actions"
+    channel.type = "text"
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("runtime.jobs._core.db.get_promotion_candidates", return_value={"recommended": [], "demotion_candidates": []}),
+        patch("runtime.jobs._core.db.get_members_at_risk", return_value={
+            "members": [{
+                "member_ref": "xian",
+                "player_tag": "#UGQPVQ9U9",
+                "clan_rank": 30,
+                "reasons": [{"type": "inactive", "detail": "no battle in 10 days", "value": 10, "threshold_days": 7.6}],
+            }],
+        }),
+        patch("runtime.jobs._core.db.list_due_decision_cases", return_value=[{
+            "case_id": 77,
+            "case_type": "inactivity_review",
+            "target_player_tag": "#UGQPVQ9U9",
+            "target_player_name": "xian",
+            "recommendation": "Review xian for removal from the clan.",
+            "rationale": "10 days inactive vs 7.6 day threshold",
+        }]),
+        patch("runtime.jobs._core._kick_candidate_availability_memory", return_value=None),
+        patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
+        patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
+        patch("runtime.jobs._core.db.create_leader_action_recommendation", return_value={
+            "action_id": 77,
+            "action_key": "kick:#UGQPVQ9U9",
+            "status": "proposed",
+            "objective": "roster_health",
+            "case_id": 77,
+        }) as mock_create,
+        patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock(return_value=[
+            SimpleNamespace(id=7700),
+            SimpleNamespace(id=7701),
+        ])),
+        patch("runtime.jobs._core.db.save_message"),
+    ):
+        from runtime.jobs._core import _post_candidate_leader_action_recommendations
+        posted = asyncio.run(_post_candidate_leader_action_recommendations(max_actions=1))
+
+    assert posted == 1
+    assert mock_create.call_args.kwargs["case_id"] == 77
+    assert mock_create.call_args.kwargs["target_player_tag"] == "#UGQPVQ9U9"
 
 
 def test_leader_action_scan_skips_active_low_donation_war_candidates():
@@ -2569,6 +2628,7 @@ def test_leader_action_scan_skips_active_low_donation_war_candidates():
                 },
             ],
         }),
+        patch("runtime.jobs._core.db.list_due_decision_cases", return_value=[]),
         patch("runtime.jobs._core.db.create_leader_action_recommendation") as mock_create,
         patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock()) as mock_card,
         patch("runtime.jobs._core.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip,

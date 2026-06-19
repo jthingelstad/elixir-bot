@@ -376,6 +376,25 @@ def test_build_situation_includes_active_war_project_snapshot():
     assert situation["projects"]["war_season"] == project_snapshot
 
 
+def test_build_situation_includes_decision_case_snapshot():
+    case_snapshot = {
+        "due": [{
+            "case_id": 1,
+            "case_type": "inactivity_review",
+            "recommendation": "Review xian for removal.",
+        }],
+        "open": [],
+    }
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.decision_case_snapshot", return_value=case_snapshot),
+    ):
+        situation = build_situation(_bundle(signals=[]))
+
+    assert situation["decision_cases"] == case_snapshot
+
+
 # ---------------------------------------------------------------------------
 # Quiet-tick fast path
 # ---------------------------------------------------------------------------
