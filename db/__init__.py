@@ -633,6 +633,7 @@ _STORAGE_FACADE_MODULES = (
     "storage.awards",
     "storage.member_ranks",
     "storage.leader_actions",
+    "storage.improvements",
     "storage.runtime_status",
     "storage.screenshot_observations",
     "storage.clan_voyages",
