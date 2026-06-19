@@ -20,6 +20,7 @@ class ActivityDefinition:
     schedule_kind: str
     schedule_config: dict[str, Any]
     delivery_targets: tuple[str, ...]
+    activity_role: str = "communicator"
     manual_trigger_allowed: bool = True
     enabled_by_default: bool = True
     active_window: dict[str, Any] | None = None
@@ -46,6 +47,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Discord routed outcomes: #clan-events, #leaders",
         ),
+        activity_role="observer+communicator",
         legacy_commands=("heartbeat",),
     ),
     ActivityDefinition(
@@ -63,6 +65,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Storage: live war snapshots and river race log",
         ),
+        activity_role="observer",
         manual_trigger_allowed=False,
     ),
     ActivityDefinition(
@@ -80,6 +83,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Discord routed outcomes: #river-race, optional #leader-actions leader actions, optional #leaders",
         ),
+        activity_role="observer+communicator",
     ),
     ActivityDefinition(
         activity_key="player-progression",
@@ -96,6 +100,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Discord: #player-highlights",
         ),
+        activity_role="observer+communicator",
         legacy_commands=("player-intel",),
     ),
     ActivityDefinition(
@@ -115,6 +120,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "Storage: durable awards rows",
             "Discord routed outcomes: #clan-events on new grants",
         ),
+        activity_role="observer+communicator",
     ),
     ActivityDefinition(
         activity_key="daily-clan-insight",
@@ -130,6 +136,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Discord: #ask-elixir",
         ),
+        activity_role="communicator",
     ),
     ActivityDefinition(
         activity_key="leadership-action-scan",
@@ -146,6 +153,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Discord: #leader-actions singular leader action cards",
         ),
+        activity_role="observer+communicator",
         legacy_commands=("leadership-actions",),
     ),
     ActivityDefinition(
@@ -165,6 +173,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Discord: #leader-actions weekly no-link Discord invite copy",
         ),
+        activity_role="communicator",
         legacy_commands=("discord-invite-relay",),
     ),
     ActivityDefinition(
@@ -182,6 +191,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Discord: #leaders",
         ),
+        activity_role="observer+communicator",
     ),
     ActivityDefinition(
         activity_key="weekly-recap",
@@ -199,6 +209,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "Discord: #announcements",
             "POAP KINGS: weekly members payload",
         ),
+        activity_role="communicator",
     ),
     ActivityDefinition(
         activity_key="site-content",
@@ -216,6 +227,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "POAP KINGS: clan payload",
             "POAP KINGS: roster payload",
         ),
+        activity_role="communicator",
         legacy_commands=("poap-kings-site-sync",),
     ),
     ActivityDefinition(
@@ -234,6 +246,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "Discord: #recruiting",
             "POAP KINGS: promotion payloads",
         ),
+        activity_role="communicator",
         legacy_commands=("promotion",),
     ),
     ActivityDefinition(
@@ -250,6 +263,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Storage: card_catalog table",
         ),
+        activity_role="observer",
     ),
     ActivityDefinition(
         activity_key="api-sentinel",
@@ -267,6 +281,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "Storage: api_sentinel_observations",
             "Discord: #leaders on first-seen CR API schema or event drift",
         ),
+        activity_role="observer+communicator",
     ),
     ActivityDefinition(
         activity_key="db-maintenance",
@@ -283,6 +298,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Discord webhook: #elixir-log",
         ),
+        activity_role="observer+communicator",
     ),
     ActivityDefinition(
         activity_key="clan-wars-intel",
@@ -300,6 +316,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Discord: #river-race",
         ),
+        activity_role="communicator",
         manual_trigger_allowed=True,
         enabled_by_default=False,
         legacy_commands=("intel-report",),
@@ -358,6 +375,7 @@ def resolve_activity(activity_key: str, runtime_module: Any) -> dict[str, Any]:
     return {
         "definition": activity,
         "activity_key": activity.activity_key,
+        "activity_role": activity.activity_role,
         "owner_subagent": activity.owner_subagent,
         "purpose": activity.purpose,
         "job_id": activity.job_id,
@@ -413,6 +431,7 @@ def schedule_specs_from_registry(runtime_module: Any) -> list[dict[str, Any]]:
         specs.append(
             {
                 "activity_key": activity.activity_key,
+                "activity_role": activity.activity_role,
                 "owner_subagent": activity.owner_subagent,
                 "purpose": activity.purpose,
                 "job_id": activity.job_id,

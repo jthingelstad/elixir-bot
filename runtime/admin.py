@@ -476,7 +476,7 @@ def _build_activity_list_report() -> str:
     lines = [f"**Elixir Activities ({len(specs)})**"]
     for spec in specs:
         lines.append(
-            f"- `{spec['activity_key']}` — {spec['owner_subagent']} — {spec['schedule']}"
+            f"- `{spec['activity_key']}` — {spec['owner_subagent']} — {spec['activity_role']} — {spec['schedule']}"
         )
         lines.append(
             f"  {spec['purpose']}"
@@ -490,6 +490,7 @@ def _build_activity_show_report(activity_key: str) -> str:
     resolved = resolve_activity(activity_key, elixir)
     lines = [f"**Activity: {resolved['activity_key']}**"]
     lines.append(f"- Owner: `{resolved['owner_subagent']}`")
+    lines.append(f"- Role: {resolved['activity_role']}")
     lines.append(f"- Purpose: {resolved['purpose']}")
     lines.append(f"- Job: `{resolved['job_function']}`")
     lines.append(f"- Schedule: {next(spec['schedule'] for spec in schedule_specs_from_registry(elixir) if spec['activity_key'] == resolved['activity_key'])}")

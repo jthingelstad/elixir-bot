@@ -138,6 +138,37 @@ def _compact_post_row(row: dict) -> dict:
     }
 
 
+def _compact_event_row(row: dict) -> dict:
+    return {
+        "event_key": row.get("event_key"),
+        "event_type": row.get("event_type"),
+        "scope": row.get("scope"),
+        "subject_type": row.get("subject_type"),
+        "subject_key": row.get("subject_key"),
+        "source_signal_key": row.get("source_signal_key"),
+        "season_id": row.get("season_id"),
+        "war_week": row.get("war_week"),
+        "observed_at": row.get("observed_at"),
+    }
+
+
+def _compact_intent_row(row: dict) -> dict:
+    return {
+        "intent_id": row.get("intent_id"),
+        "workflow": row.get("workflow"),
+        "intent_type": row.get("intent_type"),
+        "status": row.get("status"),
+        "target_channel_key": row.get("target_channel_key"),
+        "source_signal_key": row.get("source_signal_key"),
+        "source_signal_type": row.get("source_signal_type"),
+        "case_id": row.get("case_id"),
+        "project_id": row.get("project_id"),
+        "summary": _clip_text(row.get("summary"), 200),
+        "skipped_reason": _clip_text(row.get("skipped_reason"), 160),
+        "updated_at": row.get("updated_at"),
+    }
+
+
 def _contradiction_text(item: dict) -> str:
     fields = (
         "stored",
@@ -268,12 +299,46 @@ def _build_memory_synthesis_context():
     except Exception:
         log.warning("memory synthesis: war status load failed", exc_info=True)
 
+    operations_context = {}
+    try:
+        operations_context["event_windows"] = db.summarize_events_by_window(
+            windows=(7, 28, 56, 90),
+            scope=None,
+        )
+        operations_context["recent_events"] = [
+            _compact_event_row(row)
+            for row in db.list_recent_events(days=7, limit=50)
+        ]
+    except Exception:
+        log.warning("memory synthesis: event stream load failed", exc_info=True)
+    try:
+        operations_context["projects"] = {
+            "war_season": db.get_active_war_season_project_snapshot(),
+        }
+    except Exception:
+        log.warning("memory synthesis: project context load failed", exc_info=True)
+    try:
+        operations_context["decision_cases"] = db.decision_case_snapshot(
+            open_limit=20,
+            due_limit=20,
+        )
+    except Exception:
+        log.warning("memory synthesis: decision case context load failed", exc_info=True)
+    try:
+        operations_context["recent_intents"] = [
+            _compact_intent_row(row)
+            for row in db.list_recent_communication_intents(limit=25)
+        ]
+    except Exception:
+        log.warning("memory synthesis: communication intent context load failed", exc_info=True)
+
     return {
         "week_window": {"start": week_ago, "end": now.strftime("%Y-%m-%dT%H:%M:%S"), "war_week_id": week_id},
         "week_memories": [_compact_memory_row(m) for m in week_memories],
         "prior_arcs": [_compact_memory_row(m) for m in prior_arcs],
         "week_posts": posts_by_channel,
         "live_clan_state": clan_state,
+        "operations_context": operations_context,
     }
 
 

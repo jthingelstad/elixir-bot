@@ -202,6 +202,16 @@ def _build_ask_elixir_daily_insight_context(clan, war):
         lambda: db.get_clan_recently_played_cards(days=14, limit=20) or [],
         [],
     )
+    event_windows = _query_or_default(
+        "public_event_windows",
+        lambda: db.summarize_events_by_window(windows=(7,), scope="public") or {},
+        {},
+    )
+    recent_events = _query_or_default(
+        "public_recent_events",
+        lambda: db.list_recent_events(days=7, scope="public", limit=8) or [],
+        [],
+    )
 
     lines = [
         "Write one short daily fun fact for #ask-elixir that teaches members something about a Clash Royale card.",
@@ -216,6 +226,25 @@ def _build_ask_elixir_daily_insight_context(clan, war):
         "Do not turn it into a recap, reminder, call to action, leadership note, or war order.",
         "If today's data does not support a genuinely interesting insight, return null.",
     ]
+    if event_windows or recent_events:
+        lines.extend([
+            "",
+            "=== RECENT PUBLIC EVENT PULSE (variety guardrail, not recap material) ===",
+            "Use this only to avoid repeating yesterday's clan topic. Do not mention these events directly.",
+        ])
+        seven_day = (event_windows.get("7d") or {}) if isinstance(event_windows, dict) else {}
+        by_type = seven_day.get("by_type") or {}
+        if by_type:
+            top_types = sorted(by_type.items(), key=lambda item: (-item[1], item[0]))[:5]
+            lines.append("7d event types: " + ", ".join(f"{event_type}={count}" for event_type, count in top_types))
+        if recent_events:
+            lines.append(
+                "recent events: "
+                + "; ".join(
+                    f"{event.get('event_type')}:{event.get('subject_key') or event.get('source_signal_key')}"
+                    for event in recent_events[:5]
+                )
+            )
     if played_cards:
         lines.extend([
             "",

@@ -1542,6 +1542,12 @@ def test_ask_elixir_daily_insight_posts_fun_fact():
         patch("runtime.jobs._core._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS", "tag": "#J2RGCRVG", "memberList": [{"name": "Jamie"}]}, {}))),
         patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 50, "donations_week_total": 12345, "avg_member_trophies": 8123}),
         patch("elixir.db.build_clan_trend_summary_context", return_value="Clan score is up over the last 7 days."),
+        patch("elixir.db.summarize_events_by_window", return_value={
+            "7d": {"total": 4, "by_type": {"member_join": 2, "arena_change": 1}},
+        }),
+        patch("elixir.db.list_recent_events", return_value=[
+            {"event_type": "member_join", "subject_key": "#ABC", "source_signal_key": "join:#ABC"},
+        ]),
         patch("elixir.db.get_members_on_hot_streak", return_value=[{"name": "Jamie", "current_streak": 5}]),
         patch("elixir.db.get_trending_war_contributors", return_value={"members": [{"name": "Vijay", "trend_delta": 240}]}),
         patch("elixir.db.list_longest_tenure_members", return_value=[{"name": "King Levy", "joined_date": "2023-01-01"}]),
@@ -1563,6 +1569,10 @@ def test_ask_elixir_daily_insight_posts_fun_fact():
 
     assert mock_generate.call_args.args[0] == "#ask-elixir"
     assert mock_generate.call_args.args[1] == "ask-elixir"
+    context = mock_generate.call_args.args[2]
+    assert "RECENT PUBLIC EVENT PULSE (variety guardrail, not recap material)" in context
+    assert "7d event types: member_join=2, arena_change=1" in context
+    assert "recent events: member_join:#ABC" in context
     mock_post.assert_awaited_once()
     assert mock_save.call_args.kwargs["workflow"] == "ask-elixir"
     assert mock_save.call_args.kwargs["event_type"] == "daily_clan_insight"
@@ -2885,6 +2895,10 @@ def test_activity_registry_has_unique_keys_and_required_fields():
     assert activities
     keys = [activity.activity_key for activity in activities]
     assert len(keys) == len(set(keys))
+    assert all(
+        activity.activity_role in {"observer", "communicator", "observer+communicator"}
+        for activity in activities
+    )
     assert all(activity.owner_subagent for activity in activities)
     assert all(activity.job_id for activity in activities)
     assert all(activity.job_function for activity in activities)
@@ -2904,31 +2918,39 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
 
     assert "war-poll" in specs
     assert specs["war-poll"]["owner_subagent"] == "river-race"
+    assert specs["war-poll"]["activity_role"] == "observer"
     assert specs["war-poll"]["schedule"] == "Every hour at :00 CT."
     assert "war-awareness" in specs
     assert specs["war-awareness"]["owner_subagent"] == "river-race"
+    assert specs["war-awareness"]["activity_role"] == "observer+communicator"
     assert specs["war-awareness"]["schedule"] == "Every hour at :05 CT."
     assert "#river-race" in " ".join(specs["war-awareness"]["delivery_targets"])
     assert "daily-clan-insight" in specs
     assert specs["daily-clan-insight"]["owner_subagent"] == "ask-elixir"
+    assert specs["daily-clan-insight"]["activity_role"] == "communicator"
     assert "Discord: #ask-elixir" in specs["daily-clan-insight"]["delivery_targets"]
     assert specs["daily-clan-insight"]["schedule"] == "Daily at 12:00 CT."
     assert "leadership-action-scan" in specs
     assert specs["leadership-action-scan"]["owner_subagent"] == "arena-relay"
+    assert specs["leadership-action-scan"]["activity_role"] == "observer+communicator"
     assert specs["leadership-action-scan"]["schedule"] == "Every 240 minutes."
     assert "Discord: #leader-actions singular leader action cards" in specs["leadership-action-scan"]["delivery_targets"]
     assert "weekly-discord-invite-relay" in specs
     assert specs["weekly-discord-invite-relay"]["owner_subagent"] == "arena-relay"
+    assert specs["weekly-discord-invite-relay"]["activity_role"] == "communicator"
     assert specs["weekly-discord-invite-relay"]["schedule"] == "Every Sat at 11:00 CT."
     assert "Discord: #leader-actions weekly no-link Discord invite copy" in specs["weekly-discord-invite-relay"]["delivery_targets"]
     assert "db-maintenance" in specs
     assert specs["db-maintenance"]["owner_subagent"] == "elixir-log"
+    assert specs["db-maintenance"]["activity_role"] == "observer+communicator"
     assert "Discord webhook: #elixir-log" in specs["db-maintenance"]["delivery_targets"]
     assert "api-sentinel" in specs
     assert specs["api-sentinel"]["owner_subagent"] == "leader-lounge"
+    assert specs["api-sentinel"]["activity_role"] == "observer+communicator"
     assert specs["api-sentinel"]["schedule"] == "Every 240 minutes."
     assert "Discord: #leaders on first-seen CR API schema or event drift" in specs["api-sentinel"]["delivery_targets"]
     assert "promotion-content" in specs
+    assert specs["promotion-content"]["activity_role"] == "communicator"
     assert "Discord: #recruiting" in specs["promotion-content"]["delivery_targets"]
     assert "POAP KINGS: promotion payloads" in specs["promotion-content"]["delivery_targets"]
 
@@ -3858,6 +3880,41 @@ def test_build_weekly_clan_recap_context_summarizes_week():
     assert "=== CLAN TREND SUMMARY ===" in report
     assert "battle pulse heaters: Finn won 5 straight" in report
     assert "recent joins this week: Newbie" in report
+
+
+def test_weekly_recap_context_includes_project_and_event_stream_pulse():
+    with (
+        patch("memory_store.list_memories", return_value=[]),
+        patch("elixir.db.get_weekly_digest_summary", return_value={"window_days": 7}),
+        patch("elixir.db.build_clan_trend_summary_context", return_value=""),
+        patch("elixir.db.build_clan_voyage_context", return_value="No Clan Voyage screenshots"),
+        patch("elixir.db.get_active_war_season_project_snapshot", return_value={
+            "project_key": "war_season:133",
+            "summary": "Season 133; Week 3; Battle Day 2; rank 1",
+            "state": {
+                "participation_health": {
+                    "engaged_count": 12,
+                    "total_participants": 43,
+                    "untouched_count": 31,
+                    "finished_count": 8,
+                },
+            },
+        }),
+        patch("elixir.db.summarize_events_by_window", return_value={
+            "7d": {"total": 14, "by_type": {"member_join": 3, "war_battle_day_started": 2}},
+            "28d": {"total": 40, "by_type": {}},
+        }),
+        patch("elixir.db.list_recent_events", return_value=[
+            {"event_type": "member_join", "subject_key": "#ABC", "source_signal_key": "join:#ABC"},
+        ]),
+    ):
+        report = elixir._build_weekly_clan_recap_context({"name": "POAP KINGS"}, {})
+
+    assert "active war-season project: Season 133; Week 3; Battle Day 2; rank 1" in report
+    assert "war project participation: engaged 12/43 | untouched 31 | finished 8" in report
+    assert "event stream pulse: 7d 14 events | 28d 40 events" in report
+    assert "top 7d event types: member_join=3, war_battle_day_started=2" in report
+    assert "recent event stream examples: member_join:#ABC" in report
 
 
 def test_share_channel_result_rewrites_member_refs_before_posting():
