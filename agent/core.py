@@ -122,7 +122,18 @@ def _content_has_anthropic_payload(content) -> bool:
     if isinstance(content, str):
         return bool(content.strip())
     if isinstance(content, list):
-        return bool(content)
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    if str(block.get("text") or "").strip():
+                        return True
+                    continue
+                if block.get("type"):
+                    return True
+                continue
+            if block:
+                return True
+        return False
     return True
 
 
