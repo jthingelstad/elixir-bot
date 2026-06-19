@@ -46,6 +46,8 @@ def test_v2_schema_initializes_core_tables():
             "elixir_projects",
             "project_event_links",
             "decision_cases",
+            "communication_intents",
+            "communication_intent_event_links",
             "leader_action_recommendations",
             "runtime_job_status",
             "arena_relay_screenshot_observations",
@@ -396,6 +398,134 @@ def test_decision_case_tracks_inactivity_review_deferral_lifecycle():
         assert db.list_due_decision_cases(now="2026-06-22T11:59:00", conn=conn) == []
         due = db.list_due_decision_cases(now="2026-06-22T12:00:00", conn=conn)
         assert [item["case_id"] for item in due] == [case["case_id"]]
+    finally:
+        conn.close()
+
+
+def test_communication_intent_traces_message_to_case_project_and_event():
+    conn = db.get_connection(":memory:")
+    try:
+        signal = {
+            "type": "inactive_members",
+            "signal_key": "inactive:#ABC",
+            "target_player_tag": "#ABC",
+            "target_player_name": "Alice",
+            "season_id": 129,
+        }
+        events = db.record_signal_events(
+            [signal],
+            source_system="clan_awareness",
+            source_detector="detect_inactivity",
+            conn=conn,
+        )
+        event = events[0]
+        project = db.upsert_project(
+            project_key="war_season:129",
+            project_type="war_season",
+            title="War season 129",
+            season_id=129,
+            conn=conn,
+        )
+        db.link_project_event(
+            project_id=project["project_id"],
+            event_key=event["event_key"],
+            conn=conn,
+        )
+        case = db.upsert_decision_case(
+            case_type="inactivity_review",
+            title="Review Alice",
+            target_player_tag="#ABC",
+            target_player_name="Alice",
+            source_signal_key="inactive:#ABC",
+            source_signal_type="inactive_members",
+            source_event_key=event["event_key"],
+            conn=conn,
+        )
+
+        intent = db.create_awareness_post_intent(
+            {
+                "channel": "leader-lounge",
+                "event_type": "inactivity_review",
+                "summary": "Review Alice",
+                "content": "Alice needs a leader review.",
+                "covers_signal_keys": ["inactive:#ABC"],
+            },
+            [signal],
+            workflow="clan_awareness",
+            conn=conn,
+        )
+        assert intent["status"] == "planned"
+        assert intent["case_id"] == case["case_id"]
+        assert intent["project_id"] == project["project_id"]
+        assert intent["event_keys"] == [event["event_key"]]
+
+        delivered = db.mark_communication_intent_delivered(
+            intent["intent_id"],
+            target_channel_id=777,
+            message_ids=[888],
+            conn=conn,
+        )
+        assert delivered["status"] == "delivered"
+        message_id = db.save_message(
+            "channel:777",
+            "assistant",
+            "Alice needs a leader review.",
+            channel_id=777,
+            channel_name="leaders",
+            workflow="leader-lounge",
+            event_type="inactivity_review",
+            discord_message_id=888,
+            intent_id=intent["intent_id"],
+            conn=conn,
+        )
+        db.upsert_signal_outcome(
+            "inactive:#ABC",
+            "inactive_members",
+            "leader-lounge",
+            777,
+            "inactivity_review",
+            delivery_status="delivered",
+            intent_id=intent["intent_id"],
+            conn=conn,
+        )
+
+        message = db.get_message_by_discord_message_id(888, conn=conn)
+        assert message["message_id"] == message_id
+        assert message["intent_id"] == intent["intent_id"]
+        outcome = db.get_signal_outcome("inactive:#ABC", "leader-lounge", "inactivity_review", conn=conn)
+        assert outcome["intent_id"] == intent["intent_id"]
+        trace = db.get_communication_trace_for_message(888, conn=conn)
+        assert trace["intent"]["intent_id"] == intent["intent_id"]
+        assert trace["case"]["case_id"] == case["case_id"]
+        assert trace["project"]["project_id"] == project["project_id"]
+        assert [item["event_key"] for item in trace["events"]] == [event["event_key"]]
+    finally:
+        conn.close()
+
+
+def test_awareness_skip_intent_records_due_case_silence():
+    conn = db.get_connection(":memory:")
+    try:
+        case = db.upsert_decision_case(
+            case_type="inactivity_review",
+            title="Review Alice",
+            target_player_tag="#ABC",
+            target_player_name="Alice",
+            status="open",
+            due_at="2026-06-19T12:00:00",
+            conn=conn,
+        )
+        intent = db.create_awareness_skip_intent(
+            [],
+            workflow="clan_awareness",
+            skipped_reason="No leader post needed yet.",
+            situation={"decision_cases": {"due": [case], "open": []}},
+            conn=conn,
+        )
+        assert intent["status"] == "skipped"
+        assert intent["intent_type"] == "skip"
+        assert intent["case_id"] == case["case_id"]
+        assert intent["skipped_reason"] == "No leader post needed yet."
     finally:
         conn.close()
 

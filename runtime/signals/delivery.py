@@ -1780,13 +1780,71 @@ async def _deliver_arena_relay_sidecars(signals, clan, war) -> int:
     return delivered
 
 
-async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
+async def _create_awareness_post_intent(post: dict, signals: list[dict], *, workflow: str | None, situation: dict | None) -> dict | None:
+    try:
+        return await asyncio.to_thread(
+            db.create_awareness_post_intent,
+            post,
+            signals or [],
+            workflow=workflow or "awareness",
+            situation=situation,
+        )
+    except Exception:
+        log.warning(
+            "communication intent create failed for awareness post channel=%r",
+            (post or {}).get("channel"),
+            exc_info=True,
+        )
+        return None
+
+
+async def _create_awareness_skip_intent(plan: dict, signals: list[dict], *, workflow: str | None, situation: dict | None) -> dict | None:
+    skipped_reason = (plan or {}).get("skipped_reason")
+    if not skipped_reason:
+        return None
+    try:
+        return await asyncio.to_thread(
+            db.create_awareness_skip_intent,
+            signals or [],
+            workflow=workflow or "awareness",
+            skipped_reason=skipped_reason,
+            situation=situation,
+        )
+    except Exception:
+        log.warning("communication skip intent create failed for workflow=%r", workflow, exc_info=True)
+        return None
+
+
+async def _mark_awareness_intent_failed(
+    intent: dict | None,
+    reason: str,
+    *,
+    target_channel_id: str | int | None = None,
+    payload: dict | None = None,
+) -> None:
+    intent_id = (intent or {}).get("intent_id")
+    if intent_id is None:
+        return
+    try:
+        await asyncio.to_thread(
+            db.mark_communication_intent_failed,
+            intent_id,
+            error_detail=reason,
+            target_channel_id=target_channel_id,
+            payload=payload,
+        )
+    except Exception:
+        log.warning("communication intent failure mark failed intent_id=%s", intent_id, exc_info=True)
+
+
+async def _deliver_awareness_post(post: dict, signals: list[dict], *, intent: dict | None = None) -> bool:
     facade = _facade()
     from runtime.situation import CHANNEL_LANES
 
     channel_key = (post.get("channel") or "").strip()
     if channel_key not in CHANNEL_LANES:
         log.warning("awareness post rejected: unknown channel %r", channel_key)
+        await _mark_awareness_intent_failed(intent, f"unknown channel: {channel_key or '<empty>'}")
         return False
     leads_with = (post.get("leads_with") or "").strip()
     if leads_with and leads_with not in CHANNEL_LANES[channel_key]:
@@ -1796,6 +1854,7 @@ async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
             channel_key,
             sorted(CHANNEL_LANES[channel_key]),
         )
+        await _mark_awareness_intent_failed(intent, f"lane mismatch: {leads_with} not allowed on {channel_key}")
         return False
 
     covers = list(post.get("covers_signal_keys") or [])
@@ -1805,6 +1864,7 @@ async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
             channel_key,
             len(signals),
         )
+        await _mark_awareness_intent_failed(intent, "empty covers_signal_keys")
         return False
 
     if covers:
@@ -1818,21 +1878,29 @@ async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
                     signal_source_key(sig),
                     channel_key,
                 )
+                await _mark_awareness_intent_failed(intent, "leadership-only signal routed to public channel")
                 return False
 
     try:
         channel_config = facade._channel_config_by_key(channel_key)
     except RuntimeError:
         log.warning("awareness post rejected: channel %r not configured", channel_key)
+        await _mark_awareness_intent_failed(intent, f"channel not configured: {channel_key}")
         return False
     channel = _bot().get_channel(channel_config["id"])
     if not channel:
         log.warning("awareness post rejected: channel %r not found in Discord", channel_key)
+        await _mark_awareness_intent_failed(
+            intent,
+            f"channel not found: {channel_key}",
+            target_channel_id=channel_config["id"],
+        )
         return False
 
     content = post.get("content")
     if not content:
         log.warning("awareness post on %r had empty content", channel_key)
+        await _mark_awareness_intent_failed(intent, "empty content", target_channel_id=channel_config["id"])
         return False
 
     result = {
@@ -1841,10 +1909,18 @@ async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
         "content": content,
     }
     try:
-        await facade._post_to_elixir(channel, result)
-    except Exception:
+        sent_messages = await facade._post_to_elixir(channel, result)
+    except Exception as exc:
         log.error("awareness post send failed channel=%r", channel_key, exc_info=True)
+        await _mark_awareness_intent_failed(
+            intent,
+            str(exc),
+            target_channel_id=channel_config["id"],
+            payload={"result": result},
+        )
         return False
+    if not isinstance(sent_messages, list):
+        sent_messages = []
 
     app = _runtime_app()
     posts = app._entry_posts(result)
@@ -1857,7 +1933,13 @@ async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
         channel_kind = str(channel_kind)
     summary = result.get("summary")
     event_type = result.get("event_type")
+    intent_id = (intent or {}).get("intent_id")
+    sent_message_ids = []
     for index, body_part in enumerate(posts):
+        sent_message = sent_messages[index] if index < len(sent_messages) else None
+        sent_message_id = getattr(sent_message, "id", None)
+        if sent_message_id is not None:
+            sent_message_ids.append(sent_message_id)
         post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
         post_event_type = event_type if index == 0 else f"{event_type}_part"
         await asyncio.to_thread(
@@ -1871,8 +1953,11 @@ async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
             channel_kind=channel_kind,
             workflow=channel_config["subagent_key"],
             event_type=post_event_type,
+            discord_message_id=sent_message_id,
+            intent_id=intent_id,
             raw_json={
                 "source": "awareness_loop",
+                "communication_intent_id": intent_id,
                 "leads_with": post.get("leads_with"),
                 "covers_signal_keys": post.get("covers_signal_keys") or [],
                 "result": result,
@@ -1894,9 +1979,26 @@ async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
             required=True,
             delivery_status="delivered",
             payload={"result": result, "signals": [signal]},
+            intent_id=intent_id,
             mark_attempt=True,
             delivered=True,
         )
+
+    if intent_id is not None:
+        try:
+            await asyncio.to_thread(
+                db.mark_communication_intent_delivered,
+                intent_id,
+                target_channel_id=channel_id,
+                message_ids=sent_message_ids,
+                payload={
+                    "result": result,
+                    "delivered_post_count": len(posts),
+                    "covered_signal_keys": covers,
+                },
+            )
+        except Exception:
+            log.warning("communication intent delivered mark failed intent_id=%s", intent_id, exc_info=True)
 
     from runtime.helpers._common import _safe_create_task
 
@@ -1913,17 +2015,31 @@ async def _deliver_awareness_post(post: dict, signals: list[dict]) -> bool:
     return True
 
 
-async def _deliver_awareness_post_plan(plan: dict, signals: list[dict]) -> dict:
+async def _deliver_awareness_post_plan(
+    plan: dict,
+    signals: list[dict],
+    *,
+    workflow: str | None = None,
+    situation: dict | None = None,
+) -> dict:
     facade = _facade()
     posts = (plan or {}).get("posts") or []
     delivered = 0
     rejected = 0
     covered: set[str] = set()
     attempted: set[str] = set()
+    if not posts:
+        await _create_awareness_skip_intent(plan or {}, signals or [], workflow=workflow, situation=situation)
     for post in posts:
         post_keys = {str(key) for key in (post.get("covers_signal_keys") or []) if key}
         attempted |= post_keys
-        ok = await facade._deliver_awareness_post(post, signals or [])
+        intent = await _create_awareness_post_intent(
+            post,
+            signals or [],
+            workflow=workflow,
+            situation=situation,
+        )
+        ok = await facade._deliver_awareness_post(post, signals or [], intent=intent)
         if ok:
             delivered += 1
             covered |= post_keys
@@ -1981,7 +2097,12 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         log.warning("awareness loop returned no plan; falling back to per-signal delivery")
         return await facade._deliver_signal_group(signals, clan, war)
 
-    report = await facade._deliver_awareness_post_plan(plan, signals)
+    report = await facade._deliver_awareness_post_plan(
+        plan,
+        signals,
+        workflow=workflow,
+        situation=situation,
+    )
     relay_sidecars = await facade._deliver_arena_relay_sidecars(signals, clan, war)
 
     hard_required_keys = {hp.get("signal_key") for hp in (situation.get("hard_post_signals") or [])}

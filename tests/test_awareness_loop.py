@@ -1,6 +1,7 @@
 """Tests for the Phase 4 awareness-loop architecture."""
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 # Import elixir first so the full runtime.app + runtime.jobs module graph
@@ -439,6 +440,16 @@ def test_situation_is_not_quiet_with_hard_post_floor():
     assert situation_is_quiet(situation) is False
 
 
+def test_situation_is_not_quiet_with_due_decision_case():
+    situation = {
+        "_raw_signal_count": 0,
+        "hard_post_signals": [],
+        "decision_cases": {"due": [{"case_id": 1, "case_type": "inactivity_review"}], "open": []},
+        "time": {"phase": "practice", "hours_remaining_in_day": 18},
+    }
+    assert situation_is_quiet(situation) is False
+
+
 def test_situation_is_not_quiet_within_one_hour_of_battle_deadline():
     situation = {
         "_raw_signal_count": 0,
@@ -463,6 +474,72 @@ def test_deliver_awareness_post_rejects_lane_mismatch():
     post = {"channel": "river-race", "leads_with": "milestone", "content": "x"}
     delivered = asyncio.run(signals_module._deliver_awareness_post(post, []))
     assert delivered is False
+
+
+def test_deliver_awareness_post_records_intent_links_on_message_and_outcome():
+    post = {
+        "channel": "clan-events",
+        "leads_with": "clan_event",
+        "event_type": "member_join_public",
+        "summary": "Alice joined",
+        "content": "Welcome Alice.",
+        "covers_signal_keys": ["join:A"],
+    }
+    signal = {"type": "member_join", "signal_key": "join:A", "name": "Alice"}
+    channel = SimpleNamespace(id=777, name="clan-events", type="text")
+    sent = SimpleNamespace(id=888)
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._signals.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals._channel_config_by_key", return_value={
+            "id": 777,
+            "name": "clan-events",
+            "subagent_key": "clan-events",
+            "memory_scope": "public",
+        }),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("runtime.jobs._signals._post_to_elixir", new=AsyncMock(return_value=[sent])),
+        patch("runtime.jobs._signals.db.save_message") as mock_save,
+        patch("runtime.jobs._signals.db.upsert_signal_outcome") as mock_outcome,
+        patch("runtime.jobs._signals.db.mark_communication_intent_delivered") as mock_mark,
+    ):
+        delivered = asyncio.run(
+            signals_module._deliver_awareness_post(post, [signal], intent={"intent_id": 99})
+        )
+
+    assert delivered is True
+    assert mock_save.call_args.kwargs["discord_message_id"] == 888
+    assert mock_save.call_args.kwargs["intent_id"] == 99
+    assert mock_save.call_args.kwargs["raw_json"]["communication_intent_id"] == 99
+    assert mock_outcome.call_args.kwargs["intent_id"] == 99
+    mock_mark.assert_called_once()
+    assert mock_mark.call_args.args[0] == 99
+    assert mock_mark.call_args.kwargs["message_ids"] == [888]
+
+
+def test_deliver_awareness_post_marks_intent_failed_when_rejected():
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._signals.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals.db.mark_communication_intent_failed") as mock_failed,
+    ):
+        delivered = asyncio.run(
+            signals_module._deliver_awareness_post(
+                {"channel": "ghost-channel", "leads_with": "war", "content": "x"},
+                [],
+                intent={"intent_id": 42},
+            )
+        )
+
+    assert delivered is False
+    mock_failed.assert_called_once()
+    assert mock_failed.call_args.args[0] == 42
+    assert "unknown channel" in mock_failed.call_args.kwargs["error_detail"]
 
 
 def test_deliver_signal_group_via_awareness_falls_back_for_uncovered_hard_floor():
@@ -631,6 +708,38 @@ def test_deliver_signal_group_via_awareness_marks_considered_skipped_non_hard_si
     mock_mark.assert_awaited()
     marked_signals = mock_mark.await_args_list[-1].args[0]
     assert arena_signal in marked_signals
+
+
+def test_deliver_signal_group_via_awareness_records_skip_intent_for_empty_plan():
+    arena_signal = {
+        "type": "arena_change",
+        "signal_key": "arena:#ABC",
+        "tag": "#ABC",
+    }
+    empty_plan = {"posts": [], "skipped_reason": "not worth a post"}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._signals.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.get_members_on_hot_streak", return_value=[]),
+        patch("runtime.jobs._signals.elixir_agent.run_awareness_tick", return_value=empty_plan),
+        patch("runtime.jobs._signals.db.record_awareness_tick"),
+        patch("runtime.jobs._signals.db.create_awareness_skip_intent", return_value={"intent_id": 77}) as mock_intent,
+        patch("runtime.jobs._signals._mark_signal_group_completed", new=AsyncMock()),
+    ):
+        ok = asyncio.run(
+            signals_module._deliver_signal_group_via_awareness([arena_signal], {}, {}, workflow="clan_awareness")
+        )
+
+    assert ok is True
+    mock_intent.assert_called_once()
+    assert mock_intent.call_args.args[0] == [arena_signal]
+    assert mock_intent.call_args.kwargs["workflow"] == "clan_awareness"
+    assert mock_intent.call_args.kwargs["skipped_reason"] == "not worth a post"
 
 
 def test_deliver_signal_group_via_awareness_records_event_keys_in_tick_audit():
