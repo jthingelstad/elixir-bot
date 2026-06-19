@@ -2236,7 +2236,51 @@ def _migration_49(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49]
+def _migration_50(conn: sqlite3.Connection) -> None:
+    """Add durable event rollups for post-retention stream history."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS event_rollups (
+            rollup_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rollup_key TEXT NOT NULL UNIQUE,
+            rollup_type TEXT NOT NULL,
+            scope TEXT NOT NULL DEFAULT 'public',
+            subject_type TEXT,
+            subject_key TEXT,
+            project_key TEXT,
+            season_id TEXT,
+            period_start TEXT NOT NULL,
+            period_end TEXT NOT NULL,
+            source_event_count INTEGER NOT NULL DEFAULT 0,
+            summary_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_event_rollups_type_period "
+        "ON event_rollups(rollup_type, period_end DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_event_rollups_scope_period "
+        "ON event_rollups(scope, period_end DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_event_rollups_subject_period "
+        "ON event_rollups(subject_type, subject_key, period_end DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_event_rollups_project "
+        "ON event_rollups(project_key, period_end DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_event_rollups_season "
+        "ON event_rollups(season_id, period_end DESC)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49, _migration_50]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

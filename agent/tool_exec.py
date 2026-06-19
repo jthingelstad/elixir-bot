@@ -792,6 +792,9 @@ def _execute_get_elixir_state(arguments, workflow=None):
             ),
         }
 
+    if aspect == "event_rollups":
+        return _execute_get_event_rollups(arguments, workflow=workflow)
+
     leadership_error = _require_leadership_state(workflow)
     if leadership_error:
         return leadership_error
@@ -864,9 +867,28 @@ def _execute_get_elixir_state(arguments, workflow=None):
             "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
             "recent_intents": db.list_recent_communication_intents(limit=limit),
             "failed_intents": db.list_recent_communication_intents(status="failed", limit=limit),
+            "recent_rollups": db.list_event_rollups(limit=limit),
         }
 
     return {"error": f"Unknown aspect: {aspect}"}
+
+
+def _execute_get_event_rollups(arguments, workflow=None):
+    scope, error = _state_scope(arguments, workflow)
+    if error:
+        return error
+    return {
+        "scope": scope or "all",
+        "rollups": db.list_event_rollups(
+            rollup_type=arguments.get("rollup_type"),
+            scope=scope,
+            subject_type=arguments.get("subject_type"),
+            subject_key=arguments.get("subject_key"),
+            project_key=arguments.get("project_key"),
+            season_id=arguments.get("season_id"),
+            limit=_state_limit(arguments),
+        ),
+    }
 
 
 
@@ -1494,6 +1516,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_clan_voyage(arguments)
         elif name == "get_elixir_state":
             result = _execute_get_elixir_state(arguments, workflow=workflow)
+        elif name == "get_event_rollups":
+            result = _execute_get_event_rollups(arguments, workflow=workflow)
         elif name == "lookup_cards":
             result = db.lookup_cards(
                 name=arguments.get("name"),

@@ -1,5 +1,12 @@
 # Vision: A Unified Agentic Awareness Loop for Elixir
 
+Status note, 2026-06-19: the unified awareness loop now has a canonical
+internal data substrate. Signals enter `game_event_stream`, Situation reads
+recent stream summaries plus projects/cases, delivery is represented by
+`communication_intents`, and history beyond the 90-day stream is summarized in
+`event_rollups`. Older references in this design to the event stream as future
+work should be read as historical design context.
+
 ## Context
 
 Elixir's current architecture is deterministic detection plus per-signal prose generation. A heartbeat tick runs every 30 minutes (`heartbeat/__init__.py:89`), emits signals, and a router (`runtime/channel_subagents.py:250 plan_signal_outcomes`) assigns each signal to a channel. Each planned outcome then becomes its own LLM call through `generate_channel_update()` with a pre-enriched context envelope built in `runtime/jobs/_signals.py:238 _build_outcome_context`.

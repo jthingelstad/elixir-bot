@@ -5,7 +5,7 @@ awareness and delivery flows. It also defines the guardrails for Phase 0 of the
 internal data subsystem pivot: event identity, shadow event-stream retention,
 and which workflow layers may write which durable objects.
 
-Last updated: 2026-06-19, after the shadow `game_event_stream` foundation.
+Last updated: 2026-06-19, after the `event_rollups` retention layer.
 
 ## Signal Lifecycle
 
@@ -14,10 +14,12 @@ Current proactive flow:
 1. Facts are fetched or derived from the Clash Royale API and local SQLite state.
 2. Detectors emit signal dictionaries.
 3. `storage.event_stream.record_signal_events()` records those signals in
-   `game_event_stream` in shadow mode.
-4. Existing awareness/delivery paths continue unchanged.
-5. Existing delivery state is still tracked in `signal_log`, `signal_outcomes`,
-   `messages`, and leader-action tables.
+   `game_event_stream`.
+4. Situation, project, case, and communication-intent layers read that stream as
+   operational context.
+5. Delivery state is tracked by `communication_intents`, `signal_outcomes`, and
+   `messages`; `signal_log` remains a compatibility/dedupe table for older
+   detector paths.
 
 Important distinction: the event stream is an observation ledger, not a posting
 queue and not a delivery ledger.
@@ -55,7 +57,10 @@ per-member cases.
 - 56 days supports current-cycle vs prior-cycle comparison.
 - 90 days supports broader trend and analytics scans.
 - History that must survive beyond 90 days should live in facts, projects,
-  cases, memories, or future `event_rollups`.
+  cases, memories, or `event_rollups`.
+- Weekly database maintenance writes rollups before pruning old
+  `game_event_stream` rows. If rollup generation fails, pruning fails with it
+  rather than deleting unsummarized stream rows.
 
 ## Workflow Write Boundaries
 
@@ -64,10 +69,11 @@ These boundaries keep the pivot coherent while the old and new systems overlap:
 | Layer | May Write | Notes |
 |---|---|---|
 | Detectors / ingestion | facts, signal dictionaries | No Discord I/O. |
-| Shadow event stream | `game_event_stream` | Best-effort; failures must not block delivery. |
-| Awareness loop | future projects/cases/intents; current memories/revisits | Public situations must not include leadership-only state. |
-| Delivery layer | `messages`, `signal_outcomes`, Discord/site delivery results | Should not invent new facts. |
-| Leader action UI | leader-action cards and decisions | Future work links cards to `decision_cases`. |
+| Event stream | `game_event_stream` | Canonical compact observation ledger; failures must not block delivery. |
+| Rollup maintenance | `event_rollups` | Writes long-term summaries before 90-day stream pruning. |
+| Awareness loop | projects/cases/intents; memories/revisits | Public situations must not include leadership-only state. |
+| Delivery layer | `communication_intents`, `messages`, `signal_outcomes`, Discord/site delivery results | Should not invent new facts. |
+| Leader action UI | leader-action cards and decisions | Cards are linked to `decision_cases` when a case exists. |
 | Memory synthesis | contextual memories | Memory summarizes; it is not operational truth for cases/projects. |
 | Admin/manual commands | explicit human-requested writes | Must preserve scope and source metadata. |
 
@@ -199,12 +205,12 @@ lane.
 `storage/war_analytics.py` returns analytics rows such as `inactive`,
 `low_donations`, and `low_war_participation` for structured tools and leader
 action scans. Those rows are not themselves proactive awareness signals unless a
-detector or job wraps them into a signal such as `inactive_members` or a future
-decision case.
+detector or job wraps them into a signal such as `inactive_members` or upserts a
+durable `decision_cases` row.
 
 ## Routing Guardrails
 
-Current hard routing, before future cases/intents:
+Current routing and projection boundaries:
 
 - War signals route to `#river-race`; some also route to `#leader-actions` or
   `#leaders`.
@@ -215,5 +221,7 @@ Current hard routing, before future cases/intents:
 - `#leader-actions` remains an action-board projection, not a generic signal
   destination.
 
-The event stream records the same observations before delivery, but it must not
-change these routing outcomes in Phase 1 / Phase 0.
+The event stream records the same observations before delivery. Projects,
+decision cases, and communication intents may now shape whether a channel gets a
+post, an action card, or a recorded skip, but the delivery layer is still the
+only place that performs Discord side effects.

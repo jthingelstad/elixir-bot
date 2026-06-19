@@ -418,6 +418,10 @@ _PURGE_DATE_TARGETS = [
 def purge_old_data(conn: Optional[sqlite3.Connection] = None) -> dict[str, int]:
     """Delete expired rows and return per-table deletion counts."""
     stats = {}
+    from storage.event_rollups import prune_event_stream_with_rollups
+
+    event_prune = prune_event_stream_with_rollups(conn=conn)
+    stats["game_event_stream"] = int(event_prune.get("pruned") or 0)
     for table, column, days in _PURGE_TARGETS:
         cutoff = _cr_cutoff(days) if table in _CR_TIMESTAMP_TABLES else _utc_cutoff(days)
         cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
