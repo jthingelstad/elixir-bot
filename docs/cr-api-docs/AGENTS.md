@@ -7,8 +7,12 @@ This repository is an agent-first reference for the public Clash Royale API.
 1. Read [index.md](index.md) for global API rules, response-shape patterns, pagination, errors, caching, and endpoint
    discovery.
 2. Read the endpoint file for the route you are implementing.
-3. Read only the focused model file(s) in [models/](models/) needed for that route.
-4. Use [data/endpoints.json](data/endpoints.json) for machine-readable endpoint routing.
+3. Read [game-modes.md](game-modes.md) when interpreting player activity, battle logs, events, rankings, or side modes.
+4. Read [wiki-api-crosswalk.md](wiki-api-crosswalk.md) when mapping a wiki/gameplay concept to API docs, or mapping an
+   API field back to game context.
+5. Read only the focused model file(s) in [models/](models/) needed for that route.
+6. Use [data/endpoints.json](data/endpoints.json), [data/game-modes.json](data/game-modes.json), and
+   [data/wiki-api-crosswalk.json](data/wiki-api-crosswalk.json) for machine-readable endpoint and gameplay routing.
 
 ## Important Rules
 
@@ -18,6 +22,8 @@ This repository is an agent-first reference for the public Clash Royale API.
 - Optional fields are usually absent, not present as `null`.
 - Nullable fields are explicitly called out where observed.
 - Treat endpoints marked broken, disabled, removed, or undocumented as operational constraints.
+- Do not equate all activity with Trophy Road. Ranked / Path of Legend, Clan Wars, events, tournaments, 2v2, and side
+  modes have distinct API signals.
 - Do not add notes about specific downstream consumers of this repo.
 
 ## Official Docs Comparison

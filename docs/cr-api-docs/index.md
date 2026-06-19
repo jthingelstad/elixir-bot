@@ -1,7 +1,8 @@
 # Clash Royale API — Reference Index
 
-This is a reference documentation set for the Clash Royale API (`https://api.clashroyale.com/v1`). Each file covers a
-domain of endpoints, their parameters, response types, and implementation notes.
+This is a reference documentation set for the Clash Royale API (`https://api.clashroyale.com/v1`). Each endpoint file
+covers a domain of routes, parameters, response types, and implementation notes. The repo also includes gameplay-mode
+context for interpreting player activity beyond Trophy Road.
 
 Verified against live API: March–April 2026.
 
@@ -156,7 +157,7 @@ These are countdown timers — the actual value returned decreases as the cache 
 
 ### Players — [players.md](players.md)
 
-Player profiles, battle logs, and upcoming chests.
+Player profiles, battle logs, upcoming chests, Trophy Road state, Ranked / Path of Legend state, and side-mode progress.
 
 | Endpoint                                             | Description                                        |
 | ---------------------------------------------------- | -------------------------------------------------- |
@@ -200,20 +201,20 @@ Supercell-run global tournaments.
 
 Location lookups, regional rankings, global tournament rankings, and league seasons.
 
-| Endpoint                                                         | Description                         | Status                  |
-| ---------------------------------------------------------------- | ----------------------------------- | ----------------------- |
-| `GET /locations`                                                 | List all locations                  | Active                  |
-| `GET /locations/{locationId}`                                    | Single location by ID               | Active                  |
-| `GET /locations/{locationId}/rankings/players`                   | Player trophy rankings by location  | Active (may be empty)   |
-| `GET /locations/{locationId}/rankings/clans`                     | Clan trophy rankings by location    | Active                  |
-| `GET /locations/{locationId}/rankings/clanwars`                  | Clan war rankings by location       | Active                  |
-| `GET /locations/{locationId}/pathoflegend/players`               | Path of Legend rankings by location | Active                  |
-| `GET /locations/global/rankings/tournaments/{tournamentTag}`     | Global tournament player rankings   | Active                  |
-| `GET /locations/global/seasons`                                  | List league seasons (YYYY-MM IDs)   | Active                  |
-| `GET /locations/global/seasonsV2`                                | List league seasons (extended)      | **Broken** (null data)  |
-| `GET /locations/global/seasons/{seasonId}`                       | Single league season                | Active                  |
-| `GET /locations/global/seasons/{seasonId}/rankings/players`      | Season trophy rankings              | **May return notFound** |
-| `GET /locations/global/pathoflegend/{seasonId}/rankings/players` | Season Path of Legend rankings      | Active                  |
+| Endpoint                                                         | Description                        | Status                  |
+| ---------------------------------------------------------------- | ---------------------------------- | ----------------------- |
+| `GET /locations`                                                 | List all locations                 | Active                  |
+| `GET /locations/{locationId}`                                    | Single location by ID              | Active                  |
+| `GET /locations/{locationId}/rankings/players`                   | Player trophy rankings by location | Active (may be empty)   |
+| `GET /locations/{locationId}/rankings/clans`                     | Clan trophy rankings by location   | Active                  |
+| `GET /locations/{locationId}/rankings/clanwars`                  | Clan war rankings by location      | Active                  |
+| `GET /locations/{locationId}/pathoflegend/players`               | Ranked / Path of Legend rankings   | Active                  |
+| `GET /locations/global/rankings/tournaments/{tournamentTag}`     | Global tournament player rankings  | Active                  |
+| `GET /locations/global/seasons`                                  | List league seasons (YYYY-MM IDs)  | Active                  |
+| `GET /locations/global/seasonsV2`                                | List league seasons (extended)     | **Broken** (null data)  |
+| `GET /locations/global/seasons/{seasonId}`                       | Single league season               | Active                  |
+| `GET /locations/global/seasons/{seasonId}/rankings/players`      | Season trophy rankings             | **May return notFound** |
+| `GET /locations/global/pathoflegend/{seasonId}/rankings/players` | Season Ranked / Path of Legend     | Active                  |
 
 ### Leaderboards — [leaderboards.md](leaderboards.md)
 
@@ -257,6 +258,25 @@ Current in-game events (bare array response).
 Routing page for focused model files in [models/](models/), with verified field shapes and example data from live
 responses.
 
+### Gameplay Modes — [game-modes.md](game-modes.md)
+
+Wiki-derived context for Trophy Road, Ranked / Path of Legend, Merge Tactics, Clan Wars, events, challenges,
+tournaments, 2v2, and rotating modes. Use this when interpreting activity across battle logs, rankings, events, and
+side-mode progress.
+
+### Game Mode Taxonomy — [data/game-modes.json](data/game-modes.json)
+
+Machine-readable mode families, API signals, event variants, and source URLs.
+
+### Wiki/API Crosswalk — [wiki-api-crosswalk.md](wiki-api-crosswalk.md)
+
+Scan-backed mapping between Clash Royale Wiki concepts and this repo's endpoint/model docs. Use this when an API field
+needs game-context interpretation, or when a gameplay concept needs the right public API surface.
+
+### Wiki/API Crosswalk Data — [data/wiki-api-crosswalk.json](data/wiki-api-crosswalk.json)
+
+Machine-readable scan summary and API-doc-to-wiki-concept mapping.
+
 ### Fan Content Policy — [fan-content-policy.md](fan-content-policy.md)
 
 Supercell's rules for using their assets in fan-created content. Includes required disclaimer text, permitted/prohibited
@@ -270,8 +290,9 @@ activities, and monetization guidelines.
   `/locations/global/rankings/tournaments/{tournamentTag}` to get player rankings
 - **Classic war endpoints are dead:** `currentwar` is permanently removed (410 Gone); `warlog` is disabled (404). Only
   river race endpoints work.
-- **Trophy rankings vs Path of Legend:** These are separate leaderboards at the same location — `/rankings/players` for
-  trophies, `/pathoflegend/players` for Path of Legend
+- **Trophy rankings vs Ranked / Path of Legend:** These are separate leaderboards at the same location —
+  `/rankings/players` for Trophy Road, `/pathoflegend/players` for Ranked / Path of Legend. The game/wiki now uses
+  Ranked wording, while the API still uses `pathoflegend` names.
 - **Leaderboards vs location rankings:** `/leaderboards` cover game modes (Merge Tactics, Touchdown, etc.);
   `/locations/{id}/rankings` are geography-specific trophy rankings
 - **Tournaments vs global tournaments:** `/tournaments` covers player-created tournaments; `/globaltournaments` covers
@@ -283,6 +304,8 @@ activities, and monetization guidelines.
 - **Events ↔ Battles:** `Battle.eventTag` maps to `TrailEvent.eventTag` from `/events`
 - **Challenges ↔ Events:** While `/challenges` is currently undocumented and returning `notFound`, active challenge-like
   events still appear in `/events` (e.g. "Classic Challenge", "Grand Challenge")
+- **Gameplay-mode context:** Use [game-modes.md](game-modes.md) before assuming `PvP`/Trophy Road activity is the only
+  meaningful player activity. Ranked, Clan Wars, tournaments, events, 2v2, and side modes have separate signals.
 - **Clan search flexibility:** `name` is not required — you can search by `locationId`, `minScore`, `minMembers`, or
   `maxMembers` alone. Search is case-insensitive.
 - **River race seasons:** `seasonId` in river race log is a sequential integer (e.g. 127, 128, 129, 130) — not the

@@ -3,6 +3,9 @@
 Base URL: `https://api.clashroyale.com/v1` Auth: Bearer token in `Authorization` header Tag encoding: `#2ABC` →
 `%232ABC` in path
 
+Gameplay context: use [wiki-api-crosswalk.md](wiki-api-crosswalk.md) when separating player-created tournaments, victory
+challenges, special event challenges, and global tournaments.
+
 ---
 
 ## Endpoints

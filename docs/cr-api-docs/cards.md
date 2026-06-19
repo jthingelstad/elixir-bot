@@ -2,6 +2,11 @@
 
 Base URL: `https://api.clashroyale.com/v1` Auth: Bearer token in `Authorization` header
 
+Gameplay context: use [wiki-api-crosswalk.md](wiki-api-crosswalk.md#cards-levels-evolutions-heroes-and-tower-troops),
+[recipes/normalize-card-levels.md](recipes/normalize-card-levels.md), and
+[recipes/interpret-evolution-level.md](recipes/interpret-evolution-level.md) when translating card catalog data into
+game concepts.
+
 ---
 
 ## Endpoints

@@ -1,0 +1,114 @@
+{
+  "retrievedAt": "2026-06-19",
+  "source": "Clash Royale Wiki MediaWiki API",
+  "sourceRoot": "https://clashroyale.fandom.com/wiki/Clash_Royale_Wiki",
+  "wikiScan": {
+    "siteArticlesReported": 1967,
+    "mainNamespacePagesScanned": 429,
+    "categoryNamespacePagesScanned": 327,
+    "deckNamespacePagesInventoried": 1640,
+    "mainNamespacePagesParsed": 429,
+    "parseErrors": 0,
+    "deckNamespacePolicy": "Inventoried but not imported as authoritative gameplay context because individual decks are volatile.",
+    "historyPolicy": "Removed and history-only pages are legacy context only unless live API behavior still exposes related fields."
+  },
+  "repoScan": {
+    "markdownTextJsonFilesScanned": 36,
+    "excluded": ["node_modules", "tools/docs-build/node_modules"]
+  },
+  "crosswalk": [
+    {
+      "apiDocs": ["players.md", "models/players.md"],
+      "wikiPages": ["Player Profile", "Trophies", "Arenas", "Ranked", "Card Mastery"],
+      "agentGuidance": "Summarize Trophy Road, Ranked / Path of Legend, clan status, current deck, collection, badges, and side-mode progress separately."
+    },
+    {
+      "apiDocs": ["players.md", "models/battles.md", "recipes/detect-battle-winner.md"],
+      "wikiPages": [
+        "Basics of Battle",
+        "2v2",
+        "Friendly Battle",
+        "Tournament",
+        "Tournament/Special Event Challenges",
+        "Clan Wars"
+      ],
+      "agentGuidance": "Use battle type, gameMode, deckSelection, eventTag, tournamentTag, modifiers, and team size before assuming ladder rules."
+    },
+    {
+      "apiDocs": ["cards.md", "models/cards-events.md", "models/players.md", "recipes/normalize-card-levels.md"],
+      "wikiPages": [
+        "Cards",
+        "Card Evolution",
+        "Heroes",
+        "Battle Decks",
+        "Tower Princess",
+        "Cannoneer",
+        "Dagger Duchess",
+        "Royal Chef"
+      ],
+      "agentGuidance": "Map catalog items and player cards to card, tower troop, evolution, hero, and rarity-relative level context."
+    },
+    {
+      "apiDocs": ["clans.md", "models/clans.md", "models/river-race.md"],
+      "wikiPages": ["Clans", "Clan Wars", "Trade Tokens", "Friendly Battle"],
+      "agentGuidance": "Separate clan roster/social state from River Race war state. Use currentriverrace and riverracelog for the active war model."
+    },
+    {
+      "apiDocs": ["locations.md", "models/locations-rankings.md"],
+      "wikiPages": ["Trophies", "Arenas", "Ranked", "Clan Wars", "Tournament"],
+      "agentGuidance": "Keep Trophy Road rankings, clan rankings, war rankings, tournament rankings, and Ranked / Path of Legend rankings separate."
+    },
+    {
+      "apiDocs": ["leaderboards.md", "models/leaderboards.md", "data/game-modes.json"],
+      "wikiPages": ["Merge Tactics", "Touchdown", "C.H.A.O.S.", "Trophies"],
+      "agentGuidance": "Treat leaderboard IDs as stable keys and names as mode labels that can repeat across seasons or variants."
+    },
+    {
+      "apiDocs": ["events.md", "challenges.md", "models/cards-events.md"],
+      "wikiPages": ["Events", "Tournament/Special Event Challenges", "Card Delivery", "C.H.A.O.S."],
+      "agentGuidance": "Use events and battle logs for live event attribution; challenges endpoint is currently unavailable in live testing."
+    },
+    {
+      "apiDocs": ["tournaments.md", "globaltournaments.md", "models/tournaments.md"],
+      "wikiPages": ["Tournament", "Tournament/Special Event Challenges", "Gems", "Emotes"],
+      "agentGuidance": "Distinguish player-created tournaments, victory challenges, special event challenges, and Supercell-run global tournaments."
+    }
+  ],
+  "stableWikiConceptGroups": {
+    "battleAndOutcome": ["Basics of Battle", "2v2", "Touchdown", "Heist", "Chess Royale"],
+    "cardsAndDecks": [
+      "Cards",
+      "Card Evolution",
+      "Heroes",
+      "Battle Decks",
+      "Tower Princess",
+      "Cannoneer",
+      "Dagger Duchess",
+      "Royal Chef"
+    ],
+    "progressionAndRewards": [
+      "Trophies",
+      "Arenas",
+      "Ranked",
+      "Chests",
+      "Lucky Chests",
+      "Experience",
+      "Pass Royale",
+      "Magic Items",
+      "Gold",
+      "Gems"
+    ],
+    "socialClanAndWar": ["Clans", "Clan Wars", "Trade Tokens", "Friendly Battle", "Emotes"],
+    "eventsAndTemporaryModes": [
+      "Events",
+      "Tournament/Special Event Challenges",
+      "Global Spell",
+      "Troop Rush",
+      "Treasure Hunt",
+      "Obstacle Course",
+      "Trick or Treat",
+      "C.H.A.O.S.",
+      "Card Delivery"
+    ]
+  }
+}

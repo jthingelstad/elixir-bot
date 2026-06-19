@@ -10,6 +10,7 @@ accurate reference for live endpoint behavior rather than a thin endpoint list.
 - A structured reference for the documented Clash Royale API surface area
 - Endpoint-by-endpoint notes on parameters, response shapes, pagination, caching, and error behavior
 - Field-level model references based on live API responses
+- Gameplay-mode context so agents do not treat Trophy Road as the only meaningful player activity surface
 - Coverage of known quirks, broken endpoints, removed endpoints, and inconsistent behaviors
 - Cross-links between related resources such as players, clans, river race, locations, rankings, tournaments, cards,
   events, and leaderboards
@@ -37,9 +38,11 @@ order is:
 2. Open the domain file for the target surface area such as [players.md](players.md) or [clans.md](clans.md).
 3. Use [models.md](models.md) or the focused files in [models/](models/) to validate field presence, optionality, and
    shared object shapes.
-4. Prefer observed behavior notes over generic assumptions, especially for pagination, error payloads, and older
+4. Use [game-modes.md](game-modes.md) when interpreting player activity across Trophy Road, Ranked / Path of Legend,
+   Clan Wars, events, tournaments, 2v2, and side modes.
+5. Prefer observed behavior notes over generic assumptions, especially for pagination, error payloads, and older
    endpoints.
-5. Treat endpoints marked broken, disabled, or removed as operational constraints, not temporary noise.
+6. Treat endpoints marked broken, disabled, or removed as operational constraints, not temporary noise.
 
 The intended opinionated use is simple: agents should treat this repo as a live-behavior reference, not just a static
 API catalog.
@@ -66,8 +69,12 @@ Remember that Clash Royale tags must be URL-encoded in paths:
 - [cards.md](cards.md): card catalog and support items
 - [events.md](events.md): current live events
 - [challenges.md](challenges.md): undocumented challenge endpoint status
+- [game-modes.md](game-modes.md): gameplay-mode context and API observability notes
+- [wiki-api-crosswalk.md](wiki-api-crosswalk.md): wiki concept to API doc crosswalk
 - [models.md](models.md): shared response model router
 - [models/](models/): focused model reference files
+- [data/wiki-api-crosswalk.json](data/wiki-api-crosswalk.json): machine-readable wiki/API crosswalk
+- [data/game-modes.json](data/game-modes.json): machine-readable mode taxonomy for agent routing
 - [fan-content-policy.md](fan-content-policy.md): Supercell fan content constraints
 
 ## Status
