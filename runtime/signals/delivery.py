@@ -2041,6 +2041,8 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         signal_outcomes.append({
             "signal_key": key,
             "signal_type": signal.get("type") or "",
+            "event_key": signal.get("event_key"),
+            "event_id": signal.get("event_id"),
             "status": status,
         })
     try:

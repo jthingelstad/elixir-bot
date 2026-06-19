@@ -267,6 +267,95 @@ def test_build_situation_surfaces_recent_agent_writes_for_dedup():
     assert situation["recent_agent_writes"] == fake_writes
 
 
+def test_build_situation_includes_recent_event_windows_for_leadership_context():
+    """Default awareness Situation includes public + leadership event summaries
+    because leader-lounge is one of the active lanes."""
+    public_summary = {
+        "7d": {"days": 7, "total": 1, "by_type": {"member_join": 1}, "by_scope": {"public": 1}},
+        "28d": {"days": 28, "total": 1, "by_type": {"member_join": 1}, "by_scope": {"public": 1}},
+        "56d": {"days": 56, "total": 1, "by_type": {"member_join": 1}, "by_scope": {"public": 1}},
+        "90d": {"days": 90, "total": 1, "by_type": {"member_join": 1}, "by_scope": {"public": 1}},
+    }
+    leadership_summary = {
+        "7d": {"days": 7, "total": 1, "by_type": {"inactive_members": 1}, "by_scope": {"leadership": 1}},
+        "28d": {"days": 28, "total": 1, "by_type": {"inactive_members": 1}, "by_scope": {"leadership": 1}},
+        "56d": {"days": 56, "total": 1, "by_type": {"inactive_members": 1}, "by_scope": {"leadership": 1}},
+        "90d": {"days": 90, "total": 1, "by_type": {"inactive_members": 1}, "by_scope": {"leadership": 1}},
+    }
+
+    def fake_summary(*, scope, **_kwargs):
+        return leadership_summary if scope == "leadership" else public_summary
+
+    def fake_recent(*, scope, **_kwargs):
+        if scope == "leadership":
+            return [{
+                "event_id": 2,
+                "event_key": "game_event:leadership",
+                "event_type": "inactive_members",
+                "observed_at": "2026-06-19T12:00:00",
+                "scope": "leadership",
+                "payload_json": {"members": ["hidden"]},
+            }]
+        return [{
+            "event_id": 1,
+            "event_key": "game_event:public",
+            "event_type": "member_join",
+            "observed_at": "2026-06-19T11:00:00",
+            "scope": "public",
+            "payload_json": {"name": "Newbie"},
+        }]
+
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.summarize_events_by_window", side_effect=fake_summary),
+        patch("runtime.situation.db.list_recent_events", side_effect=fake_recent),
+    ):
+        situation = build_situation(_bundle(signals=[]))
+
+    recent_events = situation["recent_events"]
+    assert recent_events["scope_filter"] == "public+leadership"
+    assert recent_events["summaries"]["7d"]["total"] == 2
+    assert recent_events["summaries"]["7d"]["by_type"] == {
+        "inactive_members": 1,
+        "member_join": 1,
+    }
+    assert [event["event_type"] for event in recent_events["recent"]] == [
+        "inactive_members",
+        "member_join",
+    ]
+    assert all("payload_json" not in event for event in recent_events["recent"])
+
+
+def test_build_situation_public_channel_keys_exclude_leadership_events():
+    calls = []
+
+    def fake_summary(*, scope, **_kwargs):
+        calls.append(("summary", scope))
+        return {"7d": {"days": 7, "total": 1, "by_type": {"member_join": 1}, "by_scope": {scope: 1}}}
+
+    def fake_recent(*, scope, **_kwargs):
+        calls.append(("recent", scope))
+        return [{
+            "event_id": 1,
+            "event_key": "game_event:public",
+            "event_type": "member_join",
+            "observed_at": "2026-06-19T11:00:00",
+            "scope": scope,
+        }]
+
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.summarize_events_by_window", side_effect=fake_summary),
+        patch("runtime.situation.db.list_recent_events", side_effect=fake_recent),
+    ):
+        situation = build_situation(_bundle(signals=[]), channel_keys=["clan-events"])
+
+    assert situation["recent_events"]["scope_filter"] == "public"
+    assert all(scope == "public" for _, scope in calls)
+
+
 # ---------------------------------------------------------------------------
 # Quiet-tick fast path
 # ---------------------------------------------------------------------------
@@ -503,6 +592,43 @@ def test_deliver_signal_group_via_awareness_marks_considered_skipped_non_hard_si
     mock_mark.assert_awaited()
     marked_signals = mock_mark.await_args_list[-1].args[0]
     assert arena_signal in marked_signals
+
+
+def test_deliver_signal_group_via_awareness_records_event_keys_in_tick_audit():
+    arena_signal = {
+        "type": "arena_change",
+        "signal_key": "arena:#ABC",
+        "event_key": "game_event:arena",
+        "event_id": 42,
+        "tag": "#ABC",
+    }
+    empty_plan = {"posts": [], "skipped_reason": "not worth a post"}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._signals.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.get_members_on_hot_streak", return_value=[]),
+        patch("runtime.jobs._signals.elixir_agent.run_awareness_tick", return_value=empty_plan),
+        patch("runtime.jobs._signals.db.record_awareness_tick") as mock_record,
+        patch("runtime.jobs._signals._mark_signal_group_completed", new=AsyncMock()),
+    ):
+        ok = asyncio.run(
+            signals_module._deliver_signal_group_via_awareness([arena_signal], {}, {})
+        )
+
+    assert ok is True
+    signal_outcomes = mock_record.call_args.kwargs["signal_outcomes"]
+    assert signal_outcomes == [{
+        "signal_key": "arena:#ABC",
+        "signal_type": "arena_change",
+        "event_key": "game_event:arena",
+        "event_id": 42,
+        "status": "skipped",
+    }]
 
 
 def test_hard_post_signal_types_includes_join_and_capability():
