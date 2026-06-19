@@ -356,6 +356,26 @@ def test_build_situation_public_channel_keys_exclude_leadership_events():
     assert all(scope == "public" for _, scope in calls)
 
 
+def test_build_situation_includes_active_war_project_snapshot():
+    project_snapshot = {
+        "project_key": "war_season:129",
+        "summary": "Season 129; Week 2; Battle Day 1; rank 1",
+        "state": {
+            "season_id": 129,
+            "week": 2,
+            "phase_display": "Battle Day 1",
+        },
+    }
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.get_active_war_season_project_snapshot", return_value=project_snapshot),
+    ):
+        situation = build_situation(_bundle(signals=[]))
+
+    assert situation["projects"]["war_season"] == project_snapshot
+
+
 # ---------------------------------------------------------------------------
 # Quiet-tick fast path
 # ---------------------------------------------------------------------------

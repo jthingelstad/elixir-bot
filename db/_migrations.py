@@ -2039,7 +2039,66 @@ def _migration_46(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46]
+def _migration_47(conn: sqlite3.Connection) -> None:
+    """Add durable project records and event links for long-running missions."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS elixir_projects (
+            project_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_key TEXT NOT NULL UNIQUE,
+            project_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            title TEXT NOT NULL,
+            subject_type TEXT,
+            subject_key TEXT,
+            season_id TEXT,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            last_observed_at TEXT,
+            next_action_at TEXT,
+            summary TEXT,
+            state_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_elixir_projects_type_status "
+        "ON elixir_projects(project_type, status, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_elixir_projects_subject "
+        "ON elixir_projects(subject_type, subject_key, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_elixir_projects_season "
+        "ON elixir_projects(season_id, project_type, status)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS project_event_links (
+            link_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES elixir_projects(project_id) ON DELETE CASCADE,
+            event_id INTEGER REFERENCES game_event_stream(event_id) ON DELETE SET NULL,
+            event_key TEXT NOT NULL,
+            relationship TEXT NOT NULL DEFAULT 'evidence',
+            created_at TEXT NOT NULL,
+            UNIQUE(project_id, event_key, relationship)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_event_links_project "
+        "ON project_event_links(project_id, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_event_links_event "
+        "ON project_event_links(event_key, relationship)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

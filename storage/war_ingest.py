@@ -1,3 +1,5 @@
+import logging
+
 from db import (
     _canon_tag,
     _ensure_member,
@@ -18,6 +20,8 @@ from storage.war_calendar import (
     resolve_phase,
     war_day_key,
 )
+
+log = logging.getLogger("elixir_db")
 
 
 def _infer_period_section_index(period_index, current_section_index, current_period_index):
@@ -192,6 +196,12 @@ def upsert_war_current_state(war_data, conn=None):
             ),
         )
     _upsert_period_logs(conn, observed_at, war_data, season_id)
+    try:
+        from storage.projects import refresh_active_war_season_project
+
+        refresh_active_war_season_project(conn=conn)
+    except Exception:
+        log.warning("war project refresh failed during live war ingest", exc_info=True)
     conn.commit()
 
 
