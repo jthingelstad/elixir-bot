@@ -222,6 +222,50 @@ def test_build_context_returns_expected_keys(memdb):
     assert "recent" in titles
 
 
+def test_build_context_includes_operations_context(memdb, monkeypatch):
+    monkeypatch.setattr(memory_job.db, "summarize_events_by_window", lambda **kwargs: {
+        "7d": {"total": 2, "by_type": {"member_join": 1}},
+    })
+    monkeypatch.setattr(memory_job.db, "list_recent_events", lambda **kwargs: [
+        {
+            "event_key": "game_event:join",
+            "event_type": "member_join",
+            "scope": "public",
+            "subject_key": "#ABC",
+            "source_signal_key": "join:#ABC",
+            "observed_at": "2026-06-19T12:00:00",
+        }
+    ])
+    monkeypatch.setattr(memory_job.db, "get_active_war_season_project_snapshot", lambda: {
+        "project_key": "war_season:133",
+        "summary": "Season 133; rank 1",
+    })
+    monkeypatch.setattr(memory_job.db, "decision_case_snapshot", lambda **kwargs: {
+        "due": [{"case_id": 1, "case_type": "inactivity_review"}],
+        "open": [],
+    })
+    monkeypatch.setattr(memory_job.db, "list_recent_communication_intents", lambda **kwargs: [
+        {
+            "intent_id": 5,
+            "workflow": "arena-relay",
+            "intent_type": "action_card",
+            "status": "delivered",
+            "target_channel_key": "arena-relay",
+            "source_signal_key": "join:#ABC",
+            "updated_at": "2026-06-19T12:01:00",
+        }
+    ])
+
+    context = _build_memory_synthesis_context()
+
+    operations = context["operations_context"]
+    assert operations["event_windows"]["7d"]["total"] == 2
+    assert operations["recent_events"][0]["event_key"] == "game_event:join"
+    assert operations["projects"]["war_season"]["project_key"] == "war_season:133"
+    assert operations["decision_cases"]["due"][0]["case_id"] == 1
+    assert operations["recent_intents"][0]["intent_id"] == 5
+
+
 def test_build_context_bounds_memory_count_and_text_size(memdb, monkeypatch):
     monkeypatch.setattr(memory_job, "MEMORY_SYNTHESIS_MEMORY_LIMIT", 2)
     monkeypatch.setattr(memory_job, "MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", 24)

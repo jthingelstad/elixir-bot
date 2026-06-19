@@ -169,7 +169,7 @@ def _build_schedule_report():
             lines.append(f"**{current_owner}**")
         deliveries = "; ".join(spec["delivery_targets"])
         lines.append(
-            f"- `{spec['activity_key']}` via `{spec['job_function']}`: {spec['schedule']} "
+            f"- `{spec['activity_key']}` [{spec['activity_role']}] via `{spec['job_function']}`: {spec['schedule']} "
             f"Next run: {next_runs.get(spec['job_id'], 'n/a')} "
             f"Deliveries: {deliveries}"
         )
@@ -671,6 +671,18 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
     except Exception as exc:
         _log().warning("Weekly recap Clan Voyage context unavailable: %s", exc)
         clan_voyage_context = ""
+    try:
+        war_project = db.get_active_war_season_project_snapshot()
+    except Exception as exc:
+        _log().warning("Weekly recap war project context unavailable: %s", exc)
+        war_project = None
+    try:
+        event_windows = db.summarize_events_by_window(windows=(7, 28), scope="public")
+        recent_events = db.list_recent_events(days=7, scope="public", limit=12)
+    except Exception as exc:
+        _log().warning("Weekly recap event stream context unavailable: %s", exc)
+        event_windows = {}
+        recent_events = []
     roster = summary.get("roster") or {}
     war_score_trend = summary.get("war_score_trend") or {}
     season_summary = summary.get("war_season_summary") or {}
@@ -708,6 +720,46 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
     if clan_voyage_context and "No Clan Voyage screenshots" not in clan_voyage_context:
         lines.append("manual Clan Voyage activity: use only as positive recognition; screenshots may be partial")
         lines.append(clan_voyage_context)
+
+    if war_project:
+        lines.append(
+            "active war-season project: "
+            f"{war_project.get('summary') or war_project.get('title') or war_project.get('project_key')}"
+        )
+        project_state = war_project.get("state") or {}
+        participation = project_state.get("participation_health") or {}
+        if participation:
+            lines.append(
+                "war project participation: "
+                f"engaged {participation.get('engaged_count') or 0}/"
+                f"{participation.get('total_participants') or 0} | "
+                f"untouched {participation.get('untouched_count') or 0} | "
+                f"finished {participation.get('finished_count') or 0}"
+            )
+
+    if event_windows:
+        seven_day = event_windows.get("7d") or {}
+        twenty_eight_day = event_windows.get("28d") or {}
+        lines.append(
+            "event stream pulse: "
+            f"7d {seven_day.get('total') or 0} events | "
+            f"28d {twenty_eight_day.get('total') or 0} events"
+        )
+        by_type = seven_day.get("by_type") or {}
+        if by_type:
+            top_types = sorted(by_type.items(), key=lambda item: (-item[1], item[0]))[:5]
+            lines.append(
+                "top 7d event types: "
+                + ", ".join(f"{event_type}={count}" for event_type, count in top_types)
+            )
+    if recent_events:
+        lines.append(
+            "recent event stream examples: "
+            + "; ".join(
+                f"{event.get('event_type')}:{event.get('subject_key') or event.get('source_signal_key')}"
+                for event in recent_events[:6]
+            )
+        )
 
     if war_score_trend:
         lines.append(
