@@ -1,213 +1,219 @@
-# Signal Inventory
+# Signal Inventory and Guardrails
 
-A catalog of every signal the Elixir data layer emits into the agentic awareness
-loop, grouped by source. Each entry lists the signal `type`, the emitting
-function, the trigger, and any dedup key. This is the authoritative list of
-"what Elixir can see" — if it's not here, the agent cannot react to it.
+This document catalogs the signal types Elixir can emit into proactive
+awareness and delivery flows. It also defines the guardrails for Phase 0 of the
+internal data subsystem pivot: event identity, shadow event-stream retention,
+and which workflow layers may write which durable objects.
 
-Kept fresh as new detectors land. Last updated: 2026-04-16 (v4.7 autonomous
-refactor).
+Last updated: 2026-06-19, after the shadow `game_event_stream` foundation.
 
----
+## Signal Lifecycle
 
-## Roster & identity — `heartbeat/_roster.py`
+Current proactive flow:
 
-| Type | Trigger | Dedup |
+1. Facts are fetched or derived from the Clash Royale API and local SQLite state.
+2. Detectors emit signal dictionaries.
+3. `storage.event_stream.record_signal_events()` records those signals in
+   `game_event_stream` in shadow mode.
+4. Existing awareness/delivery paths continue unchanged.
+5. Existing delivery state is still tracked in `signal_log`, `signal_outcomes`,
+   `messages`, and leader-action tables.
+
+Important distinction: the event stream is an observation ledger, not a posting
+queue and not a delivery ledger.
+
+## Event Identity Policy
+
+Every event-stream row needs deterministic identity. Use this order:
+
+1. `signal_key`, when the detector provides one.
+2. `signal_log_type`, when present.
+3. Derived identity from stable fields:
+   - `type`
+   - `signal_date`
+   - member/player tag
+   - `season_id`
+   - `week` or `section_index`
+   - `day_number` or `period_index`
+   - `milestone`, `card_name`, or `award_type`
+4. Compact payload hash only as a final fallback.
+
+Do not use `event_key` as source identity. It is a downstream event-stream
+annotation and would make repeated shadow ingestion generate new events.
+
+For batched signals, prefer one aggregate event when the signal is semantically
+one observation (`inactive_members`, `war_attacks_complete`,
+`season_awards_granted`). Later case/project phases may fan that aggregate into
+per-member cases.
+
+## Retention Model
+
+- `game_event_stream` keeps full-fidelity compact event rows for 90 days.
+- Standard query windows are 7, 28, 56, and 90 days.
+- 7 days is for recent pulse and prompt-friendly context.
+- 28 days is one full River Race cycle.
+- 56 days supports current-cycle vs prior-cycle comparison.
+- 90 days supports broader trend and analytics scans.
+- History that must survive beyond 90 days should live in facts, projects,
+  cases, memories, or future `event_rollups`.
+
+## Workflow Write Boundaries
+
+These boundaries keep the pivot coherent while the old and new systems overlap:
+
+| Layer | May Write | Notes |
 |---|---|---|
-| `member_join` | Tag in current API roster but not in previous snapshot. | Natural (snapshot diff). |
-| `member_leave` | Tag in previous snapshot but not in current API roster. Enriched via `_enrich_leave_signal`. | Natural (snapshot diff). |
-| `arena_change` | DB milestone diff on `arena_id`. | `signal_log_type` from `detect_milestones`. |
-| `elder_promotion` | Role change from `member` → `elder`. | `signal_log_type` from `detect_role_changes`. |
-| `donation_leaders` | Top 3 daily donors, once per day after `DONATION_HIGHLIGHT_HOUR`. | `signal_log` keyed on `donation_leaders:<date>`. |
-| `weekly_donation_leader` | Top 3 donors of the prior CR week, emitted Mondays off frozen Sunday `member_daily_metrics.donations_week`. | `signal_log_type` weekly: `weekly_donation_leader:<isoweek>`. |
-| `inactive_members` | Members past `INACTIVITY_DAYS` threshold; Fridays only, once per week. | `signal_log` keyed on `inactive_members:<date>`. |
-| `member_active_again` | Previous snapshot stale (≥ threshold), current fresh, `last_seen_api` advanced. | `signal_log_type` keyed on `member_active_again:<tag>:<observed_at>`. |
-| `recent_form_slump` | Form crosses top-tier (`hot`/`strong`) → bottom-tier (`slumping`/`cold`). Per-(member,scope) cursor remembers last label. | `signal_log_type` weekly: `recent_form_slump:<tag>:<scope>:<isoweek>`. |
-| `deck_archetype_change` | Current deck differs by 4+ cards from the deck fetched 24+ hours ago (mode_scope='overall'). Natural de-flicker via the 24h window. | `signal_log_type` daily: `deck_archetype_change:<tag>:<YYYY-MM-DD>`. |
-| `clan_birthday` | Month-day of `clan_founded` matches today. | `cake_day_announcements` unique on (date, type, tag). |
-| `join_anniversary` | Members whose `joined_at` anniversary is today. | Same as above. |
-| `member_birthday` | Members whose birthday is today. | Same as above. |
+| Detectors / ingestion | facts, signal dictionaries | No Discord I/O. |
+| Shadow event stream | `game_event_stream` | Best-effort; failures must not block delivery. |
+| Awareness loop | future projects/cases/intents; current memories/revisits | Public situations must not include leadership-only state. |
+| Delivery layer | `messages`, `signal_outcomes`, Discord/site delivery results | Should not invent new facts. |
+| Leader action UI | leader-action cards and decisions | Future work links cards to `decision_cases`. |
+| Memory synthesis | contextual memories | Memory summarizes; it is not operational truth for cases/projects. |
+| Admin/manual commands | explicit human-requested writes | Must preserve scope and source metadata. |
 
----
+## Roster and Identity Signals
 
-## Player progression — `storage/player.py`
+Source: `heartbeat/_roster.py`, called from `heartbeat.tick(include_nonwar=True)`
+unless noted.
 
-All fire off `snapshot_player_profile` / `snapshot_player_battlelog` as new CR
-API payloads arrive, then flow into heartbeat via `detect_pending_system_signals`
-or direct return. Dedup is generally by `signal_log_type` stored on the snapshot
-row.
+| Type | Trigger | Identity / Dedup |
+|---|---|---|
+| `member_join` | Tag appears in current API roster but not previous active roster. | `signal_log_type=member_join:<tag>`. |
+| `member_leave` | Tag disappears from current API roster. | `signal_log_type=member_leave:<tag>:<chicago_date>`. |
+| `arena_change` | Stored arena milestone diff. | `signal_log_type` from stored milestone row. |
+| `elder_promotion` | Role changes from member to elder. | `signal_log_type` from role-change detector. |
+| `donation_leaders` | Top daily donors after `DONATION_HIGHLIGHT_HOUR`. | `signal_log` key `donation_leaders:<date>`. |
+| `weekly_donation_leader` | Top donors from prior CR week, emitted Mondays. | `signal_log_type=weekly_donation_leader:<isoweek>`. |
+| `inactive_members` | Friday leadership-only inactivity report. | `signal_log` key `inactive_members:<date>`; event identity derives from `type` plus signal date when present. |
+| `member_active_again` | Previously dormant member has fresh activity. | `signal_log_type=member_active_again:<tag>:<observed_at>`. |
+| `clan_war_trophies_record` | New all-time clan war trophy high. | `signal_log_type=clan_war_trophies_record:<date>`. |
+| `clan_birthday` | Clan founding month/day matches today. | `cake_day_announcements`. |
+| `join_anniversary` | Member join anniversary matches today. | `cake_day_announcements`. |
+| `member_birthday` | Stored member birthday matches today. | `cake_day_announcements`. |
 
-| Type | Trigger |
-|---|---|
-| `player_level_up` | `exp_level` increased vs. previous profile snapshot. |
-| `career_wins_milestone` | Total wins crossed a 1,000-win threshold. |
-| `best_trophies_peak` | `best_trophies` set a new all-time high. |
-| `challenge_performance_milestone` | `challenge_max_wins` reached a milestone value. |
-| `path_of_legend_promotion` | PoL league advanced (1→10). |
-| `path_of_legend_demotion` | PoL league regressed. |
-| `ultimate_champion_reached` | PoL league 10 reached for the first time. |
-| `path_of_legend_global_rank_attained` | Top-1000 global rank appeared (non-null). |
-| `new_card_unlocked` | New card ID in collection. |
-| `new_champion_unlocked` | New champion card. |
-| `card_level_milestone` | Card level crossed 10/14 threshold. |
-| `card_evolution_unlocked` | Card's `evolutionLevel` increased (evo 0→1 or hero 0→2/2→3). Payload carries `evolution_kind` ∈ {`evo`, `hero`}. |
-| `badge_earned` | New badge in profile. |
-| `badge_level_milestone` | Badge level milestone. |
-| `achievement_star_milestone` | Achievement stars crossed a threshold. |
-| `battle_hot_streak` (mode: `ladder` / `ranked`) | ≥4 consecutive wins in the given mode since last snapshot. |
-| `battle_trophy_push` (mode: `ladder` / `ranked`) | Cumulative trophy_change ≥ threshold since last snapshot in the given mode. |
+Available but not currently wired into the recurring heartbeat tick:
 
----
+| Type | Helper | Notes |
+|---|---|---|
+| `deck_archetype_change` | `detect_deck_archetype_changes()` | Tested helper; not currently part of the scheduled proactive pipeline. |
+| `recent_form_slump` | `detect_form_slumps()` | Form slump signals were intentionally kept out of proactive posting; form is background context. |
 
-## War awareness — `heartbeat/_war.py` and `storage/war_status.py`
+## Player Progression Signals
 
-These are the heaviest-weight signals. The agent treats war signals as the
-highest-priority lane. Dedup is via `war_signal_log` or `signal_detector_cursors`
-keyed per war period.
+Source: `storage/player.py` from `snapshot_player_profile()` and
+`snapshot_player_battlelog()`, delivered by `player-progression`.
 
-| Type | Trigger |
-|---|---|
-| `war_battle_phase_active` / `war_practice_phase_active` | Phase marker at start of war day. |
-| `war_final_practice_day` / `war_final_battle_day` | Last day of a phase. |
-| `war_battle_days_complete` | All battle days ended for the week. |
-| `war_week_rollover` | New `periodIndex` begins vs stored cursor. |
-| `war_season_rollover` | New season detected from war log. |
-| `war_practice_day_started` / `war_battle_day_started` | Period start crossed. |
-| `war_practice_day_complete` / `war_battle_day_complete` | Period end crossed. |
-| `war_battle_day_final_hours` | ≤ N hours remaining in a battle day. |
-| `war_battle_rank_change` | Clan leaderboard rank changed during battle day. |
-| `war_week_complete` | Week finalized in war log. |
-| `war_season_complete` | Season finalized (terminal `periodType`). |
-| `war_completed` | War log gained a new entry (post-hoc result). |
-| `war_champ_standings` | War completion → fresh War Champ standings. |
-| `war_race_finished_live` | Live state shows a race close event. |
+| Type | Trigger | Lane |
+|---|---|---|
+| `player_level_up` | Experience level increased. | milestone |
+| `career_wins_milestone` | Wins crossed a configured milestone. | milestone |
+| `best_trophies_peak` | New all-time best trophies. | milestone |
+| `challenge_performance_milestone` | Challenge max wins reached a milestone. | milestone |
+| `cr_account_anniversary` | Clash Royale account age anniversary. | milestone |
+| `new_card_unlocked` | New card in collection. | milestone |
+| `new_champion_unlocked` | New champion in collection. | milestone |
+| `card_level_milestone` | Card level crossed configured milestone. | milestone |
+| `card_evolution_unlocked` | Card evolution or hero evolution level increased. | optional milestone |
+| `badge_earned` | New badge appeared. | milestone |
+| `badge_level_milestone` | Badge level crossed milestone. | optional milestone |
+| `achievement_star_milestone` | Achievement stars crossed milestone. | milestone |
+| `battle_hot_streak` | Consecutive wins in ladder/ranked mode. | battle_mode |
+| `battle_trophy_push` | Trophy delta crossed push threshold. | battle_mode |
+| `path_of_legend_promotion` | Path of Legends league advanced. | battle_mode |
+| `path_of_legend_demotion` | Path of Legends league regressed. | battle_mode |
+| `ultimate_champion_reached` | Path of Legends league 10 reached. | battle_mode |
+| `path_of_legend_global_rank_attained` | Top-1000 global rank appeared. | battle_mode |
 
-See `heartbeat/_helpers.py:BATTLE_DAY_SECONDS` + `_BATTLE_DAY_CHECKPOINTS` for
-the time-based thresholds; wall-clock computation in `build_situation_time`.
+## War Awareness Signals
 
----
+Sources:
 
-## Awards — `heartbeat/_awards.py`
+- `heartbeat.tick(include_war=True)` for legacy live war detectors.
+- `heartbeat.detect_war_signals_from_storage()` for the current stored-war
+  awareness pipeline.
 
-Durable, season-scoped recognition records. Each new award row fires one
-`award_earned` signal so the announcement pipeline and memory store pick it
-up automatically. Grants are idempotent (INSERT OR IGNORE) so detectors can
-run every heartbeat.
+| Type | Trigger | Identity / Dedup |
+|---|---|---|
+| `war_practice_phase_active` | Current phase is practice/training. | War period `signal_log_type`. |
+| `war_battle_phase_active` | Current phase is battle. | War period `signal_log_type`. |
+| `war_final_practice_day` | Last practice day. | War period `signal_log_type`. |
+| `war_final_battle_day` | Last battle day. | War period `signal_log_type`. |
+| `war_battle_days_complete` | All battle days complete. | War period `signal_log_type`. |
+| `war_week_rollover` | New week/section detected. | `war_week_rollover::s<season>:w<section>`. |
+| `war_season_rollover` | New season detected. | `war_season_rollover::s<season>`. |
+| `war_practice_day_started` | Practice day period starts. | War period `signal_log_type`. |
+| `war_battle_day_started` | Battle day period starts. | War period `signal_log_type`. |
+| `war_practice_day_complete` | Practice day period completes. | War period `signal_log_type`. |
+| `war_battle_day_complete` | Battle day period completes. | War period `signal_log_type`. |
+| `war_battle_day_final_hours` | Battle day is inside final-hours threshold. | War period/checkpoint key. |
+| `war_battle_rank_change` | Our race rank changed. | War period key plus rank. |
+| `war_attacks_complete` | Members completed all four battle decks. | Per-member nested `signal_log_type`. |
+| `war_surprise_participant` | Rare/never war participant played in current week. | Per-member nested `signal_log_type`. |
+| `war_rival_woke_up` | Rival clan moves from zero period points to active. | `war_rival_woke_up:<tag>:<battle_date>`. |
+| `war_lead_change` | Lead/deficit delta crosses threshold. | `war_lead_change:<battle_date>:<our_points>`. |
+| `war_race_finished_live` | Live state shows race finish. | Live-state signal key. |
+| `war_completed` | River Race log gained a new completed race. | `war_completed::<season>:<section>`. |
+| `war_week_complete` | Completed race gets weekly summary. | `war_week_complete::<season>:<section>`. |
+| `war_champ_standings` | War completion refreshes standings. | `war_champ_standings::<season>:<section>`. |
+| `war_season_complete` | Terminal season detected. | `war_season_complete::<season>`. |
+
+## Awards Signals
+
+Source: `heartbeat/_awards.py`, called by daily award detection.
 
 | Type | Trigger | Scope |
 |---|---|---|
-| `award_earned` (`war_champ`) | `detect_season_awards` — any season with a newer season in `war_races` and no existing `war_champ` row. Grants rank 1/2/3. | Season |
-| `award_earned` (`iron_king`) | Same trigger as `war_champ`. Grants to any active member with `decks_used_today=4` on every battle day of the season. | Season |
-| `award_earned` (`donation_champ`) | Same trigger. Ranks the top-3 season donation totals. | Season |
-| `award_earned` (`rookie_mvp`) | Same trigger. Top-3 fame among members whose `clan_memberships.joined_at` falls inside the season window. | Season |
-| `award_earned` (`war_participant`) | `detect_war_participant_awards` — any active member with fame > 0 in the current season and no existing row. Fires mid-season. | Season |
-| `award_earned` (`perfect_week`) | `detect_weekly_awards` — hooks on each `war_completed`; grants to members with `decks_used_today=4` on every battle day of that week. | Week |
-| `award_earned` (`donation_champ_weekly`) | `detect_weekly_donation_awards` — hooks on `weekly_donation_leader`. Persists the top-3 donors of the prior CR week as rank 1/2/3 rows. | Week |
+| `award_earned` | New award row inserted. | Member / season / week depending on award. |
+| `season_awards_granted` | Aggregated season awards payload. | Season |
 
-**Dedup**: Unique constraint on `awards(award_type, season_id, section_index,
-member_id)` plus `signal_log_type` per (award_type, season_id, scope, player_tag,
-rank). Detectors are safe to run every tick. Rows feed the `trophy_case` array
-on the roster site and a new `elixirAwards.json` payload for the
-`/members/trophy` page.
+Award types currently include `war_champ`, `iron_king`, `donation_champ`,
+`rookie_mvp`, `war_participant`, `perfect_week`, and
+`donation_champ_weekly`.
 
----
+## Tournament and Manual Observation Signals
 
-## Tournament — `storage/tournament.py`
+| Type | Source | Trigger |
+|---|---|---|
+| `tournament_watching_started` | `runtime/discord_commands.py` | Leader starts watching a tournament. |
+| `tournament_started` | `storage/tournament.py` | Tournament enters in-progress state. |
+| `tournament_ended` | `storage/tournament.py` | Tournament ends. |
+| `tournament_lead_change` | `storage/tournament.py` | Our rank changes. |
+| `tournament_participant_joined` | `storage/tournament.py` | New participant appears. |
+| `tournament_battle_played` | `runtime/jobs/_tournament.py` | New battle appears in watched tournament. |
+| `clan_voyage_complete` | `runtime/channel_router.py` | Leader-posted screenshot observation completes a Clan Voyage capture. |
 
-Fires inside the tournament poller; surfaced into `#tournaments` via
-`detect_pending_system_signals`.
+Tournament signals currently route to `#clan-events` through the clan-event
+lane.
 
-| Type | Trigger |
-|---|---|
-| `tournament_started` | Tournament entered `inProgress` state. |
-| `tournament_ended` | Tournament reached `ended` state. |
-| `tournament_lead_change` | Our rank in the leaderboard changed. |
+## System and Maintenance Signals
 
----
+| Type | Source | Trigger |
+|---|---|---|
+| `capability_unlock` | `runtime/system_signals.py` | Startup-seeded system signal not yet announced. |
+| `api_event_sentinel` | API sentinel | New Clash Royale `/events` observation. |
+| `api_schema_sentinel` | API sentinel | First-seen API schema path. |
+| `discord_invite_reminder` | Weekly relay job | Weekly no-link clan-chat invite reminder. |
 
-## War participation analytics — `storage/war_analytics.py`
+## Leadership Analytics That Are Not Proactive Signals
 
-Weekly post-war analysis; surfaces leadership-scope concerns.
+`storage/war_analytics.py` returns analytics rows such as `inactive`,
+`low_donations`, and `low_war_participation` for structured tools and leader
+action scans. Those rows are not themselves proactive awareness signals unless a
+detector or job wraps them into a signal such as `inactive_members` or a future
+decision case.
 
-| Type | Trigger |
-|---|---|
-| `inactive` | Member with 0 war battles in the completed week. |
-| `low_donations` | Member below weekly donation threshold. |
-| `low_war_participation` | Member with fewer than expected battles. |
+## Routing Guardrails
 
----
+Current hard routing, before future cases/intents:
 
-## System signals — `runtime/system_signals.py`
+- War signals route to `#river-race`; some also route to `#leader-actions` or
+  `#leaders`.
+- Battle-mode and milestone signals route to `#player-highlights`.
+- Roster/community events route to `#clan-events`, with selected leadership
+  side notes.
+- Leadership-only signals route to `#leaders`.
+- `#leader-actions` remains an action-board projection, not a generic signal
+  destination.
 
-Startup-time signals (v4.7 capability unlocks, release announcements, etc.).
-Delivered into `#announcements` or matching channel based on `audience`.
-
-| Type | Trigger |
-|---|---|
-| `capability_unlock` | New `STARTUP_SYSTEM_SIGNALS` entry with unused `signal_key`; fires once per version. |
-
----
-
-## Deficits noted during the v4.7 audit
-
-These are things the DB stores that had no signal until the v4.7 refactor, or
-that remain unsurfaced:
-
-- **`member_recent_form`** — four scopes × ~30 members. Only upward transitions
-  fed `battle_hot_streak`; downward was dark. **Closed by #27
-  (`recent_form_slump`).**
-- **`member_state_snapshots.last_seen_api` returning to fresh** — no "welcome
-  back" counterpart to the inactivity detector. **Closed by #26
-  (`member_active_again`).**
-- **Path of Legends full lifecycle** — promotion existed; demotion, UC reach,
-  and top-1000 global rank did not. **Closed by #23 / #24 / #25.**
-- **Best-trophies peak and challenge-max-wins** — stored on every profile
-  snapshot but not diffed. **Closed by #28 / #30.**
-- **Battle pulse mode conflation** — ladder and ranked battles were merged into
-  one signal stream, making it impossible to tell where progress was happening.
-  **Closed by #22 (per-mode `mode` field on `battle_hot_streak` /
-  `battle_trophy_push`).**
-
-Still open / future work:
-
-- None at the moment. Signal-flow backlog is cleared.
-
-Closed this sprint (v4.7 autonomous signal refactor):
-
-- **Card evolution unlocks.** Previously the card-diff loop tracked levels but
-  not `evolutionLevel`. **Closed** — now emits `card_evolution_unlocked` with
-  `evolution_kind` ∈ {`evo`, `hero`}.
-- **Member deck-style trends.** 18k `member_deck_snapshots` rows nobody read.
-  **Closed** — `deck_archetype_change` fires when the current deck differs by
-  4+ cards from the deck 24h ago.
-- **Silent lane routing bug.** All ten v4.7-added signal types were falling
-  into the "unknown" lane because none were added to `PROGRESSION_SIGNAL_TYPES`
-  / `BATTLE_MODE_SIGNAL_TYPES` / `CLAN_EVENT_SIGNAL_TYPES` /
-  `LEADERSHIP_ONLY_SIGNAL_TYPES`. **Closed** — all ten now route correctly
-  (locked down by a regression test in `test_awareness_loop.py`).
-- **Clan-level trophy records.** `clan_daily_metrics` had totals but no
-  "new clan-score high" or "new clan-war-trophy high" signal. **Closed** —
-  `clan_score_record` / `clan_war_trophies_record` fire once per new
-  all-time high (roughly every 2-3 days at current trajectory).
-- **Longer-window donation leaders.** Only daily top-3; nothing captured
-  the weekly carriage. **Closed** — `weekly_donation_leader` fires on
-  Mondays with the prior CR week's top-3.
-
----
-
-## How dedup works, in brief
-
-Three conventions are used across detectors:
-
-1. **`signal_log` table** via `was_signal_sent` / `mark_signal_sent` — for
-   calendar-bounded events (daily/weekly). Example: `donation_leaders:<date>`.
-2. **`signal_log_type`** on a signal dict — the downstream publisher writes the
-   type to `signal_log` automatically when the post lands. Used for
-   per-observation dedup like `member_active_again:<tag>:<observed_at>`.
-3. **`signal_detector_cursors`** — keyed `(detector_key, scope_key)` with free
-   text / int payloads. Used when the detector needs remembered state that
-   isn't a table-level field. Example: `form_slump` remembers last label per
-   (member, scope).
-
-When adding a new detector, choose the dedup style that matches the event
-cadence: calendar → (1), observation → (2), needs state → (3).
+The event stream records the same observations before delivery, but it must not
+change these routing outcomes in Phase 1 / Phase 0.
