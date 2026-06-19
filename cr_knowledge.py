@@ -76,7 +76,7 @@ def is_ready_to_upgrade(rarity, current_level, count):
 # spells + cycle (Miner-cycle is borderline; Miner is included here because it
 # IS the win condition in those decks).
 #
-# Source: prompts/subagents/tournament.md plus the deck-review prompt's
+# Source: prompts/agents/tournament.md plus the deck-review prompt's
 # tournament-style language. Encoded as a constant so signal enrichment, deck
 # review, and tournament commentary all read from the same list.
 WIN_CONDITION_CARDS = frozenset({

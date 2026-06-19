@@ -129,7 +129,7 @@ def test_on_message_routes_ask_elixir_without_mention():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1482368505058955467,
             "name": "#ask-elixir",
-            "subagent": "ask-elixir",
+            "lane": "ask-elixir",
             "workflow": "interactive",
             "reply_policy": "open_channel",
         }),
@@ -182,7 +182,7 @@ def test_on_message_routes_ask_elixir_image_only_screenshot():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1482368505058955467,
             "name": "#ask-elixir",
-            "subagent": "ask-elixir",
+            "lane": "ask-elixir",
             "workflow": "interactive",
             "reply_policy": "open_channel",
         }),
@@ -247,7 +247,7 @@ def test_on_message_corrects_mislabeled_screenshot_media_type():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1482368505058955467,
             "name": "#ask-elixir",
-            "subagent": "ask-elixir",
+            "lane": "ask-elixir",
             "workflow": "interactive",
             "reply_policy": "open_channel",
         }),
@@ -299,7 +299,7 @@ def test_on_message_passes_screenshot_to_deck_review():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1482368505058955467,
             "name": "#ask-elixir",
-            "subagent": "ask-elixir",
+            "lane": "ask-elixir",
             "workflow": "interactive",
             "reply_policy": "open_channel",
             "memory_scope": "public",
@@ -351,7 +351,7 @@ def test_on_message_routes_reception_without_mention():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1476456514121109514,
             "name": "#welcome",
-            "subagent": "reception",
+            "lane": "reception",
             "workflow": "reception",
             "reply_policy": "open_channel",
             "memory_scope": "public",
@@ -429,7 +429,7 @@ def test_on_raw_reaction_add_marks_arena_relay_action_done():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
             "name": "#leader-actions",
-            "subagent": "arena-relay",
+            "lane": "arena-relay",
         }),
         patch("runtime.prompt_feedback.db.decide_leader_action_by_message", return_value={
             "action_id": 42,
@@ -470,7 +470,7 @@ def test_arena_relay_reply_records_action_note():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
             "name": "#leader-actions",
-            "subagent": "arena-relay",
+            "lane": "arena-relay",
             "workflow": "channel_update",
             "reply_policy": "disabled",
             "memory_scope": "leadership",
@@ -522,7 +522,7 @@ def test_arena_relay_leader_screenshot_is_observed():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
             "name": "#leader-actions",
-            "subagent": "arena-relay",
+            "lane": "arena-relay",
             "workflow": "channel_update",
             "reply_policy": "disabled",
             "memory_scope": "leadership",
@@ -602,7 +602,7 @@ def test_arena_relay_screenshot_persists_structured_memories():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
             "name": "#leader-actions",
-            "subagent": "arena-relay",
+            "lane": "arena-relay",
             "workflow": "channel_update",
             "reply_policy": "disabled",
             "memory_scope": "leadership",
@@ -703,7 +703,7 @@ def test_arena_relay_leader_multi_screenshot_corrects_media_types():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
             "name": "#leader-actions",
-            "subagent": "arena-relay",
+            "lane": "arena-relay",
             "workflow": "channel_update",
             "reply_policy": "disabled",
             "memory_scope": "leadership",
@@ -784,7 +784,7 @@ def test_arena_relay_clan_voyage_screenshot_persists_capture():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1513758211206025227,
             "name": "#leader-actions",
-            "subagent": "arena-relay",
+            "lane": "arena-relay",
             "workflow": "channel_update",
             "reply_policy": "disabled",
             "memory_scope": "leadership",
@@ -941,7 +941,7 @@ def test_on_raw_reaction_add_records_negative_feedback_and_invites_retry():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
         patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
         patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 44, "became_active_down": True}) as mock_upsert,
         patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
@@ -982,7 +982,7 @@ def test_on_raw_reaction_add_emits_warning_on_active_thumbs_down(caplog):
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
         patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
         patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 99, "became_active_down": True}),
         patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited"),
@@ -1029,7 +1029,7 @@ def test_on_raw_reaction_add_records_positive_feedback_and_acknowledges_receipt(
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
         patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
         patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 45, "became_active_down": False}) as mock_upsert,
         patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
@@ -1071,7 +1071,7 @@ def test_on_raw_reaction_add_ignores_non_owner_feedback():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
         patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
         patch("runtime.prompt_feedback.db.upsert_prompt_feedback") as mock_upsert,
         patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=111), get_channel=lambda _channel_id: None)),
@@ -1108,7 +1108,7 @@ def test_on_raw_reaction_add_does_not_repeat_retry_invitation_for_active_down_fe
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
         patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
         patch("runtime.prompt_feedback.db.upsert_prompt_feedback", return_value={"prompt_feedback_id": 44, "became_active_down": False}) as mock_upsert,
         patch("runtime.prompt_feedback.db.mark_prompt_feedback_retry_invited") as mock_mark,
@@ -1146,7 +1146,7 @@ def test_on_raw_reaction_remove_clears_matching_feedback():
 
     with (
         patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "subagent": "ask-elixir"}),
+        patch("elixir._get_channel_behavior", return_value={"id": 1482368505058955467, "name": "#ask-elixir", "lane": "ask-elixir"}),
         patch("runtime.prompt_feedback.db.get_message_by_discord_message_id", return_value=assistant_row),
         patch("runtime.prompt_feedback.db.clear_prompt_feedback") as mock_clear,
         patch("runtime.app.bot", new=SimpleNamespace(user=SimpleNamespace(id=999), get_channel=lambda _channel_id: None)),
@@ -1178,7 +1178,7 @@ def test_on_message_saves_primary_discord_message_id_for_multipart_ask_elixir_re
         patch("elixir._get_channel_behavior", return_value={
             "id": 1482368505058955467,
             "name": "#ask-elixir",
-            "subagent": "ask-elixir",
+            "lane": "ask-elixir",
             "workflow": "interactive",
             "reply_policy": "open_channel",
         }),
@@ -1526,19 +1526,19 @@ def test_ask_elixir_daily_insight_posts_fun_fact():
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core._get_singleton_channel_id", return_value=1482368505058955467),
         patch(
-            "elixir.prompts.discord_channels_by_subagent",
+            "elixir.prompts.discord_channels_by_lane",
             return_value={
                 "ask-elixir": {
                     "id": 1482368505058955467,
                     "name": "#ask-elixir",
-                    "subagent_key": "ask-elixir",
+                    "lane_key": "ask-elixir",
                     "memory_scope": "public",
                     "durable_memory_enabled": True,
                 }
             },
         ),
         patch("elixir.db.list_channel_messages", return_value=[]),
-        patch("runtime.jobs._core.build_subagent_memory_context", return_value={}),
+        patch("runtime.jobs._core.build_lane_memory_context", return_value={}),
         patch("runtime.jobs._core._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS", "tag": "#J2RGCRVG", "memberList": [{"name": "Jamie"}]}, {}))),
         patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 50, "donations_week_total": 12345, "avg_member_trophies": 8123}),
         patch("elixir.db.build_clan_trend_summary_context", return_value="Clan score is up over the last 7 days."),
@@ -1810,7 +1810,7 @@ def test_on_message_keeps_interpretive_main_deck_questions_in_llm_path():
         patch("elixir._get_channel_behavior", return_value={
             "id": 1482368505058955467,
             "name": "#ask-elixir",
-            "subagent": "ask-elixir",
+            "lane": "ask-elixir",
             "workflow": "interactive",
             "reply_policy": "open_channel",
             "memory_scope": "public",
@@ -1946,7 +1946,7 @@ def test_slash_relay_status_allowed_in_arena_relay():
 
     with (
         patch("runtime.app._is_clanops_channel", return_value=False),
-        patch("runtime.app._get_channel_behavior", return_value={"name": "#leader-actions", "subagent": "arena-relay"}),
+        patch("runtime.app._get_channel_behavior", return_value={"name": "#leader-actions", "lane": "arena-relay"}),
         patch("runtime.app._has_leader_role", return_value=True),
         patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="relay report")) as mock_dispatch,
     ):
@@ -1982,7 +1982,7 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
 
     with (
         patch("runtime.app._is_clanops_channel", return_value=False),
-        patch("runtime.app._get_channel_behavior", return_value={"name": "#leader-actions", "subagent": "arena-relay"}),
+        patch("runtime.app._get_channel_behavior", return_value={"name": "#leader-actions", "lane": "arena-relay"}),
         patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="war report")) as mock_dispatch,
     ):
         asyncio.run(war_status_command.callback(interaction))
@@ -2587,7 +2587,7 @@ def test_cr_api_auth_failure_alert_posts_once_per_signature():
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     with (
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "subagent": "leader-lounge", "workflow": "clanops"}]),
+        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "lane": "leader-lounge", "workflow": "clanops"}]),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
@@ -2626,7 +2626,7 @@ def test_cr_api_outage_alert_posts_after_consecutive_failures():
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     with (
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "subagent": "leader-lounge", "workflow": "clanops"}]),
+        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "lane": "leader-lounge", "workflow": "clanops"}]),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
@@ -2669,7 +2669,7 @@ def test_llm_outage_alert_fires_on_first_hard_fail_error():
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     with (
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "subagent": "leader-lounge", "workflow": "clanops"}]),
+        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "lane": "leader-lounge", "workflow": "clanops"}]),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
@@ -2721,7 +2721,7 @@ def test_llm_outage_alert_waits_for_three_consecutive_soft_errors():
         }
 
     with (
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "subagent": "leader-lounge", "workflow": "clanops"}]),
+        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "lane": "leader-lounge", "workflow": "clanops"}]),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
@@ -2767,7 +2767,7 @@ def test_llm_outage_alert_dedupes_on_signature():
     channel = SimpleNamespace(id=200, name="leader-lounge", type="text")
 
     with (
-        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "subagent": "leader-lounge", "workflow": "clanops"}]),
+        patch("elixir.prompts.discord_channels_by_workflow", return_value=[{"id": 200, "name": "#leader-lounge", "lane": "leader-lounge", "workflow": "clanops"}]),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("elixir.db.format_member_reference", return_value="King Thing (<@704062105258557511>)"),
@@ -2899,7 +2899,7 @@ def test_activity_registry_has_unique_keys_and_required_fields():
         activity.activity_role in {"observer", "communicator", "observer+communicator"}
         for activity in activities
     )
-    assert all(activity.owner_subagent for activity in activities)
+    assert all(activity.owner_lane for activity in activities)
     assert all(activity.job_id for activity in activities)
     assert all(activity.job_function for activity in activities)
     assert all(activity.schedule_kind in {"interval", "cron"} for activity in activities)
@@ -2917,35 +2917,35 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
         specs = {spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)}
 
     assert "war-poll" in specs
-    assert specs["war-poll"]["owner_subagent"] == "river-race"
+    assert specs["war-poll"]["owner_lane"] == "river-race"
     assert specs["war-poll"]["activity_role"] == "observer"
     assert specs["war-poll"]["schedule"] == "Every hour at :00 CT."
     assert "war-awareness" in specs
-    assert specs["war-awareness"]["owner_subagent"] == "river-race"
+    assert specs["war-awareness"]["owner_lane"] == "river-race"
     assert specs["war-awareness"]["activity_role"] == "observer+communicator"
     assert specs["war-awareness"]["schedule"] == "Every hour at :05 CT."
     assert "#river-race" in " ".join(specs["war-awareness"]["delivery_targets"])
     assert "daily-clan-insight" in specs
-    assert specs["daily-clan-insight"]["owner_subagent"] == "ask-elixir"
+    assert specs["daily-clan-insight"]["owner_lane"] == "ask-elixir"
     assert specs["daily-clan-insight"]["activity_role"] == "communicator"
     assert "Discord: #ask-elixir" in specs["daily-clan-insight"]["delivery_targets"]
     assert specs["daily-clan-insight"]["schedule"] == "Daily at 12:00 CT."
     assert "leadership-action-scan" in specs
-    assert specs["leadership-action-scan"]["owner_subagent"] == "arena-relay"
+    assert specs["leadership-action-scan"]["owner_lane"] == "arena-relay"
     assert specs["leadership-action-scan"]["activity_role"] == "observer+communicator"
     assert specs["leadership-action-scan"]["schedule"] == "Every 240 minutes."
     assert "Discord: #leader-actions singular leader action cards" in specs["leadership-action-scan"]["delivery_targets"]
     assert "weekly-discord-invite-relay" in specs
-    assert specs["weekly-discord-invite-relay"]["owner_subagent"] == "arena-relay"
+    assert specs["weekly-discord-invite-relay"]["owner_lane"] == "arena-relay"
     assert specs["weekly-discord-invite-relay"]["activity_role"] == "communicator"
     assert specs["weekly-discord-invite-relay"]["schedule"] == "Every Sat at 11:00 CT."
     assert "Discord: #leader-actions weekly no-link Discord invite copy" in specs["weekly-discord-invite-relay"]["delivery_targets"]
     assert "db-maintenance" in specs
-    assert specs["db-maintenance"]["owner_subagent"] == "elixir-log"
+    assert specs["db-maintenance"]["owner_lane"] == "elixir-log"
     assert specs["db-maintenance"]["activity_role"] == "observer+communicator"
     assert "Discord webhook: #elixir-log" in specs["db-maintenance"]["delivery_targets"]
     assert "api-sentinel" in specs
-    assert specs["api-sentinel"]["owner_subagent"] == "leader-lounge"
+    assert specs["api-sentinel"]["owner_lane"] == "leader-lounge"
     assert specs["api-sentinel"]["activity_role"] == "observer+communicator"
     assert specs["api-sentinel"]["schedule"] == "Every 240 minutes."
     assert "Discord: #leaders on first-seen CR API schema or event drift" in specs["api-sentinel"]["delivery_targets"]

@@ -10,7 +10,7 @@ import heartbeat
 from heartbeat._roster import detect_deck_archetype_changes, detect_form_slumps
 import discord
 import elixir
-from runtime.channel_subagents import plan_signal_outcomes
+from runtime.signal_lanes import plan_signal_outcomes
 
 
 def _publish_result(*content_types, sha="abc123def456", repo="jthingelstad/poapkings.com", branch="main"):
@@ -1556,7 +1556,7 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
             "cr_collection_level": 1597,
             "trophies": 6000,
         }),
-        patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
+        patch("runtime.signals.delivery.build_lane_memory_context", return_value={"durable_memories": []}),
         patch("elixir.db.list_leader_action_feedback_profiles", return_value=[{
             "memory_id": 900,
             "scope": "leadership",
@@ -1663,7 +1663,7 @@ def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_bat
             "cr_collection_level": 1597,
             "cr_clan_war_wins": 421,
         }),
-        patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
+        patch("runtime.signals.delivery.build_lane_memory_context", return_value={"durable_memories": []}),
         patch("elixir.db.list_leader_action_feedback_profiles", return_value=[]),
         patch("runtime.signals.delivery.can_post_leader_action", return_value=(False, "daily_cap:4")) as mock_policy,
         patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={
@@ -1791,7 +1791,7 @@ def test_deliver_weekly_discord_invite_relay_uses_elixir_authored_copy():
             {"name": f"Member {index}", "in_discord": index <= 17}
             for index in range(1, 51)
         ]),
-        patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
+        patch("runtime.signals.delivery.build_lane_memory_context", return_value={"durable_memories": []}),
         patch("elixir.db.list_leader_action_feedback_profiles", return_value=[]),
         patch("runtime.signals.delivery.can_post_leader_action", return_value=(True, None)),
         patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={
@@ -1865,7 +1865,7 @@ def test_signal_delivery_logs_leader_action_policy_skip():
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir.db.get_signal_outcome", return_value=None),
         patch("elixir.db.list_channel_messages", return_value=[]),
-        patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
+        patch("runtime.signals.delivery.build_lane_memory_context", return_value={"durable_memories": []}),
         patch("runtime.signals.delivery.can_post_leader_action", return_value=(False, "open_card_backlog:5/5")),
         patch("runtime.signals.delivery.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip_log,
         patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
@@ -1918,7 +1918,7 @@ def test_signal_delivery_policy_skip_includes_player_target():
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir.db.get_signal_outcome", return_value=None),
         patch("elixir.db.list_channel_messages", return_value=[]),
-        patch("runtime.signals.delivery.build_subagent_memory_context", return_value={"durable_memories": []}),
+        patch("runtime.signals.delivery.build_lane_memory_context", return_value={"durable_memories": []}),
         patch("runtime.signals.delivery.can_post_leader_action", return_value=(False, "daily_cap:4")),
         patch("runtime.signals.delivery.post_leader_action_skip", new=AsyncMock(return_value=True)) as mock_skip_log,
         patch("elixir.elixir_agent.generate_channel_update") as mock_generate,
@@ -2466,7 +2466,7 @@ def test_weekly_leader_actions_post_to_arena_relay():
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
+        patch("runtime.jobs._core.prompts.discord_singleton_lane", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.db.get_promotion_candidates", return_value={
             "recommended": [{"member_ref": "King Levy", "player_tag": "#ABC123", "elder_donation_rank": 2, "elder_target_rank": 10, "rolling_donations_avg": 220.0, "donations": 220, "war_races_played": 4, "days_since_battle": 0}],
@@ -2534,7 +2534,7 @@ def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppresse
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
+        patch("runtime.jobs._core.prompts.discord_singleton_lane", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.db.get_promotion_candidates", return_value={"recommended": []}),
         patch("runtime.jobs._core.db.get_members_at_risk", return_value={
@@ -2596,7 +2596,7 @@ def test_leader_action_scan_posts_due_inactivity_case():
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
+        patch("runtime.jobs._core.prompts.discord_singleton_lane", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.db.get_promotion_candidates", return_value={"recommended": [], "demotion_candidates": []}),
         patch("runtime.jobs._core.db.get_members_at_risk", return_value={
@@ -2651,7 +2651,7 @@ def test_leader_action_scan_skips_active_low_donation_war_candidates():
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core.prompts.discord_singleton_subagent", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
+        patch("runtime.jobs._core.prompts.discord_singleton_lane", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.db.get_promotion_candidates", return_value={"recommended": []}),
         patch("runtime.jobs._core.db.get_members_at_risk", return_value={
@@ -2932,7 +2932,7 @@ def test_weekly_story_relay_card_offers_recap_beat_as_clan_chat_copy():
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#leader-actions", "subagent_key": "arena-relay"}),
+        patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#leader-actions", "lane_key": "arena-relay"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)) as mock_policy,
         patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={"messages": [copy_line]}) as mock_generate,
@@ -2967,7 +2967,7 @@ def test_weekly_story_relay_card_skips_when_copy_unusable():
 
     with (
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#leader-actions", "subagent_key": "arena-relay"}),
+        patch("runtime.jobs._core._channel_config_by_key", return_value={"id": 900, "name": "#leader-actions", "lane_key": "arena-relay"}),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
         patch("runtime.clan_chat_copy.elixir_agent.generate_clan_chat_copy", return_value={"messages": ["Read more at https://example.com"]}),
@@ -3342,12 +3342,12 @@ def test_notify_poapkings_publish_posts_success_to_poapkings_channel():
         patch("runtime.jobs._site._channel_config_by_key", return_value={
             "id": 900,
             "name": "#website-updates",
-            "subagent_key": "poapkings-com",
+            "lane_key": "poapkings-com",
             "memory_scope": "public",
         }),
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("elixir.db.list_channel_messages", return_value=[]),
-        patch("runtime.jobs._site.build_subagent_memory_context", return_value=""),
+        patch("runtime.jobs._site.build_lane_memory_context", return_value=""),
         patch("elixir.elixir_agent.generate_channel_update", return_value={
             "event_type": "channel_update",
             "summary": "POAP KINGS publish complete",

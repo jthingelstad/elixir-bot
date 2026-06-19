@@ -16,7 +16,7 @@ def _is_arena_relay_command_channel(app, channel, command_name: str) -> bool:
     if not str(command_name or "").startswith("relay."):
         return False
     channel_config = app._get_channel_behavior(getattr(channel, "id", 0))
-    return bool(channel_config and (channel_config.get("subagent") or "") == "arena-relay")
+    return bool(channel_config and channel_config.get("lane") == "arena-relay")
 
 
 def register_elixir_app_commands(bot) -> None:
@@ -260,7 +260,7 @@ def register_elixir_app_commands(bot) -> None:
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            target_config = app.prompts.discord_singleton_subagent("arena-relay")
+            target_config = app.prompts.discord_singleton_lane("arena-relay")
             channel = app.bot.get_channel(target_config["id"])
         except Exception as exc:
             app.log.warning("relay test card failed: arena-relay unavailable: %s", exc, exc_info=True)

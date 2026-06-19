@@ -16,14 +16,13 @@ __all__ = [
 ]
 
 import asyncio
+import logging
 import os
 
 import cr_api
 import db
 import elixir_agent
 from storage.contextual_memory import upsert_intel_report_memory
-from runtime import app as _app
-from runtime.app import bot, log
 from runtime.helpers import _get_singleton_channel_id
 from runtime.jobs._signals import (
     _channel_config_by_key,
@@ -31,8 +30,20 @@ from runtime.jobs._signals import (
     _post_to_elixir,
     _progression_signal_batches,
 )
-from runtime.channel_subagents import build_subagent_memory_context
+from runtime.signal_lanes import build_lane_memory_context
 from runtime import status as runtime_status
+
+log = logging.getLogger("elixir")
+
+
+def _runtime_app():
+    import runtime.app as app
+
+    return app
+
+
+def _bot():
+    return _runtime_app().bot
 
 
 def _player_intel_refresh_minutes() -> int:
@@ -57,10 +68,10 @@ async def _player_intel_refresh():
     runtime_status.mark_job_start("player_intel_refresh")
     try:
         clan = await asyncio.to_thread(cr_api.get_clan)
-        _app._clear_cr_api_failure_alert_if_recovered()
+        _runtime_app()._clear_cr_api_failure_alert_if_recovered()
     except Exception as e:
         log.error("Player intel refresh: clan fetch failed: %s", e)
-        await _app._maybe_alert_cr_api_failure("player intel refresh")
+        await _runtime_app()._maybe_alert_cr_api_failure("player intel refresh")
         runtime_status.mark_job_failure("player_intel_refresh", f"clan fetch failed: {e}")
         return
 
@@ -136,7 +147,7 @@ async def _player_intel_refresh():
             )
 
     if profile_failures or battle_log_failures:
-        await _app._maybe_alert_cr_api_failure("player intel refresh")
+        await _runtime_app()._maybe_alert_cr_api_failure("player intel refresh")
 
     total_targets = len(targets)
     failure_summary = []
@@ -176,7 +187,7 @@ async def _clan_wars_intel_report():
         runtime_status.mark_job_failure("clan_wars_intel", f"channel config error: {exc}")
         return
 
-    channel = bot.get_channel(channel_id)
+    channel = _bot().get_channel(channel_id)
     if not channel:
         runtime_status.mark_job_failure("clan_wars_intel", "river-race channel not found")
         return
@@ -208,7 +219,7 @@ async def _clan_wars_intel_report():
     try:
         channel_config = _channel_config_by_key("river-race")
         memory_context = await asyncio.to_thread(
-            build_subagent_memory_context, channel_config, signals=[],
+            build_lane_memory_context, channel_config, signals=[],
         )
     except Exception as exc:
         log.warning("Intel report: memory context setup failed: %s", exc)

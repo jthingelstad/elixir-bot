@@ -42,7 +42,7 @@ Awards become first-class. Until now, War Champ, Iron King, and friends were rec
 - `heartbeat/_awards.py` (new) — `detect_season_awards`, `detect_weekly_awards`, `detect_weekly_donation_awards`, `detect_war_participant_awards`.
 - `db/_migrations.py` — migration 30.
 - `heartbeat/__init__.py`, `heartbeat/_pipeline.py` — wire detectors into both tick and the storage-backed war path.
-- `runtime/channel_subagents.py` — route `award_earned` to clan-events + durable memory.
+- `runtime/signal_lanes.py` — route `award_earned` to clan-events + durable memory.
 - `agent/memory_tasks.py` — award-earned fact mapper.
 - `modules/poap_kings/site.py` — `build_trophy_case`, `build_awards_data`, new `awards` content type.
 - `runtime/jobs/_site.py` — publish `elixirAwards.json` alongside `roster` and `clan`.
@@ -294,12 +294,12 @@ Elixir's River Race intelligence and internal architecture both got sharper in t
 
 ### River Race — Competing Clan Awareness
 
-- The #river-race subagent now references competing clans by name with fame-gap framing — who's closest, who's falling behind, and snarky commentary when a rival barely shows up.
+- The #river-race lane now references competing clans by name with fame-gap framing — who's closest, who's falling behind, and snarky commentary when a rival barely shows up.
 - Race standings data was already passed to the LLM but previously ignored; the prompt now actively instructs Elixir to use it.
 
 ### River Race — Win Streak Memory
 
-- Introduced unscoped "clan identity" durable memories that load for the river-race subagent regardless of which war week is active.
+- Introduced unscoped "clan identity" durable memories that load for the river-race lane regardless of which war week is active.
 - A race win streak memory is auto-updated on each `war_week_complete` signal by counting consecutive 1st-place finishes in the `war_races` table.
 - POAP KINGS' unbroken 1st-place streak (Season 129 Week 2 to present) is now part of Elixir's River Race voice.
 

@@ -13,7 +13,7 @@ class RuntimeAttrRef:
 @dataclass(frozen=True)
 class ActivityDefinition:
     activity_key: str
-    owner_subagent: str
+    owner_lane: str
     purpose: str
     job_id: str
     job_function: str
@@ -34,7 +34,7 @@ def _attr(name: str, default: Any = None) -> RuntimeAttrRef:
 _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ActivityDefinition(
         activity_key="clan-awareness",
-        owner_subagent="clan-events",
+        owner_lane="clan-events",
         purpose="Process non-war clan signals, leader-facing notes, and routed clan-event outcomes.",
         job_id="clan-awareness",
         job_function="_clan_awareness_tick",
@@ -52,7 +52,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="war-poll",
-        owner_subagent="river-race",
+        owner_lane="river-race",
         purpose="Poll live war state and persist the hourly River Race snapshot pipeline.",
         job_id="war-poll",
         job_function="_war_poll_tick",
@@ -70,7 +70,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="war-awareness",
-        owner_subagent="river-race",
+        owner_lane="river-race",
         purpose="Process war-only signals and coordinate River Race messaging.",
         job_id="war-awareness",
         job_function="_war_awareness_tick",
@@ -87,7 +87,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="player-progression",
-        owner_subagent="member-highlights",
+        owner_lane="member-highlights",
         purpose="Refresh player intelligence and emit curated member highlights.",
         job_id="player-progression",
         job_function="_player_intel_refresh",
@@ -105,7 +105,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="award-detection",
-        owner_subagent="river-race",
+        owner_lane="river-race",
         purpose="Detect and grant season-wide clan awards (idempotent). Runs daily — season close and War Participant accumulation only need a daily pass.",
         job_id="award-detection",
         job_function="_award_detection_tick",
@@ -124,7 +124,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="daily-clan-insight",
-        owner_subagent="ask-elixir",
+        owner_lane="ask-elixir",
         purpose="Share one playful, data-driven hidden fact in the dedicated Elixir conversation channel.",
         job_id="daily-clan-insight",
         job_function="_ask_elixir_daily_insight",
@@ -140,7 +140,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="leadership-action-scan",
-        owner_subagent="arena-relay",
+        owner_lane="arena-relay",
         purpose="Continuously scan for singular leader actions and post crisp action cards when the data warrants one.",
         job_id="leadership-action-scan",
         job_function="_leadership_action_scan",
@@ -158,7 +158,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="weekly-discord-invite-relay",
-        owner_subagent="arena-relay",
+        owner_lane="arena-relay",
         purpose="Post a weekly no-link Clash Royale clan-chat prompt that helps members find the Discord via POAPKINGS . COM > Members.",
         job_id="weekly-discord-invite-relay",
         job_function="_weekly_discord_invite_relay",
@@ -178,7 +178,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="memory-synthesis",
-        owner_subagent="leader-lounge",
+        owner_lane="leader-lounge",
         purpose="Weekly pass that writes arc memories, retires stale entries, and flags contradictions against live state.",
         job_id="memory-synthesis",
         job_function="_memory_synthesis_cycle",
@@ -195,7 +195,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="weekly-recap",
-        owner_subagent="announcements",
+        owner_lane="announcements",
         purpose="Publish the public weekly clan recap and members-page payload.",
         job_id="weekly-recap",
         job_function="_weekly_clan_recap",
@@ -213,7 +213,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="site-content",
-        owner_subagent="announcements",
+        owner_lane="announcements",
         purpose="Refresh and publish daily POAP KINGS site content.",
         job_id="site-content",
         job_function="_site_content_cycle",
@@ -232,7 +232,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="promotion-content",
-        owner_subagent="promote-the-clan",
+        owner_lane="promote-the-clan",
         purpose="Generate reusable recruiting content for members and the website.",
         job_id="promotion-content",
         job_function="_promotion_content_cycle",
@@ -251,7 +251,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="card-catalog-sync",
-        owner_subagent="leader-lounge",
+        owner_lane="leader-lounge",
         purpose="Sync the Clash Royale card catalog from the API.",
         job_id="card-catalog-sync",
         job_function="_card_catalog_sync",
@@ -267,7 +267,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="api-sentinel",
-        owner_subagent="leader-lounge",
+        owner_lane="leader-lounge",
         purpose="Track first-seen Clash Royale API schema paths and current game-mode events as the game evolves.",
         job_id="api-sentinel",
         job_function="_api_sentinel_tick",
@@ -285,7 +285,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="db-maintenance",
-        owner_subagent="elixir-log",
+        owner_lane="elixir-log",
         purpose="Purge expired data, VACUUM the database, and report space reclaimed.",
         job_id="db-maintenance",
         job_function="_db_maintenance_cycle",
@@ -302,7 +302,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="clan-wars-intel",
-        owner_subagent="river-race",
+        owner_lane="river-race",
         purpose="Generate a detailed intel report on competing clans for the war season.",
         job_id="clan-wars-intel",
         job_function="_clan_wars_intel_report",
@@ -376,7 +376,7 @@ def resolve_activity(activity_key: str, runtime_module: Any) -> dict[str, Any]:
         "definition": activity,
         "activity_key": activity.activity_key,
         "activity_role": activity.activity_role,
-        "owner_subagent": activity.owner_subagent,
+        "owner_lane": activity.owner_lane,
         "purpose": activity.purpose,
         "job_id": activity.job_id,
         "job_function": activity.job_function,
@@ -432,7 +432,7 @@ def schedule_specs_from_registry(runtime_module: Any) -> list[dict[str, Any]]:
             {
                 "activity_key": activity.activity_key,
                 "activity_role": activity.activity_role,
-                "owner_subagent": activity.owner_subagent,
+                "owner_lane": activity.owner_lane,
                 "purpose": activity.purpose,
                 "job_id": activity.job_id,
                 "job_function": activity.job_function,

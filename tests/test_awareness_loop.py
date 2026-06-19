@@ -517,7 +517,7 @@ def test_deliver_awareness_post_records_intent_links_on_message_and_outcome():
         patch("runtime.jobs._signals._channel_config_by_key", return_value={
             "id": 777,
             "name": "clan-events",
-            "subagent_key": "clan-events",
+            "lane_key": "clan-events",
             "memory_scope": "public",
         }),
         patch.object(elixir.bot, "get_channel", return_value=channel),
@@ -688,7 +688,7 @@ def test_arena_relay_sidecar_uses_communication_intent_planner():
         patch("runtime.jobs._signals._channel_config_by_key", return_value={
             "id": 999,
             "name": "leader-actions",
-            "subagent_key": "arena-relay",
+            "lane_key": "arena-relay",
             "memory_scope": "leadership",
         }),
         patch("runtime.jobs._signals.plan_signal_outcomes", side_effect=AssertionError("legacy planner should not run")),

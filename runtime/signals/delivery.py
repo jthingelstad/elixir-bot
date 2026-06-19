@@ -22,10 +22,10 @@ from runtime.clan_chat_copy import (
 from runtime.leader_action_observability import post_leader_action_skip
 from runtime.leader_action_policy import can_post_leader_action
 from runtime.leader_action_ui import LEADER_ACTION_UI_VERSION, post_leader_action_card
-from runtime.channel_subagents import (
+from runtime.signal_lanes import (
     SEASON_AWARDS_SIGNAL_TYPES,
     batch_source_key,
-    build_subagent_memory_context,
+    build_lane_memory_context,
     is_arena_relay_celebration_signal,
     is_battle_mode_signal,
     is_leadership_only_signal,
@@ -46,6 +46,10 @@ CRITICAL_LEADER_ACTION_SIGNAL_TYPES = {
     "war_battle_day_final_hours",
     "war_final_battle_day",
 }
+
+
+def _lane_key_for_config(channel_config: dict) -> str:
+    return channel_config.get("lane_key") or channel_config.get("lane") or ""
 CELEBRATION_RELAY_SIGNAL_TYPES = {
     "career_wins_milestone",
     "cr_account_anniversary",
@@ -774,7 +778,7 @@ async def _generate_war_relay_result(
         required_terms=required_terms,
         forbidden_terms=("Discord", "http://", "https://", "www."),
         fallback_messages=_fallback_war_relay_messages(signals),
-        metadata={"subagent": "arena-relay", "war_period_label": label},
+        metadata={"lane": "arena-relay", "war_period_label": label},
     )
     return _build_generated_war_relay_result(signals, generated)
 
@@ -873,7 +877,7 @@ async def _generate_war_champ_winner_result(
         required_terms=required_terms,
         forbidden_terms=("Discord", "http://", "https://", "www."),
         fallback_messages=[winner_message],
-        metadata={"subagent": "arena-relay", "war_period_label": label},
+        metadata={"lane": "arena-relay", "war_period_label": label},
     )
     return _build_generated_war_champ_winner_result(signals, generated)
 
@@ -1286,7 +1290,7 @@ def _arena_relay_sidecar_outcome(signals: list[dict], channel_config: dict) -> d
     return {
         "source_signal_key": source_key,
         "source_signal_type": signal_type or "signal_batch",
-        "target_channel_key": channel_config.get("subagent_key") or "arena-relay",
+        "target_channel_key": _lane_key_for_config(channel_config) or "arena-relay",
         "target_channel_id": channel_config.get("id"),
         "intent": intent,
         "required": False,
@@ -1384,6 +1388,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         return False
 
     channel_id = channel_config["id"]
+    lane_key = _lane_key_for_config(channel_config)
     delivery_signals, suppressed_public_signals = _filter_public_announcement_signals(
         signals,
         target_channel_key=outcome["target_channel_key"],
@@ -1435,12 +1440,12 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
 
     recent_posts = await asyncio.to_thread(db.list_channel_messages, channel_id, 10, "assistant")
     memory_context = await asyncio.to_thread(
-        build_subagent_memory_context,
+        build_lane_memory_context,
         channel_config,
         signals=delivery_signals,
     )
 
-    from runtime.channel_subagents import TOURNAMENT_SIGNAL_TYPES, WAR_RECAP_SIGNAL_TYPES
+    from runtime.signal_lanes import TOURNAMENT_SIGNAL_TYPES, WAR_RECAP_SIGNAL_TYPES
 
     is_tournament_batch = bool(delivery_signals) and all(
         (s or {}).get("type") in TOURNAMENT_SIGNAL_TYPES for s in delivery_signals
@@ -1469,7 +1474,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         if channel_kind is not None:
             channel_kind = str(channel_kind)
 
-        if channel_config["subagent_key"] == "arena-relay":
+        if lane_key == "arena-relay":
             arena_types = {signal.get("type") for signal in delivery_signals or []}
             member_join_signals = [
                 signal for signal in delivery_signals or []
@@ -1559,7 +1564,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     max_chars=ARENA_RELAY_MAX_COPY_CHARS,
                     exact_once_terms=(DISCORD_INVITE_ROUTE,),
                     forbidden_terms=("http://", "https://", "www."),
-                    metadata={"channel": channel_config["name"], "subagent": channel_config["subagent_key"]},
+                    metadata={"channel": channel_config["name"], "lane": lane_key},
                 )
                 result = _build_generated_discord_invite_relay_result(delivery_signals, generated)
             elif outcome.get("intent") == "welcome_relay" and member_join_signals:
@@ -1585,7 +1590,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     required_terms=required_terms,
                     forbidden_terms=("Discord", "boat defenses", "onboarding", "http://", "https://", "www."),
                     fallback_messages=[_fallback_welcome_relay_copy(member_join_signals[0], welcome_profile_facts)],
-                    metadata={"channel": channel_config["name"], "subagent": channel_config["subagent_key"]},
+                    metadata={"channel": channel_config["name"], "lane": lane_key},
                 )
                 result = _build_generated_welcome_relay_result(
                     member_join_signals,
@@ -1683,7 +1688,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             result = await asyncio.to_thread(
                 elixir_agent.generate_channel_update,
                 channel_config["name"],
-                channel_config["subagent_key"],
+                lane_key,
                 context,
                 recent_posts=recent_posts,
                 memory_context=memory_context,
@@ -1760,7 +1765,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         posts = app._entry_posts(result)
         metadata = result.get("metadata") if isinstance(result, dict) else {}
         sent_messages = []
-        if channel_config["subagent_key"] == "arena-relay" and isinstance(metadata, dict) and metadata.get("leader_action_id"):
+        if lane_key == "arena-relay" and isinstance(metadata, dict) and metadata.get("leader_action_id"):
             action = arena_leader_action or await asyncio.to_thread(db.get_leader_action_by_id, metadata.get("leader_action_id"))
             if action:
                 sent_messages = await post_leader_action_card(
@@ -1774,7 +1779,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             sent_messages = await facade._post_to_elixir(channel, result)
         if not isinstance(sent_messages, list):
             sent_messages = []
-        if channel_config["subagent_key"] == "arena-relay":
+        if lane_key == "arena-relay":
             action_id = metadata.get("leader_action_id") if isinstance(metadata, dict) else None
             first_message = sent_messages[0] if sent_messages else None
             first_message_id = getattr(first_message, "id", None)
@@ -1794,7 +1799,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                         copy_message_id=copy_message_id,
                     )
         if (
-            channel_config["subagent_key"] == "clan-events"
+            lane_key == "clan-events"
             and any(s.get("type") == "member_join" for s in delivery_signals)
         ):
             from modules.poap_kings import site as _pk_site
@@ -1834,7 +1839,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 channel_id=channel_id,
                 channel_name=channel_name,
                 channel_kind=channel_kind,
-                workflow=channel_config["subagent_key"],
+                workflow=lane_key,
                 event_type=post_event_type,
                 discord_message_id=sent_message_id,
                 intent_id=communication_intent_id,
@@ -1874,7 +1879,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 },
             )
         body = "\n\n".join(posts)
-        if channel_config["subagent_key"] != "arena-relay":
+        if lane_key != "arena-relay":
             await asyncio.to_thread(
                 facade.maybe_upsert_signal_memory,
                 source_signal_key=outcome["source_signal_key"],
@@ -1887,12 +1892,12 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         from agent.memory_tasks import store_observation_facts
 
         await asyncio.to_thread(store_observation_facts, delivery_signals, channel_id)
-        if channel_config["subagent_key"] == "river-race" and facade._signal_group_needs_recap_memory(delivery_signals):
+        if lane_key == "river-race" and facade._signal_group_needs_recap_memory(delivery_signals):
             await asyncio.to_thread(facade._store_recap_memories_for_signal_batch, delivery_signals, posts, channel_id)
 
         from runtime.helpers._common import _safe_create_task
 
-        if channel_config["subagent_key"] != "arena-relay":
+        if lane_key != "arena-relay":
             _safe_create_task(
                 facade._post_signal_memory(body, outcome, delivery_signals),
                 name="signal_memory",
@@ -2127,6 +2132,7 @@ async def _deliver_awareness_post(post: dict, signals: list[dict], *, intent: di
     app = _runtime_app()
     posts = app._entry_posts(result)
     channel_id = channel_config["id"]
+    lane_key = _lane_key_for_config(channel_config)
     channel_name = getattr(channel, "name", None)
     if not isinstance(channel_name, str):
         channel_name = None
@@ -2153,7 +2159,7 @@ async def _deliver_awareness_post(post: dict, signals: list[dict], *, intent: di
             channel_id=channel_id,
             channel_name=channel_name,
             channel_kind=channel_kind,
-            workflow=channel_config["subagent_key"],
+            workflow=lane_key,
             event_type=post_event_type,
             discord_message_id=sent_message_id,
             intent_id=intent_id,

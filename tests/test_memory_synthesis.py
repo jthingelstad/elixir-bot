@@ -336,7 +336,7 @@ def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
         patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
         patch("runtime.jobs._memory.upsert_weekly_summary_memory") as mock_memory,
         patch("runtime.jobs._memory.elixir_log.post_event_async", new=AsyncMock()) as mock_elixir_log,
-        patch("runtime.jobs._memory.prompts.discord_singleton_subagent", return_value={"id": 900, "name": "#leader-actions"}),
+        patch("runtime.jobs._memory.prompts.discord_singleton_lane", return_value={"id": 900, "name": "#leader-actions"}),
         patch("runtime.jobs._memory.bot.get_channel", return_value=channel),
         patch("runtime.jobs._memory.db.create_leader_action_recommendation", return_value=created) as mock_create,
         patch("runtime.jobs._memory.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=1)])) as mock_card,

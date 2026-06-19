@@ -23,7 +23,7 @@ from storage.contextual_memory import (
 )
 from storage.messages import update_message_summary
 from runtime.admin import _build_memory_report
-from runtime.channel_subagents import maybe_upsert_signal_memory
+from runtime.signal_lanes import maybe_upsert_signal_memory
 
 
 def test_memory_schema_tables_exist_and_separate_from_authoritative_facts():

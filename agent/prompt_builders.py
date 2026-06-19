@@ -42,14 +42,14 @@ def _discord_formatting_guidance() -> str:
     )
 
 
-def _subagent_base(channel_name: str, subagent_key: str) -> tuple[str, str, str]:
+def _lane_base(channel_name: str, lane_key: str) -> tuple[str, str, str]:
     return (
         prompts.identity_block(),
         prompts.knowledge_block(),
         "\n\n".join(
             part
             for part in (
-                prompts.subagent_prompt(subagent_key),
+                prompts.lane_prompt(lane_key),
                 prompts.channel_section(channel_name),
             )
             if part
@@ -63,8 +63,8 @@ def _help_system(channel_name: str, *, role: str) -> str:
     The capability list is supplied via the user message, not baked into the
     prompt, so adding a new route in the registry doesn't require a prompt edit.
     """
-    subagent_key = prompts.subagent_key_for_channel(channel_name, role)
-    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
+    lane_key = prompts.lane_key_for_channel(channel_name, role)
+    purpose, knowledge, channel_context = _lane_base(channel_name, lane_key)
     role_guidance = (
         "You are answering a 'how can you help me?' style question in a clan operations channel. "
         "Speak as a clan ops collaborator — concrete about what you can do for an operator: "
@@ -96,8 +96,8 @@ def _help_system(channel_name: str, *, role: str) -> str:
     )
 
 
-def _proactive_channel_system(channel_name: str, subagent_key: str, *, leadership: bool = False):
-    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
+def _proactive_channel_system(channel_name: str, lane_key: str, *, leadership: bool = False):
+    purpose, knowledge, channel_context = _lane_base(channel_name, lane_key)
     memory_scope = "leadership plus public" if leadership else "public"
     return _build_system_prompt(
         purpose,
@@ -110,7 +110,7 @@ def _proactive_channel_system(channel_name: str, subagent_key: str, *, leadershi
         "External lookups are capped at 5 per turn — that is plenty for one streak post or one rivalry scout. "
         "Posts that cite specific evidence (opponent trophies, opponent deck archetype, rival clan size) read sharper than posts that restate the signal dict. "
         "Only skip the lookup when the signal is fully self-explanatory (e.g. a card unlock, a rank move you already have all the numbers for).\n\n"
-        f"You are writing for the `{subagent_key}` channel subagent. "
+        f"You are writing for the `{lane_key}` channel lane. "
         "Stay in that lane. Do not drift into unrelated channel jobs.\n\n"
         f"You may only use {memory_scope} durable memory context when it is provided. "
         "Do not invent or imply hidden memory from other channels.\n\n"
@@ -137,7 +137,7 @@ def _proactive_channel_system(channel_name: str, subagent_key: str, *, leadershi
 def _awareness_system():
     """System prompt for the per-tick awareness loop (Phase 4).
 
-    Loads the awareness subagent prompt that defines lane rules, output
+        Loads the awareness agent prompt that defines lane rules, output
     schema, and the "decide what to say" framing. Identity + knowledge +
     policy blocks come along so the agent can reason in voice and reference
     leadership-context rules when a tick warrants a #leaders post.
@@ -146,7 +146,7 @@ def _awareness_system():
         prompts.identity_block(),
         prompts.knowledge_block(),
         prompts.policy(),
-        prompts.subagent_prompt("awareness"),
+        prompts.agent_prompt("awareness"),
         _discord_formatting_guidance(),
         _discord_emoji_guidance(),
     )
@@ -155,7 +155,7 @@ def _awareness_system():
 def _memory_synthesis_system():
     """System prompt for the weekly memory-synthesis job.
 
-    Loads the memory-synthesis subagent prompt that defines the arc-memory
+        Loads the memory-synthesis agent prompt that defines the arc-memory
     output schema + decay + contradiction-flag rules. Identity + knowledge +
     policy blocks come along so the agent can reason in voice and frame
     leadership arcs (promotions, demotions, watch states) against the rules.
@@ -164,7 +164,7 @@ def _memory_synthesis_system():
         prompts.identity_block(),
         prompts.knowledge_block(),
         prompts.policy(),
-        prompts.subagent_prompt("memory-synthesis"),
+        prompts.agent_prompt("memory-synthesis"),
         _discord_formatting_guidance(),
         _discord_emoji_guidance(allow_in_sensitive=True),
     )
@@ -274,8 +274,8 @@ def _intel_report_system():
 
 
 def _interactive_system(channel_name):
-    subagent_key = prompts.subagent_key_for_channel(channel_name, "interactive")
-    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
+    lane_key = prompts.lane_key_for_channel(channel_name, "interactive")
+    purpose, knowledge, channel_context = _lane_base(channel_name, lane_key)
     return _build_system_prompt(
         purpose,
         knowledge,
@@ -346,8 +346,8 @@ def _interactive_system(channel_name):
 
 
 def _clanops_system(channel_name):
-    subagent_key = prompts.subagent_key_for_channel(channel_name, "clanops")
-    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
+    lane_key = prompts.lane_key_for_channel(channel_name, "clanops")
+    purpose, knowledge, channel_context = _lane_base(channel_name, lane_key)
     return _build_system_prompt(
         purpose,
         knowledge,
@@ -421,8 +421,8 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
     mode: 'regular' (Trophy Road / current deck) or 'war' (the four river-race war decks).
     subject: 'review' (critique an existing deck) or 'suggest' (build new decks from collection).
     """
-    subagent_key = prompts.subagent_key_for_channel(channel_name, "interactive")
-    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
+    lane_key = prompts.lane_key_for_channel(channel_name, "interactive")
+    purpose, knowledge, channel_context = _lane_base(channel_name, lane_key)
 
     base_guidance = (
         "You are running Elixir's specialized DECK REVIEW workflow. "
@@ -527,8 +527,8 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
 
 
 def _arena_relay_observation_system(channel_name: str):
-    subagent_key = prompts.subagent_key_for_channel(channel_name, "clanops")
-    purpose, knowledge, channel_context = _subagent_base(channel_name, subagent_key)
+    lane_key = prompts.lane_key_for_channel(channel_name, "clanops")
+    purpose, knowledge, channel_context = _lane_base(channel_name, lane_key)
     guidance = (
         "You are reading leader-submitted Clash Royale screenshot evidence in #leader-actions. "
         "This is not a normal conversation and not a new action card unless the screenshot clearly supports one.\n\n"
@@ -600,8 +600,8 @@ def _clan_voyage_reconciliation_system():
 
 
 def _reception_system():
-    reception = prompts.discord_singleton_subagent("reception")
-    purpose, _, channel_context = _subagent_base(reception["name"], reception["subagent_key"])
+    reception = prompts.discord_singleton_lane("reception")
+    purpose, _, channel_context = _lane_base(reception["name"], reception["lane_key"])
     return _build_system_prompt(
         purpose,
         channel_context,
@@ -765,8 +765,8 @@ def _promote_system(required_trophies=2000):
 
 
 def _weekly_digest_system():
-    announcements = prompts.discord_singleton_subagent("announcements")
-    purpose, knowledge, channel_context = _subagent_base(announcements["name"], announcements["subagent_key"])
+    announcements = prompts.discord_singleton_lane("announcements")
+    purpose, knowledge, channel_context = _lane_base(announcements["name"], announcements["lane_key"])
     return _build_system_prompt(
         purpose,
         knowledge,
@@ -870,7 +870,7 @@ def _tournament_update_system():
     """System prompt for live tournament commentary posts.
 
     This is a self-contained lane: identity, game knowledge, and the
-    tournament.md subagent. No channel_section (no clan-events prose), no
+    tournament.md agent prompt. No channel_section (no clan-events prose), no
     war/river-race context. The goal is to keep the model's attention on
     the tournament signal in front of it, not on the unrelated war state
     the main clan-events path layers in.
@@ -878,7 +878,7 @@ def _tournament_update_system():
     return _build_system_prompt(
         prompts.identity_block(),
         prompts.knowledge_block(),
-        prompts.subagent_prompt("tournament"),
+        prompts.agent_prompt("tournament"),
         f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance()}",
     )
@@ -896,7 +896,7 @@ def _tournament_recap_system():
     return _build_system_prompt(
         prompts.identity_block(),
         prompts.knowledge_block(),
-        prompts.subagent_prompt("tournament"),
+        prompts.agent_prompt("tournament"),
         "**You are writing the end-of-tournament recap.** The tournament is "
         "complete. Use the pre-materialized recap context the user message "
         "provides — it carries the standings, card analysis, head-to-head "
@@ -940,17 +940,15 @@ def _observe_system():
     return _proactive_channel_system("#clan-events", "clan-events", leadership=False)
 
 
-def _channel_subagent_system(channel_name: str, *, leadership: bool = False):
+def _channel_lane_system(channel_name: str, *, leadership: bool = False):
     return _proactive_channel_system(
         channel_name,
-        prompts.subagent_key_for_channel(
+        prompts.lane_key_for_channel(
             channel_name,
             "clanops" if leadership else "interactive",
         ),
         leadership=leadership,
     )
-
-
 
 __all__ = [
     "_observe_system",
@@ -959,7 +957,7 @@ __all__ = [
     "_arena_relay_observation_system",
     "_clan_voyage_reconciliation_system",
     "_reception_system",
-    "_channel_subagent_system",
+    "_channel_lane_system",
     "_home_message_system",
     "_members_message_system",
     "_roster_bios_system",

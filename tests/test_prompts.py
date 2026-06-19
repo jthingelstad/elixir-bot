@@ -56,7 +56,7 @@ def test_channel_section_reception():
 
 
 def test_reception_channel_is_open_channel():
-    channel = prompts.discord_singleton_subagent("reception")
+    channel = prompts.discord_singleton_lane("reception")
     assert channel["reply_policy"] == "open_channel"
 
 
@@ -68,7 +68,7 @@ def test_channel_section_poapkings_com():
 
 
 def test_arena_relay_channel_is_configured():
-    channel = prompts.discord_singleton_subagent("arena-relay")
+    channel = prompts.discord_singleton_lane("arena-relay")
     assert channel["id"] == 1513758211206025227
     assert channel["name"] == "#leader-actions"
     assert channel["reply_policy"] == "disabled"
@@ -76,23 +76,23 @@ def test_arena_relay_channel_is_configured():
     section = prompts.channel_section("#leader-actions")
     assert "leader action board" in section.lower()
     assert "✅/☑️" in section
-    assert prompts.resolve_channel_reference("leader-actions")["subagent"] == "arena-relay"
+    assert prompts.resolve_channel_reference("leader-actions")["lane"] == "arena-relay"
     assert prompts.resolve_channel_reference("arena-relay")["name"] == "#leader-actions"
 
 
 def test_member_highlights_channel_replaces_old_progression_split():
-    channel = prompts.discord_singleton_subagent("member-highlights")
+    channel = prompts.discord_singleton_lane("member-highlights")
     assert channel["id"] == 1482352147029950474
     assert channel["name"] == "#player-highlights"
     assert channel["reply_policy"] == "disabled"
     section = prompts.channel_section("#player-highlights")
     assert "curated player-story stream" in section.lower()
     assert "live non-war battle momentum" in section.lower()
-    assert prompts.resolve_channel_reference("player-progress")["subagent"] == "member-highlights"
-    assert prompts.resolve_channel_reference("trophy-road")["subagent"] == "member-highlights"
-    assert prompts.resolve_channel_reference("trophy-case")["subagent"] == "member-highlights"
-    assert prompts.resolve_channel_reference("player-highlights")["subagent"] == "member-highlights"
-    assert "Member Highlights Lane" in prompts.subagent_prompt("player-progress")
+    assert prompts.resolve_channel_reference("player-progress")["lane"] == "member-highlights"
+    assert prompts.resolve_channel_reference("trophy-road")["lane"] == "member-highlights"
+    assert prompts.resolve_channel_reference("trophy-case")["lane"] == "member-highlights"
+    assert prompts.resolve_channel_reference("player-highlights")["lane"] == "member-highlights"
+    assert "Member Highlights Lane" in prompts.lane_prompt("player-progress")
 
 
 def test_channel_section_nonexistent():
@@ -101,7 +101,7 @@ def test_channel_section_nonexistent():
     assert section == ""
 
 
-def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
+def test_discord_channel_configs_parse_lanes_and_policies(monkeypatch):
     monkeypatch.setattr(
         prompts,
         "discord",
@@ -111,7 +111,7 @@ def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
             "- application_id: 1\n\n"
             "## #member-chat\n\n"
             "ID: 100\n"
-            "Subagent: general\n\n"
+            "Lane: general\n\n"
             "Workflow: interactive\n"
             "ToolPolicy: read_only\n"
             "ReplyPolicy: mention_only\n"
@@ -120,7 +120,7 @@ def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
             "Read-only member Q&A.\n\n"
             "## #leader-lounge\n\n"
             "ID: 200\n"
-            "Subagent: leader-lounge\n\n"
+            "Lane: leader-lounge\n\n"
             "Workflow: clanops\n"
             "ToolPolicy: read_write\n"
             "ReplyPolicy: mention_only\n"
@@ -129,7 +129,7 @@ def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
             "Private operations.\n\n"
             "## #poapkings-com\n\n"
             "ID: 300\n"
-            "Subagent: poapkings-com\n\n"
+            "Lane: poapkings-com\n\n"
             "Workflow: channel_update\n"
             "ToolPolicy: read_only\n"
             "ReplyPolicy: disabled\n"
@@ -141,7 +141,7 @@ def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
     channels = prompts.discord_channels_by_id()
 
     assert channels[100]["workflow"] == "interactive"
-    assert channels[100]["subagent"] == "general"
+    assert channels[100]["lane"] == "general"
     assert channels[100]["tool_policy"] == "read_only"
     assert channels[100]["reply_policy"] == "mention_only"
     assert "role" not in channels[100]
@@ -154,11 +154,10 @@ def test_discord_channel_configs_parse_subagents_and_policies(monkeypatch):
     assert channels[200]["tool_policy"] == "read_write"
     assert channels[200]["reply_policy"] == "mention_only"
     assert channels[200]["memory_scope"] == "leadership"
-    assert channels[300]["subagent"] == "poapkings-com"
+    assert channels[300]["lane"] == "poapkings-com"
     assert channels[300]["reply_policy"] == "disabled"
     assert channels[300]["durable_memory_enabled"] is False
-    assert prompts.discord_singleton_subagent("leader-lounge")["id"] == 200
-
+    assert prompts.discord_singleton_lane("leader-lounge")["id"] == 200
 
 
 def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
@@ -170,11 +169,11 @@ def test_validate_discord_channel_config_flags_singleton_errors(monkeypatch):
             "- application_id: 1\n\n"
             "## #one\n\n"
             "ID: 100\n"
-            "Subagent: leader-lounge\n\n"
+            "Lane: leader-lounge\n\n"
             "Primary leadership room.\n\n"
             "## #two\n\n"
             "ID: 101\n"
-            "Subagent: leader-lounge\n\n"
+            "Lane: leader-lounge\n\n"
             "Duplicate singleton.\n"
         ),
     )
@@ -340,6 +339,6 @@ def test_observation_prompt_includes_custom_emoji_guidance():
     assert "Use occasional **bold** emphasis" in system_prompt
     assert "Elixir server custom emoji" in system_prompt
     assert "Do not invent custom emoji names" in system_prompt
-    assert "channel subagent" in system_prompt
+    assert "channel lane" in system_prompt
     assert "Default to one Discord message" in system_prompt
     assert "Do not split one update across multiple near-duplicate messages." in system_prompt

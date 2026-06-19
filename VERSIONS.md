@@ -74,10 +74,10 @@ Notable changes:
 **Date:** 2026-03-14  
 **Representative anchor:** current working release on top of git history dated 2026-03-14
 
-This is the multi-agent release. Elixir stopped behaving like one overloaded stream and became a set of channel-native subagents with distinct missions, shared identity, scoped memory, and a central activity model.
+This is the multi-lane release. Elixir stopped behaving like one overloaded stream and became a set of channel-native lanes with distinct missions, shared identity, scoped memory, and a central activity model.
 
 Notable changes:
-- introduced channel-named subagents like `river-race`, `player-progress`, `clan-events`, `ask-elixir`, and `poapkings-com`
+- introduced channel-named lanes like `river-race`, `player-progress`, `clan-events`, `ask-elixir`, and `poapkings-com`
 - replaced one-signal-one-post assumptions with multi-outcome routing
 - added a central recurring activity registry
 - formalized memory boundaries for public, leadership, and notification-only lanes

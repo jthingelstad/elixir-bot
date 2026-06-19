@@ -163,8 +163,9 @@ def _build_schedule_report():
     ]
     current_owner = None
     for spec in _schedule_specs():
-        if spec["owner_subagent"] != current_owner:
-            current_owner = spec["owner_subagent"]
+        owner_lane = spec["owner_lane"]
+        if owner_lane != current_owner:
+            current_owner = owner_lane
             lines.append("")
             lines.append(f"**{current_owner}**")
         deliveries = "; ".join(spec["delivery_targets"])

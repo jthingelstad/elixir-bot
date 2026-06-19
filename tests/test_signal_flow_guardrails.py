@@ -6,7 +6,7 @@ behavior while `_deliver_signal_group()` remains as a compatibility shim.
 
 import pytest
 
-from runtime.channel_subagents import plan_signal_outcomes
+from runtime.signal_lanes import plan_signal_outcomes
 from storage.event_stream import event_key_for_signal
 
 

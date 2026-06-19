@@ -17,16 +17,16 @@ __all__ = [
 
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime, timezone
 
 import db
 import elixir_agent
+import pytz
 import prompts
 from storage.contextual_memory import upsert_race_streak_memory, upsert_war_recap_memory
-from runtime import app as _app
-from runtime.channel_subagents import (
-    build_subagent_memory_context,
+from runtime.signal_lanes import (
     is_leadership_only_signal,
     maybe_upsert_signal_memory,
     CLAN_RECORD_SIGNAL_TYPES,
@@ -35,34 +35,37 @@ from runtime.channel_subagents import (
     plan_signal_outcomes,
     signal_source_key,
 )
-from runtime.app import (
-    CHICAGO,
-    bot,
-    log,
-)
 from runtime.helpers import _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
 from runtime.system_signals import queue_startup_system_signals
 
 
 _WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
+CHICAGO = pytz.timezone("America/Chicago")
+log = logging.getLogger("elixir")
+
+
+def _runtime_app():
+    import runtime.app as app
+
+    return app
 
 
 # These wrappers exist so test patches on `elixir._post_to_elixir` /
 # `elixir._load_live_clan_context` (i.e. `runtime.app.<name>`) take effect
 # everywhere downstream — the attribute access at call time picks up the patch.
 async def _post_to_elixir(*args, **kwargs):
-    return await _app._post_to_elixir(*args, **kwargs)
+    return await _runtime_app()._post_to_elixir(*args, **kwargs)
 
 
 async def _load_live_clan_context(*args, **kwargs):
-    return await _app._load_live_clan_context(*args, **kwargs)
+    return await _runtime_app()._load_live_clan_context(*args, **kwargs)
 
 
 def _channel_config_by_key(channel_key: str) -> dict:
-    config = prompts.discord_channels_by_subagent().get(channel_key)
+    config = prompts.discord_channels_by_lane().get(channel_key)
     if not config:
-        raise RuntimeError(f"channel subagent not configured: {channel_key}")
+        raise RuntimeError(f"channel lane not configured: {channel_key}")
     return config
 
 

@@ -296,7 +296,7 @@ def _truncate_for_report(text, limit=160):
 
 def _build_signals_report(*, view: str = "all", recent_limit: int = 10, conn=None) -> str:
     import db
-    from runtime.channel_subagents import signal_routing_summary
+    from runtime.signal_lanes import signal_routing_summary
 
     close = conn is None
     conn = conn or db.get_connection()
@@ -341,7 +341,7 @@ def _build_signals_report(*, view: str = "all", recent_limit: int = 10, conn=Non
                     requirement = "required" if target.get("required") else "optional"
                     condition = f" - {target['condition']}" if target.get("condition") else ""
                     lines.append(
-                        f"  -> `{target['subagent']}` `{target['intent']}` ({requirement}){condition}"
+                        f"  -> `{target['lane']}` `{target['intent']}` ({requirement}){condition}"
                     )
 
         if view in {"all", "recent"}:
@@ -476,7 +476,7 @@ def _build_activity_list_report() -> str:
     lines = [f"**Elixir Activities ({len(specs)})**"]
     for spec in specs:
         lines.append(
-            f"- `{spec['activity_key']}` — {spec['owner_subagent']} — {spec['activity_role']} — {spec['schedule']}"
+            f"- `{spec['activity_key']}` — {spec['owner_lane']} — {spec['activity_role']} — {spec['schedule']}"
         )
         lines.append(
             f"  {spec['purpose']}"
@@ -489,7 +489,7 @@ def _build_activity_show_report(activity_key: str) -> str:
 
     resolved = resolve_activity(activity_key, elixir)
     lines = [f"**Activity: {resolved['activity_key']}**"]
-    lines.append(f"- Owner: `{resolved['owner_subagent']}`")
+    lines.append(f"- Owner lane: `{resolved['owner_lane']}`")
     lines.append(f"- Role: {resolved['activity_role']}")
     lines.append(f"- Purpose: {resolved['purpose']}")
     lines.append(f"- Job: `{resolved['job_function']}`")

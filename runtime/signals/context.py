@@ -6,7 +6,7 @@ import json
 import logging
 
 import db
-from runtime.channel_subagents import BATTLE_MODE_SIGNAL_TYPES, CLAN_RECORD_SIGNAL_TYPES
+from runtime.signal_lanes import BATTLE_MODE_SIGNAL_TYPES, CLAN_RECORD_SIGNAL_TYPES
 
 log = logging.getLogger("elixir")
 
@@ -155,7 +155,7 @@ def _build_outcome_context(outcome, signals, clan, war):
     channel_key = outcome["target_channel_key"]
     first = (signals or [{}])[0]
     lines = [
-        f"Target channel subagent: {channel_key}",
+        f"Target channel lane: {channel_key}",
         f"Intent: {outcome['intent']}",
         "Write the final post for that destination only.",
         "Do not mention other channels or other internal outcomes from the same signal.",
