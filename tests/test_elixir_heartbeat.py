@@ -1431,6 +1431,31 @@ def test_member_join_welcome_context_gives_elixir_profile_facts():
     assert "Return `content` as a single string" in context
 
 
+def test_member_join_welcome_context_marks_returning_members():
+    from runtime.signals.delivery import _member_join_welcome_context
+
+    with patch("runtime.signals.delivery.db.get_member_profile", return_value={
+        "player_tag": "#ABC",
+        "member_name": "MONICA",
+        "cr_account_age_years": 9,
+        "cr_banner_count": 205,
+        "membership_summary": {
+            "is_returning": True,
+            "join_count": 3,
+            "prior_stints": 2,
+            "last_left_at": "2026-06-12",
+        },
+    }):
+        context = _member_join_welcome_context("Signal context", {
+            "type": "member_join",
+            "tag": "#ABC",
+            "name": "MONICA",
+        })
+
+    assert "Clan membership: returning member; 3 recorded POAP KINGS stints; last left 2026-06-12" in context
+    assert "say welcome back rather than welcoming them as brand new" in context
+
+
 def test_generated_welcome_relay_result_rejects_copy_without_member_name():
     from runtime.signals.delivery import _build_generated_welcome_relay_result
 
@@ -1440,6 +1465,43 @@ def test_generated_welcome_relay_result_rejects_copy_without_member_name():
     )
 
     assert result is None
+
+
+def test_generated_welcome_relay_result_rejects_generic_copy_for_returning_member():
+    from runtime.signals.delivery import _build_generated_welcome_relay_result
+
+    result = _build_generated_welcome_relay_result(
+        [{"type": "member_join", "tag": "#ABC", "name": "MONICA"}],
+        {"content": "Welcome to POAP KINGS, MONICA! 9 years played and 205 banners."},
+        profile_facts=[
+            "- Name: MONICA",
+            "- Player tag: #ABC",
+            "- Clan membership: returning member; 3 recorded POAP KINGS stints; last left 2026-06-12",
+            "- Years played/account age: 9 years",
+            "- Banner collection: 205",
+        ],
+    )
+
+    assert result is None
+
+
+def test_generated_welcome_relay_result_accepts_welcome_back_for_returning_member():
+    from runtime.signals.delivery import _build_generated_welcome_relay_result
+
+    result = _build_generated_welcome_relay_result(
+        [{"type": "member_join", "tag": "#ABC", "name": "MONICA"}],
+        {"content": "Welcome back to POAP KINGS, MONICA! 9 years played and 205 banners."},
+        profile_facts=[
+            "- Name: MONICA",
+            "- Player tag: #ABC",
+            "- Clan membership: returning member; 3 recorded POAP KINGS stints; last left 2026-06-12",
+            "- Years played/account age: 9 years",
+            "- Banner collection: 205",
+        ],
+    )
+
+    assert result is not None
+    assert "Welcome back" in result["metadata"]["relay_copy"]
 
 
 def test_generated_welcome_relay_result_rejects_copy_without_poap_kings():
@@ -1508,6 +1570,25 @@ def test_fallback_welcome_relay_result_uses_profile_facts_when_generation_is_emp
     assert "POAP KINGS" in copy
     assert "King Levy" in copy
     assert "1,597" in copy
+
+
+def test_fallback_welcome_relay_result_says_welcome_back_for_returning_member():
+    from runtime.signals.delivery import _build_fallback_welcome_relay_result
+
+    result = _build_fallback_welcome_relay_result(
+        [{"type": "member_join", "tag": "#ABC", "name": "MONICA"}],
+        profile_facts=[
+            "- Name: MONICA",
+            "- Player tag: #ABC",
+            "- Clan membership: returning member; 3 recorded POAP KINGS stints; last left 2026-06-12",
+            "- Years played/account age: 9 years",
+            "- Banner collection: 205",
+        ],
+    )
+
+    assert result is not None
+    copy = result["metadata"]["relay_copy"]
+    assert copy.startswith("Welcome back to POAP KINGS, MONICA!")
     assert result["metadata"]["target_player_tag"] == "#ABC"
 
 
@@ -2583,6 +2664,36 @@ def test_leader_action_scan_prioritizes_idle_kick_candidates_and_skips_suppresse
     assert posted == 1
     assert mock_create.call_args.kwargs["target_player_tag"] == "#IDLE"
     assert mock_create.call_args.kwargs["target_player_name"] == "Fresh Idle"
+
+
+def test_kick_candidate_ineligibility_suppresses_fresh_join():
+    from runtime.jobs._core import _kick_candidate_ineligibility_reason
+
+    conn = db.get_connection(":memory:")
+    try:
+        today = datetime.now(timezone.utc).date().isoformat()
+        db.snapshot_members(
+            [{"tag": "#NEW123", "name": "New Recruit", "role": "member", "clanRank": 1}],
+            conn=conn,
+        )
+        member_id = conn.execute(
+            "SELECT member_id FROM members WHERE player_tag = '#NEW123'"
+        ).fetchone()["member_id"]
+        conn.execute(
+            "UPDATE clan_memberships SET joined_at = ?, join_source = 'observed_join' WHERE member_id = ? AND left_at IS NULL",
+            (today, member_id),
+        )
+        conn.commit()
+
+        member = {
+            "member_ref": "New Recruit",
+            "player_tag": "#NEW123",
+            "reasons": [{"type": "inactive", "detail": "no battles in 90+ days", "value": 90, "threshold_days": 7}],
+        }
+
+        assert _kick_candidate_ineligibility_reason(member, conn=conn) == "fresh_membership:0d<7d"
+    finally:
+        conn.close()
 
 
 def test_leader_action_scan_posts_due_inactivity_case():

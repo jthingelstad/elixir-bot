@@ -450,6 +450,7 @@ def get_member_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> O
         return None
     result = dict(row)
     result["joined_date"] = _current_joined_at(conn, row["member_id"])
+    result["membership_summary"] = get_member_membership_summary(tag, conn=conn)
     result["in_discord"] = 1 if row["discord_user_id"] else 0
     _member_reference_fields(conn, row["member_id"], result)
     recent_form = get_member_recent_form(tag, conn=conn)
@@ -465,6 +466,63 @@ def get_member_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> O
     if collection:
         result["card_collection_summary"] = collection.get("summary")
     return result
+
+
+@managed_connection
+def get_member_membership_summary(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    row = conn.execute(
+        "SELECT member_id, player_tag, current_name FROM members WHERE player_tag = ?",
+        (_canon_tag(tag),),
+    ).fetchone()
+    if not row:
+        return None
+    memberships = conn.execute(
+        """
+        SELECT membership_id, joined_at, left_at, join_source, leave_source
+        FROM clan_memberships
+        WHERE member_id = ?
+        ORDER BY joined_at ASC, membership_id ASC
+        """,
+        (row["member_id"],),
+    ).fetchall()
+    if not memberships:
+        return {
+            "player_tag": row["player_tag"],
+            "member_name": row["current_name"],
+            "join_count": 0,
+            "prior_stints": 0,
+            "is_returning": False,
+            "current_joined_at": None,
+            "first_joined_at": None,
+            "last_left_at": None,
+            "memberships": [],
+        }
+    current = _get_current_membership(conn, row["member_id"])
+    current_membership_id = current["membership_id"] if current else None
+    prior_stints = sum(
+        1
+        for membership in memberships
+        if membership["left_at"] or (
+            current_membership_id is not None
+            and membership["membership_id"] != current_membership_id
+        )
+    )
+    last_left = None
+    for membership in memberships:
+        if membership["left_at"]:
+            last_left = membership["left_at"]
+    items = [dict(membership) for membership in memberships]
+    return {
+        "player_tag": row["player_tag"],
+        "member_name": row["current_name"],
+        "join_count": len(items),
+        "prior_stints": prior_stints,
+        "is_returning": prior_stints > 0,
+        "current_joined_at": current["joined_at"] if current else None,
+        "first_joined_at": items[0]["joined_at"],
+        "last_left_at": last_left,
+        "memberships": items,
+    }
 
 
 @managed_connection

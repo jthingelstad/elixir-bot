@@ -406,6 +406,19 @@ def _member_join_profile_facts(signal: dict) -> list[str]:
     if tag:
         facts.append(f"- Player tag: {tag}")
 
+    membership = profile.get("membership_summary") or {}
+    if membership.get("is_returning"):
+        prior = membership.get("prior_stints")
+        join_count = membership.get("join_count")
+        parts = ["returning member"]
+        if isinstance(join_count, int) and join_count > 1:
+            parts.append(f"{join_count} recorded POAP KINGS stints")
+        if membership.get("last_left_at"):
+            parts.append(f"last left {membership['last_left_at']}")
+        elif isinstance(prior, int) and prior > 0:
+            parts.append(f"{prior} prior stint{'s' if prior != 1 else ''}")
+        facts.append(f"- Clan membership: {'; '.join(parts)}")
+
     age_years = _profile_number(profile.get("cr_account_age_years"))
     if age_years:
         facts.append(f"- Years played/account age: {age_years} years")
@@ -472,6 +485,7 @@ def _member_join_welcome_context(base_context: str | None, signal: dict, profile
         "- Author one short Clash Royale clan-chat welcome a leader can copy/paste.\n"
         "- Include the member name exactly as provided when available.\n"
         "- Include `POAP KINGS` exactly in the copy/paste message.\n"
+        "- If Clan membership says returning member, say welcome back rather than welcoming them as brand new.\n"
         "- Sound like a real leader typing in Clash Royale clan chat, not a polished announcement.\n"
         "- Use one or two distinctive profile facts when available. Prefer years played/account age, Collection Level, max-level cards, Collection Level badge tier, favorite card, challenge best, banner count, or emote count.\n"
         "- Use plain win counts or trophies only as fallback facts when nothing more distinctive is available.\n"
@@ -494,6 +508,10 @@ def _welcome_profile_fact_markers(profile_facts: list[str] | None) -> list[str]:
         text = str(fact or "").strip()
         if not text or text.startswith("- Name:") or text.startswith("- Player tag:"):
             continue
+        if text.lower().startswith("- clan membership:"):
+            if "returning member" in text.lower() and "welcome back" not in markers:
+                markers.append("welcome back")
+            continue
         for value in re.findall(r"\d[\d,]*", text):
             marker = value.replace(",", "")
             if marker and marker not in markers:
@@ -503,6 +521,10 @@ def _welcome_profile_fact_markers(profile_facts: list[str] | None) -> list[str]:
             if card and card not in markers:
                 markers.append(card)
     return markers
+
+
+def _welcome_profile_is_returning(profile_facts: list[str] | None) -> bool:
+    return any("clan membership:" in str(fact or "").lower() and "returning member" in str(fact or "").lower() for fact in profile_facts or [])
 
 
 def _welcome_copy_mentions_profile_fact(copy: str, profile_facts: list[str] | None) -> bool:
@@ -541,6 +563,8 @@ def _welcome_profile_fact_phrases(profile_facts: list[str] | None) -> list[str]:
             phrases.append(f"{value} banners")
         elif label == "Emote collection":
             phrases.append(f"{value} emotes")
+        elif label == "Clan membership" and "returning member" in value.lower():
+            phrases.append("back with POAP KINGS")
         elif label.startswith("Fallback only - battle wins"):
             phrases.append(f"{value} battle wins")
         elif label.startswith("Fallback only - current trophies"):
@@ -555,14 +579,16 @@ def _welcome_profile_fact_phrases(profile_facts: list[str] | None) -> list[str]:
 def _fallback_welcome_relay_copy(signal: dict, profile_facts: list[str] | None) -> str:
     name = str((signal or {}).get("name") or "new member").strip() or "new member"
     phrases = _welcome_profile_fact_phrases(profile_facts)
+    returning = _welcome_profile_is_returning(profile_facts)
     if len(phrases) >= 2:
         fact = f"{phrases[0]} and {phrases[1]}"
     elif phrases:
         fact = phrases[0]
     else:
         fact = "glad you are here"
+    prefix = "Welcome back to POAP KINGS" if returning else "Welcome to POAP KINGS"
     return _clip_relay_copy(
-        f"Welcome to POAP KINGS, {name}! {fact} stands out.",
+        f"{prefix}, {name}! {fact} stands out.",
         limit=ARENA_RELAY_WELCOME_MAX_COPY_CHARS,
     )
 
@@ -601,6 +627,8 @@ def _build_generated_welcome_relay_result(
     if "poap kings" not in copy_lower:
         return None
     if name != "new member" and name.lower() not in copy_lower:
+        return None
+    if _welcome_profile_is_returning(profile_facts) and "welcome back" not in copy_lower:
         return None
     if not _welcome_copy_mentions_profile_fact(copy, profile_facts):
         return None
