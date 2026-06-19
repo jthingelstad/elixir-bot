@@ -422,12 +422,13 @@ def _decision_cases_block() -> dict:
 
 
 def _already_delivered(signal: dict) -> bool:
-    """True iff the signal's log key is already in ``signal_log``.
+    """True iff the signal's completion key is already in ``signal_log``.
 
-    Belt-and-suspenders: each detector self-checks before emitting, but if a
-    detector-level check is missed (restart, cursor reset, concurrent tick),
-    this filter drops the signal before the agent can re-cover it. Safer than
-    relying on the agent to read channel_memory and self-skip.
+    ``signal_log`` is a delivery-completion marker, not the observation
+    ledger. Awareness records signals into ``game_event_stream`` before this
+    filter runs, then drops completed signals before the agent can re-cover
+    them. That preserves observability while retaining duplicate-post
+    protection if a detector-level check is missed.
 
     On lookup error the signal is treated as delivered (suppressed): a missed
     announcement is recoverable on a later tick, while a duplicate post to the
@@ -438,7 +439,7 @@ def _already_delivered(signal: dict) -> bool:
     if not log_type:
         return False
     try:
-        return db.was_signal_sent_any_date(log_type)
+        return db.was_signal_completed_any_date(log_type)
     except Exception:
         log.error("_already_delivered lookup failed for %s; suppressing signal to avoid double-post", log_type, exc_info=True)
         _note_degraded(f"already_delivered:{log_type}")
@@ -459,9 +460,10 @@ def build_situation(
     ``channel_memory``, ``recent_events``, ``projects``, ``decision_cases``,
     ``roster_vitals``, ``due_revisits``, ``recent_agent_writes``.
 
-    Signals whose ``signal_log_type`` is already in ``signal_log`` are dropped
-    before assembly — preventing the agent from re-covering a signal that was
-    already announced.
+    Signals whose ``signal_log_type`` is already marked complete in
+    ``signal_log`` are dropped before assembly — preventing the agent from
+    re-covering a signal that was already announced. In the awareness delivery
+    path, event-stream recording happens before this prefilter.
     """
     del _degraded_blocks[:]
     all_signals = list(getattr(tick_result, "signals", None) or [])

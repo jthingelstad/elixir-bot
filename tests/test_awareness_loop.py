@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 # loads cleanly. Importing runtime.jobs._signals directly first creates a
 # partial-load circular import (runtime.app → runtime.jobs → _core → _signals).
 import elixir  # noqa: F401
+import db
 import heartbeat
 import runtime.jobs._signals as signals_module
 from runtime.situation import (
@@ -139,7 +140,7 @@ def test_build_situation_includes_channel_memory_for_each_lane_channel():
 
 
 def test_build_situation_drops_already_delivered_signals():
-    """Belt-and-suspenders: signals whose signal_log_type is already in
+    """Belt-and-suspenders: signals whose completion key is already in
     signal_log must be filtered before the agent sees them — preventing
     repeat coverage when detector dedup misses."""
     bundle = _bundle(signals=[
@@ -156,7 +157,7 @@ def test_build_situation_drops_already_delivered_signals():
     def _already_sent(signal_type):
         return signal_type == "war_final_practice_day::s00131-w01-p009"
 
-    with patch("runtime.situation.db.was_signal_sent_any_date", side_effect=_already_sent), \
+    with patch("runtime.situation.db.was_signal_completed_any_date", side_effect=_already_sent), \
          patch("runtime.situation.db.list_channel_messages", return_value=[]), \
          patch("runtime.situation.build_situation_time", return_value=None):
         situation = build_situation(bundle)
@@ -172,7 +173,7 @@ def test_build_situation_drops_already_delivered_signals():
 
 
 def test_build_situation_suppresses_signal_when_delivery_lookup_fails():
-    """If the signal_log lookup raises, the signal is suppressed rather than
+    """If the signal_log completion lookup raises, the signal is suppressed rather than
     passed through — a missed announcement is recoverable on a later tick,
     a duplicate post to the clan is not. The suppression is surfaced via
     _degraded_blocks."""
@@ -182,7 +183,7 @@ def test_build_situation_suppresses_signal_when_delivery_lookup_fails():
             "signal_log_type": "war_battle_rank_change::s00131-w01-p010::rank1",
         },
     ])
-    with patch("runtime.situation.db.was_signal_sent_any_date", side_effect=RuntimeError("db locked")), \
+    with patch("runtime.situation.db.was_signal_completed_any_date", side_effect=RuntimeError("db locked")), \
          patch("runtime.situation.db.list_channel_messages", return_value=[]), \
          patch("runtime.situation.build_situation_time", return_value=None):
         situation = build_situation(bundle)
@@ -604,6 +605,43 @@ def test_deliver_signal_group_via_awareness_records_coverage_gap_for_uncovered_h
     assert "hard-post-floor" in mock_gap.call_args.kwargs["reason"]
     signal_outcomes = mock_record.call_args.kwargs["signal_outcomes"]
     assert signal_outcomes[0]["status"] == "coverage_gap"
+
+
+def test_deliver_signal_group_via_awareness_records_event_before_completion_prefilter():
+    """signal_log suppresses repeat delivery, not observation capture."""
+    signal = {
+        "type": "war_battle_rank_change",
+        "signal_log_type": "war_battle_rank_change::s134-w02-p3::rank2",
+        "season_id": 134,
+        "week": 2,
+        "race_rank": 2,
+    }
+    db.mark_signal_completed(signal["signal_log_type"], "2026-06-19")
+
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.jobs._signals.elixir_agent.run_awareness_tick") as mock_agent,
+    ):
+        ok = asyncio.run(
+            signals_module._deliver_signal_group_via_awareness(
+                [signal],
+                {},
+                {},
+                workflow="war_awareness",
+            )
+        )
+
+    assert ok is True
+    mock_agent.assert_not_called()
+    events = db.list_recent_events(
+        event_type="war_battle_rank_change",
+        subject_type="war",
+        subject_key="season:134:week:2",
+        limit=5,
+    )
+    assert len(events) == 1
+    assert events[0]["source_signal_key"] == signal["signal_log_type"]
 
 
 def test_deliver_signal_group_via_awareness_invokes_arena_relay_sidecar_for_war():
