@@ -1,0 +1,19 @@
+{
+  "name": "cr-agent-api-docs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent-first reference documentation for the Clash Royale API.",
+  "type": "module",
+  "scripts": {
+    "format": "cd ../.. && prettier --config tools/docs-build/.prettierrc.json --ignore-path tools/docs-build/.prettierignore --write \"**/*.md\" && prettier --config tools/docs-build/.prettierrc.json --parser markdown --write llms.txt",
+    "lint": "cd ../.. && markdownlint --config tools/docs-build/.markdownlint.jsonc --ignore-path tools/docs-build/.markdownlintignore \"**/*.md\" \"llms.txt\"",
+    "lint:fix": "cd ../.. && markdownlint --fix --config tools/docs-build/.markdownlint.jsonc --ignore-path tools/docs-build/.markdownlintignore \"**/*.md\" \"llms.txt\"",
+    "validate:json": "node scripts/validate-json.mjs",
+    "validate:links": "node scripts/validate-markdown-links.mjs",
+    "build": "npm run lint && npm run validate:json && npm run validate:links"
+  },
+  "devDependencies": {
+    "markdownlint-cli": "^0.49.0",
+    "prettier": "^3.8.4"
+  }
+}

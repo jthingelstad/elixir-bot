@@ -1,0 +1,43 @@
+# Clash Royale API Agent Reference
+
+This repository documents the public Clash Royale API for coding agents and automation workflows.
+
+## Entry Points
+
+- [Index](index.md): global rules, endpoint table, response shapes, pagination, errors, caching
+- [Agent Guide](AGENTS.md): agent-specific usage rules
+- [Endpoint Manifest](data/endpoints.json): machine-readable endpoint routing and quirks
+- [Models](models.md): model reference router
+
+## Endpoint Docs
+
+- [Players](players.md)
+- [Clans](clans.md)
+- [Locations](locations.md)
+- [Leaderboards](leaderboards.md)
+- [Tournaments](tournaments.md)
+- [Global Tournaments](globaltournaments.md)
+- [Cards](cards.md)
+- [Events](events.md)
+- [Challenges](challenges.md)
+
+## Model Docs
+
+- [Common Models](models/common.md)
+- [Player Models](models/players.md)
+- [Battle Models](models/battles.md)
+- [Clan Models](models/clans.md)
+- [River Race Models](models/river-race.md)
+- [Location And Ranking Models](models/locations-rankings.md)
+- [Leaderboard Models](models/leaderboards.md)
+- [Tournament Models](models/tournaments.md)
+- [Cards And Events Models](models/cards-events.md)
+- [Errors And Utility Models](models/errors.md)
+
+## Core Agent Notes
+
+- Use relative links only.
+- URL-encode tag path parameters: `#ABC` becomes `%23ABC`.
+- Check `paging` before treating an `items` response as paginated.
+- Treat absent and null fields differently.
+- Prefer observed live behavior notes over assumptions from the official Swagger UI.
