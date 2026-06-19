@@ -24,8 +24,14 @@ from runtime.leader_action_policy import can_post_leader_action
 from runtime.leader_action_ui import LEADER_ACTION_UI_VERSION, post_leader_action_card
 from runtime.channel_subagents import (
     SEASON_AWARDS_SIGNAL_TYPES,
+    batch_source_key,
     build_subagent_memory_context,
+    is_arena_relay_celebration_signal,
+    is_battle_mode_signal,
     is_leadership_only_signal,
+    is_progression_signal,
+    is_war_relay_signal,
+    is_war_signal,
     signal_source_key,
 )
 from runtime.helpers import _channel_scope
@@ -1227,8 +1233,89 @@ def _bot():
     return _runtime_app().bot
 
 
+def _arena_relay_sidecar_intent(signals: list[dict]) -> str | None:
+    signals = signals or []
+    if not signals:
+        return None
+    if all(is_war_signal(signal) for signal in signals):
+        if any(is_war_relay_signal(signal) for signal in signals):
+            return "war_relay_brief"
+        return None
+    if any(signal.get("type") == "member_join" for signal in signals):
+        return "welcome_relay"
+    if any(signal.get("type") == "discord_invite_reminder" for signal in signals):
+        return "discord_invite_relay"
+    if any(signal.get("type") in SEASON_AWARDS_SIGNAL_TYPES for signal in signals):
+        return "war_champ_winner_relay"
+    if (
+        all(is_progression_signal(signal) for signal in signals)
+        or all(is_progression_signal(signal) or is_battle_mode_signal(signal) for signal in signals)
+    ):
+        if any(is_arena_relay_celebration_signal(signal) for signal in signals):
+            return "celebration_relay"
+    return None
+
+
+def _arena_relay_sidecar_outcome(signals: list[dict], channel_config: dict) -> dict | None:
+    signals = signals or []
+    intent = _arena_relay_sidecar_intent(signals)
+    if not intent:
+        return None
+    source_key = signal_source_key(signals[0]) if len(signals) == 1 else batch_source_key(signals)
+    signal_type = signals[0].get("type") if len(signals) == 1 else "signal_batch"
+    return {
+        "source_signal_key": source_key,
+        "source_signal_type": signal_type or "signal_batch",
+        "target_channel_key": channel_config.get("subagent_key") or "arena-relay",
+        "target_channel_id": channel_config.get("id"),
+        "intent": intent,
+        "required": False,
+        "payload": {
+            "signals": signals,
+            "source": "arena_relay_sidecar_intent",
+        },
+        "delivery_status": "planned",
+    }
+
+
+async def _create_arena_relay_communication_intent(outcome: dict, signals: list[dict]) -> dict | None:
+    signal_keys = [signal_source_key(signal) for signal in (signals or []) if isinstance(signal, dict)]
+    event_keys = [
+        signal.get("event_key") for signal in (signals or [])
+        if isinstance(signal, dict) and signal.get("event_key")
+    ]
+    try:
+        return await asyncio.to_thread(
+            db.upsert_communication_intent,
+            intent_key=f"arena_relay:{outcome['source_signal_key']}:{outcome['intent']}",
+            workflow="arena-relay",
+            intent_type="action_card",
+            status=db.INTENT_PLANNED,
+            target_channel_key=outcome.get("target_channel_key"),
+            target_channel_id=outcome.get("target_channel_id"),
+            source_signal_key=outcome.get("source_signal_key"),
+            source_signal_type=outcome.get("source_signal_type"),
+            covers_signal_keys=signal_keys,
+            event_keys=event_keys,
+            summary=f"Arena relay sidecar: {outcome.get('intent')}",
+            payload={
+                "source": "arena_relay_sidecar",
+                "outcome": outcome,
+            },
+        )
+    except Exception:
+        log.warning(
+            "arena relay communication intent create failed signal_key=%s intent=%s",
+            outcome.get("source_signal_key"),
+            outcome.get("intent"),
+            exc_info=True,
+        )
+        return None
+
+
 async def _deliver_signal_outcome(outcome, signals, clan, war):
     facade = _facade()
+    communication_intent_id = outcome.get("communication_intent_id") or outcome.get("intent_id")
     existing = await asyncio.to_thread(
         db.get_signal_outcome,
         outcome["source_signal_key"],
@@ -1248,6 +1335,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
         required=outcome.get("required", True),
         delivery_status="planned",
         payload=outcome.get("payload"),
+        intent_id=communication_intent_id,
     )
 
     channel_config = facade._channel_config_by_key(outcome["target_channel_key"])
@@ -1264,7 +1352,15 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             delivery_status="failed",
             payload=outcome.get("payload"),
             error_detail="channel not found",
+            intent_id=communication_intent_id,
         )
+        if communication_intent_id is not None:
+            await asyncio.to_thread(
+                db.mark_communication_intent_failed,
+                communication_intent_id,
+                error_detail="channel not found",
+                target_channel_id=outcome["target_channel_id"],
+            )
         return False
 
     channel_id = channel_config["id"]
@@ -1301,8 +1397,15 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 "suppressed_signals": suppressed_public_signals,
             },
             error_detail=reason,
+            intent_id=communication_intent_id,
             mark_attempt=True,
         )
+        if communication_intent_id is not None:
+            await asyncio.to_thread(
+                db.mark_communication_intent_skipped,
+                communication_intent_id,
+                skipped_reason=reason,
+            )
         return True
     if suppressed_public_signals:
         log.info(
@@ -1364,8 +1467,15 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     delivery_status="skipped",
                     payload={"signals": signals},
                     error_detail=f"arena_relay_cooldown:{ARENA_RELAY_COOLDOWN_HOURS}h",
+                    intent_id=communication_intent_id,
                     mark_attempt=True,
                 )
+                if communication_intent_id is not None:
+                    await asyncio.to_thread(
+                        db.mark_communication_intent_skipped,
+                        communication_intent_id,
+                        skipped_reason=f"arena_relay_cooldown:{ARENA_RELAY_COOLDOWN_HOURS}h",
+                    )
                 return True
             if _arena_relay_uses_leader_action_policy(outcome.get("intent")):
                 signal_types = {signal.get("type") for signal in delivery_signals or []}
@@ -1400,8 +1510,15 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                         delivery_status="skipped",
                         payload={"signals": signals},
                         error_detail=f"leader_action_policy:{reason}",
+                        intent_id=communication_intent_id,
                         mark_attempt=True,
                     )
+                    if communication_intent_id is not None:
+                        await asyncio.to_thread(
+                            db.mark_communication_intent_skipped,
+                            communication_intent_id,
+                            skipped_reason=f"leader_action_policy:{reason}",
+                        )
                     return True
             if arena_types == {"discord_invite_reminder"}:
                 action_memory_context = _memory_context_with_leader_action_feedback(
@@ -1568,8 +1685,23 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 delivery_status=status,
                 payload=outcome.get("payload"),
                 error_detail="generator returned null",
+                intent_id=communication_intent_id,
                 mark_attempt=True,
             )
+            if communication_intent_id is not None:
+                if status == "skipped":
+                    await asyncio.to_thread(
+                        db.mark_communication_intent_skipped,
+                        communication_intent_id,
+                        skipped_reason="generator returned null",
+                    )
+                else:
+                    await asyncio.to_thread(
+                        db.mark_communication_intent_failed,
+                        communication_intent_id,
+                        error_detail="generator returned null",
+                        target_channel_id=outcome["target_channel_id"],
+                    )
             return status == "skipped"
 
         app._clear_llm_failure_alert_if_recovered()
@@ -1594,8 +1726,15 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 delivery_status="skipped",
                 payload={"result": result, "signals": signals},
                 error_detail=f"llm_no_post: {reason}",
+                intent_id=communication_intent_id,
                 mark_attempt=True,
             )
+            if communication_intent_id is not None:
+                await asyncio.to_thread(
+                    db.mark_communication_intent_skipped,
+                    communication_intent_id,
+                    skipped_reason=f"llm_no_post: {reason}",
+                )
             return True
 
         posts = app._entry_posts(result)
@@ -1658,9 +1797,12 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
 
         summary = result.get("summary")
         event_type = result.get("event_type") or outcome["intent"]
+        sent_message_ids = []
         for index, post in enumerate(posts):
             sent_message = sent_messages[index] if index < len(sent_messages) else None
             sent_message_id = getattr(sent_message, "id", None)
+            if sent_message_id is not None:
+                sent_message_ids.append(sent_message_id)
             post_summary = summary if index == 0 else f"{summary} ({index + 1}/{len(posts)})" if summary else None
             post_event_type = event_type if index == 0 else f"{event_type}_part"
             await asyncio.to_thread(
@@ -1675,9 +1817,11 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                 workflow=channel_config["subagent_key"],
                 event_type=post_event_type,
                 discord_message_id=sent_message_id,
+                intent_id=communication_intent_id,
                 raw_json={
                     "source_signal_key": outcome["source_signal_key"],
                     "intent": outcome["intent"],
+                    "communication_intent_id": communication_intent_id,
                     "target_channel_key": outcome["target_channel_key"],
                     "result": result,
                     "suppressed_signals": suppressed_public_signals,
@@ -1694,9 +1838,21 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             required=outcome.get("required", True),
             delivery_status="delivered",
             payload={"result": result, "signals": signals, "suppressed_signals": suppressed_public_signals},
+            intent_id=communication_intent_id,
             mark_attempt=True,
             delivered=True,
         )
+        if communication_intent_id is not None:
+            await asyncio.to_thread(
+                db.mark_communication_intent_delivered,
+                communication_intent_id,
+                target_channel_id=channel_id,
+                message_ids=sent_message_ids,
+                payload={
+                    "result": result,
+                    "delivered_post_count": len(posts),
+                },
+            )
         body = "\n\n".join(posts)
         if channel_config["subagent_key"] != "arena-relay":
             await asyncio.to_thread(
@@ -1734,8 +1890,19 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             delivery_status="failed",
             payload=outcome.get("payload"),
             error_detail=str(exc),
+            intent_id=communication_intent_id,
             mark_attempt=True,
         )
+        if communication_intent_id is not None:
+            try:
+                await asyncio.to_thread(
+                    db.mark_communication_intent_failed,
+                    communication_intent_id,
+                    error_detail=str(exc),
+                    target_channel_id=outcome.get("target_channel_id"),
+                )
+            except Exception:
+                log.warning("communication intent failure mark failed intent_id=%s", communication_intent_id, exc_info=True)
         log.error(
             "Signal outcome delivery failed for %s/%s: %s",
             outcome["source_signal_key"],
@@ -1771,12 +1938,21 @@ async def _deliver_signal_group(signals, clan, war, *, source_system: str = "sig
 async def _deliver_arena_relay_sidecars(signals, clan, war) -> int:
     facade = _facade()
     delivered = 0
-    for outcome in facade.plan_signal_outcomes(signals or []):
-        if outcome.get("target_channel_key") != "arena-relay":
-            continue
-        ok = await facade._deliver_signal_outcome(outcome, signals, clan, war)
-        if ok:
-            delivered += 1
+    try:
+        channel_config = facade._channel_config_by_key("arena-relay")
+    except RuntimeError:
+        log.warning("arena relay sidecar skipped: arena-relay channel not configured")
+        return 0
+    outcome = _arena_relay_sidecar_outcome(signals or [], channel_config)
+    if not outcome:
+        return 0
+    intent = await _create_arena_relay_communication_intent(outcome, signals or [])
+    if intent and intent.get("intent_id") is not None:
+        outcome = dict(outcome)
+        outcome["communication_intent_id"] = intent["intent_id"]
+    ok = await facade._deliver_signal_outcome(outcome, signals, clan, war)
+    if ok:
+        delivered += 1
     return delivered
 
 
