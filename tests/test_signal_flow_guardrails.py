@@ -1,7 +1,7 @@
 """Guardrails for the internal data subsystem pivot.
 
-These tests snapshot transition signal routing plus event identity behavior
-while direct `_deliver_signal_group()` callers remain in the codebase.
+These tests snapshot transition-only legacy routing plus event identity
+behavior while `_deliver_signal_group()` remains as a compatibility shim.
 """
 
 import pytest

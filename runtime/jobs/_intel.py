@@ -27,7 +27,7 @@ from runtime.app import bot, log
 from runtime.helpers import _get_singleton_channel_id
 from runtime.jobs._signals import (
     _channel_config_by_key,
-    _deliver_signal_group,
+    _deliver_signal_group_via_awareness,
     _post_to_elixir,
     _progression_signal_batches,
 )
@@ -123,12 +123,11 @@ async def _player_intel_refresh():
 
     progression_delivery_failures = 0
     for signal_batch in _progression_signal_batches(progression_signals):
-        if not await _deliver_signal_group(
+        if not await _deliver_signal_group_via_awareness(
             signal_batch,
             clan,
             war,
-            source_system="player_intel",
-            source_detector="player_progression",
+            workflow="player_intel",
         ):
             progression_delivery_failures += 1
             log.warning(
