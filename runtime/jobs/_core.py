@@ -835,6 +835,151 @@ async def _post_leader_action_recommendation(
     return True
 
 
+LEADER_ACTION_CASE_ORDER = (
+    "inactivity_review",
+    "demotion_review",
+    "promotion_review",
+)
+
+
+def _leader_action_case_identity(case: dict | None) -> str | None:
+    case = case or {}
+    case_key = case.get("case_key")
+    if case_key:
+        return str(case_key)
+    case_type = case.get("case_type")
+    tag = case.get("target_player_tag")
+    if case_type and tag:
+        return f"{case_type}:member:{db._canon_tag(tag)}"
+    return None
+
+
+def _leader_action_case_payload(
+    *,
+    case_type: str,
+    member: dict,
+    action_type: str,
+    objective: str,
+    title: str,
+    prompt_text: str,
+    rationale: str,
+    case: dict | None,
+) -> dict:
+    tag = _leader_action_member_tag(member)
+    label = _leader_action_member_label(member)
+    merged = dict(case or {})
+    merged.update({
+        "case_type": case_type,
+        "action_type": action_type,
+        "objective": objective,
+        "title": title,
+        "prompt_text": prompt_text,
+        "rationale": rationale,
+        "target_player_tag": tag,
+        "target_player_name": label,
+        "member": dict(member or {}),
+    })
+    merged.setdefault("recommendation", prompt_text)
+    merged.setdefault("case_key", _leader_action_case_identity(merged))
+    return merged
+
+
+async def _upsert_leader_action_candidate_case(
+    *,
+    case_type: str,
+    member: dict,
+    action_type: str,
+    objective: str,
+    title: str,
+    prompt_text: str,
+    rationale: str,
+) -> dict:
+    case = await asyncio.to_thread(
+        db.upsert_member_review_case,
+        case_type=case_type,
+        member=member,
+        title=title.replace("/", " ").title(),
+        recommendation=prompt_text,
+        rationale=rationale,
+    )
+    return _leader_action_case_payload(
+        case_type=case_type,
+        member=member,
+        action_type=action_type,
+        objective=objective,
+        title=title,
+        prompt_text=prompt_text,
+        rationale=rationale,
+        case=case,
+    )
+
+
+def _merge_due_case_with_refreshed_payload(due_case: dict, refreshed: dict | None) -> dict:
+    merged = dict(refreshed or {})
+    for key, value in (due_case or {}).items():
+        if value is not None:
+            merged[key] = value
+    if not merged.get("prompt_text"):
+        merged["prompt_text"] = merged.get("recommendation")
+    if not merged.get("title") and merged.get("case_type"):
+        merged["title"] = str(merged["case_type"]).replace("_", " ").title()
+    return merged
+
+
+async def _post_leader_action_case(channel, case: dict) -> bool:
+    case_type = case.get("case_type")
+    action_type = case.get("action_type")
+    if not action_type:
+        action_type = {
+            "inactivity_review": "kick_recommendation",
+            "demotion_review": "demotion_recommendation",
+            "promotion_review": "promotion_recommendation",
+        }.get(case_type)
+    if not action_type:
+        return False
+
+    member = case.get("member") if isinstance(case.get("member"), dict) else {}
+    target_player_tag = case.get("target_player_tag") or _leader_action_member_tag(member)
+    target_player_name = case.get("target_player_name") or _leader_action_member_label(member)
+    rationale = case.get("rationale") or ""
+    prompt_text = case.get("prompt_text") or case.get("recommendation")
+    if not prompt_text:
+        if action_type == "kick_recommendation":
+            prompt_text = f"Review {target_player_name or target_player_tag} for removal from the clan."
+        elif action_type == "demotion_recommendation":
+            prompt_text = f"Move {target_player_name or target_player_tag} from Elder back to Member."
+        elif action_type == "promotion_recommendation":
+            prompt_text = f"Promote {target_player_name or target_player_tag} to Elder."
+    if not rationale:
+        rationale = case.get("recommendation") or prompt_text or "Case is due for leader review."
+
+    if action_type == "kick_recommendation":
+        ineligible_reason = await asyncio.to_thread(_kick_candidate_ineligibility_reason, member)
+        if ineligible_reason:
+            await post_leader_action_skip(
+                source="decision_case_scan",
+                action_type=action_type,
+                reason=f"ineligible:{ineligible_reason}",
+                target_player_name=target_player_name,
+                target_player_tag=target_player_tag,
+                objective=case.get("objective") or "roster_health",
+                rationale=rationale,
+            )
+            return False
+
+    return await _post_leader_action_recommendation(
+        channel,
+        action_type=action_type,
+        objective=case.get("objective") or "leader_action",
+        title=case.get("title") or str(action_type).replace("_", " "),
+        prompt_text=prompt_text,
+        rationale=rationale,
+        target_player_tag=target_player_tag,
+        target_player_name=target_player_name,
+        case_id=case.get("case_id"),
+    )
+
+
 async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3) -> int:
     try:
         target_config = prompts.discord_singleton_subagent("arena-relay")
@@ -855,12 +1000,19 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
 
     posted = 0
     max_actions = max(1, int(max_actions or 1))
-    at_risk_members = (at_risk or {}).get("members") or []
-    at_risk_by_tag = {
-        db._canon_tag(_leader_action_member_tag(member)): member
-        for member in at_risk_members
-        if _leader_action_member_tag(member)
+    refreshed_cases_by_type: dict[str, list[dict]] = {
+        case_type: [] for case_type in LEADER_ACTION_CASE_ORDER
     }
+    refreshed_cases_by_identity: dict[str, dict] = {}
+
+    def remember_case(case: dict) -> None:
+        identity = _leader_action_case_identity(case)
+        if not identity:
+            return
+        refreshed_cases_by_identity[identity] = case
+        refreshed_cases_by_type.setdefault(case.get("case_type"), []).append(case)
+
+    at_risk_members = (at_risk or {}).get("members") or []
     kick_candidates = [
         member for member in at_risk_members
         if _kick_candidate_inactive_reason(member)
@@ -872,130 +1024,73 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
             ignored_count,
         )
     kick_candidates = sorted(kick_candidates, key=_kick_candidate_priority)
-    attempted_tags = set()
-    due_cases = await asyncio.to_thread(
-        db.list_due_decision_cases,
-        case_type="inactivity_review",
-        limit=max_actions,
-    )
-    for case in due_cases:
-        if posted >= max_actions:
-            return posted
-        tag = db._canon_tag(case.get("target_player_tag"))
-        if not tag:
-            continue
-        member = at_risk_by_tag.get(tag)
-        if not member or not _kick_candidate_inactive_reason(member):
-            continue
-        attempted_tags.add(tag)
-        label = _leader_action_member_label(member)
-        ineligible_reason = await asyncio.to_thread(_kick_candidate_ineligibility_reason, member)
-        if ineligible_reason:
-            await post_leader_action_skip(
-                source="decision_case_scan",
-                action_type="kick_recommendation",
-                reason=f"ineligible:{ineligible_reason}",
-                target_player_name=label,
-                target_player_tag=tag,
-                objective="roster_health",
-                rationale=case.get("rationale"),
-            )
-            continue
-        rationale = _leader_action_reason(member, promotion=False)
-        prompt_text = case.get("recommendation") or f"Review {label} for removal from the clan."
-        if await _post_leader_action_recommendation(
-            channel,
-            action_type="kick_recommendation",
-            objective="roster_health",
-            title="kick/removal recommendation",
-            prompt_text=prompt_text,
-            rationale=rationale,
-            target_player_tag=tag,
-            target_player_name=label,
-            case_id=case.get("case_id"),
-        ):
-            posted += 1
-
     for member in kick_candidates:
-        if posted >= max_actions:
-            return posted
-        label = _leader_action_member_label(member)
-        tag = _leader_action_member_tag(member)
-        canon_tag = db._canon_tag(tag)
-        if canon_tag in attempted_tags:
-            continue
-        ineligible_reason = await asyncio.to_thread(_kick_candidate_ineligibility_reason, member)
-        if ineligible_reason:
-            rationale = _leader_action_reason(member, promotion=False)
-            await post_leader_action_skip(
-                source="leader_action_candidate_scan",
-                action_type="kick_recommendation",
-                reason=f"ineligible:{ineligible_reason}",
-                target_player_name=label,
-                target_player_tag=tag,
-                objective="roster_health",
-                rationale=rationale,
-            )
-            continue
         rationale = _leader_action_reason(member, promotion=False)
+        label = _leader_action_member_label(member)
         prompt_text = f"Review {label} for removal from the clan."
-        case = await asyncio.to_thread(
-            db.upsert_member_review_case,
+        case_payload = await _upsert_leader_action_candidate_case(
             case_type="inactivity_review",
             member=member,
-            recommendation=prompt_text,
-            rationale=rationale,
-        )
-        if await _post_leader_action_recommendation(
-            channel,
             action_type="kick_recommendation",
             objective="roster_health",
             title="kick/removal recommendation",
             prompt_text=prompt_text,
             rationale=rationale,
-            target_player_tag=tag,
-            target_player_name=label,
-            case_id=(case or {}).get("case_id"),
-        ):
-            posted += 1
+        )
+        remember_case(case_payload)
 
     for member in (promotions.get("demotion_candidates") or []):
-        if posted >= max_actions:
-            return posted
         label = _leader_action_member_label(member)
-        tag = _leader_action_member_tag(member)
         rationale = _leader_action_reason(member, promotion=False)
         prompt_text = f"Move {label} from Elder back to Member."
-        if await _post_leader_action_recommendation(
-            channel,
+        case_payload = await _upsert_leader_action_candidate_case(
+            case_type="demotion_review",
+            member=member,
             action_type="demotion_recommendation",
             objective="role_health",
             title="demotion recommendation",
             prompt_text=prompt_text,
             rationale=rationale,
-            target_player_tag=tag,
-            target_player_name=label,
-        ):
-            posted += 1
+        )
+        remember_case(case_payload)
 
     for member in (promotions.get("recommended") or []):
-        if posted >= max_actions:
-            return posted
         label = _leader_action_member_label(member)
-        tag = _leader_action_member_tag(member)
         rationale = _leader_action_reason(member, promotion=True)
         prompt_text = f"Promote {label} to Elder."
-        if await _post_leader_action_recommendation(
-            channel,
+        case_payload = await _upsert_leader_action_candidate_case(
+            case_type="promotion_review",
+            member=member,
             action_type="promotion_recommendation",
             objective="reward_and_retention",
             title="promotion recommendation",
             prompt_text=prompt_text,
             rationale=rationale,
-            target_player_tag=tag,
-            target_player_name=label,
-        ):
-            posted += 1
+        )
+        remember_case(case_payload)
+
+    for case_type in LEADER_ACTION_CASE_ORDER:
+        if posted >= max_actions:
+            return posted
+        due_cases = await asyncio.to_thread(
+            db.list_due_decision_cases,
+            case_type=case_type,
+            limit=max_actions,
+        )
+        candidates = []
+        for due_case in due_cases:
+            identity = _leader_action_case_identity(due_case)
+            refreshed = refreshed_cases_by_identity.get(identity)
+            if not refreshed:
+                continue
+            candidates.append(_merge_due_case_with_refreshed_payload(due_case, refreshed))
+        if not candidates:
+            candidates = refreshed_cases_by_type.get(case_type) or []
+        for case in candidates:
+            if posted >= max_actions:
+                return posted
+            if await _post_leader_action_case(channel, case):
+                posted += 1
     return posted
 
 
