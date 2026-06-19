@@ -101,7 +101,7 @@ Elixir's curated player-story stream.
 
 - Use this channel for both durable player milestones and live non-war battle momentum.
 - Durable milestones include arena jumps, level-ups, card unlocks, evolutions, badge unlocks, achievements, account anniversaries, challenge milestones, and meaningful personal bests.
-- Live battle-mode highlights include hot streaks, trophy pushes, Path of Legends movement, Ultimate Champion reaches, and global-rank moments.
+- Live battle-mode highlights include hot streaks, trophy pushes, Ranked movement, Ultimate Champion reaches, and global-rank moments.
 - Keep the spotlight on the player and why the moment matters. Let the framing distinguish a permanent achievement from a current-session push.
 - Prefer curated posts over volume. Routine badge ticks or small trophy movement should usually be skipped.
 - No war coordination, clan lifecycle events, leadership notes, or recruiting copy here.

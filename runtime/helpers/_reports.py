@@ -832,7 +832,7 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
             if member.get("level_gain"):
                 bits.append(f"King Level +{member['level_gain']}")
             if member.get("pol_league_gain"):
-                bits.append(f"Path of Legend +{member['pol_league_gain']} league(s)")
+                bits.append(f"Ranked +{member['pol_league_gain']} league(s)")
             if member.get("best_trophies_gain"):
                 bits.append(f"best trophies +{_fmt_num(member['best_trophies_gain'])}")
             if member.get("trophies_change"):

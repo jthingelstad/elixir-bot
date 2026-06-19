@@ -430,6 +430,8 @@ def get_member_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> O
         "pp.fetched_at AS player_profile_at, pp.wins AS career_wins, pp.losses AS career_losses, "
         "pp.battle_count AS career_battle_count, pp.total_donations AS career_total_donations, "
         "pp.war_day_wins, pp.challenge_max_wins, pp.three_crown_wins, pp.current_favourite_card_name, "
+        "pp.current_path_of_legend_season_result_json, pp.last_path_of_legend_season_result_json, "
+        "pp.best_path_of_legend_season_result_json, pp.progress_json, "
         "dl.discord_user_id, dl.discord_username, dl.discord_display_name, du.last_seen_at AS discord_last_seen_at "
         "FROM members m "
         "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "

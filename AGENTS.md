@@ -285,11 +285,11 @@ This keeps feature announcements discoverable: future changes should usually mea
 
 ## Query Layer (Current)
 
-Elixir’s core member/leader questions should be answered from structured query helpers and tools, not prompt reconstruction. The LLM has 21 domain-aligned tools organized into five groups:
+Elixir’s core member/leader questions should be answered from structured query helpers and tools, not prompt reconstruction. The LLM has 22 domain-aligned tools organized into five groups:
 
 - **Member domain**: `resolve_member`, `get_member` (include: profile, form, battles, war, trend, deck, losses, history, memories, chests, awards), `get_member_war_detail` (aspect: summary, attendance, battles, missed_days, vs_clan_avg, war_decks)
 - **River Race domain**: `get_river_race` (live race state + competing clan standings), `get_war_season` (aspect: summary, standings, win_rates, boat_battles, score_trend, season_comparison, trending, perfect_attendance, no_participation), `get_clan_intel_report`
-- **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards, trends), `get_clan_health` (aspect: at_risk, hot_streaks, losing_streaks, trophy_drops, promotion_candidates), `get_clan_voyage`
+- **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards, trends), `get_clan_health` (aspect: at_risk, hot_streaks, losing_streaks, trophy_drops, promotion_candidates), `get_clan_game_modes` (aspect: summary, ranked, side_modes, events), `get_clan_voyage`
 - **Card + awards domain**: `lookup_cards`, `get_member_card_profile`, `lookup_member_cards`, `get_awards`
 - **Elixir state + utility**: `get_elixir_state` (event stream, projects, decision cases, communication intents), `get_event_rollups`, `cr_api` (live Clash Royale API bridge for any external player/clan/tournament), `update_member`, `save_clan_memory`, `flag_member_watch`, `record_leadership_followup`, `schedule_revisit`
 

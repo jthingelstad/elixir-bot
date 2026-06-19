@@ -41,6 +41,13 @@ def _persist_raw_payload(endpoint_name: str, entity_key: str | None, payload) ->
             except Exception:
                 log.exception("api_sentinel_baseline_failed")
             db._store_raw_payload(conn, label, key, payload)
+            try:
+                if label == "events":
+                    db.upsert_game_mode_contexts_from_events(payload, conn=conn)
+                elif label == "leaderboards":
+                    db.upsert_game_mode_contexts_from_leaderboards(payload, conn=conn)
+            except Exception:
+                log.exception("game_mode_context_persist_failed endpoint=%s entity=%s", label, key)
             conn.commit()
             try:
                 db.record_api_payload_sentinel_observations(label, key, payload, conn=conn)
@@ -353,3 +360,51 @@ def get_events():
         return _request_json("/events", endpoint_name="events")
     except (requests.RequestException, ValueError):
         return None
+
+
+def get_pathoflegend_location_rankings(location_id="global", limit=50):
+    """Fetch current Path of Legend rankings for a location."""
+    loc = str(location_id or "global").strip() or "global"
+    safe_limit = max(1, min(int(limit or 50), 200))
+    return _cached_fetch(
+        "pathoflegend_location_rankings",
+        loc,
+        f"/locations/{loc}/pathoflegend/players?limit={safe_limit}",
+        ttl_seconds=60,
+    )
+
+
+def get_pathoflegend_season_rankings(season_id, limit=50):
+    """Fetch global Path of Legend rankings for a completed/current season id."""
+    season = str(season_id or "").strip()
+    if not season:
+        raise InvalidTagError("season_id is required")
+    safe_limit = max(1, min(int(limit or 50), 200))
+    return _cached_fetch(
+        "pathoflegend_season_rankings",
+        season,
+        f"/locations/global/pathoflegend/{season}/rankings/players?limit={safe_limit}",
+        ttl_seconds=300,
+    )
+
+
+def get_leaderboards():
+    """Fetch available game-mode leaderboards."""
+    try:
+        return _request_json("/leaderboards", endpoint_name="leaderboards")
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def get_leaderboard(leaderboard_id, limit=50):
+    """Fetch one game-mode leaderboard by id."""
+    raw_id = str(leaderboard_id or "").strip()
+    if not raw_id.isdigit():
+        raise InvalidTagError("leaderboard_id must be an integer")
+    safe_limit = max(1, min(int(limit or 50), 200))
+    return _cached_fetch(
+        "leaderboard",
+        raw_id,
+        f"/leaderboard/{raw_id}?limit={safe_limit}",
+        ttl_seconds=60,
+    )

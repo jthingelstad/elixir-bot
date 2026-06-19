@@ -58,6 +58,7 @@ def test_v2_schema_initializes_core_tables():
             "api_sentinel_observations",
             "game_event_stream",
             "event_rollups",
+            "game_mode_contexts",
             "elixir_projects",
             "project_event_links",
             "decision_cases",

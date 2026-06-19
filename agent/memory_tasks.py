@@ -243,7 +243,7 @@ def _pol_promotion_fact(signal: dict) -> dict | None:
     tag = signal.get("tag")
     if new_league is None or not tag:
         return None
-    body = f"{name} promoted to Path of Legend league {new_league}"
+    body = f"{name} promoted in Ranked to league {new_league}"
     if trophies is not None:
         body += f" with {trophies} trophies"
     return {

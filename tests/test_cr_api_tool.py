@@ -132,6 +132,85 @@ class TestExecuteCrApiDispatch:
             "count": 1,
         }
 
+    def test_pathoflegend_location_rankings_do_not_require_tag(self, execute_cr_api):
+        payload = {
+            "items": [
+                {
+                    "rank": 1,
+                    "tag": "#P1",
+                    "name": "Ranked One",
+                    "expLevel": 70,
+                    "eloRating": 2500,
+                    "clan": {"tag": "#C1", "name": "Clan One"},
+                }
+            ]
+        }
+        with patch("cr_api.get_pathoflegend_location_rankings", return_value=payload) as mock_fetch:
+            result = execute_cr_api({
+                "aspect": "pathoflegend_location_rankings",
+                "location_id": "global",
+                "limit": 5,
+            })
+
+        mock_fetch.assert_called_once_with("global", limit=5)
+        assert result == {
+            "items": [
+                {
+                    "rank": 1,
+                    "tag": "#P1",
+                    "name": "Ranked One",
+                    "expLevel": 70,
+                    "eloRating": 2500,
+                    "clan": {"tag": "#C1", "name": "Clan One"},
+                }
+            ],
+            "count": 1,
+        }
+
+    def test_leaderboards_do_not_require_tag(self, execute_cr_api):
+        with patch("cr_api.get_leaderboards", return_value={
+            "items": [{"id": 170000019, "name": "Merge Tactics"}],
+        }):
+            result = execute_cr_api({"aspect": "leaderboards"})
+
+        assert result == {
+            "leaderboards": [{"id": 170000019, "name": "Merge Tactics"}],
+            "count": 1,
+        }
+
+    def test_leaderboard_requires_id_not_tag(self, execute_cr_api):
+        payload = {
+            "items": [
+                {
+                    "rank": 7,
+                    "score": 2100,
+                    "tag": "#P2",
+                    "name": "Side Mode Player",
+                    "clan": {"tag": "#C2", "name": "Clan Two"},
+                }
+            ]
+        }
+        with patch("cr_api.get_leaderboard", return_value=payload) as mock_fetch:
+            result = execute_cr_api({"aspect": "leaderboard", "leaderboard_id": 170000019, "limit": 10})
+
+        mock_fetch.assert_called_once_with(170000019, limit=10)
+        assert result == {
+            "items": [
+                {
+                    "rank": 7,
+                    "score": 2100,
+                    "tag": "#P2",
+                    "name": "Side Mode Player",
+                    "clan": {"tag": "#C2", "name": "Clan Two"},
+                }
+            ],
+            "count": 1,
+        }
+
+    def test_leaderboard_missing_id_errors_before_tag_validation(self, execute_cr_api):
+        result = execute_cr_api({"aspect": "leaderboard"})
+        assert result == {"error": "leaderboard_id is required"}
+
 
 # ---------------------------------------------------------------------------
 # Filters — envelope size + field whitelisting
@@ -196,14 +275,25 @@ class TestFilters:
 
     def test_player_battles_mode_filter(self, execute_cr_api):
         battles = [
-            {"type": "PvP", "gameMode": {"name": "Ladder"}, "team": [], "opponent": []},
-            {"type": "riverRacePvP", "gameMode": {"name": "War"}, "team": [], "opponent": []},
-            {"type": "pathOfLegend", "gameMode": {"name": "PoL"}, "team": [], "opponent": []},
+            {"type": "PvP", "gameMode": {"id": 72000006, "name": "Ladder"}, "team": [], "opponent": []},
+            {"type": "riverRacePvP", "gameMode": {"id": 72000266, "name": "War"}, "team": [], "opponent": []},
+            {"type": "pathOfLegend", "gameMode": {"id": 72000464, "name": "Ranked1v1_NewArena2"}, "team": [], "opponent": []},
+            {"type": "trail", "gameMode": {"id": 72000469, "name": "DraftMode_Princess"}, "eventTag": "#E", "team": [], "opponent": []},
+            {"type": "trail", "gameMode": {"id": 72000014, "name": "TeamVsTeam"}, "team": [{"tag": "#T1"}, {"tag": "#T2"}], "opponent": [{"tag": "#O1"}, {"tag": "#O2"}]},
         ]
         with patch("cr_api.get_player_battle_log", return_value=battles):
-            r = execute_cr_api({"aspect": "player_battles", "tag": "#PYLQ2", "mode": "war"})
-        assert r["count"] == 1
-        assert r["battles"][0]["type"] == "riverRacePvP"
+            war = execute_cr_api({"aspect": "player_battles", "tag": "#PYLQ2", "mode": "war"})
+            ranked = execute_cr_api({"aspect": "player_battles", "tag": "#PYLQ2", "mode": "ranked"})
+            event = execute_cr_api({"aspect": "player_battles", "tag": "#PYLQ2", "mode": "event"})
+            two_v_two = execute_cr_api({"aspect": "player_battles", "tag": "#PYLQ2", "mode": "two_v_two"})
+        assert war["count"] == 1
+        assert war["battles"][0]["type"] == "riverRacePvP"
+        assert ranked["count"] == 1
+        assert ranked["battles"][0]["type"] == "pathOfLegend"
+        assert event["count"] == 1
+        assert event["battles"][0]["eventTag"] == "#E"
+        assert two_v_two["count"] == 1
+        assert two_v_two["battles"][0]["gameMode"] == "TeamVsTeam"
 
     def test_clan_filter_truncates_description_and_summarizes(self, execute_cr_api):
         payload = {

@@ -295,7 +295,7 @@ def _interactive_system(channel_name):
         "This includes computing averages or totals across a deck — resolve each card's elixir cost via lookup_cards first. Memory is never the source for elixir costs.\n\n"
         "The cr_api tool is your bridge to the live Clash Royale API for ANY external player, clan, or tournament by tag. "
         "Reach for it when a user hands you a tag — e.g. 'tell me about player #ABC', 'how is clan #XYZ', 'scout the clan I just lost to'. "
-        "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, get_clan_health, get_river_race) — local data is deeper. "
+        "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, get_clan_health, get_clan_game_modes, get_river_race) — local data is deeper. "
         "For card data, always use lookup_cards, not cr_api. "
         "Chain aspect='player_battles' into aspect='player' or aspect='clan' to scout opponents. "
         "If the user asks about something the CR API doesn't expose (battle IDs, match IDs, historical clan rosters), say so plainly — do not improvise.\n\n"
@@ -369,7 +369,7 @@ def _clanops_system(channel_name):
         "Do not reconstruct this from Discord history alone when structured state is available.\n\n"
         "The cr_api tool is your bridge to the live Clash Royale API for ANY external player, clan, or tournament by tag. "
         "Reach for it when a user hands you a tag — e.g. 'tell me about player #ABC', 'how is clan #XYZ', 'scout the clan I just lost to'. "
-        "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, get_clan_health, get_river_race) — local data is deeper. "
+        "For OUR clan and OUR members, prefer local tools (get_member, get_clan_roster, get_clan_health, get_clan_game_modes, get_river_race) — local data is deeper. "
         "For card data, always use lookup_cards, not cr_api. "
         "Chain aspect='player_battles' into aspect='player' or aspect='clan' to scout opponents. "
         "If the user asks about something the CR API doesn't expose (battle IDs, match IDs, historical clan rosters), say so plainly — do not improvise.\n\n"
@@ -436,7 +436,7 @@ def _deck_review_system(channel_name, *, mode: str = "regular", subject: str = "
         "Always call lookup_cards before claiming anything about a card's elixir cost, rarity, type, or evolution capability — and BEFORE computing any average or total elixir cost across a deck or set of cards. Memory is NEVER an acceptable source for elixir costs, even when 'just adding them up'.\n"
         "If the user message includes a VERIFIED CARD ELIXIR COSTS block, treat those values as authoritative and use them directly instead of calling lookup_cards again for those cards.\n"
         "Before suggesting any card swap, verify the player owns the candidate at competitive level. Use `lookup_member_cards(filter={\"name\":\"<card>\"})` for a single-card check, or `get_member_card_profile` for a collection overview. Never recommend a card the player does not own at competitive level. Do NOT call get_member with include=['cards'] — that path is deprecated.\n"
-        "Always call get_member with include=['losses'] (passing scope='war' for war mode, scope='ladder_ranked_10' for regular mode) before giving advice. Cite specific opponent cards from the losses data instead of generic meta talk. Example: 'Mega Knight has been in 6 of your last 9 losses — your deck has no clean answer for it.'\n\n"
+        "Always call get_member with include=['losses'] (passing scope='war' for war mode, scope='ranked_10' or 'ladder_10' when the player names Ranked or Trophy Road, and scope='ladder_ranked_10' for unspecified regular mode) before giving advice. Cite specific opponent cards from the losses data instead of generic meta talk. Example: 'Mega Knight has been in 6 of your last 9 losses — your deck has no clean answer for it.'\n\n"
     )
 
     if mode == "war":

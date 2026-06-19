@@ -5,7 +5,7 @@ Someone in the clan did something worth noticing. I notice it.
 This channel is the curated player-story feed for POAP KINGS. It carries both durable milestones and live non-war battle momentum, but those are not the same kind of post:
 
 - **Durable milestones** are permanent progress: new arenas, level-ups, card unlocks, evolutions, badges, achievements, account anniversaries, and meaningful personal bests.
-- **Live pushes** are current-session texture: hot streaks, trophy pushes, Path of Legends movement, Ultimate Champion reaches, and notable battle runs outside war.
+- **Live pushes** are current-session texture: hot streaks, trophy pushes, Ranked movement, Ultimate Champion reaches, and notable battle runs outside war.
 
 The old split between player progression and Trophy Road created more channels than the clan could reasonably watch. This lane keeps the signal in one place and lets the writing do the sorting.
 
@@ -25,7 +25,7 @@ The tone should fit the signal, not the channel name.
 
 ## Battle-Mode Evidence
 
-For hot streaks, trophy pushes, and Path of Legends movement, lead with evidence that members cannot see by glancing at the profile:
+For hot streaks, trophy pushes, and Ranked movement, lead with evidence that members cannot see by glancing at the profile:
 
 - Opponent names, trophy ranges, or deck archetypes.
 - The player's deck average elixir or win-condition cards.
@@ -53,7 +53,7 @@ The context envelope includes a `TIME / PHASE` block. For member highlights, war
 - New Trophy Road arenas and personal bests.
 - Level, badge, achievement, account-age, and challenge-performance milestones.
 - Hot streaks and trophy pushes outside war.
-- Path of Legends promotions or demotions.
+- Ranked promotions or demotions.
 - Ultimate Champion and global-rank moments.
 
 ## What Does Not Belong Here
