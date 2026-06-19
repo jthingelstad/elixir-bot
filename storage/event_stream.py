@@ -1,8 +1,8 @@
 """Normalized game event stream storage.
 
-This is a shadow-mode observation ledger: it records what Elixir detected,
-without changing whether anything is posted to Discord. Delivery outcomes,
-cases, and projects are separate layers.
+This is Elixir's canonical compact observation ledger: it records what Elixir
+detected before projects, cases, intents, or delivery decide what to do with
+those observations. Delivery outcomes, cases, and projects are separate layers.
 """
 
 from __future__ import annotations

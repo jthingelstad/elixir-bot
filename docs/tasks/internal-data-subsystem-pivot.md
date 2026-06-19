@@ -5,6 +5,12 @@ subsystem is now `game_event_stream` -> `elixir_projects` /
 `decision_cases` -> `communication_intents`, with `event_rollups` preserving
 long-term summaries beyond the 90-day operational stream.
 
+Follow-up cleanup: awareness-loop hard-post-floor misses now record failed
+`coverage_gap` communication intents instead of falling back to legacy
+per-signal delivery. Direct `_deliver_signal_group()` callers remain as
+transition paths for player progression, tournament, and startup/system signal
+jobs.
+
 ## Purpose
 
 Elixir has outgrown the original "detector emits signal, router picks channel,
@@ -488,6 +494,8 @@ Tasks:
   where useful, rather than reconstructing the story solely from raw facts and
   recent messages.
 - Reduce `plan_signal_outcomes()` to fallback/compatibility behavior.
+  Awareness no longer invokes this path for hard-post-floor recovery; remaining
+  direct callers should be migrated deliberately.
 - Document which scheduled activities are "observers" and which are
   "communicators":
   - observers write facts/events/projects/cases

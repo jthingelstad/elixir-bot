@@ -28,6 +28,7 @@ __all__ = [
     "INTENT_PLANNED",
     "INTENT_SKIPPED",
     "create_awareness_post_intent",
+    "create_awareness_coverage_gap_intent",
     "create_awareness_skip_intent",
     "get_communication_intent",
     "get_communication_intent_by_id",
@@ -510,6 +511,64 @@ def create_awareness_post_intent(
             "source": "awareness_loop",
             "post": post or {},
             "covered_signal_count": len(covered_signals),
+        },
+        conn=conn,
+    )
+
+
+@managed_connection
+def create_awareness_coverage_gap_intent(
+    signals: list[dict] | tuple[dict, ...] | None = None,
+    *,
+    workflow: str | None = None,
+    reason: str | None = None,
+    situation: dict | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict | None:
+    signal_list = [signal for signal in (signals or []) if isinstance(signal, dict)]
+    if not signal_list:
+        return None
+    source_signal = _first_signal(signal_list)
+    source_signal_key = _source_key(source_signal)
+    source_signal_type = _source_type(source_signal)
+    covers = [_source_key(signal) for signal in signal_list if _source_key(signal)]
+    event_keys = _event_keys_for(signal_list)
+    case_id = _infer_case_id(
+        conn,
+        source_signal_key=source_signal_key,
+        event_keys=event_keys,
+        signal=source_signal,
+    )
+    project_id = _infer_project_id(
+        conn,
+        event_keys=event_keys,
+        signal=source_signal,
+        situation=situation,
+    )
+    clean_reason = _clean_text(reason) or "required signal was not covered by the awareness post plan"
+    key_basis = {
+        "workflow": _clean_text(workflow) or "awareness",
+        "intent_type": "coverage_gap",
+        "signals": covers,
+        "reason": clean_reason,
+    }
+    return upsert_communication_intent(
+        intent_key=f"awareness:coverage_gap:{_short_hash(key_basis)}",
+        workflow=_clean_text(workflow) or "awareness",
+        intent_type="coverage_gap",
+        status=INTENT_FAILED,
+        source_signal_key=source_signal_key,
+        source_signal_type=source_signal_type,
+        covers_signal_keys=covers,
+        event_keys=event_keys,
+        project_id=project_id,
+        case_id=case_id,
+        summary="Awareness coverage gap",
+        error_detail=clean_reason,
+        payload={
+            "source": "awareness_loop",
+            "reason": clean_reason,
+            "signals_uncovered": len(signal_list),
         },
         conn=conn,
     )

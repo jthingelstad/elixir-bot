@@ -1,9 +1,9 @@
 # Signal Inventory and Guardrails
 
 This document catalogs the signal types Elixir can emit into proactive
-awareness and delivery flows. It also defines the guardrails for Phase 0 of the
-internal data subsystem pivot: event identity, shadow event-stream retention,
-and which workflow layers may write which durable objects.
+awareness and delivery flows. It also defines the guardrails for the internal
+data subsystem pivot: event identity, event-stream retention, and which
+workflow layers may write which durable objects.
 
 Last updated: 2026-06-19, after the `event_rollups` retention layer.
 
@@ -20,6 +20,13 @@ Current proactive flow:
 5. Delivery state is tracked by `communication_intents`, `signal_outcomes`, and
    `messages`; `signal_log` remains a compatibility/dedupe table for older
    detector paths.
+
+Awareness-loop delivery no longer falls back to the legacy per-signal router
+when a hard-post-floor signal is not covered by the agent's post plan. Instead,
+Elixir records a failed `coverage_gap` communication intent and leaves the
+signal uncompleted for retry. Direct `_deliver_signal_group()` callers still
+exist for transition paths such as player progression, tournament signals, and
+startup/system signals.
 
 Important distinction: the event stream is an observation ledger, not a posting
 queue and not a delivery ledger.

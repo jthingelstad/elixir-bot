@@ -1,7 +1,7 @@
 """Guardrails for the internal data subsystem pivot.
 
-These tests snapshot current signal routing and event identity behavior before
-later phases move decisioning onto projects, cases, and intents.
+These tests snapshot transition signal routing plus event identity behavior
+while direct `_deliver_signal_group()` callers remain in the codebase.
 """
 
 import pytest
