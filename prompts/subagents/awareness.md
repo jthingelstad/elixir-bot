@@ -15,6 +15,7 @@ The user message contains a structured `Situation` object:
 - `time` — authoritative "what moment is it in the war": `phase`, `day_number`, `battle_days_after_today`, `practice_days_after_today`, `hours_remaining_in_day`, `time_left_text`, `is_final_battle_day`, `is_final_practice_day`, `is_colosseum_week`, `season_id`, `week`. Never infer these — read them. If `time` is absent, there is no active war. (Interactive and observation prompts additionally get a human-readable `=== RIVER RACE — CURRENT MOMENT ===` block with the same facts; field names match.)
 - `standing` — clan rank, fame, deficit-to-leader, pace status, engagement.
 - `signals_by_lane` — raw signals since the last tick, grouped by lane: `war`, `battle_mode`, `milestone`, `clan_event`, `leadership`, `system`.
+- `recent_events` — compact event-stream history, not a posting queue. It has 7/28/56/90-day summaries plus a small recent-pulse list without raw payloads. Use it to notice patterns, compare this war cycle with the prior one, and avoid treating one current signal as isolated. Do not post just because something appears in `recent_events`; current tick signals, due revisits, clock pressure, and open leadership context still determine whether speaking now is warranted.
 - `channel_memory` — for each channel, what I've already posted recently (so I don't repeat angles).
 - `roster_vitals` — compact 20-row most-active-this-week table (a scouting anchor; not for verbatim posting).
 - `hard_post_signals` — signals that *must* produce a post; I choose framing, not existence.

@@ -7,7 +7,7 @@ since the last tick grouped by lane, recent channel posts (memory), roster
 vitals, and an explicit list of hard-post-floor signals.
 
 The assembler is pure: it takes a heartbeat tick result + clan/war and
-queries the local DB for memory and form data. It does no Discord I/O and
+queries the local DB for memory, event history, and form data. It does no Discord I/O and
 no LLM calls — that's the agent's job.
 """
 
@@ -18,6 +18,7 @@ from typing import Iterable
 
 import db
 import prompts
+from storage.event_stream import EVENT_STREAM_WINDOWS
 from heartbeat import build_situation_time
 from runtime.channel_subagents import (
     BATTLE_MODE_SIGNAL_TYPES,
@@ -316,6 +317,83 @@ def _leader_action_board() -> dict:
         return {"open": [], "recent_decisions": []}
 
 
+def _merge_count_maps(*maps: dict | None) -> dict:
+    merged: dict[str, int] = {}
+    for mapping in maps:
+        for key, value in (mapping or {}).items():
+            merged[key] = merged.get(key, 0) + int(value or 0)
+    return merged
+
+
+def _merge_event_window_summaries(*summaries: dict | None) -> dict:
+    merged: dict[str, dict] = {}
+    for days in EVENT_STREAM_WINDOWS:
+        key = f"{days}d"
+        blocks = [(summary or {}).get(key) or {} for summary in summaries]
+        merged[key] = {
+            "days": days,
+            "total": sum(int(block.get("total") or 0) for block in blocks),
+            "by_type": _merge_count_maps(*(block.get("by_type") for block in blocks)),
+            "by_scope": _merge_count_maps(*(block.get("by_scope") for block in blocks)),
+        }
+    return merged
+
+
+def _compact_event(row: dict) -> dict:
+    """Return prompt-safe event metadata without raw payload_json."""
+    return {
+        "event_key": row.get("event_key"),
+        "event_type": row.get("event_type"),
+        "observed_at": row.get("observed_at"),
+        "scope": row.get("scope"),
+        "source_system": row.get("source_system"),
+        "source_detector": row.get("source_detector"),
+        "source_signal_key": row.get("source_signal_key"),
+        "subject_type": row.get("subject_type"),
+        "subject_key": row.get("subject_key"),
+        "season_id": row.get("season_id"),
+        "war_week": row.get("war_week"),
+    }
+
+
+def _recent_events_block(*, include_leadership: bool, recent_limit: int = 20) -> dict:
+    """Compact event-stream context for awareness.
+
+    The raw 90-day stream remains queryable through tools/admin scripts. The
+    prompt only gets aggregate windows plus a small recent-pulse list.
+    """
+    scopes = ["public", "leadership"] if include_leadership else ["public"]
+    try:
+        summaries = [
+            db.summarize_events_by_window(windows=EVENT_STREAM_WINDOWS, scope=scope)
+            for scope in scopes
+        ]
+        recent_rows: list[dict] = []
+        for scope in scopes:
+            recent_rows.extend(
+                db.list_recent_events(days=7, scope=scope, limit=recent_limit)
+            )
+        recent_rows.sort(
+            key=lambda row: (row.get("observed_at") or "", row.get("event_id") or 0),
+            reverse=True,
+        )
+        return {
+            "window_days": list(EVENT_STREAM_WINDOWS),
+            "scope_filter": "public+leadership" if include_leadership else "public",
+            "summaries": _merge_event_window_summaries(*summaries),
+            "recent": [_compact_event(row) for row in recent_rows[:recent_limit]],
+        }
+    except Exception:
+        log.warning("recent_events load failed", exc_info=True)
+        _note_degraded("recent_events")
+        return {
+            "window_days": list(EVENT_STREAM_WINDOWS),
+            "scope_filter": "public+leadership" if include_leadership else "public",
+            "summaries": {},
+            "recent": [],
+        }
+
+
 def _already_delivered(signal: dict) -> bool:
     """True iff the signal's log key is already in ``signal_log``.
 
@@ -340,13 +418,18 @@ def _already_delivered(signal: dict) -> bool:
         return True
 
 
-def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -> dict:
+def build_situation(
+    tick_result,
+    *,
+    channel_keys: Iterable[str] | None = None,
+    include_leadership_events: bool | None = None,
+) -> dict:
     """Assemble the single Situation payload for one awareness tick.
 
     ``tick_result`` is a ``HeartbeatTickResult`` (signals + clan + war).
     Returns a dict whose top-level keys are stable for the agent's prompt:
     ``time``, ``standing``, ``signals_by_lane``, ``hard_post_signals``,
-    ``channel_memory``, ``roster_vitals``, ``due_revisits``,
+    ``channel_memory``, ``recent_events``, ``roster_vitals``, ``due_revisits``,
     ``recent_agent_writes``.
 
     Signals whose ``signal_log_type`` is already in ``signal_log`` are dropped
@@ -364,6 +447,11 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
 
     if channel_keys is None:
         channel_keys = list(CHANNEL_LANES.keys())
+    else:
+        channel_keys = list(channel_keys)
+
+    if include_leadership_events is None:
+        include_leadership_events = "leader-lounge" in set(channel_keys)
 
     # Signals whose only presence is "optional progression" (badge milestones,
     # etc.) should not force an LLM call — the agent almost always skips them.
@@ -382,6 +470,9 @@ def build_situation(tick_result, *, channel_keys: Iterable[str] | None = None) -
         "signals_by_lane": _group_signals_by_lane(signals),
         "hard_post_signals": _hard_post_signals(signals),
         "due_revisits": due_revisits,
+        "recent_events": _recent_events_block(
+            include_leadership=bool(include_leadership_events),
+        ),
         "channel_memory": {
             key: _channel_memory_for(key) for key in channel_keys
         },
