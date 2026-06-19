@@ -2389,6 +2389,52 @@ def test_channel_messages_and_state_are_tracked_for_channel_user_threads():
         conn.close()
 
 
+def test_list_channel_messages_skips_blank_history_before_limit():
+    conn = db.get_connection(":memory:")
+    try:
+        db.save_message(
+            "channel_user:100:123",
+            "assistant",
+            "First useful post",
+            channel_id=100,
+            workflow="clanops",
+            conn=conn,
+        )
+        db.save_message(
+            "channel_user:100:123",
+            "user",
+            "",
+            channel_id=100,
+            workflow="interactive",
+            conn=conn,
+        )
+        db.save_message(
+            "channel_user:100:123",
+            "assistant",
+            "   ",
+            channel_id=100,
+            workflow="clanops",
+            conn=conn,
+        )
+        db.save_message(
+            "channel_user:100:123",
+            "assistant",
+            "Second useful post",
+            channel_id=100,
+            workflow="clanops",
+            conn=conn,
+        )
+
+        history = db.list_channel_messages(100, limit=2, conn=conn)
+
+        assert [turn["content"] for turn in history] == [
+            "First useful post",
+            "Second useful post",
+        ]
+    finally:
+        conn.close()
+
+
 def test_resolve_member_folds_diacritics_for_non_ascii_names():
     conn = db.get_connection(":memory:")
     try:

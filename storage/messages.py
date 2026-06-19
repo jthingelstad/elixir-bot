@@ -793,6 +793,7 @@ def list_channel_messages(channel_id: str | int, limit: int = 10, author_type: O
     rows = conn.execute(
         "SELECT author_type, content, summary, created_at "
         f"FROM messages WHERE {' AND '.join(where)} "
+        "AND TRIM(content) <> '' "
         "ORDER BY created_at DESC, message_id DESC LIMIT ?",
         tuple(params),
     ).fetchall()
