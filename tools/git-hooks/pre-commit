@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+tools/git-hooks/run-docs-build
