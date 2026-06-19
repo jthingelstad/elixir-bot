@@ -2098,7 +2098,58 @@ def _migration_47(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47]
+def _migration_48(conn: sqlite3.Connection) -> None:
+    """Add durable decision cases and link leader actions to cases."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS decision_cases (
+            case_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_key TEXT NOT NULL UNIQUE,
+            case_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            subject_type TEXT,
+            subject_key TEXT,
+            target_player_tag TEXT,
+            target_player_name TEXT,
+            title TEXT NOT NULL,
+            recommendation TEXT,
+            rationale TEXT,
+            priority INTEGER NOT NULL DEFAULT 0,
+            source_signal_key TEXT,
+            source_signal_type TEXT,
+            source_event_key TEXT,
+            opened_at TEXT NOT NULL,
+            due_at TEXT,
+            resolved_at TEXT,
+            resolution TEXT,
+            state_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_decision_cases_status_due "
+        "ON decision_cases(status, due_at, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_decision_cases_subject "
+        "ON decision_cases(subject_type, subject_key, case_type, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_decision_cases_target "
+        "ON decision_cases(target_player_tag, case_type, status)"
+    )
+    columns = _table_columns(conn, "leader_action_recommendations")
+    if "case_id" not in columns:
+        conn.execute("ALTER TABLE leader_action_recommendations ADD COLUMN case_id INTEGER")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_leader_actions_case "
+        "ON leader_action_recommendations(case_id, status)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

@@ -90,6 +90,29 @@ async def _record_signal_events_shadow(
         return 0
 
 
+async def _upsert_decision_cases_shadow(
+    signals: list[dict] | tuple[dict, ...] | None,
+    *,
+    source_system: str | None = None,
+) -> int:
+    """Create durable cases from actionable signals without blocking delivery."""
+    try:
+        cases = await asyncio.to_thread(
+            db.upsert_decision_cases_from_signals,
+            signals or [],
+            source_system=source_system,
+        )
+        return len(cases or [])
+    except Exception:
+        log.warning(
+            "decision case upsert failed source_system=%s signals=%d",
+            source_system,
+            len(signals or []),
+            exc_info=True,
+        )
+        return 0
+
+
 def _memory_context_with_leader_action_feedback(memory_context: dict | None, profiles: list[dict] | None) -> dict | None:
     profiles = profiles or []
     if not profiles:
@@ -1126,6 +1149,7 @@ def _attach_leader_action_to_result(result: dict, action: dict) -> dict:
     metadata = result.setdefault("metadata", {})
     metadata.update({
         "leader_action_id": action.get("action_id"),
+        "decision_case_id": action.get("case_id"),
         "leader_action_key": action.get("action_key"),
         "leader_action_status": action.get("status"),
     })
@@ -1491,6 +1515,7 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                     copy_current_text=metadata.get("relay_copy_text"),
                     ui_version=LEADER_ACTION_UI_VERSION,
                     baseline=baseline,
+                    case_id=metadata.get("case_id"),
                 )
                 arena_leader_action = action
                 result = _attach_leader_action_to_result(result, action)
@@ -1728,6 +1753,7 @@ async def _deliver_signal_group(signals, clan, war, *, source_system: str = "sig
         source_system=source_system,
         source_detector=source_detector,
     )
+    await _upsert_decision_cases_shadow(signals, source_system=source_system)
     outcomes = facade.plan_signal_outcomes(signals)
     if not outcomes:
         return False
@@ -1930,6 +1956,7 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         source_system=workflow or "awareness",
         source_detector=workflow,
     )
+    await _upsert_decision_cases_shadow(signals, source_system=workflow or "awareness")
     bundle = HeartbeatTickResult(signals=signals or [], clan=clan or {}, war=war or {})
     situation = build_situation(bundle)
 

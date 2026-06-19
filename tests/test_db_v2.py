@@ -45,6 +45,7 @@ def test_v2_schema_initializes_core_tables():
             "game_event_stream",
             "elixir_projects",
             "project_event_links",
+            "decision_cases",
             "leader_action_recommendations",
             "runtime_job_status",
             "arena_relay_screenshot_observations",
@@ -326,6 +327,75 @@ def test_refresh_active_war_season_project_from_live_war_state():
         assert snapshot["project_key"] == "war_season:129"
         assert snapshot["linked_event_count"] == 1
         assert snapshot["state"]["phase_display"] == "Battle Day 1"
+    finally:
+        conn.close()
+
+
+def test_decision_case_tracks_inactivity_review_deferral_lifecycle():
+    conn = db.get_connection(":memory:")
+    try:
+        signal = {
+            "type": "inactive_members",
+            "signal_key": "inactive:2026-06-19",
+            "event_key": "game_event:inactive",
+            "members": [
+                {
+                    "name": "xian",
+                    "tag": "#UGQPVQ9U9",
+                    "days_inactive": 10,
+                    "battle_days_ago": 10,
+                    "login_days_ago": 7,
+                    "threshold_days": 7.6,
+                    "role": "member",
+                }
+            ],
+        }
+
+        cases = db.upsert_decision_cases_from_signals(
+            [signal],
+            source_system="clan_awareness",
+            conn=conn,
+        )
+
+        assert len(cases) == 1
+        case = cases[0]
+        assert case["case_key"] == "inactivity_review:member:#UGQPVQ9U9"
+        assert case["case_type"] == "inactivity_review"
+        assert case["status"] == db.CASE_OPEN
+        assert case["target_player_tag"] == "#UGQPVQ9U9"
+        assert case["source_event_key"] == "game_event:inactive"
+
+        action = db.create_leader_action_recommendation(
+            action_type="kick_recommendation",
+            objective="roster_health",
+            prompt_text="Review xian for removal from the clan.",
+            rationale="10 days inactive vs 7.6 day threshold",
+            target_player_tag="#UGQPVQ9U9",
+            target_player_name="xian",
+            source_signal_key="inactive:2026-06-19",
+            source_signal_type="inactive_members",
+            case_id=case["case_id"],
+            conn=conn,
+        )
+        assert action["case_id"] == case["case_id"]
+
+        deferred = db.decide_leader_action(
+            action["action_id"],
+            status=db.ACTION_DEFERRED,
+            discord_user_id="leader-1",
+            emoji="⏳",
+            defer_days=3,
+            decided_at="2026-06-19T12:00:00",
+            conn=conn,
+        )
+        assert deferred["deferred_until"] == "2026-06-22T12:00:00"
+
+        case = db.get_decision_case_by_id(case["case_id"], conn=conn)
+        assert case["status"] == db.CASE_DEFERRED
+        assert case["due_at"] == "2026-06-22T12:00:00"
+        assert db.list_due_decision_cases(now="2026-06-22T11:59:00", conn=conn) == []
+        due = db.list_due_decision_cases(now="2026-06-22T12:00:00", conn=conn)
+        assert [item["case_id"] for item in due] == [case["case_id"]]
     finally:
         conn.close()
 

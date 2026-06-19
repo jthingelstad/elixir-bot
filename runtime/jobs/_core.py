@@ -735,6 +735,7 @@ async def _post_leader_action_recommendation(
     rationale: str,
     target_player_tag: str | None = None,
     target_player_name: str | None = None,
+    case_id: int | None = None,
     dedupe_hours: int = 168,
 ) -> bool:
     if target_player_tag and await asyncio.to_thread(
@@ -775,6 +776,9 @@ async def _post_leader_action_recommendation(
     if action_type == "kick_recommendation":
         baseline = dict(baseline or {})
         baseline["policy_context"] = KICK_RECOMMENDATION_POLICY_CONTEXT
+    if case_id is not None:
+        baseline = dict(baseline or {})
+        baseline["decision_case_id"] = case_id
     clan_chat_copy = _leader_action_clan_chat_copy(
         action_type=action_type,
         target_player_name=target_player_name,
@@ -794,6 +798,7 @@ async def _post_leader_action_recommendation(
         copy_current_text=clan_chat_copy,
         ui_version=LEADER_ACTION_UI_VERSION,
         baseline=baseline,
+        case_id=case_id,
     )
     if not action or action.get("source_message_id"):
         return False
@@ -851,6 +856,11 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
     posted = 0
     max_actions = max(1, int(max_actions or 1))
     at_risk_members = (at_risk or {}).get("members") or []
+    at_risk_by_tag = {
+        db._canon_tag(_leader_action_member_tag(member)): member
+        for member in at_risk_members
+        if _leader_action_member_tag(member)
+    }
     kick_candidates = [
         member for member in at_risk_members
         if _kick_candidate_inactive_reason(member)
@@ -862,11 +872,58 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
             ignored_count,
         )
     kick_candidates = sorted(kick_candidates, key=_kick_candidate_priority)
+    attempted_tags = set()
+    due_cases = await asyncio.to_thread(
+        db.list_due_decision_cases,
+        case_type="inactivity_review",
+        limit=max_actions,
+    )
+    for case in due_cases:
+        if posted >= max_actions:
+            return posted
+        tag = db._canon_tag(case.get("target_player_tag"))
+        if not tag:
+            continue
+        member = at_risk_by_tag.get(tag)
+        if not member or not _kick_candidate_inactive_reason(member):
+            continue
+        attempted_tags.add(tag)
+        label = _leader_action_member_label(member)
+        ineligible_reason = await asyncio.to_thread(_kick_candidate_ineligibility_reason, member)
+        if ineligible_reason:
+            await post_leader_action_skip(
+                source="decision_case_scan",
+                action_type="kick_recommendation",
+                reason=f"ineligible:{ineligible_reason}",
+                target_player_name=label,
+                target_player_tag=tag,
+                objective="roster_health",
+                rationale=case.get("rationale"),
+            )
+            continue
+        rationale = _leader_action_reason(member, promotion=False)
+        prompt_text = case.get("recommendation") or f"Review {label} for removal from the clan."
+        if await _post_leader_action_recommendation(
+            channel,
+            action_type="kick_recommendation",
+            objective="roster_health",
+            title="kick/removal recommendation",
+            prompt_text=prompt_text,
+            rationale=rationale,
+            target_player_tag=tag,
+            target_player_name=label,
+            case_id=case.get("case_id"),
+        ):
+            posted += 1
+
     for member in kick_candidates:
         if posted >= max_actions:
             return posted
         label = _leader_action_member_label(member)
         tag = _leader_action_member_tag(member)
+        canon_tag = db._canon_tag(tag)
+        if canon_tag in attempted_tags:
+            continue
         ineligible_reason = await asyncio.to_thread(_kick_candidate_ineligibility_reason, member)
         if ineligible_reason:
             rationale = _leader_action_reason(member, promotion=False)
@@ -882,6 +939,13 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
             continue
         rationale = _leader_action_reason(member, promotion=False)
         prompt_text = f"Review {label} for removal from the clan."
+        case = await asyncio.to_thread(
+            db.upsert_member_review_case,
+            case_type="inactivity_review",
+            member=member,
+            recommendation=prompt_text,
+            rationale=rationale,
+        )
         if await _post_leader_action_recommendation(
             channel,
             action_type="kick_recommendation",
@@ -891,6 +955,7 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
             rationale=rationale,
             target_player_tag=tag,
             target_player_name=label,
+            case_id=(case or {}).get("case_id"),
         ):
             posted += 1
 

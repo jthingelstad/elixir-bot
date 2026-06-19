@@ -620,6 +620,7 @@ _STORAGE_FACADE_MODULES = (
     "storage.messages",
     "storage.event_stream",
     "storage.projects",
+    "storage.decision_cases",
     "storage.api_sentinel",
     "storage.metadata",
     "storage.tournament",

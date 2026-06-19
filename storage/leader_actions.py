@@ -279,6 +279,7 @@ def create_leader_action_recommendation(
     baseline: dict | None = None,
     expires_at: str | None = None,
     action_key: str | None = None,
+    case_id: int | None = None,
     is_test: bool = False,
     ui_version: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
@@ -303,11 +304,12 @@ def create_leader_action_recommendation(
             target_player_tag, target_player_name, source_signal_key, source_signal_type,
             source_message_id, prompt_text, rationale, baseline_json, proposed_at,
             expires_at, copy_original_text, copy_current_text, is_test, ui_version,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            case_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(action_key) DO UPDATE SET
             target_channel_key = excluded.target_channel_key,
             target_channel_id = excluded.target_channel_id,
+            case_id = COALESCE(excluded.case_id, leader_action_recommendations.case_id),
             source_message_id = COALESCE(excluded.source_message_id, leader_action_recommendations.source_message_id),
             rationale = excluded.rationale,
             baseline_json = COALESCE(leader_action_recommendations.baseline_json, excluded.baseline_json),
@@ -339,6 +341,7 @@ def create_leader_action_recommendation(
             (copy_current_text or copy_original_text or "").strip() or None,
             1 if is_test else 0,
             (ui_version or "").strip() or None,
+            int(case_id) if case_id is not None else None,
             now,
             now,
         ),
@@ -522,6 +525,7 @@ def _compact_action_for_feedback(action: dict) -> dict:
     outcome = action.get("outcome") or {}
     return {
         "action_id": action.get("action_id"),
+        "case_id": action.get("case_id"),
         "action_type": action.get("action_type"),
         "objective": action.get("objective"),
         "status": action.get("status"),
@@ -973,7 +977,42 @@ def decide_leader_action(
         ),
     )
     conn.commit()
-    return get_leader_action_by_id(action["action_id"], conn=conn)
+    updated = get_leader_action_by_id(action["action_id"], conn=conn)
+    if updated and updated.get("case_id"):
+        try:
+            from storage.decision_cases import (
+                CASE_DISMISSED,
+                CASE_RESOLVED,
+                defer_decision_case,
+                resolve_decision_case,
+            )
+
+            if status == ACTION_DEFERRED and deferred_until:
+                defer_decision_case(
+                    updated["case_id"],
+                    due_at=deferred_until,
+                    resolution=clean_note or f"Deferred for {clean_defer_days} day(s).",
+                    conn=conn,
+                )
+            elif status == ACTION_DONE:
+                resolve_decision_case(
+                    updated["case_id"],
+                    status=CASE_RESOLVED,
+                    resolution=clean_note or "Leader accepted the recommended action.",
+                    conn=conn,
+                )
+            elif status == ACTION_REJECTED:
+                resolve_decision_case(
+                    updated["case_id"],
+                    status=CASE_DISMISSED,
+                    resolution=clean_note or "Leader declined the recommended action.",
+                    conn=conn,
+                )
+        except Exception:
+            # The card decision is the user action of record; case sync should
+            # not make the Discord reaction handler fail.
+            pass
+    return updated
 
 
 @managed_connection
