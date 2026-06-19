@@ -1,6 +1,7 @@
 """Focused tests for the baseline database schema."""
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 import sqlite3
 from unittest.mock import patch
@@ -8,6 +9,19 @@ from unittest.mock import patch
 import db
 from memory_store import create_memory, list_memories
 from runtime import leader_action_policy
+
+
+def test_default_connection_uses_isolated_test_database():
+    conn = db.get_connection()
+    try:
+        row = conn.execute("PRAGMA database_list").fetchone()
+        main_path = row["file"]
+
+        assert main_path
+        assert main_path != os.path.join(db.PROJECT_ROOT, "elixir.db")
+        assert os.path.basename(main_path) == "elixir-test.db"
+    finally:
+        conn.close()
 
 
 def test_v2_schema_initializes_core_tables():

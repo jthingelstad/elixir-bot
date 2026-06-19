@@ -3,6 +3,9 @@
 The autouse fixtures here protect the production database copy and the
 Anthropic API from accidental test pollution:
 
+- `_isolate_default_sqlite_db` routes implicit `db.get_connection()` calls to a
+  per-test tempfile-backed SQLite database. Tests that pass an explicit
+  connection or database path keep full control of their storage.
 - `_block_real_llm_calls` patches `agent.core._get_client` so any test that
   reaches the bottom-level API call raises a loud RuntimeError. Tests that
   correctly mock at the workflow layer (e.g.
@@ -10,8 +13,8 @@ Anthropic API from accidental test pollution:
   that forgot to mock will fail with a clear pointer instead of silently
   burning tokens and inserting rows into `llm_calls`.
 
-The fixture runs at session scope (applied once, cheaply) but uses
-`autouse=True` so every test inherits it without explicit opt-in.
+Both fixtures use `autouse=True` so every test inherits the guardrails without
+explicit opt-in.
 """
 from __future__ import annotations
 
@@ -21,7 +24,19 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _block_real_llm_calls():
+def _isolate_default_sqlite_db(tmp_path, monkeypatch):
+    """Route implicit DB access away from the production SQLite file."""
+    db_path = str(tmp_path / "elixir-test.db")
+    monkeypatch.setenv("ELIXIR_DB_PATH", db_path)
+
+    import db as _db
+
+    monkeypatch.setattr(_db, "DB_PATH", db_path)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _block_real_llm_calls(_isolate_default_sqlite_db):
     """Fail loudly if any test reaches the Anthropic API."""
     def _boom(*args, **kwargs):
         raise RuntimeError(
