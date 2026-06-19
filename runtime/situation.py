@@ -20,7 +20,7 @@ import db
 import prompts
 from storage.event_stream import EVENT_STREAM_WINDOWS
 from heartbeat import build_situation_time
-from runtime.channel_subagents import (
+from runtime.signal_lanes import (
     BATTLE_MODE_SIGNAL_TYPES,
     CLAN_EVENT_SIGNAL_TYPES,
     LEADERSHIP_ONLY_SIGNAL_TYPES,
@@ -196,18 +196,18 @@ def _season_awards_block() -> dict | None:
         return None
 
 
-def _channel_memory_for(subagent_key: str, *, recent_limit: int = 5) -> dict:
+def _channel_memory_for(lane_key: str, *, recent_limit: int = 5) -> dict:
     """Pull recent assistant posts for one channel so the agent knows what it
     has already said. Pure DB read, no Discord call."""
     try:
-        config = prompts.discord_singleton_subagent(subagent_key)
+        config = prompts.discord_singleton_lane(lane_key)
     except (ValueError, KeyError):
         return {"recent_posts": []}
     try:
         recent = db.list_channel_messages(config["id"], recent_limit, "assistant") or []
     except Exception:
-        log.warning("channel_memory load failed for %s", subagent_key, exc_info=True)
-        _note_degraded(f"channel_memory:{subagent_key}")
+        log.warning("channel_memory load failed for %s", lane_key, exc_info=True)
+        _note_degraded(f"channel_memory:{lane_key}")
         recent = []
     return {
         "channel_id": config["id"],

@@ -562,7 +562,7 @@ def test_season_awards_granted_returns_none_when_only_participants():
 
 def test_season_awards_signal_routes_to_clan_events_and_arena_relay():
     """plan_signal_outcomes sends season awards to Discord and a final War Champ relay."""
-    from runtime.channel_subagents import plan_signal_outcomes
+    from runtime.signal_lanes import plan_signal_outcomes
     signal = {"type": "season_awards_granted", "season_id": 131}
     outcomes = plan_signal_outcomes([signal])
     assert len(outcomes) == 2

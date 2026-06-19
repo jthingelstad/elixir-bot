@@ -16,7 +16,7 @@ from agent.chat import _clan_context, _format_memory_context, _format_recent_pos
 from agent.prompt_builders import (
     _arena_relay_observation_system,
     _awareness_system,
-    _channel_subagent_system,
+    _channel_lane_system,
     _clan_voyage_reconciliation_system,
     _clan_chat_copy_system,
     _clanops_system,
@@ -306,7 +306,7 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memor
     signals: list of signal dicts from heartbeat.tick(), or None when no detector output is being passed.
     recent_posts: list of recent message dicts from db.list_channel_messages().
     """
-    from runtime.channel_subagents import is_war_signal
+    from runtime.signal_lanes import is_war_signal
 
     # Only include war context when signals are war-related
     has_war_signals = signals and any(is_war_signal(s) for s in signals)
@@ -340,15 +340,15 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memor
     )
 
 
-def generate_channel_update(channel_name, subagent_key, context, *,
+def generate_channel_update(channel_name, lane_key, context, *,
                             recent_posts=None, memory_context=None, leadership=False):
-    """Generate a proactive update for a specific channel-named subagent."""
+    """Generate a proactive update for a specific Discord channel lane."""
     user_msg = context or ""
     user_msg += _format_recent_posts(recent_posts, channel_label=channel_name)
     user_msg += _format_memory_context(memory_context)
     workflow = "channel_update_leadership" if leadership else "channel_update"
     return _chat_with_tools(
-        _channel_subagent_system(channel_name, leadership=leadership),
+        _channel_lane_system(channel_name, leadership=leadership),
         user_msg,
         workflow=workflow,
         allowed_tools=TOOLSETS_BY_WORKFLOW[workflow],
@@ -1143,7 +1143,7 @@ def generate_tournament_update(signals, *, recent_posts=None, memory_context=Non
 
     Runs with a dedicated tournament prompt and a self-contained context —
     just the signals themselves and recent posts in #clan-events, no war
-    state and no river-race context. The clan-events subagent is still the
+    state and no river-race context. The clan-events lane is still the
     destination, but the prompt and inputs are tournament-only.
 
     Returns the parsed response dict (with ``content`` as a string) or None.

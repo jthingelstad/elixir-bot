@@ -7,11 +7,11 @@ __all__ = [
 ]
 
 import asyncio
+import logging
 import os
 
 import cr_api
 import db
-from runtime.app import bot, log
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import elixir_log
 from runtime import status as runtime_status
@@ -21,6 +21,17 @@ from storage.api_sentinel import EVENT_SENTINEL_SIGNAL_TYPE, SCHEMA_SENTINEL_SIG
 
 
 API_SENTINEL_POLL_MINUTES = int(os.getenv("API_SENTINEL_POLL_MINUTES", "240"))
+log = logging.getLogger("elixir")
+
+
+def _runtime_app():
+    import runtime.app as app
+
+    return app
+
+
+def _bot():
+    return _runtime_app().bot
 
 
 def _format_size(size_bytes):
@@ -165,7 +176,7 @@ async def _db_maintenance_cycle():
                 runtime_status.mark_job_failure("db_maintenance", f"leaders channel config error: {exc}")
                 return
 
-            channel = bot.get_channel(channel_id)
+            channel = _bot().get_channel(channel_id)
             if not channel:
                 runtime_status.mark_job_failure("db_maintenance", "leaders channel not found")
                 return

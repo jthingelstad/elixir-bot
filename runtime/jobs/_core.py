@@ -16,6 +16,7 @@ __all__ = [
 ]
 
 import asyncio
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ import discord
 import db
 import elixir_agent
 import heartbeat
+import pytz
 import prompts
 from runtime.clan_chat_copy import (
     clip_clan_chat_text,
@@ -32,15 +34,9 @@ from runtime.clan_chat_copy import (
 )
 from modules.poap_kings import site as poap_kings_site
 from storage.contextual_memory import upsert_weekly_summary_memory
-from runtime import app as _app
-from runtime.channel_subagents import (
-    build_subagent_memory_context,
+from runtime.signal_lanes import (
+    build_lane_memory_context,
     OPTIONAL_PROGRESSION_SIGNAL_TYPES,
-)
-from runtime.app import (
-    CHICAGO,
-    bot,
-    log,
 )
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id, _safe_create_task
 from runtime.leader_action_observability import post_leader_action_skip
@@ -67,6 +63,19 @@ from runtime.jobs._site import (
     _publish_poap_kings_site_or_raise,
     _publish_weekly_recap_blog_post,
 )
+
+CHICAGO = pytz.timezone("America/Chicago")
+log = logging.getLogger("elixir")
+
+
+def _runtime_app():
+    import runtime.app as app
+
+    return app
+
+
+def _bot():
+    return _runtime_app().bot
 
 
 _FINISH_TIME_MINUTE_RE = re.compile(r"\d{8}T(\d{2})(\d{2})(\d{2})")
@@ -159,7 +168,7 @@ _RETURN_MEMORY_TERMS = (
 
 
 def _build_weekly_clan_recap_context(*args, **kwargs):
-    return _app._build_weekly_clan_recap_context(*args, **kwargs)
+    return _runtime_app()._build_weekly_clan_recap_context(*args, **kwargs)
 
 
 def _query_or_default(label: str, fn, default):
@@ -286,7 +295,7 @@ async def _ask_elixir_daily_insight():
         runtime_status.mark_job_failure("daily_clan_insight", f"ask-elixir channel config error: {exc}")
         return
 
-    channel = bot.get_channel(channel_id)
+    channel = _bot().get_channel(channel_id)
     if not channel:
         runtime_status.mark_job_failure("daily_clan_insight", "ask-elixir channel not found")
         return
@@ -310,7 +319,7 @@ async def _ask_elixir_daily_insight():
     )
     channel_config = _channel_config_by_key("ask-elixir")
     memory_context = await asyncio.to_thread(
-        build_subagent_memory_context,
+        build_lane_memory_context,
         channel_config,
         signals=[],
     )
@@ -320,7 +329,7 @@ async def _ask_elixir_daily_insight():
         result = await asyncio.to_thread(
             elixir_agent.generate_channel_update,
             channel_config["name"],
-            channel_config["subagent_key"],
+            channel_config["lane_key"],
             context,
             recent_posts=recent_posts,
             memory_context=memory_context,
@@ -332,12 +341,12 @@ async def _ask_elixir_daily_insight():
         return
 
     if result is None:
-        await _app._maybe_alert_llm_failure("daily clan insight")
+        await _runtime_app()._maybe_alert_llm_failure("daily clan insight")
         runtime_status.mark_job_success("daily_clan_insight", "no fresh insight")
         return
 
-    _app._clear_llm_failure_alert_if_recovered()
-    posts = _app._entry_posts(result)
+    _runtime_app()._clear_llm_failure_alert_if_recovered()
+    posts = _runtime_app()._entry_posts(result)
     if not posts:
         runtime_status.mark_job_success("daily_clan_insight", "no fresh insight")
         return
@@ -389,9 +398,9 @@ async def _clan_awareness_tick():
         except Exception:
             log.warning("Clan awareness: operating project refresh failed", exc_info=True)
         if tick_result.clan.get("memberList"):
-            _app._clear_cr_api_failure_alert_if_recovered()
+            _runtime_app()._clear_cr_api_failure_alert_if_recovered()
         else:
-            await _app._maybe_alert_cr_api_failure("clan awareness")
+            await _runtime_app()._maybe_alert_cr_api_failure("clan awareness")
         signals = tick_result.signals
 
         if not signals:
@@ -438,7 +447,7 @@ async def _war_poll_tick():
         )
         war = (ingest_result or {}).get("war") or {}
         if war:
-            _app._clear_cr_api_failure_alert_if_recovered()
+            _runtime_app()._clear_cr_api_failure_alert_if_recovered()
         else:
             log.info("War poll: no live war data returned")
         detail = "war snapshot stored" if war else "no live war data"
@@ -447,7 +456,7 @@ async def _war_poll_tick():
         runtime_status.mark_job_success("war_poll", detail)
     except Exception as e:
         log.error("War poll error: %s", e, exc_info=True)
-        await _app._maybe_alert_cr_api_failure("war poll")
+        await _runtime_app()._maybe_alert_cr_api_failure("war poll")
         runtime_status.mark_job_failure("war_poll", str(e))
 
 
@@ -520,7 +529,7 @@ async def _award_detection_tick():
             runtime_status.mark_job_success("award_detection", "no new awards")
             return
 
-        clan, war = await _app._load_live_clan_context()
+        clan, war = await _runtime_app()._load_live_clan_context()
         delivered_ok = await _deliver_signal_group_via_awareness(
             signals, clan, war, workflow="award_detection",
         )
@@ -1016,11 +1025,11 @@ async def _post_leader_action_case(channel, case: dict) -> bool:
 
 async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3) -> int:
     try:
-        target_config = prompts.discord_singleton_subagent("arena-relay")
+        target_config = prompts.discord_singleton_lane("arena-relay")
     except Exception as exc:
         log.info("leader action candidates skipped: arena-relay unavailable: %s", exc)
         return 0
-    channel = bot.get_channel(target_config["id"])
+    channel = _bot().get_channel(target_config["id"])
     if not channel:
         log.warning("leader action candidates skipped: arena-relay channel not found")
         return 0
@@ -1219,7 +1228,7 @@ async def _weekly_clan_recap():
         runtime_status.mark_job_failure("weekly_clan_recap", f"weekly digest channel config error: {exc}")
         return
 
-    channel = bot.get_channel(recap_channel_id)
+    channel = _bot().get_channel(recap_channel_id)
     if not channel:
         runtime_status.mark_job_failure("weekly_clan_recap", "weekly digest channel not found")
         return
@@ -1319,7 +1328,7 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
     except Exception:
         log.info("weekly story relay skipped: arena-relay unavailable")
         return False
-    relay_channel = bot.get_channel(channel_config["id"])
+    relay_channel = _bot().get_channel(channel_config["id"])
     if not relay_channel:
         log.info("weekly story relay skipped: arena-relay channel not found")
         return False
@@ -1343,7 +1352,7 @@ async def _weekly_story_relay_card(recap_text: str) -> bool:
         max_messages=1,
         max_chars=CLAN_CHAT_ACTION_COPY_LIMIT,
         forbidden_terms=("http://", "https://", "www.", "Discord"),
-        metadata={"channel": channel_config["name"], "subagent": channel_config.get("subagent_key") or "arena-relay"},
+        metadata={"channel": channel_config["name"], "lane": channel_config.get("lane_key") or "arena-relay"},
     )
     copy = generated.messages[0] if generated and generated.messages else ""
     if not copy:

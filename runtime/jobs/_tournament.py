@@ -7,14 +7,13 @@ __all__ = [
 ]
 
 import asyncio
+import logging
 import os
 from typing import Optional
 
 import cr_api
 import db
 import elixir_agent
-from runtime import app as _app
-from runtime.app import bot, log
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
 from runtime.jobs._signals import _deliver_signal_group_via_awareness, _post_to_elixir
@@ -24,6 +23,17 @@ TOURNAMENT_POLL_MINUTES = int(os.getenv("TOURNAMENT_POLL_MINUTES", "5"))
 TOURNAMENT_BATTLE_LOG_SPACING_SECONDS = 0.5
 TOURNAMENT_RECAP_DELAY_SECONDS = int(os.getenv("TOURNAMENT_RECAP_DELAY_SECONDS", "120"))
 _TOURNAMENT_JOB_ID = "tournament-watch"
+log = logging.getLogger("elixir")
+
+
+def _runtime_app():
+    import runtime.app as app
+
+    return app
+
+
+def _bot():
+    return _runtime_app().bot
 
 
 def _build_battle_played_signal(
@@ -298,7 +308,7 @@ async def _post_tournament_close(tournament_tag: str, api_data: dict) -> None:
         if not channel_id:
             log.error("Tournament close: #clan-events channel not configured")
             return
-        channel = bot.get_channel(channel_id)
+        channel = _bot().get_channel(channel_id)
         if not channel:
             log.error("Tournament close: could not resolve channel %s", channel_id)
             return
@@ -326,10 +336,10 @@ def _schedule_tournament_recap(tournament_tag: str, *, delay_seconds: int) -> No
     picks up the recap so it isn't lost.
     """
     def _kick():
-        bot.loop.create_task(_tournament_recap(tournament_tag))
+        _bot().loop.create_task(_tournament_recap(tournament_tag))
 
-    bot.loop.call_soon_threadsafe(
-        lambda: bot.loop.call_later(max(0, delay_seconds), _kick)
+    _bot().loop.call_soon_threadsafe(
+        lambda: _bot().loop.call_later(max(0, delay_seconds), _kick)
     )
 
 
@@ -373,7 +383,7 @@ async def _tournament_recap(tournament_tag: str):
         if not channel_id:
             log.error("Tournament recap: #clan-events channel not configured")
             return
-        channel = bot.get_channel(channel_id)
+        channel = _bot().get_channel(channel_id)
         if not channel:
             log.error("Tournament recap: could not resolve channel %s", channel_id)
             return
@@ -414,7 +424,7 @@ async def _tournament_recap(tournament_tag: str):
 def start_tournament_watch():
     """Add the tournament watch job to the scheduler."""
     try:
-        _app.scheduler.remove_job(_TOURNAMENT_JOB_ID)
+        _runtime_app().scheduler.remove_job(_TOURNAMENT_JOB_ID)
     except Exception:
         pass  # job may not exist yet
 
@@ -422,7 +432,7 @@ def start_tournament_watch():
     # the tick. The old call_soon_threadsafe shim returned instantly, so
     # APScheduler's overlap guard only ever saw the no-op shim (see the
     # scheduler setup in runtime/app.py).
-    _app.scheduler.add_job(
+    _runtime_app().scheduler.add_job(
         _tournament_watch_tick,
         "interval",
         id=_TOURNAMENT_JOB_ID,
@@ -437,7 +447,7 @@ def start_tournament_watch():
 def stop_tournament_watch():
     """Remove the tournament watch job from the scheduler."""
     try:
-        _app.scheduler.remove_job(_TOURNAMENT_JOB_ID)
+        _runtime_app().scheduler.remove_job(_TOURNAMENT_JOB_ID)
         log.info("Tournament watch stopped")
     except Exception:
         pass  # job may not exist

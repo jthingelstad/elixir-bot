@@ -14,6 +14,7 @@ __all__ = [
 ]
 
 import asyncio
+import logging
 import os
 from datetime import datetime, timezone
 
@@ -21,9 +22,7 @@ import cr_api
 import db
 import elixir_agent
 from modules.poap_kings import site as poap_kings_site
-from runtime import app as _app
-from runtime.channel_subagents import build_subagent_memory_context
-from runtime.app import bot, log
+from runtime.signal_lanes import build_lane_memory_context
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
 from runtime.jobs._signals import (
@@ -35,6 +34,17 @@ from runtime.jobs._signals import (
 
 SITE_DATA_HOUR = int(os.getenv("SITE_DATA_HOUR", "18"))       # 6pm Chicago
 SITE_CONTENT_HOUR = int(os.getenv("SITE_CONTENT_HOUR", "18"))  # 6pm Chicago
+log = logging.getLogger("elixir")
+
+
+def _runtime_app():
+    import runtime.app as app
+
+    return app
+
+
+def _bot():
+    return _runtime_app().bot
 
 
 def _promotion_discord_required_text(trophies):
@@ -212,7 +222,7 @@ async def _notify_poapkings_publish(activity_key: str, *, publish_result=None, e
         log.warning("POAP KINGS publish notification skipped: %s", exc)
         return False
 
-    channel = bot.get_channel(channel_config["id"])
+    channel = _bot().get_channel(channel_config["id"])
     if not channel:
         log.warning("POAP KINGS publish notification skipped: channel not found")
         return False
@@ -224,7 +234,7 @@ async def _notify_poapkings_publish(activity_key: str, *, publish_result=None, e
         "assistant",
     )
     memory_context = await asyncio.to_thread(
-        build_subagent_memory_context,
+        build_lane_memory_context,
         channel_config,
         signals=[],
     )
@@ -234,7 +244,7 @@ async def _notify_poapkings_publish(activity_key: str, *, publish_result=None, e
         generated = await asyncio.to_thread(
             elixir_agent.generate_channel_update,
             channel_config["name"],
-            channel_config["subagent_key"],
+            channel_config["lane_key"],
             context,
             recent_posts=recent_posts,
             memory_context=memory_context,
@@ -251,7 +261,7 @@ async def _notify_poapkings_publish(activity_key: str, *, publish_result=None, e
     }
 
     try:
-        posts = _app._entry_posts(result_payload)
+        posts = _runtime_app()._entry_posts(result_payload)
         await _post_to_elixir(channel, result_payload)
         event_type = "poapkings_publish_failure" if error_detail else "poapkings_publish_success"
         ch = _channel_msg_kwargs(channel)
@@ -286,7 +296,7 @@ async def _promotion_content_cycle():
         runtime_status.mark_job_failure("promotion_content_cycle", f"promotion channel config error: {exc}")
         return
 
-    channel = bot.get_channel(promotion_channel_id)
+    channel = _bot().get_channel(promotion_channel_id)
     if not channel:
         runtime_status.mark_job_failure("promotion_content_cycle", "promotion channel not found")
         return
@@ -359,10 +369,10 @@ async def _site_data_refresh():
     try:
         try:
             clan = await asyncio.to_thread(cr_api.get_clan)
-            _app._clear_cr_api_failure_alert_if_recovered()
+            _runtime_app()._clear_cr_api_failure_alert_if_recovered()
         except Exception:
             log.error("Site data refresh: CR API failed")
-            await _app._maybe_alert_cr_api_failure("site data refresh")
+            await _runtime_app()._maybe_alert_cr_api_failure("site data refresh")
             clan = {}
 
         if not clan.get("memberList"):
@@ -401,14 +411,14 @@ async def _site_content_cycle():
     try:
         try:
             clan = await asyncio.to_thread(cr_api.get_clan)
-            _app._clear_cr_api_failure_alert_if_recovered()
+            _runtime_app()._clear_cr_api_failure_alert_if_recovered()
         except Exception:
-            await _app._maybe_alert_cr_api_failure("site content cycle")
+            await _runtime_app()._maybe_alert_cr_api_failure("site content cycle")
             clan = {}
         try:
             war = await asyncio.to_thread(cr_api.get_current_war)
         except Exception:
-            await _app._maybe_alert_cr_api_failure("site content war refresh")
+            await _runtime_app()._maybe_alert_cr_api_failure("site content war refresh")
             war = {}
 
         # Build and write data (second daily refresh)

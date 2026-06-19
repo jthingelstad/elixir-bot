@@ -18,6 +18,7 @@ __all__ = [
 ]
 
 import asyncio
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -27,10 +28,30 @@ import prompts
 from memory_store import update_memory
 from storage.contextual_memory import upsert_weekly_summary_memory
 from runtime import elixir_log
-from runtime.app import bot, log
 from runtime.helpers import _channel_scope
 from runtime.leader_action_ui import LEADER_ACTION_UI_VERSION, post_leader_action_card
 from runtime import status as runtime_status
+
+log = logging.getLogger("elixir")
+
+
+def _runtime_app():
+    import runtime.app as app
+
+    return app
+
+
+def _bot():
+    return _runtime_app().bot
+
+
+class _BotProxy:
+    def get_channel(self, *args, **kwargs):
+        return bot.get_channel(*args, **kwargs)
+
+
+bot = _BotProxy()
+
 
 MEMORY_SYNTHESIS_DAY = os.getenv("MEMORY_SYNTHESIS_DAY", "sun")
 MEMORY_SYNTHESIS_HOUR = int(os.getenv("MEMORY_SYNTHESIS_HOUR", "22"))
@@ -271,7 +292,7 @@ def _build_memory_synthesis_context():
     posts_by_channel: dict[str, list[dict]] = {}
     for key in channel_keys:
         try:
-            channel = prompts.discord_singleton_subagent(key)
+            channel = prompts.discord_singleton_lane(key)
             channel_id = channel.get("id") if isinstance(channel, dict) else None
         except Exception:
             channel_id = None
@@ -445,7 +466,7 @@ async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
     if not review_items:
         return 0
     try:
-        channel_config = prompts.discord_singleton_subagent("arena-relay")
+        channel_config = prompts.discord_singleton_lane("arena-relay")
     except Exception:
         log.info("memory contradiction cards skipped: arena-relay unavailable", exc_info=True)
         return 0

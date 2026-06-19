@@ -1,3 +1,11 @@
+"""Signal family classification and Discord lane helpers.
+
+This module owns the legacy signal-to-lane planner plus shared lane memory
+context helpers. It does not run independent channel agents; proactive
+production delivery now flows through the awareness loop and communication
+intents.
+"""
+
 from __future__ import annotations
 
 import json
@@ -148,75 +156,75 @@ def signal_routing_summary() -> list[dict]:
             "family": "war_*",
             "match": "all signals in the batch are war signals",
             "targets": [
-                {"subagent": "river-race", "intent": "war_update", "required": True},
-                {"subagent": "arena-relay", "intent": "war_relay_brief", "required": False, "condition": "war state is useful for an in-game clan chat relay"},
-                {"subagent": "leader-lounge", "intent": "war_ops_note", "required": False, "condition": "important rank swing, recovery need, or ops-relevant war state"},
+                {"lane": "river-race", "intent": "war_update", "required": True},
+                {"lane": "arena-relay", "intent": "war_relay_brief", "required": False, "condition": "war state is useful for an in-game clan chat relay"},
+                {"lane": "leader-lounge", "intent": "war_ops_note", "required": False, "condition": "important rank swing, recovery need, or ops-relevant war state"},
             ],
         },
         {
             "family": "badge_level_milestone",
             "match": "all signals in the batch are badge level milestones",
             "targets": [
-                {"subagent": "member-highlights", "intent": "player_progress", "required": False},
+                {"lane": "member-highlights", "intent": "player_progress", "required": False},
             ],
         },
         {
             "family": "battle_mode",
             "match": "all signals in the batch are battle-mode signals (hot streak, trophy push, PoL promotion)",
             "targets": [
-                {"subagent": "member-highlights", "intent": "battle_mode_update", "required": True},
+                {"lane": "member-highlights", "intent": "battle_mode_update", "required": True},
             ],
         },
         {
             "family": "progression",
             "match": "all signals in the batch are non-optional durable milestones",
             "targets": [
-                {"subagent": "member-highlights", "intent": "player_progress", "required": True},
+                {"lane": "member-highlights", "intent": "player_progress", "required": True},
             ],
         },
         {
             "family": "member_join",
             "match": "any signal in the batch is member_join",
             "targets": [
-                {"subagent": "clan-events", "intent": "member_join_public", "required": True},
-                {"subagent": "leader-lounge", "intent": "member_join_ops", "required": True},
-                {"subagent": "arena-relay", "intent": "welcome_relay", "required": False},
+                {"lane": "clan-events", "intent": "member_join_public", "required": True},
+                {"lane": "leader-lounge", "intent": "member_join_ops", "required": True},
+                {"lane": "arena-relay", "intent": "welcome_relay", "required": False},
             ],
         },
         {
             "family": "public_system_update",
             "match": "capability_unlock with clan audience",
             "targets": [
-                {"subagent": "announcements", "intent": "system_update", "required": True},
+                {"lane": "announcements", "intent": "system_update", "required": True},
             ],
         },
         {
             "family": "leadership_only",
             "match": "leadership-only signal type or leadership audience",
             "targets": [
-                {"subagent": "leader-lounge", "intent": "leadership_note", "required": True},
+                {"lane": "leader-lounge", "intent": "leadership_note", "required": True},
             ],
         },
         {
             "family": "tournament",
             "match": "any tournament signal",
             "targets": [
-                {"subagent": "clan-events", "intent": "tournament_live_update", "required": True},
+                {"lane": "clan-events", "intent": "tournament_live_update", "required": True},
             ],
         },
         {
             "family": "clan_event",
             "match": "any clan event signal not matched earlier",
             "targets": [
-                {"subagent": "clan-events", "intent": "clan_event_public", "required": True},
-                {"subagent": "leader-lounge", "intent": "clan_event_ops", "required": False, "condition": "elder promotion"},
+                {"lane": "clan-events", "intent": "clan_event_public", "required": True},
+                {"lane": "leader-lounge", "intent": "clan_event_ops", "required": False, "condition": "elder promotion"},
             ],
         },
         {
             "family": "fallback",
             "match": "anything else",
             "targets": [
-                {"subagent": "leader-lounge", "intent": "leadership_note", "required": True},
+                {"lane": "leader-lounge", "intent": "leadership_note", "required": True},
             ],
         },
     ]
@@ -307,7 +315,7 @@ def _signal_memory_event_id(source_signal_key: str, outcome: dict) -> str:
     return f"{source_signal_key}:{outcome['target_channel_key']}"
 
 
-def build_subagent_memory_context(channel_config: dict, *, discord_user_id=None, signals=None):
+def build_lane_memory_context(channel_config: dict, *, discord_user_id=None, signals=None):
     member_tag = _member_tag_from_signals(signals or [])
     context = db.build_memory_context(
         discord_user_id=discord_user_id,
@@ -351,6 +359,12 @@ def build_subagent_memory_context(channel_config: dict, *, discord_user_id=None,
 
 
 def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
+    """Legacy deterministic signal-to-lane planner.
+
+    The awareness loop is the canonical proactive path. This planner remains
+    for compatibility and for narrow sidecar behavior while older tests and
+    runtime shims are retired.
+    """
     signals = signals or []
     if not signals:
         return []
@@ -359,12 +373,12 @@ def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
     signal_type = signals[0].get("type") or "signal_batch"
     outcomes = []
 
-    def add(channel_subagent: str, intent: str, *, required: bool):
-        channel = prompts.discord_singleton_subagent(channel_subagent)
+    def add(lane: str, intent: str, *, required: bool):
+        channel = prompts.discord_singleton_lane(lane)
         outcomes.append({
             "source_signal_key": source_key,
             "source_signal_type": signal_type,
-            "target_channel_key": channel["subagent_key"],
+            "target_channel_key": channel["lane_key"],
             "target_channel_id": channel["id"],
             "intent": intent,
             "required": required,
@@ -482,7 +496,8 @@ def maybe_upsert_signal_memory(*, source_signal_key: str, signal_type: str, body
 __all__ = [
     "ARENA_RELAY_CELEBRATION_SIGNAL_TYPES",
     "BATTLE_MODE_SIGNAL_TYPES",
-    "build_subagent_memory_context",
+    "batch_source_key",
+    "build_lane_memory_context",
     "is_arena_relay_celebration_signal",
     "is_battle_mode_signal",
     "is_progression_signal",

@@ -414,7 +414,7 @@ def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> tuple[Op
     so the LLM sees identical, fresh time-left values on both surfaces. Field
     names align with ``build_situation_time`` (``is_colosseum_week``,
     ``is_final_battle_day``, ``is_final_practice_day``) so both LLM-facing
-    blocks can be referenced by the same field list in subagent prompts.
+    blocks can be referenced by the same field list in lane prompts.
     """
     status = get_current_war_status(conn=conn) or {}
     if not status or (status.get("war_state") or "").strip() == "notInWar":

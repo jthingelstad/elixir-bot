@@ -90,12 +90,12 @@ def _get_channel_behavior(channel_id):
     return prompts.discord_channels_by_id().get(channel_id)
 
 
-def _get_singleton_channel(subagent):
-    return prompts.discord_singleton_subagent(subagent)
+def _get_singleton_channel(lane):
+    return prompts.discord_singleton_lane(lane)
 
 
-def _get_singleton_channel_id(subagent):
-    return _get_singleton_channel(subagent)["id"]
+def _get_singleton_channel_id(lane):
+    return _get_singleton_channel(lane)["id"]
 
 
 def _channel_reply_target_name(channel_config):

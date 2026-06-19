@@ -18,12 +18,13 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 - `db/` — SQLite data store package: identity, memory, current state, analytics, war, and raw payload capture
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
-- `prompts/subagents/` — Channel-named subagent prompt files
+- `prompts/lanes/` — Discord destination-lane behavior prompts
+- `prompts/agents/` — Executable workflow prompts that are not tied to one Discord destination
 - `modules/poap_kings/` — POAP KINGS-specific site integration and GitHub publishing
 - `scripts/review_agent_feedback.py` — Review recent LLM/channel failures and `#ask-elixir` feedback from SQLite for debugging and prompt/tool routing analysis
 - `runtime/activities.py` — Canonical registry for recurring automated activities
 - `runtime/clan_chat_copy.py` — Dedicated Clash Royale in-game clan chat copy generation, validation, and fallback guardrails
-- `runtime/channel_subagents.py` — Signal outcome planning, channel-targeted delivery, and subagent memory context
+- `runtime/signal_lanes.py` — Signal family classification, legacy lane routing, and lane memory context
 - `runtime/channel_router.py` — Discord message routing for interactive channels
 - `storage/`, `agent/`, `runtime/` — Domain-first implementation packages for persistence, LLM behavior, and Discord runtime; root modules remain the stable public API surface
 - Facade discipline: `elixir_agent.py` is an explicit static facade over `agent/` (its import list is the public API; submodules may only reach it via function-level imports). `elixir` is a sys.modules alias for `runtime.app`, whose explicit import blocks declare the runtime surface that tests and `runtime.activities` address by name. No dynamic re-export machinery — if a name should be public, add it to the explicit lists.
@@ -117,13 +118,13 @@ Website publish visibility lives in `#website-updates`. Elixir posts there for r
 
 Success posts should include the commit SHA and direct GitHub commit URL. No-change publishes stay quiet.
 
-## Subagent Architecture
+## Agents And Lanes
 
-Elixir now uses channel-named subagents: one Elixir identity, many focused lanes.
+Elixir has one identity and several executable workflows. Discord destinations are **lanes**, not independent agents.
 
-Core rule: one signal is not one post. A signal can fan out into multiple channel outcomes, each generated for the destination channel only.
+Core rule: one signal is not one post. A signal enters the event/project/case/intent pipeline; Elixir then decides which lane, if any, should receive a communication.
 
-Current primary subagents:
+Current primary lanes:
 - `reception` — onboarding and verification (`#welcome`)
 - `general` — mention-driven general Q&A (`#clan-chat`)
 - `ask-elixir` — open-channel clan conversation and Clash Royale screenshot help
@@ -136,12 +137,21 @@ Current primary subagents:
 - `promote-the-clan` — recruiting copy for Discord and the website (`#recruiting`)
 - `poapkings-com` — website publish visibility only (`#website-updates`)
 
+Current executable agents/workflows:
+- `awareness` — proactive operating loop that reads Situation, projects, cases, recent events, channel memory, and decides whether to create communication intents.
+- `interactive` — public read-only conversation in member-facing lanes.
+- `clanops` — private leadership conversation with gated write tools.
+- `reception` — constrained onboarding and identity-verification replies.
+- `memory_synthesis` — weekly memory hygiene and canonical arc synthesis.
+- `content` workflows — website, recruiting, weekly recap, and other publishable content.
+- specialist workflows such as `deck_review`, `tournament_update`, `clan_chat_copy`, and `intent_router`.
+
 ## Recurring Activities
 
 The canonical source of truth for scheduled automated work is `runtime/activities.py`, not scattered scheduler calls or prose docs.
 
 Each activity declares:
-- owner subagent
+- owner lane
 - purpose
 - schedule
 - executor function
@@ -180,8 +190,9 @@ Principle: **Prompts define what Elixir says and why. Code defines when, where, 
 - `PURPOSE.md` — Elixir's mission, responsibilities, and guardrails.
 - `GAME.md` — Clash Royale mechanics (game-generic, rarely changes).
 - `CLAN.md` — Clan-specific identity, rules, history, and configurable thresholds (inactivity, promotion criteria, donation highlights, clan lore).
-- `DISCORD.md` — Declarative Discord channel contract: IDs, subagents, workflows, reply policies, memory scope, and durable-memory flags.
-- `subagents/*.md` — Channel-named behavior prompts for each subagent.
+- `DISCORD.md` — Declarative Discord channel contract: IDs, lanes, workflows, reply policies, memory scope, and durable-memory flags.
+- `lanes/*.md` — Destination-lane behavior prompts.
+- `agents/*.md` — Executable workflow prompts for awareness, memory synthesis, routing, and specialist agents.
 
 ### What stays in code
 
@@ -194,8 +205,8 @@ Elixir uses two memory layers:
 - durable scoped memory in contextual memory (`public`, `leadership`, `system_internal`)
 
 Important rules:
-- channel subagents read destination-channel conversational context, not a global blended chat history
-- public subagents read public durable memory only
+- channel lanes read destination-channel conversational context, not a global blended chat history
+- public lanes read public durable memory only
 - `leader-lounge` can read public plus leadership durable memory
 - `reception` should stay focused on onboarding context and avoid unrelated clan-event noise
 - one source signal can create multiple channel outcomes, but durable memory records must stay scope-safe and must not let leadership copy overwrite public memory
@@ -286,17 +297,17 @@ War tools include `war_player_type` (regular/occasional/rare/never) per member. 
 
 ### Mostly LLM
 
-Almost every message Elixir sends is LLM-generated. Events, scheduled activities, website publish notices, and channel replies pass context to the LLM, which crafts the message using Elixir's identity from `SOUL.md` + `PURPOSE.md`, channel contract from `DISCORD.md`, and lane behavior from `subagents/*.md`.
+Almost every message Elixir sends is LLM-generated. Events, scheduled activities, website publish notices, and channel replies pass context to the LLM, which crafts the message using Elixir's identity from `SOUL.md` + `PURPOSE.md`, channel contract from `DISCORD.md`, lane behavior from `lanes/*.md`, and workflow-specific guidance from `agents/*.md` where applicable.
 
 Exception: preauthored system-signal announcements may be written directly in code and delivered without LLM rewriting when deterministic wording matters.
 
 ### Portability
 
-A new clan forks elixir-bot and primarily rewrites `CLAN.md` and `DISCORD.md`, plus any subagent prompts that reflect their own server culture. `SOUL.md`, `PURPOSE.md`, and `GAME.md` should stay mostly portable.
+A new clan forks elixir-bot and primarily rewrites `CLAN.md` and `DISCORD.md`, plus any lane prompts that reflect their own server culture. `SOUL.md`, `PURPOSE.md`, `GAME.md`, and most agent prompts should stay mostly portable.
 
 ### Future work
 
-- startup linting for subagent config, reply policy, and activity registry consistency outside the bot runtime
+- startup linting for lane config, reply policy, and activity registry consistency outside the bot runtime
 - the intra-package aggregators (`db/__init__.py`, `storage/war.py`, `agent/tools.py`) still use the dynamic `__export_public` copy loop. Converting them to the explicit-facade pattern requires giving each aggregated submodule a real `__all__` first — without that, a static conversion either enshrines junk names (`datetime`, `Optional`) or risks dropping a name that whole-module `db` mocks in tests would never catch.
 
 ## Work Tracking

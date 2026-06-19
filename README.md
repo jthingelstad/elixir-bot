@@ -3,7 +3,8 @@
 Elixir is an LLM-powered Discord bot for the POAP KINGS Clash Royale clan (`#J2RGCRVG`).
 
 It is not a generic chat bot and not a single-feed narrator. Elixir is a channel-native clan agent with:
-- channel-named subagents like `river-race`, `clan-events`, `leader-lounge`, and `ask-elixir`
+- Discord channel lanes like `river-race`, `clan-events`, `leader-lounge`, and `ask-elixir`
+- executable agents/workflows for awareness, conversation, clanops, memory synthesis, content, and specialist tasks
 - a central recurring activity registry for scheduled work
 - scoped memory for public vs leadership context
 - GitHub-backed publishing for poapkings.com
@@ -35,7 +36,7 @@ Elixir currently handles four main kinds of work:
 
 ## Current Channel Model
 
-Elixir now uses channel-named subagents instead of one overloaded public stream.
+Elixir uses channel lanes instead of one overloaded public stream. A lane is a Discord destination contract: channel id, audience, allowed topics, reply policy, memory scope, and voice. Lanes are not independent agents; they are the rooms where one Elixir speaks.
 
 Primary public/proactive lanes:
 - `#river-race` for River Race scoreboards, recaps, and meaningful war momentum
@@ -51,8 +52,6 @@ Primary interactive lanes:
 - `#welcome` for onboarding and identity verification
 - `#leaders` for leadership and clan operations
 
-Legacy:
-
 The live channel contract lives in [prompts/DISCORD.md](prompts/DISCORD.md).
 
 ## Recurring Activities
@@ -61,7 +60,7 @@ Recurring automated work is defined in [runtime/activities.py](runtime/activitie
 
 Current activities:
 - `clan-awareness`
-  Every 30 minutes, 24/7. Processes non-war clan signals and routes outcomes to subagents like `clan-events` and `leader-lounge`.
+  Every 30 minutes, 24/7. Processes non-war clan signals and routes outcomes to lanes like `clan-events` and `leader-lounge`.
 - `war-poll`
   Every hour at `:00` CT. Owns scheduled live war ingest and persists the River Race snapshot pipeline.
 - `war-awareness`
@@ -137,16 +136,18 @@ Prompt and behavior stack:
   POAP KINGS-specific rules, thresholds, and clan identity.
 - [prompts/DISCORD.md](prompts/DISCORD.md)
   Declarative channel contract.
-- [prompts/subagents/](prompts/subagents/)
-  Channel-named behavior prompts.
+- [prompts/lanes/](prompts/lanes/)
+  Discord destination-lane behavior prompts.
+- [prompts/agents/](prompts/agents/)
+  Executable workflow prompts for awareness, memory synthesis, routing, and tournament commentary.
 
 Runtime architecture:
 - [runtime/activities.py](runtime/activities.py)
   Canonical recurring activity registry.
 - [runtime/channel_router.py](runtime/channel_router.py)
   Discord message routing and reply-policy enforcement.
-- [runtime/channel_subagents.py](runtime/channel_subagents.py)
-  Multi-outcome signal planning, delivery, and channel-safe memory context.
+- [runtime/signal_lanes.py](runtime/signal_lanes.py)
+  Signal family classification, legacy lane routing, and channel-safe memory context.
 - [runtime/jobs.py](runtime/jobs.py)
   Scheduled activity executors.
 - [runtime/admin.py](runtime/admin.py)
@@ -179,8 +180,10 @@ The current prompt stack is:
   POAP KINGS-specific reality.
 - `DISCORD.md`
   Server and channel contract.
-- `subagents/*.md`
+- `lanes/*.md`
   Destination-lane behavior.
+- `agents/*.md`
+  Workflow/agent instructions that are not tied to one Discord channel.
 
 This split matters. It keeps one consistent Elixir identity across very different channels without collapsing everything into one noisy system prompt.
 
@@ -199,7 +202,7 @@ Durable scoped memory:
 - `system_internal`
 
 Important rules:
-- public subagents only read public durable memory
+- public lanes only read public durable memory
 - `leader-lounge` can read public plus leadership durable memory
 - `reception` should stay focused on onboarding context
 - multi-outcome signals share a source identity, but public and leadership durable memories stay separated so private copy cannot overwrite public memory
@@ -284,6 +287,6 @@ Default cleanup removes caches like `__pycache__` and `.pytest_cache`.
 The project is designed so a new clan can fork it and mostly rewrite:
 - [prompts/CLAN.md](prompts/CLAN.md)
 - [prompts/DISCORD.md](prompts/DISCORD.md)
-- selected files in [prompts/subagents/](prompts/subagents/)
+- selected files in [prompts/lanes/](prompts/lanes/)
 
 The shared Elixir identity in `SOUL.md`, `PURPOSE.md`, and the game knowledge in `GAME.md` should remain broadly portable.

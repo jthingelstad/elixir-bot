@@ -77,7 +77,7 @@ ASK_ELIXIR_DAILY_INSIGHT_MINUTE=0
 
 Non-secret config lives in prompt files checked into the repo:
 - [prompts/DISCORD.md](prompts/DISCORD.md)
-  Discord IDs, subagents, workflows, reply policy, and memory scope.
+  Discord IDs, lanes, workflows, reply policy, and memory scope.
 - [prompts/CLAN.md](prompts/CLAN.md)
   Clan tag, rules, thresholds, and clan-specific identity.
 

@@ -12,9 +12,10 @@ import re
 from datetime import date, datetime
 
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
-_SUBAGENT_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "subagents")
+_AGENT_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "agents")
+_LANE_PROMPTS_DIR = os.path.join(_PROMPTS_DIR, "lanes")
 
-CHANNEL_SUBAGENT_CONFIG = {
+CHANNEL_LANE_CONFIG = {
     "promote-the-clan": {
         "workflow": "site_promote_content",
         "tool_policy": "none",
@@ -105,7 +106,7 @@ CHANNEL_SUBAGENT_CONFIG = {
     },
 }
 
-SUBAGENT_ALIASES = {
+LANE_ALIASES = {
     "onboarding": "reception",
     "welcome": "reception",
     "join_gate": "reception",
@@ -148,12 +149,11 @@ SUBAGENT_ALIASES = {
     "site-builder": "poapkings-com",
 }
 
-
-def _normalize_subagent_name(value: str | None) -> str:
+def _normalize_lane_name(value: str | None) -> str:
     key = (value or "").strip().lower()
     if key.startswith("#"):
         key = key[1:]
-    return SUBAGENT_ALIASES.get(key, key)
+    return LANE_ALIASES.get(key, key)
 
 
 def _normalize_channel_ref(value: str | None) -> str:
@@ -212,9 +212,9 @@ def validate_discord_channel_config():
     seen_ids = {}
     seen_names = {}
     for channel in channels:
-        subagent = channel["subagent"]
-        if subagent not in CHANNEL_SUBAGENT_CONFIG:
-            errors.append(f"unknown channel subagent '{subagent}' for {channel['name']}")
+        lane = channel["lane"]
+        if lane not in CHANNEL_LANE_CONFIG:
+            errors.append(f"unknown channel lane '{lane}' for {channel['name']}")
         workflow = channel.get("workflow")
         if workflow not in VALID_CHANNEL_WORKFLOWS:
             errors.append(f"invalid workflow '{workflow}' for {channel['name']}")
@@ -238,12 +238,12 @@ def validate_discord_channel_config():
         else:
             seen_names[channel["name"].lower()] = channel["id"]
 
-    for subagent, config in CHANNEL_SUBAGENT_CONFIG.items():
+    for lane, config in CHANNEL_LANE_CONFIG.items():
         if not config.get("singleton"):
             continue
-        matching = [channel for channel in channels if channel["subagent"] == subagent]
+        matching = [channel for channel in channels if channel["lane"] == lane]
         if len(matching) != 1:
-            errors.append(f"expected exactly one {subagent} channel, found {len(matching)}")
+            errors.append(f"expected exactly one {lane} channel, found {len(matching)}")
 
     return errors
 
@@ -262,8 +262,8 @@ def _load(filename):
         return f.read().strip()
 
 
-def _load_subagent_prompt(filename):
-    path = os.path.join(_SUBAGENT_PROMPTS_DIR, filename)
+def _load_from_prompt_dir(directory: str, filename: str):
+    path = os.path.join(directory, filename)
     with open(path) as f:
         return f.read().strip()
 
@@ -332,25 +332,25 @@ def channel_section(channel_name):
     return channel["section"] if channel else ""
 
 
-def _channel_subagent_key(channel_name: str) -> str:
+def _channel_lane_key(channel_name: str) -> str:
     key = (channel_name or "").strip().lower()
     if key.startswith("#"):
         key = key[1:]
     return re.sub(r"[^a-z0-9-]+", "-", key).strip("-")
 
 
-def subagent_key_for_channel(channel_name: str, workflow: str | None = None) -> str:
-    """Resolve the best subagent key for a channel/workflow pair.
+def lane_key_for_channel(channel_name: str, workflow: str | None = None) -> str:
+    """Resolve the best lane key for a channel/workflow pair.
 
-    Configured channels use their explicit subagent key. Unknown channels fall
-    back to the generic subagent for their workflow so ad hoc interactive or
+    Configured channels use their explicit lane key. Unknown channels fall
+    back to the generic lane for their workflow so ad hoc interactive or
     leadership channels do not require dedicated prompt files.
     """
     query = (channel_name or "").strip().lower()
     if query:
         channel = resolve_channel_reference(query)
         if channel is not None:
-            return channel["subagent_key"]
+            return channel["lane_key"]
 
     workflow_key = (workflow or "").strip().lower()
     if workflow_key.startswith("interactive"):
@@ -362,7 +362,7 @@ def subagent_key_for_channel(channel_name: str, workflow: str | None = None) -> 
     if workflow_key in {"weekly_digest", "announcements"}:
         return "announcements"
 
-    return _channel_subagent_key(channel_name)
+    return _channel_lane_key(channel_name)
 
 
 def discord_channel_configs():
@@ -380,39 +380,39 @@ def discord_channel_configs():
         section = text[start:end].strip()
 
         id_match = re.search(r"^ID:\s*(\d+)\s*$", section, re.MULTILINE)
-        subagent_match = re.search(r"^Subagent:\s*([A-Za-z0-9_-]+)\s*$", section, re.MULTILINE)
-        if not id_match or not subagent_match:
+        lane_match = re.search(r"^Lane:\s*([A-Za-z0-9_-]+)\s*$", section, re.MULTILINE)
+        if not id_match or not lane_match:
             continue
 
-        subagent = _normalize_subagent_name(subagent_match.group(1))
+        lane = _normalize_lane_name(lane_match.group(1))
         channel_id = int(id_match.group(1))
-        subagent_config = CHANNEL_SUBAGENT_CONFIG.get(subagent, {})
+        lane_config = CHANNEL_LANE_CONFIG.get(lane, {})
         workflow = _parse_optional_keyword(section, "Workflow")
         if workflow is None:
-            workflow = subagent_config.get("workflow")
+            workflow = lane_config.get("workflow")
         tool_policy = _parse_optional_keyword(section, "ToolPolicy")
         if tool_policy is None:
-            tool_policy = subagent_config.get("tool_policy", "none")
+            tool_policy = lane_config.get("tool_policy", "none")
         reply_policy = _parse_optional_keyword(section, "ReplyPolicy")
         if reply_policy is None:
-            reply_policy = subagent_config.get("reply_policy", "disabled")
+            reply_policy = lane_config.get("reply_policy", "disabled")
         memory_scope = _parse_optional_keyword(section, "MemoryScope")
         if memory_scope is None:
-            memory_scope = subagent_config.get("memory_scope", "public")
+            memory_scope = lane_config.get("memory_scope", "public")
         durable_memory_enabled = _parse_bool_field(section, "DurableMemory")
         if durable_memory_enabled is None:
-            durable_memory_enabled = subagent_config.get("durable_memory_enabled", False)
+            durable_memory_enabled = lane_config.get("durable_memory_enabled", False)
 
         channels.append(
             {
                 "name": heading,
                 "id": channel_id,
-                "subagent": subagent,
-                "subagent_key": subagent,
+                "lane": lane,
+                "lane_key": lane,
                 "workflow": workflow,
                 "tool_policy": tool_policy,
                 "reply_policy": reply_policy,
-                "singleton": subagent_config.get("singleton", False),
+                "singleton": lane_config.get("singleton", False),
                 "memory_scope": memory_scope,
                 "durable_memory_enabled": durable_memory_enabled,
                 "section": section,
@@ -426,10 +426,10 @@ def discord_channels_by_id():
     return {channel["id"]: channel for channel in discord_channel_configs()}
 
 
-def discord_channels_for_subagent(subagent):
-    """Return parsed Discord channel configs for a subagent."""
-    subagent = _normalize_subagent_name(subagent)
-    return [channel for channel in discord_channel_configs() if channel["subagent"] == subagent]
+def discord_channels_for_lane(lane):
+    """Return parsed Discord channel configs for a lane."""
+    lane = _normalize_lane_name(lane)
+    return [channel for channel in discord_channel_configs() if channel["lane"] == lane]
 
 
 def discord_channels_by_workflow(workflow):
@@ -438,57 +438,64 @@ def discord_channels_by_workflow(workflow):
     return [channel for channel in discord_channel_configs() if (channel.get("workflow") or "").lower() == workflow]
 
 
-def discord_channels_by_subagent():
-    """Return parsed Discord channel configs keyed by subagent key."""
-    return {channel["subagent_key"]: channel for channel in discord_channel_configs()}
+def discord_channels_by_lane():
+    """Return parsed Discord channel configs keyed by lane key."""
+    return {channel["lane_key"]: channel for channel in discord_channel_configs()}
 
 
-def discord_singleton_subagent(subagent):
-    """Return the unique configured channel for a singleton subagent."""
-    subagent = _normalize_subagent_name(subagent)
-    subagent_config = CHANNEL_SUBAGENT_CONFIG.get(subagent, {})
-    if not subagent_config.get("singleton"):
-        raise ValueError(f"subagent is not singleton: {subagent}")
-    channels = discord_channels_for_subagent(subagent)
+def discord_singleton_lane(lane):
+    """Return the unique configured channel for a singleton lane."""
+    lane = _normalize_lane_name(lane)
+    lane_config = CHANNEL_LANE_CONFIG.get(lane, {})
+    if not lane_config.get("singleton"):
+        raise ValueError(f"lane is not singleton: {lane}")
+    channels = discord_channels_for_lane(lane)
     if len(channels) != 1:
-        raise ValueError(f"expected exactly one {subagent} channel, found {len(channels)}")
+        raise ValueError(f"expected exactly one {lane} channel, found {len(channels)}")
     return channels[0]
 
 
 def discord_channels_by_role(role):
-    """Backward-compatible alias for discord_channels_for_subagent()."""
-    return discord_channels_for_subagent(role)
+    """Backward-compatible alias for discord_channels_for_lane()."""
+    return discord_channels_for_lane(role)
 
 
 def discord_singleton_channel(role):
-    """Backward-compatible alias for discord_singleton_subagent()."""
-    return discord_singleton_subagent(role)
+    """Backward-compatible alias for discord_singleton_lane()."""
+    return discord_singleton_lane(role)
 
 
 def resolve_channel_reference(value):
-    """Resolve a channel by exact heading name or singleton subagent."""
+    """Resolve a channel by exact heading name or singleton lane."""
     query = _normalize_channel_ref(value)
     if not query:
         return None
     for channel in discord_channel_configs():
         if _normalize_channel_ref(channel["name"]) == query:
             return channel
-    query = _normalize_subagent_name(query)
-    subagent_config = CHANNEL_SUBAGENT_CONFIG.get(query)
-    if subagent_config and subagent_config.get("singleton"):
-        channels = discord_channels_for_subagent(query)
+    query = _normalize_lane_name(query)
+    lane_config = CHANNEL_LANE_CONFIG.get(query)
+    if lane_config and lane_config.get("singleton"):
+        channels = discord_channels_for_lane(query)
         if len(channels) == 1:
             return channels[0]
     return None
 
 
-def subagent_prompt(subagent_key: str) -> str:
-    """Load a subagent prompt file from prompts/subagents."""
-    key = _normalize_subagent_name(subagent_key)
+def lane_prompt(lane_key: str) -> str:
+    """Load a Discord lane behavior prompt from prompts/lanes."""
+    key = _normalize_lane_name(lane_key)
     if not key:
         return ""
-    filename = f"{key}.md"
-    return _load_subagent_prompt(filename)
+    return _load_from_prompt_dir(_LANE_PROMPTS_DIR, f"{key}.md")
+
+
+def agent_prompt(agent_key: str) -> str:
+    """Load an executable workflow/agent prompt from prompts/agents."""
+    key = (agent_key or "").strip().lower().replace("_", "-")
+    if not key:
+        return ""
+    return _load_from_prompt_dir(_AGENT_PROMPTS_DIR, f"{key}.md")
 
 
 def identity_block():

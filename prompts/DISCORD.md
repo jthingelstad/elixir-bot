@@ -11,7 +11,7 @@
 ## #welcome
 
 ID: 1476456514121109514
-Subagent: reception
+Lane: reception
 Workflow: reception
 ToolPolicy: none
 ReplyPolicy: open_channel
@@ -32,7 +32,7 @@ Elixir's onboarding and verification channel.
 ## #announcements
 
 ID: 1474760975851982959
-Subagent: announcements
+Lane: announcements
 Workflow: weekly_digest
 ToolPolicy: read_only
 MemoryScope: public
@@ -50,7 +50,7 @@ Elixir's long-form weekly recap and major Elixir update channel.
 ## #river-race
 
 ID: 1482352067573059675
-Subagent: river-race
+Lane: river-race
 Workflow: channel_update
 ToolPolicy: read_only
 MemoryScope: public
@@ -66,7 +66,7 @@ Elixir's public River Race scoreboard and recap channel.
 ## #leader-actions
 
 ID: 1513758211206025227
-Subagent: arena-relay
+Lane: arena-relay
 Workflow: channel_update
 ToolPolicy: read_only
 ReplyPolicy: disabled
@@ -91,7 +91,7 @@ Elixir's leader action board.
 ## #player-highlights
 
 ID: 1482352147029950474
-Subagent: member-highlights
+Lane: member-highlights
 Workflow: channel_update
 ToolPolicy: read_only
 MemoryScope: public
@@ -109,7 +109,7 @@ Elixir's curated player-story stream.
 ## #clan-events
 
 ID: 1482352241628414013
-Subagent: clan-events
+Lane: clan-events
 Workflow: channel_update
 ToolPolicy: read_only
 MemoryScope: public
@@ -127,7 +127,7 @@ Elixir's clan-wide celebration and recognition stream.
 ## #recruiting
 
 ID: 1475138086957613197
-Subagent: promote-the-clan
+Lane: promote-the-clan
 Workflow: site_promote_content
 ToolPolicy: none
 MemoryScope: public
@@ -145,7 +145,7 @@ Elixir's recruiting copy channel.
 ## #website-updates
 
 ID: 1482333970816434346
-Subagent: poapkings-com
+Lane: poapkings-com
 Workflow: channel_update
 ToolPolicy: read_only
 MemoryScope: public
@@ -164,7 +164,7 @@ Elixir's POAP KINGS website publish visibility channel.
 ## #clan-chat
 
 ID: 1474760693491433585
-Subagent: general
+Lane: general
 Workflow: interactive
 ToolPolicy: read_only
 ReplyPolicy: mention_only
@@ -184,7 +184,7 @@ Elixir's main social help channel.
 ## #ask-elixir
 
 ID: 1482368505058955467
-Subagent: ask-elixir
+Lane: ask-elixir
 Workflow: interactive
 ToolPolicy: read_only
 ReplyPolicy: open_channel
@@ -205,7 +205,7 @@ Elixir's dedicated conversation and screenshot-help channel.
 ## #leaders
 
 ID: 1475139718525227089
-Subagent: leader-lounge
+Lane: leader-lounge
 Workflow: clanops
 ToolPolicy: read_write
 ReplyPolicy: mention_only

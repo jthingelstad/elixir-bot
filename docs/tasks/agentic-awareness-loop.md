@@ -9,7 +9,7 @@ work should be read as historical design context.
 
 ## Context
 
-Elixir's current architecture is deterministic detection plus per-signal prose generation. A heartbeat tick runs every 30 minutes (`heartbeat/__init__.py:89`), emits signals, and a router (`runtime/channel_subagents.py:250 plan_signal_outcomes`) assigns each signal to a channel. Each planned outcome then becomes its own LLM call through `generate_channel_update()` with a pre-enriched context envelope built in `runtime/jobs/_signals.py:238 _build_outcome_context`.
+Elixir's historical architecture was deterministic detection plus per-signal prose generation. A heartbeat tick ran every 30 minutes (`heartbeat/__init__.py:89`), emitted signals, and a router (`runtime/signal_lanes.py:250 plan_signal_outcomes`) assigned each signal to a channel. Each planned outcome then became its own LLM call through `generate_channel_update()` with a pre-enriched context envelope built in `runtime/jobs/_signals.py:238 _build_outcome_context`.
 
 That design worked to ship a reliable feed, but it has three compounding problems:
 
@@ -27,7 +27,7 @@ The fix is not more signals. It is **one awareness loop that sees the world end-
 - **Tool plumbing** — `agent/chat.py:_chat_with_tools` already supports multi-turn tool loops up to 15 rounds (`intel_report` uses 15). `cr_api` bridge is capped at 5 external calls per turn. This is production-grade; we are under-using it.
 - **World-state building blocks** — compact war context (`_build_compact_war_context`), race standings (`_extract_race_standings_summary`), insight layer (`_build_river_race_insight_layer`), player insight (`_build_player_insight_context`) already exist in `runtime/jobs/_signals.py`. They are scattered across outcome-context branches; they want to be a single "situation" assembler.
 - **Classifier** — `storage/player.py:_battle_mode_group` already emits `war`, `ranked`, `ladder`, `special_event`, `friendly`, `other`. This is the seed of channel-lane routing.
-- **Durable memory** — subagents already have channel-scoped durable memory, which lets an agentic loop remember "I covered this angle last tick."
+- **Durable memory** — lanes already have channel-scoped durable memory, which lets an agentic loop remember "I covered this angle last tick."
 
 ---
 
@@ -101,7 +101,7 @@ Today's model mixes two orthogonal axes: **signal source** (battle vs. milestone
 
 1. **Surface time awareness.** Extract `hours_remaining_in_day`, `hours_until_war_reset`, day/phase, colosseum flag into a reusable `situation.time` block and expose to existing `channel_update` context. Already mostly computed in `heartbeat/_war.py`. Low risk, immediate uplift for river-race posts.
 2. **Give `channel_update` real tools.** Move `channel_update` from `READ_TOOLS_NO_EXTERNAL` to `READ_TOOLS` (include `cr_api`), bump rounds from 3 to 6. Re-prompt to say "investigate before you post." This alone unlocks deeper streak commentary without touching the loop structure. (`agent/tool_policy.py:46–48, 60–63`.)
-3. **Channel reorg.** Introduce `#trophy-road`. Extend `PROGRESSION_SIGNAL_TYPES` routing to split battle-mode signals (`battle_hot_streak`, `battle_trophy_push`, `path_of_legend_promotion`) onto the new channel. Narrow `#player-progress` to durable milestones. Update `CHANNEL_SUBAGENT_CONFIG` and `plan_signal_outcomes`.
+3. **Channel reorg.** Introduce `#trophy-road`. Extend `PROGRESSION_SIGNAL_TYPES` routing to split battle-mode signals (`battle_hot_streak`, `battle_trophy_push`, `path_of_legend_promotion`) onto the new channel. Narrow `#player-progress` to durable milestones. Update `CHANNEL_LANE_CONFIG` and `plan_signal_outcomes`.
 4. **Awareness tick replaces the router.** Build the `Situation` assembler, swap `plan_signal_outcomes` + per-outcome `generate_channel_update` for a single `run_awareness_tick()`. Keep the hard-post floors. Retire per-channel outcome-context builders. Per-tick post plan drives Discord delivery.
 
 Phases 1–3 each ship value independently. Phase 4 is the architectural payoff and depends on the prior three.
@@ -113,11 +113,11 @@ Phases 1–3 each ship value independently. Phase 4 is the architectural payoff 
 - `heartbeat/__init__.py:89` — heartbeat tick; where situation assembly attaches.
 - `heartbeat/_war.py:470–518` — time-remaining, engagement %, pace; lift into `situation.time` / `situation.standing`.
 - `runtime/jobs/_signals.py:238–326` — today's per-channel context builders; source material for a unified situation assembler.
-- `runtime/channel_subagents.py:11–131, 250–315` — signal-family constants and the routing planner; target of the channel reorg and of the awareness-tick replacement.
+- `runtime/signal_lanes.py:11–131, 250–315` — signal-family constants and the compatibility routing planner; target of the channel reorg and of the awareness-tick replacement.
 - `agent/tool_policy.py:45–74` — toolset and round caps per workflow; edited in phases 2 and 4.
 - `agent/tool_defs.py:432` — `cr_api` tool; the capability unlocked for channel posts.
 - `storage/player.py:420–448` — `_classify_battle` / `_battle_mode_group`; the seed for the #trophy-road lane.
-- `prompts/DISCORD.md` and `prompts/subagents/*.md` — channel persona definitions; updated for the new channel and the awareness-loop voice.
+- `prompts/DISCORD.md`, `prompts/lanes/*.md`, and `prompts/agents/awareness.md` — channel lane definitions and the awareness-loop voice.
 
 ---
 

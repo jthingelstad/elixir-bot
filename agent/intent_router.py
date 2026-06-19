@@ -26,7 +26,7 @@ log = logging.getLogger("elixir_agent")
 
 INTENT_ROUTER_WORKFLOW = "intent_router"
 
-_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "subagents" / "intent_router.md"
+_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "agents" / "intent_router.md"
 
 
 class Intent(TypedDict, total=False):

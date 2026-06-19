@@ -849,7 +849,7 @@ async def _post_clan_voyage_recognition_action(channel, voyage: dict | None) -> 
         forbidden_terms=("Discord", "http://", "https://", "www."),
         fallback_messages=[fallback],
         metadata={
-            "subagent": "arena-relay",
+            "lane": "arena-relay",
             "clan_voyage_id": voyage.get("voyage_id"),
             "season_key": voyage.get("season_key"),
         },
@@ -1010,7 +1010,7 @@ def _stored_assistant_content(content) -> str:
 
 
 async def _handle_arena_relay_action_note(app, message, channel_config, raw_question: str) -> bool:
-    if (channel_config.get("subagent") or "") != "arena-relay":
+    if channel_config.get("lane") != "arena-relay":
         return False
     reference = getattr(message, "reference", None)
     referenced_message_id = getattr(reference, "message_id", None)
@@ -1066,7 +1066,7 @@ async def _handle_arena_relay_screenshot_observation(
     raw_question: str,
     image_attachments: list,
 ) -> bool:
-    if (channel_config.get("subagent") or "") != "arena-relay":
+    if channel_config.get("lane") != "arena-relay":
         return False
     if not image_attachments:
         return False
@@ -1287,9 +1287,9 @@ async def _save_reply_save(app, message, conversation_scope, raw_question, conte
     )
 
 
-def _log_route(app, route, message, mentioned, subagent, workflow, raw_question, **extra):
-    parts = [f"message_route route={route} channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s"]
-    args = [message.channel.id, message.author.id, mentioned, subagent, workflow]
+def _log_route(app, route, message, mentioned, lane, workflow, raw_question, **extra):
+    parts = [f"message_route route={route} channel_id=%s author_id=%s mentioned=%s lane=%s workflow=%s"]
+    args = [message.channel.id, message.author.id, mentioned, lane, workflow]
     for k, v in extra.items():
         parts.append(f"{k}=%r")
         args.append(v)
@@ -1300,7 +1300,7 @@ def _log_route(app, route, message, mentioned, subagent, workflow, raw_question,
 
 async def _handle_report_route(app, message, ctx, route, content, event_type=None):
     """Handle a simple report route: log, save, reply, save."""
-    _log_route(app, route, message, ctx["mentioned"], ctx["subagent"], ctx["workflow"], ctx["raw_question"])
+    _log_route(app, route, message, ctx["mentioned"], ctx["lane"], ctx["workflow"], ctx["raw_question"])
     await _save_reply_save(
         app, message, ctx["conversation_scope"], ctx["raw_question"],
         content, ctx["workflow"], event_type or route,
@@ -1321,7 +1321,7 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
             target_name = None
 
     route = f"deck_review_{mode}_{subject}"
-    _log_route(app, route, message, ctx["mentioned"], ctx["subagent"], ctx["workflow"],
+    _log_route(app, route, message, ctx["mentioned"], ctx["lane"], ctx["workflow"],
                ctx["raw_question"], deck_target=target_tag, mode=mode, subject=subject)
 
     async with message.channel.typing():
@@ -1437,7 +1437,7 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
     if route == "help":
         role = "clanops" if workflow == "clanops" else "interactive"
         event = "clanops_help" if role == "clanops" else "interactive_help"
-        _log_route(app, event, message, ctx["mentioned"], ctx["subagent"], workflow, ctx["raw_question"])
+        _log_route(app, event, message, ctx["mentioned"], ctx["lane"], workflow, ctx["raw_question"])
         channel_config = app._get_channel_behavior(message.channel.id) or {}
         memory_context = await asyncio.to_thread(
             db.build_memory_context,
@@ -1489,7 +1489,7 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
     if route == "status_report":
         if workflow != "clanops":
             return False
-        _log_route(app, "status_report", message, ctx["mentioned"], ctx["subagent"], workflow, ctx["raw_question"])
+        _log_route(app, "status_report", message, ctx["mentioned"], ctx["lane"], workflow, ctx["raw_question"])
         content = await asyncio.to_thread(app._build_status_report)
         await _save_reply_save(
             app, message, ctx["conversation_scope"], ctx["raw_question"],
@@ -1500,7 +1500,7 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
     if route == "schedule_report":
         if workflow != "clanops":
             return False
-        _log_route(app, "schedule_report", message, ctx["mentioned"], ctx["subagent"], workflow, ctx["raw_question"])
+        _log_route(app, "schedule_report", message, ctx["mentioned"], ctx["lane"], workflow, ctx["raw_question"])
         content = await asyncio.to_thread(app._build_schedule_report)
         await _save_reply_save(
             app, message, ctx["conversation_scope"], ctx["raw_question"],
@@ -1523,7 +1523,7 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
         else:
             route_name = "clan_status_report"
             content = await asyncio.to_thread(app._build_clan_status_report, clan, war)
-        _log_route(app, route_name, message, ctx["mentioned"], ctx["subagent"], workflow, ctx["raw_question"])
+        _log_route(app, route_name, message, ctx["mentioned"], ctx["lane"], workflow, ctx["raw_question"])
         await _save_reply_save(
             app, message, ctx["conversation_scope"], ctx["raw_question"],
             content, "clanops", route_name,
@@ -1540,12 +1540,12 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
             return False
         mode = intent.get("mode") or "regular"
         if mode == "war":
-            _log_route(app, "member_war_decks_report", message, ctx["mentioned"], ctx["subagent"],
+            _log_route(app, "member_war_decks_report", message, ctx["mentioned"], ctx["lane"],
                        workflow, ctx["raw_question"], deck_target=deck_target, mode="war")
             content = await asyncio.to_thread(app._build_member_war_decks_report, deck_target)
             event_type = "member_war_decks_report"
         else:
-            _log_route(app, "member_deck_report", message, ctx["mentioned"], ctx["subagent"],
+            _log_route(app, "member_deck_report", message, ctx["mentioned"], ctx["lane"],
                        workflow, ctx["raw_question"], deck_target=deck_target)
             content = await asyncio.to_thread(app._build_member_deck_report, deck_target)
             event_type = "member_deck_report"
@@ -1612,7 +1612,7 @@ async def route_message(message):
         await app.bot.process_commands(message)
         return
 
-    subagent = channel_config.get("subagent") or channel_config.get("role")
+    lane = channel_config.get("lane") or channel_config.get("role")
     workflow = channel_config.get("workflow", "interactive")
     reply_policy = channel_config.get("reply_policy", "mention_only")
     allows_open_channel_reply = reply_policy == "open_channel"
@@ -1624,7 +1624,7 @@ async def route_message(message):
 
     ctx = {
         "mentioned": mentioned,
-        "subagent": subagent,
+        "lane": lane,
         "workflow": workflow,
         "raw_question": raw_question,
         "text_question": stripped_content,
@@ -1690,7 +1690,7 @@ async def route_message(message):
         await app.bot.process_commands(message)
         return
 
-    if subagent == "reception" or workflow == "reception":
+    if lane == "reception" or workflow == "reception":
         async with message.channel.typing():
             try:
                 clan = await asyncio.to_thread(cr_api.get_clan)
@@ -1794,11 +1794,11 @@ async def route_message(message):
 
     if workflow in {"interactive", "clanops"}:
         app.log.info(
-            "message_route route=channel_llm channel_id=%s author_id=%s mentioned=%s subagent=%s workflow=%s proactive=%s raw_question=%r original=%r",
+            "message_route route=channel_llm channel_id=%s author_id=%s mentioned=%s lane=%s workflow=%s proactive=%s raw_question=%r original=%r",
             message.channel.id,
             message.author.id,
             mentioned,
-            subagent,
+            lane,
             workflow,
             False,
             raw_question,

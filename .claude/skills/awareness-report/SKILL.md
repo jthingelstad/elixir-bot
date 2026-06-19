@@ -144,7 +144,7 @@ Keep the whole report tight — under ~40 lines for a healthy week. If nothing i
 
 Do not write "investigate the prompt." Point to the file, the signal type, or the config value. Examples of the level of specificity expected:
 
-- "`arena_change` is skipped 94% of the time (48 of 51 appearances this week). If that's intended, add it to `OPTIONAL_PROGRESSION_SIGNAL_TYPES` in `runtime/channel_subagents.py:35` so the quiet-check skips these ticks entirely — would save ~48 LLM calls/week."
+- "`arena_change` is skipped 94% of the time (48 of 51 appearances this week). If that's intended, add it to `OPTIONAL_PROGRESSION_SIGNAL_TYPES` in `runtime/signal_lanes.py:35` so the quiet-check skips these ticks entirely — would save ~48 LLM calls/week."
 - "3 `hard_fallback_failed` ticks all have `workflow=war_awareness` around the 10:00 UTC reset. Likely the period-index-stale-at-boundary pattern — re-check `heartbeat/_war.py:detect_war_day_markers` for observation-time-vs-reset-window alignment."
 - "Coverage rate for `clan_awareness` dropped from 41% last week to 28% this week. Check if `_clan_awareness_system` in `agent/prompts.py` changed recently, or if signal volume spiked (detector regression) vs. the LLM actually choosing silence more often."
 
