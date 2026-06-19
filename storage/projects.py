@@ -17,6 +17,25 @@ from db import managed_connection
 
 WAR_PROJECT_TOP_LIMIT = 5
 WAR_PROJECT_RECENT_COMMUNICATION_LIMIT = 5
+CLAN_DEVELOPMENT_PROJECT_KEY = "clan_development:roster_health"
+ONBOARDING_PROJECT_KEY = "onboarding:current"
+RECRUITMENT_PROJECT_KEY = "recruitment:current"
+CLAN_DEVELOPMENT_EVENT_TYPES = (
+    "inactive_members",
+    "promotion_recommendation",
+    "demotion_recommendation",
+    "kick_recommendation",
+)
+CLAN_DEVELOPMENT_CASE_TYPES = (
+    "inactivity_review",
+    "promotion_review",
+    "demotion_review",
+)
+ONBOARDING_EVENT_TYPES = ("member_join",)
+RECRUITMENT_EVENT_TYPES = (
+    "discord_invite_reminder",
+    "promotion_content_cycle",
+)
 
 __all__ = [
     "upsert_project",
@@ -27,9 +46,11 @@ __all__ = [
     "link_project_event",
     "link_project_events_for_subject",
     "list_project_event_links",
+    "refresh_operating_projects",
     "refresh_active_war_season_project",
     "get_active_war_season_project",
     "get_active_war_season_project_snapshot",
+    "get_active_operating_project_snapshots",
 ]
 
 
@@ -317,6 +338,423 @@ def list_project_event_links(
         (int(project_id), max(1, int(limit or 50))),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _compact_project_case(case: dict | None) -> dict:
+    case = case or {}
+    return {
+        "case_id": case.get("case_id"),
+        "case_key": case.get("case_key"),
+        "case_type": case.get("case_type"),
+        "status": case.get("status"),
+        "title": case.get("title"),
+        "target_player_tag": case.get("target_player_tag"),
+        "target_player_name": case.get("target_player_name"),
+        "due_at": case.get("due_at"),
+        "is_due": case.get("is_due"),
+    }
+
+
+def _recent_events_for_types(
+    conn: sqlite3.Connection,
+    *,
+    event_types: tuple[str, ...],
+    limit: int = 10,
+) -> list[dict]:
+    placeholders = ",".join("?" * len(event_types))
+    rows = conn.execute(
+        f"""
+        SELECT event_key, event_type, observed_at, scope, subject_type, subject_key, payload_json
+        FROM game_event_stream
+        WHERE event_type IN ({placeholders})
+        ORDER BY observed_at DESC, event_id DESC
+        LIMIT ?
+        """,
+        (*event_types, max(1, min(int(limit or 10), 50))),
+    ).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["payload"] = _json_loads(item.pop("payload_json", "{}"))
+        out.append(item)
+    return out
+
+
+def _event_type_counts(conn: sqlite3.Connection, *, event_types: tuple[str, ...]) -> dict:
+    placeholders = ",".join("?" * len(event_types))
+    rows = conn.execute(
+        f"""
+        SELECT event_type, COUNT(*) AS count, MAX(observed_at) AS last_observed_at
+        FROM game_event_stream
+        WHERE event_type IN ({placeholders})
+        GROUP BY event_type
+        ORDER BY count DESC, event_type ASC
+        """,
+        event_types,
+    ).fetchall()
+    return {
+        row["event_type"]: {
+            "count": int(row["count"] or 0),
+            "last_observed_at": row["last_observed_at"],
+        }
+        for row in rows
+    }
+
+
+def _last_observed_for_types(conn: sqlite3.Connection, *, event_types: tuple[str, ...]) -> str | None:
+    placeholders = ",".join("?" * len(event_types))
+    row = conn.execute(
+        f"SELECT MAX(observed_at) AS last_observed_at FROM game_event_stream WHERE event_type IN ({placeholders})",
+        event_types,
+    ).fetchone()
+    return row["last_observed_at"] if row else None
+
+
+def _link_project_events_by_types(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    event_types: tuple[str, ...],
+    relationship: str = "evidence",
+    limit: int = 500,
+) -> int:
+    placeholders = ",".join("?" * len(event_types))
+    rows = conn.execute(
+        f"""
+        SELECT event_id, event_key
+        FROM game_event_stream
+        WHERE event_type IN ({placeholders})
+        ORDER BY observed_at DESC, event_id DESC
+        LIMIT ?
+        """,
+        (*event_types, max(1, min(int(limit or 500), 2000))),
+    ).fetchall()
+    linked = 0
+    for row in rows:
+        before = conn.total_changes
+        link_project_event(
+            project_id=project_id,
+            event_id=row["event_id"],
+            event_key=row["event_key"],
+            relationship=relationship,
+            conn=conn,
+        )
+        if conn.total_changes > before:
+            linked += 1
+    return linked
+
+
+def _link_project_case_events(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    case_types: tuple[str, ...],
+) -> int:
+    placeholders = ",".join("?" * len(case_types))
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT source_event_key
+        FROM decision_cases
+        WHERE case_type IN ({placeholders})
+          AND source_event_key IS NOT NULL
+        """,
+        case_types,
+    ).fetchall()
+    linked = 0
+    for row in rows:
+        before = conn.total_changes
+        link_project_event(
+            project_id=project_id,
+            event_key=row["source_event_key"],
+            relationship="case_evidence",
+            conn=conn,
+        )
+        if conn.total_changes > before:
+            linked += 1
+    return linked
+
+
+def _assign_matching_intents_to_project(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    source_signal_types: tuple[str, ...],
+) -> int:
+    placeholders = ",".join("?" * len(source_signal_types))
+    cursor = conn.execute(
+        f"""
+        UPDATE communication_intents
+        SET project_id = ?, updated_at = ?
+        WHERE source_signal_type IN ({placeholders})
+          AND COALESCE(project_id, -1) <> ?
+        """,
+        (int(project_id), _db._utcnow(), *source_signal_types, int(project_id)),
+    )
+    conn.commit()
+    return max(0, int(cursor.rowcount or 0))
+
+
+def _recent_project_intents(
+    conn: sqlite3.Connection,
+    *,
+    project_id: int,
+    limit: int = 5,
+) -> list[dict]:
+    from storage.communication_intents import list_recent_communication_intents
+
+    return [
+        {
+            "intent_id": row.get("intent_id"),
+            "status": row.get("status"),
+            "workflow": row.get("workflow"),
+            "intent_type": row.get("intent_type"),
+            "target_channel_key": row.get("target_channel_key"),
+            "source_signal_type": row.get("source_signal_type"),
+            "summary": row.get("summary"),
+            "updated_at": row.get("updated_at"),
+        }
+        for row in list_recent_communication_intents(
+            project_id=project_id,
+            limit=limit,
+            conn=conn,
+        )
+    ]
+
+
+def _case_status_counts(conn: sqlite3.Connection, *, case_types: tuple[str, ...]) -> dict:
+    placeholders = ",".join("?" * len(case_types))
+    rows = conn.execute(
+        f"""
+        SELECT status, COUNT(*) AS count
+        FROM decision_cases
+        WHERE case_type IN ({placeholders})
+        GROUP BY status
+        ORDER BY status
+        """,
+        case_types,
+    ).fetchall()
+    return {row["status"]: int(row["count"] or 0) for row in rows}
+
+
+def _build_clan_development_state(conn: sqlite3.Connection, *, project_id: int | None = None) -> dict:
+    from storage.decision_cases import list_decision_cases, list_due_decision_cases
+    from storage.leader_actions import leader_action_board_snapshot
+
+    due_cases = [
+        case for case in list_due_decision_cases(limit=25, conn=conn)
+        if case.get("case_type") in CLAN_DEVELOPMENT_CASE_TYPES
+    ]
+    open_cases = [
+        case for case in list_decision_cases(
+            statuses=("open", "deferred"),
+            limit=50,
+            conn=conn,
+        )
+        if case.get("case_type") in CLAN_DEVELOPMENT_CASE_TYPES
+    ]
+    state = {
+        "kind": "clan_development",
+        "case_types": list(CLAN_DEVELOPMENT_CASE_TYPES),
+        "case_counts": _case_status_counts(conn, case_types=CLAN_DEVELOPMENT_CASE_TYPES),
+        "due_cases": [_compact_project_case(case) for case in due_cases[:10]],
+        "open_cases": [_compact_project_case(case) for case in open_cases[:10]],
+        "leader_action_board": leader_action_board_snapshot(open_limit=10, decided_limit=10, conn=conn),
+        "event_counts": _event_type_counts(conn, event_types=CLAN_DEVELOPMENT_EVENT_TYPES),
+    }
+    if project_id is not None:
+        state["recent_communications"] = _recent_project_intents(conn, project_id=project_id)
+    return state
+
+
+def _build_onboarding_state(conn: sqlite3.Connection, *, project_id: int | None = None) -> dict:
+    recent_joins = _recent_events_for_types(conn, event_types=ONBOARDING_EVENT_TYPES, limit=10)
+    state = {
+        "kind": "onboarding",
+        "event_counts": _event_type_counts(conn, event_types=ONBOARDING_EVENT_TYPES),
+        "recent_joins": [
+            {
+                "event_key": event.get("event_key"),
+                "observed_at": event.get("observed_at"),
+                "tag": (event.get("payload") or {}).get("tag") or event.get("subject_key"),
+                "name": (event.get("payload") or {}).get("name"),
+            }
+            for event in recent_joins
+        ],
+    }
+    if project_id is not None:
+        state["recent_communications"] = _recent_project_intents(conn, project_id=project_id)
+    return state
+
+
+def _recent_recruiting_messages(conn: sqlite3.Connection, *, limit: int = 5) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT created_at, workflow, event_type, summary, content
+        FROM messages
+        WHERE event_type IN ('promotion_content_cycle', 'promotion_content_cycle_part')
+           OR workflow = 'promote-the-clan'
+        ORDER BY created_at DESC, message_id DESC
+        LIMIT ?
+        """,
+        (max(1, min(int(limit or 5), 25)),),
+    ).fetchall()
+    result = []
+    for row in rows:
+        content = (row["content"] or "").replace("\n", " ").strip()
+        result.append({
+            "created_at": row["created_at"],
+            "workflow": row["workflow"],
+            "event_type": row["event_type"],
+            "summary": row["summary"],
+            "content_preview": content[:240],
+        })
+    return result
+
+
+def _build_recruitment_state(conn: sqlite3.Connection, *, project_id: int | None = None) -> dict:
+    state = {
+        "kind": "recruitment",
+        "event_counts": _event_type_counts(conn, event_types=RECRUITMENT_EVENT_TYPES),
+        "recent_recruiting_messages": _recent_recruiting_messages(conn),
+    }
+    if project_id is not None:
+        state["recent_communications"] = _recent_project_intents(conn, project_id=project_id)
+    return state
+
+
+def _operating_project_summary(project_type: str, state: dict) -> str:
+    if project_type == "clan_development":
+        counts = state.get("case_counts") or {}
+        due = len(state.get("due_cases") or [])
+        active = int(counts.get("open") or 0) + int(counts.get("deferred") or 0)
+        return f"{due} due review case(s); {active} active roster review case(s)"
+    if project_type == "onboarding":
+        joins = ((state.get("event_counts") or {}).get("member_join") or {}).get("count") or 0
+        return f"{joins} member join event(s) in the durable stream"
+    if project_type == "recruitment":
+        intents = len(state.get("recent_communications") or [])
+        messages = len(state.get("recent_recruiting_messages") or [])
+        return f"{intents} recruiting intent(s); {messages} recent recruiting message(s)"
+    return None
+
+
+def _project_snapshot(project: dict | None) -> dict | None:
+    if not project:
+        return None
+    return {
+        "project_id": project.get("project_id"),
+        "project_key": project.get("project_key"),
+        "project_type": project.get("project_type"),
+        "status": project.get("status"),
+        "title": project.get("title"),
+        "summary": project.get("summary"),
+        "started_at": project.get("started_at"),
+        "last_observed_at": project.get("last_observed_at"),
+        "next_action_at": project.get("next_action_at"),
+        "linked_event_count": project.get("linked_event_count") or 0,
+        "state": project.get("state") or {},
+    }
+
+
+def _refresh_one_operating_project(
+    conn: sqlite3.Connection,
+    *,
+    project_key: str,
+    project_type: str,
+    title: str,
+    subject_key: str,
+    event_types: tuple[str, ...],
+    source_signal_types: tuple[str, ...],
+    state_builder,
+) -> dict:
+    initial_state = state_builder(conn)
+    project = upsert_project(
+        project_key=project_key,
+        project_type=project_type,
+        status="active",
+        title=title,
+        subject_type="clan",
+        subject_key=subject_key,
+        last_observed_at=_last_observed_for_types(conn, event_types=event_types) or _db._utcnow(),
+        summary=_operating_project_summary(project_type, initial_state),
+        state=initial_state,
+        conn=conn,
+    )
+    _link_project_events_by_types(
+        conn,
+        project_id=project["project_id"],
+        event_types=event_types,
+    )
+    if project_type == "clan_development":
+        _link_project_case_events(
+            conn,
+            project_id=project["project_id"],
+            case_types=CLAN_DEVELOPMENT_CASE_TYPES,
+        )
+    _assign_matching_intents_to_project(
+        conn,
+        project_id=project["project_id"],
+        source_signal_types=source_signal_types,
+    )
+    refreshed_state = state_builder(conn, project_id=project["project_id"])
+    return upsert_project(
+        project_key=project_key,
+        project_type=project_type,
+        status="active",
+        title=title,
+        subject_type="clan",
+        subject_key=subject_key,
+        last_observed_at=_last_observed_for_types(conn, event_types=event_types) or _db._utcnow(),
+        summary=_operating_project_summary(project_type, refreshed_state),
+        state=refreshed_state,
+        conn=conn,
+    )
+
+
+@managed_connection
+def refresh_operating_projects(conn: Optional[sqlite3.Connection] = None) -> dict:
+    """Refresh non-war standing projects: development, onboarding, recruiting."""
+    return {
+        "clan_development": _project_snapshot(_refresh_one_operating_project(
+            conn,
+            project_key=CLAN_DEVELOPMENT_PROJECT_KEY,
+            project_type="clan_development",
+            title="Clan Development",
+            subject_key="poap_kings",
+            event_types=CLAN_DEVELOPMENT_EVENT_TYPES,
+            source_signal_types=CLAN_DEVELOPMENT_EVENT_TYPES,
+            state_builder=_build_clan_development_state,
+        )),
+        "onboarding": _project_snapshot(_refresh_one_operating_project(
+            conn,
+            project_key=ONBOARDING_PROJECT_KEY,
+            project_type="onboarding",
+            title="Onboarding",
+            subject_key="poap_kings",
+            event_types=ONBOARDING_EVENT_TYPES,
+            source_signal_types=ONBOARDING_EVENT_TYPES,
+            state_builder=_build_onboarding_state,
+        )),
+        "recruitment": _project_snapshot(_refresh_one_operating_project(
+            conn,
+            project_key=RECRUITMENT_PROJECT_KEY,
+            project_type="recruitment",
+            title="Recruitment",
+            subject_key="poap_kings",
+            event_types=RECRUITMENT_EVENT_TYPES,
+            source_signal_types=RECRUITMENT_EVENT_TYPES,
+            state_builder=_build_recruitment_state,
+        )),
+    }
+
+
+@managed_connection
+def get_active_operating_project_snapshots(conn: Optional[sqlite3.Connection] = None) -> dict:
+    return {
+        "clan_development": _project_snapshot(get_active_project("clan_development", conn=conn)),
+        "onboarding": _project_snapshot(get_active_project("onboarding", conn=conn)),
+        "recruitment": _project_snapshot(get_active_project("recruitment", conn=conn)),
+    }
 
 
 def _project_events(

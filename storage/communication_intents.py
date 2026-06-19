@@ -130,6 +130,27 @@ def _signal_tag(signal: dict | None) -> str | None:
     return None
 
 
+_PROJECT_TYPE_BY_SIGNAL_TYPE = {
+    "inactive_members": "clan_development",
+    "promotion_recommendation": "clan_development",
+    "demotion_recommendation": "clan_development",
+    "kick_recommendation": "clan_development",
+    "member_join": "onboarding",
+    "discord_invite_reminder": "recruitment",
+    "promotion_content_cycle": "recruitment",
+}
+
+
+def _signal_is_war_scoped(signal: dict | None) -> bool:
+    signal_type = _source_type(signal) or ""
+    return bool(
+        _clean_text((signal or {}).get("season_id"))
+        or signal_type.startswith("war_")
+        or signal_type.startswith("river_")
+        or signal_type in {"war", "river_race"}
+    )
+
+
 def _row_to_intent(row: sqlite3.Row | None) -> dict | None:
     if not row:
         return None
@@ -267,13 +288,6 @@ def _infer_project_id(
         except (TypeError, ValueError):
             pass
 
-    project_snapshot = ((situation or {}).get("projects") or {}).get("war_season")
-    if isinstance(project_snapshot, dict) and project_snapshot.get("project_id") is not None:
-        try:
-            return int(project_snapshot["project_id"])
-        except (TypeError, ValueError):
-            pass
-
     keys = [key for key in (event_keys or []) if key]
     if keys:
         placeholders = ",".join("?" * len(keys))
@@ -285,6 +299,25 @@ def _infer_project_id(
         ).fetchone()
         if row:
             return int(row["project_id"])
+
+    signal_type = _source_type(signal)
+    project_type = _PROJECT_TYPE_BY_SIGNAL_TYPE.get(signal_type or "")
+    if project_type:
+        row = conn.execute(
+            "SELECT project_id FROM elixir_projects "
+            "WHERE project_type = ? AND status = 'active' "
+            "ORDER BY updated_at DESC, project_id DESC LIMIT 1",
+            (project_type,),
+        ).fetchone()
+        if row:
+            return int(row["project_id"])
+
+    project_snapshot = ((situation or {}).get("projects") or {}).get("war_season")
+    if _signal_is_war_scoped(signal) and isinstance(project_snapshot, dict) and project_snapshot.get("project_id") is not None:
+        try:
+            return int(project_snapshot["project_id"])
+        except (TypeError, ValueError):
+            pass
 
     season_id = _clean_text((signal or {}).get("season_id"))
     if season_id:
@@ -380,6 +413,19 @@ def upsert_communication_intent(
     if not clean_type:
         raise ValueError("intent_type is required")
     normalized_status = _normalize_status(status)
+    event_key_list = [str(key) for key in (event_keys or []) if key]
+    clean_source_signal_type = _clean_text(source_signal_type)
+    inferred_project_id = project_id
+    if inferred_project_id is None:
+        inferred_project_id = _infer_project_id(
+            conn,
+            event_keys=event_key_list,
+            signal={
+                "type": clean_source_signal_type,
+                "signal_key": source_signal_key,
+                "source_signal_key": source_signal_key,
+            },
+        )
     now = _db._utcnow()
     conn.execute(
         """
@@ -427,10 +473,10 @@ def upsert_communication_intent(
             _clean_text(target_channel_key),
             str(target_channel_id) if target_channel_id is not None else None,
             _clean_text(source_signal_key),
-            _clean_text(source_signal_type),
+            clean_source_signal_type,
             _json_list(covers_signal_keys),
-            _json_list(event_keys),
-            int(project_id) if project_id is not None else None,
+            _json_list(event_key_list),
+            int(inferred_project_id) if inferred_project_id is not None else None,
             int(case_id) if case_id is not None else None,
             _clean_text(summary),
             _clean_text(content_preview),

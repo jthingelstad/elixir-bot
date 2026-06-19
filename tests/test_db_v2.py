@@ -251,6 +251,87 @@ def test_projects_link_stream_events_idempotently():
         conn.close()
 
 
+def test_refresh_operating_projects_materializes_nonwar_missions_and_links_evidence():
+    conn = db.get_connection(":memory:")
+    try:
+        join_event = db.record_game_event(
+            event_type="member_join",
+            source_system="test",
+            source_signal_key="member_join:#NEW",
+            observed_at="2026-06-18T12:00:00",
+            scope="public",
+            subject_type="member",
+            subject_key="#NEW",
+            payload={"tag": "#NEW", "name": "Newbie"},
+            conn=conn,
+        )
+        inactive_event = db.record_game_event(
+            event_type="inactive_members",
+            source_system="test",
+            source_signal_key="inactive:#OLD",
+            observed_at="2026-06-17T12:00:00",
+            scope="leadership",
+            subject_type="member",
+            subject_key="#OLD",
+            payload={"tag": "#OLD", "name": "Oldtimer"},
+            conn=conn,
+        )
+        recruit_event = db.record_game_event(
+            event_type="discord_invite_reminder",
+            source_system="test",
+            source_signal_key="discord_invite_reminder:2026-W25",
+            observed_at="2026-06-16T12:00:00",
+            scope="public",
+            subject_type="clan",
+            subject_key="poap_kings",
+            payload={"week_key": "2026-W25"},
+            conn=conn,
+        )
+        db.upsert_decision_case(
+            case_type="inactivity_review",
+            title="Review Oldtimer",
+            target_player_tag="#OLD",
+            target_player_name="Oldtimer",
+            source_signal_key="inactive:#OLD",
+            source_signal_type="inactive_members",
+            source_event_key=inactive_event["event_key"],
+            status=db.CASE_OPEN,
+            conn=conn,
+        )
+        join_intent = db.upsert_communication_intent(
+            intent_key="test:onboarding:intent",
+            workflow="clan-events",
+            intent_type="post",
+            source_signal_key="member_join:#NEW",
+            source_signal_type="member_join",
+            event_keys=[join_event["event_key"]],
+            conn=conn,
+        )
+        assert join_intent["project_id"] is None
+
+        projects = db.refresh_operating_projects(conn=conn)
+
+        assert set(projects) == {"clan_development", "onboarding", "recruitment"}
+        assert projects["clan_development"]["project_key"] == "clan_development:roster_health"
+        assert projects["onboarding"]["project_key"] == "onboarding:current"
+        assert projects["recruitment"]["project_key"] == "recruitment:current"
+        assert projects["clan_development"]["state"]["due_cases"][0]["target_player_tag"] == "#OLD"
+        assert projects["clan_development"]["state"]["open_cases"][0]["target_player_tag"] == "#OLD"
+        assert projects["onboarding"]["state"]["recent_joins"][0]["tag"] == "#NEW"
+
+        onboarding_links = db.list_project_event_links(projects["onboarding"]["project_id"], conn=conn)
+        assert [link["event_key"] for link in onboarding_links] == [join_event["event_key"]]
+        development_links = db.list_project_event_links(projects["clan_development"]["project_id"], conn=conn)
+        assert inactive_event["event_key"] in {link["event_key"] for link in development_links}
+        recruitment_links = db.list_project_event_links(projects["recruitment"]["project_id"], conn=conn)
+        assert [link["event_key"] for link in recruitment_links] == [recruit_event["event_key"]]
+
+        refreshed_intent = db.get_communication_intent("test:onboarding:intent", conn=conn)
+        assert refreshed_intent["project_id"] == projects["onboarding"]["project_id"]
+    finally:
+        conn.close()
+
+
 def test_event_rollups_write_before_stream_pruning():
     conn = db.get_connection(":memory:")
     try:
@@ -768,6 +849,58 @@ def test_communication_intent_traces_message_to_case_project_and_event():
         assert trace["case"]["case_id"] == case["case_id"]
         assert trace["project"]["project_id"] == project["project_id"]
         assert [item["event_key"] for item in trace["events"]] == [event["event_key"]]
+    finally:
+        conn.close()
+
+
+def test_nonwar_awareness_intent_prefers_operating_project_over_active_war_project():
+    conn = db.get_connection(":memory:")
+    try:
+        join_event = db.record_game_event(
+            event_type="member_join",
+            source_system="test",
+            source_signal_key="member_join:#ABC",
+            observed_at="2026-06-19T12:00:00",
+            scope="public",
+            subject_type="member",
+            subject_key="#ABC",
+            payload={"tag": "#ABC", "name": "Alice"},
+            conn=conn,
+        )
+        war_project = db.upsert_project(
+            project_key="war_season:129",
+            project_type="war_season",
+            title="War season 129",
+            subject_type="war",
+            subject_key="season:129",
+            season_id=129,
+            conn=conn,
+        )
+        projects = db.refresh_operating_projects(conn=conn)
+        signal = {
+            "type": "member_join",
+            "signal_key": "member_join:#ABC",
+            "event_key": join_event["event_key"],
+            "tag": "#ABC",
+            "name": "Alice",
+        }
+
+        intent = db.create_awareness_post_intent(
+            {
+                "channel": "clan-events",
+                "event_type": "member_join_public",
+                "summary": "Alice joined.",
+                "content": "Welcome Alice.",
+                "covers_signal_keys": ["member_join:#ABC"],
+            },
+            [signal],
+            workflow="clan_awareness",
+            situation={"projects": {"war_season": war_project}},
+            conn=conn,
+        )
+
+        assert intent["project_id"] == projects["onboarding"]["project_id"]
+        assert intent["project_id"] != war_project["project_id"]
     finally:
         conn.close()
 

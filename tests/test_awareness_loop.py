@@ -377,6 +377,25 @@ def test_build_situation_includes_active_war_project_snapshot():
     assert situation["projects"]["war_season"] == project_snapshot
 
 
+def test_build_situation_includes_operating_project_snapshots():
+    operating_projects = {
+        "clan_development": {"project_key": "clan_development:roster_health"},
+        "onboarding": {"project_key": "onboarding:current"},
+        "recruitment": {"project_key": "recruitment:current"},
+    }
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.get_active_war_season_project_snapshot", return_value=None),
+        patch("runtime.situation.db.get_active_operating_project_snapshots", return_value=operating_projects),
+    ):
+        situation = build_situation(_bundle(signals=[]))
+
+    assert situation["projects"]["clan_development"]["project_key"] == "clan_development:roster_health"
+    assert situation["projects"]["onboarding"]["project_key"] == "onboarding:current"
+    assert situation["projects"]["recruitment"]["project_key"] == "recruitment:current"
+
+
 def test_build_situation_includes_decision_case_snapshot():
     case_snapshot = {
         "due": [{
