@@ -65,6 +65,7 @@ def test_v2_schema_initializes_core_tables():
             "communication_intents",
             "communication_intent_event_links",
             "leader_action_recommendations",
+            "elixir_improvement_suggestions",
             "runtime_job_status",
             "arena_relay_screenshot_observations",
             "clan_voyages",
