@@ -1,0 +1,221 @@
+{
+  "retrievedAt": "2026-06-19",
+  "source": "Clash Royale Wiki",
+  "sourceRoot": "https://clashroyale.fandom.com/wiki/Clash_Royale_Wiki",
+  "scope": "Current and recurring gameplay context only; history-only and removed wiki content excluded.",
+  "modeFamilies": [
+    {
+      "id": "trophy_road",
+      "displayName": "Trophy Road / Arenas",
+      "classification": "permanent_progression",
+      "apiSignals": [
+        "Player.trophies",
+        "Player.bestTrophies",
+        "Player.arena",
+        "Battle.type=PvP",
+        "Battle.gameMode.name=Ladder",
+        "PlayerBattleData.trophyChange"
+      ],
+      "notes": [
+        "Standard ladder progression and arena unlocks.",
+        "Do not use Trophy Road fields as a proxy for all player activity."
+      ],
+      "sourceUrls": [
+        "https://clashroyale.fandom.com/wiki/Arenas",
+        "https://clashroyale.fandom.com/wiki/Trophies"
+      ]
+    },
+    {
+      "id": "ranked_path_of_legend",
+      "displayName": "Ranked / Path of Legend",
+      "classification": "permanent_ranked_progression",
+      "apiSignals": [
+        "Player.currentPathOfLegendSeasonResult",
+        "Player.lastPathOfLegendSeasonResult",
+        "Player.bestPathOfLegendSeasonResult",
+        "Battle.type=pathOfLegend",
+        "Battle.leagueNumber",
+        "GET /locations/{locationId}/pathoflegend/players",
+        "GET /locations/global/pathoflegend/{seasonId}/rankings/players"
+      ],
+      "notes": [
+        "Use Ranked for current player-facing wording; the API still uses pathoflegend names.",
+        "Ultimate Champion ranking uses rating exposed as eloRating on ranking endpoints."
+      ],
+      "sourceUrls": ["https://clashroyale.fandom.com/wiki/Ranked"]
+    },
+    {
+      "id": "merge_tactics",
+      "displayName": "Merge Tactics",
+      "classification": "side_mode_progression",
+      "apiSignals": [
+        "Player.progress",
+        "GET /leaderboards",
+        "GET /leaderboard/{leaderboardId}"
+      ],
+      "notes": [
+        "Four-player auto-battler side mode with draft/deploy/merge rounds.",
+        "Progress uses side-mode keys and should not be inferred from Player.trophies."
+      ],
+      "sourceUrls": [
+        "https://clashroyale.fandom.com/wiki/Merge_Tactics",
+        "https://clashroyale.fandom.com/wiki/Trophies"
+      ]
+    },
+    {
+      "id": "clan_wars_river_race",
+      "displayName": "Clan Wars / River Race",
+      "classification": "clan_competition",
+      "apiSignals": [
+        "GET /clans/{clanTag}/currentriverrace",
+        "GET /clans/{clanTag}/riverracelog",
+        "Battle.type=riverRacePvP",
+        "Battle.type=riverRaceDuel",
+        "Battle.type=riverRaceDuelColosseum",
+        "Battle.type=boatBattle"
+      ],
+      "notes": [
+        "Use periodType to distinguish training, warDay, and colosseum phases.",
+        "Use participant decksUsed and decksUsedToday for participation tracking."
+      ],
+      "sourceUrls": ["https://clashroyale.fandom.com/wiki/Clan_Wars"]
+    },
+    {
+      "id": "events_and_special_challenges",
+      "displayName": "Events / Special Event Challenges",
+      "classification": "temporary_or_rotating_rules",
+      "apiSignals": [
+        "GET /events",
+        "Battle.eventTag",
+        "Battle.type=trail",
+        "Battle.gameMode",
+        "Battle.deckSelection",
+        "Battle.modifiers"
+      ],
+      "notes": [
+        "Includes draft, elixir, environment, locked-card, mirror, and other rotating rule variants.",
+        "Use live events and battle logs rather than hardcoded availability."
+      ],
+      "sourceUrls": [
+        "https://clashroyale.fandom.com/wiki/Events",
+        "https://clashroyale.fandom.com/wiki/Tournament/Special_Event_Challenges"
+      ]
+    },
+    {
+      "id": "tournaments",
+      "displayName": "Tournaments / Global Tournaments / Victory Challenges",
+      "classification": "competitive_event",
+      "apiSignals": [
+        "GET /tournaments",
+        "GET /tournaments/{tournamentTag}",
+        "GET /globaltournaments",
+        "GET /locations/global/rankings/tournaments/{tournamentTag}",
+        "Battle.type=tournament",
+        "Battle.tournamentTag"
+      ],
+      "notes": [
+        "Player-created tournaments, global tournaments, and victory challenges have different API surfaces.",
+        "Mega Draft and other challenge formats may not use the player's normal currentDeck."
+      ],
+      "sourceUrls": ["https://clashroyale.fandom.com/wiki/Tournament"]
+    },
+    {
+      "id": "two_v_two",
+      "displayName": "2v2",
+      "classification": "team_mode",
+      "apiSignals": [
+        "Battle.team.length=2",
+        "Battle.opponent.length=2",
+        "Battle.type=clanMate2v2",
+        "Battle.gameMode.name=TeamVsTeam"
+      ],
+      "notes": [
+        "Normal 2v2 does not put Trophy Road trophies at risk.",
+        "Outcome logic should still use the first team entry because teammates share the result."
+      ],
+      "sourceUrls": ["https://clashroyale.fandom.com/wiki/2v2"]
+    },
+    {
+      "id": "friendly_and_training",
+      "displayName": "Friendly Battle / Training Camp / Card Delivery",
+      "classification": "practice_or_tutorial",
+      "apiSignals": [
+        "Battle.type=clanMate",
+        "Battle.type=friendly",
+        "Battle.gameMode.name=Friendly",
+        "GET /events"
+      ],
+      "notes": [
+        "Friendly battles are practice battles against friends or clanmates.",
+        "Training Camp and Card Delivery are not normal progression surfaces."
+      ],
+      "sourceUrls": [
+        "https://clashroyale.fandom.com/wiki/Friendly_Battle",
+        "https://clashroyale.fandom.com/wiki/Training_Camp",
+        "https://clashroyale.fandom.com/wiki/Card_Delivery"
+      ]
+    }
+  ],
+  "eventVariants": [
+    {
+      "id": "touchdown",
+      "displayName": "Touchdown",
+      "agentNote": "End-zone objective with no normal Crown Towers; tower-hitpoint assumptions can fail.",
+      "sourceUrl": "https://clashroyale.fandom.com/wiki/Touchdown"
+    },
+    {
+      "id": "heist",
+      "displayName": "Heist",
+      "agentNote": "Safe-focused objective; treat normal tower and spell-damage assumptions carefully.",
+      "sourceUrl": "https://clashroyale.fandom.com/wiki/Heist"
+    },
+    {
+      "id": "global_spell",
+      "displayName": "Global Spell",
+      "agentNote": "A global spell affects the whole arena while the main objective remains close to 1v1.",
+      "sourceUrl": "https://clashroyale.fandom.com/wiki/Global_Spell"
+    },
+    {
+      "id": "battleground",
+      "displayName": "Battleground",
+      "agentNote": "No river/bridges; troops move more directly and may interact with center elements.",
+      "sourceUrl": "https://clashroyale.fandom.com/wiki/Battleground"
+    },
+    {
+      "id": "troop_rush",
+      "displayName": "Troop Rush",
+      "agentNote": "Featured troops, spells, or special units spawn periodically for both sides.",
+      "sourceUrl": "https://clashroyale.fandom.com/wiki/Troop_Rush"
+    },
+    {
+      "id": "treasure_hunt",
+      "displayName": "Treasure Hunt",
+      "agentNote": "Neutral center objective grants benefits when claimed or destroyed.",
+      "sourceUrl": "https://clashroyale.fandom.com/wiki/Treasure_Hunt"
+    },
+    {
+      "id": "obstacle_course",
+      "displayName": "Obstacle Course",
+      "agentNote": "Neutral center unit or obstacle changes pathing/combat without belonging to either side.",
+      "sourceUrl": "https://clashroyale.fandom.com/wiki/Obstacle_Course"
+    },
+    {
+      "id": "chess_royale",
+      "displayName": "Chess Royale",
+      "agentNote": "Alternate tower layout with more tower-like buildings than normal 1v1.",
+      "sourceUrl": "https://clashroyale.fandom.com/wiki/Chess_Royale"
+    },
+    {
+      "id": "trick_or_treat",
+      "displayName": "Trick or Treat",
+      "agentNote": "Claimable presents/buildings trigger randomized effects.",
+      "sourceUrl": "https://clashroyale.fandom.com/wiki/Trick_or_Treat"
+    },
+    {
+      "id": "chaos",
+      "displayName": "C.H.A.O.S.",
+      "agentNote": "Players choose card modifiers during the match; battle logs can include modifiers.",
+      "sourceUrl": "https://clashroyale.fandom.com/wiki/C.H.A.O.S."
+    }
+  ]
+}

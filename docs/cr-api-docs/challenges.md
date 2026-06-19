@@ -2,6 +2,10 @@
 
 Base URL: `https://api.clashroyale.com/v1` Auth: Bearer token in `Authorization` header
 
+Gameplay context: use [events.md](events.md), [game-modes.md](game-modes.md#event-and-challenge-variants), and
+[wiki-api-crosswalk.md](wiki-api-crosswalk.md#events-challenges-and-temporary-modes) because challenge-like modes are
+currently observable through `/events` even though `/challenges` is unavailable in live testing.
+
 ---
 
 ## Endpoint

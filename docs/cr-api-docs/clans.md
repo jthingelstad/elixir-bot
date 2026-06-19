@@ -3,6 +3,10 @@
 Base URL: `https://api.clashroyale.com/v1` Auth: Bearer token in `Authorization` header Tag encoding: `#2ABC` →
 `%232ABC` in path
 
+Gameplay context: use [game-modes.md](game-modes.md#clan-wars--river-race) and
+[wiki-api-crosswalk.md](wiki-api-crosswalk.md#social-clan-and-war) when interpreting clan membership, Friendly Battles,
+and River Race participation.
+
 ---
 
 ## Endpoints

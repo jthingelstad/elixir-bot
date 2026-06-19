@@ -3,6 +3,9 @@
 Base URL: `https://api.clashroyale.com/v1` Auth: Bearer token in `Authorization` header Tag encoding: `#2ABC` →
 `%232ABC` in path
 
+Gameplay context: use [game-modes.md](game-modes.md) and [wiki-api-crosswalk.md](wiki-api-crosswalk.md) when
+interpreting Trophy Road, Ranked / Path of Legend, side-mode progress, battle-log modes, and player-profile fields.
+
 ---
 
 ## Endpoints

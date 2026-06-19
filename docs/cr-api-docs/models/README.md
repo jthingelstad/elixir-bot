@@ -5,6 +5,9 @@ This directory contains response model notes split by domain for agent-friendly 
 Use endpoint files for request behavior, pagination, cache notes, and operational quirks. Use these model files for
 field shape, optionality, nullability, and shared nested objects.
 
+Use [../game-modes.md](../game-modes.md) and [../wiki-api-crosswalk.md](../wiki-api-crosswalk.md) when a model field
+needs gameplay context beyond its JSON shape.
+
 ## Recommended Lookup Order
 
 1. Open [../index.md](../index.md) for common API behavior.
@@ -36,3 +39,5 @@ field shape, optionality, nullability, and shared nested objects.
 - Official Swagger often names wrapper models such as `BattleList`, `ClanMemberList`, `TrailEventList`,
   `TournamentHeaderList`, and `LocationList`. Local endpoint docs describe the observed JSON shape directly, including
   bare arrays where the live API returns them.
+- Trophy Road, Ranked / Path of Legend, Clan Wars, events, tournaments, 2v2, and side-mode progress use different API
+  signals. Keep gameplay interpretation separate from raw field shape.

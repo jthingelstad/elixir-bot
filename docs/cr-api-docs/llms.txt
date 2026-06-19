@@ -7,6 +7,11 @@ This repository documents the public Clash Royale API for coding agents and auto
 - [Index](index.md): global rules, endpoint table, response shapes, pagination, errors, caching
 - [Agent Guide](AGENTS.md): agent-specific usage rules
 - [Endpoint Manifest](data/endpoints.json): machine-readable endpoint routing and quirks
+- [Game Mode Taxonomy](data/game-modes.json): machine-readable gameplay-mode families and API signals
+- [Wiki/API Crosswalk Data](data/wiki-api-crosswalk.json): machine-readable wiki/API concept mapping
+- [Gameplay Modes](game-modes.md): mode context for Trophy Road, Ranked / Path of Legend, Clan Wars, events, and side
+  modes
+- [Wiki/API Crosswalk](wiki-api-crosswalk.md): connect wiki gameplay concepts to endpoint/model docs
 - [Models](models.md): model reference router
 
 ## Endpoint Docs
@@ -41,3 +46,6 @@ This repository documents the public Clash Royale API for coding agents and auto
 - Check `paging` before treating an `items` response as paginated.
 - Treat absent and null fields differently.
 - Prefer observed live behavior notes over assumptions from the official Swagger UI.
+- Do not treat Trophy Road as the only activity surface; use Gameplay Modes for Ranked, Clan Wars, events, and side
+  modes.
+- Use Wiki/API Crosswalk when a gameplay concept needs the right API surface or an API field needs game context.

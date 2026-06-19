@@ -5,6 +5,9 @@ Field shapes verified against live API responses (March-April 2026).
 This file is a routing page. Detailed model notes live in the `models/` directory so agents can load only the schema
 area they need.
 
+For gameplay meaning behind model fields, use [game-modes.md](game-modes.md) and
+[wiki-api-crosswalk.md](wiki-api-crosswalk.md) alongside the focused schema file.
+
 ## Model Files
 
 | File                                                         | Covers                                                                            |
@@ -27,3 +30,5 @@ area they need.
 - Need a response field list? Open the model file for that domain.
 - Need shared optionality rules? See [models/errors.md](models/errors.md) and the domain-specific model file.
 - Need card level or `evolutionLevel` semantics? See [models/players.md](models/players.md) and [cards.md](cards.md).
+- Need to map a field to Trophy Road, Ranked / Path of Legend, Clan Wars, events, tournaments, 2v2, or side modes? See
+  [game-modes.md](game-modes.md) and [wiki-api-crosswalk.md](wiki-api-crosswalk.md).

@@ -2,6 +2,9 @@
 
 Base URL: `https://api.clashroyale.com/v1` Auth: Bearer token in `Authorization` header
 
+Gameplay context: use [tournaments.md](tournaments.md), [locations.md](locations.md#global-tournament-rankings), and
+[wiki-api-crosswalk.md](wiki-api-crosswalk.md) when connecting Supercell-run global tournaments to rankings and rewards.
+
 ---
 
 ## Endpoints

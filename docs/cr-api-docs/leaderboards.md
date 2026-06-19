@@ -2,6 +2,10 @@
 
 Base URL: `https://api.clashroyale.com/v1` Auth: Bearer token in `Authorization` header
 
+Gameplay context: use [game-modes.md](game-modes.md#side-mode-progress-and-leaderboards) and
+[wiki-api-crosswalk.md](wiki-api-crosswalk.md) when interpreting game-mode leaderboards such as Merge Tactics,
+Touchdown, C.H.A.O.S., or other seasonal boards.
+
 ---
 
 ## Endpoints
