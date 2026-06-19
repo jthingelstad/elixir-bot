@@ -396,13 +396,20 @@ def _recent_events_block(*, include_leadership: bool, recent_limit: int = 20) ->
 
 def _projects_block() -> dict:
     try:
-        return {
+        projects = {
             "war_season": db.get_active_war_season_project_snapshot(),
         }
+        projects.update(db.get_active_operating_project_snapshots() or {})
+        return projects
     except Exception:
         log.warning("projects load failed", exc_info=True)
         _note_degraded("projects")
-        return {"war_season": None}
+        return {
+            "war_season": None,
+            "clan_development": None,
+            "onboarding": None,
+            "recruitment": None,
+        }
 
 
 def _decision_cases_block() -> dict:

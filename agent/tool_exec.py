@@ -863,6 +863,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
             "event_windows": db.summarize_events_by_window(windows=_ELIXIR_STATE_WINDOWS, scope=None),
             "recent_events": db.list_recent_events(days=7, limit=10),
             "active_war_project": db.get_active_war_season_project_snapshot(),
+            "operating_projects": db.get_active_operating_project_snapshots(),
             "active_projects": db.list_projects(statuses=("active",), limit=10),
             "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
             "recent_intents": db.list_recent_communication_intents(limit=limit),

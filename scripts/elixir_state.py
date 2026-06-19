@@ -61,6 +61,7 @@ def _summary_payload(args) -> dict:
         "recent_events": db.list_recent_events(days=args.days, scope=args.scope, limit=limit),
         "active_projects": db.list_projects(statuses=("active",), limit=limit),
         "active_war_project": db.get_active_war_season_project_snapshot(),
+        "operating_projects": db.get_active_operating_project_snapshots(),
         "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
         "recent_intents": db.list_recent_communication_intents(limit=limit),
         "failed_intents": db.list_recent_communication_intents(status="failed", limit=limit),
@@ -86,6 +87,17 @@ def _print_summary(data: dict) -> None:
         print(f"- {active_war.get('project_key')}: {_short(active_war.get('summary'))}")
     else:
         print("- none")
+    print("")
+    for line in _line_items(
+        "Operating Projects",
+        [
+            project
+            for project in (data.get("operating_projects") or {}).values()
+            if project
+        ],
+        empty="none",
+    ):
+        print(line)
     print("")
     for line in _line_items(
         "Due Decision Cases",
