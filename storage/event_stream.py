@@ -15,6 +15,7 @@ from typing import Iterable, Optional
 
 import db as _db
 from db import EVENT_STREAM_RETENTION_DAYS, managed_connection
+from signal_keys import signal_source_key
 
 EVENT_STREAM_WINDOWS = (7, 28, 56, 90)
 
@@ -79,27 +80,6 @@ def _signal_payload(signal: dict) -> dict:
     return dict(signal or {})
 
 
-def _signal_source_key(signal: dict) -> str:
-    signal = signal or {}
-    for key in ("signal_key", "signal_log_type"):
-        value = _clean_text(signal.get(key))
-        if value:
-            return value
-    parts = [
-        _event_type_from_signal(signal),
-        _clean_text(signal.get("signal_date")) or "",
-        _clean_text(signal.get("tag") or signal.get("player_tag") or signal.get("member_tag") or signal.get("target_player_tag")) or "",
-        _clean_text(signal.get("season_id")) or "",
-        _clean_text(signal.get("week") or signal.get("section_index")) or "",
-        _clean_text(signal.get("day_number") or signal.get("period_index")) or "",
-        _clean_text(signal.get("milestone") or signal.get("card_name") or signal.get("award_type")) or "",
-    ]
-    basis = "|".join(parts).strip("|")
-    if basis:
-        return basis
-    return f"signal:{_short_hash(signal)}"
-
-
 def event_key_for_signal(
     signal: dict,
     source_system: str,
@@ -108,7 +88,7 @@ def event_key_for_signal(
     """Return the deterministic event key for one signal observation."""
     source = _canon_source(source_system, "unknown")
     detector = _canon_source(source_detector, "")
-    signal_key = _signal_source_key(signal)
+    signal_key = signal_source_key(signal)
     basis = "|".join([source, detector, signal_key, _event_type_from_signal(signal)])
     return f"game_event:{hashlib.sha256(basis.encode('utf-8')).hexdigest()}"
 
@@ -159,7 +139,7 @@ def _subject_from_signal(signal: dict) -> tuple[str | None, str | None]:
     if clan_tag:
         return "clan", _db._canon_tag(clan_tag)
     if _event_type_from_signal(signal) in {"capability_unlock"}:
-        return "system", _signal_source_key(signal)
+        return "system", signal_source_key(signal)
     return None, None
 
 
@@ -262,7 +242,7 @@ def record_signal_events(
             continue
         payload = _signal_payload(signal)
         event_type = _event_type_from_signal(signal)
-        source_signal_key = _signal_source_key(signal)
+        source_signal_key = signal_source_key(signal)
         source_signal_type = _clean_text(signal.get("signal_type")) or event_type
         subject_type, subject_key = _subject_from_signal(signal)
         event_key = event_key_for_signal(signal, source_system, source_detector)

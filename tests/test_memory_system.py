@@ -241,6 +241,38 @@ def test_hybrid_search_rrf_and_fts_only_degraded_mode():
         conn.close()
 
 
+def test_search_memories_handles_naive_and_aware_created_at_values():
+    conn = db.get_connection(":memory:")
+    try:
+        naive = create_memory(
+            body="Naive timestamp memory about war consistency.",
+            source_type="leader_note",
+            is_inference=False,
+            confidence=1.0,
+            created_by="leader",
+            conn=conn,
+        )
+        aware = create_memory(
+            body="Aware timestamp memory about war consistency.",
+            source_type="leader_note",
+            is_inference=False,
+            confidence=1.0,
+            created_by="leader",
+            conn=conn,
+        )
+        conn.execute(
+            "UPDATE clan_memories SET created_at = ? WHERE memory_id = ?",
+            ("2026-06-19T10:00:00Z", aware["memory_id"]),
+        )
+        results = search_memories("war consistency", conn=conn)
+        result_ids = {result.memory["memory_id"] for result in results}
+
+        assert naive["memory_id"] in result_ids
+        assert aware["memory_id"] in result_ids
+    finally:
+        conn.close()
+
+
 def test_upsert_weekly_summary_memory_creates_and_updates_same_week_entry():
     conn = db.get_connection(":memory:")
     try:
