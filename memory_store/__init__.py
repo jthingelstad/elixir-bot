@@ -66,6 +66,13 @@ def _normalize_date(value: Optional[str]) -> Optional[str]:
     return datetime.strptime(text, "%Y-%m-%d").strftime("%Y-%m-%d")
 
 
+def _parse_utc_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _build_filter_where(filters: Optional[dict], args: list) -> str:
     filters = filters or {}
     clauses = []
@@ -427,7 +434,7 @@ def search_memories(query: str, *, viewer_scope: str = "leadership", include_sys
         if not memory:
             continue
         score = parts["rrf"]
-        created = datetime.fromisoformat(memory["created_at"].replace("Z", "+00:00"))
+        created = _parse_utc_datetime(memory["created_at"])
         age_days = max(0.0, (now - created).total_seconds() / 86400.0)
         recency_boost = 1.0 + max(0.0, (30 - age_days) / 300.0)
         confidence_penalty = 1.0 if not memory["is_inference"] else max(0.4, float(memory["confidence"]))

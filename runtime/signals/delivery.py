@@ -50,6 +50,42 @@ CRITICAL_LEADER_ACTION_SIGNAL_TYPES = {
 
 def _lane_key_for_config(channel_config: dict) -> str:
     return channel_config.get("lane_key") or channel_config.get("lane") or ""
+
+
+def _normalize_signal_cover_key(value) -> str:
+    text = str(value or "").strip()
+    return text.strip("|") or text
+
+
+def _signal_cover_key_map(signals: list[dict] | tuple[dict, ...] | None) -> dict[str, str]:
+    key_map: dict[str, str] = {}
+    for signal in signals or []:
+        if not isinstance(signal, dict):
+            continue
+        canonical = signal_source_key(signal)
+        if not canonical:
+            continue
+        for value in (
+            canonical,
+            signal.get("signal_key"),
+            signal.get("signal_log_type"),
+            signal.get("source_signal_key"),
+        ):
+            normalized = _normalize_signal_cover_key(value)
+            if normalized:
+                key_map[normalized] = canonical
+    return key_map
+
+
+def _normalized_cover_keys(raw_keys, signals: list[dict] | tuple[dict, ...] | None) -> set[str]:
+    keys = [_normalize_signal_cover_key(key) for key in (raw_keys or [])]
+    keys = [key for key in keys if key]
+    if not signals:
+        return set(keys)
+    key_map = _signal_cover_key_map(signals)
+    return {key_map[key] for key in keys if key in key_map}
+
+
 CELEBRATION_RELAY_SIGNAL_TYPES = {
     "career_wins_milestone",
     "cr_account_anniversary",
@@ -2064,14 +2100,19 @@ async def _deliver_awareness_post(post: dict, signals: list[dict], *, intent: di
         await _mark_awareness_intent_failed(intent, f"lane mismatch: {leads_with} not allowed on {channel_key}")
         return False
 
-    covers = list(post.get("covers_signal_keys") or [])
+    raw_covers = list(post.get("covers_signal_keys") or [])
+    covers = sorted(_normalized_cover_keys(raw_covers, signals))
+    post["covers_signal_keys"] = covers
     if signals and not covers:
+        reason = "empty covers_signal_keys" if not raw_covers else "covers_signal_keys did not match input signals"
         log.warning(
-            "awareness post rejected: empty covers_signal_keys channel=%r despite %d input signal(s)",
+            "awareness post rejected: %s channel=%r covers=%s input_signals=%d",
+            reason,
             channel_key,
+            raw_covers,
             len(signals),
         )
-        await _mark_awareness_intent_failed(intent, "empty covers_signal_keys")
+        await _mark_awareness_intent_failed(intent, reason)
         return False
 
     if covers:
@@ -2251,7 +2292,10 @@ async def _deliver_awareness_post_plan(
                 situation=situation,
             )
     for post in posts:
-        post_keys = {str(key) for key in (post.get("covers_signal_keys") or []) if key}
+        post_keys = _normalized_cover_keys(post.get("covers_signal_keys") or [], signals or [])
+        if post_keys:
+            post = dict(post)
+            post["covers_signal_keys"] = sorted(post_keys)
         attempted |= post_keys
         intent = await _create_awareness_post_intent(
             post,

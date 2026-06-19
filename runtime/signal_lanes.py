@@ -8,11 +8,9 @@ intents.
 
 from __future__ import annotations
 
-import json
-from hashlib import sha1
-
 import db
 import prompts
+from signal_keys import batch_source_key, signal_source_key
 from memory_store import list_memories
 from storage.contextual_memory import upsert_summary_memory
 
@@ -228,35 +226,6 @@ def signal_routing_summary() -> list[dict]:
             ],
         },
     ]
-
-
-def signal_source_key(signal: dict) -> str:
-    signal = signal or {}
-    for key in ("signal_key", "signal_log_type"):
-        value = (signal.get(key) or "").strip()
-        if value:
-            return value
-    parts = [
-        str(signal.get("type") or "signal"),
-        str(signal.get("signal_date") or ""),
-        str(signal.get("tag") or ""),
-        str(signal.get("season_id") or ""),
-        str(signal.get("week") or signal.get("section_index") or ""),
-        str(signal.get("day_number") or ""),
-        str(signal.get("milestone") or ""),
-        str(signal.get("card_name") or ""),
-    ]
-    basis = "|".join(parts)
-    if basis.strip("|"):
-        return basis
-    payload = json.dumps(signal, sort_keys=True, default=str)
-    return f"signal:{sha1(payload.encode('utf-8')).hexdigest()[:16]}"
-
-
-def batch_source_key(signals: list[dict]) -> str:
-    keys = sorted(signal_source_key(signal) for signal in (signals or []))
-    payload = "|".join(keys)
-    return f"batch:{sha1(payload.encode('utf-8')).hexdigest()[:16]}"
 
 
 def is_war_signal(signal: dict) -> bool:

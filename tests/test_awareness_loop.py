@@ -11,6 +11,7 @@ import elixir  # noqa: F401
 import db
 import heartbeat
 import runtime.jobs._signals as signals_module
+import runtime.signals.delivery as delivery_module
 from runtime.situation import (
     CHANNEL_LANES,
     HARD_POST_SIGNAL_TYPES,
@@ -737,6 +738,40 @@ def test_deliver_awareness_post_rejects_empty_covers_when_signals_present():
         signals_module._deliver_awareness_post(post, [{"type": "member_join", "signal_key": "join:A"}])
     )
     assert delivered is False
+
+
+def test_normalized_cover_keys_accepts_legacy_trailing_field_keys():
+    signal = {
+        "type": "path_of_legend_promotion",
+        "tag": "#RJ9RRQPVU",
+    }
+
+    assert delivery_module._normalized_cover_keys(
+        ["path_of_legend_promotion||#RJ9RRQPVU|||||"],
+        [signal],
+    ) == {"path_of_legend_promotion||#RJ9RRQPVU"}
+
+
+def test_deliver_awareness_post_rejects_unmatched_covers_when_signals_present():
+    post = {
+        "channel": "clan-events",
+        "leads_with": "clan_event",
+        "content": "x",
+        "covers_signal_keys": ["unknown-signal"],
+    }
+
+    with patch("runtime.signals.delivery._mark_awareness_intent_failed", new=AsyncMock()) as mock_failed:
+        delivered = asyncio.run(
+            signals_module._deliver_awareness_post(
+                post,
+                [{"type": "member_join", "signal_key": "join:A"}],
+                intent={"intent_id": 1},
+            )
+        )
+
+    assert delivered is False
+    mock_failed.assert_awaited_once()
+    assert mock_failed.await_args.args[1] == "covers_signal_keys did not match input signals"
 
 
 def test_deliver_awareness_post_allows_empty_covers_when_no_signals():

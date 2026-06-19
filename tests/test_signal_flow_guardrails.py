@@ -6,8 +6,9 @@ behavior while `_deliver_signal_group()` remains as a compatibility shim.
 
 import pytest
 
-from runtime.signal_lanes import plan_signal_outcomes
-from storage.event_stream import event_key_for_signal
+import db
+from runtime.signal_lanes import plan_signal_outcomes, signal_source_key
+from storage.event_stream import event_key_for_signal, record_signal_events
 
 
 def _routing_snapshot(signals):
@@ -164,3 +165,28 @@ def test_event_key_policy_prefers_signal_key_over_payload_hash():
     second = event_key_for_signal(signal, source_system="system_signals")
 
     assert second == first
+
+
+def test_signal_source_key_is_canonical_across_runtime_and_event_stream():
+    signal = {
+        "type": "path_of_legend_promotion",
+        "tag": "#RJ9RRQPVU",
+    }
+    expected = "path_of_legend_promotion||#RJ9RRQPVU"
+
+    assert signal_source_key(signal) == expected
+
+    conn = db.get_connection(":memory:")
+    try:
+        record_signal_events(
+            [dict(signal)],
+            source_system="player_intel",
+            source_detector="profile_refresh",
+            conn=conn,
+        )
+        row = conn.execute(
+            "SELECT source_signal_key FROM game_event_stream ORDER BY event_id DESC LIMIT 1"
+        ).fetchone()
+        assert row["source_signal_key"] == expected
+    finally:
+        conn.close()
