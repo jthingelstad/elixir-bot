@@ -47,10 +47,13 @@ _DECK_SELECTION_LABELS = {
     "draft": "Draft",
 }
 
-# Player-facing CR tournament game-mode names by API id. Build this table
-# opportunistically — the API does not publish a stable public mapping.
-# See docs/cr-api-docs/tournaments.md for the full set of player-facing
-# names and the rationale for keeping the mapping at this seam.
+# Player-facing CR tournament game-mode names by API id. The mapping is
+# empirical — observed ids carry over, but the API does not publish a stable
+# public table — so build it opportunistically as we host or observe each
+# mode (see docs/cr-api-docs/tournaments.md for the documented ids). We keep
+# the lookup at this seam, the signal-emission boundary, so every emitted
+# signal carries the player-facing name regardless of whether the LLM ever
+# sees the raw id.
 _GAME_MODE_LABELS = {
     72000009: "Normal Battle",
     72000194: "Triple Draft",
@@ -74,7 +77,9 @@ def deck_selection_label(deck_selection: Optional[str]) -> Optional[str]:
     name shown in-game. ``draftCompetitive`` → ``Triple Draft``, etc.
 
     Unknown codes fall through unchanged so we still pass *something*
-    rather than hiding the raw value.
+    rather than hiding the raw value. Note ``deckSelection`` only hints at
+    deck *format*; it does not distinguish the elixir-rate variants (Normal
+    vs. Double vs. Triple Elixir Battle) — those ride on ``gameMode`` instead.
     """
     if not deck_selection:
         return deck_selection
