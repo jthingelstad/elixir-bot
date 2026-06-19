@@ -34,6 +34,7 @@ CARD_COLLECTION_RETENTION_DAYS = 14
 WAR_RETENTION_DAYS = 180
 RAW_PAYLOAD_RETENTION_DAYS = 14
 SIGNAL_OUTCOME_RETENTION_DAYS = 90
+EVENT_STREAM_RETENTION_DAYS = 90
 CONVERSATION_RETENTION_DAYS = 30
 TOURNAMENT_RETENTION_DAYS = 365
 CONVERSATION_MAX_PER_SCOPE = 20
@@ -617,6 +618,7 @@ _STORAGE_FACADE_MODULES = (
     "storage.player",
     "storage.trends",
     "storage.messages",
+    "storage.event_stream",
     "storage.api_sentinel",
     "storage.metadata",
     "storage.tournament",

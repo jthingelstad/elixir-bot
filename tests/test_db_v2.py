@@ -42,6 +42,7 @@ def test_v2_schema_initializes_core_tables():
             "war_period_clan_status",
             "raw_api_payloads",
             "api_sentinel_observations",
+            "game_event_stream",
             "leader_action_recommendations",
             "runtime_job_status",
             "arena_relay_screenshot_observations",
@@ -49,6 +50,117 @@ def test_v2_schema_initializes_core_tables():
             "clan_voyage_entries",
         }
         assert expected.issubset(tables)
+    finally:
+        conn.close()
+
+
+def test_event_stream_records_signal_idempotently_with_scope_and_subject():
+    conn = db.get_connection(":memory:")
+    try:
+        signal = {
+            "type": "inactive_members",
+            "signal_date": "2026-06-19",
+            "members": [
+                {
+                    "name": "xian",
+                    "tag": "#UGQPVQ9U9",
+                    "days_inactive": 10,
+                }
+            ],
+        }
+
+        first = db.record_signal_events(
+            [signal],
+            source_system="clan_awareness",
+            source_detector="detect_inactivity",
+            conn=conn,
+        )
+        second = db.record_signal_events(
+            [signal],
+            source_system="clan_awareness",
+            source_detector="detect_inactivity",
+            conn=conn,
+        )
+
+        assert len(first) == 1
+        assert len(second) == 1
+        assert first[0]["event_id"] == second[0]["event_id"]
+        assert signal["event_key"] == first[0]["event_key"]
+        assert signal["event_id"] == first[0]["event_id"]
+
+        count = conn.execute("SELECT COUNT(*) AS count FROM game_event_stream").fetchone()["count"]
+        assert count == 1
+
+        event = db.list_recent_events(scope="leadership", conn=conn)[0]
+        assert event["event_type"] == "inactive_members"
+        assert event["source_system"] == "clan_awareness"
+        assert event["source_detector"] == "detect_inactivity"
+        assert event["scope"] == "leadership"
+        assert event["subject_type"] == "member"
+        assert event["subject_key"] == "#UGQPVQ9U9"
+        assert event["payload_json"]["members"][0]["name"] == "xian"
+
+        assert db.list_recent_events(scope="public", conn=conn) == []
+    finally:
+        conn.close()
+
+
+def test_event_stream_query_windows_and_subject_lookup():
+    conn = db.get_connection(":memory:")
+    try:
+        db.record_game_event(
+            event_type="member_join",
+            source_system="test",
+            source_signal_key="member_join:#AAA:recent",
+            observed_at="2026-06-16T12:00:00",
+            scope="public",
+            subject_type="member",
+            subject_key="#AAA",
+            payload={"name": "Recent"},
+            conn=conn,
+        )
+        db.record_game_event(
+            event_type="war_battle_rank_change",
+            source_system="test",
+            source_signal_key="war_rank:s1:w2",
+            observed_at="2026-05-20T12:00:00",
+            scope="public",
+            subject_type="war",
+            subject_key="season:1:week:2",
+            season_id="1",
+            war_week="2",
+            payload={"rank": 2},
+            conn=conn,
+        )
+        db.record_game_event(
+            event_type="promotion_review",
+            source_system="test",
+            source_signal_key="promotion:#AAA:old",
+            observed_at="2026-04-10T12:00:00",
+            scope="leadership",
+            subject_type="member",
+            subject_key="#AAA",
+            payload={"name": "Old"},
+            conn=conn,
+        )
+
+        subject_events = db.list_subject_events("member", "#AAA", days=90, conn=conn)
+        assert [event["event_type"] for event in subject_events] == [
+            "member_join",
+            "promotion_review",
+        ]
+
+        summary = db.summarize_events_by_window(
+            windows=(7, 28, 56, 90),
+            now="2026-06-19T12:00:00",
+            conn=conn,
+        )
+        assert summary["7d"]["total"] == 1
+        assert summary["28d"]["total"] == 1
+        assert summary["56d"]["total"] == 2
+        assert summary["90d"]["total"] == 3
+        assert summary["90d"]["by_scope"] == {"leadership": 1, "public": 2}
+        assert summary["56d"]["by_type"]["war_battle_rank_change"] == 1
     finally:
         conn.close()
 

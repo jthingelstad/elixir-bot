@@ -1992,7 +1992,54 @@ def _migration_45(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45]
+def _migration_46(conn: sqlite3.Connection) -> None:
+    """Add shadow-mode game event stream for normalized signal observations."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS game_event_stream (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_key TEXT NOT NULL UNIQUE,
+            event_type TEXT NOT NULL,
+            source_system TEXT NOT NULL,
+            source_detector TEXT,
+            source_signal_key TEXT,
+            source_signal_type TEXT,
+            observed_at TEXT NOT NULL,
+            occurred_at TEXT,
+            scope TEXT NOT NULL DEFAULT 'public',
+            subject_type TEXT,
+            subject_key TEXT,
+            season_id TEXT,
+            war_week TEXT,
+            payload_json TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_event_stream_observed "
+        "ON game_event_stream(observed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_event_stream_type_observed "
+        "ON game_event_stream(event_type, observed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_event_stream_subject_observed "
+        "ON game_event_stream(subject_type, subject_key, observed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_event_stream_war_observed "
+        "ON game_event_stream(season_id, war_week, observed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_event_stream_scope_observed "
+        "ON game_event_stream(scope, observed_at DESC)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

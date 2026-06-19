@@ -123,7 +123,13 @@ async def _player_intel_refresh():
 
     progression_delivery_failures = 0
     for signal_batch in _progression_signal_batches(progression_signals):
-        if not await _deliver_signal_group(signal_batch, clan, war):
+        if not await _deliver_signal_group(
+            signal_batch,
+            clan,
+            war,
+            source_system="player_intel",
+            source_detector="player_progression",
+        ):
             progression_delivery_failures += 1
             log.warning(
                 "player_intel_refresh progression batch delivery failed size=%d",
