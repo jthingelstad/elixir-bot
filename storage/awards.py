@@ -440,11 +440,35 @@ def get_season_donation_leaderboard(
     season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
     if season_id is None:
         return []
+    rows = _season_donation_rows(conn, season_id, limit=limit)
+    return [
+        {
+            "tag": r["tag"],
+            "name": r["name"],
+            "member_id": r["member_id"],
+            "total_donations": r["total_donations"],
+            "rank": i + 1,
+        }
+        for i, r in enumerate(rows)
+    ]
+
+
+def _season_donation_rows(
+    conn: sqlite3.Connection,
+    season_id: int,
+    *,
+    limit: Optional[int] = None,
+) -> list[sqlite3.Row]:
     start, end = _season_metric_date_bounds(conn, season_id)
     if not start or not end:
         return []
-    rows = conn.execute(
-        """
+    params: list = [start, end]
+    limit_clause = ""
+    if limit is not None:
+        limit_clause = "LIMIT ?"
+        params.append(int(limit))
+    return conn.execute(
+        f"""
         WITH weekly_peaks AS (
             SELECT d.member_id,
                    strftime('%Y-%W', d.metric_date) AS iso_week,
@@ -462,21 +486,11 @@ def get_season_donation_leaderboard(
         WHERE m.status = 'active'
         GROUP BY wp.member_id
         HAVING total_donations > 0
-        ORDER BY total_donations DESC
-        LIMIT ?
+        ORDER BY total_donations DESC, m.current_name COLLATE NOCASE
+        {limit_clause}
         """,
-        (start, end, limit),
+        tuple(params),
     ).fetchall()
-    return [
-        {
-            "tag": r["tag"],
-            "name": r["name"],
-            "member_id": r["member_id"],
-            "total_donations": r["total_donations"],
-            "rank": i + 1,
-        }
-        for i, r in enumerate(rows)
-    ]
 
 
 @managed_connection

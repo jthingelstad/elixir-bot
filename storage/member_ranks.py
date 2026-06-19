@@ -139,31 +139,8 @@ def _populate_donation_rank_season(conn, ranks, season_id):
     """
     if season_id is None:
         return
-    from storage.awards import _season_metric_date_bounds
-    start, end = _season_metric_date_bounds(conn, season_id)
-    if not start or not end:
-        return
-    rows = conn.execute(
-        """
-        WITH weekly_peaks AS (
-            SELECT d.member_id,
-                   strftime('%Y-%W', d.metric_date) AS iso_week,
-                   MAX(COALESCE(d.donations_week, 0)) AS week_peak
-            FROM member_daily_metrics d
-            WHERE d.metric_date BETWEEN ? AND ?
-            GROUP BY d.member_id, iso_week
-        )
-        SELECT wp.member_id, SUM(wp.week_peak) AS total_donations,
-               m.current_name
-        FROM weekly_peaks wp
-        JOIN members m ON m.member_id = wp.member_id
-        WHERE m.status = 'active'
-        GROUP BY wp.member_id
-        HAVING total_donations > 0
-        ORDER BY total_donations DESC, m.current_name COLLATE NOCASE
-        """,
-        (start, end),
-    ).fetchall()
+    from storage.awards import _season_donation_rows
+    rows = _season_donation_rows(conn, season_id)
     for i, row in enumerate(rows):
         if row["member_id"] in ranks:
             ranks[row["member_id"]]["donation_rank_season"] = i + 1
