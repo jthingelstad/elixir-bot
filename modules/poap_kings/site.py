@@ -26,6 +26,7 @@ import time
 
 import db
 import cr_api
+from storage.game_modes import special_event_context_for_badge
 
 log = logging.getLogger("poap_kings.site")
 
@@ -100,6 +101,8 @@ def _badge_category(name: str | None) -> str:
         return "mode"
     if badge_name in {"EmoteCollection", "BannerCollection", "CollectionLevel", "ClanDonations"}:
         return "collection"
+    if special_event_context_for_badge(badge_name):
+        return "event"
     if badge_name in {"YearsPlayed", "BattleWins", "ClanWarsVeteran", "ClanWarWins", "LadderTop1000"}:
         return "career"
     return "general"
