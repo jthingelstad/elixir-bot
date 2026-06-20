@@ -1,7 +1,12 @@
 import json
+from datetime import datetime, timezone
 
 import db
 from storage.game_modes import classify_battle_mode
+
+
+def _battle_ts(time_part: str) -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d") + f"T{time_part}.000Z"
 
 
 def _battle(ts, *, battle_type, game_mode_id, game_mode_name, team_size=1, event_tag=None, tournament_tag=None):
@@ -54,11 +59,11 @@ def test_battle_rollups_split_new_mode_groups():
         db.snapshot_player_battlelog(
             "#ABC123",
             [
-                _battle("20260619T100000.000Z", battle_type="PvP", game_mode_id=72000006, game_mode_name="Ladder"),
-                _battle("20260619T100100.000Z", battle_type="pathOfLegend", game_mode_id=72000464, game_mode_name="Ranked1v1_NewArena2"),
-                _battle("20260619T100200.000Z", battle_type="trail", game_mode_id=72000014, game_mode_name="TeamVsTeam", team_size=2, event_tag="#E"),
-                _battle("20260619T100300.000Z", battle_type="tournament", game_mode_id=72000194, game_mode_name="Draft_Competitive", tournament_tag="#T"),
-                _battle("20260619T100400.000Z", battle_type="friendly", game_mode_id=72000007, game_mode_name="Friendly"),
+                _battle(_battle_ts("100000"), battle_type="PvP", game_mode_id=72000006, game_mode_name="Ladder"),
+                _battle(_battle_ts("100100"), battle_type="pathOfLegend", game_mode_id=72000464, game_mode_name="Ranked1v1_NewArena2"),
+                _battle(_battle_ts("100200"), battle_type="trail", game_mode_id=72000014, game_mode_name="TeamVsTeam", team_size=2, event_tag="#E"),
+                _battle(_battle_ts("100300"), battle_type="tournament", game_mode_id=72000194, game_mode_name="Draft_Competitive", tournament_tag="#T"),
+                _battle(_battle_ts("100400"), battle_type="friendly", game_mode_id=72000007, game_mode_name="Friendly"),
             ],
             conn=conn,
         )
@@ -89,7 +94,7 @@ def test_ranked_and_clan_game_mode_query_helpers():
         )
         db.snapshot_player_battlelog(
             "#ABC123",
-            [_battle("20260619T100100.000Z", battle_type="pathOfLegend", game_mode_id=72000464, game_mode_name="Ranked1v1_NewArena2")],
+            [_battle(_battle_ts("100100"), battle_type="pathOfLegend", game_mode_id=72000464, game_mode_name="Ranked1v1_NewArena2")],
             conn=conn,
         )
         ranked = db.get_member_ranked_status("#ABC123", days=1, conn=conn)

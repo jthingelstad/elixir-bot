@@ -1305,6 +1305,30 @@ def _arena_relay_uses_leader_action_policy(intent: str | None) -> bool:
     }
 
 
+def _provisional_leader_action_policy_shape(signal_types: set[str]) -> tuple[str, str | None]:
+    """Pre-generation action type/objective for budget and cooldown checks."""
+    if signal_types == {"discord_invite_reminder"}:
+        return "discord_invite_relay", None
+    if signal_types & CELEBRATION_RELAY_SIGNAL_TYPES:
+        return "celebration_relay", None
+    if signal_types & {"war_attacks_complete"}:
+        return "in_game_relay", "war_recognition"
+    if signal_types & {"war_week_complete", "war_completed", "war_champ_standings", "war_season_complete"}:
+        return "in_game_relay", "war_recap"
+    if signal_types & {
+        "war_practice_phase_active",
+        "war_practice_day_started",
+        "war_final_practice_day",
+        "war_battle_phase_active",
+        "war_battle_day_started",
+        "war_battle_day_live_update",
+        "war_battle_day_final_hours",
+        "war_final_battle_day",
+    }:
+        return "in_game_relay", "war_participation"
+    return "in_game_relay", None
+
+
 def _facade():
     from runtime.jobs import _signals as facade
 
@@ -1569,15 +1593,13 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
             if _arena_relay_uses_leader_action_policy(outcome.get("intent")):
                 signal_types = {signal.get("type") for signal in delivery_signals or []}
                 critical = bool(signal_types & CRITICAL_LEADER_ACTION_SIGNAL_TYPES)
-                # Provisional action type for the earned-frequency check —
-                # mirrors how _arena_relay_copy will classify these signals.
-                if arena_types == {"discord_invite_reminder"}:
-                    provisional_type = "discord_invite_relay"
-                elif signal_types & CELEBRATION_RELAY_SIGNAL_TYPES:
-                    provisional_type = "celebration_relay"
-                else:
-                    provisional_type = "in_game_relay"
-                allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=critical, action_type=provisional_type)
+                provisional_type, provisional_objective = _provisional_leader_action_policy_shape(signal_types)
+                allowed, reason = await asyncio.to_thread(
+                    can_post_leader_action,
+                    critical=critical,
+                    action_type=provisional_type,
+                    objective=provisional_objective,
+                )
                 if not allowed:
                     target_name, target_tag = _leader_action_skip_target(delivery_signals)
                     await post_leader_action_skip(

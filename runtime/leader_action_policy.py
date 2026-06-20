@@ -34,6 +34,12 @@ LEADER_ACTION_BACKLOG_WINDOW_DAYS = int(os.getenv("LEADER_ACTION_BACKLOG_WINDOW_
 LEADER_ACTION_DECLINE_RATE_THRESHOLD = float(os.getenv("LEADER_ACTION_DECLINE_RATE_THRESHOLD", "0.6"))
 LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE = int(os.getenv("LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE", "5"))
 LEADER_ACTION_THROTTLED_COOLDOWN_HOURS = int(os.getenv("LEADER_ACTION_THROTTLED_COOLDOWN_HOURS", "72"))
+# In-game relay feedback is often objective-specific: "we already posted the
+# battle-day start" should suppress another participation nudge, but not a
+# later final-hours callout or a different welcome/recruiting card.
+LEADER_ACTION_IN_GAME_RELAY_OBJECTIVE_COOLDOWN_HOURS = int(
+    os.getenv("LEADER_ACTION_IN_GAME_RELAY_OBJECTIVE_COOLDOWN_HOURS", "18")
+)
 
 
 def count_open_leader_actions(*, conn=None, now: datetime | None = None) -> int:
@@ -59,14 +65,34 @@ def count_open_leader_actions(*, conn=None, now: datetime | None = None) -> int:
             conn.close()
 
 
-def can_post_leader_action(*, critical: bool = False, action_type: str | None = None, conn=None, now: datetime | None = None) -> tuple[bool, str | None]:
+def can_post_leader_action(
+    *,
+    critical: bool = False,
+    action_type: str | None = None,
+    objective: str | None = None,
+    conn=None,
+    now: datetime | None = None,
+) -> tuple[bool, str | None]:
     if critical:
         return True, None
     backlog = count_open_leader_actions(conn=conn, now=now)
     if backlog >= LEADER_ACTION_OPEN_CARD_CAP:
         return False, f"open_card_backlog:{backlog}/{LEADER_ACTION_OPEN_CARD_CAP}"
-    if action_type:
-        stats = db.leader_action_decision_stats(action_type=action_type, conn=conn)
+    clean_type = (action_type or "").strip()
+    clean_objective = (objective or "").strip()
+    if clean_type == "in_game_relay" and clean_objective and db.has_recent_leader_action(
+        action_type=clean_type,
+        objective=clean_objective,
+        within_hours=LEADER_ACTION_IN_GAME_RELAY_OBJECTIVE_COOLDOWN_HOURS,
+        conn=conn,
+    ):
+        return (
+            False,
+            f"objective_cooldown:{clean_type}:{clean_objective}:"
+            f"{LEADER_ACTION_IN_GAME_RELAY_OBJECTIVE_COOLDOWN_HOURS}h",
+        )
+    if clean_type:
+        stats = db.leader_action_decision_stats(action_type=clean_type, conn=conn)
         decided = int(stats.get("decided") or 0)
         rate = stats.get("decline_rate")
         if (
@@ -74,18 +100,19 @@ def can_post_leader_action(*, critical: bool = False, action_type: str | None = 
             and rate is not None
             and rate >= LEADER_ACTION_DECLINE_RATE_THRESHOLD
             and db.has_recent_leader_action(
-                action_type=action_type,
+                action_type=clean_type,
                 within_hours=LEADER_ACTION_THROTTLED_COOLDOWN_HOURS,
                 conn=conn,
             )
         ):
-            return False, f"earned_frequency:{action_type}:decline_rate={rate:.2f}"
+            return False, f"earned_frequency:{clean_type}:decline_rate={rate:.2f}"
     return True, None
 
 
 __all__ = [
     "LEADER_ACTION_BACKLOG_WINDOW_DAYS",
     "LEADER_ACTION_DECLINE_RATE_THRESHOLD",
+    "LEADER_ACTION_IN_GAME_RELAY_OBJECTIVE_COOLDOWN_HOURS",
     "LEADER_ACTION_MIN_DECIDED_FOR_THROTTLE",
     "LEADER_ACTION_OPEN_CARD_CAP",
     "LEADER_ACTION_THROTTLED_COOLDOWN_HOURS",
