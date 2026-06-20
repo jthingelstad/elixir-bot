@@ -2325,6 +2325,7 @@ async def _deliver_awareness_post_plan(
     posts = (plan or {}).get("posts") or []
     delivered = 0
     rejected = 0
+    invalid_cover_rejected = 0
     covered: set[str] = set()
     attempted: set[str] = set()
     if not posts:
@@ -2359,6 +2360,8 @@ async def _deliver_awareness_post_plan(
             covered |= post_keys
         else:
             rejected += 1
+            if signals and not post_keys:
+                invalid_cover_rejected += 1
 
     if covered:
         covered_signals = [
@@ -2371,6 +2374,7 @@ async def _deliver_awareness_post_plan(
     return {
         "delivered": delivered,
         "rejected": rejected,
+        "invalid_cover_rejected": invalid_cover_rejected,
         "covered_signal_keys": covered,
         "attempted_signal_keys": attempted,
     }
@@ -2461,7 +2465,9 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         if signal_source_key(signal) in hard_required_keys
         and signal_source_key(signal) not in covered_keys
     ]
-    all_ok = report["rejected"] == 0
+    invalid_cover_rejected = int(report.get("invalid_cover_rejected") or 0)
+    actionable_rejected = max(0, int(report["rejected"]) - invalid_cover_rejected)
+    all_ok = actionable_rejected == 0
     if uncovered:
         log.warning(
             "awareness loop: %d hard-post-floor signal(s) uncovered by post plan",
@@ -2486,6 +2492,16 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         and signal_source_key(signal) not in covered_keys
         and signal_source_key(signal) not in hard_required_keys
     }
+    if invalid_cover_rejected and not covered_keys:
+        # The agent tried to post, but the post covered no input signal. With
+        # no successful sibling post, keep soft signals retryable instead of
+        # burning them as intentionally skipped.
+        post_failed_keys.update(
+            signal_source_key(signal)
+            for signal in (signals or [])
+            if signal_source_key(signal) not in hard_required_keys
+        )
+        all_ok = False
 
     considered_skipped = [
         signal for signal in (signals or [])

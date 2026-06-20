@@ -648,6 +648,58 @@ def test_deliver_signal_group_via_awareness_marks_rejected_posts_unhealthy():
     assert mock_record.call_args.kwargs["signal_outcomes"][0]["status"] == "post_failed"
 
 
+def test_deliver_signal_group_via_awareness_ignores_invalid_extra_post_when_signal_covered():
+    signal = {
+        "type": "battle_hot_streak",
+        "signal_key": "hot:#ABC",
+        "tag": "#ABC",
+    }
+    plan = {
+        "posts": [
+            {
+                "channel": "river-race",
+                "leads_with": "war_update",
+                "content": "unrelated war status",
+                "covers_signal_keys": [],
+            },
+            {
+                "channel": "member-highlights",
+                "leads_with": "member_highlight",
+                "content": "covered milestone",
+                "covers_signal_keys": ["hot:#ABC"],
+            },
+        ],
+    }
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    async def fake_deliver(post, signals, *, intent=None):
+        return bool(post.get("covers_signal_keys"))
+
+    with (
+        patch("runtime.jobs._signals.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.get_members_on_hot_streak", return_value=[]),
+        patch("runtime.situation.db.decision_case_snapshot", return_value={"due": [], "open": []}),
+        patch("runtime.jobs._signals.elixir_agent.run_awareness_tick", return_value=plan),
+        patch("runtime.jobs._signals._deliver_awareness_post", new=AsyncMock(side_effect=fake_deliver)),
+        patch("runtime.jobs._signals._deliver_arena_relay_sidecars", new=AsyncMock(return_value=0)),
+        patch("runtime.jobs._signals.db.record_awareness_tick") as mock_record,
+        patch("runtime.jobs._signals._mark_signal_group_completed", new=AsyncMock()) as mock_mark,
+    ):
+        ok = asyncio.run(
+            signals_module._deliver_signal_group_via_awareness([signal], {}, {}, workflow="player_intel")
+        )
+
+    assert ok is True
+    mock_mark.assert_awaited_once_with([signal])
+    assert mock_record.call_args.kwargs["all_ok"] is True
+    assert mock_record.call_args.kwargs["posts_rejected"] == 1
+    assert mock_record.call_args.kwargs["signal_outcomes"][0]["status"] == "covered"
+
+
 def test_deliver_signal_group_via_awareness_records_event_before_completion_prefilter():
     """signal_log suppresses repeat delivery, not observation capture."""
     signal = {
