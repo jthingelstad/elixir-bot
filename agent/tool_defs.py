@@ -463,6 +463,7 @@ TOOLS = [
                         "operational_summary",
                         "event_summary",
                         "recent_events",
+                        "game_modes",
                         "projects",
                         "project_detail",
                         "decision_cases",

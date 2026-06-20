@@ -871,6 +871,12 @@ def _execute_get_elixir_state(arguments, workflow=None):
             ),
         }
 
+    if aspect == "game_modes":
+        return db.summarize_battle_modes(
+            windows=_state_windows(arguments),
+            top_members=int(arguments.get("top_members") or 5),
+        )
+
     if aspect == "event_rollups":
         return _execute_get_event_rollups(arguments, workflow=workflow)
 
@@ -925,6 +931,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
         return {
             "event_windows": db.summarize_events_by_window(windows=_ELIXIR_STATE_WINDOWS, scope=None),
             "recent_events": db.list_recent_events(days=7, limit=10),
+            "game_modes": db.summarize_battle_modes(windows=(7,)),
             "war_season": db.get_war_season_snapshot(),
             "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
             "recent_intents": db.list_recent_communication_intents(limit=limit),

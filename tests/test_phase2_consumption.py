@@ -100,3 +100,20 @@ def test_situation_blocks_are_safe_on_empty_db():
     import runtime.situation as sit
     assert isinstance(sit._mode_pulse_block(), dict)
     assert sit._season_window_block() is None  # no war data in a fresh DB
+
+
+def test_get_elixir_state_game_modes_aspect_is_pullable():
+    from agent.tool_exec import _execute_get_elixir_state
+
+    conn = db.get_connection()
+    _seed_member(conn, "#GM1", "Climber")
+    for i, outcome in enumerate(["W", "W", "L", "W"]):
+        _battle(conn, "#GM1", "ranked", "pathOfLegend", "Ranked1v1_NewArena2",
+                f"20260620T12{i:02d}00.000Z", outcome, f"#X{i}")
+
+    # An interactive call can now pull per-mode clan activity on demand.
+    result = _execute_get_elixir_state({"aspect": "game_modes"})
+    ranked = result["7d"]["modes"]["ranked"]
+    assert ranked["battles"] == 4
+    assert ranked["label"] == "Ranked"
+    assert ranked["top_members"][0]["name"] == "Climber"
