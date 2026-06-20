@@ -7,6 +7,7 @@ import logging
 
 import db
 from runtime.signal_lanes import BATTLE_MODE_SIGNAL_TYPES, CLAN_RECORD_SIGNAL_TYPES
+from storage.game_modes import special_event_context_for_badge
 
 log = logging.getLogger("elixir")
 
@@ -167,6 +168,39 @@ def _build_player_insight_context(tag):
     return lines
 
 
+def _build_special_event_signal_context(signals):
+    lines = []
+    seen = set()
+    for signal in signals or []:
+        context = special_event_context_for_badge(signal.get("badge_name"))
+        if not context:
+            continue
+        key = (signal.get("tag"), signal.get("badge_name"))
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"current_event: {context['event_name']}")
+        lines.append(f"event_badge: {context['badge_label']} ({signal.get('badge_name')})")
+        lines.append(f"related_event_mode: {context['game_mode_name']}")
+        tag = signal.get("tag")
+        if tag:
+            try:
+                activity = db.get_member_special_event_activity(
+                    tag,
+                    days=14,
+                    game_mode_id=context.get("game_mode_id"),
+                    game_mode_name=context.get("game_mode_name"),
+                )
+            except Exception:
+                log.warning("get_member_special_event_activity failed for %s", tag, exc_info=True)
+                activity = None
+            total = int((activity or {}).get("total_battles") or 0)
+            if total:
+                lines.append(f"member_event_activity_14d: {total} {context['game_mode_name']} battles")
+        lines.append(f"recognition_guardrail: {context['recognition_guidance']}")
+    return lines
+
+
 def _build_outcome_context(outcome, signals, clan, war):
     channel_key = outcome["target_channel_key"]
     first = (signals or [{}])[0]
@@ -212,6 +246,9 @@ def _build_outcome_context(outcome, signals, clan, war):
             ])
         else:
             lines.extend(["", "Focus on the player's achievement and why it is worth celebrating."])
+        event_lines = _build_special_event_signal_context(signals)
+        if event_lines:
+            lines.extend(["", "=== CURRENT EVENT CONTEXT (ground the highlight here) ==="] + event_lines)
         tag = first.get("tag")
         if tag:
             insight_lines = _build_player_insight_context(tag)

@@ -27,7 +27,13 @@ from db import (
     managed_connection,
 )
 from storage._enrichment import _member_reference_fields
-from storage.game_modes import classify_battle_mode, mode_group_label
+from storage.game_modes import (
+    classify_battle_mode,
+    mode_group_label,
+    special_event_badge_names,
+    special_event_context_for_badge,
+    special_event_context_for_game_mode,
+)
 
 CARD_UPGRADE_SIGNAL_MIN_LEVEL = 16
 MASTERY_BADGE_SIGNAL_MIN_LEVEL = 5
@@ -68,6 +74,8 @@ def _badge_category(name: str | None) -> str:
         return "collection"
     if badge_name.startswith("SeasonalBadge_") or badge_name.startswith("MergeTacticsBadge_"):
         return "seasonal"
+    if special_event_context_for_badge(badge_name):
+        return "event"
     if badge_name.startswith("Crl") or badge_name in {"EasterEgg"}:
         return "event"
     if badge_name in {"YearsPlayed", "BattleWins", "ClanWarWins", "ClanWarsVeteran", "LadderTop1000"}:
@@ -109,6 +117,15 @@ def _badge_signal_fields(badge: dict | None) -> dict:
     card_name = _badge_card_name(name)
     if card_name:
         fields["badge_card_name"] = card_name
+    event_context = special_event_context_for_badge(name)
+    if event_context:
+        fields.update({
+            "event_name": event_context["event_name"],
+            "event_mode_group": event_context["mode_group"],
+            "event_game_mode_id": event_context["game_mode_id"],
+            "event_game_mode_name": event_context["game_mode_name"],
+            "event_recognition_guidance": event_context["recognition_guidance"],
+        })
     return fields
 
 
@@ -1768,6 +1785,72 @@ def get_member_mode_activity(tag: str, days: int = 30, mode_group: Optional[str]
 
 
 @managed_connection
+def get_member_special_event_activity(
+    tag: str,
+    days: int = 14,
+    *,
+    game_mode_id=None,
+    game_mode_name: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    member_tag = _canon_tag(tag)
+    member_row = conn.execute(
+        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        (member_tag,),
+    ).fetchone()
+    if not member_row:
+        return None
+    days = max(1, int(days or 14))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
+    where = ["bf.member_id = ?", "bf.is_special_event = 1", "bf.battle_time >= ?"]
+    params: list = [member_row["member_id"], cutoff]
+    if game_mode_id is not None:
+        where.append("bf.game_mode_id = ?")
+        params.append(game_mode_id)
+    if game_mode_name:
+        where.append("bf.game_mode_name = ?")
+        params.append(game_mode_name)
+    rows = conn.execute(
+        "SELECT bf.game_mode_id, bf.game_mode_name, COUNT(*) AS battles, "
+        "SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
+        "SUM(CASE WHEN bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
+        "MAX(bf.battle_time) AS latest_battle "
+        "FROM member_battle_facts bf "
+        f"WHERE {' AND '.join(where)} "
+        "GROUP BY bf.game_mode_id, bf.game_mode_name "
+        "ORDER BY battles DESC, latest_battle DESC",
+        tuple(params),
+    ).fetchall()
+    modes = []
+    total_battles = 0
+    for row in rows:
+        item = dict(row)
+        item["battles"] = int(item.get("battles") or 0)
+        item["wins"] = int(item.get("wins") or 0)
+        item["losses"] = int(item.get("losses") or 0)
+        total_battles += item["battles"]
+        context = special_event_context_for_game_mode(
+            game_mode_id=item.get("game_mode_id"),
+            game_mode_name=item.get("game_mode_name"),
+        )
+        if context:
+            item.update({
+                "event_name": context["event_name"],
+                "related_badge_name": context["badge_name"],
+                "related_badge_label": context["badge_label"],
+            })
+        item["win_rate"] = round(item["wins"] / item["battles"], 4) if item["battles"] else None
+        modes.append(item)
+    return {
+        "member_tag": member_tag,
+        "member_name": member_row["current_name"],
+        "window_days": days,
+        "total_battles": total_battles,
+        "by_game_mode": modes,
+    }
+
+
+@managed_connection
 def list_clan_daily_battle_rollups(days: int = 30, clan_tag: Optional[str] = None, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()
     where = ["battle_date >= ?"]
@@ -1785,6 +1868,97 @@ def list_clan_daily_battle_rollups(days: int = 30, clan_tag: Optional[str] = Non
         tuple(params),
     ).fetchall()
     return _rowdicts(rows)
+
+
+def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
+    badge_names = special_event_badge_names()
+    if not badge_names:
+        return {}
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
+    placeholders = ",".join("?" for _ in badge_names)
+    rows = conn.execute(
+        "SELECT subject_key AS tag, json_extract(payload_json, '$.badge_name') AS badge_name, "
+        "json_extract(payload_json, '$.badge_label') AS badge_label, COUNT(*) AS badge_events, "
+        "MAX(observed_at) AS latest_badge_event "
+        "FROM game_event_stream "
+        "WHERE event_type IN ('badge_earned', 'badge_level_milestone') "
+        f"AND json_extract(payload_json, '$.badge_name') IN ({placeholders}) "
+        "AND observed_at >= ? AND subject_key IS NOT NULL "
+        "GROUP BY subject_key, badge_name, badge_label "
+        "ORDER BY latest_badge_event DESC",
+        (*badge_names, cutoff),
+    ).fetchall()
+    completions_by_tag: dict[str, list[dict]] = {}
+    for row in rows:
+        context = special_event_context_for_badge(row["badge_name"]) or {}
+        item = {
+            "tag": row["tag"],
+            "badge_name": row["badge_name"],
+            "badge_label": row["badge_label"] or context.get("badge_label"),
+            "badge_events": int(row["badge_events"] or 0),
+            "latest_badge_event": row["latest_badge_event"],
+        }
+        if context:
+            item.update({
+                "event_name": context["event_name"],
+                "event_game_mode_id": context["game_mode_id"],
+                "event_game_mode_name": context["game_mode_name"],
+            })
+        completions_by_tag.setdefault(row["tag"], []).append(item)
+    return completions_by_tag
+
+
+def _special_event_participation(
+    days: int,
+    limit: int,
+    badge_completions_by_tag: dict[str, list[dict]],
+    conn,
+) -> list[dict]:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime("%Y%m%dT%H%M%S.000Z")
+    rows = conn.execute(
+        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
+        "bf.game_mode_id, bf.game_mode_name, COUNT(*) AS event_battles, "
+        "SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
+        "SUM(CASE WHEN bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
+        "MAX(bf.battle_time) AS latest_event_battle "
+        "FROM member_battle_facts bf "
+        "JOIN members m ON m.member_id = bf.member_id "
+        "WHERE bf.is_special_event = 1 AND bf.battle_time >= ? "
+        "GROUP BY bf.member_id, bf.game_mode_id, bf.game_mode_name "
+        "ORDER BY event_battles DESC, latest_event_battle DESC, m.current_name COLLATE NOCASE "
+        "LIMIT ?",
+        (cutoff, limit),
+    ).fetchall()
+    participation = []
+    for row in rows:
+        item = dict(row)
+        battles = int(item.get("event_battles") or 0)
+        wins = int(item.get("wins") or 0)
+        item["event_battles"] = battles
+        item["wins"] = wins
+        item["losses"] = int(item.get("losses") or 0)
+        item["win_rate"] = round(wins / battles, 4) if battles else None
+        context = special_event_context_for_game_mode(
+            game_mode_id=item.get("game_mode_id"),
+            game_mode_name=item.get("game_mode_name"),
+        )
+        if context:
+            item.update({
+                "event_name": context["event_name"],
+                "related_badge_name": context["badge_name"],
+                "related_badge_label": context["badge_label"],
+            })
+        completions = badge_completions_by_tag.get(item["tag"], [])
+        if context:
+            completions = [
+                completion for completion in completions
+                if completion.get("badge_name") == context.get("badge_name")
+            ]
+        if completions:
+            item["badge_completions"] = completions
+            item["has_current_event_completion"] = True
+        participation.append(_member_reference_fields(conn, item.pop("member_id"), item))
+    return participation
 
 
 @managed_connection
@@ -1841,6 +2015,16 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
             "draws": row["draws"] or 0,
             "trophy_delta": row["trophy_delta"] or 0,
         })
+        event_context = special_event_context_for_game_mode(
+            game_mode_id=row["game_mode_id"],
+            game_mode_name=row["game_mode_name"],
+        )
+        if event_context:
+            by_game_mode[-1].update({
+                "event_name": event_context["event_name"],
+                "related_badge_name": event_context["badge_name"],
+                "related_badge_label": event_context["badge_label"],
+            })
 
     for bucket in list(by_group.values()) + by_game_mode:
         bucket["win_rate"] = round(bucket["wins"] / bucket["battles"], 4) if bucket["battles"] else None
@@ -1937,6 +2121,14 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
 
     from storage.game_mode_contexts import list_game_mode_contexts
 
+    event_badge_completions = _special_event_badge_completions(days, conn)
+    event_participation = _special_event_participation(
+        days,
+        limit,
+        event_badge_completions,
+        conn,
+    )
+
     return {
         "window_days": days,
         "mode_group": mode_group,
@@ -1945,6 +2137,12 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
         "ranked_activity": ranked_activity,
         "ranked_profiles": ranked_profiles[:limit],
         "side_mode_progress": sorted(progress_keys.values(), key=lambda item: (-item["members"], item["progress_key"]))[:limit],
+        "event_participation": event_participation,
+        "event_badge_completions": [
+            completion
+            for completions in event_badge_completions.values()
+            for completion in completions
+        ][:limit],
         "active_events": list_game_mode_contexts("event", limit=limit, conn=conn),
         "leaderboards": list_game_mode_contexts("leaderboard", limit=limit, conn=conn),
     }

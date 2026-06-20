@@ -127,3 +127,72 @@ def test_game_mode_contexts_capture_events_and_leaderboards():
     assert events[0]["display_name"] == "Princess Gambit"
     assert boards[0]["display_name"] == "Merge Tactics"
     assert json.dumps(events + boards)
+
+
+def test_anarchy_event_participation_connects_battles_and_badge_completion():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members([{"tag": "#ABC123", "name": "Alpha", "role": "member"}], conn=conn)
+        db.snapshot_player_battlelog(
+            "#ABC123",
+            [
+                _battle(_battle_ts("100100"), battle_type="trail", game_mode_id=72000501, game_mode_name="All_Random_Princess", event_tag="#PRINCESS"),
+                _battle(_battle_ts("100200"), battle_type="trail", game_mode_id=72000501, game_mode_name="All_Random_Princess", event_tag="#PRINCESS"),
+            ],
+            conn=conn,
+        )
+        db.record_signal_events(
+            [{
+                "type": "badge_earned",
+                "tag": "#ABC123",
+                "name": "Alpha",
+                "badge_name": "AnarchyLeagueCompletion",
+                "badge_label": "Anarchy League Completion",
+                "badge_category": "event",
+            }],
+            source_system="test",
+            source_detector="player_profile",
+            conn=conn,
+        )
+        summary = db.get_clan_game_mode_summary(days=1, mode_group="special_event", limit=5, conn=conn)
+    finally:
+        conn.close()
+
+    assert summary["by_game_mode"][0]["game_mode_name"] == "All_Random_Princess"
+    assert summary["by_game_mode"][0]["event_name"] == "Princess / Anarchy League"
+    assert summary["event_participation"][0]["tag"] == "#ABC123"
+    assert summary["event_participation"][0]["event_battles"] == 2
+    assert summary["event_participation"][0]["event_name"] == "Princess / Anarchy League"
+    assert summary["event_participation"][0]["badge_completions"][0]["badge_name"] == "AnarchyLeagueCompletion"
+    assert summary["event_badge_completions"][0]["event_game_mode_name"] == "All_Random_Princess"
+
+
+def test_member_highlight_context_includes_anarchy_event_activity(monkeypatch):
+    from runtime.signals.context import _build_outcome_context
+
+    monkeypatch.setattr("runtime.signals.context._build_player_insight_context", lambda tag: [])
+    monkeypatch.setattr(
+        "runtime.signals.context.db.get_member_special_event_activity",
+        lambda *args, **kwargs: {
+            "total_battles": 37,
+            "by_game_mode": [{"game_mode_name": "All_Random_Princess", "battles": 37}],
+        },
+    )
+
+    context = _build_outcome_context(
+        {"target_channel_key": "member-highlights", "intent": "member_highlights"},
+        [{
+            "type": "badge_earned",
+            "tag": "#ABC123",
+            "name": "Alpha",
+            "badge_name": "AnarchyLeagueCompletion",
+            "badge_label": "Anarchy League Completion",
+        }],
+        clan={},
+        war={},
+    )
+
+    assert "CURRENT EVENT CONTEXT" in context
+    assert "current_event: Princess / Anarchy League" in context
+    assert "member_event_activity_14d: 37 All_Random_Princess battles" in context
+    assert "do not infer rank, reward, or strategy" in context

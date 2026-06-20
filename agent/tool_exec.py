@@ -736,6 +736,8 @@ def _execute_get_clan_game_modes(arguments):
             "aspect": aspect,
             "window_days": summary["window_days"],
             "event_activity": summary["by_game_mode"],
+            "event_participation": summary["event_participation"],
+            "event_badge_completions": summary["event_badge_completions"],
             "active_events": summary["active_events"],
             "mode_mix": summary["by_group"],
         }

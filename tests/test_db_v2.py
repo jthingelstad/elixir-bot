@@ -4433,6 +4433,46 @@ def test_snapshot_player_profile_detects_badge_and_achievement_milestones():
         conn.close()
 
 
+def test_snapshot_player_profile_ties_anarchy_badge_to_current_event():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members(
+            [{"tag": "#ABC123", "name": "King Levy", "role": "member"}],
+            conn=conn,
+        )
+        db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "badges": [],
+            },
+            conn=conn,
+        )
+        signals = db.snapshot_player_profile(
+            {
+                "tag": "#ABC123",
+                "name": "King Levy",
+                "currentDeck": [],
+                "cards": [],
+                "badges": [
+                    {"name": "AnarchyLeagueCompletion", "level": 1, "maxLevel": 10, "progress": 1, "target": 2},
+                ],
+            },
+            conn=conn,
+        )
+    finally:
+        conn.close()
+
+    event_badge = next(sig for sig in signals if sig["type"] == "badge_earned")
+    assert event_badge["badge_name"] == "AnarchyLeagueCompletion"
+    assert event_badge["badge_category"] == "event"
+    assert event_badge["badge_label"] == "Anarchy League Completion"
+    assert event_badge["event_name"] == "Princess / Anarchy League"
+    assert event_badge["event_game_mode_name"] == "All_Random_Princess"
+
+
 def test_snapshot_player_profile_ignores_badge_progress_without_tier_change():
     conn = db.get_connection(":memory:")
     try:

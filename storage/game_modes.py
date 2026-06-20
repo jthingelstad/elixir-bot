@@ -34,6 +34,20 @@ MODE_GROUP_LABELS = {
     "other": "Other",
 }
 
+SPECIAL_EVENT_BADGE_CONTEXTS = {
+    "AnarchyLeagueCompletion": {
+        "event_name": "Princess / Anarchy League",
+        "badge_label": "Anarchy League Completion",
+        "game_mode_id": 72000501,
+        "game_mode_name": "All_Random_Princess",
+        "mode_group": "special_event",
+        "recognition_guidance": (
+            "Treat this as current-event completion evidence tied to recent "
+            "All_Random_Princess battles; do not infer rank, reward, or strategy."
+        ),
+    },
+}
+
 RANKED_GAME_MODE_IDS = {72000450, 72000464}
 WAR_GAME_MODE_IDS = {72000266, 72000267, 72000268, 72000321}
 LADDER_GAME_MODE_IDS = {72000006, 72000060, 72000062, 72000070, 72000073, 72000261}
@@ -71,6 +85,34 @@ def _int_or_none(value) -> Optional[int]:
 def mode_group_label(mode_group: str | None) -> str:
     group = _lower(mode_group)
     return MODE_GROUP_LABELS.get(group, str(mode_group or "Other"))
+
+
+def special_event_badge_names() -> tuple[str, ...]:
+    return tuple(SPECIAL_EVENT_BADGE_CONTEXTS.keys())
+
+
+def special_event_context_for_badge(badge_name: str | None) -> dict | None:
+    context = SPECIAL_EVENT_BADGE_CONTEXTS.get(str(badge_name or "").strip())
+    return dict(context) if context else None
+
+
+def special_event_context_for_game_mode(
+    *,
+    game_mode_id=None,
+    game_mode_name: str | None = None,
+) -> dict | None:
+    mode_id = _int_or_none(game_mode_id)
+    mode_name = _lower(game_mode_name)
+    for badge_name, context in SPECIAL_EVENT_BADGE_CONTEXTS.items():
+        if mode_id is not None and mode_id == context.get("game_mode_id"):
+            item = dict(context)
+            item["badge_name"] = badge_name
+            return item
+        if mode_name and mode_name == _lower(context.get("game_mode_name")):
+            item = dict(context)
+            item["badge_name"] = badge_name
+            return item
+    return None
 
 
 def classify_battle_mode(
@@ -167,6 +209,7 @@ __all__ = [
     "MODE_GROUPS",
     "MODE_GROUP_LABELS",
     "RANKED_GAME_MODE_IDS",
+    "SPECIAL_EVENT_BADGE_CONTEXTS",
     "WAR_GAME_MODE_IDS",
     "LADDER_GAME_MODE_IDS",
     "TWO_V_TWO_GAME_MODE_IDS",
@@ -175,4 +218,7 @@ __all__ = [
     "classify_battle_mode",
     "classify_progress_key",
     "mode_group_label",
+    "special_event_badge_names",
+    "special_event_context_for_badge",
+    "special_event_context_for_game_mode",
 ]
