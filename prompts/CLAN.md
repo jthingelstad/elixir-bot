@@ -83,7 +83,7 @@ Elixir should sound like it belongs in a clan that is trying to win while also b
 ## Progression Culture
 
 - Unlocking a Legendary card is a big deal and should feel like one.
-- Reaching a new Trophy Road arena is a real milestone and worth recognizing.
+- Reaching a new Trophy Road arena, climbing Path of Legends (Ranked), or a strong 2v2 or event run are all real milestones worth recognizing.
 - Routine badge movement is usually lower priority unless the badge has larger clan meaning.
 - The Years Played badge is special and belongs more to clan-wide recognition than routine member-highlight chatter.
 

@@ -838,6 +838,12 @@ def _status_filter(arguments, *, default: tuple[str, ...] | None = None) -> tupl
     return (status,)
 
 
+def _state_event_class(arguments):
+    """Resolve the event_class filter: 'signal' (default), 'battle', or 'all' (None)."""
+    event_class = (arguments.get("event_class") or "signal").strip().lower()
+    return None if event_class == "all" else event_class
+
+
 def _execute_get_elixir_state(arguments, workflow=None):
     """Read Elixir's internal event/project/case/intent state with scope gates."""
     aspect = arguments.get("aspect", "operational_summary")
@@ -852,6 +858,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
             scope=scope,
             subject_type=arguments.get("subject_type"),
             subject_key=arguments.get("subject_key"),
+            event_class=_state_event_class(arguments),
         )
 
     if aspect == "recent_events":
@@ -867,9 +874,19 @@ def _execute_get_elixir_state(arguments, workflow=None):
                 event_type=arguments.get("event_type"),
                 subject_type=arguments.get("subject_type"),
                 subject_key=arguments.get("subject_key"),
+                event_class=_state_event_class(arguments),
                 limit=limit,
             ),
         }
+
+    if aspect == "game_modes":
+        return db.summarize_battle_modes(
+            windows=_state_windows(arguments),
+            top_members=int(arguments.get("top_members") or 5),
+        )
+
+    if aspect == "season_window":
+        return db.get_season_window()
 
     if aspect == "event_rollups":
         return _execute_get_event_rollups(arguments, workflow=workflow)
@@ -878,27 +895,8 @@ def _execute_get_elixir_state(arguments, workflow=None):
     if leadership_error:
         return leadership_error
 
-    if aspect == "projects":
-        statuses = _status_filter(arguments, default=("active",))
-        return {
-            "projects": db.list_projects(
-                project_type=arguments.get("project_type"),
-                statuses=statuses,
-                limit=limit,
-            )
-        }
-
-    if aspect == "project_detail":
-        project_key = (arguments.get("project_key") or "").strip()
-        if not project_key:
-            project = db.get_active_project(arguments.get("project_type") or "war_season")
-            project_key = (project or {}).get("project_key") or ""
-        if not project_key:
-            return {"error": "project_key_required", "detail": "No project_key was provided and no active project matched."}
-        return db.get_project_detail(project_key, event_limit=limit, intent_limit=limit) or {
-            "error": "project_not_found",
-            "project_key": project_key,
-        }
+    if aspect == "war_season":
+        return {"war_season": db.get_war_season_snapshot()}
 
     if aspect == "decision_cases":
         status = (arguments.get("status") or "").strip()
@@ -941,9 +939,8 @@ def _execute_get_elixir_state(arguments, workflow=None):
         return {
             "event_windows": db.summarize_events_by_window(windows=_ELIXIR_STATE_WINDOWS, scope=None),
             "recent_events": db.list_recent_events(days=7, limit=10),
-            "active_war_project": db.get_active_war_season_project_snapshot(),
-            "operating_projects": db.get_active_operating_project_snapshots(),
-            "active_projects": db.list_projects(statuses=("active",), limit=10),
+            "game_modes": db.summarize_battle_modes(windows=(7,)),
+            "war_season": db.get_war_season_snapshot(),
             "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
             "recent_intents": db.list_recent_communication_intents(limit=limit),
             "failed_intents": db.list_recent_communication_intents(status="failed", limit=limit),
@@ -1139,6 +1136,11 @@ def _execute_schedule_revisit(arguments):
     }
 
 
+def _followup_topic_slug(topic: str, *, max_len: int = 48) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (topic or "").strip().lower()).strip("-")
+    return slug[:max_len].rstrip("-") or "general"
+
+
 def _execute_record_leadership_followup(arguments):
     """Awareness-loop observation: queue an operational suggestion.
 
@@ -1176,29 +1178,47 @@ def _execute_record_leadership_followup(arguments):
         return {"error": "record_leadership_followup_failed", "detail": str(exc)}
 
     attach_tags(memory["memory_id"], ["followup"], actor="elixir:awareness-tool")
+    # A leadership followup is action-oriented by definition, so it always becomes
+    # a durable decision case — the single home for the concern — with the memory
+    # above as its narrative annotation. A specific case_type (e.g.
+    # promotion_review) routes to the member-review card path; otherwise it is a
+    # generic followup case keyed by topic so distinct concerns about the same
+    # member do not collapse into one.
     case = None
-    if case_type:
-        try:
-            if resolved_tag:
-                case = db.upsert_member_review_case(
-                    case_type=case_type,
-                    member={"tag": resolved_tag},
-                    title=f"Followup: {topic}",
-                    recommendation=recommendation,
-                    rationale=recommendation,
-                )
-            else:
-                case = db.upsert_decision_case(
-                    case_type=case_type,
-                    title=f"Followup: {topic}",
-                    recommendation=recommendation,
-                    rationale=recommendation,
-                    subject_type="operation",
-                    subject_key=topic,
-                    state={"topic": topic},
-                )
-        except Exception as exc:
-            log.warning("record_leadership_followup case upsert failed: %s", exc)
+    effective_type = case_type or "leadership_followup"
+    topic_slug = _followup_topic_slug(topic)
+    try:
+        if case_type and resolved_tag:
+            case = db.upsert_member_review_case(
+                case_type=case_type,
+                member={"tag": resolved_tag},
+                title=f"Followup: {topic}",
+                recommendation=recommendation,
+                rationale=recommendation,
+            )
+        elif resolved_tag:
+            case = db.upsert_decision_case(
+                case_type=effective_type,
+                title=f"Followup: {topic}",
+                recommendation=recommendation,
+                rationale=recommendation,
+                target_player_tag=resolved_tag,
+                case_key=f"leadership_followup:member:{resolved_tag}:{topic_slug}",
+                state={"topic": topic},
+            )
+        else:
+            case = db.upsert_decision_case(
+                case_type=effective_type,
+                title=f"Followup: {topic}",
+                recommendation=recommendation,
+                rationale=recommendation,
+                subject_type="operation",
+                subject_key=f"operation:{topic_slug}",
+                case_key=f"leadership_followup:{topic_slug}",
+                state={"topic": topic},
+            )
+    except Exception as exc:
+        log.warning("record_leadership_followup case upsert failed: %s", exc)
     result = {
         "success": True,
         "memory_id": memory["memory_id"],

@@ -281,54 +281,14 @@ def _infer_project_id(
     signal: dict | None = None,
     situation: dict | None = None,
 ) -> int | None:
+    # Projects were retired (Phase 5); intents no longer link to a project.
+    # Honor only an explicit signal-supplied project_id (none in practice).
     direct = (signal or {}).get("project_id")
     if direct is not None:
         try:
             return int(direct)
         except (TypeError, ValueError):
             pass
-
-    keys = [key for key in (event_keys or []) if key]
-    if keys:
-        placeholders = ",".join("?" * len(keys))
-        row = conn.execute(
-            "SELECT project_id FROM project_event_links "
-            f"WHERE event_key IN ({placeholders}) "
-            "ORDER BY created_at DESC LIMIT 1",
-            tuple(keys),
-        ).fetchone()
-        if row:
-            return int(row["project_id"])
-
-    signal_type = _source_type(signal)
-    project_type = _PROJECT_TYPE_BY_SIGNAL_TYPE.get(signal_type or "")
-    if project_type:
-        row = conn.execute(
-            "SELECT project_id FROM elixir_projects "
-            "WHERE project_type = ? AND status = 'active' "
-            "ORDER BY updated_at DESC, project_id DESC LIMIT 1",
-            (project_type,),
-        ).fetchone()
-        if row:
-            return int(row["project_id"])
-
-    project_snapshot = ((situation or {}).get("projects") or {}).get("war_season")
-    if _signal_is_war_scoped(signal) and isinstance(project_snapshot, dict) and project_snapshot.get("project_id") is not None:
-        try:
-            return int(project_snapshot["project_id"])
-        except (TypeError, ValueError):
-            pass
-
-    season_id = _clean_text((signal or {}).get("season_id"))
-    if season_id:
-        row = conn.execute(
-            "SELECT project_id FROM elixir_projects "
-            "WHERE project_type = 'war_season' AND season_id = ? "
-            "ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, updated_at DESC LIMIT 1",
-            (season_id,),
-        ).fetchone()
-        if row:
-            return int(row["project_id"])
     return None
 
 

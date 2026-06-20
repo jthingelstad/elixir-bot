@@ -148,6 +148,22 @@ def _build_player_insight_context(tag):
                 lines.append(f"battles_this_week: {ca['battles']}{prev_label}")
     except Exception:
         log.warning("compare_member_trend_windows failed for %s", tag, exc_info=True)
+    try:
+        # Per-mode activity from the battle stream so a Path-of-Legends, 2v2, or
+        # event push is grounded in the player's actual mode trend, not just the
+        # overall trophy delta.
+        modes = db.summarize_battle_modes(windows=(7,), subject_key=tag, top_members=1, min_battles=1)
+        mode_lines = []
+        for mode, info in ((modes.get("7d") or {}).get("modes") or {}).items():
+            if mode == "ladder":
+                continue  # Trophy Road is the default frame; surface the other modes
+            win_rate = info.get("win_rate")
+            wr_text = f", {int(win_rate * 100)}% win rate" if win_rate is not None else ""
+            mode_lines.append(f"{info.get('label')}: {info.get('battles')} battles{wr_text}")
+        if mode_lines:
+            lines.append("per_mode_7d: " + "; ".join(mode_lines))
+    except Exception:
+        log.warning("summarize_battle_modes failed for %s", tag, exc_info=True)
     return lines
 
 

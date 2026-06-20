@@ -187,153 +187,6 @@ def test_event_stream_query_windows_and_subject_lookup():
         conn.close()
 
 
-def test_projects_link_stream_events_idempotently():
-    conn = db.get_connection(":memory:")
-    try:
-        event = db.record_game_event(
-            event_type="war_battle_rank_change",
-            source_system="test",
-            source_signal_key="war_rank:s129:w2",
-            observed_at="2026-06-19T12:00:00",
-            scope="public",
-            subject_type="war",
-            subject_key="season:129:week:2",
-            season_id="129",
-            war_week="2",
-            payload={"rank": 1},
-            conn=conn,
-        )
-        project = db.upsert_project(
-            project_key="war_season:129",
-            project_type="war_season",
-            title="War Season 129",
-            subject_type="war",
-            subject_key="season:129",
-            season_id="129",
-            state={"season_id": 129, "week": 2},
-            conn=conn,
-        )
-
-        first = db.link_project_event(
-            project_id=project["project_id"],
-            event_key=event["event_key"],
-            conn=conn,
-        )
-        second = db.link_project_event(
-            project_id=project["project_id"],
-            event_key=event["event_key"],
-            conn=conn,
-        )
-
-        assert first["link_id"] == second["link_id"]
-        links = db.list_project_event_links(project["project_id"], conn=conn)
-        assert [link["event_key"] for link in links] == [event["event_key"]]
-        stored = db.get_project("war_season:129", conn=conn)
-        assert stored["linked_event_count"] == 1
-        assert stored["state"]["week"] == 2
-
-        intent = db.upsert_communication_intent(
-            intent_key="test:intent:war-season-129",
-            workflow="river-race",
-            intent_type="post",
-            target_channel_key="river-race",
-            project_id=project["project_id"],
-            summary="War rank changed.",
-            event_keys=[event["event_key"]],
-            conn=conn,
-        )
-        listed = db.list_projects(project_type="war_season", statuses=("active",), conn=conn)
-        assert [item["project_key"] for item in listed] == ["war_season:129"]
-
-        detail = db.get_project_detail("war_season:129", conn=conn)
-        assert detail["project"]["project_key"] == "war_season:129"
-        assert detail["events"][0]["event_key"] == event["event_key"]
-        assert detail["communication_intents"][0]["intent_id"] == intent["intent_id"]
-    finally:
-        conn.close()
-
-
-def test_refresh_operating_projects_materializes_nonwar_missions_and_links_evidence():
-    conn = db.get_connection(":memory:")
-    try:
-        join_event = db.record_game_event(
-            event_type="member_join",
-            source_system="test",
-            source_signal_key="member_join:#NEW",
-            observed_at="2026-06-18T12:00:00",
-            scope="public",
-            subject_type="member",
-            subject_key="#NEW",
-            payload={"tag": "#NEW", "name": "Newbie"},
-            conn=conn,
-        )
-        inactive_event = db.record_game_event(
-            event_type="inactive_members",
-            source_system="test",
-            source_signal_key="inactive:#OLD",
-            observed_at="2026-06-17T12:00:00",
-            scope="leadership",
-            subject_type="member",
-            subject_key="#OLD",
-            payload={"tag": "#OLD", "name": "Oldtimer"},
-            conn=conn,
-        )
-        recruit_event = db.record_game_event(
-            event_type="discord_invite_reminder",
-            source_system="test",
-            source_signal_key="discord_invite_reminder:2026-W25",
-            observed_at="2026-06-16T12:00:00",
-            scope="public",
-            subject_type="clan",
-            subject_key="poap_kings",
-            payload={"week_key": "2026-W25"},
-            conn=conn,
-        )
-        db.upsert_decision_case(
-            case_type="inactivity_review",
-            title="Review Oldtimer",
-            target_player_tag="#OLD",
-            target_player_name="Oldtimer",
-            source_signal_key="inactive:#OLD",
-            source_signal_type="inactive_members",
-            source_event_key=inactive_event["event_key"],
-            status=db.CASE_OPEN,
-            conn=conn,
-        )
-        join_intent = db.upsert_communication_intent(
-            intent_key="test:onboarding:intent",
-            workflow="clan-events",
-            intent_type="post",
-            source_signal_key="member_join:#NEW",
-            source_signal_type="member_join",
-            event_keys=[join_event["event_key"]],
-            conn=conn,
-        )
-        assert join_intent["project_id"] is None
-
-        projects = db.refresh_operating_projects(conn=conn)
-
-        assert set(projects) == {"clan_development", "onboarding", "recruitment"}
-        assert projects["clan_development"]["project_key"] == "clan_development:roster_health"
-        assert projects["onboarding"]["project_key"] == "onboarding:current"
-        assert projects["recruitment"]["project_key"] == "recruitment:current"
-        assert projects["clan_development"]["state"]["due_cases"][0]["target_player_tag"] == "#OLD"
-        assert projects["clan_development"]["state"]["open_cases"][0]["target_player_tag"] == "#OLD"
-        assert projects["onboarding"]["state"]["recent_joins"][0]["tag"] == "#NEW"
-
-        onboarding_links = db.list_project_event_links(projects["onboarding"]["project_id"], conn=conn)
-        assert [link["event_key"] for link in onboarding_links] == [join_event["event_key"]]
-        development_links = db.list_project_event_links(projects["clan_development"]["project_id"], conn=conn)
-        assert inactive_event["event_key"] in {link["event_key"] for link in development_links}
-        recruitment_links = db.list_project_event_links(projects["recruitment"]["project_id"], conn=conn)
-        assert [link["event_key"] for link in recruitment_links] == [recruit_event["event_key"]]
-
-        refreshed_intent = db.get_communication_intent("test:onboarding:intent", conn=conn)
-        assert refreshed_intent["project_id"] == projects["onboarding"]["project_id"]
-    finally:
-        conn.close()
-
-
 def test_event_rollups_write_before_stream_pruning():
     conn = db.get_connection(":memory:")
     try:
@@ -348,7 +201,7 @@ def test_event_rollups_write_before_stream_pruning():
             payload={"name": "Alpha"},
             conn=conn,
         )
-        old_war = db.record_game_event(
+        db.record_game_event(
             event_type="war_battle_day_complete",
             source_system="test",
             source_signal_key="war:s129:w1",
@@ -383,21 +236,6 @@ def test_event_rollups_write_before_stream_pruning():
             payload={"arena": "Legendary Arena"},
             conn=conn,
         )
-        project = db.upsert_project(
-            project_key="war_season:129",
-            project_type="war_season",
-            title="War Season 129",
-            status="completed",
-            subject_type="war",
-            subject_key="season:129",
-            season_id="129",
-            conn=conn,
-        )
-        db.link_project_event(
-            project_id=project["project_id"],
-            event_key=old_war["event_key"],
-            conn=conn,
-        )
         case = db.upsert_decision_case(
             case_type="promotion_review",
             title="Promotion review: Alpha",
@@ -416,133 +254,17 @@ def test_event_rollups_write_before_stream_pruning():
 
         assert result["old_event_count"] == 3
         assert result["pruned"] == 3
-        assert result["rollups"]["total_written"] >= 4
+        assert result["rollups"]["total_written"] >= 3
         remaining = db.list_recent_events(days=365, conn=conn)
         assert [event["event_key"] for event in remaining] == [recent["event_key"]]
 
         rollups = db.list_event_rollups(limit=20, conn=conn)
         by_type = {rollup["rollup_type"]: rollup for rollup in rollups}
-        assert {"member_90d", "war_cycle", "project_summary", "case_history"}.issubset(by_type)
+        assert {"member_90d", "war_cycle", "case_history"}.issubset(by_type)
         assert by_type["member_90d"]["subject_key"] == "#AAA"
         assert by_type["member_90d"]["summary"]["by_scope"] == {"leadership": 1, "public": 1}
         assert by_type["war_cycle"]["season_id"] == "129"
-        assert by_type["project_summary"]["project_key"] == "war_season:129"
         assert by_type["case_history"]["summary"]["resolution"] == "promoted"
-    finally:
-        conn.close()
-
-
-def test_refresh_active_war_season_project_from_live_war_state():
-    conn = db.get_connection(":memory:")
-    try:
-        db.snapshot_members(
-            [
-                {
-                    "tag": "#AAA111",
-                    "name": "Alpha",
-                    "role": "member",
-                    "expLevel": 14,
-                    "trophies": 7000,
-                    "clanRank": 1,
-                },
-                {
-                    "tag": "#BBB222",
-                    "name": "Beta",
-                    "role": "member",
-                    "expLevel": 13,
-                    "trophies": 6500,
-                    "clanRank": 2,
-                },
-            ],
-            conn=conn,
-        )
-        event = db.record_game_event(
-            event_type="war_battle_rank_change",
-            source_system="war_awareness",
-            source_signal_key="rank:s129:w2",
-            observed_at="2026-06-19T12:00:00",
-            scope="public",
-            subject_type="war",
-            subject_key="season:129:week:2",
-            season_id="129",
-            war_week="2",
-            payload={"rank": 1},
-            conn=conn,
-        )
-        db.upsert_war_current_state(
-            {
-                "state": "warDay",
-                "seasonId": 129,
-                "sectionIndex": 1,
-                "periodIndex": 10,
-                "periodType": "warDay",
-                "clan": {
-                    "tag": "#J2RGCRVG",
-                    "name": "POAP KINGS",
-                    "fame": 12000,
-                    "repairPoints": 0,
-                    "periodPoints": 3000,
-                    "clanScore": 150,
-                    "participants": [
-                        {
-                            "tag": "#AAA111",
-                            "name": "Alpha",
-                            "fame": 500,
-                            "repairPoints": 0,
-                            "boatAttacks": 0,
-                            "decksUsed": 4,
-                            "decksUsedToday": 4,
-                        },
-                        {
-                            "tag": "#BBB222",
-                            "name": "Beta",
-                            "fame": 0,
-                            "repairPoints": 0,
-                            "boatAttacks": 0,
-                            "decksUsed": 0,
-                            "decksUsedToday": 0,
-                        },
-                    ],
-                },
-                "clans": [
-                    {
-                        "tag": "#J2RGCRVG",
-                        "name": "POAP KINGS",
-                        "fame": 12000,
-                        "repairPoints": 0,
-                        "periodPoints": 3000,
-                        "clanScore": 150,
-                    },
-                    {
-                        "tag": "#RIVAL",
-                        "name": "Rivals",
-                        "fame": 11000,
-                        "repairPoints": 0,
-                        "periodPoints": 2900,
-                        "clanScore": 145,
-                    },
-                ],
-            },
-            conn=conn,
-        )
-
-        project = db.get_active_war_season_project(conn=conn)
-        assert project["project_key"] == "war_season:129"
-        assert project["summary"] == "Season 129; Week 2; Battle Day 1; rank 1; 1/2 engaged today"
-        state = project["state"]
-        assert state["race"]["rank"] == 1
-        assert state["race"]["standings"][0]["is_us"] is True
-        assert state["participation_health"]["engaged_count"] == 1
-        assert state["participation_health"]["untouched_count"] == 1
-        assert state["active_risks"]["no_participation_count"] == 2
-
-        links = db.list_project_event_links(project["project_id"], conn=conn)
-        assert [link["event_key"] for link in links] == [event["event_key"]]
-
-        snapshot = db.get_active_war_season_project_snapshot(conn=conn)
-        assert snapshot["project_key"] == "war_season:129"
-        assert snapshot["linked_event_count"] == 1
-        assert snapshot["state"]["phase_display"] == "Battle Day 1"
     finally:
         conn.close()
 
@@ -771,18 +493,6 @@ def test_communication_intent_traces_message_to_case_project_and_event():
             conn=conn,
         )
         event = events[0]
-        project = db.upsert_project(
-            project_key="war_season:129",
-            project_type="war_season",
-            title="War season 129",
-            season_id=129,
-            conn=conn,
-        )
-        db.link_project_event(
-            project_id=project["project_id"],
-            event_key=event["event_key"],
-            conn=conn,
-        )
         case = db.upsert_decision_case(
             case_type="inactivity_review",
             title="Review Alice",
@@ -808,7 +518,7 @@ def test_communication_intent_traces_message_to_case_project_and_event():
         )
         assert intent["status"] == "planned"
         assert intent["case_id"] == case["case_id"]
-        assert intent["project_id"] == project["project_id"]
+        assert intent["project_id"] is None
         assert intent["event_keys"] == [event["event_key"]]
 
         delivered = db.mark_communication_intent_delivered(
@@ -849,60 +559,16 @@ def test_communication_intent_traces_message_to_case_project_and_event():
         trace = db.get_communication_trace_for_message(888, conn=conn)
         assert trace["intent"]["intent_id"] == intent["intent_id"]
         assert trace["case"]["case_id"] == case["case_id"]
-        assert trace["project"]["project_id"] == project["project_id"]
         assert [item["event_key"] for item in trace["events"]] == [event["event_key"]]
     finally:
         conn.close()
 
 
-def test_nonwar_awareness_intent_prefers_operating_project_over_active_war_project():
+def test_get_war_season_snapshot_none_without_active_war():
     conn = db.get_connection(":memory:")
     try:
-        join_event = db.record_game_event(
-            event_type="member_join",
-            source_system="test",
-            source_signal_key="member_join:#ABC",
-            observed_at="2026-06-19T12:00:00",
-            scope="public",
-            subject_type="member",
-            subject_key="#ABC",
-            payload={"tag": "#ABC", "name": "Alice"},
-            conn=conn,
-        )
-        war_project = db.upsert_project(
-            project_key="war_season:129",
-            project_type="war_season",
-            title="War season 129",
-            subject_type="war",
-            subject_key="season:129",
-            season_id=129,
-            conn=conn,
-        )
-        projects = db.refresh_operating_projects(conn=conn)
-        signal = {
-            "type": "member_join",
-            "signal_key": "member_join:#ABC",
-            "event_key": join_event["event_key"],
-            "tag": "#ABC",
-            "name": "Alice",
-        }
-
-        intent = db.create_awareness_post_intent(
-            {
-                "channel": "clan-events",
-                "event_type": "member_join_public",
-                "summary": "Alice joined.",
-                "content": "Welcome Alice.",
-                "covers_signal_keys": ["member_join:#ABC"],
-            },
-            [signal],
-            workflow="clan_awareness",
-            situation={"projects": {"war_season": war_project}},
-            conn=conn,
-        )
-
-        assert intent["project_id"] == projects["onboarding"]["project_id"]
-        assert intent["project_id"] != war_project["project_id"]
+        # No war state ingested → the fresh snapshot is None (table-free path).
+        assert db.get_war_season_snapshot(conn=conn) is None
     finally:
         conn.close()
 
