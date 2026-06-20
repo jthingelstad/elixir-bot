@@ -377,6 +377,12 @@ async def on_ready():
     if guild:
         await sync_emoji(guild)
     if not scheduler.running:
+        cleared_stale_jobs = await asyncio.to_thread(runtime_status.clear_stale_running_jobs)
+        if cleared_stale_jobs:
+            log.warning(
+                "Cleared stale runtime job running state after restart: %s",
+                ", ".join(sorted(cleared_stale_jobs)),
+            )
         # AsyncIOScheduler awaits coroutine jobs on the bot's running event
         # loop, so register the tick coroutines directly. The old
         # call_soon_threadsafe shim was a BackgroundScheduler-era holdover that
