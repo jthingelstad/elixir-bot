@@ -261,14 +261,13 @@ def _awareness_gap_spec(conn, *, days: int) -> dict | None:
         """
         SELECT tick_id, ticked_at, workflow, signals_in, covered_keys,
                considered_skipped, posts_rejected, skipped_reason,
-               write_calls_issued, write_calls_succeeded, write_calls_denied
+               write_calls_issued, write_calls_succeeded, write_calls_denied,
+               MAX(signals_in - covered_keys - considered_skipped, 0) AS unaccounted_signals
         FROM awareness_ticks
         WHERE ticked_at >= ?
           AND signals_in > 0
           AND (
-            covered_keys < signals_in
-            OR considered_skipped > 0
-            OR posts_rejected > 0
+            signals_in > covered_keys + considered_skipped
             OR write_calls_denied > 0
           )
         ORDER BY ticked_at DESC, tick_id DESC
@@ -282,12 +281,14 @@ def _awareness_gap_spec(conn, *, days: int) -> dict | None:
     covered = sum(int(row["covered_keys"] or 0) for row in rows)
     skipped = sum(int(row["considered_skipped"] or 0) for row in rows)
     denied = sum(int(row["write_calls_denied"] or 0) for row in rows)
+    unaccounted = sum(int(row["unaccounted_signals"] or 0) for row in rows)
     samples = [
         {
             "label": f"{row['workflow'] or 'awareness'} tick",
             "detail": _truncate(
                 f"signals={row['signals_in']} covered={row['covered_keys']} "
-                f"skipped={row['considered_skipped']} denied={row['write_calls_denied']} "
+                f"skipped={row['considered_skipped']} unaccounted={row['unaccounted_signals']} "
+                f"denied={row['write_calls_denied']} "
                 f"reason={row['skipped_reason'] or '-'}"
             ),
             "tick_id": row["tick_id"],
@@ -299,12 +300,14 @@ def _awareness_gap_spec(conn, *, days: int) -> dict | None:
         "category": "signal_gap",
         "title": "Review awareness ticks that did not cover all observed signals",
         "rationale": (
-            "Recent awareness ticks saw more incoming signal than they covered or had to skip/deny "
-            "writes. That is exactly where observational mode can drift away from recommendation mode."
+            "Recent awareness ticks left observed signals unaccounted for, or attempted write tools "
+            "that policy denied. That is exactly where observational mode can drift away from "
+            "recommendation mode."
         ),
         "proposed_change": (
-            "Inspect the skipped ticks, classify whether each gap is intentional suppression, missing "
-            "routing, missing case/project modeling, or a tool-policy constraint, then encode the rule."
+            "Inspect the unaccounted ticks, classify whether each gap is missing routing, missing "
+            "case/project modeling, or a tool-policy constraint, then encode the rule. Intentional "
+            "skips belong in routing-quality review, not this signal-gap bucket."
         ),
         "evidence": {
             "basis": "awareness-coverage-gaps",
@@ -313,6 +316,7 @@ def _awareness_gap_spec(conn, *, days: int) -> dict | None:
                 "signals_in": signals,
                 "covered_keys": covered,
                 "considered_skipped": skipped,
+                "unaccounted_signals": unaccounted,
                 "write_calls_denied": denied,
                 "window_days": days,
             },
