@@ -337,6 +337,14 @@ def _build_memory_synthesis_context():
     except Exception:
         log.warning("memory synthesis: war season context load failed", exc_info=True)
     try:
+        operations_context["game_modes"] = db.summarize_battle_modes(windows=(7, 28))
+    except Exception:
+        log.warning("memory synthesis: game modes context load failed", exc_info=True)
+    try:
+        operations_context["season_window"] = db.get_season_window()
+    except Exception:
+        log.warning("memory synthesis: season window context load failed", exc_info=True)
+    try:
         operations_context["decision_cases"] = db.decision_case_snapshot(
             open_limit=20,
             due_limit=20,

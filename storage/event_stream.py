@@ -529,24 +529,36 @@ def summarize_battle_modes(
     now: str | None = None,
     top_members: int = 3,
     min_battles: int = 3,
+    subject_key: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
-    """Per-mode clan battle activity derived from the battle-grain stream.
+    """Per-mode battle activity derived from the battle-grain stream.
 
     For each lookback window, returns a per-game-mode summary (battles, active
     members, W/L, win rate) plus the most active members in that mode. This is
     what lets Elixir observe Path of Legends, 2v2, and event activity instead of
     only Trophy Road — no detector signal required. Battles are public, so this
-    block is public-scoped.
+    block is public-scoped. Pass ``subject_key`` (a player tag) to scope the
+    summary to one member's per-mode activity (e.g. for a player highlight).
     """
     now_dt = datetime.fromisoformat((now or _db._utcnow()).replace("Z", "+00:00"))
     if now_dt.tzinfo is not None:
         now_dt = now_dt.astimezone(timezone.utc).replace(tzinfo=None)
+    member_filter = _db._canon_tag(subject_key) if subject_key else None
     result: dict[str, dict] = {}
     for days in windows:
         cutoff = (now_dt - timedelta(days=int(days))).strftime("%Y-%m-%dT%H:%M:%S")
+        where = [
+            "g.event_class = 'battle'",
+            "g.observed_at >= ?",
+            "g.subject_key IS NOT NULL",
+        ]
+        params: list = [cutoff]
+        if member_filter:
+            where.append("g.subject_key = ?")
+            params.append(member_filter)
         rows = conn.execute(
-            """
+            f"""
             SELECT g.game_mode AS game_mode,
                    g.subject_key AS tag,
                    m.current_name AS name,
@@ -555,12 +567,10 @@ def summarize_battle_modes(
                    SUM(CASE WHEN json_extract(g.payload_json, '$.outcome') = 'L' THEN 1 ELSE 0 END) AS losses
             FROM game_event_stream g
             LEFT JOIN members m ON m.player_tag = g.subject_key
-            WHERE g.event_class = 'battle'
-              AND g.observed_at >= ?
-              AND g.subject_key IS NOT NULL
+            WHERE {' AND '.join(where)}
             GROUP BY g.game_mode, g.subject_key
             """,
-            (cutoff,),
+            tuple(params),
         ).fetchall()
         modes: dict[str, dict] = {}
         for row in rows:

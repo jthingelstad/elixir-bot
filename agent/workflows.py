@@ -1212,6 +1212,32 @@ def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_co
         "Use get_clan_intel_report on each opponent to gather threat analysis, "
         "then compose the Clan Wars Intel Report for #river-race."
     )
+    our_state_lines = []
+    try:
+        snapshot = db.get_war_season_snapshot()
+        if snapshot:
+            state = snapshot.get("state") or {}
+            health = state.get("participation_health") or {}
+            our_state_lines.append(f"summary: {snapshot.get('summary')}")
+            if health:
+                our_state_lines.append(
+                    f"participation today: engaged {health.get('engaged_count', 0)}/"
+                    f"{health.get('total_participants', 0)}, untouched {health.get('untouched_count', 0)}"
+                )
+            risks = state.get("active_risks") or {}
+            if risks.get("no_participation_count"):
+                our_state_lines.append(f"no-participation this season: {risks['no_participation_count']} member(s)")
+            comparison = state.get("prior_cycle_comparison") or {}
+            if comparison.get("direction") and comparison.get("direction") != "unknown":
+                our_state_lines.append(f"fame-per-member vs prior season: {comparison.get('direction')}")
+    except Exception:
+        log.warning("intel report: our-side war season context failed", exc_info=True)
+    if our_state_lines:
+        user_msg += (
+            "\n\n=== OUR CLAN STATE (background only, for framing our side; the opponent "
+            "intel you fetch via get_clan_intel_report is the post's focus and ground truth) ===\n"
+            + "\n".join(our_state_lines) + "\n"
+        )
     user_msg += _format_memory_context(memory_context)
     return _chat_with_tools(
         _intel_report_system(),

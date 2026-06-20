@@ -240,6 +240,12 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
         "season_id": 133,
         "summary": "Season 133; rank 1",
     })
+    monkeypatch.setattr(memory_job.db, "summarize_battle_modes", lambda **kwargs: {
+        "7d": {"modes": {"ranked": {"battles": 12}}},
+    })
+    monkeypatch.setattr(memory_job.db, "get_season_window", lambda: {
+        "season_id": 133, "weeks_recorded": 2,
+    })
     monkeypatch.setattr(memory_job.db, "decision_case_snapshot", lambda **kwargs: {
         "due": [{"case_id": 1, "case_type": "inactivity_review"}],
         "open": [],
@@ -262,6 +268,8 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
     assert operations["event_windows"]["7d"]["total"] == 2
     assert operations["recent_events"][0]["event_key"] == "game_event:join"
     assert operations["war_season"]["season_id"] == 133
+    assert operations["game_modes"]["7d"]["modes"]["ranked"]["battles"] == 12
+    assert operations["season_window"]["weeks_recorded"] == 2
     assert operations["decision_cases"]["due"][0]["case_id"] == 1
     assert operations["recent_intents"][0]["intent_id"] == 5
 
