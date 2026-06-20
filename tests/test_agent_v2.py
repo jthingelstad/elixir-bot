@@ -518,6 +518,7 @@ def test_execute_tool_get_elixir_state_public_events_are_scope_filtered():
         event_type=None,
         subject_type=None,
         subject_key=None,
+        event_class="signal",
         limit=3,
     )
 
