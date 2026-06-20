@@ -2355,7 +2355,34 @@ def _migration_52(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49, _migration_50, _migration_51, _migration_52]
+def _migration_53(conn: sqlite3.Connection) -> None:
+    """Add battle-grain telemetry to the game event stream.
+
+    Introduces an ``event_class`` discriminator (``signal`` vs ``battle``) and a
+    ``game_mode`` family column so per-battle, per-mode observations (Trophy
+    Road, Path of Legends, River Race, 2v2, events, tournaments) can flow into
+    the same stream as the low-volume signal events without bloating the
+    signal-grain prompt context. Existing rows default to ``event_class='signal'``.
+    """
+    conn.execute(
+        "ALTER TABLE game_event_stream ADD COLUMN event_class TEXT NOT NULL DEFAULT 'signal'"
+    )
+    conn.execute("ALTER TABLE game_event_stream ADD COLUMN game_mode TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_event_stream_class_observed "
+        "ON game_event_stream(event_class, observed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_event_stream_mode_observed "
+        "ON game_event_stream(game_mode, observed_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_game_event_stream_subject_mode "
+        "ON game_event_stream(subject_type, subject_key, game_mode, observed_at DESC)"
+    )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49, _migration_50, _migration_51, _migration_52, _migration_53]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:
