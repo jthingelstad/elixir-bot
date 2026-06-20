@@ -181,23 +181,14 @@ def _build_special_event_signal_context(signals):
         seen.add(key)
         lines.append(f"current_event: {context['event_name']}")
         lines.append(f"event_badge: {context['badge_label']} ({signal.get('badge_name')})")
-        lines.append(f"related_event_mode: {context['game_mode_name']}")
-        tag = signal.get("tag")
-        if tag:
-            try:
-                activity = db.get_member_special_event_activity(
-                    tag,
-                    days=14,
-                    game_mode_id=context.get("game_mode_id"),
-                    game_mode_name=context.get("game_mode_name"),
-                )
-            except Exception:
-                log.warning("get_member_special_event_activity failed for %s", tag, exc_info=True)
-                activity = None
-            total = int((activity or {}).get("total_battles") or 0)
-            if total:
-                lines.append(f"member_event_activity_14d: {total} {context['game_mode_name']} battles")
-        lines.append(f"recognition_guardrail: {context['recognition_guidance']}")
+        badge_level = signal.get("badge_level")
+        progress = signal.get("progress")
+        target = signal.get("target")
+        if badge_level is not None:
+            lines.append(f"badge_level: {badge_level}")
+        if progress is not None and target is not None:
+            lines.append(f"badge_progress: {progress}/{target}")
+        lines.append(f"evidence_boundary: {context['recognition_guidance']}")
     return lines
 
 
