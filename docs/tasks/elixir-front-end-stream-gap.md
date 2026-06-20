@@ -130,3 +130,20 @@ prompt edits + small tool edits)
   signal payload remains the source of truth.
 - Tier 1 is almost entirely additive prompt/tool guidance — lowest risk, highest
   leverage. Start there.
+
+## Implementation status — all tiers SHIPPED
+
+- **Tier 1 [SHIPPED]** — `get_elixir_state` gained an `event_class` param (drill
+  into per-battle telemetry) and a public `season_window` aspect; `_interactive_system`
+  now tells the member lanes the stream exists and which aspects/tools to use.
+- **Tier 2 [SHIPPED]** — `summarize_battle_modes` gained a `subject_key` filter;
+  player-highlights now cite a per-mode trend; memory-synthesis ingests
+  game_modes + season_window; the intel report injects our-side war-season state
+  as background-only. **war-recap deliberately left signal-only** — its isolation
+  is the correctness fix for the 04-19 misfire and not worth risking.
+- **Tier 3 [SHIPPED]** — `GAME.md` has a first-class Game Modes section;
+  `PURPOSE`/`SOUL`/`CLAN` broadened beyond war + Trophy-Road; "prefer signal over
+  noise" reworded to "the strongest story in the stream."
+- **Tier 4 [SHIPPED]** — collapsed the duplicate `projects`/`project_detail`
+  aspects into a single `war_season`; removed vestigial project params. The three
+  per-mode reads were left intact as complementary (different backing/granularity).
