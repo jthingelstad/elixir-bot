@@ -36,14 +36,16 @@ MODE_GROUP_LABELS = {
 
 SPECIAL_EVENT_BADGE_CONTEXTS = {
     "AnarchyLeagueCompletion": {
-        "event_name": "Princess / Anarchy League",
+        "event_name": "Anarchy League",
         "badge_label": "Anarchy League Completion",
         "game_mode_id": 72000501,
         "game_mode_name": "All_Random_Princess",
         "mode_group": "special_event",
         "recognition_guidance": (
-            "Treat this as current-event completion evidence tied to recent "
-            "All_Random_Princess battles; do not infer rank, reward, or strategy."
+            "Treat this as Anarchy League completion evidence that can be "
+            "supported by recent All_Random_Princess battles; do not describe "
+            "Princess and Anarchy League as the same event, and do not infer "
+            "rank, reward, or strategy."
         ),
     },
 }
