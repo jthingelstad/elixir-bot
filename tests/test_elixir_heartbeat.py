@@ -2772,7 +2772,9 @@ def test_leader_action_scan_posts_due_inactivity_case():
     assert mock_create.call_args.kwargs["target_player_tag"] == "#UGQPVQ9U9"
 
 
-def test_leader_action_scan_dismisses_stale_deferred_due_case():
+def test_leader_action_scan_resurfaces_due_deferred_case_without_fresh_signal():
+    """A deferred case re-surfaces when due even if the detector no longer flags
+    the member — the leader deferred it, so it is carded (not dismissed)."""
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
@@ -2781,7 +2783,7 @@ def test_leader_action_scan_dismisses_stale_deferred_due_case():
     channel.name = "leader-actions"
     channel.type = "text"
 
-    stale_case = {
+    deferred_case = {
         "case_id": 88,
         "case_type": "inactivity_review",
         "status": db.CASE_DEFERRED,
@@ -2789,6 +2791,11 @@ def test_leader_action_scan_dismisses_stale_deferred_due_case():
         "target_player_name": "StaleMember",
         "recommendation": "Review StaleMember for removal from the clan.",
         "rationale": "Previously inactive.",
+        "state": {"member": {
+            "player_tag": "#STALE",
+            "member_ref": "StaleMember",
+            "reasons": [{"type": "inactive", "detail": "no battle in 12 days", "value": 12, "threshold_days": 7}],
+        }},
     }
 
     with (
@@ -2797,7 +2804,64 @@ def test_leader_action_scan_dismisses_stale_deferred_due_case():
         patch.object(elixir.bot, "get_channel", return_value=channel),
         patch("runtime.jobs._core.db.get_promotion_candidates", return_value={"recommended": [], "demotion_candidates": []}),
         patch("runtime.jobs._core.db.get_members_at_risk", return_value={"members": []}),
-        patch("runtime.jobs._core.db.list_due_decision_cases", side_effect=lambda **kwargs: [stale_case] if kwargs.get("case_type") == "inactivity_review" else []),
+        patch("runtime.jobs._core.db.list_due_decision_cases", side_effect=lambda **kwargs: [deferred_case] if kwargs.get("case_type") == "inactivity_review" else []),
+        patch("runtime.jobs._core._kick_candidate_ineligibility_reason", return_value=None),
+        patch("runtime.jobs._core.db.resolve_decision_case", return_value={}) as mock_resolve,
+        patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
+        patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
+        patch("runtime.jobs._core.db.create_leader_action_recommendation", return_value={
+            "action_id": 88,
+            "action_key": "kick:#STALE",
+            "status": "proposed",
+            "objective": "roster_health",
+            "case_id": 88,
+        }) as mock_create,
+        patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock(return_value=[
+            SimpleNamespace(id=8800),
+            SimpleNamespace(id=8801),
+        ])) as mock_card,
+        patch("runtime.jobs._core.db.save_message"),
+    ):
+        from runtime.jobs._core import _post_candidate_leader_action_recommendations
+        posted = asyncio.run(_post_candidate_leader_action_recommendations(max_actions=1))
+
+    assert posted == 1
+    mock_resolve.assert_not_called()  # the deferred case is re-surfaced, not dismissed
+    assert mock_create.call_args.kwargs["case_id"] == 88
+    assert mock_create.call_args.kwargs["action_type"] == "kick_recommendation"
+    assert mock_create.call_args.kwargs["target_player_tag"] == "#STALE"
+    mock_card.assert_awaited()
+
+
+def test_leader_action_scan_leaves_unflagged_open_case_uncarded():
+    """An open case the detector no longer flags is left in Situation (not carded
+    with stale evidence and not dismissed)."""
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 1513758211206025227
+    channel.name = "leader-actions"
+    channel.type = "text"
+
+    open_case = {
+        "case_id": 89,
+        "case_type": "inactivity_review",
+        "status": db.CASE_OPEN,
+        "target_player_tag": "#GHOST",
+        "target_player_name": "GhostMember",
+        "recommendation": "Review GhostMember for removal from the clan.",
+        "rationale": "Was inactive last week.",
+    }
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core.prompts.discord_singleton_lane", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("runtime.jobs._core.db.get_promotion_candidates", return_value={"recommended": [], "demotion_candidates": []}),
+        patch("runtime.jobs._core.db.get_members_at_risk", return_value={"members": []}),
+        patch("runtime.jobs._core.db.list_due_decision_cases", side_effect=lambda **kwargs: [open_case] if kwargs.get("case_type") == "inactivity_review" else []),
         patch("runtime.jobs._core.db.resolve_decision_case", return_value={}) as mock_resolve,
         patch("runtime.jobs._core.db.create_leader_action_recommendation") as mock_create,
         patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock()) as mock_card,
@@ -2806,14 +2870,7 @@ def test_leader_action_scan_dismisses_stale_deferred_due_case():
         posted = asyncio.run(_post_candidate_leader_action_recommendations(max_actions=1))
 
     assert posted == 0
-    mock_resolve.assert_called_once_with(
-        88,
-        status=db.CASE_DISMISSED,
-        resolution=(
-            "Auto-cleared by leadership action scan: deferred review came due, "
-            "but StaleMember no longer appears in the fresh recommendation candidate set."
-        ),
-    )
+    mock_resolve.assert_not_called()  # left in Situation, not dismissed
     mock_create.assert_not_called()
     mock_card.assert_not_awaited()
 

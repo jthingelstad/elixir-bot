@@ -673,9 +673,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         _log().warning("Weekly recap Clan Voyage context unavailable: %s", exc)
         clan_voyage_context = ""
     try:
-        war_project = db.get_active_war_season_project_snapshot()
+        war_project = db.get_war_season_snapshot()
     except Exception as exc:
-        _log().warning("Weekly recap war project context unavailable: %s", exc)
+        _log().warning("Weekly recap war season context unavailable: %s", exc)
         war_project = None
     try:
         event_windows = db.summarize_events_by_window(windows=(7, 28), scope="public")
@@ -684,6 +684,11 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         _log().warning("Weekly recap event stream context unavailable: %s", exc)
         event_windows = {}
         recent_events = []
+    try:
+        mode_pulse = db.summarize_battle_modes(windows=(7,))
+    except Exception as exc:
+        _log().warning("Weekly recap mode pulse unavailable: %s", exc)
+        mode_pulse = {}
     roster = summary.get("roster") or {}
     war_score_trend = summary.get("war_score_trend") or {}
     season_summary = summary.get("war_season_summary") or {}
@@ -753,6 +758,27 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
                 "top 7d event types: "
                 + ", ".join(f"{event_type}={count}" for event_type, count in top_types)
             )
+    modes = (mode_pulse.get("7d") or {}).get("modes") or {}
+    notable_modes = [
+        (mode, info) for mode, info in modes.items()
+        if mode != "ladder" and (info.get("battles") or 0) >= 10
+    ]
+    if notable_modes:
+        lines.append("game-mode activity beyond Trophy Road (7d) — material for non-war stories:")
+        for _mode, info in notable_modes[:4]:
+            top = [
+                t.get("name") or t.get("tag")
+                for t in (info.get("top_members") or [])[:2]
+                if (t.get("name") or t.get("tag"))
+            ]
+            win_rate = info.get("win_rate")
+            wr_text = f", {int(win_rate * 100)}% win rate" if win_rate is not None else ""
+            top_text = f" | most active: {', '.join(top)}" if top else ""
+            lines.append(
+                f"- {info.get('label')}: {info.get('battles')} battles across "
+                f"{info.get('active_members')} member(s){wr_text}{top_text}"
+            )
+
     if recent_events:
         lines.append(
             "recent event stream examples: "

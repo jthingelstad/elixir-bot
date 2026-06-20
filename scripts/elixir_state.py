@@ -59,9 +59,7 @@ def _summary_payload(args) -> dict:
     return {
         "event_windows": db.summarize_events_by_window(windows=DEFAULT_WINDOWS, scope=args.scope),
         "recent_events": db.list_recent_events(days=args.days, scope=args.scope, limit=limit),
-        "active_projects": db.list_projects(statuses=("active",), limit=limit),
-        "active_war_project": db.get_active_war_season_project_snapshot(),
-        "operating_projects": db.get_active_operating_project_snapshots(),
+        "war_season": db.get_war_season_snapshot(),
         "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
         "recent_intents": db.list_recent_communication_intents(limit=limit),
         "failed_intents": db.list_recent_communication_intents(status="failed", limit=limit),
@@ -81,23 +79,12 @@ def _print_summary(data: dict) -> None:
         type_text = f" ({top_types})" if top_types else ""
         print(f"- {key}: {window.get('total', 0)} event(s){type_text}")
     print("")
-    active_war = data.get("active_war_project") or {}
-    print("Active War Project")
-    if active_war:
-        print(f"- {active_war.get('project_key')}: {_short(active_war.get('summary'))}")
+    war_season = data.get("war_season") or {}
+    print("War Season")
+    if war_season:
+        print(f"- season {war_season.get('season_id')}: {_short(war_season.get('summary'))}")
     else:
         print("- none")
-    print("")
-    for line in _line_items(
-        "Operating Projects",
-        [
-            project
-            for project in (data.get("operating_projects") or {}).values()
-            if project
-        ],
-        empty="none",
-    ):
-        print(line)
     print("")
     for line in _line_items(
         "Due Decision Cases",
@@ -143,22 +130,7 @@ def _events_payload(args) -> dict:
 
 
 def _projects_payload(args) -> dict:
-    if args.project_key:
-        return {
-            "detail": db.get_project_detail(
-                args.project_key,
-                event_limit=args.limit,
-                intent_limit=args.limit,
-            )
-        }
-    statuses = None if args.status == "all" else (args.status or "active",)
-    return {
-        "projects": db.list_projects(
-            project_type=args.project_type,
-            statuses=statuses,
-            limit=args.limit,
-        )
-    }
+    return {"war_season": db.get_war_season_snapshot()}
 
 
 def _cases_payload(args) -> dict:

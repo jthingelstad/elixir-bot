@@ -394,22 +394,14 @@ def _recent_events_block(*, include_leadership: bool, recent_limit: int = 20) ->
         }
 
 
-def _projects_block() -> dict:
+def _war_season_block():
+    """Fresh River Race season snapshot — the season story across the week."""
     try:
-        projects = {
-            "war_season": db.get_active_war_season_project_snapshot(),
-        }
-        projects.update(db.get_active_operating_project_snapshots() or {})
-        return projects
+        return db.get_war_season_snapshot()
     except Exception:
-        log.warning("projects load failed", exc_info=True)
-        _note_degraded("projects")
-        return {
-            "war_season": None,
-            "clan_development": None,
-            "onboarding": None,
-            "recruitment": None,
-        }
+        log.warning("war_season load failed", exc_info=True)
+        _note_degraded("war_season")
+        return None
 
 
 def _decision_cases_block() -> dict:
@@ -419,6 +411,26 @@ def _decision_cases_block() -> dict:
         log.warning("decision cases load failed", exc_info=True)
         _note_degraded("decision_cases")
         return {"due": [], "open": []}
+
+
+def _mode_pulse_block() -> dict:
+    """Per-mode clan battle activity (Trophy Road, Ranked, 2v2, events, …)."""
+    try:
+        return db.summarize_battle_modes(windows=(7, 28))
+    except Exception:
+        log.warning("mode_pulse load failed", exc_info=True)
+        _note_degraded("mode_pulse")
+        return {}
+
+
+def _season_window_block():
+    """Concrete season frame + week-by-week trajectory for the active season."""
+    try:
+        return db.get_season_window()
+    except Exception:
+        log.warning("season_window load failed", exc_info=True)
+        _note_degraded("season_window")
+        return None
 
 
 def _already_delivered(signal: dict) -> bool:
@@ -459,8 +471,9 @@ def build_situation(
     ``tick_result`` is a ``HeartbeatTickResult`` (signals + clan + war).
     Returns a dict whose top-level keys are stable for the agent's prompt:
     ``time``, ``standing``, ``signals_by_lane``, ``hard_post_signals``,
-    ``channel_memory``, ``recent_events``, ``projects``, ``decision_cases``,
-    ``roster_vitals``, ``due_revisits``, ``recent_agent_writes``.
+    ``channel_memory``, ``recent_events``, ``mode_pulse``, ``season_window``,
+    ``war_season``, ``decision_cases``, ``roster_vitals``, ``due_revisits``,
+    ``recent_agent_writes``.
 
     Signals whose ``signal_log_type`` is already marked complete in
     ``signal_log`` are dropped before assembly — preventing the agent from
@@ -504,7 +517,9 @@ def build_situation(
         "recent_events": _recent_events_block(
             include_leadership=bool(include_leadership_events),
         ),
-        "projects": _projects_block(),
+        "mode_pulse": _mode_pulse_block(),
+        "season_window": _season_window_block(),
+        "war_season": _war_season_block(),
         "decision_cases": _decision_cases_block() if include_decision_cases else {"due": [], "open": []},
         "channel_memory": {
             key: _channel_memory_for(key) for key in channel_keys

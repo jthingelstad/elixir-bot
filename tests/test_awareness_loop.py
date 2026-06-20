@@ -359,9 +359,9 @@ def test_build_situation_public_channel_keys_exclude_leadership_events():
     assert all(scope == "public" for _, scope in calls)
 
 
-def test_build_situation_includes_active_war_project_snapshot():
-    project_snapshot = {
-        "project_key": "war_season:129",
+def test_build_situation_includes_war_season_snapshot():
+    season_snapshot = {
+        "season_id": 129,
         "summary": "Season 129; Week 2; Battle Day 1; rank 1",
         "state": {
             "season_id": 129,
@@ -372,30 +372,11 @@ def test_build_situation_includes_active_war_project_snapshot():
     with (
         patch("runtime.situation.db.list_channel_messages", return_value=[]),
         patch("runtime.situation.build_situation_time", return_value=None),
-        patch("runtime.situation.db.get_active_war_season_project_snapshot", return_value=project_snapshot),
+        patch("runtime.situation.db.get_war_season_snapshot", return_value=season_snapshot),
     ):
         situation = build_situation(_bundle(signals=[]))
 
-    assert situation["projects"]["war_season"] == project_snapshot
-
-
-def test_build_situation_includes_operating_project_snapshots():
-    operating_projects = {
-        "clan_development": {"project_key": "clan_development:roster_health"},
-        "onboarding": {"project_key": "onboarding:current"},
-        "recruitment": {"project_key": "recruitment:current"},
-    }
-    with (
-        patch("runtime.situation.db.list_channel_messages", return_value=[]),
-        patch("runtime.situation.build_situation_time", return_value=None),
-        patch("runtime.situation.db.get_active_war_season_project_snapshot", return_value=None),
-        patch("runtime.situation.db.get_active_operating_project_snapshots", return_value=operating_projects),
-    ):
-        situation = build_situation(_bundle(signals=[]))
-
-    assert situation["projects"]["clan_development"]["project_key"] == "clan_development:roster_health"
-    assert situation["projects"]["onboarding"]["project_key"] == "onboarding:current"
-    assert situation["projects"]["recruitment"]["project_key"] == "recruitment:current"
+    assert situation["war_season"] == season_snapshot
 
 
 def test_build_situation_includes_decision_case_snapshot():

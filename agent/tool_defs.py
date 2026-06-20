@@ -463,8 +463,9 @@ TOOLS = [
                         "operational_summary",
                         "event_summary",
                         "recent_events",
-                        "projects",
-                        "project_detail",
+                        "game_modes",
+                        "season_window",
+                        "war_season",
                         "decision_cases",
                         "communication_intents",
                         "communication_trace",
@@ -501,13 +502,10 @@ TOOLS = [
                     "type": "string",
                     "description": "Optional subject key filter for event views.",
                 },
-                "project_type": {
+                "event_class": {
                     "type": "string",
-                    "description": "Optional project type filter, e.g. war_season.",
-                },
-                "project_key": {
-                    "type": "string",
-                    "description": "Project key for aspect='project_detail', e.g. war_season:133.",
+                    "description": "Event class for recent_events / event_summary: 'signal' (notable detector events, default), 'battle' (per-battle telemetry across all game modes), or 'all'.",
+                    "enum": ["signal", "battle", "all"],
                 },
                 "case_type": {
                     "type": "string",
@@ -515,7 +513,7 @@ TOOLS = [
                 },
                 "status": {
                     "type": "string",
-                    "description": "Optional status filter for projects, decision cases, or communication intents.",
+                    "description": "Optional status filter for decision cases or communication intents.",
                 },
                 "workflow": {
                     "type": "string",
@@ -912,9 +910,12 @@ TOOLS = [
         "description": (
             "Queue an operational suggestion for the leadership channel. Use when you detect a "
             "pattern that calls for a leader action — a rank swing, a recurring no-show, a "
-            "compliance gap. Persists as a leadership-scoped memory tagged 'followup'. Keep the "
-            "recommendation concrete (who, what, when) so a human can act on it without re-doing "
-            "the analysis."
+            "compliance gap. Always opens a durable decision case (the tracked home for the "
+            "concern) plus a leadership-scoped memory tagged 'followup' as its narrative note. "
+            "Pass case_type only when the followup is a member kick/promotion/demotion review that "
+            "should also become a #leader-actions card; otherwise omit it and it is tracked as a "
+            "general followup case. Keep the recommendation concrete (who, what, when) so a human "
+            "can act on it without re-doing the analysis."
         ),
         "input_schema": {
             "type": "object",
@@ -934,7 +935,7 @@ TOOLS = [
                 "case_type": {
                     "type": "string",
                     "enum": ["inactivity_review", "promotion_review", "demotion_review", "war_recovery"],
-                    "description": "Optional durable decision-case type to create or update when the followup is an actionable recommendation.",
+                    "description": "Optional. Set only for a member kick/promotion/demotion review that should also become a #leader-actions card. Omit for a general followup (still tracked as a decision case).",
                 },
             },
             "required": ["topic", "recommendation"],

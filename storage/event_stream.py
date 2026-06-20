@@ -16,8 +16,17 @@ from typing import Iterable, Optional
 import db as _db
 from db import EVENT_STREAM_RETENTION_DAYS, managed_connection
 from signal_keys import signal_source_key
+from storage.game_modes import mode_group_label
 
 EVENT_STREAM_WINDOWS = (7, 28, 56, 90)
+
+# Event-class discriminator. The signal-grain stream feeds prompt context; the
+# high-volume battle-grain telemetry accumulates for rollups/queries and is
+# excluded from the prompt-facing helpers by default (they default to
+# event_class="signal") so battle volume never bloats awareness context.
+DEFAULT_EVENT_CLASS = "signal"
+BATTLE_EVENT_CLASS = "battle"
+BATTLE_SOURCE_SYSTEM = "battle_log"
 
 _LEADERSHIP_SIGNAL_TYPES = {
     "inactive_members",
@@ -27,12 +36,17 @@ _LEADERSHIP_SIGNAL_TYPES = {
 
 __all__ = [
     "EVENT_STREAM_WINDOWS",
+    "DEFAULT_EVENT_CLASS",
+    "BATTLE_EVENT_CLASS",
     "event_key_for_signal",
+    "battle_event_key",
     "record_game_event",
     "record_signal_events",
+    "record_battle_event",
     "list_recent_events",
     "list_subject_events",
     "summarize_events_by_window",
+    "summarize_battle_modes",
 ]
 
 
@@ -169,6 +183,8 @@ def record_game_event(
     subject_key: str | None = None,
     season_id: str | int | None = None,
     war_week: str | int | None = None,
+    event_class: str = DEFAULT_EVENT_CLASS,
+    game_mode: str | None = None,
     payload: Optional[dict] = None,
     event_key: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
@@ -197,8 +213,9 @@ def record_game_event(
             event_key, event_type, source_system, source_detector,
             source_signal_key, source_signal_type, observed_at, occurred_at,
             scope, subject_type, subject_key, season_id, war_week,
+            event_class, game_mode,
             payload_json, payload_hash, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             normalized_key,
@@ -214,6 +231,8 @@ def record_game_event(
             _clean_text(subject_key),
             _clean_text(season_id),
             _clean_text(war_week),
+            _canon_source(event_class, DEFAULT_EVENT_CLASS),
+            _clean_text(game_mode),
             payload_json,
             hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
             now,
@@ -270,6 +289,97 @@ def record_signal_events(
     return events
 
 
+def battle_event_key(
+    member_tag: str,
+    battle_time: str | None,
+    battle_type: str | None = None,
+    opponent_tag: str | None = None,
+    crowns_for=None,
+    crowns_against=None,
+) -> str:
+    """Deterministic event key for one battle.
+
+    Mirrors the ``member_battle_facts`` dedupe tuple (member, time, type,
+    opponent, crowns) so the live ingest path and the historical backfill
+    produce identical keys and ``INSERT OR IGNORE`` stays idempotent.
+    """
+    basis = "|".join([
+        "battle",
+        _db._canon_tag(member_tag) or "",
+        _clean_text(battle_time) or "",
+        _clean_text(battle_type) or "",
+        _db._canon_tag(opponent_tag) or "",
+        "" if crowns_for is None else str(crowns_for),
+        "" if crowns_against is None else str(crowns_against),
+    ])
+    return f"game_event:{hashlib.sha256(basis.encode('utf-8')).hexdigest()}"
+
+
+@managed_connection
+def record_battle_event(
+    *,
+    member_tag: str,
+    battle_time: str | None,
+    mode_group: str,
+    battle_type: str | None = None,
+    game_mode_name: str | None = None,
+    outcome: str | None = None,
+    crowns_for=None,
+    crowns_against=None,
+    trophy_change=None,
+    league_number=None,
+    arena_name: str | None = None,
+    opponent_name: str | None = None,
+    opponent_tag: str | None = None,
+    opponent_clan_tag: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Project one battle into the stream as battle-grain telemetry.
+
+    ``observed_at``/``occurred_at`` are set to the battle time so windowed
+    queries place historical battles correctly. The caller supplies
+    ``mode_group`` (Elixir's stable mode family from
+    ``storage.game_modes.classify_battle_mode``) so the event's game mode
+    matches the battle fact's classification exactly.
+    """
+    tag = _db._canon_tag(member_tag)
+    when = _clean_text(battle_time)
+    if not tag or not when:
+        return {}
+    parsed = _db._parse_cr_time(battle_time)
+    occurred = parsed.strftime("%Y-%m-%dT%H:%M:%S") if parsed else _normalize_time(battle_time)
+    mode = _clean_text(mode_group) or "other"
+    payload = {
+        "mode_group": mode,
+        "game_mode_name": _clean_text(game_mode_name),
+        "battle_type": _clean_text(battle_type),
+        "outcome": _clean_text(outcome),
+        "crowns_for": crowns_for,
+        "crowns_against": crowns_against,
+        "trophy_change": trophy_change,
+        "league_number": league_number,
+        "arena": _clean_text(arena_name),
+        "opponent_name": _clean_text(opponent_name),
+        "opponent_tag": _db._canon_tag(opponent_tag) if opponent_tag else None,
+        "opponent_clan_tag": _db._canon_tag(opponent_clan_tag) if opponent_clan_tag else None,
+    }
+    return record_game_event(
+        event_type="battle_played",
+        source_system=BATTLE_SOURCE_SYSTEM,
+        source_detector=mode,
+        observed_at=occurred,
+        occurred_at=occurred,
+        scope="public",
+        subject_type="member",
+        subject_key=tag,
+        event_class=BATTLE_EVENT_CLASS,
+        game_mode=mode,
+        payload=payload,
+        event_key=battle_event_key(tag, battle_time, battle_type, opponent_tag, crowns_for, crowns_against),
+        conn=conn,
+    )
+
+
 def _event_filters(
     *,
     since: str | None = None,
@@ -278,6 +388,7 @@ def _event_filters(
     event_type: str | None = None,
     subject_type: str | None = None,
     subject_key: str | None = None,
+    event_class: str | None = None,
 ) -> tuple[str, list]:
     clauses = []
     args: list = []
@@ -288,6 +399,9 @@ def _event_filters(
         cutoff = (datetime.now(timezone.utc) - timedelta(days=int(days))).replace(tzinfo=None)
         clauses.append("observed_at >= ?")
         args.append(cutoff.strftime("%Y-%m-%dT%H:%M:%S"))
+    if event_class:
+        clauses.append("event_class = ?")
+        args.append(event_class)
     if scope:
         clauses.append("scope = ?")
         args.append(scope)
@@ -313,6 +427,7 @@ def list_recent_events(
     event_type: str | None = None,
     subject_type: str | None = None,
     subject_key: str | None = None,
+    event_class: str | None = DEFAULT_EVENT_CLASS,
     limit: int = 100,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
@@ -323,6 +438,7 @@ def list_recent_events(
         event_type=event_type,
         subject_type=subject_type,
         subject_key=subject_key,
+        event_class=event_class,
     )
     rows = conn.execute(
         f"SELECT * FROM game_event_stream {where} "
@@ -340,6 +456,7 @@ def list_subject_events(
     days: int = EVENT_STREAM_RETENTION_DAYS,
     limit: int = 100,
     scope: str | None = None,
+    event_class: str | None = DEFAULT_EVENT_CLASS,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
     return list_recent_events(
@@ -347,6 +464,7 @@ def list_subject_events(
         scope=scope,
         subject_type=subject_type,
         subject_key=subject_key,
+        event_class=event_class,
         limit=limit,
         conn=conn,
     )
@@ -359,6 +477,7 @@ def summarize_events_by_window(
     scope: str | None = None,
     subject_type: str | None = None,
     subject_key: str | None = None,
+    event_class: str | None = DEFAULT_EVENT_CLASS,
     now: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
@@ -374,6 +493,7 @@ def summarize_events_by_window(
             scope=scope,
             subject_type=subject_type,
             subject_key=subject_key,
+            event_class=event_class,
         )
         total = conn.execute(
             f"SELECT COUNT(*) AS count FROM game_event_stream {where}",
@@ -396,3 +516,97 @@ def summarize_events_by_window(
             "by_scope": {row["scope"]: int(row["count"] or 0) for row in by_scope_rows},
         }
     return summary
+
+
+def _win_rate(wins: int, decided: int) -> float | None:
+    return round(wins / decided, 3) if decided else None
+
+
+@managed_connection
+def summarize_battle_modes(
+    *,
+    windows: tuple[int, ...] = (7, 28),
+    now: str | None = None,
+    top_members: int = 3,
+    min_battles: int = 3,
+    subject_key: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Per-mode battle activity derived from the battle-grain stream.
+
+    For each lookback window, returns a per-game-mode summary (battles, active
+    members, W/L, win rate) plus the most active members in that mode. This is
+    what lets Elixir observe Path of Legends, 2v2, and event activity instead of
+    only Trophy Road — no detector signal required. Battles are public, so this
+    block is public-scoped. Pass ``subject_key`` (a player tag) to scope the
+    summary to one member's per-mode activity (e.g. for a player highlight).
+    """
+    now_dt = datetime.fromisoformat((now or _db._utcnow()).replace("Z", "+00:00"))
+    if now_dt.tzinfo is not None:
+        now_dt = now_dt.astimezone(timezone.utc).replace(tzinfo=None)
+    member_filter = _db._canon_tag(subject_key) if subject_key else None
+    result: dict[str, dict] = {}
+    for days in windows:
+        cutoff = (now_dt - timedelta(days=int(days))).strftime("%Y-%m-%dT%H:%M:%S")
+        where = [
+            "g.event_class = 'battle'",
+            "g.observed_at >= ?",
+            "g.subject_key IS NOT NULL",
+        ]
+        params: list = [cutoff]
+        if member_filter:
+            where.append("g.subject_key = ?")
+            params.append(member_filter)
+        rows = conn.execute(
+            f"""
+            SELECT g.game_mode AS game_mode,
+                   g.subject_key AS tag,
+                   m.current_name AS name,
+                   COUNT(*) AS battles,
+                   SUM(CASE WHEN json_extract(g.payload_json, '$.outcome') = 'W' THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN json_extract(g.payload_json, '$.outcome') = 'L' THEN 1 ELSE 0 END) AS losses
+            FROM game_event_stream g
+            LEFT JOIN members m ON m.player_tag = g.subject_key
+            WHERE {' AND '.join(where)}
+            GROUP BY g.game_mode, g.subject_key
+            """,
+            tuple(params),
+        ).fetchall()
+        modes: dict[str, dict] = {}
+        for row in rows:
+            mode = row["game_mode"] or "other"
+            bucket = modes.setdefault(mode, {"battles": 0, "wins": 0, "losses": 0, "members": []})
+            wins = int(row["wins"] or 0)
+            losses = int(row["losses"] or 0)
+            battles = int(row["battles"] or 0)
+            bucket["battles"] += battles
+            bucket["wins"] += wins
+            bucket["losses"] += losses
+            bucket["members"].append({
+                "tag": row["tag"],
+                "name": row["name"],
+                "battles": battles,
+                "wins": wins,
+                "losses": losses,
+            })
+        summary_modes: dict[str, dict] = {}
+        for mode, bucket in modes.items():
+            if bucket["battles"] < max(1, int(min_battles)):
+                continue
+            members = sorted(
+                bucket["members"], key=lambda member: (-member["battles"], -member["wins"])
+            )[: max(0, int(top_members))]
+            for member in members:
+                member["win_rate"] = _win_rate(member["wins"], member["wins"] + member["losses"])
+            summary_modes[mode] = {
+                "label": mode_group_label(mode),
+                "battles": bucket["battles"],
+                "active_members": len(bucket["members"]),
+                "wins": bucket["wins"],
+                "losses": bucket["losses"],
+                "win_rate": _win_rate(bucket["wins"], bucket["wins"] + bucket["losses"]),
+                "top_members": members,
+            }
+        ordered = dict(sorted(summary_modes.items(), key=lambda kv: -kv[1]["battles"]))
+        result[f"{int(days)}d"] = {"days": int(days), "modes": ordered}
+    return result

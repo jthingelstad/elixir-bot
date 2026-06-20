@@ -1279,6 +1279,7 @@ def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, pre
 def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     tag = _canon_tag(player_tag)
     member_id = _ensure_member(conn, tag, status=None)
+    from storage.event_stream import record_battle_event
     # v4.7 (#22): capture per-mode state (ladder, ranked) so we can emit
     # mode-specific streak / push signals and let the awareness agent post
     # Trophy Road vs Ranked moments with the right voice.
@@ -1341,6 +1342,27 @@ def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Opt
                 battle.get("tournamentTag"),
                 _json_or_none(battle),
             ),
+        )
+        # Project the battle into the stream at battle grain so Elixir can make
+        # per-mode observations (Trophy Road, Path of Legends, 2v2, events, …).
+        # Idempotent via the battle event_key; battle-class events are excluded
+        # from prompt context by default, so this is shadow-mode telemetry.
+        record_battle_event(
+            member_tag=tag,
+            battle_time=battle.get("battleTime"),
+            mode_group=classified["mode_group"],
+            battle_type=battle.get("type"),
+            game_mode_name=(battle.get("gameMode") or {}).get("name"),
+            outcome=outcome,
+            crowns_for=crowns_for,
+            crowns_against=crowns_against,
+            trophy_change=team.get("trophyChange"),
+            league_number=battle.get("leagueNumber"),
+            arena_name=arena.get("name") if isinstance(arena, dict) else None,
+            opponent_name=opp.get("name") if opp else None,
+            opponent_tag=opp.get("tag") if opp and opp.get("tag") else None,
+            opponent_clan_tag=(opp.get("clan") or {}).get("tag") if opp else None,
+            conn=conn,
         )
     recent_rows = conn.execute(
         "SELECT deck_json, support_cards_json, battle_time FROM member_battle_facts WHERE member_id = ? AND is_competitive = 1 ORDER BY battle_time DESC LIMIT 30",

@@ -13,20 +13,17 @@ from db import EVENT_STREAM_RETENTION_DAYS, managed_connection
 
 ROLLUP_MEMBER_90D = "member_90d"
 ROLLUP_WAR_CYCLE = "war_cycle"
-ROLLUP_PROJECT_SUMMARY = "project_summary"
 ROLLUP_CASE_HISTORY = "case_history"
 
 ROLLUP_TYPES = {
     ROLLUP_MEMBER_90D,
     ROLLUP_WAR_CYCLE,
-    ROLLUP_PROJECT_SUMMARY,
     ROLLUP_CASE_HISTORY,
 }
 
 __all__ = [
     "ROLLUP_CASE_HISTORY",
     "ROLLUP_MEMBER_90D",
-    "ROLLUP_PROJECT_SUMMARY",
     "ROLLUP_TYPES",
     "ROLLUP_WAR_CYCLE",
     "get_event_rollup",
@@ -370,60 +367,6 @@ def _write_war_cycle_rollups(conn: sqlite3.Connection, *, cutoff: str) -> int:
     return written
 
 
-def _write_project_summary_rollups(conn: sqlite3.Connection, *, cutoff: str) -> int:
-    rows = conn.execute(
-        """
-        SELECT p.*,
-               COUNT(e.event_id) AS old_event_count,
-               MIN(e.observed_at) AS first_event_at,
-               MAX(e.observed_at) AS last_event_at
-        FROM elixir_projects p
-        LEFT JOIN project_event_links l ON l.project_id = p.project_id
-        LEFT JOIN game_event_stream e ON e.event_key = l.event_key AND e.observed_at < ?
-        WHERE p.status <> 'active'
-           OR EXISTS (
-               SELECT 1
-               FROM project_event_links pl
-               JOIN game_event_stream ge ON ge.event_key = pl.event_key
-               WHERE pl.project_id = p.project_id AND ge.observed_at < ?
-           )
-        GROUP BY p.project_id
-        ORDER BY p.updated_at DESC, p.project_id DESC
-        """,
-        (cutoff, cutoff),
-    ).fetchall()
-    written = 0
-    for row in rows:
-        state = _json_loads(row["state_json"])
-        summary = {
-            "project_key": row["project_key"],
-            "project_type": row["project_type"],
-            "status": row["status"],
-            "title": row["title"],
-            "summary": row["summary"],
-            "subject_type": row["subject_type"],
-            "subject_key": row["subject_key"],
-            "old_event_count": int(row["old_event_count"] or 0),
-            "state_keys": sorted(state.keys()),
-        }
-        upsert_event_rollup(
-            rollup_key=f"project_summary:{row['project_key']}",
-            rollup_type=ROLLUP_PROJECT_SUMMARY,
-            scope="leadership",
-            subject_type=row["subject_type"],
-            subject_key=row["subject_key"],
-            project_key=row["project_key"],
-            season_id=row["season_id"],
-            period_start=row["started_at"] or row["created_at"],
-            period_end=row["ended_at"] or row["updated_at"],
-            source_event_count=int(row["old_event_count"] or 0),
-            summary=summary,
-            conn=conn,
-        )
-        written += 1
-    return written
-
-
 def _write_case_history_rollups(conn: sqlite3.Connection, *, cutoff: str) -> int:
     rows = conn.execute(
         """
@@ -481,7 +424,6 @@ def write_event_rollups_for_retention(
     stats = {
         ROLLUP_MEMBER_90D: _write_member_90d_rollups(conn, cutoff=clean_cutoff),
         ROLLUP_WAR_CYCLE: _write_war_cycle_rollups(conn, cutoff=clean_cutoff),
-        ROLLUP_PROJECT_SUMMARY: _write_project_summary_rollups(conn, cutoff=clean_cutoff),
         ROLLUP_CASE_HISTORY: _write_case_history_rollups(conn, cutoff=clean_cutoff),
     }
     conn.commit()
