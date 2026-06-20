@@ -464,6 +464,7 @@ TOOLS = [
                         "event_summary",
                         "recent_events",
                         "game_modes",
+                        "season_window",
                         "projects",
                         "project_detail",
                         "decision_cases",
@@ -501,6 +502,11 @@ TOOLS = [
                 "subject_key": {
                     "type": "string",
                     "description": "Optional subject key filter for event views.",
+                },
+                "event_class": {
+                    "type": "string",
+                    "description": "Event class for recent_events / event_summary: 'signal' (notable detector events, default), 'battle' (per-battle telemetry across all game modes), or 'all'.",
+                    "enum": ["signal", "battle", "all"],
                 },
                 "project_type": {
                     "type": "string",

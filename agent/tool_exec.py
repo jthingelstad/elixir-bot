@@ -838,6 +838,12 @@ def _status_filter(arguments, *, default: tuple[str, ...] | None = None) -> tupl
     return (status,)
 
 
+def _state_event_class(arguments):
+    """Resolve the event_class filter: 'signal' (default), 'battle', or 'all' (None)."""
+    event_class = (arguments.get("event_class") or "signal").strip().lower()
+    return None if event_class == "all" else event_class
+
+
 def _execute_get_elixir_state(arguments, workflow=None):
     """Read Elixir's internal event/project/case/intent state with scope gates."""
     aspect = arguments.get("aspect", "operational_summary")
@@ -852,6 +858,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
             scope=scope,
             subject_type=arguments.get("subject_type"),
             subject_key=arguments.get("subject_key"),
+            event_class=_state_event_class(arguments),
         )
 
     if aspect == "recent_events":
@@ -867,6 +874,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
                 event_type=arguments.get("event_type"),
                 subject_type=arguments.get("subject_type"),
                 subject_key=arguments.get("subject_key"),
+                event_class=_state_event_class(arguments),
                 limit=limit,
             ),
         }
@@ -876,6 +884,9 @@ def _execute_get_elixir_state(arguments, workflow=None):
             windows=_state_windows(arguments),
             top_members=int(arguments.get("top_members") or 5),
         )
+
+    if aspect == "season_window":
+        return db.get_season_window()
 
     if aspect == "event_rollups":
         return _execute_get_event_rollups(arguments, workflow=workflow)

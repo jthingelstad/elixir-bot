@@ -117,3 +117,29 @@ def test_get_elixir_state_game_modes_aspect_is_pullable():
     assert ranked["battles"] == 4
     assert ranked["label"] == "Ranked"
     assert ranked["top_members"][0]["name"] == "Climber"
+
+
+def test_get_elixir_state_event_class_drills_into_battles():
+    from agent.tool_exec import _execute_get_elixir_state
+
+    conn = db.get_connection()
+    _seed_member(conn, "#EC1", "Driller")
+    db.record_game_event(
+        event_type="badge_earned", source_system="player_intel",
+        subject_type="member", subject_key="#EC1", payload={}, conn=conn,
+    )
+    _battle(conn, "#EC1", "ranked", "pathOfLegend", "Ranked1v1_NewArena2",
+            "20260620T120000.000Z", "W", "#OPP")
+
+    # default (signal) excludes battle telemetry
+    signal_view = _execute_get_elixir_state({"aspect": "recent_events", "days": 90})
+    assert "battle_played" not in {e["event_type"] for e in signal_view["events"]}
+    # event_class='battle' drills into the per-battle stream
+    battle_view = _execute_get_elixir_state({"aspect": "recent_events", "days": 90, "event_class": "battle"})
+    assert {e["event_type"] for e in battle_view["events"]} == {"battle_played"}
+
+
+def test_get_elixir_state_season_window_aspect_is_reachable():
+    from agent.tool_exec import _execute_get_elixir_state
+    # public-reachable (before the leadership gate); None when no active war
+    assert _execute_get_elixir_state({"aspect": "season_window"}) is None
