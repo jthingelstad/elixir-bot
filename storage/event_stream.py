@@ -16,6 +16,7 @@ from typing import Iterable, Optional
 import db as _db
 from db import EVENT_STREAM_RETENTION_DAYS, managed_connection
 from signal_keys import signal_source_key
+from storage.game_modes import mode_group_label
 
 EVENT_STREAM_WINDOWS = (7, 28, 56, 90)
 
@@ -45,6 +46,7 @@ __all__ = [
     "list_recent_events",
     "list_subject_events",
     "summarize_events_by_window",
+    "summarize_battle_modes",
 ]
 
 
@@ -514,3 +516,87 @@ def summarize_events_by_window(
             "by_scope": {row["scope"]: int(row["count"] or 0) for row in by_scope_rows},
         }
     return summary
+
+
+def _win_rate(wins: int, decided: int) -> float | None:
+    return round(wins / decided, 3) if decided else None
+
+
+@managed_connection
+def summarize_battle_modes(
+    *,
+    windows: tuple[int, ...] = (7, 28),
+    now: str | None = None,
+    top_members: int = 3,
+    min_battles: int = 3,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Per-mode clan battle activity derived from the battle-grain stream.
+
+    For each lookback window, returns a per-game-mode summary (battles, active
+    members, W/L, win rate) plus the most active members in that mode. This is
+    what lets Elixir observe Path of Legends, 2v2, and event activity instead of
+    only Trophy Road — no detector signal required. Battles are public, so this
+    block is public-scoped.
+    """
+    now_dt = datetime.fromisoformat((now or _db._utcnow()).replace("Z", "+00:00"))
+    if now_dt.tzinfo is not None:
+        now_dt = now_dt.astimezone(timezone.utc).replace(tzinfo=None)
+    result: dict[str, dict] = {}
+    for days in windows:
+        cutoff = (now_dt - timedelta(days=int(days))).strftime("%Y-%m-%dT%H:%M:%S")
+        rows = conn.execute(
+            """
+            SELECT g.game_mode AS game_mode,
+                   g.subject_key AS tag,
+                   m.current_name AS name,
+                   COUNT(*) AS battles,
+                   SUM(CASE WHEN json_extract(g.payload_json, '$.outcome') = 'W' THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN json_extract(g.payload_json, '$.outcome') = 'L' THEN 1 ELSE 0 END) AS losses
+            FROM game_event_stream g
+            LEFT JOIN members m ON m.player_tag = g.subject_key
+            WHERE g.event_class = 'battle'
+              AND g.observed_at >= ?
+              AND g.subject_key IS NOT NULL
+            GROUP BY g.game_mode, g.subject_key
+            """,
+            (cutoff,),
+        ).fetchall()
+        modes: dict[str, dict] = {}
+        for row in rows:
+            mode = row["game_mode"] or "other"
+            bucket = modes.setdefault(mode, {"battles": 0, "wins": 0, "losses": 0, "members": []})
+            wins = int(row["wins"] or 0)
+            losses = int(row["losses"] or 0)
+            battles = int(row["battles"] or 0)
+            bucket["battles"] += battles
+            bucket["wins"] += wins
+            bucket["losses"] += losses
+            bucket["members"].append({
+                "tag": row["tag"],
+                "name": row["name"],
+                "battles": battles,
+                "wins": wins,
+                "losses": losses,
+            })
+        summary_modes: dict[str, dict] = {}
+        for mode, bucket in modes.items():
+            if bucket["battles"] < max(1, int(min_battles)):
+                continue
+            members = sorted(
+                bucket["members"], key=lambda member: (-member["battles"], -member["wins"])
+            )[: max(0, int(top_members))]
+            for member in members:
+                member["win_rate"] = _win_rate(member["wins"], member["wins"] + member["losses"])
+            summary_modes[mode] = {
+                "label": mode_group_label(mode),
+                "battles": bucket["battles"],
+                "active_members": len(bucket["members"]),
+                "wins": bucket["wins"],
+                "losses": bucket["losses"],
+                "win_rate": _win_rate(bucket["wins"], bucket["wins"] + bucket["losses"]),
+                "top_members": members,
+            }
+        ordered = dict(sorted(summary_modes.items(), key=lambda kv: -kv[1]["battles"]))
+        result[f"{int(days)}d"] = {"days": int(days), "modes": ordered}
+    return result

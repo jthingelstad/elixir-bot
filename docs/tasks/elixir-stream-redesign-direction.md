@@ -69,10 +69,16 @@ case-first. Not part of Phase 1, but the model the later phases target.
   - Tests: idempotent insertion, mode classification on events, backfill, and
     Situation unchanged.
 
-- **Phase 2 — Season window + rollups (consumption).** Concrete season-window helper
-  (bounds from war tables); write `event_rollups` (`war_cycle` + per-mode +
-  `member_90d`) from the stream; Situation/recap/insight read per-mode and
-  whole-season rollups so Elixir comments on PoL/2v2/events and season-long arcs.
+- **Phase 2 — Season window + per-mode consumption. [SHIPPED 2a]** A concrete
+  season-window helper (`get_season_window`: bounds + week-by-week rank/fame
+  trajectory from war tables) and a live per-mode battle summary
+  (`summarize_battle_modes`: Trophy Road / Path of Legends / 2v2 / events / war /
+  tournaments with W-L, win rate, and top members) — both computed from the stream
+  and wired into Situation (`mode_pulse`, `season_window`) and the awareness prompt,
+  so Elixir can comment on Path of Legends grinds, 2v2 streaks, and whole-season
+  arcs. Consumption is computed live (always fresh) rather than pre-stored.
+  - **Follow-on (2b):** durable `event_rollups` persistence (history beyond the
+    90-day stream, per-mode + member-level) and recap/daily-insight consumption.
 
 - **Phase 3 — Cases as the concern spine; case-first leader scan.**
 - **Phase 4 — Delivery on `communication_intents` (incl. skip intents).**

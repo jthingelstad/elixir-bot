@@ -421,6 +421,26 @@ def _decision_cases_block() -> dict:
         return {"due": [], "open": []}
 
 
+def _mode_pulse_block() -> dict:
+    """Per-mode clan battle activity (Trophy Road, Ranked, 2v2, events, …)."""
+    try:
+        return db.summarize_battle_modes(windows=(7, 28))
+    except Exception:
+        log.warning("mode_pulse load failed", exc_info=True)
+        _note_degraded("mode_pulse")
+        return {}
+
+
+def _season_window_block():
+    """Concrete season frame + week-by-week trajectory for the active season."""
+    try:
+        return db.get_season_window()
+    except Exception:
+        log.warning("season_window load failed", exc_info=True)
+        _note_degraded("season_window")
+        return None
+
+
 def _already_delivered(signal: dict) -> bool:
     """True iff the signal's completion key is already in ``signal_log``.
 
@@ -459,8 +479,9 @@ def build_situation(
     ``tick_result`` is a ``HeartbeatTickResult`` (signals + clan + war).
     Returns a dict whose top-level keys are stable for the agent's prompt:
     ``time``, ``standing``, ``signals_by_lane``, ``hard_post_signals``,
-    ``channel_memory``, ``recent_events``, ``projects``, ``decision_cases``,
-    ``roster_vitals``, ``due_revisits``, ``recent_agent_writes``.
+    ``channel_memory``, ``recent_events``, ``mode_pulse``, ``season_window``,
+    ``projects``, ``decision_cases``, ``roster_vitals``, ``due_revisits``,
+    ``recent_agent_writes``.
 
     Signals whose ``signal_log_type`` is already marked complete in
     ``signal_log`` are dropped before assembly — preventing the agent from
@@ -504,6 +525,8 @@ def build_situation(
         "recent_events": _recent_events_block(
             include_leadership=bool(include_leadership_events),
         ),
+        "mode_pulse": _mode_pulse_block(),
+        "season_window": _season_window_block(),
         "projects": _projects_block(),
         "decision_cases": _decision_cases_block() if include_decision_cases else {"due": [], "open": []},
         "channel_memory": {

@@ -1144,3 +1144,44 @@ def _season_bounds(conn: sqlite3.Connection, season_id: int) -> tuple[Optional[s
         return None, None
     end_dt = end_dt + timedelta(days=7)
     return start_dt.strftime("%Y%m%dT%H%M%S.000Z"), end_dt.strftime("%Y%m%dT%H%M%S.000Z")
+
+
+@managed_connection
+def get_season_window(
+    season_id: Optional[int] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """Concrete River Race season frame: date bounds + week-by-week trajectory.
+
+    A war season runs ~4-5 weekly sections. This packages the season's bounds
+    and per-week rank/fame/trophy trajectory so Elixir can reason about clan
+    performance across the *whole* season instead of a single week or snapshot.
+    The current week/phase still come from the ``time`` block; this adds the
+    season-long arc. Returns None when there is no identifiable season.
+    """
+    sid = season_id if season_id is not None else get_current_season_id(conn=conn)
+    if sid is None:
+        return None
+    start, end = _season_bounds(conn, int(sid))
+    weeks = conn.execute(
+        "SELECT section_index, our_rank, our_fame, trophy_change, total_clans "
+        "FROM war_races WHERE season_id = ? ORDER BY section_index ASC",
+        (int(sid),),
+    ).fetchall()
+    trajectory = [
+        {
+            "section_index": row["section_index"],
+            "rank": row["our_rank"],
+            "fame": row["our_fame"],
+            "trophy_change": row["trophy_change"],
+            "clans": row["total_clans"],
+        }
+        for row in weeks
+    ]
+    return {
+        "season_id": int(sid),
+        "start": start,
+        "end": end,
+        "weeks_recorded": len(trajectory),
+        "week_trajectory": trajectory,
+    }
