@@ -18,11 +18,14 @@ Service control for the launchd agent (`com.poapkings.elixir`).
 scripts/admin.sh install    # write ~/Library/LaunchAgents/com.poapkings.elixir.plist
 scripts/admin.sh start      # launchctl bootstrap
 scripts/admin.sh stop       # launchctl bootout
-scripts/admin.sh restart
+scripts/admin.sh restart    # backup → stop → start
 scripts/admin.sh status
 scripts/admin.sh upgrade    # stop → git pull → pip install -r → start
 scripts/admin.sh backup     # invokes backup_db.py
 ```
+
+`restart` creates a live SQLite backup before stopping the bot and aborts if the
+backup fails.
 
 ### `backup_db.py`
 Safe online SQLite backup (uses `sqlite3.Connection.backup()` — no need to stop

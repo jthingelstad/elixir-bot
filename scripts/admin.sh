@@ -35,6 +35,7 @@ start_bot() {
 }
 
 restart_bot() {
+    backup_db
     stop_bot
     start_bot
 }
