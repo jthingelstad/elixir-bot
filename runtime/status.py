@@ -87,6 +87,37 @@ def _load_persisted_job_status() -> dict:
     return statuses
 
 
+def clear_stale_running_jobs() -> list[str]:
+    """Clear persisted running flags left behind by a previous process."""
+    try:
+        import db
+
+        statuses = db.list_runtime_job_status()
+    except Exception:
+        return []
+
+    now = _utcnow()
+    cleared: list[str] = []
+    with _LOCK:
+        active_current_jobs = {
+            name for name, state in _JOB_STATUS.items()
+            if state.get("running")
+        }
+
+    for name, state in statuses.items():
+        if not state.get("running") or name in active_current_jobs:
+            continue
+        cleaned = dict(state)
+        cleaned["running"] = False
+        cleaned["failure_count"] = int(cleaned.get("failure_count") or 0) + 1
+        cleaned["last_finished_at"] = now
+        cleaned["last_failure_at"] = now
+        cleaned["last_error"] = "process restarted before job marked complete"
+        db.save_runtime_job_status(name, cleaned)
+        cleared.append(name)
+    return cleared
+
+
 def mark_job_start(name: str) -> None:
     with _LOCK:
         state = _JOB_STATUS.setdefault(name, _default_job_state())
