@@ -24,7 +24,7 @@ To stop two scheduled agents colliding on the same files, code-commit rights are
 - **Build Manager** — the only role that commits feature and bug-fix code to `main`.
 - **Operations Manager** — commits operational/reliability fixes only.
 - **Evaluator** — commits eval harnesses, datasets, scoring rules, and regression tests only.
-- **Data Analyst, Quality Manager & Product Manager** — never commit code. They produce GitHub issues and `docs/tasks/` reports only.
+- **Data Analyst, Quality Manager & Product Manager** — never commit product code. They produce GitHub issues and `docs/tasks/` reports, and they commit *and push* those reports themselves so they never leave the worktree dirty for the Build Manager.
 
 If a role finds work outside its lane, it does **not** reach in — it files a labeled issue and moves on.
 
@@ -122,7 +122,7 @@ Someone has to own the health of the queue, or it silently fills. The **Product 
 
 ## Operating rules shared by all roles
 
-1. Update the repo first; if the worktree is dirty, stop and open an issue.
+1. Update the repo first; if the worktree is dirty, stop and open an issue. **End every run with `git status` clean** — if you wrote anything to `docs/tasks/`, commit and push it before you finish. An uncommitted report blocks the Build Manager, which refuses to engage on a dirty tree.
 2. Do **one** focused thing per run. Never bundle unrelated work.
 3. Claim before you work (`wip`), and skip anything already claimed. See *Concurrency* above.
 4. Tag every issue you file with `generated` so agent-filed work is distinguishable from human-filed.
