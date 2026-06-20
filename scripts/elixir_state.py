@@ -130,22 +130,7 @@ def _events_payload(args) -> dict:
 
 
 def _projects_payload(args) -> dict:
-    if args.project_key:
-        return {
-            "detail": db.get_project_detail(
-                args.project_key,
-                event_limit=args.limit,
-                intent_limit=args.limit,
-            )
-        }
-    statuses = None if args.status == "all" else (args.status or "active",)
-    return {
-        "projects": db.list_projects(
-            project_type=args.project_type,
-            statuses=statuses,
-            limit=args.limit,
-        )
-    }
+    return {"war_season": db.get_war_season_snapshot()}
 
 
 def _cases_payload(args) -> dict:

@@ -879,26 +879,10 @@ def _execute_get_elixir_state(arguments, workflow=None):
         return leadership_error
 
     if aspect == "projects":
-        statuses = _status_filter(arguments, default=("active",))
-        return {
-            "projects": db.list_projects(
-                project_type=arguments.get("project_type"),
-                statuses=statuses,
-                limit=limit,
-            )
-        }
+        return {"war_season": db.get_war_season_snapshot()}
 
     if aspect == "project_detail":
-        project_key = (arguments.get("project_key") or "").strip()
-        if not project_key:
-            project = db.get_active_project(arguments.get("project_type") or "war_season")
-            project_key = (project or {}).get("project_key") or ""
-        if not project_key:
-            return {"error": "project_key_required", "detail": "No project_key was provided and no active project matched."}
-        return db.get_project_detail(project_key, event_limit=limit, intent_limit=limit) or {
-            "error": "project_not_found",
-            "project_key": project_key,
-        }
+        return {"war_season": db.get_war_season_snapshot()}
 
     if aspect == "decision_cases":
         status = (arguments.get("status") or "").strip()

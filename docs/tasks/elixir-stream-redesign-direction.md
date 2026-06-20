@@ -102,9 +102,16 @@ case-first. Not part of Phase 1, but the model the later phases target.
   are removed, and the `project_summary` retention rollup is decoupled. Nothing in
   the awareness, recap, memory, or scheduled-job paths reads or writes the projects
   tables anymore.
-  - **Follow-on (5.2):** remove the two remaining admin readers, slim
-    `storage/projects.py` to the snapshot, and physically drop the dormant tables
-    (needs care — `foreign_keys=ON` and a `communication_intents.project_id` FK).
+  - **[SHIPPED 5.2]** `storage/projects.py` is now just the war-season snapshot;
+    the war-ingest project writer and the intent→project inference are removed,
+    the `project_summary` rollup is gone, and the admin/tool views read the fresh
+    snapshot. No code reads or writes the projects tables. The physical tables are
+    left **dormant** rather than dropped: with `foreign_keys=ON` and the
+    `communication_intents.project_id` FK, a hard `DROP TABLE elixir_projects`
+    breaks `communication_intents` inserts ("no such table"), and a clean drop
+    would mean rebuilding `communication_intents` (itself referenced by
+    `messages`/`signal_outcomes`) — disproportionate risk for two ~4-row dormant
+    tables. They can be dropped later via a dedicated FK-rebuild migration.
 
 ## Guardrails
 
