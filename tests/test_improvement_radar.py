@@ -100,6 +100,26 @@ def test_awareness_gap_spec_ignores_accounted_skips_and_rejected_posts():
             covered_keys=3,
             considered_skipped=0,
             all_ok=False,
+            signal_outcomes=[
+                {"signal_key": "hot:#ABC", "signal_type": "battle_hot_streak", "status": "covered"},
+                {"signal_key": "push:#ABC", "signal_type": "battle_trophy_push", "status": "covered"},
+                {"signal_key": "badge:#ABC", "signal_type": "badge_level_milestone", "status": "covered"},
+            ],
+            conn=conn,
+        )
+        db.record_awareness_tick(
+            workflow="player_intel",
+            signals_in=4,
+            posts_rejected=1,
+            covered_keys=1,
+            considered_skipped=0,
+            all_ok=False,
+            signal_outcomes=[
+                {"signal_key": "card:#ABC:16", "signal_type": "card_level_milestone", "status": "covered"},
+                {"signal_key": "card:#ABC:16", "signal_type": "card_level_milestone", "status": "covered"},
+                {"signal_key": "card:#ABC:16", "signal_type": "card_level_milestone", "status": "covered"},
+                {"signal_key": "card:#ABC:16", "signal_type": "card_level_milestone", "status": "covered"},
+            ],
             conn=conn,
         )
         db.record_awareness_tick(
