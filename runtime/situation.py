@@ -451,6 +451,8 @@ def build_situation(
     *,
     channel_keys: Iterable[str] | None = None,
     include_leadership_events: bool | None = None,
+    include_decision_cases: bool = True,
+    include_leader_action_board: bool = True,
 ) -> dict:
     """Assemble the single Situation payload for one awareness tick.
 
@@ -503,13 +505,17 @@ def build_situation(
             include_leadership=bool(include_leadership_events),
         ),
         "projects": _projects_block(),
-        "decision_cases": _decision_cases_block(),
+        "decision_cases": _decision_cases_block() if include_decision_cases else {"due": [], "open": []},
         "channel_memory": {
             key: _channel_memory_for(key) for key in channel_keys
         },
         "roster_vitals": _roster_vitals(),
         "recent_agent_writes": _recent_agent_writes(),
-        "leader_action_board": _leader_action_board(),
+        "leader_action_board": (
+            _leader_action_board()
+            if include_leader_action_board
+            else {"open": [], "recent_decisions": []}
+        ),
         "_raw_signal_count": len(signals),
         "_noisy_signal_count": noisy_signal_count,
         "_due_revisit_count": len(due_revisits),

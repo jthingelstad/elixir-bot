@@ -2392,7 +2392,16 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
     )
     await _upsert_decision_cases_from_signals(signals, source_system=workflow or "awareness")
     bundle = HeartbeatTickResult(signals=signals or [], clan=clan or {}, war=war or {})
-    situation = build_situation(bundle)
+    if workflow == "player_intel":
+        situation = build_situation(
+            bundle,
+            channel_keys=["member-highlights"],
+            include_leadership_events=False,
+            include_decision_cases=False,
+            include_leader_action_board=False,
+        )
+    else:
+        situation = build_situation(bundle)
 
     if situation_is_quiet(situation):
         log.info("awareness loop: quiet tick, skipping agent call")
