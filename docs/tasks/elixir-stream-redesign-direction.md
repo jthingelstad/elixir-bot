@@ -80,7 +80,16 @@ case-first. Not part of Phase 1, but the model the later phases target.
   - **Follow-on (2b):** durable `event_rollups` persistence (history beyond the
     90-day stream, per-mode + member-level) and recap/daily-insight consumption.
 
-- **Phase 3 — Cases as the concern spine; case-first leader scan.**
+- **Phase 3 — Cases as the concern spine; case-first leader scan. [SHIPPED 3a]**
+  The leader-action scan now posts from due decision cases — the candidate
+  recompute is just the sensor that opens/refreshes cases. A deferred case
+  re-surfaces when its `due_at` passes even without a fresh detector flag
+  (fixing the inverted north-star, where overdue deferrals were silently
+  auto-dismissed); an open case the detector no longer flags is left in Situation
+  rather than carded with stale evidence. Card dedupe (168h) prevents re-post spam.
+  - **Follow-on (3b):** awareness write-tools (`flag_member_watch` /
+    `record_leadership_followup`) upsert cases by default so a concern has a
+    single home, and memories/revisits become annotations of the case.
 - **Phase 4 — Delivery on `communication_intents` (incl. skip intents).**
 - **Phase 5 — Retire `elixir_projects`, dead paths; docs.**
 

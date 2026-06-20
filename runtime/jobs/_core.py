@@ -999,32 +999,15 @@ def _merge_due_case_with_refreshed_payload(due_case: dict, refreshed: dict | Non
         merged["prompt_text"] = merged.get("recommendation")
     if not merged.get("title") and merged.get("case_type"):
         merged["title"] = str(merged["case_type"]).replace("_", " ").title()
+    # When there is no fresh detector payload, fall back to the member evidence
+    # the case stored when it was opened, so a re-surfaced case can still run the
+    # kick-eligibility check and render a card.
+    if not isinstance(merged.get("member"), dict):
+        state = merged.get("state") if isinstance(merged.get("state"), dict) else {}
+        member = state.get("member") if isinstance(state.get("member"), dict) else None
+        if member:
+            merged["member"] = member
     return merged
-
-
-async def _dismiss_stale_deferred_case(due_case: dict) -> bool:
-    if (due_case or {}).get("status") != db.CASE_DEFERRED:
-        return False
-    case_id = (due_case or {}).get("case_id")
-    if case_id is None:
-        return False
-    target = (due_case or {}).get("target_player_name") or (due_case or {}).get("target_player_tag") or "member"
-    resolution = (
-        "Auto-cleared by leadership action scan: deferred review came due, "
-        f"but {target} no longer appears in the fresh recommendation candidate set."
-    )
-    try:
-        await asyncio.to_thread(
-            db.resolve_decision_case,
-            case_id,
-            status=db.CASE_DISMISSED,
-            resolution=resolution,
-        )
-    except Exception:
-        log.warning("failed to dismiss stale deferred decision case %s", case_id, exc_info=True)
-        return False
-    log.info("dismissed stale deferred decision case %s for %s", case_id, target)
-    return True
 
 
 async def _post_leader_action_case(channel, case: dict) -> bool:
@@ -1178,12 +1161,17 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
             case_type=case_type,
             limit=max_actions,
         )
+        # Case-first: due cases drive the cards. A deferred case re-surfaces when
+        # its due_at passes even if the live detector no longer flags the member —
+        # the leader chose to revisit it, so we honor that instead of silently
+        # dismissing it (card dedupe, has_recent_leader_action/168h, prevents
+        # re-post spam). An open case the detector no longer flags is left in
+        # Situation for the awareness loop rather than carded with stale evidence.
         candidates = []
         for due_case in due_cases:
             identity = _leader_action_case_identity(due_case)
             refreshed = refreshed_cases_by_identity.get(identity)
-            if not refreshed:
-                await _dismiss_stale_deferred_case(due_case)
+            if refreshed is None and due_case.get("status") != db.CASE_DEFERRED:
                 continue
             candidates.append(_merge_due_case_with_refreshed_payload(due_case, refreshed))
         if not candidates:
