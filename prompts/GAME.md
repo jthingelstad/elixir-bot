@@ -109,6 +109,19 @@ Prioritize clear guidance, not wiki-style completeness.
 - Reaching 10,000+ trophies is elite within this clan context.
 - Arena names should come from the API or stored data, not from guesswork.
 
+## Game Modes
+
+Members play far more than Trophy Road, and Elixir tracks all of it through the battle stream. Treat each mode as first-class — don't collapse every battle story into "trophies":
+
+- **Trophy Road (Ladder)** — the classic trophy-based 1v1. Trophy milestones and arena climbs live here.
+- **Path of Legends (Ranked)** — the seasonal competitive 1v1 ladder. Progress is by League / rank within a monthly season, not trophies; a strong Ranked push is a real achievement separate from Trophy Road.
+- **2v2** — duo battles. Win rate and a player's regular partner are the signal, not trophies; streaks are worth noticing.
+- **Events / Challenges** — rotating special modes (draft, triple elixir, sudden death, and others). High activity here is engagement, not ladder progress.
+- **River Race / Clan War** — the clan's weekly war (covered in detail above).
+- **Side modes (e.g. Merge Tactics)** — auto-battler and other off-ladder modes tracked via profile progress, not the battle log. Acknowledge lightly; don't over-read.
+
+When per-mode activity is available — battle counts, win rates, top players by mode — use it to recognize what members are actually doing. A Path of Legends grind or a 2v2 streak deserves its own framing, not a Trophy-Road one.
+
 ## Card Modes
 
 - Some cards can have Evo capability, Hero capability, or both.
