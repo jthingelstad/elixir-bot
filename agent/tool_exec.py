@@ -1139,6 +1139,11 @@ def _execute_schedule_revisit(arguments):
     }
 
 
+def _followup_topic_slug(topic: str, *, max_len: int = 48) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (topic or "").strip().lower()).strip("-")
+    return slug[:max_len].rstrip("-") or "general"
+
+
 def _execute_record_leadership_followup(arguments):
     """Awareness-loop observation: queue an operational suggestion.
 
@@ -1176,29 +1181,47 @@ def _execute_record_leadership_followup(arguments):
         return {"error": "record_leadership_followup_failed", "detail": str(exc)}
 
     attach_tags(memory["memory_id"], ["followup"], actor="elixir:awareness-tool")
+    # A leadership followup is action-oriented by definition, so it always becomes
+    # a durable decision case — the single home for the concern — with the memory
+    # above as its narrative annotation. A specific case_type (e.g.
+    # promotion_review) routes to the member-review card path; otherwise it is a
+    # generic followup case keyed by topic so distinct concerns about the same
+    # member do not collapse into one.
     case = None
-    if case_type:
-        try:
-            if resolved_tag:
-                case = db.upsert_member_review_case(
-                    case_type=case_type,
-                    member={"tag": resolved_tag},
-                    title=f"Followup: {topic}",
-                    recommendation=recommendation,
-                    rationale=recommendation,
-                )
-            else:
-                case = db.upsert_decision_case(
-                    case_type=case_type,
-                    title=f"Followup: {topic}",
-                    recommendation=recommendation,
-                    rationale=recommendation,
-                    subject_type="operation",
-                    subject_key=topic,
-                    state={"topic": topic},
-                )
-        except Exception as exc:
-            log.warning("record_leadership_followup case upsert failed: %s", exc)
+    effective_type = case_type or "leadership_followup"
+    topic_slug = _followup_topic_slug(topic)
+    try:
+        if case_type and resolved_tag:
+            case = db.upsert_member_review_case(
+                case_type=case_type,
+                member={"tag": resolved_tag},
+                title=f"Followup: {topic}",
+                recommendation=recommendation,
+                rationale=recommendation,
+            )
+        elif resolved_tag:
+            case = db.upsert_decision_case(
+                case_type=effective_type,
+                title=f"Followup: {topic}",
+                recommendation=recommendation,
+                rationale=recommendation,
+                target_player_tag=resolved_tag,
+                case_key=f"leadership_followup:member:{resolved_tag}:{topic_slug}",
+                state={"topic": topic},
+            )
+        else:
+            case = db.upsert_decision_case(
+                case_type=effective_type,
+                title=f"Followup: {topic}",
+                recommendation=recommendation,
+                rationale=recommendation,
+                subject_type="operation",
+                subject_key=f"operation:{topic_slug}",
+                case_key=f"leadership_followup:{topic_slug}",
+                state={"topic": topic},
+            )
+    except Exception as exc:
+        log.warning("record_leadership_followup case upsert failed: %s", exc)
     result = {
         "success": True,
         "memory_id": memory["memory_id"],

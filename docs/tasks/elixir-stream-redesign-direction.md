@@ -87,9 +87,11 @@ case-first. Not part of Phase 1, but the model the later phases target.
   (fixing the inverted north-star, where overdue deferrals were silently
   auto-dismissed); an open case the detector no longer flags is left in Situation
   rather than carded with stale evidence. Card dedupe (168h) prevents re-post spam.
-  - **Follow-on (3b):** awareness write-tools (`flag_member_watch` /
-    `record_leadership_followup`) upsert cases by default so a concern has a
-    single home, and memories/revisits become annotations of the case.
+  - **[SHIPPED 3b]** `record_leadership_followup` now always opens a durable
+    decision case (a member-review type when `case_type` is set — card-eligible —
+    otherwise a generic topic-keyed `leadership_followup` case) with the memory as
+    its annotation. `flag_member_watch` stays memory-only unless `case_type` makes
+    it action-oriented. A leadership concern now has a single home.
 - **Phase 4 — Delivery on `communication_intents` (incl. skip intents).**
 - **Phase 5 — Retire `elixir_projects`, dead paths; docs.**
 
