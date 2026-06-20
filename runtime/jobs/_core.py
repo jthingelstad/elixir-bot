@@ -1002,6 +1002,31 @@ def _merge_due_case_with_refreshed_payload(due_case: dict, refreshed: dict | Non
     return merged
 
 
+async def _dismiss_stale_deferred_case(due_case: dict) -> bool:
+    if (due_case or {}).get("status") != db.CASE_DEFERRED:
+        return False
+    case_id = (due_case or {}).get("case_id")
+    if case_id is None:
+        return False
+    target = (due_case or {}).get("target_player_name") or (due_case or {}).get("target_player_tag") or "member"
+    resolution = (
+        "Auto-cleared by leadership action scan: deferred review came due, "
+        f"but {target} no longer appears in the fresh recommendation candidate set."
+    )
+    try:
+        await asyncio.to_thread(
+            db.resolve_decision_case,
+            case_id,
+            status=db.CASE_DISMISSED,
+            resolution=resolution,
+        )
+    except Exception:
+        log.warning("failed to dismiss stale deferred decision case %s", case_id, exc_info=True)
+        return False
+    log.info("dismissed stale deferred decision case %s for %s", case_id, target)
+    return True
+
+
 async def _post_leader_action_case(channel, case: dict) -> bool:
     case_type = case.get("case_type")
     action_type = case.get("action_type")
@@ -1158,6 +1183,7 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
             identity = _leader_action_case_identity(due_case)
             refreshed = refreshed_cases_by_identity.get(identity)
             if not refreshed:
+                await _dismiss_stale_deferred_case(due_case)
                 continue
             candidates.append(_merge_due_case_with_refreshed_payload(due_case, refreshed))
         if not candidates:
