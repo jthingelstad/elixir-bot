@@ -129,7 +129,7 @@ def test_game_mode_contexts_capture_events_and_leaderboards():
     assert json.dumps(events + boards)
 
 
-def test_anarchy_event_participation_connects_battles_and_badge_completion():
+def test_anarchy_badges_do_not_attach_to_princess_battle_activity():
     conn = db.get_connection(":memory:")
     try:
         db.snapshot_members([{"tag": "#ABC123", "name": "Alpha", "role": "member"}], conn=conn)
@@ -159,25 +159,20 @@ def test_anarchy_event_participation_connects_battles_and_badge_completion():
         conn.close()
 
     assert summary["by_game_mode"][0]["game_mode_name"] == "All_Random_Princess"
-    assert summary["by_game_mode"][0]["event_name"] == "Anarchy League"
+    assert "event_name" not in summary["by_game_mode"][0]
     assert summary["event_participation"][0]["tag"] == "#ABC123"
     assert summary["event_participation"][0]["event_battles"] == 2
-    assert summary["event_participation"][0]["event_name"] == "Anarchy League"
-    assert summary["event_participation"][0]["badge_completions"][0]["badge_name"] == "AnarchyLeagueCompletion"
-    assert summary["event_badge_completions"][0]["event_game_mode_name"] == "All_Random_Princess"
+    assert "event_name" not in summary["event_participation"][0]
+    assert "badge_completions" not in summary["event_participation"][0]
+    assert summary["event_badge_completions"][0]["badge_name"] == "AnarchyLeagueCompletion"
+    assert summary["event_badge_completions"][0]["event_name"] == "Anarchy League"
+    assert "event_game_mode_name" not in summary["event_badge_completions"][0]
 
 
-def test_member_highlight_context_includes_anarchy_event_activity(monkeypatch):
+def test_member_highlight_context_keeps_anarchy_badge_separate_from_princess_activity(monkeypatch):
     from runtime.signals.context import _build_outcome_context
 
     monkeypatch.setattr("runtime.signals.context._build_player_insight_context", lambda tag: [])
-    monkeypatch.setattr(
-        "runtime.signals.context.db.get_member_special_event_activity",
-        lambda *args, **kwargs: {
-            "total_battles": 37,
-            "by_game_mode": [{"game_mode_name": "All_Random_Princess", "battles": 37}],
-        },
-    )
 
     context = _build_outcome_context(
         {"target_channel_key": "member-highlights", "intent": "member_highlights"},
@@ -187,6 +182,9 @@ def test_member_highlight_context_includes_anarchy_event_activity(monkeypatch):
             "name": "Alpha",
             "badge_name": "AnarchyLeagueCompletion",
             "badge_label": "Anarchy League Completion",
+            "badge_level": 1,
+            "progress": 1,
+            "target": 2,
         }],
         clan={},
         war={},
@@ -194,5 +192,6 @@ def test_member_highlight_context_includes_anarchy_event_activity(monkeypatch):
 
     assert "CURRENT EVENT CONTEXT" in context
     assert "current_event: Anarchy League" in context
-    assert "member_event_activity_14d: 37 All_Random_Princess battles" in context
-    assert "do not describe Princess and Anarchy League as the same event" in context
+    assert "badge_progress: 1/2" in context
+    assert "All_Random_Princess" not in context
+    assert "evidence_boundary: No battle-mode source is encoded for this badge" in context

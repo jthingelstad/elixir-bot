@@ -32,7 +32,6 @@ from storage.game_modes import (
     mode_group_label,
     special_event_badge_names,
     special_event_context_for_badge,
-    special_event_context_for_game_mode,
 )
 
 CARD_UPGRADE_SIGNAL_MIN_LEVEL = 16
@@ -121,9 +120,6 @@ def _badge_signal_fields(badge: dict | None) -> dict:
     if event_context:
         fields.update({
             "event_name": event_context["event_name"],
-            "event_mode_group": event_context["mode_group"],
-            "event_game_mode_id": event_context["game_mode_id"],
-            "event_game_mode_name": event_context["game_mode_name"],
             "event_recognition_guidance": event_context["recognition_guidance"],
         })
     return fields
@@ -1829,16 +1825,6 @@ def get_member_special_event_activity(
         item["wins"] = int(item.get("wins") or 0)
         item["losses"] = int(item.get("losses") or 0)
         total_battles += item["battles"]
-        context = special_event_context_for_game_mode(
-            game_mode_id=item.get("game_mode_id"),
-            game_mode_name=item.get("game_mode_name"),
-        )
-        if context:
-            item.update({
-                "event_name": context["event_name"],
-                "related_badge_name": context["badge_name"],
-                "related_badge_label": context["badge_label"],
-            })
         item["win_rate"] = round(item["wins"] / item["battles"], 4) if item["battles"] else None
         modes.append(item)
     return {
@@ -1901,8 +1887,6 @@ def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
         if context:
             item.update({
                 "event_name": context["event_name"],
-                "event_game_mode_id": context["game_mode_id"],
-                "event_game_mode_name": context["game_mode_name"],
             })
         completions_by_tag.setdefault(row["tag"], []).append(item)
     return completions_by_tag
@@ -1911,7 +1895,6 @@ def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
 def _special_event_participation(
     days: int,
     limit: int,
-    badge_completions_by_tag: dict[str, list[dict]],
     conn,
 ) -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime("%Y%m%dT%H%M%S.000Z")
@@ -1938,25 +1921,6 @@ def _special_event_participation(
         item["wins"] = wins
         item["losses"] = int(item.get("losses") or 0)
         item["win_rate"] = round(wins / battles, 4) if battles else None
-        context = special_event_context_for_game_mode(
-            game_mode_id=item.get("game_mode_id"),
-            game_mode_name=item.get("game_mode_name"),
-        )
-        if context:
-            item.update({
-                "event_name": context["event_name"],
-                "related_badge_name": context["badge_name"],
-                "related_badge_label": context["badge_label"],
-            })
-        completions = badge_completions_by_tag.get(item["tag"], [])
-        if context:
-            completions = [
-                completion for completion in completions
-                if completion.get("badge_name") == context.get("badge_name")
-            ]
-        if completions:
-            item["badge_completions"] = completions
-            item["has_current_event_completion"] = True
         participation.append(_member_reference_fields(conn, item.pop("member_id"), item))
     return participation
 
@@ -2015,17 +1979,6 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
             "draws": row["draws"] or 0,
             "trophy_delta": row["trophy_delta"] or 0,
         })
-        event_context = special_event_context_for_game_mode(
-            game_mode_id=row["game_mode_id"],
-            game_mode_name=row["game_mode_name"],
-        )
-        if event_context:
-            by_game_mode[-1].update({
-                "event_name": event_context["event_name"],
-                "related_badge_name": event_context["badge_name"],
-                "related_badge_label": event_context["badge_label"],
-            })
-
     for bucket in list(by_group.values()) + by_game_mode:
         bucket["win_rate"] = round(bucket["wins"] / bucket["battles"], 4) if bucket["battles"] else None
 
@@ -2125,7 +2078,6 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
     event_participation = _special_event_participation(
         days,
         limit,
-        event_badge_completions,
         conn,
     )
 

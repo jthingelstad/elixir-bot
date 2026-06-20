@@ -38,14 +38,10 @@ SPECIAL_EVENT_BADGE_CONTEXTS = {
     "AnarchyLeagueCompletion": {
         "event_name": "Anarchy League",
         "badge_label": "Anarchy League Completion",
-        "game_mode_id": 72000501,
-        "game_mode_name": "All_Random_Princess",
-        "mode_group": "special_event",
         "recognition_guidance": (
-            "Treat this as Anarchy League completion evidence that can be "
-            "supported by recent All_Random_Princess battles; do not describe "
-            "Princess and Anarchy League as the same event, and do not infer "
-            "rank, reward, or strategy."
+            "No battle-mode source is encoded for this badge; use the badge "
+            "fields as standalone evidence unless Clash Royale data explicitly "
+            "supplies a source."
         ),
     },
 }
@@ -96,25 +92,6 @@ def special_event_badge_names() -> tuple[str, ...]:
 def special_event_context_for_badge(badge_name: str | None) -> dict | None:
     context = SPECIAL_EVENT_BADGE_CONTEXTS.get(str(badge_name or "").strip())
     return dict(context) if context else None
-
-
-def special_event_context_for_game_mode(
-    *,
-    game_mode_id=None,
-    game_mode_name: str | None = None,
-) -> dict | None:
-    mode_id = _int_or_none(game_mode_id)
-    mode_name = _lower(game_mode_name)
-    for badge_name, context in SPECIAL_EVENT_BADGE_CONTEXTS.items():
-        if mode_id is not None and mode_id == context.get("game_mode_id"):
-            item = dict(context)
-            item["badge_name"] = badge_name
-            return item
-        if mode_name and mode_name == _lower(context.get("game_mode_name")):
-            item = dict(context)
-            item["badge_name"] = badge_name
-            return item
-    return None
 
 
 def classify_battle_mode(
@@ -222,5 +199,4 @@ __all__ = [
     "mode_group_label",
     "special_event_badge_names",
     "special_event_context_for_badge",
-    "special_event_context_for_game_mode",
 ]
