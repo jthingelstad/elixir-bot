@@ -1569,6 +1569,43 @@ def test_leader_action_policy_earned_frequency_throttles_declined_types():
         conn.close()
 
 
+def test_leader_action_policy_throttles_in_game_relay_by_objective():
+    conn = db.get_connection(":memory:")
+    try:
+        db.create_leader_action_recommendation(
+            action_type="in_game_relay",
+            objective="war_participation",
+            prompt_text="Battle day is live. Use your decks.",
+            source_message_id=3000,
+            conn=conn,
+        )
+
+        allowed, reason = leader_action_policy.can_post_leader_action(
+            action_type="in_game_relay",
+            objective="war_participation",
+            conn=conn,
+        )
+        assert not allowed
+        assert reason == "objective_cooldown:in_game_relay:war_participation:18h"
+
+        allowed, reason = leader_action_policy.can_post_leader_action(
+            action_type="in_game_relay",
+            objective="war_recognition",
+            conn=conn,
+        )
+        assert allowed, reason
+
+        allowed, reason = leader_action_policy.can_post_leader_action(
+            critical=True,
+            action_type="in_game_relay",
+            objective="war_participation",
+            conn=conn,
+        )
+        assert allowed, reason
+    finally:
+        conn.close()
+
+
 def test_get_connection_rebuilds_legacy_database_with_stale_version(tmp_path):
     db_path = tmp_path / "legacy.db"
     legacy = sqlite3.connect(db_path)

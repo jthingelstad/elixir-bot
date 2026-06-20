@@ -1691,6 +1691,27 @@ def test_deliver_new_member_welcome_relay_uses_elixir_authored_copy():
     mock_update_copy.assert_called_once_with(43, copy_message_id=2001)
 
 
+def test_war_relay_policy_shape_uses_objective_specific_cooldowns():
+    from runtime.signals.delivery import (
+        CRITICAL_LEADER_ACTION_SIGNAL_TYPES,
+        _provisional_leader_action_policy_shape,
+    )
+
+    assert _provisional_leader_action_policy_shape({"war_battle_day_started"}) == (
+        "in_game_relay",
+        "war_participation",
+    )
+    assert _provisional_leader_action_policy_shape({"war_attacks_complete"}) == (
+        "in_game_relay",
+        "war_recognition",
+    )
+    assert _provisional_leader_action_policy_shape({"war_week_complete"}) == (
+        "in_game_relay",
+        "war_recap",
+    )
+    assert "war_final_battle_day" in CRITICAL_LEADER_ACTION_SIGNAL_TYPES
+
+
 def test_deliver_new_member_welcome_relay_ignores_generic_cooldown_and_mixed_batch():
     signals = [
         {
