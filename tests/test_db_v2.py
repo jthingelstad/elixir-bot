@@ -4469,7 +4469,7 @@ def test_snapshot_player_profile_ties_anarchy_badge_to_current_event():
     assert event_badge["badge_name"] == "AnarchyLeagueCompletion"
     assert event_badge["badge_category"] == "event"
     assert event_badge["badge_label"] == "Anarchy League Completion"
-    assert event_badge["event_name"] == "Princess / Anarchy League"
+    assert event_badge["event_name"] == "Anarchy League"
     assert event_badge["event_game_mode_name"] == "All_Random_Princess"
 
 

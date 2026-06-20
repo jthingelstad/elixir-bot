@@ -159,10 +159,10 @@ def test_anarchy_event_participation_connects_battles_and_badge_completion():
         conn.close()
 
     assert summary["by_game_mode"][0]["game_mode_name"] == "All_Random_Princess"
-    assert summary["by_game_mode"][0]["event_name"] == "Princess / Anarchy League"
+    assert summary["by_game_mode"][0]["event_name"] == "Anarchy League"
     assert summary["event_participation"][0]["tag"] == "#ABC123"
     assert summary["event_participation"][0]["event_battles"] == 2
-    assert summary["event_participation"][0]["event_name"] == "Princess / Anarchy League"
+    assert summary["event_participation"][0]["event_name"] == "Anarchy League"
     assert summary["event_participation"][0]["badge_completions"][0]["badge_name"] == "AnarchyLeagueCompletion"
     assert summary["event_badge_completions"][0]["event_game_mode_name"] == "All_Random_Princess"
 
@@ -193,6 +193,6 @@ def test_member_highlight_context_includes_anarchy_event_activity(monkeypatch):
     )
 
     assert "CURRENT EVENT CONTEXT" in context
-    assert "current_event: Princess / Anarchy League" in context
+    assert "current_event: Anarchy League" in context
     assert "member_event_activity_14d: 37 All_Random_Princess battles" in context
-    assert "do not infer rank, reward, or strategy" in context
+    assert "do not describe Princess and Anarchy League as the same event" in context
