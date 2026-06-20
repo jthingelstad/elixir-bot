@@ -90,6 +90,61 @@ def test_improvement_radar_uses_leader_action_notes_edits_and_channel_comments()
         conn.close()
 
 
+def test_awareness_gap_spec_ignores_accounted_skips_and_rejected_posts():
+    conn = db.get_connection(":memory:")
+    try:
+        db.record_awareness_tick(
+            workflow="player_intel",
+            signals_in=3,
+            posts_rejected=1,
+            covered_keys=3,
+            considered_skipped=0,
+            all_ok=False,
+            conn=conn,
+        )
+        db.record_awareness_tick(
+            workflow="clan_awareness",
+            signals_in=3,
+            covered_keys=1,
+            considered_skipped=2,
+            all_ok=True,
+            skipped_reason="intentionally quiet",
+            conn=conn,
+        )
+        db.record_awareness_tick(
+            workflow="war_awareness",
+            signals_in=3,
+            covered_keys=1,
+            considered_skipped=1,
+            all_ok=False,
+            skipped_reason="missed one",
+            conn=conn,
+        )
+        db.record_awareness_tick(
+            workflow="clanops",
+            signals_in=1,
+            covered_keys=1,
+            write_calls_denied=1,
+            all_ok=False,
+            skipped_reason="write denied",
+            conn=conn,
+        )
+
+        spec = radar._awareness_gap_spec(conn, days=30)
+
+        assert spec is not None
+        metrics = spec["evidence"]["metrics"]
+        assert metrics["gap_ticks"] == 2
+        assert metrics["unaccounted_signals"] == 1
+        assert metrics["write_calls_denied"] == 1
+        sample_details = [sample["detail"] for sample in spec["evidence"]["samples"]]
+        assert any("unaccounted=1" in detail for detail in sample_details)
+        assert all("signals=3 covered=3" not in detail for detail in sample_details)
+        assert all("skipped=2 unaccounted=0" not in detail for detail in sample_details)
+    finally:
+        conn.close()
+
+
 def test_github_promotion_dry_run_does_not_call_runner():
     conn = db.get_connection(":memory:")
     try:
