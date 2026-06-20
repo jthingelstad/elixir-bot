@@ -34,6 +34,7 @@ from runtime.clan_chat_copy import (
 )
 from modules.poap_kings import site as poap_kings_site
 from storage.contextual_memory import upsert_weekly_summary_memory
+from storage.api_sentinel import EVENT_SENTINEL_SIGNAL_TYPE, SCHEMA_SENTINEL_SIGNAL_TYPE
 from runtime.signal_lanes import (
     build_lane_memory_context,
     OPTIONAL_PROGRESSION_SIGNAL_TYPES,
@@ -53,6 +54,7 @@ from runtime.jobs._signals import (
     _mark_delivered_signals,
     _persist_signal_detector_cursors,
     _post_to_elixir,
+    _post_system_signal_updates,
     _publish_pending_system_signal_updates,
     _strip_weekly_recap_header,
 )
@@ -411,23 +413,46 @@ async def _clan_awareness_tick():
         clan = tick_result.clan
         war = tick_result.war
 
-        # One agent turn sees all signals together and emits a post plan.
+        api_sentinel_types = {EVENT_SENTINEL_SIGNAL_TYPE, SCHEMA_SENTINEL_SIGNAL_TYPE}
+        api_sentinel_signals = [
+            signal for signal in signals
+            if (signal.get("signal_type") or signal.get("type")) in api_sentinel_types
+        ]
+        awareness_signals = [
+            signal for signal in signals
+            if (signal.get("signal_type") or signal.get("type")) not in api_sentinel_types
+        ]
+
+        if api_sentinel_signals:
+            await _post_system_signal_updates(api_sentinel_signals, clan, war)
+
+        if not awareness_signals:
+            runtime_status.mark_job_success(
+                "clan_awareness",
+                f"{len(api_sentinel_signals)} API sentinel signal(s) processed",
+            )
+            return
+
+        # One agent turn sees all remaining signals together and emits a post plan.
         # Hard-post-floor signals fall back to per-signal on omission so
         # coverage is still guaranteed.
         failed = 0
-        ok = await _deliver_signal_group_via_awareness(signals, clan, war, workflow="clan_awareness")
+        ok = await _deliver_signal_group_via_awareness(awareness_signals, clan, war, workflow="clan_awareness")
         if not ok:
-            failed = len(signals)
+            failed = len(awareness_signals)
 
-        await _revoke_member_role_for_leavers(signals)
+        await _revoke_member_role_for_leavers(awareness_signals)
 
         if failed:
             runtime_status.mark_job_failure(
                 "clan_awareness",
-                f"{failed} of {len(signals)} signal(s) failed to deliver",
+                f"{failed} of {len(awareness_signals)} signal(s) failed to deliver",
             )
         else:
-            runtime_status.mark_job_success("clan_awareness", f"{len(signals)} signal(s) processed")
+            runtime_status.mark_job_success(
+                "clan_awareness",
+                f"{len(signals)} signal(s) processed",
+            )
 
     except Exception as e:
         log.error("Clan awareness error: %s", e, exc_info=True)

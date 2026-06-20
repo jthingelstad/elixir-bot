@@ -35,6 +35,15 @@ def _preauthored_system_signal_result(signal):
     }
 
 
+def _preauthored_system_signal_target(signal):
+    signal_type = (signal or {}).get("signal_type") or (signal or {}).get("type")
+    payload = (signal or {}).get("payload") or {}
+    audience = (payload.get("audience") or (signal or {}).get("audience") or "").strip().lower()
+    if audience == "leadership" or signal_type in {"api_event_sentinel", "api_schema_sentinel"}:
+        return "leader-lounge", "leadership"
+    return "announcements", "system"
+
+
 async def _post_system_signal_updates(signals, clan, war):
     from runtime.jobs._signals import (
         _deliver_awareness_post,
@@ -60,9 +69,10 @@ async def _post_system_signal_updates(signals, clan, war):
             remaining.append(signal)
             continue
         source_key = signal.get("signal_key") or signal.get("signal_log_type")
+        channel_key, leads_with = _preauthored_system_signal_target(signal)
         post = {
-            "channel": "announcements",
-            "leads_with": "system",
+            "channel": channel_key,
+            "leads_with": leads_with,
             "event_type": result.get("event_type") or "channel_update",
             "summary": result.get("summary"),
             "content": result.get("content"),

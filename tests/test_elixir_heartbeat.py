@@ -1059,6 +1059,39 @@ def test_system_signal_updates_deliver_preauthored_posts_through_awareness_inten
     mock_completed.assert_awaited_once_with([signal])
 
 
+def test_system_signal_updates_route_api_sentinel_to_leader_lounge():
+    signal = {
+        "type": "api_schema_sentinel",
+        "signal_type": "api_schema_sentinel",
+        "signal_key": "api_schema_sentinel:202606201102:a514cc7d15bb",
+        "payload": {
+            "title": "CR API schema sentinel",
+            "discord_content": "**CR API schema sentinel**\n\nFirst-seen shape.",
+            "audience": "leadership",
+        },
+    }
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.signals.system.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._signals._deliver_awareness_post", new=AsyncMock(return_value=True)) as mock_post,
+        patch("runtime.jobs._signals._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_awareness,
+        patch("runtime.jobs._signals._mark_signal_group_completed", new=AsyncMock()) as mock_completed,
+    ):
+        asyncio.run(elixir._post_system_signal_updates([signal], {}, {}))
+
+    mock_awareness.assert_not_awaited()
+    mock_post.assert_awaited_once()
+    post = mock_post.await_args.args[0]
+    assert post["channel"] == "leader-lounge"
+    assert post["leads_with"] == "leadership"
+    assert post["content"] == "**CR API schema sentinel**\n\nFirst-seen shape."
+    assert post["covers_signal_keys"] == ["api_schema_sentinel:202606201102:a514cc7d15bb"]
+    mock_completed.assert_awaited_once_with([signal])
+
+
 def test_deliver_signal_group_stores_war_recap_memory_for_river_race_batch():
     signals = [{"type": "war_battle_day_complete", "season_id": 129, "week": 2, "day_number": 1}]
     clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
@@ -2254,6 +2287,46 @@ def test_clan_awareness_tick_hands_multiple_system_signals_to_awareness_loop():
         asyncio.run(elixir._clan_awareness_tick())
 
     mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="clan_awareness")
+
+
+def test_clan_awareness_tick_publishes_api_sentinels_before_awareness_loop():
+    api_sentinel = {
+        "type": "api_schema_sentinel",
+        "signal_type": "api_schema_sentinel",
+        "signal_key": "api_schema_sentinel:202606201102:a514cc7d15bb",
+        "payload": {
+            "title": "CR API schema sentinel",
+            "discord_content": "**CR API schema sentinel**\n\nFirst-seen shape.",
+            "audience": "leadership",
+        },
+    }
+    member_join = {
+        "type": "member_join",
+        "signal_log_type": "member_join:#ABC123",
+        "name": "King Levy",
+        "tag": "#ABC123",
+    }
+    bundle = heartbeat.HeartbeatTickResult(
+        signals=[api_sentinel, member_join],
+        clan={"memberList": [{"name": "King Levy", "tag": "#ABC123"}]},
+        war={"state": "training"},
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("elixir.heartbeat.tick", return_value=bundle),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core._post_system_signal_updates", new=AsyncMock()) as mock_system_post,
+        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)) as mock_deliver,
+        patch("elixir.runtime_status.mark_job_success") as mock_success,
+    ):
+        asyncio.run(elixir._clan_awareness_tick())
+
+    mock_system_post.assert_awaited_once_with([api_sentinel], bundle.clan, bundle.war)
+    mock_deliver.assert_awaited_once_with([member_join], bundle.clan, bundle.war, workflow="clan_awareness")
+    assert mock_success.call_args.args == ("clan_awareness", "2 signal(s) processed")
 
 
 def test_weekly_clan_recap_syncs_members_page_payload_when_poap_kings_enabled():
