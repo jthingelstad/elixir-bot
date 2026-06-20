@@ -417,6 +417,29 @@ def test_build_situation_includes_decision_case_snapshot():
     assert situation["decision_cases"] == case_snapshot
 
 
+def test_build_situation_can_omit_leadership_decision_context():
+    with (
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.decision_case_snapshot") as mock_cases,
+        patch("runtime.situation.db.leader_action_board_snapshot") as mock_board,
+    ):
+        situation = build_situation(
+            _bundle(signals=[]),
+            channel_keys=["member-highlights"],
+            include_leadership_events=False,
+            include_decision_cases=False,
+            include_leader_action_board=False,
+        )
+
+    assert situation["decision_cases"] == {"due": [], "open": []}
+    assert situation["leader_action_board"] == {"open": [], "recent_decisions": []}
+    assert situation["recent_events"]["scope_filter"] == "public"
+    assert set(situation["channel_memory"]) == {"member-highlights"}
+    mock_cases.assert_not_called()
+    mock_board.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Quiet-tick fast path
 # ---------------------------------------------------------------------------
@@ -698,6 +721,60 @@ def test_deliver_signal_group_via_awareness_ignores_invalid_extra_post_when_sign
     assert mock_record.call_args.kwargs["all_ok"] is True
     assert mock_record.call_args.kwargs["posts_rejected"] == 1
     assert mock_record.call_args.kwargs["signal_outcomes"][0]["status"] == "covered"
+
+
+def test_player_intel_awareness_omits_leadership_case_context():
+    signal = {
+        "type": "battle_hot_streak",
+        "signal_key": "hot:#ABC",
+        "tag": "#ABC",
+    }
+    due_case = {"case_id": 1, "case_type": "inactivity_review", "target_player_name": "xian"}
+    captured_situation = {}
+
+    def fake_awareness_tick(situation, *, tool_stats=None):
+        captured_situation.update(situation)
+        return {
+            "posts": [{
+                "channel": "member-highlights",
+                "leads_with": "battle_mode",
+                "content": "covered streak",
+                "covers_signal_keys": ["hot:#ABC"],
+            }],
+        }
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    async def fake_deliver(post, signals, *, intent=None):
+        return True
+
+    with (
+        patch("runtime.jobs._signals.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.situation.db.list_channel_messages", return_value=[]),
+        patch("runtime.situation.build_situation_time", return_value=None),
+        patch("runtime.situation.db.get_members_on_hot_streak", return_value=[]),
+        patch("runtime.situation.db.decision_case_snapshot", return_value={"due": [due_case], "open": []}),
+        patch("runtime.situation.db.leader_action_board_snapshot", return_value={"open": [due_case], "recent_decisions": []}),
+        patch("runtime.jobs._signals.elixir_agent.run_awareness_tick", side_effect=fake_awareness_tick),
+        patch("runtime.jobs._signals._deliver_awareness_post", new=AsyncMock(side_effect=fake_deliver)),
+        patch("runtime.jobs._signals._deliver_arena_relay_sidecars", new=AsyncMock(return_value=0)),
+        patch("runtime.jobs._signals.db.record_awareness_tick"),
+        patch("runtime.jobs._signals._mark_signal_group_completed", new=AsyncMock()),
+    ):
+        ok = asyncio.run(
+            signals_module._deliver_signal_group_via_awareness(
+                [signal],
+                {},
+                {},
+                workflow="player_intel",
+            )
+        )
+
+    assert ok is True
+    assert captured_situation["decision_cases"] == {"due": [], "open": []}
+    assert captured_situation["leader_action_board"] == {"open": [], "recent_decisions": []}
+    assert set(captured_situation["channel_memory"]) == {"member-highlights"}
 
 
 def test_deliver_signal_group_via_awareness_records_event_before_completion_prefilter():
