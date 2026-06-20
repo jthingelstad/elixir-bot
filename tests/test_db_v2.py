@@ -416,17 +416,16 @@ def test_event_rollups_write_before_stream_pruning():
 
         assert result["old_event_count"] == 3
         assert result["pruned"] == 3
-        assert result["rollups"]["total_written"] >= 4
+        assert result["rollups"]["total_written"] >= 3
         remaining = db.list_recent_events(days=365, conn=conn)
         assert [event["event_key"] for event in remaining] == [recent["event_key"]]
 
         rollups = db.list_event_rollups(limit=20, conn=conn)
         by_type = {rollup["rollup_type"]: rollup for rollup in rollups}
-        assert {"member_90d", "war_cycle", "project_summary", "case_history"}.issubset(by_type)
+        assert {"member_90d", "war_cycle", "case_history"}.issubset(by_type)
         assert by_type["member_90d"]["subject_key"] == "#AAA"
         assert by_type["member_90d"]["summary"]["by_scope"] == {"leadership": 1, "public": 1}
         assert by_type["war_cycle"]["season_id"] == "129"
-        assert by_type["project_summary"]["project_key"] == "war_season:129"
         assert by_type["case_history"]["summary"]["resolution"] == "promoted"
     finally:
         conn.close()

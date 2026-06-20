@@ -333,13 +333,9 @@ def _build_memory_synthesis_context():
     except Exception:
         log.warning("memory synthesis: event stream load failed", exc_info=True)
     try:
-        projects = {
-            "war_season": db.get_active_war_season_project_snapshot(),
-        }
-        projects.update(db.get_active_operating_project_snapshots() or {})
-        operations_context["projects"] = projects
+        operations_context["war_season"] = db.get_war_season_snapshot()
     except Exception:
-        log.warning("memory synthesis: project context load failed", exc_info=True)
+        log.warning("memory synthesis: war season context load failed", exc_info=True)
     try:
         operations_context["decision_cases"] = db.decision_case_snapshot(
             open_limit=20,

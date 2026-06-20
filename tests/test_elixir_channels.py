@@ -3888,8 +3888,8 @@ def test_weekly_recap_context_includes_project_and_event_stream_pulse():
         patch("elixir.db.get_weekly_digest_summary", return_value={"window_days": 7}),
         patch("elixir.db.build_clan_trend_summary_context", return_value=""),
         patch("elixir.db.build_clan_voyage_context", return_value="No Clan Voyage screenshots"),
-        patch("elixir.db.get_active_war_season_project_snapshot", return_value={
-            "project_key": "war_season:133",
+        patch("elixir.db.get_war_season_snapshot", return_value={
+            "season_id": 133,
             "summary": "Season 133; Week 3; Battle Day 2; rank 1",
             "state": {
                 "participation_health": {

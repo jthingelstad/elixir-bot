@@ -394,10 +394,6 @@ async def _clan_awareness_tick():
 
         # Run the clan-awareness tick — fetches data, snapshots, detects signals
         tick_result = await asyncio.to_thread(heartbeat.tick, include_war=False)
-        try:
-            await asyncio.to_thread(db.refresh_operating_projects)
-        except Exception:
-            log.warning("Clan awareness: operating project refresh failed", exc_info=True)
         if tick_result.clan.get("memberList"):
             _runtime_app()._clear_cr_api_failure_alert_if_recovered()
         else:
@@ -468,11 +464,6 @@ async def _war_awareness_tick():
         detection_result = await asyncio.to_thread(
             heartbeat.detect_war_signals_from_storage,
         )
-        try:
-            await asyncio.to_thread(db.refresh_active_war_season_project)
-            await asyncio.to_thread(db.refresh_operating_projects)
-        except Exception:
-            log.warning("War awareness: project refresh failed", exc_info=True)
         signals = detection_result.signals
 
         if not signals:
@@ -1189,10 +1180,6 @@ async def _leadership_action_scan():
     posted = 0
     try:
         refreshed = await asyncio.to_thread(db.refresh_due_leader_action_outcomes)
-        try:
-            await asyncio.to_thread(db.refresh_operating_projects)
-        except Exception:
-            log.warning("leadership action scan: operating project refresh failed", exc_info=True)
         if refreshed:
             log.info("leadership action scan refreshed %s due action outcome(s)", len(refreshed))
             # Measured outcomes (role changes after a promotion, etc.) land
@@ -1225,10 +1212,6 @@ async def _leadership_action_scan():
 async def _weekly_discord_invite_relay():
     runtime_status.mark_job_start("weekly_discord_invite_relay")
     try:
-        try:
-            await asyncio.to_thread(db.refresh_operating_projects)
-        except Exception:
-            log.warning("weekly Discord invite relay: operating project refresh failed", exc_info=True)
         now = datetime.now(CHICAGO)
         week_key = now.strftime("%G-W%V")
         signal_key = f"discord_invite_reminder:{week_key}"

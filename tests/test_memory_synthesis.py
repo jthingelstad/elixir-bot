@@ -236,8 +236,8 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
             "observed_at": "2026-06-19T12:00:00",
         }
     ])
-    monkeypatch.setattr(memory_job.db, "get_active_war_season_project_snapshot", lambda: {
-        "project_key": "war_season:133",
+    monkeypatch.setattr(memory_job.db, "get_war_season_snapshot", lambda: {
+        "season_id": 133,
         "summary": "Season 133; rank 1",
     })
     monkeypatch.setattr(memory_job.db, "decision_case_snapshot", lambda **kwargs: {
@@ -261,7 +261,7 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
     operations = context["operations_context"]
     assert operations["event_windows"]["7d"]["total"] == 2
     assert operations["recent_events"][0]["event_key"] == "game_event:join"
-    assert operations["projects"]["war_season"]["project_key"] == "war_season:133"
+    assert operations["war_season"]["season_id"] == 133
     assert operations["decision_cases"]["due"][0]["case_id"] == 1
     assert operations["recent_intents"][0]["intent_id"] == 5
 

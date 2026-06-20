@@ -481,7 +481,6 @@ def write_event_rollups_for_retention(
     stats = {
         ROLLUP_MEMBER_90D: _write_member_90d_rollups(conn, cutoff=clean_cutoff),
         ROLLUP_WAR_CYCLE: _write_war_cycle_rollups(conn, cutoff=clean_cutoff),
-        ROLLUP_PROJECT_SUMMARY: _write_project_summary_rollups(conn, cutoff=clean_cutoff),
         ROLLUP_CASE_HISTORY: _write_case_history_rollups(conn, cutoff=clean_cutoff),
     }
     conn.commit()

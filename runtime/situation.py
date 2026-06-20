@@ -394,22 +394,14 @@ def _recent_events_block(*, include_leadership: bool, recent_limit: int = 20) ->
         }
 
 
-def _projects_block() -> dict:
+def _war_season_block():
+    """Fresh River Race season snapshot — the season story across the week."""
     try:
-        projects = {
-            "war_season": db.get_active_war_season_project_snapshot(),
-        }
-        projects.update(db.get_active_operating_project_snapshots() or {})
-        return projects
+        return db.get_war_season_snapshot()
     except Exception:
-        log.warning("projects load failed", exc_info=True)
-        _note_degraded("projects")
-        return {
-            "war_season": None,
-            "clan_development": None,
-            "onboarding": None,
-            "recruitment": None,
-        }
+        log.warning("war_season load failed", exc_info=True)
+        _note_degraded("war_season")
+        return None
 
 
 def _decision_cases_block() -> dict:
@@ -480,7 +472,7 @@ def build_situation(
     Returns a dict whose top-level keys are stable for the agent's prompt:
     ``time``, ``standing``, ``signals_by_lane``, ``hard_post_signals``,
     ``channel_memory``, ``recent_events``, ``mode_pulse``, ``season_window``,
-    ``projects``, ``decision_cases``, ``roster_vitals``, ``due_revisits``,
+    ``war_season``, ``decision_cases``, ``roster_vitals``, ``due_revisits``,
     ``recent_agent_writes``.
 
     Signals whose ``signal_log_type`` is already marked complete in
@@ -527,7 +519,7 @@ def build_situation(
         ),
         "mode_pulse": _mode_pulse_block(),
         "season_window": _season_window_block(),
-        "projects": _projects_block(),
+        "war_season": _war_season_block(),
         "decision_cases": _decision_cases_block() if include_decision_cases else {"due": [], "open": []},
         "channel_memory": {
             key: _channel_memory_for(key) for key in channel_keys

@@ -93,7 +93,18 @@ case-first. Not part of Phase 1, but the model the later phases target.
     its annotation. `flag_member_watch` stays memory-only unless `case_type` makes
     it action-oriented. A leadership concern now has a single home.
 - **Phase 4 — Delivery on `communication_intents` (incl. skip intents).**
-- **Phase 5 — Retire `elixir_projects`, dead paths; docs.**
+- **Phase 5 — Retire the projects subsystem. [SHIPPED 5.1]** Decommissioned
+  `elixir_projects` from every core path: the war-season story is now a fresh
+  `get_war_season_snapshot()` computed from war tables (no project-row
+  round-trip), wired into Situation (key `war_season`, replacing `projects`), the
+  weekly recap, and memory synthesis. The redundant clan_development / onboarding
+  / recruitment operating projects are dropped, the five project-refresh job calls
+  are removed, and the `project_summary` retention rollup is decoupled. Nothing in
+  the awareness, recap, memory, or scheduled-job paths reads or writes the projects
+  tables anymore.
+  - **Follow-on (5.2):** remove the two remaining admin readers, slim
+    `storage/projects.py` to the snapshot, and physically drop the dormant tables
+    (needs care — `foreign_keys=ON` and a `communication_intents.project_id` FK).
 
 ## Guardrails
 

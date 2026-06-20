@@ -673,9 +673,9 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         _log().warning("Weekly recap Clan Voyage context unavailable: %s", exc)
         clan_voyage_context = ""
     try:
-        war_project = db.get_active_war_season_project_snapshot()
+        war_project = db.get_war_season_snapshot()
     except Exception as exc:
-        _log().warning("Weekly recap war project context unavailable: %s", exc)
+        _log().warning("Weekly recap war season context unavailable: %s", exc)
         war_project = None
     try:
         event_windows = db.summarize_events_by_window(windows=(7, 28), scope="public")

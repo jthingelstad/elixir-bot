@@ -51,6 +51,7 @@ __all__ = [
     "get_active_war_season_project",
     "get_active_war_season_project_snapshot",
     "get_active_operating_project_snapshots",
+    "get_war_season_snapshot",
 ]
 
 
@@ -1072,6 +1073,44 @@ def get_active_war_season_project_snapshot(conn: Optional[sqlite3.Connection] = 
         "started_at": project.get("started_at"),
         "last_observed_at": project.get("last_observed_at"),
         "linked_event_count": project.get("linked_event_count") or 0,
+        "state": {
+            "season_id": state.get("season_id"),
+            "week": state.get("week"),
+            "phase": state.get("phase"),
+            "phase_display": state.get("phase_display"),
+            "day_number": state.get("day_number"),
+            "race": state.get("race") or {},
+            "participation_health": state.get("participation_health") or {},
+            "season_summary": state.get("season_summary") or {},
+            "active_risks": state.get("active_risks") or {},
+            "recent_communications": state.get("recent_communications") or [],
+            "prior_cycle_comparison": state.get("prior_cycle_comparison") or {},
+        },
+    }
+
+
+@managed_connection
+def get_war_season_snapshot(conn: Optional[sqlite3.Connection] = None) -> dict | None:
+    """Fresh River Race season snapshot computed directly from war facts.
+
+    Replaces the elixir_projects-backed war-season project: the same state
+    (race standing, participation health, season summary, active risks, recent
+    war communications, prior-cycle comparison) computed on demand from war
+    tables, with no project-row round-trip. Returns None when no season is
+    active.
+    """
+    from storage.war_status import get_current_war_status
+
+    current = get_current_war_status(conn=conn) or {}
+    season_id = current.get("season_id")
+    if season_id is None:
+        return None
+    state = _build_war_project_state(conn, current)
+    return {
+        "season_id": season_id,
+        "summary": _war_project_summary(state),
+        "started_at": _season_started_at(conn, season_id, current.get("observed_at")),
+        "last_observed_at": current.get("observed_at"),
         "state": {
             "season_id": state.get("season_id"),
             "week": state.get("week"),
