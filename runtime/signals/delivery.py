@@ -2439,7 +2439,7 @@ async def _deliver_signal_group_via_awareness(signals, clan, war, *, workflow: s
         if signal_source_key(signal) in hard_required_keys
         and signal_source_key(signal) not in covered_keys
     ]
-    all_ok = True
+    all_ok = report["rejected"] == 0
     if uncovered:
         log.warning(
             "awareness loop: %d hard-post-floor signal(s) uncovered by post plan",
