@@ -54,6 +54,16 @@ def _loads_dict(value) -> dict:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _loads_list(value) -> list:
+    if not value:
+        return []
+    try:
+        loaded = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return loaded if isinstance(loaded, list) else []
+
+
 def _has_table(conn, table_name: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -262,6 +272,7 @@ def _awareness_gap_spec(conn, *, days: int) -> dict | None:
         SELECT tick_id, ticked_at, workflow, signals_in, covered_keys,
                considered_skipped, posts_rejected, skipped_reason,
                write_calls_issued, write_calls_succeeded, write_calls_denied,
+               signal_outcomes_json,
                MAX(signals_in - covered_keys - considered_skipped, 0) AS unaccounted_signals
         FROM awareness_ticks
         WHERE ticked_at >= ?
@@ -275,13 +286,27 @@ def _awareness_gap_spec(conn, *, days: int) -> dict | None:
         """,
         (cutoff,),
     ).fetchall()
-    if len(rows) < 2:
+    gap_rows = []
+    for row in rows:
+        outcomes = _loads_list(row["signal_outcomes_json"])
+        if outcomes:
+            unaccounted_count = sum(1 for item in outcomes if (item or {}).get("status") == "coverage_gap")
+        else:
+            unaccounted_count = int(row["unaccounted_signals"] or 0)
+        denied_count = int(row["write_calls_denied"] or 0)
+        if unaccounted_count <= 0 and denied_count <= 0:
+            continue
+        row_dict = dict(row)
+        row_dict["unaccounted_signals"] = unaccounted_count
+        gap_rows.append(row_dict)
+
+    if len(gap_rows) < 2:
         return None
-    signals = sum(int(row["signals_in"] or 0) for row in rows)
-    covered = sum(int(row["covered_keys"] or 0) for row in rows)
-    skipped = sum(int(row["considered_skipped"] or 0) for row in rows)
-    denied = sum(int(row["write_calls_denied"] or 0) for row in rows)
-    unaccounted = sum(int(row["unaccounted_signals"] or 0) for row in rows)
+    signals = sum(int(row["signals_in"] or 0) for row in gap_rows)
+    covered = sum(int(row["covered_keys"] or 0) for row in gap_rows)
+    skipped = sum(int(row["considered_skipped"] or 0) for row in gap_rows)
+    denied = sum(int(row["write_calls_denied"] or 0) for row in gap_rows)
+    unaccounted = sum(int(row["unaccounted_signals"] or 0) for row in gap_rows)
     samples = [
         {
             "label": f"{row['workflow'] or 'awareness'} tick",
@@ -294,7 +319,7 @@ def _awareness_gap_spec(conn, *, days: int) -> dict | None:
             "tick_id": row["tick_id"],
             "ticked_at": row["ticked_at"],
         }
-        for row in rows[:8]
+        for row in gap_rows[:8]
     ]
     return {
         "category": "signal_gap",
@@ -312,7 +337,7 @@ def _awareness_gap_spec(conn, *, days: int) -> dict | None:
         "evidence": {
             "basis": "awareness-coverage-gaps",
             "metrics": {
-                "gap_ticks": len(rows),
+                "gap_ticks": len(gap_rows),
                 "signals_in": signals,
                 "covered_keys": covered,
                 "considered_skipped": skipped,
@@ -323,7 +348,7 @@ def _awareness_gap_spec(conn, *, days: int) -> dict | None:
             "samples": samples,
         },
         "severity": 4 if skipped or denied else 3,
-        "confidence": min(0.9, 0.64 + 0.03 * min(len(rows), 8)),
+        "confidence": min(0.9, 0.64 + 0.03 * min(len(gap_rows), 8)),
         "suggestion_key": db.suggestion_key_for(
             "signal_gap",
             "Review awareness ticks that did not cover all observed signals",
@@ -561,7 +586,7 @@ def main() -> None:
             ]
         else:
             suggestions = store_improvement_specs(specs, conn=conn)
-            suggestions = db.list_improvement_suggestions(limit=args.limit, conn=conn)
+            suggestions = suggestions[: max(1, min(int(args.limit or 50), 200))]
         promotion = []
         if args.promote_github or args.write_github:
             promotion = promote_suggestions_to_github(
