@@ -3907,6 +3907,14 @@ def test_weekly_recap_context_includes_project_and_event_stream_pulse():
         patch("elixir.db.list_recent_events", return_value=[
             {"event_type": "member_join", "subject_key": "#ABC", "source_signal_key": "join:#ABC"},
         ]),
+        patch("elixir.db.summarize_battle_modes", return_value={
+            "7d": {"modes": {
+                "ladder": {"label": "Trophy Road", "battles": 300, "active_members": 30, "win_rate": 0.55, "top_members": []},
+                "ranked": {"label": "Ranked", "battles": 40, "active_members": 5, "win_rate": 0.52,
+                           "top_members": [{"name": "OllieTurtle"}, {"name": "pax"}]},
+                "two_v_two": {"label": "2v2", "battles": 5, "active_members": 2, "win_rate": 0.4, "top_members": []},
+            }},
+        }),
     ):
         report = elixir._build_weekly_clan_recap_context({"name": "POAP KINGS"}, {})
 
@@ -3915,6 +3923,12 @@ def test_weekly_recap_context_includes_project_and_event_stream_pulse():
     assert "event stream pulse: 7d 14 events | 28d 40 events" in report
     assert "top 7d event types: member_join=3, war_battle_day_started=2" in report
     assert "recent event stream examples: member_join:#ABC" in report
+    # per-mode activity beyond Trophy Road is surfaced for non-war stories;
+    # Trophy Road itself is excluded and thin modes (<10 battles) are filtered.
+    assert "game-mode activity beyond Trophy Road" in report
+    assert "Ranked: 40 battles across 5 member(s), 52% win rate | most active: OllieTurtle, pax" in report
+    assert "Trophy Road:" not in report
+    assert "2v2:" not in report
 
 
 def test_share_channel_result_rewrites_member_refs_before_posting():

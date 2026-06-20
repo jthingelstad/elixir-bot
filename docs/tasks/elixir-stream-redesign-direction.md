@@ -77,8 +77,15 @@ case-first. Not part of Phase 1, but the model the later phases target.
   and wired into Situation (`mode_pulse`, `season_window`) and the awareness prompt,
   so Elixir can comment on Path of Legends grinds, 2v2 streaks, and whole-season
   arcs. Consumption is computed live (always fresh) rather than pre-stored.
-  - **Follow-on (2b):** durable `event_rollups` persistence (history beyond the
-    90-day stream, per-mode + member-level) and recap/daily-insight consumption.
+  - **[SHIPPED 2b]** The weekly recap now surfaces per-mode activity beyond
+    Trophy Road (Path of Legends, 2v2, events) from `summarize_battle_modes`, so
+    non-war stories reach #announcements. The daily insight stays
+    card-gameplay-focused (per-mode battle stats are deliberately out of scope
+    there). Durable per-mode `event_rollups` persistence is intentionally
+    deferred: the battle stream is only days old, so 90-day-plus history is moot
+    for months, and live per-mode summaries (computed fresh from the indexed
+    stream) already serve Situation and the recap. Add the persistence writer
+    when long-term per-mode trend history is actually needed.
 
 - **Phase 3 — Cases as the concern spine; case-first leader scan. [SHIPPED 3a]**
   The leader-action scan now posts from due decision cases — the candidate
