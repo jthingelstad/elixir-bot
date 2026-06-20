@@ -465,8 +465,7 @@ TOOLS = [
                         "recent_events",
                         "game_modes",
                         "season_window",
-                        "projects",
-                        "project_detail",
+                        "war_season",
                         "decision_cases",
                         "communication_intents",
                         "communication_trace",
@@ -508,21 +507,13 @@ TOOLS = [
                     "description": "Event class for recent_events / event_summary: 'signal' (notable detector events, default), 'battle' (per-battle telemetry across all game modes), or 'all'.",
                     "enum": ["signal", "battle", "all"],
                 },
-                "project_type": {
-                    "type": "string",
-                    "description": "Optional project type filter, e.g. war_season.",
-                },
-                "project_key": {
-                    "type": "string",
-                    "description": "Project key for aspect='project_detail', e.g. war_season:133.",
-                },
                 "case_type": {
                     "type": "string",
                     "description": "Optional decision case type filter.",
                 },
                 "status": {
                     "type": "string",
-                    "description": "Optional status filter for projects, decision cases, or communication intents.",
+                    "description": "Optional status filter for decision cases or communication intents.",
                 },
                 "workflow": {
                     "type": "string",

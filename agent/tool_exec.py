@@ -895,10 +895,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
     if leadership_error:
         return leadership_error
 
-    if aspect == "projects":
-        return {"war_season": db.get_war_season_snapshot()}
-
-    if aspect == "project_detail":
+    if aspect == "war_season":
         return {"war_season": db.get_war_season_snapshot()}
 
     if aspect == "decision_cases":

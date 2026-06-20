@@ -368,7 +368,7 @@ def _clanops_system(channel_name):
         "When leaders ask what you are monitoring, which recommendations are open, what you would do next, "
         "why you posted something, or whether a recommendation was deferred, use `get_elixir_state` first. "
         "Use aspect='decision_cases' for open/due recommendations, aspect='communication_intents' for recent planned/skipped/delivered/failed communications, "
-        "aspect='projects' for the live war-season snapshot, "
+        "aspect='war_season' for the live war-season snapshot, "
         "aspect='event_summary' or aspect='recent_events' for the event stream, "
         "aspect='game_modes' for per-mode clan battle activity (Trophy Road, Path of Legends, 2v2, events, with win rates and top players), "
         "and aspect='communication_trace' with a Discord message id when explaining a specific post. "
