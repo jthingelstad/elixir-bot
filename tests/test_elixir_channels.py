@@ -2969,14 +2969,17 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
     )
 
     job_ids = {item["id"] for item in added}
+    # v5: the event-driven reactive tick replaces the schedule-first awareness jobs.
+    # clan-awareness, war-awareness, and leadership-action-scan are disabled
+    # (enabled_by_default=False) — their signals now flow through _v5_reactive_tick
+    # (detectors + communication policy). register_scheduled_activities skips
+    # disabled activities, so they are NOT in the registered set.
     assert {item["activity_key"] for item in registered} == {
-        "clan-awareness",
+        "v5-reactive-tick",
         "war-poll",
-        "war-awareness",
         "award-detection",
         "player-progression",
         "daily-clan-insight",
-        "leadership-action-scan",
         "weekly-discord-invite-relay",
         "memory-synthesis",
         "weekly-recap",
@@ -2986,12 +2989,16 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
         "api-sentinel",
         "db-maintenance",
     }
+    assert "v5-reactive-tick" in job_ids
     assert "war-poll" in job_ids
-    assert "war-awareness" in job_ids
     assert "daily-clan-insight" in job_ids
     assert "weekly-discord-invite-relay" in job_ids
     assert "promotion-content" in job_ids
     assert "api-sentinel" in job_ids
+    # disabled v4 scheduled-awareness jobs are not registered
+    assert "clan-awareness" not in job_ids
+    assert "war-awareness" not in job_ids
+    assert "leadership-action-scan" not in job_ids
 
 
 def test_api_sentinel_tick_polls_events_and_publishes_only_sentinel_signals():

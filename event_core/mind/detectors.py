@@ -283,6 +283,93 @@ class BattleTrophyPushDetector(FollowerRunner):
         return self.emitted
 
 
+class MemberJoinedDetector(FollowerRunner):
+    """New clan member -> welcome (restores #welcome). Follows Clan MemberJoined."""
+
+    name = "detector:member_joined"
+    aggregate_name = "Clan"
+
+    def detect(self, event, notification) -> None:
+        if type(event).__name__ != "MemberJoined":
+            return
+        self.emit_detection(
+            dedup_key=f"member_joined:{event.player_tag}:{event.observed_at}",
+            detection_type="member_joined",
+            subject_tag=event.player_tag,
+            occurred_at=event.observed_at,
+            caused_by=[self.evidence(notification)],
+            payload={"role": event.role},
+        )
+
+
+class WarUpdateDetector(FollowerRunner):
+    """War phase transition -> #river-race. Follows RiverRace CurrentStateObserved;
+    fires once per (clan, section, period_type) so fame churn doesn't spam — only
+    entering a new war week / phase posts."""
+
+    name = "detector:war_update"
+    aggregate_name = "RiverRace"
+
+    def detect(self, event, notification) -> None:
+        if type(event).__name__ != "CurrentStateObserved":
+            return
+        obs = event.observation or {}
+        clan = obs.get("clan_tag") or ""
+        section = obs.get("section_index")
+        period = obs.get("period_type")
+        if section is None or period is None:
+            return
+        self.emit_detection(
+            dedup_key=f"war_update:{clan}:{section}:{period}",
+            detection_type="war_update",
+            subject_tag=clan,
+            occurred_at=event.observed_at,
+            caused_by=[self.evidence(notification)],
+            payload={"section_index": section, "period_type": period,
+                     "war_state": obs.get("war_state"), "fame": obs.get("fame")},
+        )
+
+
+class CohortWaveDetector(FollowerRunner):
+    """Clan-wide wave -> #clan-events. Scans the detections projection: when >=3
+    distinct members share a celebratory detection_type on the same Chicago day,
+    emit one cohort_wave. Runs AFTER the detections projection is current."""
+
+    name = "detector:cohort_wave"
+    MIN_MEMBERS = 3
+    WAVE_TYPES = ("badge_earned", "card_level_milestone", "new_card_unlocked", "new_champion_unlocked")
+
+    def detect(self, event, notification) -> None:  # unused (scans projection)
+        pass
+
+    def run(self, batch: int = 500) -> int:
+        from event_core.timeutil import chicago_day_for_utc
+
+        rows = self.conn.execute(
+            "SELECT detection_type, subject_tag, occurred_at FROM detections "
+            "WHERE detection_type IN (%s) AND subject_tag IS NOT NULL"
+            % ",".join("?" for _ in self.WAVE_TYPES),
+            self.WAVE_TYPES,
+        ).fetchall()
+        groups: dict[tuple, set] = {}
+        for r in rows:
+            day = chicago_day_for_utc(r["occurred_at"])
+            groups.setdefault((r["detection_type"], day), set()).add(r["subject_tag"])
+        for (dtype, day), members in groups.items():
+            if len(members) >= self.MIN_MEMBERS:
+                self.emit_detection(
+                    dedup_key=f"cohort_wave:{dtype}:{day}",
+                    detection_type="cohort_wave",
+                    subject_tag=None,
+                    occurred_at=f"{day}T12:00:00Z",
+                    caused_by=[f"cohort:{dtype}:{day}"],
+                    payload={"wave_type": dtype, "day": day, "member_count": len(members)},
+                )
+        return self.emitted
+
+
+# Per-event detectors run in advance()'s detector loop. CohortWaveDetector is run
+# separately (after the detections projection is current) — see live/engine.advance.
 ALL_DETECTORS = [
     PlayerLevelUpDetector,
     BestTrophiesPeakDetector,
@@ -291,4 +378,6 @@ ALL_DETECTORS = [
     NewCardUnlockedDetector,
     BadgeEarnedDetector,
     BattleTrophyPushDetector,
+    MemberJoinedDetector,
+    WarUpdateDetector,
 ]

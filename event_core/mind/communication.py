@@ -14,8 +14,10 @@ from eventsourcing.application import AggregateNotFoundError
 from event_core.domain.communication_intent import CommunicationIntent, intent_id
 from event_core.mind.follower import FollowerRunner
 
-# Detection types worth a public post.
-PUBLIC_DETECTIONS = {
+# Public detection_type -> intent_type prefix. The prefix selects the channel in
+# route_intent (celebrate->#player-highlights, welcome->#welcome, war->#river-race,
+# cohort->#clan-events).
+_CELEBRATE = (
     "best_trophies_peak",
     "battle_hot_streak",
     "battle_trophy_push",
@@ -24,6 +26,12 @@ PUBLIC_DETECTIONS = {
     "new_champion_unlocked",
     "badge_earned",
     "player_level_up",
+)
+PUBLIC_INTENT_PREFIX = {
+    **{t: "celebrate" for t in _CELEBRATE},
+    "member_joined": "welcome",
+    "war_update": "war",
+    "cohort_wave": "cohort",
 }
 
 
@@ -47,11 +55,12 @@ class CommunicationPolicy(FollowerRunner):
         cls = type(event).__name__
         ev = self.evidence(notification)
         if cls == "Detected":
-            if event.detection_type not in PUBLIC_DETECTIONS:
+            prefix = PUBLIC_INTENT_PREFIX.get(event.detection_type)
+            if prefix is None:
                 return  # e.g. inactive_member_risk drives recommendations, not posts
             self._raise_intent(
                 dedup_key=f"intent:detection:{event.dedup_key}",
-                intent_type=f"celebrate:{event.detection_type}",
+                intent_type=f"{prefix}:{event.detection_type}",
                 subject=event.subject_tag,
                 scope="public",
                 priority=1,

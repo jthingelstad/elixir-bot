@@ -12,18 +12,30 @@ from __future__ import annotations
 
 import json
 
-# scope/intent-type -> Discord channel (from prompts/DISCORD.md). Confirmed mapping:
+# intent-type prefix -> Discord channel (ids/lanes from prompts/DISCORD.md).
 PUBLIC_HIGHLIGHTS = {"channel_id": 1482352147029950474, "channel_name": "player-highlights", "lane": "member-highlights", "leadership": False}
 LEADER_ACTIONS = {"channel_id": 1513758211206025227, "channel_name": "leader-actions", "lane": "arena-relay", "leadership": True}
+WELCOME = {"channel_id": 1476456514121109514, "channel_name": "welcome", "lane": "reception", "leadership": False}
+RIVER_RACE = {"channel_id": 1482352067573059675, "channel_name": "river-race", "lane": "river-race", "leadership": False}
+CLAN_EVENTS = {"channel_id": 1482352241628414013, "channel_name": "clan-events", "lane": "clan-events", "leadership": False}
+
+_PREFIX_CHANNEL = {
+    "celebrate": PUBLIC_HIGHLIGHTS,
+    "welcome": WELCOME,
+    "war": RIVER_RACE,
+    "cohort": CLAN_EVENTS,
+    "leadership": LEADER_ACTIONS,
+}
 
 
 def route_intent(intent) -> dict:
-    """Map an intent to its target channel config. Fail-closed: only an explicitly
-    public-scoped intent reaches the public channel; leadership and anything
-    unexpected route to the (private) leadership channel."""
-    if intent.scope == "public" and not (intent.intent_type or "").startswith("leadership:"):
-        return PUBLIC_HIGHLIGHTS
-    return LEADER_ACTIONS
+    """Map an intent to its target channel by intent_type prefix. Fail-closed:
+    leadership scope/prefix and any unknown prefix route to the (private)
+    leadership channel rather than leaking to a public one."""
+    prefix = (intent.intent_type or "").split(":", 1)[0]
+    if intent.scope == "leadership" or prefix == "leadership":
+        return LEADER_ACTIONS
+    return _PREFIX_CHANNEL.get(prefix, LEADER_ACTIONS)
 
 
 def intent_context(intent) -> str:
