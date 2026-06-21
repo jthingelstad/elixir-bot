@@ -127,6 +127,38 @@ aggregate → event store → notification log → follower → projection → e
 
 ---
 
+## Phase 2 (Elixir's Mind) — mechanism PROVEN, breadth remaining
+
+The novel layer's core is built and validated end-to-end:
+- **Granular base events** (`PlayerNameChanged`/`PlayerLevelChanged`/`BestTrophiesChanged`)
+  emitted from `observe_profile` diffs — the Mind's contract. Coarse `ProfileObserved`
+  retained so current-state parity is untouched (still 53/53).
+- **Detection aggregate** (deterministic id → idempotent emission, carries evidence, UTC).
+- **FollowerRunner**: reads the notification log forward with co-located tracking,
+  emits Detections via the shared app, snapshots `max_notification_id` so it never
+  consumes its own output, filters by aggregate.
+- **Three detectors across both input shapes**: log-following (`player_level_up`,
+  `best_trophies_peak`) and telemetry-scanning (`battle_hot_streak`).
+
+Validation vs frozen legacy `signal_log` (date-level overlap, since signal_log has
+no per-event evidence):
+
+| Detector | emitted | detection dates | legacy dates | overlap |
+|---|---|---|---|---|
+| best_trophies_peak | 115 | 15 | 19 | 10 |
+| battle_hot_streak | 234 | 29 | 28 | 22 |
+| player_level_up | 0 | 0 | 2 | 0 (no level-ups in the 2wk window; legacy's 2 are pre-archive) |
+
+Divergences explained: legacy-only dates are pre-archive (horizon); my extra
+best_trophies dates are legacy's 28-day per-tag cooldown (not yet ported). Detectors
+idempotent; Mind tests 5/5.
+
+**Remaining in Phase 2:** Recommendation + DecisionCase aggregates (the leadership
+decision state machines; parity vs leader_action_recommendations/decision_cases);
+detector breadth (card/badge milestones, trophy-push, ranked promotion, inactivity,
+cohort waves); detector cooldowns. Then Phase 3 (reactive trigger + agent tools +
+runtime rewire) and Phase 4 (cutover).
+
 ## NOT done (remaining work, roughly in dependency order)
 
 - **Cutover** — deliberately not performed. Awaiting your go.
