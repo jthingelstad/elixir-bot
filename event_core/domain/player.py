@@ -151,12 +151,12 @@ class Player(Aggregate):
         """Record a roster-state observation (from /clans) if it changed."""
         if content_hash == self.last_roster_hash:
             return False
-        self._roster_observed(observation, observed_at, content_hash)
+        self._roster_observed(observation, observed_at, content_hash, self.player_tag)
         return True
 
     @event("RosterStateObserved")
     def _roster_observed(
-        self, observation: dict, observed_at: str, content_hash: str
+        self, observation: dict, observed_at: str, content_hash: str, player_tag: str
     ) -> None:
         self.roster.update(observation)
         self.last_roster_hash = content_hash
