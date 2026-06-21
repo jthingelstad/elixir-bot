@@ -53,4 +53,48 @@ class BestTrophiesPeakDetector(FollowerRunner):
             )
 
 
-ALL_DETECTORS = [PlayerLevelUpDetector, BestTrophiesPeakDetector]
+class BattleHotStreakDetector(FollowerRunner):
+    """Telemetry-input detector (§5.3): scans battle_telemetry rather than the log.
+
+    Fires once per streak when a player reaches 4 consecutive competitive wins
+    ("≥4 W, not already hot", mirroring legacy _detect_battle_pulse_signals),
+    keyed by the battle_time of the 4th win for idempotency.
+    """
+
+    name = "detector:battle_hot_streak"
+    STREAK = 4
+
+    def detect(self, event, notification) -> None:  # unused (not log-driven)
+        pass
+
+    def run(self, batch: int = 500) -> int:
+        rows = self.conn.execute(
+            "SELECT player_tag, battle_time, outcome FROM battle_telemetry "
+            "WHERE is_competitive=1 ORDER BY player_tag, battle_time ASC"
+        ).fetchall()
+        streak = 0
+        current_tag = None
+        for r in rows:
+            if r["player_tag"] != current_tag:
+                current_tag, streak = r["player_tag"], 0
+            if r["outcome"] == "W":
+                streak += 1
+                if streak == self.STREAK:  # just became hot
+                    self.emit_detection(
+                        dedup_key=f"battle_hot_streak:{r['player_tag']}:{r['battle_time']}",
+                        detection_type="battle_hot_streak",
+                        subject_tag=r["player_tag"],
+                        occurred_at=r["battle_time"],
+                        caused_by=[f"battle_telemetry:{r['player_tag']}:{r['battle_time']}"],
+                        payload={"streak": self.STREAK},
+                    )
+            else:
+                streak = 0
+        return self.emitted
+
+
+ALL_DETECTORS = [
+    PlayerLevelUpDetector,
+    BestTrophiesPeakDetector,
+    BattleHotStreakDetector,
+]

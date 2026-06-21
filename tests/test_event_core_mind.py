@@ -84,3 +84,8 @@ def test_mind_build_against_legacy():
     bt = res["validation"]["by_type"]["best_trophies_peak"]
     assert res["detector_emitted"]["detector:best_trophies_peak"] > 0
     assert bt["overlap"] > 0
+
+    # battle hot-streak (telemetry-input detector) overlaps legacy strongly
+    hs = res["validation"]["by_type"]["battle_hot_streak"]
+    assert res["detector_emitted"]["detector:battle_hot_streak"] > 0
+    assert hs["overlap"] >= 10
