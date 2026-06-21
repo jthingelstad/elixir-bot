@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from event_core import config, db
 from event_core.ingest.profile import ingest_player_payload
+from event_core.ingest.roster import ingest_clan_payload
 
 
 def _legacy_conn(legacy_path: str | None = None) -> sqlite3.Connection:
@@ -63,6 +64,32 @@ def backfill_players(app, legacy_path: str | None = None) -> dict:
         if max_id > start_id:
             _save_cursor(cursor_conn, "player", max_id)
         return {"payloads": len(rows), "events_emitted": changed}
+    finally:
+        legacy.close()
+        cursor_conn.close()
+
+
+def backfill_clans(app, legacy_path: str | None = None) -> dict:
+    """Replay archived /clans payloads (rosters) in observation order, once each."""
+    legacy = _legacy_conn(legacy_path)
+    cursor_conn = db.connect(config.PROJECTIONS_DB)
+    try:
+        start_id = _cursor(cursor_conn, "clan")
+        rows = legacy.execute(
+            "SELECT payload_id, fetched_at, payload_json FROM raw_api_payloads "
+            "WHERE endpoint='clan' AND payload_id > ? ORDER BY fetched_at ASC, payload_id ASC",
+            (start_id,),
+        ).fetchall()
+
+        member_changes = 0
+        max_id = start_id
+        for r in rows:
+            payload = json.loads(r["payload_json"])
+            member_changes += ingest_clan_payload(app, payload, r["fetched_at"])
+            max_id = max(max_id, r["payload_id"])
+        if max_id > start_id:
+            _save_cursor(cursor_conn, "clan", max_id)
+        return {"payloads": len(rows), "member_observations_changed": member_changes}
     finally:
         legacy.close()
         cursor_conn.close()

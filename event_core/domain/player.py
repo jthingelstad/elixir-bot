@@ -45,6 +45,24 @@ PROFILE_SCALAR_FIELDS: dict[str, str] = {
     "legacyTrophyRoadHighScore": "legacy_trophy_road_high_score",
 }
 
+# Roster-state fields observed via the /clans memberList entry, mapped to the
+# legacy member_current_state columns. Attached to the Player aggregate so a
+# player's profile and roster observations share one timeline. (Clan-level
+# membership lifecycle — join/left — is a separate Clan-aggregate concern.)
+ROSTER_FIELDS = (
+    "role",
+    "exp_level",
+    "trophies",
+    "best_trophies",
+    "clan_rank",
+    "donations_week",
+    "donations_received_week",
+    "arena_id",
+    "arena_name",
+    "arena_raw_name",
+    "last_seen_api",
+)
+
 
 def canon_tag(tag: str) -> str:
     """Uppercase, '#'-prefixed canonical player tag."""
@@ -67,6 +85,9 @@ class Player(Aggregate):
         self.profile: dict[str, object] = {}
         self.last_profile_hash: str | None = None
         self.last_observed_at: str | None = None
+        # Latest observed roster state (from the clan endpoint).
+        self.roster: dict[str, object] = {}
+        self.last_roster_hash: str | None = None
 
     @classmethod
     def create_id(cls, player_tag: str) -> UUID:
@@ -88,4 +109,21 @@ class Player(Aggregate):
     ) -> None:
         self.profile.update(observation)
         self.last_profile_hash = content_hash
+        self.last_observed_at = observed_at
+
+    def observe_roster_state(
+        self, observation: dict, observed_at: str, content_hash: str
+    ) -> bool:
+        """Record a roster-state observation (from /clans) if it changed."""
+        if content_hash == self.last_roster_hash:
+            return False
+        self._roster_observed(observation, observed_at, content_hash)
+        return True
+
+    @event("RosterStateObserved")
+    def _roster_observed(
+        self, observation: dict, observed_at: str, content_hash: str
+    ) -> None:
+        self.roster.update(observation)
+        self.last_roster_hash = content_hash
         self.last_observed_at = observed_at

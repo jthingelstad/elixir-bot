@@ -29,21 +29,39 @@ def build(clean: bool = True) -> dict:
 
     from event_core import db
     from event_core.application import ObservedWorld
-    from event_core.backfill import backfill_players
-    from event_core.parity import check_player_profile_parity
+    from event_core.backfill import backfill_clans, backfill_players
+    from event_core.parity import (
+        check_member_current_state_parity,
+        check_player_profile_parity,
+    )
+    from event_core.projections.member_state import MemberCurrentState
     from event_core.projections.player_state import PlayerCurrentProfile
 
     app = ObservedWorld()
-    bf = backfill_players(app)
+    bf_players = backfill_players(app)
+    bf_clans = backfill_clans(app)
 
     conn = db.connect(config.PROJECTIONS_DB)
-    proj = PlayerCurrentProfile(app, conn)
-    proj.reset()
-    applied = proj.run()
+    profile_proj = PlayerCurrentProfile(app, conn)
+    profile_proj.reset()
+    profile_applied = profile_proj.run()
+
+    roster_proj = MemberCurrentState(app, conn)
+    roster_proj.reset()
+    roster_applied = roster_proj.run()
     conn.close()
 
-    parity = check_player_profile_parity()
-    return {"backfill": bf, "projection_events_applied": applied, "parity": parity}
+    return {
+        "backfill": {"players": bf_players, "clans": bf_clans},
+        "projection_events_applied": {
+            "profile": profile_applied,
+            "roster": roster_applied,
+        },
+        "parity": {
+            "player_profile": check_player_profile_parity(),
+            "member_current_state": check_member_current_state_parity(),
+        },
+    }
 
 
 if __name__ == "__main__":

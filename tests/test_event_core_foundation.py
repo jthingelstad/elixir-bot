@@ -70,6 +70,41 @@ def test_projection_reflects_latest(world):
     assert row["exp_level"] == 51
 
 
+def test_roster_observation_extraction_matches_legacy_defaults():
+    from event_core.ingest.roster import build_roster_observation
+
+    obs = build_roster_observation(
+        {"tag": "#X", "role": "elder", "expLevel": 50, "trophies": 7000,
+         "clanRank": 3, "donations": 120, "donationsReceived": 80,
+         "arena": {"id": 9, "name": "Legendary", "rawName": "Arena_L9"},
+         "lastSeen": "20260621T120000.000Z"}
+    )
+    assert obs["role"] == "elder"
+    assert obs["trophies"] == 7000
+    assert obs["donations_week"] == 120
+    assert obs["arena_id"] == 9 and obs["arena_raw_name"] == "Arena_L9"
+    # defaults when fields absent (mirrors snapshot_members)
+    empty = build_roster_observation({"tag": "#Y"})
+    assert empty["role"] == "member" and empty["trophies"] == 0
+    assert empty["donations_week"] == 0 and empty["arena_id"] is None
+
+
+def test_roster_projection_folds_latest(world):
+    from event_core import db
+    from event_core.projections.member_state import MemberCurrentState
+
+    world.observe_member_roster("#R", {"trophies": 100, "role": "member"}, "t0", "h0")
+    world.observe_member_roster("#R", {"trophies": 200, "role": "elder"}, "t1", "h1")
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    proj = MemberCurrentState(world, conn)
+    proj.setup()
+    proj.run()
+    row = conn.execute(
+        "SELECT trophies, role FROM member_current_state_proj WHERE player_tag='#R'"
+    ).fetchone()
+    assert row["trophies"] == 200 and row["role"] == "elder"
+
+
 legacy_missing = not os.path.exists(config.LEGACY_DB)
 
 
@@ -100,10 +135,15 @@ def test_foundation_parity_determinism_idempotency():
     fp2 = fingerprint()
 
     # exact parity: every reproducible member matches, none mismatched/missing
-    parity = r1["parity"]
-    assert parity["mismatched"] == 0
-    assert parity["missing_projection"] == 0
-    assert parity["matched"] == parity["reproducible_members"] > 0
+    pp = r1["parity"]["player_profile"]
+    assert pp["mismatched"] == 0
+    assert pp["missing_projection"] == 0
+    assert pp["matched"] == pp["reproducible_members"] > 0
+
+    # roster: no true mismatches (v5_more_current divergences are expected/explained)
+    rp = r1["parity"]["member_current_state"]
+    assert rp["mismatched"] == 0
+    assert rp["matched"] > 0
 
     # replay determinism: two from-zero rebuilds are byte-identical
     assert fp1 == fp2
