@@ -100,6 +100,61 @@ def backfill_clans(app, legacy_path: str | None = None) -> dict:
         cursor_conn.close()
 
 
+def backfill_collections(app, legacy_path: str | None = None) -> dict:
+    """Replay /players payloads into PlayerCollections (cards/badges/achievements)."""
+    from event_core.ingest.collections import ingest_player_collections
+
+    legacy = _legacy_conn(legacy_path)
+    cursor_conn = db.connect(config.PROJECTIONS_DB)
+    try:
+        start_id = _cursor(cursor_conn, "player_collections")
+        rows = legacy.execute(
+            "SELECT payload_id, fetched_at, payload_json FROM raw_api_payloads "
+            "WHERE endpoint='player' AND payload_id > ? ORDER BY fetched_at ASC, payload_id ASC",
+            (start_id,),
+        ).fetchall()
+        emitted = {"cards": 0, "badges": 0, "achievements": 0}
+        max_id = start_id
+        for r in rows:
+            changed = ingest_player_collections(app, json.loads(r["payload_json"]), r["fetched_at"])
+            for k in emitted:
+                emitted[k] += 1 if changed.get(k) else 0
+            max_id = max(max_id, r["payload_id"])
+        if max_id > start_id:
+            _save_cursor(cursor_conn, "player_collections", max_id)
+        return {"payloads": len(rows), "events_emitted": emitted}
+    finally:
+        legacy.close()
+        cursor_conn.close()
+
+
+def backfill_clan_state(app, legacy_path: str | None = None) -> dict:
+    """Replay /clans payloads into the Clan aggregate (clan-level state)."""
+    from event_core.ingest.clan import ingest_clan_state
+
+    legacy = _legacy_conn(legacy_path)
+    cursor_conn = db.connect(config.PROJECTIONS_DB)
+    try:
+        start_id = _cursor(cursor_conn, "clan_state")
+        rows = legacy.execute(
+            "SELECT payload_id, entity_key, fetched_at, payload_json FROM raw_api_payloads "
+            "WHERE endpoint='clan' AND payload_id > ? ORDER BY fetched_at ASC, payload_id ASC",
+            (start_id,),
+        ).fetchall()
+        changed = 0
+        max_id = start_id
+        for r in rows:
+            if ingest_clan_state(app, json.loads(r["payload_json"]), r["fetched_at"], r["entity_key"]):
+                changed += 1
+            max_id = max(max_id, r["payload_id"])
+        if max_id > start_id:
+            _save_cursor(cursor_conn, "clan_state", max_id)
+        return {"payloads": len(rows), "events_emitted": changed}
+    finally:
+        legacy.close()
+        cursor_conn.close()
+
+
 def backfill_battles(legacy_path: str | None = None) -> dict:
     """Replay archived battlelogs into the battle_telemetry table (tier 1).
 

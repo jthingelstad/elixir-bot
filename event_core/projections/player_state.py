@@ -15,6 +15,7 @@ PROFILE_COLUMNS = list(PROFILE_SCALAR_FIELDS.values())
 
 class PlayerCurrentProfile(ProjectionRunner):
     name = "player_current_profile"
+    aggregate_name = "Player"
 
     def setup(self) -> None:
         cols = ",\n            ".join(f"{c} {'TEXT' if c in ('name','role') else 'INTEGER'}" for c in PROFILE_COLUMNS)
