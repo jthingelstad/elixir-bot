@@ -53,36 +53,31 @@ def apply_payloads(app, conn, payloads: dict, observed_at: str) -> dict:
 
 
 def advance(app, conn) -> dict:
-    """Process new events incrementally. Order matters: World projections, then
-    detectors (emit Detections), then leadership (Detection -> Rec/Case), then the
-    communication policy (Detection/Rec -> Intent), then the detections read model.
-    Every step resumes from its tracked position; none reset."""
+    """Process new events incrementally: detectors (emit Detections), then
+    leadership (Detection -> Rec/Case), then the communication policy
+    (Detection/Rec -> Intent), then the detections read model. Every step resumes
+    from its tracked position; none reset.
+
+    The Observed-World current-state projections (player_current_profile,
+    member_current_state_proj, player_current_collections, clan_daily_metrics_proj,
+    war_current_state_proj, war_participation_proj, roster_lifecycle) were RETIRED
+    from the live tick on 2026-06-21: they had no live readers and only duplicated
+    the v4 operational tables, costing a per-tick dual-write
+    (see docs/tasks/event-core-v5-architecture-boundary.md). The Mind consumes the
+    event store + battle_telemetry + the detections projection directly. The
+    projections + their parity checks still live in build_foundation as an offline
+    validation harness."""
     from event_core.mind.communication import CommunicationPolicy
     from event_core.mind.detectors import ALL_DETECTORS, CohortWaveDetector
     from event_core.mind.leadership import InactivityRiskDetector, LeadershipGenerator
-    from event_core.projections.clan_metrics import ClanDailyMetrics
-    from event_core.projections.collections import PlayerCurrentCollections
     from event_core.projections.detections import DetectionsProjection
-    from event_core.projections.member_state import MemberCurrentState
-    from event_core.projections.player_state import PlayerCurrentProfile
-    from event_core.projections.roster_lifecycle import RosterLifecycle
     from event_core.ingest.battles import BATTLE_TELEMETRY_DDL
-    from event_core.projections.war import WarCurrentStateProjection, WarParticipationProjection
 
     # Battle detectors scan battle_telemetry; ensure it exists even on a tick with
     # no battlelogs (a fresh store).
     conn.execute(BATTLE_TELEMETRY_DDL)
     conn.commit()
     result = {}
-
-    for cls in (
-        PlayerCurrentProfile, MemberCurrentState, PlayerCurrentCollections,
-        ClanDailyMetrics, WarCurrentStateProjection, WarParticipationProjection,
-        RosterLifecycle,
-    ):
-        proj = cls(app, conn)
-        proj.setup()
-        result[proj.name] = proj.run()
 
     detected = 0
     for cls in (*ALL_DETECTORS, InactivityRiskDetector):
