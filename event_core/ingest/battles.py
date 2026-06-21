@@ -111,3 +111,23 @@ CREATE TABLE IF NOT EXISTS battle_telemetry (
     PRIMARY KEY (player_tag, battle_time, battle_type, opponent_tag, crowns_for, crowns_against)
 );
 """
+
+_BATTLE_INSERT = (
+    f"INSERT OR IGNORE INTO battle_telemetry({','.join(BATTLE_COLUMNS)},observed_at) "
+    f"VALUES({','.join('?' for _ in BATTLE_COLUMNS)},?)"
+)
+
+
+def write_battle_telemetry(conn, player_tag: str, battle_log: list[dict], observed_at: str) -> int:
+    """Idempotently write a player's battlelog into battle_telemetry (tier 1).
+
+    The single battle-ingest path shared by backfill and live ingest. Returns the
+    number of newly-inserted rows (dedup via the identity primary key).
+    """
+    conn.execute(BATTLE_TELEMETRY_DDL)
+    inserted = 0
+    for bt in extract_battles(player_tag, battle_log):
+        cur = conn.execute(_BATTLE_INSERT, [bt[c] for c in BATTLE_COLUMNS] + [observed_at])
+        inserted += cur.rowcount
+    conn.commit()
+    return inserted
