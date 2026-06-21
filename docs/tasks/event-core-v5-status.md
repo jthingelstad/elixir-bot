@@ -204,13 +204,33 @@ The runtime pivot is built and tested in `event_core/live/` (behind seams):
 - Validated: a new observation flows through one tick to a posted intent
   incrementally; an identical second tick does nothing (idempotent). 4/4 live tests.
 
-## NOT done — the cutover (Phase 4) + low-risk tails
+## Pre-cutover (runbook Stages 1–5) — DONE
 
-- **Cutover** (gated; awaiting your go). The runbook
-  (`event-core-v5-cutover-runbook.md`) has the 8 stages. With Stage 4 built, the
-  remaining build at go-live is just **wiring the seams**: `fetch_payloads` cr_api,
-  a real Discord `poster(intent)`, the agent's reads, and a scheduler calling
-  `run_tick`. Plus memory-DB split, squash v5 baseline, then switch + decommission.
+- **Stage 1 memory split** (`migrate/build_memory_db`): elixir-v5-memory.db built;
+  FTS5 rebuilt (3858 rows), vec recreated (empty). ✅
+- **Stage 2 survivors / baseline** (`migrate/build_projection_db`): 15 operational
+  survivor tables copied into elixir-v5.db (llm_calls 6179, messages 249, …). ✅
+- **Stage 3 unified build** (`migrate/build_all`): one command builds all three v5
+  stores from the archive — foundation 53/53, 652 detections/intents, memory FTS
+  3858, survivors copied, projections + survivors coexist. ✅
+- **Stage 4 seams**: `fetch_payloads` self-derives member tags; Discord renderer +
+  DryRunPoster + `make_discord_poster`; `run_once` production tick entrypoint;
+  `FollowerRunner.fast_forward`. ✅
+- **Stage 5 rehearsal**: a full live tick ran against COPIES of the v5 stores with
+  real current CR API data (3 members) and a dry-run poster — fetch → ingest (2
+  profiles, 26 battles, 17 roster obs) → incremental advance → render. ✅ Live
+  elixir.db untouched (raw-persist redirected to /tmp).
+  - ⚠ **Finding fixed:** the consumer's first run posted the entire ~650-intent
+    historical backlog. Added `fast_forward` (drain to log head); the runbook
+    Stage 6 now drains the backlog before the first live tick.
+
+## NOT done — only the go-live cutover (Stages 6–8), which you trigger
+
+- Wire the real seams into the running service: a real Discord `poster` (or hand
+  intents to the agent for copy), the agent's reads → `event_core.read.tools`, a
+  scheduler calling `run_once`.
+- Flip config to the v5 DBs, drain the intent backlog, `launchctl bootstrap` to
+  start, verify (Stage 7), decommission legacy (Stage 8).
 - **Low-risk tails:**
   - ✅ **Roster membership lifecycle (member join/leave/role-change)** — DONE.
     Clan aggregate diffs the member set → MemberJoined/MemberLeft/MemberRoleChanged;
