@@ -105,6 +105,24 @@ def test_roster_projection_folds_latest(world):
     assert row["trophies"] == 200 and row["role"] == "elder"
 
 
+def test_extract_battles_identity_fields():
+    from event_core.ingest.battles import extract_battles
+
+    payload = [
+        {
+            "battleTime": "20260621T112729.000Z",
+            "type": "PvP",
+            "team": [{"tag": "#ME", "crowns": 3, "trophyChange": 30}],
+            "opponent": [{"tag": "#OPP", "crowns": 1}],
+            "gameMode": {"id": 72000006, "name": "Ladder"},
+        }
+    ]
+    [b] = extract_battles("ME", payload)
+    assert b["battle_time"] == "20260621T112729.000Z"
+    assert b["crowns_for"] == 3 and b["crowns_against"] == 1
+    assert b["opponent_tag"] == "#OPP" and b["trophy_change"] == 30
+
+
 legacy_missing = not os.path.exists(config.LEGACY_DB)
 
 
@@ -144,6 +162,12 @@ def test_foundation_parity_determinism_idempotency():
     rp = r1["parity"]["member_current_state"]
     assert rp["mismatched"] == 0
     assert rp["matched"] > 0
+
+    # battle telemetry tier: high identity match, no fabrication beyond known
+    # special-type edge cases; only_in_legacy is the expected archive-window loss.
+    bt = r1["parity"]["battle_telemetry"]
+    assert bt["battles_matched"] > 0
+    assert bt["battles_matched"] > 10 * bt["only_in_projection"]
 
     # replay determinism: two from-zero rebuilds are byte-identical
     assert fp1 == fp2

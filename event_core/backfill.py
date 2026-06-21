@@ -11,6 +11,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from event_core import config, db
+from event_core.ingest.battles import BATTLE_TELEMETRY_DDL, extract_battles
 from event_core.ingest.profile import ingest_player_payload
 from event_core.ingest.roster import ingest_clan_payload
 
@@ -93,3 +94,50 @@ def backfill_clans(app, legacy_path: str | None = None) -> dict:
     finally:
         legacy.close()
         cursor_conn.close()
+
+
+_BATTLE_COLS = (
+    "player_tag", "battle_time", "battle_type", "opponent_tag", "crowns_for",
+    "crowns_against", "game_mode_id", "game_mode_name", "trophy_change", "event_tag",
+)
+
+
+def backfill_battles(legacy_path: str | None = None) -> dict:
+    """Replay archived battlelogs into the battle_telemetry table (tier 1).
+
+    Direct to elixir-v5.db (not the event store). Idempotent twice over: the
+    ingest cursor skips processed payloads, and INSERT OR IGNORE dedups on the
+    battle identity key.
+    """
+    legacy = _legacy_conn(legacy_path)
+    proj = db.connect(config.PROJECTIONS_DB)
+    proj.execute(BATTLE_TELEMETRY_DDL)
+    proj.commit()
+    try:
+        start_id = _cursor(proj, "player_battlelog")
+        rows = legacy.execute(
+            "SELECT payload_id, entity_key, fetched_at, payload_json FROM raw_api_payloads "
+            "WHERE endpoint='player_battlelog' AND payload_id > ? ORDER BY fetched_at ASC, payload_id ASC",
+            (start_id,),
+        ).fetchall()
+
+        inserted = 0
+        max_id = start_id
+        placeholders = ",".join("?" for _ in _BATTLE_COLS) + ",?"  # +observed_at
+        for r in rows:
+            battles = extract_battles(r["entity_key"], json.loads(r["payload_json"]))
+            for bt in battles:
+                cur = proj.execute(
+                    f"INSERT OR IGNORE INTO battle_telemetry({','.join(_BATTLE_COLS)},observed_at) "
+                    f"VALUES({placeholders})",
+                    [bt[c] for c in _BATTLE_COLS] + [r["fetched_at"]],
+                )
+                inserted += cur.rowcount
+            max_id = max(max_id, r["payload_id"])
+        if max_id > start_id:
+            _save_cursor(proj, "player_battlelog", max_id)
+        proj.commit()
+        return {"payloads": len(rows), "battles_inserted": inserted}
+    finally:
+        legacy.close()
+        proj.close()
