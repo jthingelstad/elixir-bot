@@ -117,27 +117,33 @@ from the archive). This is the last gate before touching the runtime.
 
 ---
 
-## Stage 4 — Build the live runtime wiring (still-unbuilt code)
+## Stage 4 — Live runtime wiring — ✅ BUILT (wire the seams at go-live)
 
-**Goal:** the pieces deferred from Phase 3 — connect the running bot to the core.
-**All new code, behind config so it can be exercised before cutover.**
+The engine is built and tested offline in `event_core/live/` (commit on branch).
+What remains at go-live is connecting the two seams to the running service.
 
-- [ ] **Live ingest path:** a heartbeat step that fetches CR API payloads and
-      feeds the **same** `event_core` ingest functions backfill uses
-      (`ingest_player_payload`, `ingest_clan_payload`, `observe_clan_roster`,
-      `ingest_clan_state`, `ingest_player_collections`, battle telemetry), then
-      runs the projection followers + detectors + policy incrementally (Followers
-      resume from their tracked positions — no full rebuild per tick).
-- [ ] **Agent read side:** point the agent's data access at `event_core.read.tools`
-      + the v5 projections (replacing legacy table reads).
-- [ ] **Discord consumer:** a path that reads new `CommunicationIntent` events and
-      posts them (owns copy/channel/formatting — the presentation the Event Core
-      deliberately omits), marking intents fulfilled/dropped.
-- [ ] **Cadence reflections:** the small scheduled set ("24h clan activity") that
-      queries projections.
+Built + validated offline:
+- ✅ **Live tick engine** (`live/engine.py`): `apply_payloads` routes fetched
+  payloads through the same ingest functions backfill uses; `advance()` runs
+  projections + detectors + leadership + policy **incrementally** (Followers resume
+  from tracked positions — proven, not a rebuild per tick).
+- ✅ **Discord intent consumer** (`live/discord_consumer.py`): follows
+  CommunicationIntent → pluggable poster → fulfil/drop; idempotent (no double-post).
+- ✅ **Cadence** (`live/cadence.py`): `clan_activity_24h` over projections.
+- ✅ **Tick orchestrator** (`live/tick.py`): `run_tick(...)` (tested).
 
-**Verify:** unit/integration tests for each; `ruff` clean.
-**If wrong:** iterate on the branch; nothing is live yet.
+Seams to wire at go-live (the only remaining Stage-4 work):
+- [ ] **`fetch_payloads`** → confirm cr_api wiring (`get_clan`, `get_player`,
+      `get_player_battle_log`, `get_current_war`) and the member-tag list source.
+- [ ] **Real Discord poster**: a `poster(intent)` that renders copy from
+      `intent.summary` and posts to the channel for `intent.scope`, returning
+      True on success. (The Event Core supplies facts; the poster owns copy.)
+- [ ] **Agent reads**: point the agent's data access at `event_core.read.tools`.
+- [ ] **Scheduler**: call `run_tick` on the heartbeat interval; cadence on its own.
+
+**Verify:** live tick tests pass (4/4); at go-live, the Stage-5 rehearsal exercises
+the wired seams once with Elixir still off.
+**If wrong:** iterate on the branch; nothing is live until Stage 6.
 
 ---
 

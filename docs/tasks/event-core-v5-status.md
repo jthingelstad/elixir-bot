@@ -193,13 +193,24 @@ runtime rewire) and Phase 4 (cutover).
 The full v5 architecture is now built and validated **offline on the branch**.
 What remains is the **gated cutover** — wiring into the live runtime + deploying.
 
+## Stage 4 (live runtime wiring) — BUILT offline
+
+The runtime pivot is built and tested in `event_core/live/` (behind seams):
+- **Live tick engine**: `apply_payloads` (shared ingest path) + `advance`
+  (projections/detectors/leadership/policy run **incrementally** from tracked
+  positions — first proof of incremental, non-rebuild operation).
+- **Discord intent consumer** (pluggable poster, idempotent — no double-post),
+  **cadence** reflection, **tick orchestrator** (`run_tick`).
+- Validated: a new observation flows through one tick to a posted intent
+  incrementally; an identical second tick does nothing (idempotent). 4/4 live tests.
+
 ## NOT done — the cutover (Phase 4) + low-risk tails
 
-- **Cutover** (gated; awaiting your go): live heartbeat → the shared ingest path;
-  Discord communication-intent consumer (actual posting); cadence reflections over
-  projections; memory-DB split; squash v5 baseline; fresh freeze + full backfill;
-  switch the bot to the v5 stores; decommission legacy (signal_log,
-  game_event_stream, side tables).
+- **Cutover** (gated; awaiting your go). The runbook
+  (`event-core-v5-cutover-runbook.md`) has the 8 stages. With Stage 4 built, the
+  remaining build at go-live is just **wiring the seams**: `fetch_payloads` cr_api,
+  a real Discord `poster(intent)`, the agent's reads, and a scheduler calling
+  `run_tick`. Plus memory-DB split, squash v5 baseline, then switch + decommission.
 - **Low-risk tails:**
   - ✅ **Roster membership lifecycle (member join/leave/role-change)** — DONE.
     Clan aggregate diffs the member set → MemberJoined/MemberLeft/MemberRoleChanged;
