@@ -108,3 +108,13 @@ class ObservedWorld(Application):
         if changed:
             self.save(clan)
         return changed
+
+    def observe_clan_roster(
+        self, clan_tag: str, roster: dict, observed_at: str
+    ) -> int:
+        """Diff the clan roster (player_tag -> role) -> join/leave/role events."""
+        tag = clan_canon_tag(clan_tag)
+        clan = self._get_or_create_clan(tag)
+        changes = clan.observe_roster(roster, observed_at)
+        self.save(clan)  # persists baseline or lifecycle events; no-op if unchanged
+        return changes
