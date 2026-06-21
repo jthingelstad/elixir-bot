@@ -107,6 +107,19 @@ These are settled. They close several previously-open questions.
    parity, rollback source). Each store is owned by one concern, which is why the
    memory subsystem — fully decoupled from the event core — gets its own file.
 
+7. **Persistence: native `eventsourcing.sqlite` + stdlib `sqlite3`, not
+   SQLAlchemy.** SQLAlchemy was considered (the library offers an
+   `eventsourcing.sqlalchemy` module) and declined: SQLite-only makes the native
+   event-store module leaner, projections are mechanical upserts, and a second DB
+   idiom alongside the stdlib-`sqlite3` survivors mid-rewrite isn't worth it. All
+   projection DB access goes through one helper (`event_core/db.py`) so SQLAlchemy
+   Core can be confined there later if query ergonomics ever justify it.
+
+> **Implementation status (2026-06-21):** a validated foundation slice of this plan
+> is built on branch `feat/event-core-v5` — Player aggregate, profile/roster/battle
+> ingest, projections, backfill from the frozen archive, and exact-parity checks.
+> See `docs/tasks/event-core-v5-status.md`. Elixir is stopped; no cutover performed.
+
 ---
 
 ## 3. Core Boundary
