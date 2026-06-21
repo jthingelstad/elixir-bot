@@ -1,6 +1,6 @@
-# Plan: Elixir Event-Sourcing Migration
+# Plan: Elixir Event Core Rewrite
 
-Status: Design plan. Tracking issue: #95.
+Status: Design plan. Original tracking issue: #95. Boundary refinement: #97.
 
 Captured: 2026-06-21.
 
@@ -8,9 +8,14 @@ This plan supersedes the earlier "stream as observation substrate" framing in
 `docs/tasks/elixir-stream-redesign-direction.md` and nests the implemented
 stream work into a fuller event-sourcing architecture. The prior work was a
 necessary step: battles and selected detector signals now land in
-`game_event_stream`, and Situation can read stream summaries. The next target is
-larger: make Elixir's event log the authoritative record of observed state
-changes, derived observations, Elixir decisions, and communication history.
+`game_event_stream`, and Situation can read stream summaries.
+
+The next target is larger: rewrite Elixir's core data substrate so the event log
+is the authoritative record of observed state changes, derived observations,
+leadership recommendations, and case decisions. This is a core data rewrite, not
+a bot rewrite. Runtime surfaces, prompt workflows, and external side-effect
+layers should consume projections from the Event Core; they should not define
+the Event Core's schema.
 
 ## Purpose
 
@@ -22,14 +27,15 @@ Elixir should be able to ask and answer questions like:
 - Which members are active in Ranked / Path of Legends, 2v2, special events,
   Trophy Road, and River Race?
 - Which state changes caused a streak, a promotion candidate, a demotion
-  candidate, a kick review, or a Discord post?
-- What did Elixir choose not to say, and why?
+  candidate, or a kick review?
+- Which leadership recommendations were generated, refreshed, suppressed, or
+  resolved, and what evidence caused them?
 
 The current model can answer some of this from a mix of fact tables, signal
-events, rollups, messages, leader-action tables, and awareness telemetry. That
-mix is useful, but not coherent. The same fact can be represented in several
-places, and many ordinary state changes are not events at all unless a detector
-decides they are notable.
+events, rollups, decision cases, leader-action side tables, and awareness
+telemetry. That mix is useful, but not coherent. The same fact can be
+represented in several places, and many ordinary state changes are not events at
+all unless a detector decides they are notable.
 
 The event-sourcing target is:
 
@@ -38,12 +44,12 @@ External snapshots / commands
   -> observed domain events
   -> projections and aggregators
   -> derived events
-  -> commentary candidates and intents
-  -> delivery events
+  -> leadership recommendation events
+  -> case projections and decision events
 ```
 
 In this model, "signals" are no longer the primary unit of awareness. They become
-derived stream events or commentary candidates emitted by aggregators.
+derived stream events or recommendation events emitted by aggregators.
 
 ## Core Decision
 
@@ -62,8 +68,28 @@ Plain-language distinction:
 - **Projection**: Elixir's query-optimized view derived from events.
 - **Derived event**: an event emitted by an aggregator after reading other
   events or projections.
-- **Intent**: Elixir's planned communication or deliberate silence.
-- **Delivery event**: what happened when Elixir attempted a side effect.
+- **Recommendation event**: a leadership-private derived event that says Elixir
+  recommends or suppresses action for a member, with evidence links and policy
+  version.
+- **Case projection**: the current lifecycle state of a recommendation or
+  concern, derived from recommendation and case-decision events.
+
+## Core Boundary
+
+The Event Core is a data model. It should not contain presentation logic.
+
+Do not put these concepts in the authoritative event stream:
+
+- external surface routing identifiers
+- rendering component identifiers, layouts, action states, or final copy
+- outbound side-effect receipt identifiers or formatting
+- external publishing formatting details
+- presentation-specific routing policy
+
+Those belong in downstream read models that consume Event Core projections. The
+Event Core may record that a leadership recommendation was generated,
+suppressed, accepted, rejected, deferred, or resolved. It should not record the
+form used to surface that recommendation.
 
 ## Architectural Gap
 
@@ -80,22 +106,25 @@ Missing pieces:
    A card can move from level 12 to 13 without an event because Elixir only emits
    `card_level_milestone` when a configured threshold is crossed.
 
-2. Signals combine detection, derivation, and commentary eligibility.
+2. Signals combine detection, derivation, and actionability policy.
    A streak is currently a signal. In the target model it is a derived event,
-   caused by battle events, that may or may not become a commentary candidate.
+   caused by battle events, that may or may not feed a recommendation, case, or
+   other downstream policy decision.
 
 3. Projection ownership is unclear.
    Tables like `member_current_state`, card snapshots, war tables, daily metrics,
-   decision cases, leader-action cards, and messages are currently partial
-   ledgers. In the target model, they are projections or downstream records.
+   decision cases, and leader-action side tables are currently partial ledgers.
+   In the target model, they are projections or downstream side-effect records.
 
-4. Silence is not fully evented.
-   Elixir can skip a post or decide something is quiet, but that decision is not
-   consistently represented as an intent/event with causal links.
+4. Leadership recommendations are a side system.
+   Promotion, demotion, and kick recommendations are currently produced by a
+   recompute-first scan. They should instead be generated by stream consumers and
+   inserted into the same event store as leadership-private recommendation
+   events.
 
 5. Filters and cohort views are bolted on after the fact.
    The stream needs first-class dimensions for player, card, badge, achievement,
-   battle mode, war season, lane, audience, and source.
+   battle mode, war season, local date, scope, and source.
 
 ## Target Architecture
 
@@ -178,12 +207,14 @@ Current tables that should become projections:
 | war tables | war-season and war-period read models |
 | `event_rollups` | durable summaries beyond the high-fidelity retention window |
 | `decision_cases` | current unresolved concern state |
-| `communication_intents` | current communication decision state |
-| `messages` | delivered communication read model |
 
 Some existing tables may remain as source snapshots during migration. The end
 state should make their role explicit: either upstream sample archive or
 projection from events.
+
+External side-effect tables are outside the Event Core. They may consume Event
+Core projections, but they are not authoritative sources for player, roster,
+recommendation, or case state.
 
 ### 4. Aggregators
 
@@ -197,11 +228,15 @@ Examples:
 | ranked pulse detector | ranked `battle_played`, `ranked_league_changed` | `ranked_activity_surge_detected`, `ranked_climb_detected` |
 | cohort badge detector | `badge_earned`, `badge_level_changed` | `cohort_badge_wave_detected` |
 | card movement detector | `card_unlocked`, `card_level_changed`, `card_evolution_changed` | `card_upgrade_wave_detected`, `new_champion_wave_detected` |
-| roster health detector | roster/player/war events | `inactive_member_risk_detected`, `promotion_candidate_detected`, `demotion_candidate_detected` |
+| roster health detector | roster/player/war events | `inactive_member_risk_detected` |
+| leadership recommendation generator | roster/player/war/ranked/case events | `promotion_candidate_detected`, `demotion_candidate_detected`, `kick_candidate_detected`, `leadership_recommendation_suppressed` |
 | war momentum detector | war period/member events | `war_momentum_shift_detected`, `war_recovery_needed_detected` |
-| commentary planner | derived events and projections | `commentary_candidate_created`, `commentary_suppressed` |
 
 The key rule: aggregators do not directly post. They emit events.
+
+Leadership recommendation generators are aggregators. They consume the same event
+stream as every other generator, emit leadership-scoped derived events, and link
+each recommendation to its evidence events. They are not a separate side system.
 
 ### 5. Situation Builder
 
@@ -209,12 +244,12 @@ Situation becomes a stream query and projection assembly layer.
 
 It should read:
 
-- recent base events by lane/audience/window
+- recent base events by scope/window
 - recent derived events by priority
 - cohort clusters by dimension
 - due cases
-- due revisits represented as case reminders or intent reminders
-- recent commentary intents and delivery outcomes
+- due revisits represented as case reminders
+- recent recommendation and case events
 - projection snapshots for compact context
 
 It should not depend on ephemeral signal batches as its main model. A current
@@ -222,24 +257,38 @@ tick can still pass newly emitted events into Situation, but the agent should
 understand them as "new event positions since last run," not as special signal
 objects.
 
-### 6. Commentary and Delivery
+### 6. Leadership Recommendations and Cases
 
-Communication should also be evented.
+Leadership recommendations are part of the Event Core.
 
 Target flow:
 
 ```
-derived event or event cluster
-  -> commentary_candidate_created
-  -> communication_intent_created
-  -> communication_intent_selected | communication_intent_suppressed
-  -> delivery_attempted
-  -> delivery_succeeded | delivery_failed
-  -> message_recorded
+base and derived events
+  -> promotion_candidate_detected | demotion_candidate_detected | kick_candidate_detected
+  -> leadership_recommendation_refreshed | leadership_recommendation_suppressed
+  -> decision_case_opened | decision_case_refreshed
+  -> decision_case_deferred | decision_case_accepted | decision_case_rejected | decision_case_resolved
+  -> recommendation_outcome_observed
 ```
 
-This makes silence auditable. If Elixir sees 10 players earn the same badge and
-chooses not to post, that decision should be queryable.
+The case table is a projection of these events. It answers "what is currently
+open, due, deferred, resolved, or measured?" The event store answers "what
+happened, what policy generated it, and what evidence caused it?"
+
+Recommendation events should carry:
+
+- `player_tag`
+- `recommendation_type`: promotion, demotion, kick, watch, no_action
+- `reason_codes`: inactivity, low war participation, elder readiness,
+  sustained contribution, role mismatch, etc.
+- `policy_version`
+- `confidence` or `severity`
+- `scope='leadership'`
+- `caused_by_event_ids_json`
+
+External consumers can project these cases into whatever surface they own. That
+projection must not leak surface-specific concepts back into the Event Core.
 
 ## Event Model
 
@@ -251,19 +300,20 @@ Minimum event columns:
 | `global_position` | ordered application sequence |
 | `event_key` | deterministic idempotency key |
 | `event_type` | domain event type |
-| `event_family` | player, card, badge, achievement, battle, war, roster, commentary, delivery, system |
-| `event_class` | base, derived, intent, delivery, system |
+| `event_family` | player, card, badge, achievement, battle, war, roster, recommendation, case, system |
+| `event_class` | base, derived, recommendation, case, system |
 | `schema_version` | payload version |
-| `source_system` | player_intel, clan_awareness, war_awareness, manual, system, discord, site |
+| `source_system` | player_intel, clan_awareness, war_awareness, recommendation_generator, case_manager, manual, system |
 | `source_detector` | emitter/aggregator name |
 | `occurred_at` | when the underlying thing happened, if known |
 | `observed_at` | when Elixir observed it |
 | `recorded_at` | when Elixir appended it |
+| `local_date` | America/Chicago date for day-level filters |
 | `scope` | public, leadership, system_internal |
-| `subject_type` | member, clan, card, badge, achievement, battle_mode, war, case, intent, system |
+| `subject_type` | member, clan, card, badge, achievement, battle_mode, war, case, recommendation, system |
 | `subject_key` | primary subject key |
 | `actor_type` | optional actor, usually member or elixir |
-| `actor_key` | player tag, Discord user, Elixir component |
+| `actor_key` | player tag, stable human identifier, or Elixir component |
 | `clan_tag` | clan dimension |
 | `player_tag` | denormalized member dimension |
 | `card_key` | denormalized card dimension |
@@ -283,6 +333,7 @@ Indexes should support:
 
 - global position scans
 - event type + time
+- local date + event family
 - scope + time
 - player + time
 - card + time
@@ -381,34 +432,33 @@ It feeds projections, rollups, and aggregators.
 - `cohort_achievement_wave_detected`
 - `card_upgrade_wave_detected`
 - `new_card_unlock_wave_detected`
-- `promotion_candidate_detected`
-- `demotion_candidate_detected`
 - `inactive_member_risk_detected`
 - `war_momentum_shift_detected`
 - `war_recovery_needed_detected`
 - `clan_record_detected`
 - `season_award_granted`
 
-### Elixir Operational Events
+### Leadership Recommendation Events
+
+- `promotion_candidate_detected`
+- `demotion_candidate_detected`
+- `kick_candidate_detected`
+- `leadership_recommendation_refreshed`
+- `leadership_recommendation_suppressed`
+- `leadership_recommendation_expired`
+- `recommendation_outcome_observed`
+
+### Case Decision Events
 
 - `decision_case_opened`
 - `decision_case_refreshed`
 - `decision_case_deferred`
+- `decision_case_accepted`
+- `decision_case_rejected`
 - `decision_case_resolved`
-- `leader_action_card_created`
-- `leader_action_decided`
-- `commentary_candidate_created`
-- `commentary_suppressed`
-- `communication_intent_created`
-- `communication_intent_selected`
-- `communication_intent_suppressed`
-- `delivery_attempted`
-- `delivery_succeeded`
-- `delivery_failed`
-- `message_recorded`
-- `site_publish_attempted`
-- `site_publish_succeeded`
-- `site_publish_failed`
+
+### System Observation Events
+
 - `runtime_job_started`
 - `runtime_job_succeeded`
 - `runtime_job_failed`
@@ -435,7 +485,8 @@ Answers:
 - player earned badges
 - player battled in each mode
 - Elixir opened/resolved cases about player
-- Elixir posted or suppressed commentary about player
+- Elixir generated, suppressed, or resolved leadership recommendations about
+  player
 
 ### Achievement / Badge Cohort View
 
@@ -493,22 +544,22 @@ Answers:
 - week-by-week rank/fame trajectory
 - member participation deltas
 - rival movement
-- war awards and leader actions caused by war evidence
+- war awards and leadership recommendations caused by war evidence
 
-### Commentary Audit View
+### Leadership Recommendation and Case Audit View
 
 Filter:
 
-- `event_class IN ('intent', 'delivery')`
+- `event_family IN ('recommendation', 'case')`
 - optional player/card/badge/mode dimensions
 
 Answers:
 
 - what Elixir saw
-- why Elixir posted
-- why Elixir stayed quiet
-- which event cluster caused a post
-- whether delivery succeeded
+- why Elixir recommended promotion, demotion, kick, watch, or no action
+- why Elixir suppressed a recommendation
+- which event cluster caused a case to open or refresh
+- how the case was accepted, rejected, deferred, resolved, or measured
 
 ## Relationship to the `eventsourcing` Library
 
@@ -534,7 +585,7 @@ large SQLite schema and many runtime paths. The better sequence is:
 3. evaluate whether the library should own the event store / notification log /
    process-application mechanics
 
-If adopted, the likely fit is a bounded event-store package rather than a full
+If adopted, the likely fit is a bounded Event Core package rather than a full
 rewrite of bot runtime modules.
 
 ## Migration Plan
@@ -545,17 +596,18 @@ Goal: freeze the conceptual model before schema changes.
 
 Tasks:
 
-- Inventory current fact tables, signal types, delivery ledgers, and runtime jobs.
+- Inventory current fact tables, signal types, recommendation/case tables,
+  side-effect ledgers, and runtime jobs.
 - Mark every table as one of:
   - upstream sample archive
   - event store
   - projection
   - derived state
-  - delivery side effect
+  - external side-effect outside the Event Core
   - compatibility table
 - Define event naming rules.
 - Define dimension keys and canonical IDs for players, cards, badges,
-  achievements, battle modes, war seasons, cases, and intents.
+  achievements, battle modes, war seasons, recommendations, and cases.
 - Define scope rules for public/leadership/system events.
 - Define retention policy for base events and rollups.
 
@@ -587,7 +639,7 @@ Tasks:
 
 Exit criteria:
 
-- can append base, derived, intent, and delivery events
+- can append base, derived, recommendation, case, and system events
 - can scan by global position
 - can query by player/card/badge/achievement/game mode
 - existing `game_event_stream` readers still work or have a compatibility view
@@ -607,8 +659,9 @@ Tasks:
 
 Important rule:
 
-Do not post from base events directly. Posting still goes through existing
-awareness until derived-event/commentary phases are ready.
+Do not trigger side effects from base events directly. Existing awareness paths
+remain compatibility consumers until derived-event and recommendation phases are
+ready.
 
 Exit criteria:
 
@@ -633,9 +686,10 @@ Tasks:
 
 Exit criteria:
 
-- leader-action scan can point to event evidence
+- leadership recommendation generators can point to event evidence
 - war Situation can be rebuilt from war projections derived from events
-- API schema sentinel is both an event and a communication candidate
+- API schema sentinel is an event before any external consumer decides how to
+  handle it
 
 ### Phase 4: Projection Writers
 
@@ -694,46 +748,50 @@ Exit criteria:
 - aggregators can be replayed without duplicate derived events
 - old signal functions are compatibility wrappers, not the primary model
 
-### Phase 6: Cases and Leader Actions as Evented Projections
+### Phase 6: Leadership Recommendations and Cases
 
-Goal: decision cases become projections/state machines driven by events.
+Goal: promotion, demotion, and kick recommendations become Event Core outputs,
+and decision cases become projections/state machines driven by those events.
 
 Tasks:
 
-- Open/refresh cases from derived events.
+- Generate leadership-scoped recommendation events from base and derived events.
+- Open/refresh cases from recommendation events.
 - Emit `decision_case_*` events for lifecycle changes.
-- Make leader-action cards projections of cases.
-- Emit `leader_action_card_created` and `leader_action_decided`.
-- Remove recompute-first leader-action behavior once parity is proven.
+- Emit `leadership_recommendation_suppressed` when evidence does not clear the
+  action threshold.
+- Remove recompute-first leadership recommendation behavior once parity is proven.
 
 Exit criteria:
 
-- a promotion/demotion/kick card can trace to base events and derived events
+- a promotion/demotion/kick recommendation can trace to base events and derived
+  events
 - deferred cases resurface because their case state says they are due
 - leader decision history is replayable/auditable
 
-### Phase 7: Commentary Candidates and Intent Events
+### Phase 7: Recommendation Policy and Suppression
 
-Goal: commentary planning becomes evented and silence is auditable.
+Goal: recommendation policy decisions are evented and auditable without encoding
+side-effect behavior.
 
 Tasks:
 
-- Convert derived events into `commentary_candidate_created`.
-- Add priority/novelty/audience policy.
-- Emit `commentary_suppressed` when Elixir intentionally stays quiet.
-- Create `communication_intent_created` from selected candidates.
-- Store coverage links from intent to candidate/events.
-- Keep Discord delivery side effects only after intent is durable.
+- Version leadership recommendation policies.
+- Record recommendation threshold decisions with evidence and reason codes.
+- Emit `leadership_recommendation_suppressed` for no-action decisions worth
+  auditing.
+- Keep external side effects outside the Event Core.
 
 Exit criteria:
 
-- every proactive post has an intent event
-- every deliberate skip has a suppression event
-- quiet ticks can be audited by event position/time window
+- every recommendation has a policy version and evidence events
+- every audited suppression has reason codes
+- no presentation-specific fields are required to explain a recommendation
 
 ### Phase 8: Situation V2
 
-Goal: Situation is built from event positions, projections, cases, and intents.
+Goal: Situation is built from event positions, projections, recommendation
+events, and cases.
 
 Tasks:
 
@@ -741,13 +799,12 @@ Tasks:
   - `new_events_since_last_awareness`
   - `event_clusters`
   - `derived_events_by_priority`
-  - `commentary_candidates`
+  - `recommendation_events`
   - `due_cases`
-  - `recent_intents`
   - `projection_snapshots`
 - Keep payload compaction strict.
 - Keep battle-grain rows out of prompts except as aggregates or drilldowns.
-- Add lane/audience-specific filters before prompt assembly.
+- Add scope-specific filters before prompt assembly.
 
 Exit criteria:
 
@@ -769,8 +826,6 @@ Backfill sources:
 - war tables
 - `signal_log`
 - `signal_outcomes`
-- `communication_intents`
-- `messages`
 - leader action recommendations
 - decision cases
 
@@ -797,16 +852,18 @@ Candidates:
 
 - `signal_log` becomes compatibility-only or is replaced by evented completion
   markers.
-- `signal_outcomes` collapses under communication-intent/delivery events.
+- `signal_outcomes` stays an external side-effect compatibility ledger outside
+  the Event Core until side-effect handling is redesigned.
 - signal dicts become transient DTOs or disappear.
-- direct delivery paths are retired or wrapped in intent events.
+- direct side-effect paths consume projections rather than detector signals.
 - old project tables remain dormant or are dropped via dedicated FK-safe
   migration if no longer referenced.
 
 Exit criteria:
 
 - no production path relies on signal grain as the authoritative observation
-- all proactive communications trace to event/candidate/intent/delivery chain
+- all leadership recommendations trace to base events, derived events, and case
+  events
 - admin/debug tooling reads event store and projections
 
 ## Verification Strategy
@@ -828,7 +885,7 @@ Integration tests:
 - badge cohort emits wave event
 - ranked battles emit ranked aggregate event
 - leader-action case traces to base events
-- communication suppression is recorded
+- recommendation suppression is recorded
 
 Operational checks:
 
@@ -837,7 +894,7 @@ Operational checks:
 - failed consumer count
 - event payload size distribution
 - scope leakage audit
-- commentary coverage audit
+- recommendation coverage audit
 - DB growth and retention behavior
 
 Production rollout:
@@ -846,7 +903,7 @@ Production rollout:
 2. compare projections against existing tables
 3. enable derived-event aggregators in shadow
 4. compare derived events against current signals
-5. enable commentary candidates in shadow
+5. enable recommendation generators in shadow
 6. switch Situation to stream-native read path
 7. retire old paths only after several clean weekly cycles
 
@@ -854,10 +911,10 @@ Production rollout:
 
 - No raw battle flood in prompts.
 - No leadership data in public Situation.
-- No Discord/site side effect before durable intent.
+- No presentation-specific fields in the Event Core.
 - No destructive schema migration until projections can replay.
 - No derived event without causal evidence.
-- No commentary candidate without audience/scope.
+- No recommendation event without scope, policy version, and evidence.
 - No backfill event that pretends to have real-time precision it does not have.
 - No dependency adoption that forces a bot-wide rewrite before the model is
   proven.
@@ -869,8 +926,8 @@ Production rollout:
 2. How long should full-fidelity non-battle base events be retained?
 3. Which event families should survive indefinitely via rollups?
 4. Should Elixir store upstream raw snapshot hashes for every profile sample?
-5. Should commentary candidates be generated synchronously during ingest or by a
-   scheduled consumer?
+5. Should leadership recommendation generators run synchronously during ingest
+   or by scheduled consumers?
 6. Should the Python `eventsourcing` library own the event store after the first
    native phase, or remain only an architectural reference?
 
@@ -878,15 +935,16 @@ Production rollout:
 
 This migration is complete when:
 
-- every meaningful observed player, card, badge, achievement, roster, battle,
-  ranked, war, case, intent, delivery, and system change is represented as an
-  event or as a projection from events
+- every meaningful observed player, Clash Royale card, badge, achievement,
+  roster, battle, ranked, war, leadership recommendation, case, and system
+  change is represented as an event or as a projection from events
 - existing current-state tables are documented as projections or upstream sample
   archives
 - derived observations such as streaks are event-store consumers, not special
   signal objects
+- promotion, demotion, and kick recommendations are generated by Event Core
+  consumers, not a side system
 - Situation is assembled from stream positions, event clusters, projections,
-  cases, and intents
+  recommendations, and cases
 - Elixir can filter and aggregate by player, event type, card, achievement,
-  badge, battle mode, war season, audience, and commentary lane
-- every proactive post and every deliberate silence has an auditable event chain
+  badge, battle mode, war season, scope, recommendation type, and case state
