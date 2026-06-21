@@ -4,8 +4,9 @@ Status: Design plan. Original tracking issue: #95. Boundary refinement: #97.
 
 Captured: 2026-06-21. Revised: 2026-06-21 (library adoption, reactive v5 framing,
 two-context aggregate model, UTC-only, single-campaign migration; then three-tier
-battle model, durable-log-vs-telemetry tiering, agent read-side tooling, and the
-v5 schema reset).
+battle model, durable-log-vs-telemetry tiering, agent read-side tooling, the v5
+schema reset; then three named v5 databases incl. a separate memory DB, and a
+full production-off campaign enabling exact parity).
 
 This plan supersedes the "stream as observation substrate" framing in
 `docs/tasks/elixir-stream-redesign-direction.md`. The prior work was a necessary
@@ -96,6 +97,16 @@ These are settled. They close several previously-open questions.
    shim functions, no dual-running. Backward compatibility is dead weight when
    there is one user and the upstream truth (CR API) is always re-derivable.
 
+6. **Three v5 databases, by concern** (see §4.1a, §11.1). The data layer splits
+   into three SQLite files, each with `v5` in the name:
+   - **`elixir-v5-events.db`** — the library-owned event store (write model).
+   - **`elixir-v5.db`** — projections / read models plus operational survivors
+     (Discord plumbing, `llm_calls`, messages).
+   - **`elixir-v5-memory.db`** — memory and embeddings, split out now (not later).
+   The pre-v5 `elixir.db` is frozen read-only as `elixir.db.legacy` (backfill,
+   parity, rollback source). Each store is owned by one concern, which is why the
+   memory subsystem — fully decoupled from the event core — gets its own file.
+
 ---
 
 ## 3. Core Boundary
@@ -152,8 +163,8 @@ are provided directly:
 SQLite environment (per the library tutorial, part 3):
 
 - `PERSISTENCE_MODULE = 'eventsourcing.sqlite'`
-- `SQLITE_DBNAME = '/path/to/elixir-events.db'` — the event store gets its **own
-  file**, separate from the projection/read-model DB (today's `elixir.db`). Keep
+- `SQLITE_DBNAME = '/path/to/elixir-v5-events.db'` — the event store gets its
+  **own file**, separate from the projection/read-model DB (`elixir-v5.db`). Keep
   the library's opaque write store apart from queryable projections.
 - `SQLITE_LOCK_TIMEOUT` — optional, default 5s.
 - Tests use the in-memory form `'file::memory:?mode=memory&cache=shared'`.
@@ -161,11 +172,19 @@ SQLite environment (per the library tutorial, part 3):
 Stored events are neither compressed nor encrypted by default; leadership-scoped
 payloads that need protection must be handled explicitly (see Guardrails).
 
-### 4.1a Two databases, and why that is safe
+### 4.1a Three databases, and why that is safe
 
-The event store (`elixir-events.db`, library-owned) is a **separate file** from
-the projection/read-model DB (`elixir.db`, ours). This is deliberate isolation,
-not an accident, and it is correct rather than risky — but only if one rule holds.
+The data layer is three SQLite files, split by concern (Core Decision 6):
+
+- **`elixir-v5-events.db`** — library-owned event store (write model).
+- **`elixir-v5.db`** — our projections / read models + operational survivors.
+- **`elixir-v5-memory.db`** — memory and embeddings, fully decoupled from the
+  event core (it neither follows the notification log nor backs projections), so
+  it lives on its own file and is otherwise out of scope for this plan.
+
+The interesting pair is the event store and the projection DB. Their separation is
+deliberate isolation, not an accident, and it is correct rather than risky — but
+only if one rule holds.
 
 The natural worry is **cross-database atomicity**: the core loop is "append event →
 update projection," and two files cannot share a single ACID transaction. Event
@@ -180,16 +199,16 @@ the design.
 The one rule that makes the split correct:
 
 > **A follower's tracking record lives in the same database as the projection it
-> writes** (`elixir.db`), so "processed up to position N" and the projection
+> writes** (`elixir-v5.db`), so "processed up to position N" and the projection
 > update commit in one transaction. The event store being a separate file is then
 > irrelevant to projection correctness.
 
 Topology:
 
-- `elixir-events.db` — library-owned: stored events, snapshots, notification log.
-  The source of truth; the only thing that *must* be backed up (projections
+- `elixir-v5-events.db` — library-owned: stored events, snapshots, notification
+  log. The source of truth; the only thing that *must* be backed up (projections
   rebuild from it).
-- `elixir.db` — our projections **and their followers' tracking records,
+- `elixir-v5.db` — our projections **and their followers' tracking records,
   co-located** so each follower commits atomically.
 
 Net upside of the split: clean schema ownership (the library manages its own file
@@ -214,8 +233,9 @@ Instead, the old table's two jobs split cleanly along CQRS lines:
 
 - **Write model** = the library's event store (opaque, per-aggregate, append-only,
   globally ordered via the notification log).
-- **Read model** = purpose-built **projection tables** in `elixir.db`, maintained
-  by follower process applications. Every "filtered view" the old plan wanted
+- **Read model** = purpose-built **projection tables** in `elixir-v5.db`,
+  maintained by follower process applications. Every "filtered view" the old plan
+  wanted
   (player timeline, card movement, badge cohort, battle-mode, war season,
   recommendation/case audit) becomes a projection with exactly the columns and
   indexes that view needs.
@@ -300,7 +320,7 @@ evidence). The resolution is three tiers:
 
 1. **Raw battles = retention-managed telemetry.** Captured idempotently (synthetic
    dedup key = `battleTime` + sorted `(team[0].tag, opponent[0].tag)`) into a
-   **battle-fact projection table** in `elixir.db` (the `member_battle_facts`
+   **battle-fact projection table** in `elixir-v5.db` (the `member_battle_facts`
    successor), with a finite high-fidelity horizon (target 90 days). **Not library
    events.** This matches the API's own ephemerality and the fact that raw battle
    detail is only needed short-term (reactive detection now; mode activity this
@@ -357,7 +377,7 @@ events from the log." Snapshots bound *replay cost*, not *storage*; old events
 stay forever. So retention is not a runtime feature you switch on — it is decided
 at design time by **what you allow into the log**:
 
-> **High-frequency churn is retention-managed telemetry in `elixir.db`. The
+> **High-frequency churn is retention-managed telemetry in `elixir-v5.db`. The
 > forever-append library log holds only durable, lower-frequency truth + rollups.**
 
 Applying the line across the model:
@@ -411,18 +431,24 @@ specific about an old event after the telemetry is gone.
 | `raw_api_payloads`, `arena_relay_screenshot_observations`, `api_sentinel_observations` | **Backfill/ingest sources** (see §10) + observation events. |
 | `awareness_ticks` | Reframed/retired — the schedule-first awareness loop is replaced by reactive triggers + a small cadence set (§8). |
 
-Memory/embedding tables (`clan_memories*`, `memory_*`), Discord plumbing
-(`discord_*`, `messages`, `channel_state`, `conversation_threads`), `llm_calls`,
-and improvement/project tracking are **outside** the Event Core. They may consume
-projections; they are not part of this model.
+All **outside** the Event Core, in two groups:
+
+- **Memory/embeddings** (`clan_memories*`, `memory_*`, incl. the `clan_memories_fts`
+  FTS5 and `clan_memory_vec` sqlite-vec virtual tables) move to their own file,
+  **`elixir-v5-memory.db`** (Core Decision 6). Fully decoupled from the event core.
+- **Operational survivors** — Discord plumbing (`discord_*`, `messages`,
+  `channel_state`, `conversation_threads`), `llm_calls`, improvement/project
+  tracking — stay in `elixir-v5.db` alongside the projections. They may consume
+  projections; they are not part of this model.
 
 ---
 
 ## 7. Projections and read models (UTC storage, TZ only at read)
 
 Projection tables are deterministic read models, each maintained by a follower
-process application. They live in `elixir.db` with the follower's tracking record
-**co-located** so projection-plus-position commits atomically (§4.1a). They are
+process application. They live in `elixir-v5.db` with the follower's tracking
+record **co-located** so projection-plus-position commits atomically (§4.1a). They
+are
 rebuildable from the event log on a copy.
 
 Storage is **UTC**. `local_date` is **removed from the data layer entirely** — it
@@ -639,8 +665,17 @@ the next is tested against — a foundation bug is far cheaper to catch with zer
 consumers than with eight. The boundaries are **review checkpoints**, not
 shadow-rollout milestones. Nothing ships half-on; it is whole when it merges.
 
-Isolation: a git worktree + a **copy of `elixir.db`** and a fresh
-`elixir-events.db`. The running bot is untouched until cutover.
+**Elixir is stopped for the entire effort.** This is decided: production goes
+fully offline at the start, so no new data enters the system during the campaign.
+That makes the frozen legacy DB a **complete, static oracle** — the old and new
+databases can be compared with total confidence, because nothing is moving (see
+§12). The one accepted cost: while Elixir is off it is not polling battlelogs
+either, so any battles members play during the downtime that age out of the API's
+~30-battle window are lost upstream — a bounded gap in battle history equal to the
+downtime, acceptable given battles are 90-day telemetry.
+
+Isolation: a git worktree + a frozen copy of the production DB (see §11.1) plus the
+three fresh `*-v5*.db` files. Nothing writes to production during the build.
 
 ### 11.1 The v5 schema reset
 
@@ -648,34 +683,40 @@ The current schema is 54 migrations (`db/_migrations.py`, 0–53) that mostly bu
 tables this rewrite replaces. Carrying that chain forward is archaeology. Draw a
 clean line: a **v5 schema baseline**.
 
-Three database lineages, kept distinct:
+Because Elixir is fully stopped, the production `elixir.db` is frozen the moment
+the effort starts — `cp elixir.db elixir.db.legacy`, read-only thereafter. It is
+the backfill source, the parity reference, and the rollback safety (there is no
+compat path back). Everything else is built fresh from it:
 
-- **Frozen legacy** — `cp elixir.db elixir.db.legacy`, read-only. The backfill
-  source, the one-time parity reference, and the rollback safety (there is no
-  compat path back). Never written.
-- **v5 `elixir.db`** — the working projection DB, built from a single squashed
-  baseline. Our migration tooling governs only this file.
-- **`elixir-events.db`** — library-owned; the `eventsourcing` library creates and
-  manages its own tables. **Not in our migration system at all.** (A clean upside
-  of the two-DB split: it shrinks what we migrate.)
+- **`elixir.db.legacy`** (frozen, pre-v5) — static source for backfill and parity.
+- **`elixir-v5-events.db`** — library-owned; the `eventsourcing` library creates
+  and manages its own tables. **Not in our migration system at all.**
+- **`elixir-v5.db`** — projections + operational survivors, built from one squashed
+  v5 baseline. Our migration tooling governs only this file; migrations 0–53 retire
+  to git history.
+- **`elixir-v5-memory.db`** — memory/embeddings, split out now.
 
-`elixir.db` holds two populations: tables replaced by the Event Core, and
-out-of-scope survivors (memory/embeddings incl. the `clan_memories_fts` FTS5 and
-`clan_memory_vec` sqlite-vec **virtual tables**, Discord plumbing, `llm_calls`).
-Because those virtual tables do not `INSERT … SELECT` cleanly across files, the
-reset is done **squash-in-place (recommended)**: work on a copy of `elixir.db`,
-run one `v5_cutover` migration that DROPs the replaced tables and CREATEs the
-projection tables while leaving survivors physically untouched; the new baseline =
-"survivor schema as-of-squash" + the v5 cutover; migrations 0–53 retire to git
-history. The reproducible "baseline + replay backfill" build substitutes for a
-rollback path.
+Build mechanics, by data type:
 
-Phase 0 decides one open question here: whether memory/embeddings should move to
-their **own** database now (the clean end state, mirroring the event-store split)
-or stay in `elixir.db` as survivors (less scope). Recommended: stay, to bound the
-rewrite — revisit later.
+- **Projections** (`elixir-v5.db`) — *derived*, not copied: created empty by the
+  v5 baseline, then populated by replaying the event log (which is itself built by
+  replaying `elixir.db.legacy` through the ingest path, §10).
+- **Operational survivors** (`elixir-v5.db`) — Discord plumbing, `llm_calls`,
+  messages: ordinary tables, copied from legacy via `ATTACH` + `INSERT … SELECT`.
+- **Memory/embeddings** (`elixir-v5-memory.db`) — content tables (`clan_memories`,
+  `clan_memory_embeddings`, versions, etc.) copied from legacy; the **FTS5 and
+  sqlite-vec virtual tables cannot be file-copied**, so they are recreated fresh
+  and **rebuilt from content** (FTS5 `INSERT INTO … VALUES('rebuild')`; vectors
+  re-inserted from the stored embeddings). One-time and deterministic.
+
+Splitting memory out actually *simplifies* the main DB: the awkward virtual tables
+leave, so `elixir-v5.db` is built cleanly from the baseline with no copy hazards.
+The reproducible "baseline + replay + copy survivors + rebuild memory indexes"
+build substitutes for a rollback path.
 
 ```
+[ ] Stop Elixir (production offline for the whole effort); freeze elixir.db.legacy.
+      |
 [0] Phase 0 — settle the gating decisions (§14). No schema work until done.
       |
 [1] Event Core on the library — Application + aggregate skeletons
@@ -696,32 +737,36 @@ rewrite — revisit later.
 [7] Reactive trigger — communication-policy follower -> communication intents.
       Cadence reflections (small) over projections.
       |
-[8] Cutover — freeze legacy (§11.1), point the live bot at the new core,
-      retire old tables/paths via the v5 baseline.
+[8] Cutover — point Elixir at the three v5 DBs and restart. (legacy already
+      frozen; old paths retired via the v5 baseline.)
 ```
 
-No compatibility layer at any step. No old/new dual-run. The CR API is the
-self-healing oracle for current state after cutover; only history depends on
-backfill, which is validated once (§12).
+No compatibility layer at any step. No old/new dual-run. Because Elixir was off
+throughout, parity against the frozen legacy DB is exact (§12); on restart, the CR
+API re-poll resumes current state, and only the brief downtime battle gap is
+unrecoverable.
 
 ---
 
 ## 12. Verification strategy
 
 The old plan's oracle was dual-running ("compare new projections to old tables
-forever"). With no compat and an atomic cutover, the oracle changes:
+forever"). With no compat, Elixir off for the whole effort, and a frozen legacy
+DB, the oracle is stronger and simpler:
 
 - **Replay determinism (continuous).** Rebuild any projection from the event log
   twice → byte-identical. Projections are pure functions of events. This is the
   primary, permanent correctness guarantee.
-- **One-time parity at cutover (then discard).** Rebuild backfilled projections
-  and compare to the current production tables **once**. Divergence is the bug
-  list. Expect a real share of it to be **old-code bugs**, not replay bugs —
-  telling them apart is the work; budget for it. After cutover the old tables are
-  dropped.
-- **API re-poll self-heal.** Current-state projections re-derive on the next poll,
-  so only *history* is unrecoverable — and history comes from backfill validated
-  above.
+- **Exact parity against a static oracle.** Because nothing is writing to
+  production, `elixir.db.legacy` is a complete, unchanging snapshot. Rebuild
+  backfilled projections and compare to it — this is a **deterministic, exact
+  comparison**, not "within tolerances against a moving target." Any divergence is
+  a real defect with no concurrency noise to explain it away: either a
+  backfill/replay bug or a latent **old-code bug**. Telling those two apart is the
+  work; budget for it. The frozen DB stays around until you are satisfied.
+- **API re-poll self-heal at restart.** When Elixir comes back on the v5 stores,
+  current state re-derives from the next poll; only the downtime battle gap is
+  unrecoverable (§11).
 
 Unit tests: aggregate command determinism, scope validation, event upcasting,
 projection replay, aggregator replay, follower tracking, Recommendation/Case state
@@ -785,9 +830,10 @@ No schema or aggregate code until these are written down:
    DB-growth estimate for the *durable log only*, and set the telemetry retention
    horizon (target 90 days). Confirm detection-event evidence payloads carry the
    commentable facts (§8.1).
-7. **Schema reset (§11.1)** — squash-in-place baseline vs. fresh-file copy
-   (recommended: in-place, because of the FTS5/vec virtual tables); and whether
-   memory/embeddings move to their own DB now or stay as survivors.
+7. **Schema reset / three v5 DBs (§11.1)** — the split is decided (events,
+   projections+ops, memory; all `*-v5*` named) and Elixir is off for the whole
+   effort. Phase 0 nails the v5 baseline DDL, the survivor copy list, and the
+   memory FTS5/sqlite-vec **index-rebuild-from-content** procedure.
 8. **Scope rules** — public / leadership / system_internal, and how leadership
    payloads are protected given default SQLite storage.
 
@@ -795,14 +841,14 @@ No schema or aggregate code until these are written down:
 
 ## 15. Open questions
 
-Most prior open questions are now decided (library: yes; new store: yes, separate
-file; sync vs scheduled generation: reactive followers). Remaining:
+Most prior open questions are now decided (library: yes; three v5 DBs incl. a
+separate memory DB; Elixir off for the whole effort; sync vs scheduled generation:
+reactive followers). Remaining:
 
 1. Whether `GlobalTournament` is worth modeling given it is usually empty in
    sampling.
 2. Whether the cadence reflection set should shrink further over time as reactive
    coverage proves out.
-3. Whether memory/embeddings get their own DB now or later (Phase 0 #7).
 
 ---
 
