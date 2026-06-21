@@ -2983,7 +2983,6 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
         "weekly-discord-invite-relay",
         "memory-synthesis",
         "weekly-recap",
-        "site-content",
         "promotion-content",
         "card-catalog-sync",
         "api-sentinel",

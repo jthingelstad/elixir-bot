@@ -1,14 +1,14 @@
-"""Stage 3 — build all three v5 stores from the frozen archive (one command).
+"""Stage 3 — rebuild the v5 stores from the frozen archive (migration-era tool).
 
-Production build entrypoint:
-  1. build_foundation  -> event store + World projections (elixir-v5.db)
-  2. advance()         -> Mind layer (detectors/leadership/policy/detections),
-                          run from position 0 == full Mind build
-  3. copy_survivors    -> operational survivors into elixir-v5.db
-  4. build_memory_db   -> elixir-v5-memory.db
+  1. build_foundation  -> event store + World projections
+  2. advance()         -> Mind layer (detectors/leadership/policy/detections)
+  3. build_memory_db   -> memory DB
 
-Reproducible + idempotent: re-running rebuilds deterministically. This is the
-command Stage 3 of the cutover runbook executes.
+DANGER post-consolidation: build_foundation wipes EVENTS_DB/PROJECTIONS_DB and
+rebuilds from the FROZEN legacy oracle. Now that elixir-v5.db is the live
+operational DB, build_foundation refuses to run against it (and copy_survivors,
+which clobbered live tables with stale legacy data, has been removed from this
+pipeline). Use this only against throwaway/isolated stores.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def build_all() -> dict:
     from event_core import build_foundation, db
     from event_core.application import ObservedWorld
     from event_core.live.engine import advance
-    from event_core.migrate import build_memory_db, build_projection_db
+    from event_core.migrate import build_memory_db
 
     foundation = build_foundation.build()
 
@@ -31,13 +31,13 @@ def build_all() -> dict:
     mind = advance(app, conn)
     conn.close()
 
-    survivors = build_projection_db.copy_survivors()
+    # copy_survivors was retired at the v5 consolidation: operational survivors now
+    # live in the consolidated operational DB, not copied from the frozen legacy.
     memory = build_memory_db.build()
 
     return {
         "foundation_parity": {k: v for k, v in foundation["parity"].items()},
         "mind": mind,
-        "survivors": survivors["survivors"],
         "memory": {k: memory[k] for k in ("db", "fts_rows")},
     }
 

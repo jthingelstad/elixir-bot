@@ -13,7 +13,27 @@ import os
 from event_core import config
 
 
+def _operational_db_path() -> str | None:
+    """Realpath of the live v4/operational DB (db.DB_PATH), or None if the db
+    package can't be imported. After the v5 consolidation the projections share
+    this file, so anything that would delete it is refused."""
+    try:
+        import db as _opdb
+
+        return os.path.realpath(_opdb.DB_PATH)
+    except Exception:
+        return None
+
+
 def _rm(path: str) -> None:
+    op = _operational_db_path()
+    if op is not None and os.path.realpath(path) == op:
+        raise RuntimeError(
+            f"build_foundation refused to delete the live operational DB at {path}. "
+            "Post-consolidation the v5 projections live in the operational file; this "
+            "harness rebuilds from the frozen legacy oracle and must run against "
+            "throwaway stores (the test conftest redirects config.* to temp paths)."
+        )
     for suffix in ("", "-wal", "-shm"):
         p = path + suffix
         if os.path.exists(p):
@@ -22,6 +42,14 @@ def _rm(path: str) -> None:
 
 def build(clean: bool = True) -> dict:
     if clean:
+        op = _operational_db_path()
+        if op is not None and os.path.realpath(config.PROJECTIONS_DB) == op:
+            raise RuntimeError(
+                "build_foundation.build(clean=True) refuses to run against the live "
+                f"operational DB ({config.PROJECTIONS_DB}). It wipes and rebuilds from "
+                "the frozen legacy oracle, which would destroy live operational data and "
+                "event history. Point config.PROJECTIONS_DB/EVENTS_DB at throwaway stores."
+            )
         _rm(config.EVENTS_DB)
         _rm(config.PROJECTIONS_DB)
 

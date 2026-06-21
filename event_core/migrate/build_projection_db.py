@@ -1,16 +1,14 @@
-"""Stage 2 — operational survivors into elixir-v5.db (the v5 schema baseline).
+"""Stage 2 — operational survivors into elixir-v5.db (RETIRED at consolidation).
 
-Projection tables are created by the projection runners (self-CREATE); the library
-owns the event store. This module copies the remaining operational-survivor tables
-(Discord plumbing, llm_calls, prompt/project tracking, system signals) from the
-frozen legacy DB into elixir-v5.db. Runs AFTER build_foundation (which wipes and
-recreates elixir-v5.db) and only touches survivor tables.
-
-The legacy 54-migration chain (db/_migrations.py) is retired at decommission
-(Stage 8); the v5 baseline is "projections self-create + these survivors copied".
+Historical: during the migration this copied operational-survivor tables from the
+frozen legacy DB into a freshly-rebuilt elixir-v5.db. After the v5 consolidation
+(elixir-v5.db == the live operational DB), this is DANGEROUS — it would overwrite
+live operational tables with stale frozen-legacy data. It is no longer called by
+build_all and is guarded to refuse running against the operational DB.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 
 from event_core import config
@@ -40,6 +38,18 @@ SURVIVOR_TABLES = (
 def copy_survivors(legacy_path: str | None = None, target_path: str | None = None) -> dict:
     legacy_path = legacy_path or config.LEGACY_DB
     target_path = target_path or config.PROJECTIONS_DB
+
+    try:
+        import db as _opdb
+
+        if os.path.realpath(target_path) == os.path.realpath(_opdb.DB_PATH):
+            raise RuntimeError(
+                f"copy_survivors refused: target {target_path} is the live operational "
+                "DB. This function copies STALE frozen-legacy tables and was retired at "
+                "the v5 consolidation — operational survivors already live in the DB."
+            )
+    except ImportError:
+        pass
 
     conn = sqlite3.connect(target_path)
     conn.execute(f"ATTACH DATABASE '{legacy_path}' AS src")
