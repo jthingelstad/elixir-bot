@@ -97,9 +97,31 @@ class Player(Aggregate):
         self, observation: dict, observed_at: str, content_hash: str
     ) -> bool:
         """Record a profile observation if its content changed. Returns True if a
-        ProfileObserved event was emitted, False if deduped."""
+        ProfileObserved event was emitted, False if deduped.
+
+        Also emits granular durable change events (the Mind's base-event contract)
+        for milestone-worthy fields, by diffing against current folded state. The
+        coarse ProfileObserved remains the source for the current-profile
+        projection; granular events are what detectors (Followers) consume.
+        High-frequency churn (trophies/donations/wins) stays in ProfileObserved
+        only — it is telemetry, not durable per §5.6.
+        """
         if content_hash == self.last_profile_hash:
             return False
+        old = self.profile
+        # Granular events only after a baseline exists (mirrors legacy: first
+        # snapshot emits no signals).
+        if old:
+            tag = self.player_tag
+            new_name = observation.get("name")
+            if new_name is not None and new_name != old.get("name"):
+                self._name_changed(new_name, old.get("name"), observed_at, tag)
+            new_level = observation.get("exp_level")
+            if new_level is not None and new_level != old.get("exp_level"):
+                self._level_changed(new_level, old.get("exp_level"), observed_at, tag)
+            new_best = observation.get("best_trophies")
+            if new_best is not None and new_best != old.get("best_trophies"):
+                self._best_trophies_changed(new_best, old.get("best_trophies"), observed_at, tag)
         self._profile_observed(observation, observed_at, content_hash)
         return True
 
@@ -110,6 +132,18 @@ class Player(Aggregate):
         self.profile.update(observation)
         self.last_profile_hash = content_hash
         self.last_observed_at = observed_at
+
+    @event("PlayerNameChanged")
+    def _name_changed(self, new_name: str, old_name, observed_at: str, player_tag: str) -> None:
+        self.profile["name"] = new_name
+
+    @event("PlayerLevelChanged")
+    def _level_changed(self, new_level: int, old_level, observed_at: str, player_tag: str) -> None:
+        self.profile["exp_level"] = new_level
+
+    @event("BestTrophiesChanged")
+    def _best_trophies_changed(self, new_best: int, old_best, observed_at: str, player_tag: str) -> None:
+        self.profile["best_trophies"] = new_best
 
     def observe_roster_state(
         self, observation: dict, observed_at: str, content_hash: str

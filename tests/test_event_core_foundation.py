@@ -149,7 +149,7 @@ def test_foundation_parity_determinism_idempotency():
 
     r1 = build_foundation.build()
     fp1 = fingerprint()
-    r2 = build_foundation.build()
+    build_foundation.build()
     fp2 = fingerprint()
 
     # exact parity: every reproducible member matches, none mismatched/missing
