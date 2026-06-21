@@ -96,6 +96,17 @@ class FollowerRunner:
         )
         self.conn.commit()
 
+    def fast_forward(self) -> int:
+        """Skip to the current log head WITHOUT processing — drains a backlog.
+
+        Used once at cutover so the Discord consumer posts only intents raised
+        after go-live, not the entire historical backlog (caught in the Stage-5
+        rehearsal). Returns the new position.
+        """
+        head = self.app.recorder.max_notification_id() or 0
+        self._save_position(head)
+        return head
+
     def run(self, batch: int = 500) -> int:
         stop = self.app.recorder.max_notification_id()  # snapshot: ignore our own emissions
         pos = self.last_position()

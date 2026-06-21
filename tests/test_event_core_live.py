@@ -90,6 +90,25 @@ def test_intent_consumer_posts_and_is_idempotent(world):
     conn.close()
 
 
+def test_consumer_fast_forward_drains_backlog(world):
+    """Cutover safety: fast_forward skips the historical intent backlog (Stage 5
+    finding) so go-live doesn't flood Discord."""
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live.discord_consumer import IntentConsumer
+
+    for i in range(3):
+        world.save(CommunicationIntent(
+            dedup_key=f"b{i}", intent_type="celebrate:x", subject_tag="#A", scope="public",
+            priority=1, caused_by=[], summary={},
+        ))
+    conn = _conn()
+    consumer = IntentConsumer(world, conn, poster=lambda i: True)
+    consumer.reset()
+    consumer.fast_forward()  # drain backlog without posting
+    assert consumer.run() == 0  # backlog skipped
+    conn.close()
+
+
 def test_intent_consumer_drops_on_poster_failure(world):
     from event_core.domain.communication_intent import CommunicationIntent, intent_id
     from event_core.live.discord_consumer import IntentConsumer
@@ -105,6 +124,23 @@ def test_intent_consumer_drops_on_poster_failure(world):
     assert consumer.dropped == 1
     assert world.repository.get(intent_id("i2")).status == "dropped"
     conn.close()
+
+
+def test_render_intent_and_dry_run_poster(world):
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live.discord import DryRunPoster, render_intent
+
+    ci = CommunicationIntent(
+        dedup_key="x", intent_type="celebrate:best_trophies_peak", subject_tag="#A",
+        scope="public", priority=1, caused_by=[],
+        summary={"detection_type": "best_trophies_peak", "peak": 6000},
+    )
+    text = render_intent(ci)
+    assert "6000" in text and "#A" in text
+
+    poster = DryRunPoster()
+    assert poster(ci) is True
+    assert poster.posts == [("public", text)]
 
 
 def test_cadence_reflection():

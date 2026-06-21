@@ -172,6 +172,11 @@ intent is produced, dry-run post renders. No errors in logs.
 - [ ] Point production config at the three v5 DBs (env: `ELIXIR_V5_EVENTS_DB`,
       `ELIXIR_V5_DB`, `ELIXIR_V5_MEMORY_DB`) and enable the v5 ingest/agent/Discord
       paths (config flags from Stage 4).
+- [ ] **Drain the intent backlog (critical — caught in the Stage-5 rehearsal):**
+      run `IntentConsumer(app, conn, poster).fast_forward()` ONCE before the first
+      live tick. The production build raises ~650 historical communication intents;
+      without this the consumer's first run would post the entire backlog to
+      Discord. fast_forward skips to the log head so only post-go-live intents post.
 - [ ] Start Elixir: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.poapkings.elixir.plist`.
 - [ ] The first live tick re-establishes current state from the CR API (the
       downtime battle gap is the accepted loss).
