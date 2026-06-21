@@ -178,6 +178,8 @@ def test_route_intent_and_go_live_drain(world):
     assert route_intent(_intent("w", "welcome:member_joined"))["channel_name"] == "welcome"
     assert route_intent(_intent("r", "war:war_update"))["channel_name"] == "river-race"
     assert route_intent(_intent("c", "cohort:cohort_wave"))["channel_name"] == "clan-events"
+    assert route_intent(_intent("lv", "clan:member_left"))["channel_name"] == "clan-events"
+    assert route_intent(_intent("pr", "clan:member_promoted"))["channel_name"] == "clan-events"
     # fail-closed: unknown prefix routes to the private leadership channel
     assert route_intent(_intent("u", "mystery:thing"))["channel_name"] == "leader-actions"
     # leadership scope always wins, even with a public-looking prefix

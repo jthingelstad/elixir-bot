@@ -28,6 +28,24 @@ def test_milestones_helper():
     assert _milestones(0, 500, 100) == []  # no baseline -> no burst of milestones
 
 
+def test_member_left_and_promotion_detectors(world):
+    from event_core import db
+    from event_core.mind.detectors import MemberLeftDetector, MemberRoleChangeDetector
+
+    # baseline observation -> no lifecycle events
+    world.observe_clan_roster("#CLN", {"#A": "member", "#B": "elder", "#C": "coLeader"}, "t0")
+    # #A promoted (member->elder), #C demoted (coLeader->member), #B left, #D joined
+    world.observe_clan_roster("#CLN", {"#A": "elder", "#C": "member", "#D": "member"}, "t1")
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        assert MemberLeftDetector(world, conn).run() == 1  # #B departed
+        # #A promotion posts; #C demotion is intentionally NOT posted
+        assert MemberRoleChangeDetector(world, conn).run() == 1
+    finally:
+        conn.close()
+
+
 def test_granular_level_change_emitted_after_baseline(world):
     from event_core.domain.player import player_id
 

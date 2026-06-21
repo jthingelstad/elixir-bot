@@ -24,6 +24,7 @@ _PREFIX_CHANNEL = {
     "welcome": WELCOME,
     "war": RIVER_RACE,
     "cohort": CLAN_EVENTS,
+    "clan": CLAN_EVENTS,
     "leadership": LEADER_ACTIONS,
 }
 

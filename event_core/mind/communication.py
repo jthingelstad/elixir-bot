@@ -30,6 +30,8 @@ _CELEBRATE = (
 PUBLIC_INTENT_PREFIX = {
     **{t: "celebrate" for t in _CELEBRATE},
     "member_joined": "welcome",
+    "member_left": "clan",
+    "member_promoted": "clan",
     "war_update": "war",
     "cohort_wave": "cohort",
 }
