@@ -95,6 +95,80 @@ def check_player_profile_parity(
     }
 
 
+def check_battle_telemetry_parity(
+    legacy_path: str | None = None, projections_path: str | None = None
+) -> dict:
+    """Compare battle_telemetry identities vs legacy member_battle_facts.
+
+    Scoped per member to that member's covered window [min,max battle_time present
+    in telemetry] to avoid battlelog-window boundary effects. Identity =
+    (tag, battle_time, battle_type, opponent_tag, crowns_for, crowns_against).
+    """
+    legacy = sqlite3.connect(legacy_path or config.LEGACY_DB)
+    legacy.row_factory = sqlite3.Row
+    proj = sqlite3.connect(projections_path or config.PROJECTIONS_DB)
+    proj.row_factory = sqlite3.Row
+
+    def ident(tag, bt, btype, opp, cf, ca):
+        return (_tag_key(tag), bt, btype, _tag_key(opp or ""), cf, ca)
+
+    try:
+        mine_by_member: dict[str, set] = {}
+        window: dict[str, list] = {}
+        for r in proj.execute("SELECT * FROM battle_telemetry"):
+            tk = _tag_key(r["player_tag"])
+            mine_by_member.setdefault(tk, set()).add(
+                ident(r["player_tag"], r["battle_time"], r["battle_type"],
+                      r["opponent_tag"], r["crowns_for"], r["crowns_against"])
+            )
+            w = window.setdefault(tk, [r["battle_time"], r["battle_time"]])
+            w[0] = min(w[0], r["battle_time"])
+            w[1] = max(w[1], r["battle_time"])
+
+        legacy_by_member: dict[str, set] = {}
+        for r in legacy.execute(
+            "SELECT m.player_tag AS pt, mbf.* FROM member_battle_facts mbf "
+            "JOIN members m ON m.member_id = mbf.member_id"
+        ):
+            tk = _tag_key(r["pt"])
+            if tk not in window:
+                continue
+            lo, hi = window[tk]
+            if not (lo <= r["battle_time"] <= hi):
+                continue
+            legacy_by_member.setdefault(tk, set()).add(
+                ident(r["pt"], r["battle_time"], r["battle_type"],
+                      r["opponent_tag"], r["crowns_for"], r["crowns_against"])
+            )
+    finally:
+        legacy.close()
+        proj.close()
+
+    matched = only_mine = only_legacy = 0
+    members_clean = 0
+    imperfect = []
+    for tk, mine in mine_by_member.items():
+        leg = legacy_by_member.get(tk, set())
+        inter = mine & leg
+        om, ol = len(mine - leg), len(leg - mine)
+        matched += len(inter)
+        only_mine += om
+        only_legacy += ol
+        if om == 0 and ol == 0:
+            members_clean += 1
+        else:
+            imperfect.append({"tag": tk, "only_projection": om, "only_legacy": ol})
+
+    return {
+        "members_compared": len(mine_by_member),
+        "members_identical": members_clean,
+        "battles_matched": matched,
+        "only_in_projection": only_mine,
+        "only_in_legacy": only_legacy,
+        "imperfect_detail": imperfect[:25],
+    }
+
+
 def check_member_current_state_parity(
     legacy_path: str | None = None, projections_path: str | None = None
 ) -> dict:
