@@ -35,3 +35,18 @@ class ObservedWorld(Application):
         if changed:
             self.save(player)
         return changed
+
+    def observe_member_roster(
+        self,
+        player_tag: str,
+        observation: dict,
+        observed_at: str,
+        content_hash: str,
+    ) -> bool:
+        """Record a member's roster-state observation. Returns True if changed."""
+        tag = canon_tag(player_tag)
+        player = self._get_or_create_player(tag)
+        changed = player.observe_roster_state(observation, observed_at, content_hash)
+        if changed:
+            self.save(player)
+        return changed
