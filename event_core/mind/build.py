@@ -47,7 +47,16 @@ def validate_vs_signals(app, legacy_path: str | None = None) -> dict:
     info = detection_dates_by_type(app)
     dates = info["dates"]
     out = {"detection_counts": info["counts"], "by_type": {}}
-    for dt in ("player_level_up", "best_trophies_peak", "battle_hot_streak"):
+    for dt in (
+        "player_level_up",
+        "best_trophies_peak",
+        "battle_hot_streak",
+        "card_level_milestone",
+        "new_card_unlocked",
+        "new_champion_unlocked",
+        "badge_earned",
+        "battle_trophy_push",
+    ):
         legacy_dates = {
             r[0] for r in leg.execute(
                 "SELECT signal_date FROM signal_log WHERE signal_type=?", (dt,)
