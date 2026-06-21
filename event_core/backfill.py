@@ -11,7 +11,11 @@ import sqlite3
 from datetime import datetime, timezone
 
 from event_core import config, db
-from event_core.ingest.battles import BATTLE_TELEMETRY_DDL, extract_battles
+from event_core.ingest.battles import (
+    BATTLE_COLUMNS,
+    BATTLE_TELEMETRY_DDL,
+    extract_battles,
+)
 from event_core.ingest.profile import ingest_player_payload
 from event_core.ingest.roster import ingest_clan_payload
 
@@ -96,12 +100,6 @@ def backfill_clans(app, legacy_path: str | None = None) -> dict:
         cursor_conn.close()
 
 
-_BATTLE_COLS = (
-    "player_tag", "battle_time", "battle_type", "opponent_tag", "crowns_for",
-    "crowns_against", "game_mode_id", "game_mode_name", "trophy_change", "event_tag",
-)
-
-
 def backfill_battles(legacy_path: str | None = None) -> dict:
     """Replay archived battlelogs into the battle_telemetry table (tier 1).
 
@@ -123,14 +121,14 @@ def backfill_battles(legacy_path: str | None = None) -> dict:
 
         inserted = 0
         max_id = start_id
-        placeholders = ",".join("?" for _ in _BATTLE_COLS) + ",?"  # +observed_at
+        placeholders = ",".join("?" for _ in BATTLE_COLUMNS) + ",?"  # +observed_at
         for r in rows:
             battles = extract_battles(r["entity_key"], json.loads(r["payload_json"]))
             for bt in battles:
                 cur = proj.execute(
-                    f"INSERT OR IGNORE INTO battle_telemetry({','.join(_BATTLE_COLS)},observed_at) "
+                    f"INSERT OR IGNORE INTO battle_telemetry({','.join(BATTLE_COLUMNS)},observed_at) "
                     f"VALUES({placeholders})",
-                    [bt[c] for c in _BATTLE_COLS] + [r["fetched_at"]],
+                    [bt[c] for c in BATTLE_COLUMNS] + [r["fetched_at"]],
                 )
                 inserted += cur.rowcount
             max_id = max(max_id, r["payload_id"])
