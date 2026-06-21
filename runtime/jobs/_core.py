@@ -16,6 +16,7 @@ __all__ = [
 ]
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -817,6 +818,27 @@ def _format_leader_action_card(
     )
 
 
+def _leader_action_candidate_action_key(
+    *,
+    action_type: str,
+    objective: str,
+    prompt_text: str,
+    target_player_tag: str | None = None,
+    case_id: int | None = None,
+) -> str:
+    proposal_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    parts = [
+        action_type or "",
+        objective or "",
+        db._canon_tag(target_player_tag) if target_player_tag else "",
+        str(case_id or ""),
+        " ".join((prompt_text or "").split()),
+        proposal_stamp,
+    ]
+    digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+    return f"{action_type}:{digest}"
+
+
 async def _post_leader_action_recommendation(
     channel,
     *,
@@ -888,6 +910,13 @@ async def _post_leader_action_recommendation(
         target_player_name=target_player_name,
         copy_original_text=clan_chat_copy,
         copy_current_text=clan_chat_copy,
+        action_key=_leader_action_candidate_action_key(
+            action_type=action_type,
+            objective=objective,
+            prompt_text=prompt_text,
+            target_player_tag=target_player_tag,
+            case_id=case_id,
+        ),
         ui_version=LEADER_ACTION_UI_VERSION,
         baseline=baseline,
         case_id=case_id,
