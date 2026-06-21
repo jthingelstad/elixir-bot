@@ -232,25 +232,11 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         ),
         activity_role="communicator",
     ),
-    ActivityDefinition(
-        activity_key="site-content",
-        owner_lane="announcements",
-        purpose="Refresh and publish daily POAP KINGS site content.",
-        job_id="site-content",
-        job_function="_site_content_cycle",
-        schedule_kind="cron",
-        schedule_config={
-            "hour": _attr("SITE_CONTENT_HOUR", 18),
-            "minute": 0,
-        },
-        delivery_targets=(
-            "POAP KINGS: home payload",
-            "POAP KINGS: clan payload",
-            "POAP KINGS: roster payload",
-        ),
-        activity_role="communicator",
-        legacy_commands=("poap-kings-site-sync",),
-    ),
+    # site-content (POAP KINGS daily site publish) was retired from Elixir at the
+    # v5 consolidation: website generation now lives as a dedicated script in the
+    # website repo, reading the consolidated elixir-v5.db directly. The
+    # _site_content_cycle job function remains importable but is no longer
+    # scheduled or manually triggerable here.
     ActivityDefinition(
         activity_key="promotion-content",
         owner_lane="promote-the-clan",

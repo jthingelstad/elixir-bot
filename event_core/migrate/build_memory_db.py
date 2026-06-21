@@ -1,9 +1,13 @@
-"""Stage 1 — build elixir-v5-memory.db from the frozen legacy DB.
+"""Build elixir-v5-memory.db (durable knowledge: clan_memories* only).
 
-Memory/embeddings split out (Core Decision 6). Plain content tables are copied via
-ATTACH + INSERT…SELECT; the FTS5 and sqlite-vec virtual tables cannot be
-file-copied, so they are recreated and rebuilt from content (FTS5 'rebuild'; the
-vec table is empty — 0 embeddings — so nothing to re-insert).
+Sourced from the LIVE operational DB (db.DB_PATH) so the current authoritative
+memories/embeddings are copied — NOT the frozen legacy oracle. memory_episodes/
+memory_facts stay in the operational DB and are intentionally excluded here.
+
+Schema-first: the canonical clan_memory schema (incl. FTS5 sync triggers) is
+created from memory_store.CLAN_MEMORY_SCHEMA_SQL, then data is copied in. The
+INSERT into clan_memories fires the FTS triggers, so search stays in sync going
+forward — closing the trigger-missing gap of the old build.
 
 Idempotent: rebuilds the file from scratch each run.
 """
@@ -12,68 +16,55 @@ from __future__ import annotations
 import os
 import sqlite3
 
-import sqlite_vec
-
 from event_core import config
 
-VIRTUAL = {"clan_memories_fts", "clan_memory_vec"}
+# Plain clan_memory* tables to copy (virtual/shadow FTS + vec tables are recreated
+# by the schema/sqlite-vec setup, not file-copied). clan_memory_index_status is
+# seeded by the schema, so it is not copied.
+_COPY_TABLES = (
+    "clan_memories",
+    "clan_memory_tags",
+    "clan_memory_tag_links",
+    "clan_memory_member_links",
+    "clan_memory_event_links",
+    "clan_memory_evidence_refs",
+    "clan_memory_versions",
+    "clan_memory_audit_log",
+    "clan_memory_embeddings",
+)
 
 
-def _is_memory_table(name: str) -> bool:
-    return name.startswith("clan_memor") or name.startswith("memory_")
+def build(source_path: str | None = None, out_path: str | None = None) -> dict:
+    from memory_store import CLAN_MEMORY_SCHEMA_SQL, get_memory_connection
 
+    if source_path is None:
+        import db as _opdb
 
-def _is_virtual_or_shadow(name: str) -> bool:
-    # the virtual tables themselves + their auto-managed shadow tables
-    return name.startswith("clan_memories_fts") or name.startswith("clan_memory_vec")
-
-
-def build(legacy_path: str | None = None, out_path: str | None = None) -> dict:
-    legacy_path = legacy_path or config.LEGACY_DB
+        source_path = _opdb.DB_PATH
     out_path = out_path or config.MEMORY_DB
     for suffix in ("", "-wal", "-shm"):
         if os.path.exists(out_path + suffix):
             os.remove(out_path + suffix)
 
-    src = sqlite3.connect(legacy_path)
+    src = sqlite3.connect(source_path)
     src.row_factory = sqlite3.Row
-    out = sqlite3.connect(out_path)
-    out.enable_load_extension(True)
-    sqlite_vec.load(out)
-    out.enable_load_extension(False)
+    # get_memory_connection creates the canonical clan_memory schema (tables, FTS,
+    # triggers, indexes) and loads sqlite-vec on the fresh out file.
+    out = get_memory_connection(out_path)
     try:
-        tables = [
-            r["name"] for r in src.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-            ) if _is_memory_table(r["name"])
-        ]
-        plain = [t for t in tables if not _is_virtual_or_shadow(t)]
-
-        out.execute(f"ATTACH DATABASE '{legacy_path}' AS src")
+        src_tables = {
+            r["name"] for r in src.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        out.execute(f"ATTACH DATABASE '{source_path}' AS src")
         copied = {}
-        for t in plain:
-            ddl = src.execute(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (t,)
-            ).fetchone()["sql"]
-            out.execute(ddl)
+        for t in _COPY_TABLES:
+            if t not in src_tables:
+                copied[t] = "absent-in-source"
+                continue
             out.execute(f"INSERT INTO main.{t} SELECT * FROM src.{t}")
-            # plain-table indexes
-            for (idx_sql,) in src.execute(
-                "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL", (t,)
-            ):
-                out.execute(idx_sql)
             copied[t] = out.execute(f"SELECT count(*) FROM main.{t}").fetchone()[0]
         out.commit()  # DETACH cannot run inside a transaction
         out.execute("DETACH DATABASE src")
-
-        # recreate virtual tables from their DDL, then rebuild FTS content
-        for vt in ("clan_memories_fts", "clan_memory_vec"):
-            ddl = src.execute(
-                "SELECT sql FROM sqlite_master WHERE name=?", (vt,)
-            ).fetchone()
-            if ddl:
-                out.execute(ddl["sql"])
-        out.execute("INSERT INTO clan_memories_fts(clan_memories_fts) VALUES('rebuild')")
         out.commit()
 
         fts_rows = out.execute("SELECT count(*) FROM clan_memories_fts").fetchone()[0]
