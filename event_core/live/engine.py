@@ -58,7 +58,7 @@ def advance(app, conn) -> dict:
     communication policy (Detection/Rec -> Intent), then the detections read model.
     Every step resumes from its tracked position; none reset."""
     from event_core.mind.communication import CommunicationPolicy
-    from event_core.mind.detectors import ALL_DETECTORS
+    from event_core.mind.detectors import ALL_DETECTORS, CohortWaveDetector
     from event_core.mind.leadership import InactivityRiskDetector, LeadershipGenerator
     from event_core.projections.clan_metrics import ClanDailyMetrics
     from event_core.projections.collections import PlayerCurrentCollections
@@ -87,12 +87,17 @@ def advance(app, conn) -> dict:
     detected = 0
     for cls in (*ALL_DETECTORS, InactivityRiskDetector):
         detected += cls(app, conn).run()
+
+    # Project per-event detections so the cohort detector can scan them, then run
+    # cohort (clan-wide waves), then re-project so cohort_wave is queryable.
+    dp = DetectionsProjection(app, conn)
+    dp.setup()
+    dp.run()
+    detected += CohortWaveDetector(app, conn).run()
     result["detections"] = detected
 
     result["leadership"] = LeadershipGenerator(app, conn).run()
     result["intents"] = CommunicationPolicy(app, conn).run()
 
-    dp = DetectionsProjection(app, conn)
-    dp.setup()
-    result["detections_projected"] = dp.run()
+    result["detections_projected"] = DetectionsProjection(app, conn).run()
     return result

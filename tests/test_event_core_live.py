@@ -168,6 +168,21 @@ def test_route_intent_and_go_live_drain(world):
     assert route_intent(pub)["channel_name"] == "player-highlights"
     assert route_intent(lead)["channel_name"] == "leader-actions"
 
+    # v5 restored-coverage prefixes route to their channels.
+    def _intent(dedup, itype, scope="public"):
+        return CommunicationIntent(
+            dedup_key=dedup, intent_type=itype, subject_tag="#C",
+            scope=scope, priority=1, caused_by=[], summary={},
+        )
+
+    assert route_intent(_intent("w", "welcome:member_joined"))["channel_name"] == "welcome"
+    assert route_intent(_intent("r", "war:war_update"))["channel_name"] == "river-race"
+    assert route_intent(_intent("c", "cohort:cohort_wave"))["channel_name"] == "clan-events"
+    # fail-closed: unknown prefix routes to the private leadership channel
+    assert route_intent(_intent("u", "mystery:thing"))["channel_name"] == "leader-actions"
+    # leadership scope always wins, even with a public-looking prefix
+    assert route_intent(_intent("x", "celebrate:foo", scope="leadership"))["channel_name"] == "leader-actions"
+
     world.save(pub)
     world.save(lead)
     conn = _conn()

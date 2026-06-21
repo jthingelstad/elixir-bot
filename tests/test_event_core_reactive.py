@@ -64,6 +64,42 @@ def test_policy_emits_scoped_intents_idempotently(world):
     conn.close()
 
 
+def test_policy_maps_restored_coverage_detection_types(world):
+    """v5 restored-coverage detections get the right intent_type prefix (which
+    route_intent uses to pick the channel); non-public detections are filtered."""
+    from event_core import db
+    from event_core.domain.communication_intent import intent_id
+    from event_core.domain.detection import Detection
+    from event_core.mind.communication import CommunicationPolicy
+
+    cases = {
+        "member_joined:#J:t0": ("member_joined", "welcome"),
+        "war_update:#CLAN:5:warDay": ("war_update", "war"),
+        "cohort_wave:badge_earned:2026-06-21": ("cohort_wave", "cohort"),
+    }
+    for dedup, (dtype, _prefix) in cases.items():
+        world.save(Detection(
+            dedup_key=dedup, detection_type=dtype, detector="t", subject_tag="#J",
+            occurred_at="2026-06-21T00:00:00Z", caused_by=["e"], payload={},
+        ))
+    # a detection that should NOT post (drives recommendations, not Discord)
+    world.save(Detection(
+        dedup_key="inactive_member_risk:#Z", detection_type="inactive_member_risk",
+        detector="t", subject_tag="#Z", occurred_at="2026-06-21T00:00:00Z",
+        caused_by=["e"], payload={},
+    ))
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    pol = CommunicationPolicy(world, conn)
+    pol.reset()
+    assert pol.run() == 3  # only the three public restored-coverage detections
+
+    for dedup, (_dtype, prefix) in cases.items():
+        intent = world.repository.get(intent_id(f"intent:detection:{dedup}"))
+        assert intent.intent_type.split(":", 1)[0] == prefix
+    conn.close()
+
+
 def test_agent_tools_resolve_evidence_and_scope():
     from event_core import db
     from event_core.read import tools
