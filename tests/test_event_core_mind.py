@@ -25,6 +25,7 @@ def test_milestones_helper():
     assert _milestones(8, 23, 5) == [10, 15, 20]
     assert _milestones(10, 10, 5) == []
     assert _milestones(None, 12, 5) == []
+    assert _milestones(0, 500, 100) == []  # no baseline -> no burst of milestones
 
 
 def test_granular_level_change_emitted_after_baseline(world):

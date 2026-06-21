@@ -109,7 +109,9 @@ def test_consumer_fast_forward_drains_backlog(world):
     conn.close()
 
 
-def test_intent_consumer_drops_on_poster_failure(world):
+def test_intent_consumer_leaves_raised_on_failure_and_retries(world):
+    """At-least-once: a failed post leaves the intent raised (not dropped) and the
+    consumer stops without advancing, so a later tick retries and delivers it."""
     from event_core.domain.communication_intent import CommunicationIntent, intent_id
     from event_core.live.discord_consumer import IntentConsumer
 
@@ -118,11 +120,17 @@ def test_intent_consumer_drops_on_poster_failure(world):
         priority=1, caused_by=["e"], summary={},
     ))
     conn = _conn()
-    consumer = IntentConsumer(world, conn, poster=lambda i: False)
-    consumer.reset()
-    consumer.run()
-    assert consumer.dropped == 1
-    assert world.repository.get(intent_id("i2")).status == "dropped"
+    # poster fails this tick
+    c1 = IntentConsumer(world, conn, poster=lambda i: False)
+    c1.reset()
+    assert c1.run() == 0 and c1.failed == 1
+    assert world.repository.get(intent_id("i2")).status == "raised"  # NOT dropped
+
+    # next tick, poster works -> the same intent is retried and delivered
+    seen = []
+    c2 = IntentConsumer(world, conn, poster=lambda i: (seen.append(i.dedup_key) or True))
+    assert c2.run() == 1 and seen == ["i2"]
+    assert world.repository.get(intent_id("i2")).status == "fulfilled"
     conn.close()
 
 
@@ -166,6 +174,21 @@ def test_route_intent_and_go_live_drain(world):
     assert go_live_drain(world, conn) >= 1  # drained to head, posted nothing
     # downtime backlog is not re-posted
     assert IntentConsumer(world, conn, poster=lambda i: True).run() == 0
+    conn.close()
+
+
+def test_battle_telemetry_dedups_null_identity():
+    """Boat/PvE battles with no opponent tag/crowns must still dedup (NULL-in-PK
+    would otherwise re-insert every poll)."""
+    from event_core import db
+    from event_core.ingest.battles import write_battle_telemetry
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    boat = [{"battleTime": "20260621T120000.000Z", "type": "boatBattle",
+             "team": [{"tag": "#A"}], "opponent": [{}], "gameMode": {"id": 1}}]
+    assert write_battle_telemetry(conn, "#A", boat, "t0") == 1
+    assert write_battle_telemetry(conn, "#A", boat, "t1") == 0  # deduped, not re-inserted
+    assert conn.execute("SELECT COUNT(*) FROM battle_telemetry").fetchone()[0] == 1
     conn.close()
 
 

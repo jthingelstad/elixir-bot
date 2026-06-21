@@ -58,10 +58,14 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
             {
                 "player_tag": tag,
                 "battle_time": b.get("battleTime"),
-                "battle_type": b.get("type"),
-                "opponent_tag": o0.get("tag"),
-                "crowns_for": t0.get("crowns"),
-                "crowns_against": o0.get("crowns"),
+                # Identity (PRIMARY KEY) columns must be NON-NULL: SQLite treats
+                # NULLs in a PK as distinct, so a NULL opponent_tag/crowns (boat
+                # battles, PvE) would defeat INSERT OR IGNORE and re-insert every
+                # poll. Coalesce to stable sentinels so dedup works.
+                "battle_type": b.get("type") or "unknown",
+                "opponent_tag": o0.get("tag") or "",
+                "crowns_for": t0.get("crowns") if t0.get("crowns") is not None else -1,
+                "crowns_against": o0.get("crowns") if o0.get("crowns") is not None else -1,
                 "game_mode_id": gm.get("id"),
                 "game_mode_name": gm.get("name"),
                 "mode_group": mode_group,

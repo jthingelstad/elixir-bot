@@ -46,6 +46,7 @@ class CommunicationIntent(Aggregate):
         # `summary` = compact, presentation-free facts the surface may use; NOT copy.
         self.summary = summary
         self.status = "raised"
+        self.drop_reason = None  # set on drop; always present for readers
 
     @classmethod
     def create_id(cls, dedup_key: str, **_kwargs) -> UUID:

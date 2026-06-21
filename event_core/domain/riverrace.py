@@ -95,8 +95,11 @@ class RiverRace(Aggregate):
     @event("Registered")
     def __init__(self, clan_tag: str, season_id: int, section_index: int) -> None:
         self.clan_tag = clan_tag
-        self.season_id = season_id
-        self.section_index = section_index
+        # Coerce to the same sentinels riverrace_id uses, so the STORED key matches
+        # the aggregate id and never leaves a None in (season, section) tuples that
+        # get compared during season inference (a None would raise TypeError).
+        self.season_id = SEASON_UNKNOWN if season_id is None else int(season_id)
+        self.section_index = -1 if section_index is None else int(section_index)
         # Latest observed live clan-summary state (attr -> value).
         self.current_state: dict[str, object] = {}
         self.last_state_hash: str | None = None

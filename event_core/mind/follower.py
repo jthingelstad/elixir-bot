@@ -14,11 +14,14 @@ events (Detections) into the SAME event store via the shared app. Key properties
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from eventsourcing.application import AggregateNotFoundError
 
 from event_core.domain.detection import Detection, detection_id
+
+log = logging.getLogger("elixir.event_core")
 
 
 class FollowerRunner:
@@ -118,8 +121,16 @@ class FollowerRunner:
                 break
             for n in notifs:
                 if self.aggregate_name is None or self._aggregate_of(n) == self.aggregate_name:
-                    event = self.app.mapper.to_domain_event(n)
-                    self.detect(event, n)
+                    try:
+                        event = self.app.mapper.to_domain_event(n)
+                        self.detect(event, n)
+                    except Exception:
+                        # A malformed event must not abort the tick. Skip + log;
+                        # position advances so we don't wedge. (Delivery followers
+                        # that need at-least-once override run() — see IntentConsumer.)
+                        log.exception(
+                            "%s: skipped notification %s (%s)", self.name, n.id, n.topic
+                        )
                 pos = n.id
             self._save_position(pos)
         return self.emitted

@@ -10,8 +10,13 @@ from event_core.mind.follower import FollowerRunner
 
 
 def _milestones(old: int, new: int, step: int) -> list[int]:
-    """Multiples of `step` in the open-closed interval (old, new]."""
-    if old is None or new is None or new <= old:
+    """Multiples of `step` in the open-closed interval (old, new].
+
+    Suppressed when `old` is missing or <= 0: that signals no real baseline (a
+    first/zeroed observation), and backfilling every milestone from 0 would emit a
+    burst of posts for a newly-observed member.
+    """
+    if old is None or old <= 0 or new is None or new <= old:
         return []
     first = (old // step + 1) * step
     return list(range(first, new + 1, step))
@@ -68,9 +73,12 @@ class BattleHotStreakDetector(FollowerRunner):
         pass
 
     def run(self, batch: int = 500) -> int:
+        # Total deterministic order (matches the telemetry PK) so streaks are
+        # reproducible even when a player has multiple battles at the same second.
         rows = self.conn.execute(
-            "SELECT player_tag, battle_time, outcome FROM battle_telemetry "
-            "WHERE is_competitive=1 ORDER BY player_tag, battle_time ASC"
+            "SELECT player_tag, battle_time, battle_type, opponent_tag, outcome "
+            "FROM battle_telemetry WHERE is_competitive=1 "
+            "ORDER BY player_tag, battle_time, battle_type, opponent_tag, crowns_for, crowns_against"
         ).fetchall()
         streak = 0
         current_tag = None
@@ -80,12 +88,13 @@ class BattleHotStreakDetector(FollowerRunner):
             if r["outcome"] == "W":
                 streak += 1
                 if streak == self.STREAK:  # just became hot
+                    bid = f"{r['battle_time']}:{r['battle_type']}:{r['opponent_tag']}"
                     self.emit_detection(
-                        dedup_key=f"battle_hot_streak:{r['player_tag']}:{r['battle_time']}",
+                        dedup_key=f"battle_hot_streak:{r['player_tag']}:{bid}",
                         detection_type="battle_hot_streak",
                         subject_tag=r["player_tag"],
                         occurred_at=r["battle_time"],
-                        caused_by=[f"battle_telemetry:{r['player_tag']}:{r['battle_time']}"],
+                        caused_by=[f"battle_telemetry:{r['player_tag']}:{bid}"],
                         payload={"streak": self.STREAK},
                     )
             else:
@@ -234,12 +243,13 @@ class BattleTrophyPushDetector(FollowerRunner):
         delta = sum(r["trophy_change"] for r in run)
         if len(run) >= self.MIN_BATTLES and delta >= self.MIN_DELTA:
             last = run[-1]
+            bid = f"{last['battle_time']}:{last['battle_type']}:{last['opponent_tag']}"
             self.emit_detection(
-                dedup_key=f"battle_trophy_push:{tag}:{last['battle_time']}",
+                dedup_key=f"battle_trophy_push:{tag}:{bid}",
                 detection_type="battle_trophy_push",
                 subject_tag=tag,
                 occurred_at=last["battle_time"],
-                caused_by=[f"battle_telemetry:{tag}:{last['battle_time']}"],
+                caused_by=[f"battle_telemetry:{tag}:{bid}"],
                 payload={
                     "battle_count": len(run),
                     "trophy_delta": delta,
@@ -250,11 +260,11 @@ class BattleTrophyPushDetector(FollowerRunner):
 
     def run(self, batch: int = 500) -> int:
         rows = self.conn.execute(
-            "SELECT player_tag, battle_time, trophy_change, starting_trophies "
+            "SELECT player_tag, battle_time, battle_type, opponent_tag, trophy_change, starting_trophies "
             "FROM battle_telemetry "
             "WHERE is_competitive=1 AND trophy_change IS NOT NULL "
             "AND starting_trophies IS NOT NULL "
-            "ORDER BY player_tag, battle_time ASC"
+            "ORDER BY player_tag, battle_time, battle_type, opponent_tag, crowns_for, crowns_against"
         ).fetchall()
         current_tag = None
         run: list = []

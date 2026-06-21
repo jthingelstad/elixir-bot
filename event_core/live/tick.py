@@ -16,7 +16,7 @@ def run_tick(app, conn, payloads: dict, observed_at: str, poster) -> dict:
     advanced = advance(app, conn)
     consumer = IntentConsumer(app, conn, poster)
     posted = consumer.run()
-    return {"ingested": ingested, "advanced": advanced, "posted": posted, "dropped": consumer.dropped}
+    return {"ingested": ingested, "advanced": advanced, "posted": posted, "failed": consumer.failed}
 
 
 def fetch_payloads(member_tags: list[str] | None = None) -> dict:
