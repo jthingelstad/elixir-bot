@@ -453,6 +453,14 @@ def _format_suggestion(suggestion: dict) -> str:
     )
 
 
+def _format_promotion_result_status(item: dict) -> str:
+    if item.get("dry_run"):
+        return "dry-run"
+    if item.get("action") == "skip":
+        return "skipped"
+    return "ok" if item.get("ok") else "failed"
+
+
 def _gh_runner(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(args, text=True, capture_output=True, check=False)
 
@@ -462,6 +470,32 @@ def _parse_issue_number(url_or_output: str) -> int | None:
     if not match:
         return None
     return int(match.group(1))
+
+
+def _github_issue_metadata(
+    issue_number: int,
+    *,
+    repo: str,
+    runner: Callable[[list[str]], subprocess.CompletedProcess] = _gh_runner,
+) -> tuple[dict | None, str | None]:
+    completed = runner([
+        "gh",
+        "issue",
+        "view",
+        str(issue_number),
+        "--repo",
+        repo,
+        "--json",
+        "state,stateReason,url",
+    ])
+    output = (completed.stdout or completed.stderr or "").strip()
+    if completed.returncode != 0:
+        return None, output or "failed to read issue state"
+    try:
+        loaded = json.loads(completed.stdout or "{}")
+    except json.JSONDecodeError:
+        return None, output or "invalid issue state response"
+    return loaded if isinstance(loaded, dict) else {}, None
 
 
 def promote_suggestions_to_github(
@@ -503,6 +537,33 @@ def promote_suggestions_to_github(
                 "github_issue_number": existing_issue,
             })
             continue
+        github_issue_url = suggestion.get("github_issue_url")
+        if existing_issue:
+            metadata, metadata_error = _github_issue_metadata(
+                int(existing_issue),
+                repo=repo,
+                runner=runner,
+            )
+            if metadata_error:
+                results.append({
+                    "suggestion_key": suggestion.get("suggestion_key"),
+                    "action": action,
+                    "ok": False,
+                    "github_issue_number": existing_issue,
+                    "error": metadata_error,
+                })
+                continue
+            github_issue_url = metadata.get("url") or github_issue_url
+            if metadata.get("state") == "CLOSED":
+                state_reason = metadata.get("stateReason") or "closed"
+                results.append({
+                    "suggestion_key": suggestion.get("suggestion_key"),
+                    "action": "skip",
+                    "reason": f"github_issue_closed:{state_reason}",
+                    "github_issue_number": existing_issue,
+                    "github_issue_url": github_issue_url,
+                })
+                continue
         if existing_issue:
             args = [
                 "gh",
@@ -545,7 +606,7 @@ def promote_suggestions_to_github(
             updated = db.mark_improvement_suggestion_promoted(
                 suggestion["suggestion_key"],
                 github_issue_number=issue_number,
-                github_issue_url=output if output.startswith("http") else suggestion.get("github_issue_url"),
+                github_issue_url=output if output.startswith("http") else github_issue_url,
                 conn=conn,
             )
             suggestion.update(updated or {})
@@ -610,9 +671,10 @@ def main() -> None:
         if promotion:
             print("GitHub promotion:")
             for item in promotion:
-                status = "dry-run" if item.get("dry_run") else ("ok" if item.get("ok") else "failed")
+                status = _format_promotion_result_status(item)
                 issue = f" #{item['github_issue_number']}" if item.get("github_issue_number") else ""
-                print(f"- {status}: {item.get('action')} {item.get('suggestion_key')}{issue}")
+                reason = f" ({item['reason']})" if item.get("reason") else ""
+                print(f"- {status}: {item.get('action')} {item.get('suggestion_key')}{issue}{reason}")
     finally:
         conn.close()
 

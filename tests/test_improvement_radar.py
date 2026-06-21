@@ -240,6 +240,105 @@ def test_github_promotion_write_marks_created_issue():
         conn.close()
 
 
+def test_github_promotion_skips_closed_existing_issue():
+    conn = db.get_connection(":memory:")
+    try:
+        suggestion = db.upsert_improvement_suggestion(
+            category="cost_reliability",
+            suggestion_key="cost_reliability:closed",
+            title="Reduce repeated prompt failures",
+            rationale="Failures are recurring.",
+            proposed_change="Add a guard and regression test.",
+            evidence={"basis": "test"},
+            confidence=0.9,
+            conn=conn,
+        )
+        suggestion = db.mark_improvement_suggestion_promoted(
+            "cost_reliability:closed",
+            github_issue_number=84,
+            github_issue_url="https://github.com/jthingelstad/elixir-bot/issues/84",
+            conn=conn,
+        )
+        calls = []
+
+        def runner(args):
+            calls.append(args)
+            assert args[:3] == ["gh", "issue", "view"]
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"state":"CLOSED","stateReason":"NOT_PLANNED","url":"https://github.com/jthingelstad/elixir-bot/issues/84"}',
+                stderr="",
+            )
+
+        results = radar.promote_suggestions_to_github(
+            [suggestion],
+            write=True,
+            runner=runner,
+            conn=conn,
+        )
+
+        assert len(calls) == 1
+        assert results == [{
+            "suggestion_key": "cost_reliability:closed",
+            "action": "skip",
+            "reason": "github_issue_closed:NOT_PLANNED",
+            "github_issue_number": 84,
+            "github_issue_url": "https://github.com/jthingelstad/elixir-bot/issues/84",
+        }]
+    finally:
+        conn.close()
+
+
+def test_github_promotion_updates_open_existing_issue():
+    conn = db.get_connection(":memory:")
+    try:
+        suggestion = db.upsert_improvement_suggestion(
+            category="cost_reliability",
+            suggestion_key="cost_reliability:open",
+            title="Reduce repeated prompt failures",
+            rationale="Failures are recurring.",
+            proposed_change="Add a guard and regression test.",
+            evidence={"basis": "test"},
+            confidence=0.9,
+            conn=conn,
+        )
+        suggestion = db.mark_improvement_suggestion_promoted(
+            "cost_reliability:open",
+            github_issue_number=84,
+            github_issue_url="https://github.com/jthingelstad/elixir-bot/issues/84",
+            conn=conn,
+        )
+        calls = []
+
+        def runner(args):
+            calls.append(args)
+            if args[:3] == ["gh", "issue", "view"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout='{"state":"OPEN","stateReason":null,"url":"https://github.com/jthingelstad/elixir-bot/issues/84"}',
+                    stderr="",
+                )
+            assert args[:3] == ["gh", "issue", "edit"]
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        results = radar.promote_suggestions_to_github(
+            [suggestion],
+            write=True,
+            runner=runner,
+            conn=conn,
+        )
+
+        assert [call[:3] for call in calls] == [
+            ["gh", "issue", "view"],
+            ["gh", "issue", "edit"],
+        ]
+        assert results[0]["ok"] is True
+        assert results[0]["action"] == "update"
+        assert results[0]["github_issue_number"] == 84
+    finally:
+        conn.close()
+
+
 def test_github_promotion_skips_low_confidence_suggestions():
     conn = db.get_connection(":memory:")
     try:
@@ -263,3 +362,8 @@ def test_github_promotion_skips_low_confidence_suggestions():
         }]
     finally:
         conn.close()
+
+
+def test_promotion_result_status_formats_skips_separately_from_failures():
+    assert radar._format_promotion_result_status({"action": "skip"}) == "skipped"
+    assert radar._format_promotion_result_status({"ok": False}) == "failed"
