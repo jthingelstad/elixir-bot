@@ -86,7 +86,7 @@ upgrade_bot() {
 }
 
 backup_db() {
-    echo "==> Backing up elixir.db..."
+    echo "==> Backing up databases (elixir.db + v5 event/projection/memory stores)..."
     source "$PROJECT_DIR/venv/bin/activate"
     python "$PROJECT_DIR/scripts/backup_db.py"
 }
