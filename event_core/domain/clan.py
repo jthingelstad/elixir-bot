@@ -63,6 +63,9 @@ class Clan(Aggregate):
         self.state: dict[str, object] = {}
         self.last_state_hash: str | None = None
         self.last_observed_at: str | None = None
+        # Roster membership (player_tag -> role); folded for join/leave diffing.
+        self.members: dict[str, str] = {}
+        self.roster_seen: bool = False
 
     @classmethod
     def create_id(cls, clan_tag: str) -> UUID:
@@ -85,3 +88,46 @@ class Clan(Aggregate):
         self.state.update(observation)
         self.last_state_hash = content_hash
         self.last_observed_at = observed_at
+
+    # --- roster membership lifecycle (join/leave/role-change) ---
+    def observe_roster(self, roster: dict[str, str], observed_at: str) -> int:
+        """Diff the observed member set (player_tag -> role) against the folded
+        roster and emit MemberJoined/MemberLeft/MemberRoleChanged. The first
+        observation establishes a baseline with no events (mirrors legacy
+        bootstrap_seed). Returns the number of lifecycle events emitted."""
+        if not self.roster_seen:
+            self._roster_baseline(roster, observed_at)
+            return 0
+        prev = self.members
+        changes = 0
+        for tag, role in roster.items():
+            if tag not in prev:
+                self._member_joined(tag, role, observed_at)
+                changes += 1
+            elif prev[tag] != role:
+                self._member_role_changed(tag, prev[tag], role, observed_at)
+                changes += 1
+        for tag in list(prev):
+            if tag not in roster:
+                self._member_left(tag, observed_at)
+                changes += 1
+        return changes
+
+    @event("RosterBaseline")
+    def _roster_baseline(self, roster: dict, observed_at: str) -> None:
+        self.members = dict(roster)
+        self.roster_seen = True
+
+    @event("MemberJoined")
+    def _member_joined(self, player_tag: str, role: str, observed_at: str) -> None:
+        self.members[player_tag] = role
+
+    @event("MemberLeft")
+    def _member_left(self, player_tag: str, observed_at: str) -> None:
+        self.members.pop(player_tag, None)
+
+    @event("MemberRoleChanged")
+    def _member_role_changed(
+        self, player_tag: str, old_role: str, new_role: str, observed_at: str
+    ) -> None:
+        self.members[player_tag] = new_role

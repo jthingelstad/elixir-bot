@@ -123,6 +123,23 @@ def test_extract_battles_identity_fields():
     assert b["opponent_tag"] == "#OPP" and b["trophy_change"] == 30
 
 
+def test_clan_roster_lifecycle_diff(world):
+    from event_core.domain.clan import clan_id
+
+    # first observation = baseline, no join/leave events
+    assert world.observe_clan_roster("#CLN", {"#A": "member", "#B": "elder"}, "t0") == 0
+    # #B promoted, #C joins, #A leaves -> 3 lifecycle events
+    assert world.observe_clan_roster("#CLN", {"#B": "coLeader", "#C": "member"}, "t1") == 3
+
+    c = world.repository.get(clan_id("#CLN"))
+    assert c.members == {"#B": "coLeader", "#C": "member"}
+    topics = [
+        n.topic.rsplit(".", 1)[-1]
+        for n in world.recorder.select_notifications(start=1, limit=100)
+    ]
+    assert "MemberJoined" in topics and "MemberLeft" in topics and "MemberRoleChanged" in topics
+
+
 legacy_missing = not os.path.exists(config.LEGACY_DB)
 
 

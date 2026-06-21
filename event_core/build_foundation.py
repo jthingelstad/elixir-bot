@@ -32,6 +32,7 @@ def build(clean: bool = True) -> dict:
     from event_core.backfill import (
         backfill_battles,
         backfill_clan_state,
+        backfill_clan_roster,
         backfill_clans,
         backfill_collections,
         backfill_players,
@@ -47,6 +48,7 @@ def build(clean: bool = True) -> dict:
     from event_core.projections.collections import PlayerCurrentCollections
     from event_core.projections.member_state import MemberCurrentState
     from event_core.projections.player_state import PlayerCurrentProfile
+    from event_core.projections.roster_lifecycle import RosterLifecycle
     from event_core.projections.war import (
         WarCurrentStateProjection,
         WarParticipationProjection,
@@ -65,6 +67,7 @@ def build(clean: bool = True) -> dict:
     bf_clan_state = backfill_clan_state(app)
     bf_war_log = backfill_war_log(app, projections_path=config.PROJECTIONS_DB)
     bf_war_cur = backfill_currentriverrace(app, projections_path=config.PROJECTIONS_DB)
+    bf_clan_roster = backfill_clan_roster(app)
     bf_battles = backfill_battles()
 
     conn = db.connect(config.PROJECTIONS_DB)
@@ -76,6 +79,7 @@ def build(clean: bool = True) -> dict:
         "clan_daily_metrics": ClanDailyMetrics(app, conn),
         "war_current_state": WarCurrentStateProjection(app, conn),
         "war_participation": WarParticipationProjection(app, conn),
+        "roster_lifecycle": RosterLifecycle(app, conn),
     }.items():
         proj.reset()
         applied[name] = proj.run()
@@ -89,6 +93,7 @@ def build(clean: bool = True) -> dict:
             "clan_state": bf_clan_state,
             "war_log": bf_war_log,
             "currentriverrace": bf_war_cur,
+            "clan_roster": bf_clan_roster,
             "battles": bf_battles,
         },
         "projection_events_applied": applied,

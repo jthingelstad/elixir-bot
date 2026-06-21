@@ -155,6 +155,39 @@ def backfill_clan_state(app, legacy_path: str | None = None) -> dict:
         cursor_conn.close()
 
 
+def backfill_clan_roster(app, legacy_path: str | None = None) -> dict:
+    """Replay /clans memberLists -> Clan roster lifecycle (join/leave/role)."""
+    from event_core.domain.player import canon_tag
+
+    legacy = _legacy_conn(legacy_path)
+    cursor_conn = db.connect(config.PROJECTIONS_DB)
+    try:
+        start_id = _cursor(cursor_conn, "clan_roster")
+        rows = legacy.execute(
+            "SELECT payload_id, entity_key, fetched_at, payload_json FROM raw_api_payloads "
+            "WHERE endpoint='clan' AND payload_id > ? ORDER BY fetched_at ASC, payload_id ASC",
+            (start_id,),
+        ).fetchall()
+        changes = 0
+        max_id = start_id
+        for r in rows:
+            payload = json.loads(r["payload_json"])
+            roster = {
+                canon_tag(m["tag"]): (m.get("role") or "member")
+                for m in (payload.get("memberList") or [])
+                if m.get("tag")
+            }
+            clan_tag = payload.get("tag") or r["entity_key"]
+            changes += app.observe_clan_roster(clan_tag, roster, r["fetched_at"])
+            max_id = max(max_id, r["payload_id"])
+        if max_id > start_id:
+            _save_cursor(cursor_conn, "clan_roster", max_id)
+        return {"payloads": len(rows), "lifecycle_events": changes}
+    finally:
+        legacy.close()
+        cursor_conn.close()
+
+
 def backfill_battles(legacy_path: str | None = None) -> dict:
     """Replay archived battlelogs into the battle_telemetry table (tier 1).
 
