@@ -179,27 +179,30 @@ detector breadth (card/badge milestones, trophy-push, ranked promotion, inactivi
 cohort waves); detector cooldowns. Then Phase 3 (reactive trigger + agent tools +
 runtime rewire) and Phase 4 (cutover).
 
-## NOT done (remaining work, roughly in dependency order)
+## Phase 3 (runtime pivot) — reactive core COMPLETE (offline)
 
-- **Cutover** — deliberately not performed. Awaiting your go.
-- **Phase 1 deferrals** (low risk): derived-table backfill for >2wk history; the
-  two order-sensitive war projections; clan joins/leaves. Best done when their
-  consumers exist so we know the needed grain.
-- **Granular milestone event taxonomy** + the §5.6 churn-vs-durable split — current
-  aggregates emit coarse observation events. The Mind layer needs granular base
-  events as its contract; define them at the start of Phase 2.
-- **Phase 2 — Elixir's Mind** — Detection / Recommendation / DecisionCase
-  aggregates, aggregators (Followers), the reactive communication-policy trigger,
-  agent read-side tools.
-  - ⚠ **Validation finding:** legacy `signal_log` is thin — `(signal_date,
-    signal_type)` only, date-level dedup, no per-event evidence. It cannot serve
-    as a rich parity oracle. Phase 2 detections will be richer than legacy signals;
-    validate via detection presence/timing vs signal_log dates + re-derivation from
-    the (more complete) event log, not row-for-row parity.
-- **Phase 3 — runtime pivot**: heartbeat→ingest path, reactive loop, agent reads,
-  Discord via communication intents.
-- **Phase 4 — cutover**: memory-DB split, squash v5 baseline, fresh freeze, full
-  backfill, decommission legacy.
+- **CommunicationIntent** aggregate (Mind→surface boundary: the decision to
+  communicate; scope + evidence + presentation-free summary, no copy/channel).
+- **CommunicationPolicy** Follower — the reactive trigger: Detection/Recommendation
+  events → scoped intents. Replaces schedule-first awareness.
+- **Detections projection** + **agent read-side tools** (`get_player_current`,
+  `get_player_battles`, `get_player_detections`, `resolve_evidence`), scope-gated.
+- Validated on real data: 652 intents (647 public, 5 leadership); resolve_evidence
+  drills a detection to its supporting battles; scope gating verified.
+
+The full v5 architecture is now built and validated **offline on the branch**.
+What remains is the **gated cutover** — wiring into the live runtime + deploying.
+
+## NOT done — the cutover (Phase 4) + low-risk tails
+
+- **Cutover** (gated; awaiting your go): live heartbeat → the shared ingest path;
+  Discord communication-intent consumer (actual posting); cadence reflections over
+  projections; memory-DB split; squash v5 baseline; fresh freeze + full backfill;
+  switch the bot to the v5 stores; decommission legacy (signal_log,
+  game_event_stream, side tables).
+- **Low-risk tails** (best done when consumers fix the grain): derived-table
+  backfill for >2wk history; the two order-sensitive war projections; clan
+  joins/leaves; detector cooldowns + long-tail signal types.
 
 ---
 
