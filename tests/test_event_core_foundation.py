@@ -169,6 +169,23 @@ def test_foundation_parity_determinism_idempotency():
     assert bt["battles_matched_identity"] > 0
     assert bt["outcome_mismatch"] == 0  # deterministic field must match exactly
 
+    # collections (cards/badges/achievements): exact content parity
+    coll = r1["parity"]["collections"]
+    for kind in ("cards", "badges", "achievements"):
+        assert coll[kind]["mismatched"] == 0
+        assert coll[kind]["matched"] > 0
+
+    # war: current state + participation exact
+    assert r1["parity"]["war_current_state"]["mismatched"] == 0
+    assert r1["parity"]["war_current_state"]["matched"] > 0
+    assert r1["parity"]["war_participation"]["mismatched"] == 0
+    assert r1["parity"]["war_participation"]["matched"] > 0
+
+    # clan daily metrics: no real bugs (the mismatches are legacy-corruption /
+    # last-observation timing, classified in the STATUS report)
+    cm = r1["parity"]["clan_daily_metrics"]
+    assert cm["matched"] > 0 and cm["missing_projection"] == 0
+
     # replay determinism: two from-zero rebuilds are byte-identical
     assert fp1 == fp2
 

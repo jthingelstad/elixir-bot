@@ -13,10 +13,19 @@ from datetime import datetime, timezone
 
 class ProjectionRunner:
     name: str = ""
+    # Aggregate this projection consumes (the class name as it appears in the
+    # event topic, e.g. "Player"). Required because event class names like
+    # "Registered" collide across aggregates in the shared notification log.
+    aggregate_name: str | None = None
 
     def __init__(self, app, conn):
         self.app = app
         self.conn = conn
+
+    @staticmethod
+    def _aggregate_of(notification) -> str:
+        # topic is "module.path:Aggregate.Event"
+        return notification.topic.split(":")[-1].split(".")[0]
 
     # --- lifecycle hooks (override) ---
     def setup(self) -> None:
@@ -50,16 +59,17 @@ class ProjectionRunner:
 
     def run(self, batch: int = 500) -> int:
         pos = self.last_position()
-        total = 0
+        handled = 0
         while True:
             notifs = self.app.recorder.select_notifications(start=pos + 1, limit=batch)
             if not notifs:
                 break
             for n in notifs:
-                event = self.app.mapper.to_domain_event(n)
-                self.handle(event, n)
+                if self.aggregate_name is None or self._aggregate_of(n) == self.aggregate_name:
+                    event = self.app.mapper.to_domain_event(n)
+                    self.handle(event, n)
+                    handled += 1
                 pos = n.id
             self._save_position(pos)  # same transaction as the handle() writes
             self.conn.commit()
-            total += len(notifs)
-        return total
+        return handled

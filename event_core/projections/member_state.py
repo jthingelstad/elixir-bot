@@ -13,6 +13,7 @@ _TEXT = {"role", "arena_name", "arena_raw_name", "last_seen_api"}
 
 class MemberCurrentState(ProjectionRunner):
     name = "member_current_state_proj"
+    aggregate_name = "Player"
 
     def setup(self) -> None:
         cols = ",\n            ".join(
