@@ -25,7 +25,20 @@ log = logging.getLogger("elixir_db")
 PACKAGE_DIR = os.path.dirname(__file__)
 PROJECT_ROOT = os.path.dirname(PACKAGE_DIR)
 
-DB_PATH = os.getenv("ELIXIR_DB_PATH", os.path.join(PROJECT_ROOT, "elixir.db"))
+_DEFAULT_DB_PATH = os.path.join(PROJECT_ROOT, "elixir-v5.db")
+
+
+def _resolve_db_path() -> str:
+    """The operational DB path, resolved from the environment at call time.
+
+    Lazy resolution avoids the import-order trap: ELIXIR_DB_PATH is set by
+    load_dotenv(), which can run AFTER `import db`. A frozen module constant
+    would capture the pre-dotenv default. The post-consolidation default is
+    elixir-v5.db (the single operational DB); elixir.db is retired.
+    """
+    return os.getenv("ELIXIR_DB_PATH", _DEFAULT_DB_PATH)
+
+
 CHICAGO_TZ = ZoneInfo("America/Chicago")
 
 SNAPSHOT_RETENTION_DAYS = 30
@@ -535,7 +548,7 @@ def _configure_connection(conn: sqlite3.Connection, path: str) -> None:
 
 
 def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
-    path = os.fspath(db_path or DB_PATH)
+    path = os.fspath(db_path or _resolve_db_path())
     conn = sqlite3.connect(path)
     _configure_connection(conn, path)
     if path != ":memory:":
@@ -655,6 +668,12 @@ def _load_storage_facade() -> None:
 
 
 def __getattr__(name):
+    # Lazy operational DB path: always reflects the current environment, so
+    # import order vs load_dotenv() can't freeze a stale value. A test
+    # monkeypatch.setattr(db, "DB_PATH", ...) creates a real attribute that
+    # shadows this resolver.
+    if name == "DB_PATH":
+        return _resolve_db_path()
     if not _facade_loaded:
         _load_storage_facade()
         if name in globals():

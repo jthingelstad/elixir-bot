@@ -36,6 +36,31 @@ def _isolate_default_sqlite_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_v5_event_stores(tmp_path, monkeypatch):
+    """Route the v5 event-sourcing stores to per-test tempfiles.
+
+    Without this, any test that rebuilds the foundation (e.g.
+    build_foundation.build(), which defaults to clean=True and *deletes*
+    config.EVENTS_DB/PROJECTIONS_DB) runs against the LIVE production v5 stores
+    — wiping the running bot's event store and corrupting its projections. The
+    frozen LEGACY_DB is a read-only parity oracle and is intentionally NOT
+    redirected. Tests that pass explicit DB paths are unaffected.
+    """
+    from event_core import config
+
+    events = str(tmp_path / "v5-events.db")
+    projections = str(tmp_path / "v5.db")
+    memory = str(tmp_path / "v5-memory.db")
+    monkeypatch.setenv("ELIXIR_V5_EVENTS_DB", events)
+    monkeypatch.setenv("ELIXIR_V5_DB", projections)
+    monkeypatch.setenv("ELIXIR_V5_MEMORY_DB", memory)
+    monkeypatch.setattr(config, "EVENTS_DB", events)
+    monkeypatch.setattr(config, "PROJECTIONS_DB", projections)
+    monkeypatch.setattr(config, "MEMORY_DB", memory)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _block_real_llm_calls(_isolate_default_sqlite_db):
     """Fail loudly if any test reaches the Anthropic API."""
     def _boom(*args, **kwargs):

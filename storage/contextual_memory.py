@@ -4,8 +4,15 @@ from datetime import datetime, timezone
 
 import pytz
 
-from db import _canon_tag, managed_connection
+from db import _canon_tag, get_connection
 from memory_store import archive_memory, attach_tags, create_memory, list_memories, update_memory
+
+# Memory writes route to the durable-memory DB (memory_store ops default there
+# when conn=None). These wrappers therefore do NOT open an operational connection
+# for the memory portion; the few that need operational data (members, war_races)
+# open a short-lived operational connection just for that read and pass the
+# caller's original conn (None in production) through to the memory ops. Tests
+# that pass a unified in-memory conn still work — it threads through to both.
 
 CHICAGO = pytz.timezone("America/Chicago")
 
@@ -22,7 +29,6 @@ def _memory_summary(text: str, limit: int = 220) -> str:
     return clean[: limit - 3].rstrip() + "..."
 
 
-@managed_connection
 def upsert_summary_memory(
     *,
     event_type: str,
@@ -211,7 +217,6 @@ def upsert_war_recap_memory(
     return None
 
 
-@managed_connection
 def upsert_member_note_memory(
     *,
     member_tag: str,
@@ -226,13 +231,22 @@ def upsert_member_note_memory(
     if not tag or not text:
         return None
 
-    member_row = conn.execute(
-        "SELECT m.member_id, m.current_name, cs.role "
-        "FROM members m "
-        "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "WHERE m.player_tag = ?",
-        (tag,),
-    ).fetchone()
+    # Operational read (members/member_current_state) uses an operational conn;
+    # the memory write uses the caller's conn (None -> memory DB).
+    mem_conn = conn
+    close = conn is None
+    op_conn = conn or get_connection()
+    try:
+        member_row = op_conn.execute(
+            "SELECT m.member_id, m.current_name, cs.role "
+            "FROM members m "
+            "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
+            "WHERE m.player_tag = ?",
+            (tag,),
+        ).fetchone()
+    finally:
+        if close:
+            op_conn.close()
     title = f"Leader Note: {member_label}"
     payload_metadata = dict(metadata or {})
     payload_metadata.setdefault("member_label", member_label)
@@ -245,7 +259,7 @@ def upsert_member_note_memory(
         created_by=created_by,
         tags=["leader-note", "member-note"],
         metadata=payload_metadata,
-        conn=conn,
+        conn=mem_conn,
     )
     if memory and member_row:
         memory = update_memory(
@@ -254,12 +268,11 @@ def upsert_member_note_memory(
             member_id=member_row["member_id"],
             member_tag=tag,
             role=member_row["role"],
-            conn=conn,
+            conn=mem_conn,
         )
     return memory
 
 
-@managed_connection
 def archive_member_note_memory(
     *,
     member_tag: str,
@@ -316,7 +329,6 @@ def _count_race_streak(conn) -> tuple[int, int | None, int | None]:
     return count, latest_season, latest_week
 
 
-@managed_connection
 def upsert_race_streak_memory(
     *,
     season_id: int,
@@ -325,7 +337,16 @@ def upsert_race_streak_memory(
     conn=None,
 ) -> dict | None:
     """Update the race win streak identity memory after a race completes."""
-    streak_count, latest_season, latest_week = _count_race_streak(conn)
+    # war_races read uses an operational conn; the memory write uses the caller's
+    # conn (None -> memory DB).
+    mem_conn = conn
+    close = conn is None
+    op_conn = conn or get_connection()
+    try:
+        streak_count, latest_season, latest_week = _count_race_streak(op_conn)
+    finally:
+        if close:
+            op_conn.close()
 
     if streak_count == 0:
         body = (
@@ -349,11 +370,10 @@ def upsert_race_streak_memory(
         created_by="elixir:observation",
         tags=["war", "clan-identity", "streak"],
         metadata={"streak_count": streak_count, "latest_season": latest_season, "latest_week": latest_week},
-        conn=conn,
+        conn=mem_conn,
     )
 
 
-@managed_connection
 def upsert_intel_report_memory(
     *,
     season_id: int,
