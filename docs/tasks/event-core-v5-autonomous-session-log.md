@@ -117,6 +117,30 @@ intel report (port vs keep manual), demotion handling.
 
 ---
 
+## Deploy + final state (production)
+
+- **All committed to `main` and pushed to origin** (`main` = `origin/main` =
+  `feat/event-core-v5` = `cb2ce2e`). Running bot loaded this code at the 17:49
+  restart; DBs consolidated; 7 projection tables dropped.
+- **Projection retirement deployed:** catch-up advances only the Mind; retired
+  tables stay gone; no errors.
+- **member_left + promotions deployed:** catch-up emitted 10 historical
+  detections and drained them silently (no flood); detector:member_left +
+  detector:member_role_change tracking rows live. New departures/promotions post
+  to #clan-events going forward.
+- **Health at handoff:** service_up, recent_errors none, consumer:discord at head
+  (14536), 10 detectors tracking. First REAL posting tick on the new code fires
+  ~18:49 (catch-up drains, doesn't post) — the monitoring cron will verify it.
+
+## What to review when you're back
+1. Confirm the product-voice choices (member_left → #clan-events; promotions →
+   #clan-events; demotions not auto-posted).
+2. Spot-check a #clan-events departure/promotion post once one fires (note the
+   name-enrichment caveat in §3 — leave posts may show a raw tag).
+3. Decide the backlog priorities (§2 table): war narration cadence, donation
+   leaders, cake-days, tournaments, intel report, Path-of-Legend (blocked).
+4. Optional next overhead cleanup: none pending — the dual-write is gone.
+
 ## Review notes / decisions / risks
 - **Cosmetic log artifact:** `format_scheduler_startup_summary` lists ALL activities
   incl. the disabled ones (clan/war-awareness, leadership-action-scan,
