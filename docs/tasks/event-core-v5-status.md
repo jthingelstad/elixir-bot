@@ -57,15 +57,36 @@ Test it: `./venv/bin/python -m pytest tests/test_event_core_foundation.py -q`
 
 ---
 
+## Phase 1 (Observed World) — COMPLETE as of this update
+
+The entire Observed World is now modeled and parity-proven against the frozen
+legacy DB, across six slices in one unified event store + projection DB. The last
+three (war / collections / clan) were built in parallel via subagent fanout and
+integrated. Aggregates: Player, PlayerCollections, Clan, RiverRace. Battles remain
+telemetry (not event-sourced).
+
 ## Validation results (vs frozen legacy)
 
 | Slice | Result |
 |---|---|
-| **Player profile** (current-profile projection) | **53/53** reproducible members exact match; 0 mismatch; 4 correctly excluded (pre-archive) |
-| **member_current_state** (roster) | **50 exact**, 0 true mismatch, **2 v5-more-current** (explained), 58 outside archive horizon |
-| **Battle telemetry** | 6045 ingested, **5898 identity matches (97.6%)**; divergence classified below |
-| **Replay determinism** | ✅ two from-zero rebuilds byte-identical |
-| **Ingest idempotency** | ✅ re-ingest emits 0 events / 0 rows |
+| **Player profile** | **53/53** exact; 4 excluded (pre-archive) |
+| **member_current_state** (roster) | **50 exact**, 0 true mismatch, 2 v5-more-current (explained) |
+| **Battle telemetry** | 5898 matched identities, **outcome_mismatch=0** (deterministic field exact); 499 classification-drift (legacy historical classify logic); 147 only-in-projection (pre-tracking history); 2428 only-in-legacy (rolling-window loss) |
+| **Collections** (cards/badges/achievements) | **53/53 exact** for all three |
+| **Clan daily metrics** | 8 matched, 7 explained (3 legacy persisted a broken API response → v5 more correct; 4 last-observation-of-day timing); joins/leaves deferred |
+| **War current state** | **1/1 exact** |
+| **War participation** | **593/593 exact** (254 outside the 2-archived-log horizon) |
+| **Replay determinism** | ✅ from-zero rebuilds byte-identical |
+| **Ingest idempotency** | ✅ re-ingest across all slices emits 0 events / 0 rows |
+
+Tests: 8/8 pass. Ruff clean. Build ~22s; full suite ~2min (builds twice).
+
+Integration note: event class names (e.g. `Registered`) collide across aggregates
+in the shared notification log; `ProjectionRunner` now filters by aggregate.
+
+Documented deferrals within Phase 1 (data is in the event stream; only the
+order-sensitive projection logic remains): war_day_status / war_period_clan_status
+(season-inference replay), clan joins_today/leaves_today (roster lifecycle).
 
 The three architectural guarantees the design rests on — **replay determinism,
 idempotent ingest, co-located atomic projection tracking** — are all proven on
@@ -109,18 +130,24 @@ aggregate → event store → notification log → follower → projection → e
 ## NOT done (remaining work, roughly in dependency order)
 
 - **Cutover** — deliberately not performed. Awaiting your go.
-- **Clan & RiverRace aggregates** — only Player exists; war/season slices not built.
-- **Granular milestone events** (`card_level_changed`, `badge_earned`, etc.) and
-  the §5.6 churn-vs-durable field split — current Player emits coarse
-  `ProfileObserved`/`RosterStateObserved`; the keystone proves the pipeline, not
-  the final event taxonomy.
-- **Full battle column parity** — needs porting `storage/game_modes.classify_battle_mode`
-  and `_resolve_battle_outcome` for outcome/mode/2v2/boat identity.
-- **Derived-table backfill** — only the ~2-week raw archive is replayed; deeper
-  history (member_battle_facts, snapshots) for >2wk timelines is not yet backfilled.
-- **Elixir's Mind** — Detection/Recommendation/DecisionCase aggregates, aggregators,
-  the reactive communication-policy trigger, agent read-side tools.
-- **Memory DB split** + the squash-to-v5-baseline migration for `elixir-v5.db`.
+- **Phase 1 deferrals** (low risk): derived-table backfill for >2wk history; the
+  two order-sensitive war projections; clan joins/leaves. Best done when their
+  consumers exist so we know the needed grain.
+- **Granular milestone event taxonomy** + the §5.6 churn-vs-durable split — current
+  aggregates emit coarse observation events. The Mind layer needs granular base
+  events as its contract; define them at the start of Phase 2.
+- **Phase 2 — Elixir's Mind** — Detection / Recommendation / DecisionCase
+  aggregates, aggregators (Followers), the reactive communication-policy trigger,
+  agent read-side tools.
+  - ⚠ **Validation finding:** legacy `signal_log` is thin — `(signal_date,
+    signal_type)` only, date-level dedup, no per-event evidence. It cannot serve
+    as a rich parity oracle. Phase 2 detections will be richer than legacy signals;
+    validate via detection presence/timing vs signal_log dates + re-derivation from
+    the (more complete) event log, not row-for-row parity.
+- **Phase 3 — runtime pivot**: heartbeat→ingest path, reactive loop, agent reads,
+  Discord via communication intents.
+- **Phase 4 — cutover**: memory-DB split, squash v5 baseline, fresh freeze, full
+  backfill, decommission legacy.
 
 ---
 
