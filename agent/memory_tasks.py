@@ -430,8 +430,11 @@ def store_observation_facts(signals: list[dict], channel_id: str | int | None = 
     from storage.contextual_memory import upsert_summary_memory
 
     saved = 0
+    # members read uses an operational conn; the memory write uses the caller's
+    # conn (None -> memory DB).
+    mem_conn = conn
     close = conn is None
-    conn = conn or get_connection()
+    op_conn = conn or get_connection()
     try:
         for signal in signals or []:
             tag = signal.get("tag")
@@ -444,7 +447,7 @@ def store_observation_facts(signals: list[dict], channel_id: str | int | None = 
             fact = mapper(signal)
             if not fact:
                 continue
-            member_row = conn.execute(
+            member_row = op_conn.execute(
                 "SELECT member_id FROM members WHERE player_tag = ?",
                 (_canon_tag(tag),),
             ).fetchone()
@@ -461,7 +464,7 @@ def store_observation_facts(signals: list[dict], channel_id: str | int | None = 
                     member_tag=tag,
                     member_id=member_id,
                     metadata={"channel_id": str(channel_id)} if channel_id else None,
-                    conn=conn,
+                    conn=mem_conn,
                 )
                 if result:
                     saved += 1
@@ -470,7 +473,7 @@ def store_observation_facts(signals: list[dict], channel_id: str | int | None = 
         return saved
     finally:
         if close:
-            conn.close()
+            op_conn.close()
 
 
 __all__ = [

@@ -33,7 +33,26 @@ def _attr(name: str, default: Any = None) -> RuntimeAttrRef:
 
 _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ActivityDefinition(
+        activity_key="v5-reactive-tick",
+        owner_lane="player-highlights",
+        purpose="Event-driven core: ingest CR data, advance the v5 event store + "
+        "projections, and reactively post agent-composed communication intents.",
+        job_id="v5-reactive-tick",
+        job_function="_v5_reactive_tick",
+        schedule_kind="interval",
+        schedule_config={
+            "minutes": _attr("HEARTBEAT_INTERVAL_MINUTES", 30),
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Discord reactive posts: #player-highlights (public), #leader-actions (leadership)",
+        ),
+        activity_role="observer+communicator",
+    ),
+    ActivityDefinition(
         activity_key="clan-awareness",
+        enabled_by_default=False,  # v5: replaced by the event-driven _v5_reactive_tick
         owner_lane="clan-events",
         purpose="Process non-war clan signals, leader-facing notes, and routed clan-event outcomes.",
         job_id="clan-awareness",
@@ -70,6 +89,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="war-awareness",
+        enabled_by_default=False,  # v5: replaced by the event-driven _v5_reactive_tick
         owner_lane="river-race",
         purpose="Process war-only signals and coordinate River Race messaging.",
         job_id="war-awareness",
@@ -140,6 +160,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="leadership-action-scan",
+        enabled_by_default=False,  # v5: leadership recs now flow through _v5_reactive_tick
         owner_lane="arena-relay",
         purpose="Continuously scan for singular leader actions and post crisp action cards when the data warrants one.",
         job_id="leadership-action-scan",
@@ -211,25 +232,11 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         ),
         activity_role="communicator",
     ),
-    ActivityDefinition(
-        activity_key="site-content",
-        owner_lane="announcements",
-        purpose="Refresh and publish daily POAP KINGS site content.",
-        job_id="site-content",
-        job_function="_site_content_cycle",
-        schedule_kind="cron",
-        schedule_config={
-            "hour": _attr("SITE_CONTENT_HOUR", 18),
-            "minute": 0,
-        },
-        delivery_targets=(
-            "POAP KINGS: home payload",
-            "POAP KINGS: clan payload",
-            "POAP KINGS: roster payload",
-        ),
-        activity_role="communicator",
-        legacy_commands=("poap-kings-site-sync",),
-    ),
+    # site-content (POAP KINGS daily site publish) was retired from Elixir at the
+    # v5 consolidation: website generation now lives as a dedicated script in the
+    # website repo, reading the consolidated elixir-v5.db directly. The
+    # _site_content_cycle job function remains importable but is no longer
+    # scheduled or manually triggerable here.
     ActivityDefinition(
         activity_key="promotion-content",
         owner_lane="promote-the-clan",
