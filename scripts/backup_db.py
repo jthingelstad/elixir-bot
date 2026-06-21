@@ -44,7 +44,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-_DEFAULT_DB = _PROJECT_ROOT / "elixir.db"
+_DEFAULT_DB = _PROJECT_ROOT / "elixir-v5.db"
 _DEFAULT_BACKUP_DIR = Path.home() / "elixir-backups"
 
 _TIMESTAMP_FMT = "%Y-%m-%d-%H%M%S"
@@ -60,20 +60,21 @@ def _filename_re(prefix: str) -> re.Pattern:
 
 def _databases() -> list[tuple[str, Path, bool]]:
     """(filename_prefix, source_path, required) for every DB the restart backup
-    covers: the operational elixir.db (required) plus the three v5 stores
-    (optional — absent on a fresh machine, which must not block a restart)."""
-    dbs: list[tuple[str, Path, bool]] = [(_DEFAULT_PREFIX, _db_path(), True)]
+    covers. Post-consolidation the operational DB IS elixir-v5.db (the "elixir-v5"
+    entry, now required); the v4 elixir.db is retired. The event store and memory
+    DB are required too (they hold non-derivable state). All three are the live
+    stores; absence is a real problem worth surfacing on a restart."""
     try:
         from event_core import config
 
-        dbs += [
-            ("elixir-v5-events", Path(config.EVENTS_DB), False),
-            ("elixir-v5", Path(config.PROJECTIONS_DB), False),
-            ("elixir-v5-memory", Path(config.MEMORY_DB), False),
+        return [
+            ("elixir-v5", Path(config.PROJECTIONS_DB), True),
+            ("elixir-v5-events", Path(config.EVENTS_DB), True),
+            ("elixir-v5-memory", Path(config.MEMORY_DB), True),
         ]
     except Exception as exc:  # pragma: no cover - defensive: config import failure
-        log.warning("v5 config unavailable; backing up operational DB only: %s", exc)
-    return dbs
+        log.warning("v5 config unavailable; falling back to default operational path: %s", exc)
+        return [(_DEFAULT_PREFIX, _db_path(), True)]
 
 # Retention thresholds in days.
 _KEEP_ALL_DAYS = 28

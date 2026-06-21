@@ -77,13 +77,13 @@ def test_prune_is_isolated_per_prefix(tmp_path):
 def test_databases_registry_includes_v5_stores():
     from event_core import config
 
-    # conftest already points config at temp paths; assert the registry wires
-    # all three v5 stores plus the required operational DB.
+    # Post-consolidation: the operational DB is elixir-v5.db; elixir.db is retired.
+    # All three live stores are required.
     prefixes = {prefix for prefix, _path, _required in backup_db._databases()}
-    assert prefixes == {"elixir", "elixir-v5-events", "elixir-v5", "elixir-v5-memory"}
+    assert prefixes == {"elixir-v5-events", "elixir-v5", "elixir-v5-memory"}
 
     required = {prefix for prefix, _p, req in backup_db._databases() if req}
-    assert required == {"elixir"}  # v5 stores are optional (skip if absent)
+    assert required == {"elixir-v5-events", "elixir-v5", "elixir-v5-memory"}
 
     paths = {prefix: path for prefix, path, _ in backup_db._databases()}
     assert str(paths["elixir-v5-events"]) == config.EVENTS_DB
