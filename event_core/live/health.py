@@ -3,7 +3,7 @@
 Reports event-store head, follower/projection lag, detection + intent counts (by
 status), and recent posted intents. Works pre-flip (validates the build) and
 post-flip (monitors steady state). Pair with: service up (`launchctl list | grep
-elixir`), fresh `elixir.log`, and the live channels.
+elixir`), fresh `elixir-v5.log`, and the live channels.
 """
 from __future__ import annotations
 

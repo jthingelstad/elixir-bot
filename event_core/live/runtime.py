@@ -18,10 +18,12 @@ LEADER_ACTIONS = {"channel_id": 1513758211206025227, "channel_name": "leader-act
 
 
 def route_intent(intent) -> dict:
-    """Map an intent to its target channel config."""
-    if intent.scope == "leadership" or (intent.intent_type or "").startswith("leadership:"):
-        return LEADER_ACTIONS
-    return PUBLIC_HIGHLIGHTS
+    """Map an intent to its target channel config. Fail-closed: only an explicitly
+    public-scoped intent reaches the public channel; leadership and anything
+    unexpected route to the (private) leadership channel."""
+    if intent.scope == "public" and not (intent.intent_type or "").startswith("leadership:"):
+        return PUBLIC_HIGHLIGHTS
+    return LEADER_ACTIONS
 
 
 def intent_context(intent) -> str:
@@ -48,6 +50,8 @@ def _extract_copy(result) -> str | None:
 
 def compose_copy(intent) -> str | None:
     """Agent composes voice-appropriate copy for the intent's channel lane."""
+    import logging
+
     import elixir_agent
     from event_core.live.discord import render_intent
 
@@ -59,35 +63,32 @@ def compose_copy(intent) -> str | None:
         copy = _extract_copy(result)
         if copy:
             return copy
+        logging.getLogger("elixir.event_core").warning(
+            "compose_copy: agent returned no copy for %s; using fallback", intent.dedup_key
+        )
     except Exception:
-        pass
-    return render_intent(intent)  # last-resort fallback only
+        logging.getLogger("elixir.event_core").exception(
+            "compose_copy: agent failed for %s; using fallback", intent.dedup_key
+        )
+    return render_intent(intent)  # last-resort deterministic fallback
 
 
-class CollectingPoster:
-    """Composes copy (agent) and collects (channel_id, text) to post; marks the
-    intent fulfilled. The async service layer sends the collected posts to Discord."""
+def make_agent_poster(send):
+    """Build a SYNCHRONOUS poster for IntentConsumer: compose copy (agent voice)
+    then post via `send(channel_id, text, scope) -> bool`, returning the send
+    result. Critically, this composes AND sends before returning True, so the
+    consumer only marks the intent fulfilled after a confirmed Discord post
+    (at-least-once; no fulfil-before-send loss). `send` is the live service's
+    bridge to the discord.py client (blocks on the actual post)."""
 
-    def __init__(self):
-        self.queued: list[dict] = []
-
-    def __call__(self, intent) -> bool:
+    def poster(intent) -> bool:
         ch = route_intent(intent)
         copy = compose_copy(intent)
         if not copy:
             return False
-        self.queued.append({"channel_id": ch["channel_id"], "text": copy, "scope": intent.scope})
-        return True
+        return bool(send(ch["channel_id"], copy, intent.scope))
 
-
-def prepare_posts(app, conn) -> list[dict]:
-    """Process new intents reactively: compose + collect posts (does not send).
-    Returns [{channel_id, text, scope}] for the async layer to deliver."""
-    from event_core.live.discord_consumer import IntentConsumer
-
-    poster = CollectingPoster()
-    IntentConsumer(app, conn, poster).run()
-    return poster.queued
+    return poster
 
 
 def go_live_drain(app, conn) -> int:

@@ -8,7 +8,10 @@ Rebuild-from-zero == replay determinism.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
+
+log = logging.getLogger("elixir.event_core")
 
 
 class ProjectionRunner:
@@ -66,9 +69,17 @@ class ProjectionRunner:
                 break
             for n in notifs:
                 if self.aggregate_name is None or self._aggregate_of(n) == self.aggregate_name:
-                    event = self.app.mapper.to_domain_event(n)
-                    self.handle(event, n)
-                    handled += 1
+                    try:
+                        event = self.app.mapper.to_domain_event(n)
+                        self.handle(event, n)
+                        handled += 1
+                    except Exception:
+                        # One malformed event must not abort the whole tick. Skip,
+                        # log, and continue — the position still advances so we
+                        # don't wedge on it.
+                        log.exception(
+                            "%s: skipped notification %s (%s)", self.name, n.id, n.topic
+                        )
                 pos = n.id
             self._save_position(pos)  # same transaction as the handle() writes
             self.conn.commit()

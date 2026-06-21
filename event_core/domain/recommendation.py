@@ -50,6 +50,7 @@ class Recommendation(Aggregate):
         self.scope = "leadership"
         self.status = "detected"
         self.outcome = None
+        self.suppression_reason = None  # set on suppress; always present for readers
 
     @classmethod
     def create_id(cls, dedup_key: str, **_kwargs) -> UUID:
@@ -86,6 +87,8 @@ class Recommendation(Aggregate):
         self.status = "expired"
 
     def observe_outcome(self, outcome: str) -> None:
+        if self.outcome is not None:
+            raise InvalidTransition("outcome already recorded")
         self._outcome_observed(outcome)
 
     @event("OutcomeObserved")
