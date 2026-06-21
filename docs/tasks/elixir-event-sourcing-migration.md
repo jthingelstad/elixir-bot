@@ -3,7 +3,9 @@
 Status: Design plan. Original tracking issue: #95. Boundary refinement: #97.
 
 Captured: 2026-06-21. Revised: 2026-06-21 (library adoption, reactive v5 framing,
-two-context aggregate model, UTC-only, single-campaign migration).
+two-context aggregate model, UTC-only, single-campaign migration; then three-tier
+battle model, durable-log-vs-telemetry tiering, agent read-side tooling, and the
+v5 schema reset).
 
 This plan supersedes the "stream as observation substrate" framing in
 `docs/tasks/elixir-stream-redesign-direction.md`. The prior work was a necessary
@@ -54,6 +56,12 @@ Consequences for the old design:
   surrounding detail to write well. There is no "Situation V2."
 - Signals stop being the primary unit of awareness. They become derived events
   emitted by aggregators.
+- **The agent's default diet is pre-distilled.** Because high-frequency churn
+  never enters the durable log (§5.6), what the agent reads — the triggering
+  detection event plus projection queries — is already meaningful by
+  construction, not a flood it must sift. A detection event is itself a
+  summarization ("won 7 straight," with evidence attached), not raw rows. The
+  agent drills into raw telemetry only on demand, via tools (§8.1).
 
 ---
 
@@ -340,6 +348,49 @@ What *does* deserve a period aggregate is anything with a key and a lifecycle:
 River Race week, league season, tournaments, special events. That is the line:
 **mode = dimension; bounded cycle = aggregate.**
 
+### 5.6 Durable log vs. retention-managed telemetry (the tiering principle)
+
+The battle decision in §5.3 is the first instance of a principle that the
+library's append-only nature forces everywhere. The `eventsourcing` event store
+**cannot delete events** — the docs are explicit: "it isn't possible to delete
+events from the log." Snapshots bound *replay cost*, not *storage*; old events
+stay forever. So retention is not a runtime feature you switch on — it is decided
+at design time by **what you allow into the log**:
+
+> **High-frequency churn is retention-managed telemetry in `elixir.db`. The
+> forever-append library log holds only durable, lower-frequency truth + rollups.**
+
+Applying the line across the model:
+
+- **Telemetry** (projection DB, finite horizon ~90 days, freely prunable): raw
+  battles, **trophy/donation churn** (`player_trophies_changed`,
+  `player_donations_changed` fire effectively every battle — battle-scale, so they
+  are telemetry, *not* log events), raw rankings/chests snapshots. This is where
+  "what changed over the last 90 days" is answered.
+- **Durable log** (forever, library): genuinely *meaningful* transitions — card
+  unlocks, level-ups, badges earned, role changes, ranked **league** transitions,
+  name changes — plus all Detection / Recommendation / DecisionCase events and
+  rollup-summary events. Low frequency by nature.
+- **Rollups** (durable projections): carry long-term history past the telemetry
+  horizon.
+
+This resolves a tension the original plan had backwards. It wanted "card 12→13
+queryable even if not posted" *and* an implicit forever log. You get both: ordinary
+deltas are queryable within the telemetry window, milestones are durable in the
+log, and rollups bridge the gap. You do not keep every trophy tick forever.
+
+With this tiering the durable log is small — order **hundreds of events/day**,
+~100–200k/year, sub-gigabyte for years — so append-only stops being a worry. If a
+shrink is ever truly needed, the only in-model move is **snapshot-then-truncate-
+behind** at the SQL level (delete an aggregate's events ≤ a snapshot version):
+current-state reconstruction survives; replay-from-zero and fine audit for the
+truncated range are sacrificed. Treat it as a last resort, not routine.
+
+A direct corollary for §8.1: because raw telemetry ages out, a **detection event's
+embedded evidence must carry the *commentable* facts** (opponent tags, cards
+played, key stats) — not just opaque dedup keys — so the agent can still be
+specific about an old event after the telemetry is gone.
+
 ---
 
 ## 6. Mapping current tables to the new model
@@ -427,20 +478,53 @@ surface's read model.
 Cadence reflections ("24h clan summary") are a small, separate scheduled follower
 that queries projections — not a return of schedule-first awareness.
 
+### 8.1 The agent read side — pre-distilled triggers, drill-down on demand
+
+When the agent acts, it starts from a pre-distilled trigger (a Detection or
+Recommendation event) and reaches down for specifics only as needed. It never
+queries the opaque event store; it reads **projections** through a small set of
+read-only tools:
+
+- `resolve_evidence(event)` — maps a detection's embedded evidence to full battle
+  rows (opponents, decks, cards, crowns, trophy change, mode). The link from
+  trigger to specificity; this is how Elixir comments on actual player names and
+  cards played.
+- `get_player_battles(player_tag, mode?, since?, limit?)` — recent battle detail.
+- `get_player_timeline(player_tag, window)` — the World+Mind merge projection.
+- card / cohort / current-state lookups; card IDs resolved to names via the
+  reference catalog.
+
+Three constraints on this layer:
+
+- **Evidence outlives telemetry.** Raw battle detail exists only within the
+  retention horizon (§5.6); `resolve_evidence` gives *richer* detail while the
+  window is open, but the detection event must already embed the commentable facts
+  so the agent can be specific even after raw battles are pruned.
+- **Scope is enforced at the tool**, not by convention — a public composition path
+  cannot pull leadership-scoped data.
+- **On-demand, not per-tick** — detail is fetched only while composing, keeping
+  token cost where the value is.
+
 ---
 
 ## 9. Event taxonomy
 
 Organized by context and aggregate. (Largely preserved from the prior plan; types
-are unchanged in spirit, re-homed onto aggregates.)
+are unchanged in spirit, re-homed onto aggregates.) Per the §5.6 tiering
+principle, types tagged **[telemetry]** are high-frequency churn that lands in the
+retention-managed projection DB, *not* the durable log; everything else is a
+durable log event.
 
 ### Observed World — Player aggregate
 
 `player_profile_observed`, `player_name_changed`, `player_experience_changed`,
-`player_level_changed`, `player_trophies_changed`, `player_best_trophies_changed`,
-`player_wins_changed`, `player_losses_changed`, `player_battle_count_changed`,
-`player_donations_changed`, `player_war_day_wins_changed`,
-`player_challenge_best_changed`.
+`player_level_changed`, `player_best_trophies_changed`,
+`player_war_day_wins_changed`, `player_challenge_best_changed`.
+
+[telemetry] `player_trophies_changed`, `player_donations_changed`,
+`player_wins_changed`, `player_losses_changed`, `player_battle_count_changed` —
+these fire effectively every battle; retained as telemetry, summarized into
+rollups, and surfaced as durable events only when they cross a milestone.
 
 Ranked / Path of Legends: `ranked_season_result_observed`,
 `ranked_league_changed`, `ranked_trophies_changed`, `ranked_global_rank_changed`,
@@ -558,8 +642,41 @@ shadow-rollout milestones. Nothing ships half-on; it is whole when it merges.
 Isolation: a git worktree + a **copy of `elixir.db`** and a fresh
 `elixir-events.db`. The running bot is untouched until cutover.
 
+### 11.1 The v5 schema reset
+
+The current schema is 54 migrations (`db/_migrations.py`, 0–53) that mostly build
+tables this rewrite replaces. Carrying that chain forward is archaeology. Draw a
+clean line: a **v5 schema baseline**.
+
+Three database lineages, kept distinct:
+
+- **Frozen legacy** — `cp elixir.db elixir.db.legacy`, read-only. The backfill
+  source, the one-time parity reference, and the rollback safety (there is no
+  compat path back). Never written.
+- **v5 `elixir.db`** — the working projection DB, built from a single squashed
+  baseline. Our migration tooling governs only this file.
+- **`elixir-events.db`** — library-owned; the `eventsourcing` library creates and
+  manages its own tables. **Not in our migration system at all.** (A clean upside
+  of the two-DB split: it shrinks what we migrate.)
+
+`elixir.db` holds two populations: tables replaced by the Event Core, and
+out-of-scope survivors (memory/embeddings incl. the `clan_memories_fts` FTS5 and
+`clan_memory_vec` sqlite-vec **virtual tables**, Discord plumbing, `llm_calls`).
+Because those virtual tables do not `INSERT … SELECT` cleanly across files, the
+reset is done **squash-in-place (recommended)**: work on a copy of `elixir.db`,
+run one `v5_cutover` migration that DROPs the replaced tables and CREATEs the
+projection tables while leaving survivors physically untouched; the new baseline =
+"survivor schema as-of-squash" + the v5 cutover; migrations 0–53 retire to git
+history. The reproducible "baseline + replay backfill" build substitutes for a
+rollback path.
+
+Phase 0 decides one open question here: whether memory/embeddings should move to
+their **own** database now (the clean end state, mirroring the event-store split)
+or stay in `elixir.db` as survivors (less scope). Recommended: stay, to bound the
+rewrite — revisit later.
+
 ```
-[0] Phase 0 — settle the gating decisions (§12). No schema work until done.
+[0] Phase 0 — settle the gating decisions (§14). No schema work until done.
       |
 [1] Event Core on the library — Application + aggregate skeletons
       (Player, Clan, RiverRace, LeagueSeason, Tournament, SpecialEvent;
@@ -579,7 +696,8 @@ Isolation: a git worktree + a **copy of `elixir.db`** and a fresh
 [7] Reactive trigger — communication-policy follower -> communication intents.
       Cadence reflections (small) over projections.
       |
-[8] Cutover — point the live bot at the new core; delete old tables/paths.
+[8] Cutover — freeze legacy (§11.1), point the live bot at the new core,
+      retire old tables/paths via the v5 baseline.
 ```
 
 No compatibility layer at any step. No old/new dual-run. The CR API is the
@@ -623,6 +741,10 @@ audit; recommendation coverage audit; DB growth and retention.
 ## 13. Guardrails
 
 - No raw battle flood in prompts (battles are facts behind projections/rollups).
+- No high-frequency churn in the durable log — it is append-only and cannot be
+  deleted (§5.6); churn is retention-managed telemetry.
+- No detection event whose evidence cannot stand alone after telemetry is pruned
+  (embed the commentable facts, §8.1).
 - No leadership data in public-scoped output, by construction.
 - No presentation-specific fields in the Event Core.
 - No timezone in the data layer; `America/Chicago` exists only in the one rollup
@@ -656,10 +778,17 @@ No schema or aggregate code until these are written down:
 5. **Key-format hazards** — RiverRace `seasonId` (sequential int) vs LeagueSeason
    `YYYY-MM` are different keyspaces; Player `progress` keys are opaque side-mode
    labels and must **not** key aggregates.
-6. **Retention** — produce an actual events/day and 90-day DB-growth estimate
-   (you emit "every meaningful delta" for ~50 members on top of ~350–450
-   battles/day); let the number drive base-event retention vs rollup survival.
-7. **Scope rules** — public / leadership / system_internal, and how leadership
+6. **Tiering: durable log vs. telemetry (§5.6)** — the library cannot delete
+   events, so finalize which event types are durable log vs. retention-managed
+   telemetry (battles + trophy/donation/win/loss churn → telemetry; milestones,
+   detections, recommendations, cases → log). Produce an events/day and yearly
+   DB-growth estimate for the *durable log only*, and set the telemetry retention
+   horizon (target 90 days). Confirm detection-event evidence payloads carry the
+   commentable facts (§8.1).
+7. **Schema reset (§11.1)** — squash-in-place baseline vs. fresh-file copy
+   (recommended: in-place, because of the FTS5/vec virtual tables); and whether
+   memory/embeddings move to their own DB now or stay as survivors.
+8. **Scope rules** — public / leadership / system_internal, and how leadership
    payloads are protected given default SQLite storage.
 
 ---
@@ -669,12 +798,11 @@ No schema or aggregate code until these are written down:
 Most prior open questions are now decided (library: yes; new store: yes, separate
 file; sync vs scheduled generation: reactive followers). Remaining:
 
-1. Retention horizon for full-fidelity non-battle base events vs rollup-only
-   history (input to Phase 0 #6).
-2. Whether `GlobalTournament` is worth modeling given it is usually empty in
+1. Whether `GlobalTournament` is worth modeling given it is usually empty in
    sampling.
-3. Whether the cadence reflection set should shrink further over time as reactive
+2. Whether the cadence reflection set should shrink further over time as reactive
    coverage proves out.
+3. Whether memory/embeddings get their own DB now or later (Phase 0 #7).
 
 ---
 
