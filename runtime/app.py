@@ -343,7 +343,6 @@ from runtime.startup import (  # noqa: E402,F401
 
 register_elixir_app_commands(bot)
 
-@bot.event
 async def _v5_post(channel_id, text) -> bool:
     """Post v5 agent-composed copy to a channel by id (the Discord send bridge)."""
     channel = bot.get_channel(int(channel_id))
@@ -365,6 +364,7 @@ async def _v5_reactive_tick():
     return result
 
 
+@bot.event
 async def on_ready():
     global SLASH_COMMANDS_SYNCED
     log.info("Elixir online as %s", bot.user)
