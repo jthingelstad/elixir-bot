@@ -200,9 +200,19 @@ What remains is the **gated cutover** — wiring into the live runtime + deployi
   projections; memory-DB split; squash v5 baseline; fresh freeze + full backfill;
   switch the bot to the v5 stores; decommission legacy (signal_log,
   game_event_stream, side tables).
-- **Low-risk tails** (best done when consumers fix the grain): derived-table
-  backfill for >2wk history; the two order-sensitive war projections; clan
-  joins/leaves; detector cooldowns + long-tail signal types.
+- **Low-risk tails:**
+  - ✅ **Roster membership lifecycle (member join/leave/role-change)** — DONE.
+    Clan aggregate diffs the member set → MemberJoined/MemberLeft/MemberRoleChanged;
+    RosterLifecycle projection; validated 100% precision vs legacy join/leave
+    signals (misses are pre-archive only).
+  - **Detector cooldowns** — reclassified, not a detector fix: in v5 you detect
+    everything (full record) and suppress *at the surface* (a posting-frequency
+    decision in the communication policy). Legacy's per-detector 28-day cooldown
+    becomes a CommunicationPolicy feature. Cleaner per the v5 separation.
+  - **Deferred (genuinely larger, low current value):** derived-table backfill for
+    >2wk history; the two order-sensitive war projections (war_day_status /
+    war_period_clan_status, needing season-inference replay). Best done when a
+    consumer fixes the needed grain.
 
 ---
 
