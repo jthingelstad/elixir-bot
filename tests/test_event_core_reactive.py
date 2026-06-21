@@ -74,6 +74,8 @@ def test_policy_maps_restored_coverage_detection_types(world):
 
     cases = {
         "member_joined:#J:t0": ("member_joined", "welcome"),
+        "member_left:#J:t0": ("member_left", "clan"),
+        "member_promoted:#J:elder:t0": ("member_promoted", "clan"),
         "war_update:#CLAN:5:warDay": ("war_update", "war"),
         "cohort_wave:badge_earned:2026-06-21": ("cohort_wave", "cohort"),
     }
@@ -92,7 +94,7 @@ def test_policy_maps_restored_coverage_detection_types(world):
     conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
     pol = CommunicationPolicy(world, conn)
     pol.reset()
-    assert pol.run() == 3  # only the three public restored-coverage detections
+    assert pol.run() == 5  # only the public restored-coverage detections
 
     for dedup, (_dtype, prefix) in cases.items():
         intent = world.repository.get(intent_id(f"intent:detection:{dedup}"))

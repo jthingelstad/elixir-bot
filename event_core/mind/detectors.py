@@ -302,6 +302,55 @@ class MemberJoinedDetector(FollowerRunner):
         )
 
 
+class MemberLeftDetector(FollowerRunner):
+    """Clan departure -> #clan-events. Follows Clan MemberLeft (restores the v4
+    enriched-leave note; v5 had no departure coverage at all)."""
+
+    name = "detector:member_left"
+    aggregate_name = "Clan"
+
+    def detect(self, event, notification) -> None:
+        if type(event).__name__ != "MemberLeft":
+            return
+        self.emit_detection(
+            dedup_key=f"member_left:{event.player_tag}:{event.observed_at}",
+            detection_type="member_left",
+            subject_tag=event.player_tag,
+            occurred_at=event.observed_at,
+            caused_by=[self.evidence(notification)],
+            payload={},
+        )
+
+
+# Clan role hierarchy, low -> high. Used to distinguish promotions from demotions.
+_ROLE_RANK = {"member": 0, "elder": 1, "coleader": 2, "leader": 3}
+
+
+class MemberRoleChangeDetector(FollowerRunner):
+    """Role promotions -> #clan-events (celebratory, matches v4 elder_promotion).
+    Follows Clan MemberRoleChanged. Demotions are intentionally NOT posted (v4
+    didn't publicly announce demotions either — they drove leader-action cards)."""
+
+    name = "detector:member_role_change"
+    aggregate_name = "Clan"
+
+    def detect(self, event, notification) -> None:
+        if type(event).__name__ != "MemberRoleChanged":
+            return
+        old = _ROLE_RANK.get((event.old_role or "").lower(), -1)
+        new = _ROLE_RANK.get((event.new_role or "").lower(), -1)
+        if new <= old:  # demotion or lateral/unknown -> not a public celebration
+            return
+        self.emit_detection(
+            dedup_key=f"member_promoted:{event.player_tag}:{event.new_role}:{event.observed_at}",
+            detection_type="member_promoted",
+            subject_tag=event.player_tag,
+            occurred_at=event.observed_at,
+            caused_by=[self.evidence(notification)],
+            payload={"old_role": event.old_role, "new_role": event.new_role},
+        )
+
+
 class WarUpdateDetector(FollowerRunner):
     """War phase transition -> #river-race. Follows RiverRace CurrentStateObserved;
     fires once per (clan, section, period_type) so fame churn doesn't spam — only
@@ -379,5 +428,7 @@ ALL_DETECTORS = [
     BadgeEarnedDetector,
     BattleTrophyPushDetector,
     MemberJoinedDetector,
+    MemberLeftDetector,
+    MemberRoleChangeDetector,
     WarUpdateDetector,
 ]
