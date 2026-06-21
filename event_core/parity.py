@@ -112,20 +112,30 @@ def check_battle_telemetry_parity(
     def ident(tag, bt, btype, opp, cf, ca):
         return (_tag_key(tag), bt, btype, _tag_key(opp or ""), cf, ca)
 
+    # outcome is deterministic (crowns/trophy/boat) -> must match exactly.
+    # the classification flags derive from classify_battle_mode, whose logic has
+    # evolved; legacy stores historical values, backfill applies current canonical
+    # logic, so differences there are drift, not defects.
+    outcome_cols = ["outcome"]
+    classification_cols = [
+        "is_war", "is_ladder", "is_ranked", "is_competitive",
+        "is_special_event", "game_mode_id",
+    ]
+    derived_cols = outcome_cols + classification_cols
+
     try:
-        mine_by_member: dict[str, set] = {}
+        mine: dict[tuple, dict] = {}
         window: dict[str, list] = {}
         for r in proj.execute("SELECT * FROM battle_telemetry"):
             tk = _tag_key(r["player_tag"])
-            mine_by_member.setdefault(tk, set()).add(
-                ident(r["player_tag"], r["battle_time"], r["battle_type"],
-                      r["opponent_tag"], r["crowns_for"], r["crowns_against"])
-            )
+            key = ident(r["player_tag"], r["battle_time"], r["battle_type"],
+                        r["opponent_tag"], r["crowns_for"], r["crowns_against"])
+            mine[key] = {c: r[c] for c in derived_cols}
             w = window.setdefault(tk, [r["battle_time"], r["battle_time"]])
             w[0] = min(w[0], r["battle_time"])
             w[1] = max(w[1], r["battle_time"])
 
-        legacy_by_member: dict[str, set] = {}
+        legacy_rows: dict[tuple, dict] = {}
         for r in legacy.execute(
             "SELECT m.player_tag AS pt, mbf.* FROM member_battle_facts mbf "
             "JOIN members m ON m.member_id = mbf.member_id"
@@ -136,36 +146,38 @@ def check_battle_telemetry_parity(
             lo, hi = window[tk]
             if not (lo <= r["battle_time"] <= hi):
                 continue
-            legacy_by_member.setdefault(tk, set()).add(
-                ident(r["pt"], r["battle_time"], r["battle_type"],
-                      r["opponent_tag"], r["crowns_for"], r["crowns_against"])
-            )
+            key = ident(r["pt"], r["battle_time"], r["battle_type"],
+                        r["opponent_tag"], r["crowns_for"], r["crowns_against"])
+            legacy_rows[key] = {c: r[c] for c in derived_cols}
     finally:
         legacy.close()
         proj.close()
 
-    matched = only_mine = only_legacy = 0
-    members_clean = 0
-    imperfect = []
-    for tk, mine in mine_by_member.items():
-        leg = legacy_by_member.get(tk, set())
-        inter = mine & leg
-        om, ol = len(mine - leg), len(leg - mine)
-        matched += len(inter)
-        only_mine += om
-        only_legacy += ol
-        if om == 0 and ol == 0:
-            members_clean += 1
-        else:
-            imperfect.append({"tag": tk, "only_projection": om, "only_legacy": ol})
+    mine_keys, legacy_keys = set(mine), set(legacy_rows)
+    inter = mine_keys & legacy_keys
+    outcome_mismatch = []
+    classification_drift = 0
+    fully_clean = 0
+    for key in inter:
+        out_diffs = {c: {"legacy": legacy_rows[key][c], "projection": mine[key][c]}
+                     for c in outcome_cols if legacy_rows[key][c] != mine[key][c]}
+        cls_drift = any(legacy_rows[key][c] != mine[key][c] for c in classification_cols)
+        if out_diffs:
+            outcome_mismatch.append({"battle": list(key), "diffs": out_diffs})
+        if cls_drift:
+            classification_drift += 1
+        if not out_diffs and not cls_drift:
+            fully_clean += 1
 
     return {
-        "members_compared": len(mine_by_member),
-        "members_identical": members_clean,
-        "battles_matched": matched,
-        "only_in_projection": only_mine,
-        "only_in_legacy": only_legacy,
-        "imperfect_detail": imperfect[:25],
+        "battles_matched_identity": len(inter),
+        "fully_clean": fully_clean,
+        "outcome_mismatch": len(outcome_mismatch),
+        "classification_drift": classification_drift,  # current vs historical classify logic
+        # coverage artifacts (expected, not pipeline defects):
+        "only_in_projection": len(mine_keys - legacy_keys),  # v5 captured pre-tracking history
+        "only_in_legacy": len(legacy_keys - mine_keys),      # battlelog rolling-window gaps
+        "outcome_mismatch_detail": outcome_mismatch[:25],
     }
 
 

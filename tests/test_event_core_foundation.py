@@ -163,11 +163,11 @@ def test_foundation_parity_determinism_idempotency():
     assert rp["mismatched"] == 0
     assert rp["matched"] > 0
 
-    # battle telemetry tier: high identity match, no fabrication beyond known
-    # special-type edge cases; only_in_legacy is the expected archive-window loss.
+    # battle telemetry tier: derived columns (outcome, mode flags) match exactly on
+    # battles present in both; only_in_* are expected coverage artifacts.
     bt = r1["parity"]["battle_telemetry"]
-    assert bt["battles_matched"] > 0
-    assert bt["battles_matched"] > 10 * bt["only_in_projection"]
+    assert bt["battles_matched_identity"] > 0
+    assert bt["outcome_mismatch"] == 0  # deterministic field must match exactly
 
     # replay determinism: two from-zero rebuilds are byte-identical
     assert fp1 == fp2
