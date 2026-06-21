@@ -32,7 +32,12 @@ so we retain the v5↔legacy parity validation capability without the live cost.
 **Safety checks done:** grep across `event_core/` confirmed no Mind/live reference
 to the 7 tables; event_core live/reactive/mind tests pass (17).
 
-TODO in this step: drop the 7 tables from live `elixir-v5.db`, redeploy, verify.
+**DONE (deployed to production).** Dropped the 7 tables + `_clan_agg_tag` from
+live `elixir-v5.db`, removed their `projection_tracking` rows, VACUUMed. Restarted
+(PID 53205); catch-up now advances only the Mind (`detections`/`leadership`/
+`intents`), retired tables stay gone, `detections`+`battle_telemetry` kept, no
+errors, drained_to 14494. Full suite 1014 passed with the engine change.
+Commit: "Retire unread current-state projections from the live tick".
 
 ---
 
