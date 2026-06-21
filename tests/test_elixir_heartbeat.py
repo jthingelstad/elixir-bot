@@ -3141,6 +3141,50 @@ def test_leader_action_recommendation_logs_policy_skip_with_candidate_context():
     assert mock_skip_log.await_args.kwargs["rationale"] == "last seen 8 days ago; no war participation"
 
 
+def test_leader_action_recommendation_uses_fresh_candidate_action_key():
+    from runtime.jobs._core import _post_leader_action_recommendation
+
+    channel = SimpleNamespace(id=900, name="leader-actions", type="text")
+
+    def create_action(**kwargs):
+        return {
+            "action_id": 91,
+            "action_key": kwargs["action_key"],
+            "action_type": kwargs["action_type"],
+            "status": db.ACTION_PROPOSED,
+            "objective": kwargs["objective"],
+            "source_message_id": None,
+        }
+
+    with (
+        patch("runtime.jobs._core.db.has_recent_leader_action", return_value=False),
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
+        patch("runtime.jobs._core.db.build_leader_action_baseline", return_value={}),
+        patch("runtime.jobs._core.db.create_leader_action_recommendation", side_effect=create_action) as mock_create,
+        patch("runtime.jobs._core.post_leader_action_card", new=AsyncMock(return_value=[
+            SimpleNamespace(id=9100),
+            SimpleNamespace(id=9101),
+        ])),
+        patch("runtime.jobs._core.db.save_message"),
+    ):
+        posted = asyncio.run(_post_leader_action_recommendation(
+            channel,
+            action_type="kick_recommendation",
+            objective="roster_health",
+            title="kick/removal recommendation",
+            prompt_text="Review Vijay for removal from the clan.",
+            rationale="last seen 8 days ago; no war participation",
+            target_player_tag="#DEF456",
+            target_player_name="Vijay",
+            case_id=44,
+        ))
+
+    assert posted is True
+    create_kwargs = mock_create.call_args.kwargs
+    assert create_kwargs["action_key"].startswith("kick_recommendation:")
+    assert "source_signal_key" not in create_kwargs
+
+
 def test_war_champ_standings_routes_to_arena_relay():
     outcomes = plan_signal_outcomes([
         {"type": "war_champ_standings", "season_id": 134, "section_index": 2},
