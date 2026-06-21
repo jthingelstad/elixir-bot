@@ -143,6 +143,32 @@ def test_render_intent_and_dry_run_poster(world):
     assert poster.posts == [("public", text)]
 
 
+def test_route_intent_and_go_live_drain(world):
+    from event_core import db
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live.discord_consumer import IntentConsumer
+    from event_core.live.runtime import go_live_drain, route_intent
+
+    pub = CommunicationIntent(
+        dedup_key="p", intent_type="celebrate:best_trophies_peak", subject_tag="#A",
+        scope="public", priority=1, caused_by=[], summary={},
+    )
+    lead = CommunicationIntent(
+        dedup_key="l", intent_type="leadership:kick", subject_tag="#B",
+        scope="leadership", priority=2, caused_by=[], summary={},
+    )
+    assert route_intent(pub)["channel_name"] == "player-highlights"
+    assert route_intent(lead)["channel_name"] == "leader-actions"
+
+    world.save(pub)
+    world.save(lead)
+    conn = _conn()
+    assert go_live_drain(world, conn) >= 1  # drained to head, posted nothing
+    # downtime backlog is not re-posted
+    assert IntentConsumer(world, conn, poster=lambda i: True).run() == 0
+    conn.close()
+
+
 def test_cadence_reflection():
     from event_core.live.cadence import clan_activity_24h
 
