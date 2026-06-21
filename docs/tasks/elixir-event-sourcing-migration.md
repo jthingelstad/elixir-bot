@@ -153,6 +153,47 @@ SQLite environment (per the library tutorial, part 3):
 Stored events are neither compressed nor encrypted by default; leadership-scoped
 payloads that need protection must be handled explicitly (see Guardrails).
 
+### 4.1a Two databases, and why that is safe
+
+The event store (`elixir-events.db`, library-owned) is a **separate file** from
+the projection/read-model DB (`elixir.db`, ours). This is deliberate isolation,
+not an accident, and it is correct rather than risky — but only if one rule holds.
+
+The natural worry is **cross-database atomicity**: the core loop is "append event →
+update projection," and two files cannot share a single ACID transaction. Event
+sourcing does not rely on that atomicity. The notification-log + tracking pattern
+is eventual consistency made reliable: the event is appended atomically to the
+store, and followers rebuild projections while recording how far they have read.
+If a projection write crashes, the follower resumes from its last tracked position
+and re-applies idempotently. The "event committed but projection permanently lost"
+failure mode is exactly what tracking prevents; recovery is automatic — that *is*
+the design.
+
+The one rule that makes the split correct:
+
+> **A follower's tracking record lives in the same database as the projection it
+> writes** (`elixir.db`), so "processed up to position N" and the projection
+> update commit in one transaction. The event store being a separate file is then
+> irrelevant to projection correctness.
+
+Topology:
+
+- `elixir-events.db` — library-owned: stored events, snapshots, notification log.
+  The source of truth; the only thing that *must* be backed up (projections
+  rebuild from it).
+- `elixir.db` — our projections **and their followers' tracking records,
+  co-located** so each follower commits atomically.
+
+Net upside of the split: clean schema ownership (the library manages its own file
+instead of dropping tables among our 82 and tangling with `db/_migrations.py`);
+projections are explicitly disposable and rebuildable, which clarifies backup
+priority; and the two files can be tuned independently (append-heavy write-once vs.
+read-optimized with frequent rewrites). Collapsing to one file would *not* buy
+atomicity anyway — the library still manages its own append transaction — so it
+would add tangle without a guarantee. The only behavioral constraint: **embrace
+eventual consistency** — no path appends an event and synchronously expects its
+projection updated in the same breath. The reactive model never needs that.
+
 ### 4.2 The reshape: the store is opaque; dimensions live in projections
 
 The library stores events as serialized payloads **per aggregate sequence**. You
@@ -239,29 +280,55 @@ This also resolves writer-concurrency cleanly: **ingest is the single writer to
 the World; each follower owns its own Mind aggregates.** No aggregate has two
 writers, so optimistic-version contention is avoided by construction.
 
-### 5.3 Two design decisions this model forces (gating — see §12)
+### 5.3 Battles: a three-tier model (decided)
 
-1. **Where do battles live in a library that requires aggregates?** Everything in
-   the notification log must be an aggregate event, but a Player aggregate that
-   replays thousands of `BattleObserved` events on every load is wrong.
-   - *Recommended:* a per-ingest-run **`BattlesObserved` summary event** (on
-     Player or a thin `ClanActivity` aggregate) that references a batch, while raw
-     battle rows land directly in a **battle-fact projection table** in `elixir.db`
-     where they are queryable by mode/time. The log stays lean; the high-volume
-     data stays in SQL.
-   - *Alternative:* a dedicated per-player `BattleLog` aggregate, never
-     reconstructed, consumed forward-only by followers (lean Player aggregate, but
-     a high-volume sequence in the library store).
-   - Decide in Phase 0. This is the one place library purity has a real cost.
+Battles are the highest-volume stream (~350–450/day, ~150k/year clan-wide) and the
+data v5 most wants to react to. Two failure modes to avoid: forcing every battle
+into the library log (append-only + forever-replay is the wrong home for telemetry
+with a retention horizon, and a Player aggregate replaying thousands of battle
+events on load is wrong), and pulling battles entirely out of the event model
+(which would strip aggregators of a followable stream and weaken detection
+evidence). The resolution is three tiers:
 
-2. **Where do derived events live?** Derived events are Mind events, so they live
+1. **Raw battles = retention-managed telemetry.** Captured idempotently (synthetic
+   dedup key = `battleTime` + sorted `(team[0].tag, opponent[0].tag)`) into a
+   **battle-fact projection table** in `elixir.db` (the `member_battle_facts`
+   successor), with a finite high-fidelity horizon (target 90 days). **Not library
+   events.** This matches the API's own ephemerality and the fact that raw battle
+   detail is only needed short-term (reactive detection now; mode activity this
+   week). Battles never enter a World aggregate, so Player stays lean by
+   construction.
+2. **Durable truth = the derived layer in the log.** Aggregators read the recent
+   battle-fact window and emit **Detection events** (hot streak, ranked surge,
+   trophy push) into the library log, **with evidence embedded** — the battle
+   dedup keys and a compact summary travel *inside* the detection event. The
+   durable, replayable, forever record is this lower-volume derived layer, which
+   fits an event log, and its evidence survives after raw battles age out.
+3. **Rollups = durable projections.** Daily/weekly per-mode summaries so retiring
+   raw battles never erases long-term history.
+
+Accepted, bounded exception: detection events are not *purely* replayable from the
+log alone during formation, because they are computed from retained telemetry.
+Once emitted they are durable and self-describing. This is the same boundary the
+API itself draws, documented rather than silent.
+
+Loss control is then an ingest-cadence SLO, not a modeling choice: poll each
+member's battlelog faster than their ~30–40 battle window empties (binding case: a
+heavy war-day/ladder session), **prioritize polling for members seen battling
+recently**, and rely on the idempotent dedup key so over-polling is free. Battles
+played and aged out before a poll are lost at the source — no architecture
+recovers them, and battle backfill is bounded by what reached `raw_api_payloads`.
+
+### 5.4 Where do derived events live?
+
+Derived events are Mind events, so they live
    on **Detection / Recommendation / DecisionCase aggregates**, not back on the
    Player. The unified "Player Timeline" view (observations + inferences about one
    player) is reassembled as a **projection** that merges World events for
    `player_tag` with Mind events whose subject is that player. This keeps every
    aggregate single-writer and uses the projection layer we are building anyway.
 
-### 5.4 Why game modes are NOT aggregates
+### 5.5 Why game modes are NOT aggregates
 
 Game *modes* (Trophy Road / Path of Legends / 2v2 / Touchdown / CHAOS / special
 events) have no stable identity and no start→end lifecycle of their own. A mode is
@@ -303,8 +370,9 @@ projections; they are not part of this model.
 ## 7. Projections and read models (UTC storage, TZ only at read)
 
 Projection tables are deterministic read models, each maintained by a follower
-process application with its own tracking record. They are rebuildable from the
-event log on a copy.
+process application. They live in `elixir.db` with the follower's tracking record
+**co-located** so projection-plus-position commits atomically (§4.1a). They are
+rebuildable from the event log on a copy.
 
 Storage is **UTC**. `local_date` is **removed from the data layer entirely** — it
 was presentation logic smuggled into storage, in violation of §3.
@@ -576,10 +644,11 @@ No schema or aggregate code until these are written down:
 1. **Aggregate boundaries** — confirm the §5 set; settle Player-vs-Clan ownership
    of membership; decide whether RiverRace is keyed at week or season grain
    (recommended: week).
-2. **Battle model (§5.3 #1)** — `BattlesObserved` summary event + battle-fact
-   projection (recommended) vs. dedicated `BattleLog` aggregate.
-3. **Derived-event home (§5.3 #2)** — confirm Mind aggregates + timeline-by-
-   projection.
+2. **Battle telemetry horizon** — the three-tier model is decided (§5.3); Phase 0
+   sets the actual raw-battle retention horizon (target 90 days) and confirms the
+   battle-fact projection schema and dedup key.
+3. **Derived-event home** — confirm Mind aggregates + timeline-by-projection
+   (§5.4).
 4. **Command idempotency** — deterministic rules for *change* events under the
    aggregate model, including value oscillation (12→13→12) and missed-poll jumps
    (12→14 across a gap) — you only see snapshots, so define exactly what each
