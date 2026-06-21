@@ -344,6 +344,27 @@ from runtime.startup import (  # noqa: E402,F401
 register_elixir_app_commands(bot)
 
 @bot.event
+async def _v5_post(channel_id, text) -> bool:
+    """Post v5 agent-composed copy to a channel by id (the Discord send bridge)."""
+    channel = bot.get_channel(int(channel_id))
+    if channel is None:
+        log.warning("v5: channel %s not found; skipping post", channel_id)
+        return False
+    await _post_to_elixir(channel, {"content": text})
+    return True
+
+
+async def _v5_reactive_tick():
+    """Event-driven tick: ingest CR data -> advance Followers -> reactively post new
+    communication intents (agent-composed). Replaces the v4 scheduled-awareness loop."""
+    from event_core.live import service
+
+    loop = asyncio.get_running_loop()
+    result = await service.reactive_tick(loop, _v5_post)
+    log.info("v5 reactive tick: %s", result)
+    return result
+
+
 async def on_ready():
     global SLASH_COMMANDS_SYNCED
     log.info("Elixir online as %s", bot.user)
@@ -395,6 +416,16 @@ async def on_ready():
             create_task=lambda job_callable: job_callable,
         )
         scheduler.start()
+        # v5 go-live: ingest current state + drain ALL intents (backlog + downtime
+        # catch-up) once, WITHOUT posting, so reactive posting starts clean from the
+        # next tick and never floods Discord with historical events.
+        try:
+            from event_core.live import service as _v5_service
+
+            caught_up = await asyncio.to_thread(_v5_service.catch_up)
+            log.info("v5 go-live catch-up: %s", caught_up)
+        except Exception:
+            log.exception("v5 catch-up failed (reactive posting may flood or lag)")
         startup_posted = await _post_startup_message()
         if not startup_posted:
             log.warning("Startup announcement was not posted to leadership")
