@@ -2397,6 +2397,36 @@ def test_player_intel_refresh_posts_progression_signals():
     assert mock_deliver.await_args.kwargs["workflow"] == "player_intel"
 
 
+def test_player_intel_refresh_suppresses_delivery_when_disabled():
+    """With PLAYER_INTEL_DELIVERY=0 the v4 job still refreshes the read model but
+    does NOT post progression highlights — v5 owns #player-highlights, so this
+    stops the double-post (roadmap item 7)."""
+    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
+    targets = [{"tag": "#ABC", "name": "King Levy"}]
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._intel._player_intel_delivery_enabled", return_value=False),
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir.asyncio.sleep", new=AsyncMock()),
+        patch("elixir.cr_api.get_clan", return_value=clan),
+        patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
+        patch("elixir.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
+        patch("elixir.db.snapshot_members"),
+        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
+        patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
+        patch("elixir.db.snapshot_player_profile", return_value=[{"type": "player_level_up", "tag": "#ABC", "name": "King Levy", "old_level": 65, "new_level": 66}]) as snap,
+        patch("elixir.db.snapshot_player_battlelog"),
+        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
+    ):
+        asyncio.run(elixir._player_intel_refresh())
+
+    snap.assert_called()  # refresh still ran (read model kept current)
+    mock_deliver.assert_not_awaited()  # but nothing posted to Discord
+
+
 def test_player_intel_refresh_splits_optional_badge_level_batches():
     clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
     targets = [{"tag": "#ABC", "name": "King Levy"}]

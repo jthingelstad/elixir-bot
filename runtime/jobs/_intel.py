@@ -63,6 +63,19 @@ PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "1"))
 PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))
 
 
+def _player_intel_delivery_enabled() -> bool:
+    """Whether this v4 job should POST progression highlights to #player-highlights.
+
+    The v5 celebrate detectors now own that channel, so running both double-posts
+    the same milestones (e.g. a badge announced by v4, then again by v5 minutes
+    later). Set PLAYER_INTEL_DELIVERY=0 in the environment to suppress the v4 post
+    while KEEPING the profile/battle refresh above (which still feeds the v4 read
+    model the agent's tools depend on). Defaults ON to preserve legacy behavior;
+    production disables it via .env. Read at call time so .env is loaded first.
+    (See roadmap item 7 — full v4 decommission is the eventual replacement.)"""
+    return os.getenv("PLAYER_INTEL_DELIVERY", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
 async def _player_intel_refresh():
     """Refresh stored player profile and battle intelligence for a subset of active members."""
     runtime_status.mark_job_start("player_intel_refresh")
@@ -133,18 +146,25 @@ async def _player_intel_refresh():
             log.warning("Player intel refresh failed for %s: %s", tag, e)
 
     progression_delivery_failures = 0
-    for signal_batch in _progression_signal_batches(progression_signals):
-        if not await _deliver_signal_group_via_awareness(
-            signal_batch,
-            clan,
-            war,
-            workflow="player_intel",
-        ):
-            progression_delivery_failures += 1
-            log.warning(
-                "player_intel_refresh progression batch delivery failed size=%d",
-                len(signal_batch),
-            )
+    if _player_intel_delivery_enabled():
+        for signal_batch in _progression_signal_batches(progression_signals):
+            if not await _deliver_signal_group_via_awareness(
+                signal_batch,
+                clan,
+                war,
+                workflow="player_intel",
+            ):
+                progression_delivery_failures += 1
+                log.warning(
+                    "player_intel_refresh progression batch delivery failed size=%d",
+                    len(signal_batch),
+                )
+    elif progression_signals:
+        log.info(
+            "player_intel_refresh: delivery disabled (v5 owns #player-highlights); "
+            "refreshed read model, suppressed %d progression signal(s)",
+            len(progression_signals),
+        )
 
     if profile_failures or battle_log_failures:
         await _runtime_app()._maybe_alert_cr_api_failure("player intel refresh")
