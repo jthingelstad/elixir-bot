@@ -30,12 +30,24 @@ _CELEBRATE = (
     "new_champion_unlocked",
     "badge_earned",
     "player_level_up",
+    # Path-of-Legend (ranked ladder) milestones — a first-class celebration lane.
+    "path_of_legend_promotion",
+    "ultimate_champion_reached",
+    "path_of_legend_global_rank_attained",
+)
+# Clan-social detections that go to #clan-events (the "clan" prefix in route_intent).
+_CLAN_SOCIAL = (
+    "member_left",
+    "member_promoted",
+    "clan_birthday",
+    "member_birthday",
+    "join_anniversary",
+    "weekly_donation_leader",
 )
 PUBLIC_INTENT_PREFIX = {
     **{t: "celebrate" for t in _CELEBRATE},
+    **{t: "clan" for t in _CLAN_SOCIAL},
     "member_joined": "welcome",
-    "member_left": "clan",
-    "member_promoted": "clan",
     "war_update": "war",
     "cohort_wave": "cohort",
 }

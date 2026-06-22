@@ -13,6 +13,15 @@ def build_profile_observation(payload: dict) -> dict:
     for cr_key, attr in PROFILE_SCALAR_FIELDS.items():
         if cr_key in payload:
             obs[attr] = payload[cr_key]
+    # Path-of-Legend (ranked ladder): flatten the live season result's three
+    # subfields so they ride the same observation/diff/hash path as the scalars.
+    # Only set when the payload carries the result, so a player with no PoL data
+    # doesn't churn the content hash.
+    if "currentPathOfLegendSeasonResult" in payload:
+        pol = payload.get("currentPathOfLegendSeasonResult") or {}
+        obs["pol_league_number"] = pol.get("leagueNumber")
+        obs["pol_trophies"] = pol.get("trophies")
+        obs["pol_rank"] = pol.get("rank")
     return obs
 
 
