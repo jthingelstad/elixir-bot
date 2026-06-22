@@ -122,6 +122,18 @@ Decisions are keyed to the review list Jamie answered.
     `WarUpdateDetector` posts a real standing in #river-race on the next BATTLE DAY
     and it's verified.** Until then #river-race would regress. (Today is Week 4
     practice; war detector correctly idle.)
+  - **FOLDED IN — issue #101 "F2" (`game_event_stream` retirement) is part of THIS
+    teardown, not a separate track.** It removes the same modules' write paths
+    (`runtime/signals/delivery.py` `record_signal_events`, `runtime/signals/system.py`,
+    `storage/player.py` `record_battle_event`) and its readers map onto the same v5
+    sources we already use (`detections` projection, `battle_telemetry`). Sequence:
+    when rewiring each enabled v4 caller (award-detection / weekly-invite-relay /
+    tournament-watch), also migrate its `game_event_stream` reads to v5 read facades,
+    then stop the writes, then drop `game_event_stream` + `event_rollups` +
+    `storage/event_stream.py` + `prune_event_stream_with_rollups`. Full reader/writer
+    inventory + replacement-source table: see `event-core-v5-remediation-plan.md`
+    Finding 2. Do NOT drop the table before all readers (agent `get_elixir_state`,
+    memory synthesis, weekly recap, daily insight) are on the facades.
 
 ## Not doing
 - (5) paused automation — ignore. (6) disk cleanup — hold. POAP KINGS website —
