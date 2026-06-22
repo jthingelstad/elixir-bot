@@ -63,6 +63,17 @@ class CommunicationPolicy(FollowerRunner):
     name = "policy:communication"
     aggregate_name = None  # consumes Detection + Recommendation; filters internally
 
+    def __init__(self, app, conn):
+        super().__init__(app, conn)
+        # Subjects that already got a #player-highlights (celebrate) intent in the
+        # current run — used to coalesce to ONE post per player per tick.
+        self._celebrated_this_run: set = set()
+
+    def run(self, batch: int = 500) -> int:
+        # Reset per run (one tick) so coalescing is per-tick, not per-process.
+        self._celebrated_this_run = set()
+        return super().run(batch)
+
     def _raise_intent(self, *, dedup_key, intent_type, subject, scope, priority, caused_by, summary):
         try:
             self.app.repository.get(intent_id(dedup_key))
@@ -82,6 +93,15 @@ class CommunicationPolicy(FollowerRunner):
             prefix = PUBLIC_INTENT_PREFIX.get(event.detection_type)
             if prefix is None:
                 return  # e.g. inactive_member_risk drives recommendations, not posts
+            if prefix == "celebrate":
+                # One #player-highlights post per player per tick. A grinder who
+                # trips several celebrate detectors at once (card max + trophy push
+                # + …) otherwise gets multiple posts that all narrate the same week
+                # (the recent_history enrichment makes them overlap). Keep the first;
+                # its post folds in the rest via that enrichment.
+                if event.subject_tag in self._celebrated_this_run:
+                    return
+                self._celebrated_this_run.add(event.subject_tag)
             self._raise_intent(
                 dedup_key=f"intent:detection:{event.dedup_key}",
                 intent_type=f"{prefix}:{event.detection_type}",
