@@ -155,6 +155,35 @@ Next (sequenced): (4) enrich leave + suppress kicks, (2b) weekly donations,
 (2c) cake-days, then the big ones (2f Path-of-Legend capture, 2d tournaments,
 2e season-start intel), then (7) decommission the v4 signal system.
 
+## 5. Remove ALL POAP KINGS website-publish code (Jamie: website has its own script now)
+
+B0 earlier only *descheduled* site-content; this removes the website-update code
+entirely. Distinction held: removed everything that WRITES to the external site;
+KEPT Discord-facing behavior.
+
+Deleted: `modules/poap_kings/` (whole package), `scripts/backfill_weekly_recap_blog_posts.py`,
+`tests/test_site_content.py`. Rewrote `runtime/jobs/_site.py` to recruiting-only
+(`_promotion_content_cycle` now posts Discord/Reddit copy to #recruiting, no site
+publish). Stripped website blocks from `runtime/jobs/_core.py` weekly recap (keeps
+#announcements post) and `runtime/signals/delivery.py` member-join (keeps Discord
+post). Removed the `integration` admin command tree + slash group (admin.py,
+discord_commands.py), the 3 site agent generators + their prompt-systems
+(workflows.py, prompt_builders.py, elixir_agent.py), the `poapkings-com` prompt
+lane + `#website-updates` channel (prompts.py, prompts/DISCORD.md), `POAP_KINGS_SITE_*`
+from .env, and the docs in SETUP.md. Updated activities delivery_targets.
+
+KEPT (Discord/recruiting, not website): `generate_promote_content`, `_promote_system`,
+the `promotion-content` job → #recruiting, and poapkings.com URLs inside recruiting
+copy (the site still exists; recruiting links to it).
+
+Verified: zero `poap_kings_site`/site-publish refs in source; full suite green.
+
+## Residual (minor, noted)
+- `agent/workflows.py::_roster_bio_context` is now dead (was used by the removed
+  generate_roster_bios) — harmless, passes lint; left for a later tidy.
+- `roster_bios` workflow entries remain in agent/workflow_registry.py + chat.py +
+  tool_policy (dead config, no generator) — harmless.
+
 ## Review notes / decisions / risks
 - **Cosmetic log artifact:** `format_scheduler_startup_summary` lists ALL activities
   incl. the disabled ones (clan/war-awareness, leadership-action-scan,

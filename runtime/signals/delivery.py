@@ -1884,28 +1884,8 @@ async def _deliver_signal_outcome(outcome, signals, clan, war):
                         action_id,
                         copy_message_id=copy_message_id,
                     )
-        if (
-            lane_key == "clan-events"
-            and any(s.get("type") == "member_join" for s in delivery_signals)
-        ):
-            from modules.poap_kings import site as _pk_site
-
-            if _pk_site.site_enabled():
-                from runtime.jobs._site import _notify_poapkings_publish, _publish_member_join_blog_post
-
-                join_body = "\n\n".join(posts)
-                try:
-                    blog_result = await asyncio.to_thread(
-                        _publish_member_join_blog_post,
-                        delivery_signals,
-                        join_body,
-                        result.get("summary"),
-                    )
-                    await _notify_poapkings_publish("member-join-blog", publish_result=blog_result)
-                except Exception as exc:
-                    log.error("Member join blog post publish failed: %s", exc, exc_info=True)
-                    await _notify_poapkings_publish("member-join-blog", error_detail=str(exc))
-
+        # (POAP KINGS member-join blog post removed 2026-06-21 — the Discord
+        # member-join post above is unchanged; the website has its own updater.)
         summary = result.get("summary")
         event_type = result.get("event_type") or outcome["intent"]
         sent_message_ids = []

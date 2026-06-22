@@ -33,7 +33,6 @@ from runtime.clan_chat_copy import (
     generate_clan_chat_copy,
     role_action_clan_chat_copy,
 )
-from modules.poap_kings import site as poap_kings_site
 from storage.contextual_memory import upsert_weekly_summary_memory
 from storage.api_sentinel import EVENT_SENTINEL_SIGNAL_TYPE, SCHEMA_SENTINEL_SIGNAL_TYPE
 from runtime.signal_lanes import (
@@ -60,12 +59,6 @@ from runtime.jobs._signals import (
     _strip_weekly_recap_header,
 )
 from runtime.jobs._intel import _clan_wars_intel_report
-from runtime.jobs._site import (
-    _normalize_poap_kings_publish_result,
-    _notify_poapkings_publish,
-    _publish_poap_kings_site_or_raise,
-    _publish_weekly_recap_blog_post,
-)
 
 CHICAGO = pytz.timezone("America/Chicago")
 log = logging.getLogger("elixir")
@@ -1358,41 +1351,9 @@ async def _weekly_clan_recap():
         tags=["weekly", "recap", "clan-history"],
         metadata={"channel_id": channel.id, "workflow": "announcements"},
     )
-    if poap_kings_site.site_enabled():
-        members_payload = {
-            "members": {
-                "title": "Weekly Recap",
-                "message": recap_text,
-                "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "source": "weekly_clan_recap",
-            }
-        }
-        try:
-            publish_result = await asyncio.to_thread(
-                _publish_poap_kings_site_or_raise,
-                members_payload,
-                "Elixir POAP KINGS weekly recap sync",
-            )
-            publish_result = _normalize_poap_kings_publish_result(
-                publish_result,
-                members_payload,
-            )
-            await _notify_poapkings_publish("weekly-recap", publish_result=publish_result)
-        except Exception as exc:
-            log.error("Weekly recap site sync failed: %s", exc, exc_info=True)
-            await _notify_poapkings_publish("weekly-recap", error_detail=str(exc))
-            runtime_status.mark_job_failure("weekly_clan_recap", f"site sync failed: {exc}")
-            return
-    if poap_kings_site.site_enabled():
-        try:
-            blog_result = await asyncio.to_thread(
-                _publish_weekly_recap_blog_post,
-                recap_text,
-            )
-            await _notify_poapkings_publish("weekly-recap-blog", publish_result=blog_result)
-        except Exception as exc:
-            log.error("Weekly recap blog post publish failed: %s", exc, exc_info=True)
-            await _notify_poapkings_publish("weekly-recap-blog", error_detail=str(exc))
+    # (POAP KINGS website weekly-recap sync + blog post removed 2026-06-21 — the
+    # site has its own update script now. The Discord #announcements recap above
+    # and the story relay below are unchanged.)
     try:
         await _weekly_story_relay_card(recap_text)
     except Exception:

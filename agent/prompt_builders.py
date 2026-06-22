@@ -620,71 +620,6 @@ def _reception_system():
     )
 
 
-def _home_message_system():
-    return _build_system_prompt(
-        prompts.identity_block(),
-        prompts.knowledge_block(),
-        "Your job: write a short message (2-4 sentences) for the clan's public website home page. "
-        "Visible to anyone, including people who aren't in the clan yet.\n\n"
-        "Your audience is brand-new visitors who know nothing about the clan or you. "
-        "Briefly introduce yourself (Elixir, the clan's AI chronicler) and the clan. "
-        "Then give a peek into clan activity — wars, trophies, "
-        "donations, milestones, and the cards our members love to play. "
-        "Make visitors want to join. Use real details from the data.\n\n"
-        "Guidelines:\n"
-        "- Write in first person as the clan's AI chronicler\n"
-        "- Be fresh — don't repeat what you said in your previous message\n"
-        "- You can use simple markdown (**bold**, *italic*) for emphasis\n"
-        "- No JSON — just the raw message text",
-    )
-
-
-def _members_message_system():
-    return _build_system_prompt(
-        prompts.identity_block(),
-        prompts.knowledge_block(),
-        "Your job: write a short message (2-5 sentences) for the clan's Members page. "
-        "Only current clan members see this page.\n\n"
-        "Your audience is insiders. Be conversational, reference specific members by name, "
-        "call out donation leaders, trophy movers, war heroes. Hype internal achievements. "
-        "You can see each member's most-played cards — use this to add flavor "
-        "(e.g. 'our resident Hog Rider main is on a tear').\n\n"
-        "Guidelines:\n"
-        "- Write in first person as the clan's AI chronicler\n"
-        "- Be fresh — don't repeat what you said in your previous message\n"
-        "- You can use simple markdown (**bold**, *italic*) for emphasis\n"
-        "- No JSON — just the raw message text",
-    )
-
-
-def _roster_bios_system():
-    return _build_system_prompt(
-        prompts.identity_block(),
-        prompts.knowledge_block(),
-        "Your job: write a short intro paragraph and per-member bios for the clan roster page.\n"
-        "These bios are also shared member profile state that Elixir may reference elsewhere, so they should feel durable and consistent.\n\n"
-        "Output JSON only (no markdown wrapper):\n"
-        '{"intro": "1-2 sentence intro for the roster page", '
-        '"members": {"TAG": {"bio": "4-6 sentence member biography", '
-        '"highlight": "donations|war|trophies|tenure|general"}}}\n\n'
-        "Guidelines:\n"
-        "- The intro should welcome visitors and set the tone\n"
-        "- Each member gets a bio (4-6 sentences) — a short profile paragraph written in third person. "
-        "Cover their role, how long they've been in the clan, notable stats (trophies, best trophies, donations, win data, war contributions), "
-        "recent form or momentum when available, and something that makes them stand out. Be specific with real numbers from the data. "
-        "Treat Co-Leaders the same as Leaders — refer to both simply as 'leader' (do not say 'co-leader'). "
-        "Tone: warm, celebratory, and inclusive, like introducing a teammate to the world.\n"
-        "- highlight categories: donations (generous donator), war (strong war contributor), "
-        "trophies (high trophy count or recent push), tenure (long-time member), general (default)\n"
-        "- Member data may include favorite_cards (top cards from recent battles), current_deck, recent form, career wins, and war season summaries. "
-        "Reference card preferences or playstyle in bios when available (e.g. 'Known for devastating Hog Rider pushes').\n"
-        "- Do not reduce someone to a single stat. Blend performance, role, style, and personality into one profile.\n"
-        "- Preserve continuity when an existing bio is provided, but make it richer and more complete if newer data supports it.\n"
-        "- Use the member data, war stats, donation info, recent form, and longer-term profile data to personalize.\n"
-        "- You have tools available to look up member history and war stats if needed",
-    )
-
-
 def _promote_system(required_trophies=2000):
     return _build_system_prompt(
         prompts.identity_block(),
@@ -965,9 +900,6 @@ __all__ = [
     "_clan_voyage_reconciliation_system",
     "_reception_system",
     "_channel_lane_system",
-    "_home_message_system",
-    "_members_message_system",
-    "_roster_bios_system",
     "_promote_system",
     "_weekly_digest_system",
     "_event_system",

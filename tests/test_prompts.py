@@ -38,7 +38,6 @@ def test_discord_loads():
     text = prompts.discord()
     assert "#leaders" in text
     assert "#welcome" in text
-    assert "#website-updates" in text
 
 
 def test_channel_section_leader():
@@ -58,13 +57,6 @@ def test_channel_section_reception():
 def test_reception_channel_is_open_channel():
     channel = prompts.discord_singleton_lane("reception")
     assert channel["reply_policy"] == "open_channel"
-
-
-def test_channel_section_poapkings_com():
-    """Extracts #website-updates section."""
-    section = prompts.channel_section("#website-updates")
-    assert "publish visibility" in section.lower()
-    assert "github-backed site publish" in section.lower()
 
 
 def test_arena_relay_channel_is_configured():

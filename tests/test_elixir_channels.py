@@ -2830,7 +2830,6 @@ def test_build_schedule_report_includes_promotion_content_sync():
     assert "promote-the-clan" in report
     assert "promotion-content" in report
     assert "Discord: #recruiting" in report
-    assert "POAP KINGS: promotion payloads" in report
     assert "Every Fri at 09:00 CT." in report
 
 
@@ -2952,7 +2951,6 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert "promotion-content" in specs
     assert specs["promotion-content"]["activity_role"] == "communicator"
     assert "Discord: #recruiting" in specs["promotion-content"]["delivery_targets"]
-    assert "POAP KINGS: promotion payloads" in specs["promotion-content"]["delivery_targets"]
 
 
 def test_activity_registry_registers_scheduler_jobs_from_one_source():

@@ -51,9 +51,6 @@ COMMAND_SPECS = {
     "activity.list": AdminCommandSpec("activity.list", ("activity", "list"), "List registered recurring activities.", event_type="activity_list"),
     "activity.show": AdminCommandSpec("activity.show", ("activity", "show"), "Show one recurring activity in detail.", event_type="activity_show"),
     "activity.run": AdminCommandSpec("activity.run", ("activity", "run"), "Run one registered activity now.", leader_only=True, write=True, event_type="activity_run"),
-    "integration.list": AdminCommandSpec("integration.list", ("integration", "list"), "List configured integration modules.", event_type="integration_list"),
-    "integration.poap-kings.status": AdminCommandSpec("integration.poap-kings.status", ("integration", "poap-kings", "status"), "Show POAP KINGS integration status.", event_type="integration_poap_kings_status"),
-    "integration.poap-kings.publish": AdminCommandSpec("integration.poap-kings.publish", ("integration", "poap-kings", "publish"), "Publish one POAP KINGS integration target.", leader_only=True, write=True, event_type="integration_poap_kings_publish"),
     "tournament.watch": AdminCommandSpec("tournament.watch", ("tournament", "watch"), "Start watching a tournament by tag.", leader_only=True, write=True, event_type="tournament_watch"),
     "tournament.status": AdminCommandSpec("tournament.status", ("tournament", "status"), "Show active tournament tracking status.", event_type="tournament_status"),
     "tournament.stop": AdminCommandSpec("tournament.stop", ("tournament", "stop"), "Stop watching the active tournament.", leader_only=True, write=True, event_type="tournament_stop"),
@@ -147,7 +144,6 @@ def render_admin_help(*, slash_prefix: str = "/elixir") -> str:
             f"- `{slash_prefix} signal show view:recent`",
             f"- `{slash_prefix} relay status view:pending`",
             f"- `{slash_prefix} activity run activity:clan-awareness preview:true`",
-            f"- `{slash_prefix} integration publish integration:poap-kings target:promote preview:true`",
         ]
     )
     return "\n".join(lines)
@@ -501,39 +497,6 @@ def _build_activity_show_report(activity_key: str) -> str:
     return "\n".join(lines)
 
 
-def _build_integration_list_report() -> str:
-    lines = ["**Elixir Integrations**"]
-    lines.append("- `poap-kings` — Website publishing and content sync for poapkings.com.")
-    lines.append("  Commands: `integration poap-kings status`, `integration poap-kings publish <target>`")
-    return "\n".join(lines)
-
-
-def _build_poap_kings_status_report() -> str:
-    import runtime.jobs as runtime_jobs
-    from modules.poap_kings import site as poap_kings_site
-
-    repo = poap_kings_site._site_repo()
-    branch = poap_kings_site._site_branch()
-    enabled = poap_kings_site.site_enabled()
-    lines = ["**Integration: poap-kings**"]
-    lines.append(f"- Enabled: {'yes' if enabled else 'no'}")
-    lines.append(f"- Repo: `{repo}`")
-    lines.append(f"- Branch: `{branch}`")
-    lines.append("- Visibility channel: `#website-updates`")
-    lines.append("- Targets:")
-    for target in ("all", "data", "home", "members", "roster-bios", "promote"):
-        lines.append(f"  - `{target}`")
-    status_snapshot = runtime_jobs.runtime_status.snapshot() if hasattr(runtime_jobs, "runtime_status") else {}
-    jobs = status_snapshot.get("jobs") or {}
-    for job_name in ("site_content_cycle", "site_data_refresh", "promotion_content_cycle", "weekly_clan_recap"):
-        if job_name in jobs:
-            entry = jobs[job_name]
-            lines.append(
-                f"- Job `{job_name}`: {entry.get('status') or 'n/a'} | {_truncate_for_report(entry.get('detail') or '', 100)}"
-            )
-    return "\n".join(lines)
-
-
 def _format_contextual_memory_item(memory: dict) -> str:
     source = memory.get("source_type") or "unknown"
     if source == "leader_note":
@@ -740,44 +703,19 @@ async def _preview_job_runtime():
     stack = ExitStack()
     try:
         stack.enter_context(patch.object(runtime_jobs, "bot", _ChannelLookup(channels)))
-        stack.enter_context(
-            patch("runtime.jobs.poap_kings_site.commit_and_push", side_effect=lambda *args, **kwargs: None)
-        )
-        stack.enter_context(
-            patch("runtime.jobs.poap_kings_site.publish_site_content", side_effect=lambda *args, **kwargs: False)
-        )
         yield captured_posts
     finally:
         stack.close()
 
 
-async def _load_site_context():
-    import elixir
-    from modules.poap_kings import site as site_content
-    from modules.poap_kings import site as poap_kings_site
-
-    clan, war = await elixir._load_live_clan_context()
-    roster = await asyncio.to_thread(poap_kings_site.load_published, "roster")
-    if roster is None:
-        roster = await asyncio.to_thread(site_content.load_current, "roster")
-    if roster is None and clan.get("memberList"):
-        roster = await asyncio.to_thread(site_content.build_roster_data, clan, True)
-    return clan, war, roster
-
-
 async def _run_runtime_job(job_name: str, preview: bool) -> str:
     import elixir
     activity_key = normalize_activity_key(job_name)
-    if activity_key:
-        resolved = resolve_activity(activity_key, elixir)
-        job_callable = resolved["job_callable"]
-        display_name = resolved["activity_key"]
-    else:
-        job_map = {
-            "poap-kings-data-sync": elixir._site_data_refresh,
-        }
-        job_callable = job_map[job_name]
-        display_name = job_name
+    if not activity_key:
+        return f"Unknown job: {job_name}"
+    resolved = resolve_activity(activity_key, elixir)
+    job_callable = resolved["job_callable"]
+    display_name = resolved["activity_key"]
     if preview:
         async with _preview_job_runtime() as captured_posts:
             try:
@@ -857,145 +795,6 @@ async def _run_system_signals(preview: bool) -> str:
     except Exception as exc:
         return f"`signal.publish-pending` failed: {exc}"
     return f"Published {count} pending system signal(s)."
-
-
-async def _run_poap_kings_sync(preview: bool) -> str:
-    import elixir
-
-    if preview:
-        async with _preview_job_runtime() as captured_posts:
-            try:
-                await elixir._site_content_cycle()
-                members_text = await _run_members_message(preview=True)
-            except Exception as exc:
-                return f"`integration.poap-kings.publish all` failed in preview mode: {exc}"
-            sections = [
-                "Published `integration.poap-kings` target `all` in preview mode.",
-                "",
-                _format_preview_posts(captured_posts),
-            ]
-            if members_text:
-                sections.extend(["", "**Members Page Weekly Recap Preview**", members_text])
-            return "\n".join(section for section in sections if section is not None)
-
-    await elixir._site_content_cycle()
-    await _run_members_message(preview=False)
-    return "Published `integration.poap-kings` target `all`."
-
-
-async def _run_home_message(preview: bool) -> str:
-    import elixir
-    from modules.poap_kings import site as poap_kings_site
-
-    clan, war, roster = await _load_site_context()
-    previous = await asyncio.to_thread(poap_kings_site.load_published, "home")
-    previous_message = previous.get("message", "") if previous else ""
-    text = await asyncio.to_thread(
-        elixir.elixir_agent.generate_home_message,
-        clan,
-        war,
-        previous_message,
-        roster_data=roster,
-    )
-    if not text:
-        raise RuntimeError("home message generation returned nothing")
-    payload = {"message": text, "generated": _utcnow()}
-    if not preview:
-        await asyncio.to_thread(
-            poap_kings_site.publish_site_content,
-            {"home": payload},
-            "Elixir POAP KINGS home message update",
-        )
-    return text
-
-
-async def _run_members_message(preview: bool) -> str:
-    import elixir
-    from modules.poap_kings import site as poap_kings_site
-
-    clan, war, roster = await _load_site_context()
-    recap_context = await asyncio.to_thread(elixir._build_weekly_clan_recap_context, clan, war)
-    previous = await asyncio.to_thread(poap_kings_site.load_published, "members")
-    previous_message = previous.get("message", "") if previous else ""
-    text = await asyncio.to_thread(
-        elixir.elixir_agent.generate_weekly_digest,
-        recap_context,
-        previous_message,
-    )
-    if not text:
-        raise RuntimeError("members page weekly recap generation returned nothing")
-    payload = {
-        "title": "Weekly Recap",
-        "message": text,
-        "generated": _utcnow(),
-        "source": "weekly_clan_recap",
-    }
-    if not preview:
-        await asyncio.to_thread(
-            poap_kings_site.publish_site_content,
-            {"members": payload},
-            "Elixir POAP KINGS members page weekly recap update",
-        )
-    return text
-
-
-async def _run_roster_bios(preview: bool) -> str:
-    import db
-    import elixir
-    from modules.poap_kings import site as poap_kings_site
-
-    clan, war, roster = await _load_site_context()
-    result = await asyncio.to_thread(
-        elixir.elixir_agent.generate_roster_bios,
-        clan,
-        war,
-        roster_data=roster,
-    )
-    if not result:
-        raise RuntimeError("roster bios generation returned nothing")
-    if "intro" not in result and "content" in result:
-        result = json.loads(result["content"])
-
-    roster_payload = roster or {"members": []}
-    roster_payload["intro"] = result.get("intro", "")
-    bios_by_tag = result.get("members", {}) or {}
-    await asyncio.to_thread(db.upsert_member_generated_profiles, bios_by_tag)
-    for member in roster_payload.get("members", []):
-        item = bios_by_tag.get(member["tag"], {}) or bios_by_tag.get("#" + member["tag"], {})
-        if item:
-            member["bio"] = item.get("bio", "")
-            member["highlight"] = item.get("highlight", "general")
-    if not preview:
-        await asyncio.to_thread(
-            poap_kings_site.publish_site_content,
-            {"roster": roster_payload},
-            "Elixir POAP KINGS roster bio update",
-        )
-    return roster_payload.get("intro", "")
-
-
-async def _run_promote_content(preview: bool) -> str:
-    import elixir
-    from modules.poap_kings import site as poap_kings_site
-    from runtime import jobs as runtime_jobs
-
-    clan, war, roster = await _load_site_context()
-    promote = await asyncio.to_thread(
-        elixir.elixir_agent.generate_promote_content,
-        clan,
-        war_data=war,
-        roster_data=roster,
-    )
-    if not promote:
-        raise RuntimeError("promotion content generation returned nothing")
-    runtime_jobs._validate_promote_content_or_raise(promote)
-    if not preview:
-        await asyncio.to_thread(
-            poap_kings_site.publish_site_content,
-            {"promote": promote},
-            "Elixir POAP KINGS promotion content update",
-        )
-    return json.dumps(promote, indent=2)
 
 
 _MEMBER_QUERY_MAX_LEN = 64
@@ -1261,23 +1060,6 @@ async def _run_member_field_command(action: str, *, preview: bool, args: dict) -
     return await _run_member_metadata_command(command, preview=preview, args=member_args)
 
 
-async def _run_integration_publish(target: str, *, preview: bool) -> str:
-    target = normalize_admin_command(target)
-    if target == "all":
-        return await _run_poap_kings_sync(preview=preview)
-    if target == "data":
-        return await _run_runtime_job("poap-kings-data-sync", preview=preview)
-    if target == "home":
-        return await _run_home_message(preview=preview)
-    if target == "members":
-        return await _run_members_message(preview=preview)
-    if target == "roster-bios":
-        return await _run_roster_bios(preview=preview)
-    if target == "promote":
-        return await _run_promote_content(preview=preview)
-    raise ValueError(f"Unknown integration publish target: {target}")
-
-
 async def dispatch_admin_command(command: str | dict, *, preview: bool = False, short: bool = False, args: dict | None = None) -> str:
     import elixir
 
@@ -1353,12 +1135,6 @@ async def dispatch_admin_command(command: str | dict, *, preview: bool = False, 
         return await asyncio.to_thread(_build_activity_show_report, args["activity"])
     if key == "activity.run":
         return await _run_runtime_job(args["activity"], preview=preview)
-    if key == "integration.list":
-        return await asyncio.to_thread(_build_integration_list_report)
-    if key == "integration.poap-kings.status":
-        return await asyncio.to_thread(_build_poap_kings_status_report)
-    if key == "integration.poap-kings.publish":
-        return await _run_integration_publish(args["target"], preview=preview)
     raise ValueError(f"Unknown admin command: {key}")
 
 

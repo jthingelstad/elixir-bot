@@ -1,10 +1,9 @@
-"""Tests for the awards feature — storage grants, detectors, site payloads."""
+"""Tests for the awards feature — storage grants and detectors."""
 
 from __future__ import annotations
 
 import db
 from heartbeat import _awards
-from modules.poap_kings import site as poap_site
 
 
 # -- seed helpers -----------------------------------------------------------
@@ -429,23 +428,6 @@ def test_backfill_season_purges_deprecated_award_types():
 
 # -- site trophy case -------------------------------------------------------
 
-def test_build_trophy_case_returns_member_awards():
-    conn = db.get_connection(":memory:")
-    try:
-        member_id = _seed_member(conn, "#ABC", "Alice")
-        db.insert_award("war_champ", 131, member_id, "#ABC",
-                        rank=1, metric_value=14230, metric_unit="fame", conn=conn)
-        db.insert_award("rookie_mvp", 131, member_id, "#ABC",
-                        rank=2, conn=conn)
-
-        case = poap_site.build_trophy_case("ABC", conn=conn)
-        assert len(case) == 2
-        types = sorted(c["award_type"] for c in case)
-        assert types == ["rookie_mvp", "war_champ"]
-    finally:
-        conn.close()
-
-
 def test_backfill_season_closed_grants_all_award_types():
     conn = db.get_connection(":memory:")
     try:
@@ -498,24 +480,6 @@ def test_backfill_season_in_progress_skips_season_wide_awards():
         assert summary["donation_champ"] == []
         assert summary["rookie_mvp"] == []
         assert len(summary["war_participant"]) == 1
-    finally:
-        conn.close()
-
-
-def test_build_awards_data_groups_by_season():
-    conn = db.get_connection(":memory:")
-    try:
-        member_id = _seed_member(conn, "#ABC", "Alice")
-        _seed_war_race(conn, season_id=130, section_index=0)
-        _seed_war_race(conn, season_id=131, section_index=0)
-        db.insert_award("war_champ", 130, member_id, "#ABC", rank=1, conn=conn)
-        db.insert_award("war_champ", 131, member_id, "#ABC", rank=1, conn=conn)
-
-        data = poap_site.build_awards_data(conn=conn)
-        assert "generated_at" in data
-        season_ids = [s["season_id"] for s in data["seasons"]]
-        assert season_ids == [131, 130]  # newest first
-        assert all(s["awards"] for s in data["seasons"])
     finally:
         conn.close()
 

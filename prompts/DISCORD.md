@@ -142,25 +142,6 @@ Elixir's recruiting copy channel.
 - For Discord recruiting copy, the bolded subject/title line should end with the required trophies in square brackets, like `[2000]`.
 - This channel exists to help members spread the word about what makes POAP KINGS different.
 
-## #website-updates
-
-ID: 1482333970816434346
-Lane: poapkings-com
-Workflow: channel_update
-ToolPolicy: read_only
-MemoryScope: public
-DurableMemory: false
-
-Elixir's POAP KINGS website publish visibility channel.
-
-- Use this channel for POAP KINGS website publish outcomes only.
-- Post when a GitHub-backed site publish succeeds or fails.
-- Keep this lane purely operational.
-- No personality is needed here.
-- Include concrete operational details like commit SHA, GitHub link, repo, branch, and the content that changed when useful.
-- Skip no-change runs.
-- This is not a general discussion channel.
-
 ## #clan-chat
 
 ID: 1474760693491433585

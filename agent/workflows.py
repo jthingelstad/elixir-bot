@@ -23,16 +23,13 @@ from agent.prompt_builders import (
     _deck_review_system,
     _event_system,
     _help_system,
-    _home_message_system,
     _intel_report_system,
     _interactive_system,
     _leader_action_feedback_system,
-    _members_message_system,
     _memory_synthesis_system,
     _observe_system,
     _promote_system,
     _reception_system,
-    _roster_bios_system,
     _season_awards_system,
     _tournament_recap_system,
     _tournament_update_system,
@@ -966,64 +963,6 @@ def _generate_simple_message(system_prompt, user_msg, *, workflow, temperature=0
         return None
 
 
-def generate_home_message(clan_data, war_data, previous_message, roster_data=None):
-    """Generate a message for the poapkings.com home page. Returns text or None."""
-    context = _clan_context(
-        clan_data, war_data,
-        roster_data=roster_data,
-        max_members=MAX_CONTEXT_MEMBERS_FULL,
-    )
-    prev_text = f"Your previous message: {previous_message}" if previous_message else "(none yet)"
-    user_msg = f"{context}\n\n{prev_text}\n\nWrite your next message for the home page."
-    return _generate_simple_message(
-        _home_message_system(), user_msg,
-        workflow="site_home_message", temperature=0.9, max_tokens=300,
-        error_label="Home message",
-    )
-
-
-def generate_members_message(clan_data, war_data, previous_message, roster_data=None):
-    """Generate a message for the poapkings.com members page. Returns text or None."""
-    context = _clan_context(
-        clan_data, war_data,
-        roster_data=roster_data,
-        max_members=MAX_CONTEXT_MEMBERS_FULL,
-    )
-    prev_text = f"Your previous message: {previous_message}" if previous_message else "(none yet)"
-    user_msg = f"{context}\n\n{prev_text}\n\nWrite your next message for the members page."
-    return _generate_simple_message(
-        _members_message_system(), user_msg,
-        workflow="site_members_message", temperature=0.9, max_tokens=400,
-        error_label="Members message",
-    )
-
-
-def generate_roster_bios(clan_data, war_data, roster_data=None):
-    """Generate roster intro and per-member bios. Returns dict or None."""
-    context = _clan_context(
-        clan_data, war_data,
-        roster_data=roster_data,
-        max_members=MAX_CONTEXT_MEMBERS_FULL,
-    )
-    member_profile_context = _roster_bio_context(clan_data, roster_data=roster_data)
-    members = clan_data.get("memberList", clan_data.get("members", []))
-    member_tags = [m.get("tag", "") for m in members]
-    user_msg = (
-        f"{context}\n\n"
-        f"{member_profile_context}\n\n"
-        f"Generate an intro and bio for each member.\n"
-        f"Member tags to cover: {', '.join(member_tags)}"
-    )
-    return _chat_with_tools(
-        _roster_bios_system(), user_msg,
-        temperature=0.8, max_tokens=2000,
-        workflow="roster_bios",
-        allowed_tools=TOOLSETS_BY_WORKFLOW["roster_bios"],
-        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["roster_bios"],
-        strict_json=True,
-    )
-
-
 def generate_promote_content(clan_data, war_data=None, roster_data=None):
     """Generate promotional messages for 5 channels. Returns dict or None."""
     context = _clan_context(
@@ -1264,9 +1203,6 @@ __all__ = [
     "analyze_arena_relay_screenshot",
     "reconcile_clan_voyage_entries",
     "generate_message",
-    "generate_home_message",
-    "generate_members_message",
-    "generate_roster_bios",
     "generate_promote_content",
     "generate_season_awards_post",
     "generate_tournament_recap",

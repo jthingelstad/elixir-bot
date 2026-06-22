@@ -18,7 +18,6 @@ import db
 import elixir_agent
 import heartbeat  # re-exported; patched in tests
 import prompts
-from modules.poap_kings import site as poap_kings_site
 from runtime.activities import format_scheduler_startup_summary, register_scheduled_activities
 from runtime.admin import admin_command_requires_leader, dispatch_admin_command
 from runtime.channel_router import route_message
@@ -52,7 +51,6 @@ MEMBER_ROLE_ID = _dc.get("member_role", 0)
 LEADER_ROLE_ID = _dc.get("leader_role", 0)
 BOT_ROLE_ID = _dc.get("bot_role", 0)
 GUILD_ID = int(_dc.get("guild_id", 0) or 0)
-POAPKINGS_REPO = os.path.expanduser(os.getenv("POAPKINGS_REPO_PATH", "../poapkings.com"))
 CHANNEL_CONVERSATION_LIMIT = 20
 
 HEARTBEAT_INTERVAL_MINUTES = int(os.getenv("HEARTBEAT_INTERVAL_MINUTES", "60"))
@@ -284,23 +282,12 @@ from runtime.jobs._signals import (  # noqa: E402,F401
     _system_signal_updates,
 )
 from runtime.jobs._site import (  # noqa: E402,F401
-    SITE_CONTENT_HOUR,
-    SITE_DATA_HOUR,
-    _commit_site_content_or_raise,
-    _normalize_poap_kings_publish_result,
-    _notify_poapkings_publish,
-    _poapkings_publish_context,
-    _poapkings_publish_fallback,
     _promotion_channel_posts,
     _promotion_content_cycle,
     _promotion_discord_required_text,
     _promotion_reddit_required_token,
-    _publish_poap_kings_site_or_raise,
-    _site_content_cycle,
-    _site_data_refresh,
     _unwrap_outer_bold,
     _validate_promote_content_or_raise,
-    _write_site_content_or_raise,
 )
 from runtime.jobs._tournament import (  # noqa: E402,F401
     TOURNAMENT_BATTLE_LOG_SPACING_SECONDS,

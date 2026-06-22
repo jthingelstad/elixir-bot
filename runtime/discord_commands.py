@@ -30,7 +30,6 @@ def register_elixir_app_commands(bot) -> None:
     relay_commands = app_commands.Group(name="relay", description="Leader action relay board")
     signal_commands = app_commands.Group(name="signal", description="Signal routing and system-signal commands")
     activity_commands = app_commands.Group(name="activity", description="Recurring activity inspection and manual run commands")
-    integration_commands = app_commands.Group(name="integration", description="Integration modules and external publishing")
 
     async def send_interaction_text(interaction: discord.Interaction, content: str, *, ephemeral: bool = True, use_followup: bool = False):
         chunks = app._chunk_discord_text(content)
@@ -418,63 +417,8 @@ def register_elixir_app_commands(bot) -> None:
             write=True,
         )
 
-    @integration_commands.command(name="list", description=COMMAND_SPECS["integration.list"].description)
-    async def slash_integration_list(interaction: discord.Interaction):
-        await run_admin_interaction(
-            interaction,
-            command_name="integration.list",
-            event_type=COMMAND_SPECS["integration.list"].event_type,
-        )
-
-    @integration_commands.command(name="status", description="Show status for an integration module.")
-    @app_commands.describe(integration="Integration module to inspect.")
-    @app_commands.choices(integration=[
-        app_commands.Choice(name="POAP KINGS", value="poap-kings"),
-    ])
-    async def slash_integration_status(interaction: discord.Interaction, integration: str):
-        if integration != "poap-kings":
-            await send_interaction_text(interaction, f"Unsupported integration: {integration}", ephemeral=True)
-            return
-        await run_admin_interaction(
-            interaction,
-            command_name="integration.poap-kings.status",
-            event_type=COMMAND_SPECS["integration.poap-kings.status"].event_type,
-        )
-
-    @integration_commands.command(name="publish", description="Publish content through an integration module.")
-    @app_commands.describe(
-        integration="Integration module to publish through.",
-        target="POAP KINGS publish target.",
-        preview="Suppress Discord sends and site pushes when supported.",
-    )
-    @app_commands.choices(integration=[
-        app_commands.Choice(name="POAP KINGS", value="poap-kings"),
-    ])
-    @app_commands.choices(target=[
-        app_commands.Choice(name="All", value="all"),
-        app_commands.Choice(name="Data", value="data"),
-        app_commands.Choice(name="Home", value="home"),
-        app_commands.Choice(name="Members", value="members"),
-        app_commands.Choice(name="Roster Bios", value="roster-bios"),
-        app_commands.Choice(name="Promote", value="promote"),
-    ])
-    async def slash_integration_publish(
-        interaction: discord.Interaction,
-        integration: str,
-        target: str,
-        preview: bool = False,
-    ):
-        if integration != "poap-kings":
-            await send_interaction_text(interaction, f"Unsupported integration: {integration}", ephemeral=True)
-            return
-        await run_admin_interaction(
-            interaction,
-            command_name="integration.poap-kings.publish",
-            args={"target": target},
-            preview=preview,
-            event_type=COMMAND_SPECS["integration.poap-kings.publish"].event_type,
-            write=True,
-        )
+    # (The `integration` command group was POAP KINGS website publishing only —
+    # removed 2026-06-21 along with the rest of the site-update code.)
 
     tournament_commands = app_commands.Group(name="tournament", description="Clan tournament tracking commands")
 
@@ -758,7 +702,6 @@ def register_elixir_app_commands(bot) -> None:
     elixir_commands.add_command(relay_commands)
     elixir_commands.add_command(signal_commands)
     elixir_commands.add_command(activity_commands)
-    elixir_commands.add_command(integration_commands)
 
     try:
         if app.APP_GUILD is not None:
