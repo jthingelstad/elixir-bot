@@ -94,6 +94,35 @@ Decisions are keyed to the review list Jamie answered.
   test_tournament_signals, big chunks of test_elixir_heartbeat/test_db_v2) must be
   removed/rewritten in lockstep.
 
+  **EXECUTION LOG (2026-06-22) — corrected current-state map + progress:**
+  - DONE — **player-progression delivery removed.** `_player_intel_refresh` is now
+    REFRESH-ONLY (keeps snapshotting the v4 read model the agent tools read; no
+    longer accumulates/delivers progression signals). Removed `_player_intel_
+    delivery_enabled`, the delivery loop, and the `_deliver_signal_group_via_
+    awareness`/`_progression_signal_batches` imports from `_intel.py`; deleted the
+    delivery-asserting tests; dropped the vestigial `PLAYER_INTEL_DELIVERY` env.
+    (#player-highlights had been confirmed v5-only first; this deletes the dead path.)
+  - CORRECTION — `clan-awareness` and `war-awareness` are `enabled_by_default=False`
+    and are NOT scheduled (the "Scheduler started — …" log lists the whole catalog,
+    not just scheduled jobs — see `format_scheduler_startup_summary`). So there is no
+    standalone awareness job to disable; the v4 awareness DELIVERY is invoked only by
+    the remaining enabled callers below.
+  - CORRECTION — `ELIXIR_AWARENESS_LOOP` is RETIRED (no-op; see system_signals.py).
+    The stale `.env` line can be deleted.
+  - REMAINING enabled delivery callers (rewire to direct posts before deleting
+    `runtime/signals/`): **award-detection** (`_core.py`), **weekly-discord-invite-
+    relay** (`_core.py` arena-relay sidecars), **tournament-watch** (`_tournament.py`
+    — this is item 2d). Each → a direct channel post.
+  - SHARED SURVIVORS (Phase 0): `_post_to_elixir` / `_load_live_clan_context` in
+    `_signals.py` are thin 2-line shims to `_runtime_app()` — trivial to relocate
+    (or call the app method directly). `build_lane_memory_context` (signal_lanes) and
+    `_post_system_signal_updates` (signals/system) are real and used by KEEP-side
+    jobs (`_clan_wars_intel_report`, api-sentinel) — relocate before deleting.
+  - **HARD BLOCKER — do not delete `war-awareness` / its delivery until v5's
+    `WarUpdateDetector` posts a real standing in #river-race on the next BATTLE DAY
+    and it's verified.** Until then #river-race would regress. (Today is Week 4
+    practice; war detector correctly idle.)
+
 ## Not doing
 - (5) paused automation — ignore. (6) disk cleanup — hold. POAP KINGS website —
   being removed.

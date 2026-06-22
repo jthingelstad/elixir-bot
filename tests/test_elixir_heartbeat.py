@@ -2367,8 +2367,10 @@ def test_player_intel_refresh_uses_refresh_targets_without_llm():
     mock_sleep.assert_awaited_once()
 
 
-def test_player_intel_refresh_posts_progression_signals():
-    """_player_intel_refresh should route progression signals through grouped outcome delivery."""
+def test_player_intel_refresh_refreshes_read_model_without_posting():
+    """Item-7 decommission: player-progression is now REFRESH-ONLY. It snapshots
+    the profile/battle read model (which the agent's tools read) and posts nothing
+    — v5's celebrate detectors own #player-highlights."""
     clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
     targets = [{"tag": "#ABC", "name": "King Levy"}]
 
@@ -2384,149 +2386,16 @@ def test_player_intel_refresh_posts_progression_signals():
         patch("elixir.db.snapshot_members"),
         patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
-        patch("elixir.db.snapshot_player_profile", return_value=[{"type": "player_level_up", "tag": "#ABC", "name": "King Levy", "old_level": 65, "new_level": 66}]),
-        patch("elixir.db.snapshot_player_battlelog"),
-        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
+        patch("elixir.db.snapshot_player_profile", return_value=[{"type": "player_level_up"}]) as snap_profile,
+        patch("elixir.db.snapshot_player_battlelog", return_value=[{"type": "battle_trophy_push"}]) as snap_battle,
+        patch("elixir.runtime_status.mark_job_success") as mock_success,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
-    mock_deliver.assert_awaited_once()
-    args = mock_deliver.await_args.args
-    assert args[0][0]["type"] == "player_level_up"
-    assert args[1] == clan
-    assert mock_deliver.await_args.kwargs["workflow"] == "player_intel"
-
-
-def test_player_intel_refresh_suppresses_delivery_when_disabled():
-    """With PLAYER_INTEL_DELIVERY=0 the v4 job still refreshes the read model but
-    does NOT post progression highlights — v5 owns #player-highlights, so this
-    stops the double-post (roadmap item 7)."""
-    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
-    targets = [{"tag": "#ABC", "name": "King Levy"}]
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("runtime.jobs._intel._player_intel_delivery_enabled", return_value=False),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.asyncio.sleep", new=AsyncMock()),
-        patch("elixir.cr_api.get_clan", return_value=clan),
-        patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
-        patch("elixir.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
-        patch("elixir.db.snapshot_members"),
-        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
-        patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
-        patch("elixir.db.snapshot_player_profile", return_value=[{"type": "player_level_up", "tag": "#ABC", "name": "King Levy", "old_level": 65, "new_level": 66}]) as snap,
-        patch("elixir.db.snapshot_player_battlelog"),
-        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
-    ):
-        asyncio.run(elixir._player_intel_refresh())
-
-    snap.assert_called()  # refresh still ran (read model kept current)
-    mock_deliver.assert_not_awaited()  # but nothing posted to Discord
-
-
-def test_player_intel_refresh_splits_optional_badge_level_batches():
-    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
-    targets = [{"tag": "#ABC", "name": "King Levy"}]
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.asyncio.sleep", new=AsyncMock()),
-        patch("elixir.cr_api.get_clan", return_value=clan),
-        patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
-        patch("elixir.cr_api.get_player_battle_log", return_value=[]),
-        patch("elixir.db.snapshot_members"),
-        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
-        patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
-        patch("elixir.db.snapshot_player_profile", return_value=[
-            {"type": "player_level_up", "tag": "#ABC", "name": "King Levy", "old_level": 65, "new_level": 66},
-            {"type": "badge_level_milestone", "tag": "#ABC", "name": "King Levy", "badge_name": "MasteryKnight"},
-        ]),
-        patch("elixir.db.snapshot_player_battlelog", return_value=[]),
-        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
-    ):
-        asyncio.run(elixir._player_intel_refresh())
-
-    assert mock_deliver.await_count == 2
-    first_batch = mock_deliver.await_args_list[0].args[0]
-    second_batch = mock_deliver.await_args_list[1].args[0]
-    assert [signal["type"] for signal in first_batch] == ["player_level_up"]
-    assert [signal["type"] for signal in second_batch] == ["badge_level_milestone"]
-    assert all(call.kwargs["workflow"] == "player_intel" for call in mock_deliver.await_args_list)
-
-
-def test_player_intel_refresh_posts_battle_pulse_signals():
-    clan = {"memberList": [{"name": "King Levy", "tag": "#ABC"}]}
-    targets = [{"tag": "#ABC", "name": "King Levy"}]
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.asyncio.sleep", new=AsyncMock()),
-        patch("elixir.cr_api.get_clan", return_value=clan),
-        patch("elixir.cr_api.get_player", return_value={"tag": "#ABC", "name": "King Levy"}),
-        patch("elixir.cr_api.get_player_battle_log", return_value=[{"type": "PvP"}]),
-        patch("elixir.db.snapshot_members"),
-        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
-        patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
-        patch("elixir.db.snapshot_player_profile", return_value=[]),
-        patch("elixir.db.snapshot_player_battlelog", return_value=[
-            {"type": "battle_hot_streak", "tag": "#ABC", "name": "King Levy", "streak": 4},
-            {"type": "battle_trophy_push", "tag": "#ABC", "name": "King Levy", "trophy_delta": 111},
-        ]),
-        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
-    ):
-        asyncio.run(elixir._player_intel_refresh())
-
-    mock_deliver.assert_awaited_once()
-    signal_types = [signal["type"] for signal in mock_deliver.await_args.args[0]]
-    assert signal_types == ["battle_hot_streak", "battle_trophy_push"]
-    assert mock_deliver.await_args.kwargs["workflow"] == "player_intel"
-
-
-def test_player_intel_refresh_does_not_post_baseline_profile_discovery():
-    clan = {"memberList": [{"name": "royalkiller864", "tag": "#ABC"}]}
-    targets = [{"tag": "#ABC", "name": "royalkiller864"}]
-    first_profile = {
-        "tag": "#ABC",
-        "name": "royalkiller864",
-        "currentDeck": [],
-        "cards": [
-            {"name": "Knight", "level": 1, "maxLevel": 16, "rarity": "common"},
-            {"name": "Goblin Barrel", "level": 9, "maxLevel": 14, "rarity": "epic"},
-        ],
-        "badges": [
-            {"name": "EmoteCollection", "level": 1, "maxLevel": 10, "progress": 10, "target": 25},
-            {"name": "BattleWins", "level": 2, "maxLevel": 10, "progress": 20, "target": 50},
-        ],
-    }
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.asyncio.sleep", new=AsyncMock()),
-        patch("elixir.cr_api.get_clan", return_value=clan),
-        patch("elixir.cr_api.get_player", return_value=first_profile),
-        patch("elixir.cr_api.get_player_battle_log", return_value=[]),
-        patch("elixir.db.snapshot_members"),
-        patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
-        patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
-        patch("elixir.db.snapshot_player_profile", return_value=[]),
-        patch("elixir.db.snapshot_player_battlelog", return_value=[]),
-        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
-    ):
-        asyncio.run(elixir._player_intel_refresh())
-
-    mock_deliver.assert_not_awaited()
+    snap_profile.assert_called()  # read model refreshed
+    snap_battle.assert_called()
+    assert mock_success.call_args.args[0] == "player_intel_refresh"
+    assert "refreshed 1 of 1 member(s)" in mock_success.call_args.args[1]
 
 
 def test_player_intel_refresh_marks_failure_when_all_player_endpoints_fail():
@@ -2545,14 +2414,12 @@ def test_player_intel_refresh_marks_failure_when_all_player_endpoints_fail():
         patch("elixir.db.snapshot_members"),
         patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
-        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
         patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
-    mock_deliver.assert_not_awaited()
     mock_alert.assert_awaited_once_with("player intel refresh")
     mock_success.assert_not_called()
     assert mock_failure.call_args.args[0] == "player_intel_refresh"
@@ -2579,14 +2446,12 @@ def test_player_intel_refresh_reports_partial_endpoint_failures_without_hiding_s
         patch("elixir.db.get_current_war_status", return_value={"state": "warDay"}),
         patch("elixir.db.get_player_intel_refresh_targets", return_value=targets),
         patch("elixir.db.snapshot_player_profile", return_value=[]),
-        patch("runtime.jobs._intel._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_deliver,
         patch("elixir._maybe_alert_cr_api_failure", new=AsyncMock()) as mock_alert,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
     ):
         asyncio.run(elixir._player_intel_refresh())
 
-    mock_deliver.assert_not_awaited()
     mock_alert.assert_awaited_once_with("player intel refresh")
     mock_failure.assert_not_called()
     assert mock_success.call_args.args[0] == "player_intel_refresh"
