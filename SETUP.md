@@ -47,24 +47,14 @@ ELIXIR_LOG_WEBHOOK_URL=your_discord_webhook_url_for_elixir_log
 ELIXIR_LOG_WEBHOOK_USERNAME=Elixir
 ```
 
-Optional site publishing settings:
-
-```env
-POAP_KINGS_SITE_ENABLED=1
-POAP_KINGS_SITE_REPO=jthingelstad/poapkings.com
-POAP_KINGS_SITE_BRANCH=main
-POAP_KINGS_SITE_TOKEN=github_pat_xxx
-```
-
 Optional runtime tuning:
 
 ```env
-ELIXIR_DB_PATH=./elixir.db
+ELIXIR_DB_PATH=./elixir-v5.db
 HEARTBEAT_INTERVAL_MINUTES=60
 WAR_POLL_MINUTE=0
 WAR_AWARENESS_MINUTE=5
 PLAYER_INTEL_REFRESH_MINUTES=30
-SITE_CONTENT_HOUR=18
 CLANOPS_WEEKLY_REVIEW_DAY=fri
 CLANOPS_WEEKLY_REVIEW_HOUR=19
 WEEKLY_RECAP_DAY=mon
@@ -252,14 +242,6 @@ Prompt failures:
 grep "prompt_failure" /path/to/elixir.log | tail -20
 ```
 
-POAP KINGS website publishes:
-
-```bash
-grep "POAP KINGS" /path/to/elixir.log | tail -20
-```
-
-If GitHub-backed publishes are working, Elixir should also post operational visibility into `#website-updates`.
-
 ### Prompt failure review
 
 When Discord prompt generation fails or falls back:
@@ -329,17 +311,6 @@ Only exist if your `launchd` plist writes stdout/stderr to a file.
 
 It is safe to rotate, truncate, or delete those logs while the service is stopped.
 
-### POAP KINGS website repo
-
-The dynamic site data is published to the configured GitHub repo under:
-- `src/_data/elixirClan.json`
-- `src/_data/elixirRoster.json`
-- `src/_data/elixirHome.json`
-- `src/_data/elixirMembers.json`
-- `src/_data/elixirPromote.json`
-
-The runtime publish path is GitHub API-based. Local sibling-repo writes are legacy/dev-only behavior.
-
 ## Cleanup
 
 Remove transient local files:
@@ -360,7 +331,6 @@ The following are common sources of stale docs or stale assumptions:
 - activity cadence changed in `runtime/activities.py`
 - channel contract changed in `prompts/DISCORD.md`
 - reply policy changed for a channel like `#ask-elixir`
-- a new operational channel like `#website-updates` was added
 - startup behavior changed in `runtime/app.py`
 
 When in doubt, trust code over prose:

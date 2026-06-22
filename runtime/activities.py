@@ -228,19 +228,15 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=(
             "Discord: #announcements",
-            "POAP KINGS: weekly members payload",
         ),
         activity_role="communicator",
     ),
-    # site-content (POAP KINGS daily site publish) was retired from Elixir at the
-    # v5 consolidation: website generation now lives as a dedicated script in the
-    # website repo, reading the consolidated elixir-v5.db directly. The
-    # _site_content_cycle job function remains importable but is no longer
-    # scheduled or manually triggerable here.
+    # site-content (POAP KINGS website publishing) was removed entirely 2026-06-21
+    # — the website has its own standalone update script now.
     ActivityDefinition(
         activity_key="promotion-content",
         owner_lane="promote-the-clan",
-        purpose="Generate reusable recruiting content for members and the website.",
+        purpose="Generate reusable recruiting content for the #recruiting channel.",
         job_id="promotion-content",
         job_function="_promotion_content_cycle",
         schedule_kind="cron",
@@ -251,7 +247,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=(
             "Discord: #recruiting",
-            "POAP KINGS: promotion payloads",
         ),
         activity_role="communicator",
         legacy_commands=("promotion",),

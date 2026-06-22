@@ -24,14 +24,6 @@ CHANNEL_LANE_CONFIG = {
         "memory_scope": "public",
         "durable_memory_enabled": False,
     },
-    "poapkings-com": {
-        "workflow": "channel_update",
-        "tool_policy": "read_only",
-        "reply_policy": "disabled",
-        "singleton": True,
-        "memory_scope": "public",
-        "durable_memory_enabled": False,
-    },
     "announcements": {
         "workflow": "weekly_digest",
         "tool_policy": "read_only",
@@ -142,11 +134,6 @@ LANE_ALIASES = {
     "clan_chat": "general",
     "clan-chat": "general",
     "ask_elixir": "ask-elixir",
-    "poapkings_com": "poapkings-com",
-    "website_updates": "poapkings-com",
-    "website-updates": "poapkings-com",
-    "site_builder": "poapkings-com",
-    "site-builder": "poapkings-com",
 }
 
 def _normalize_lane_name(value: str | None) -> str:
