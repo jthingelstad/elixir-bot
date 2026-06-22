@@ -53,12 +53,46 @@ Decisions are keyed to the review list Jamie answered.
   current intel workflow; just change the trigger to season-start.
 
 **P3 — endgame**
-- **(7) Decommission the v4 signal/awareness system.** Once the above cover the
-  needed signals: remove the v4 heartbeat signal detectors, signal lanes/delivery,
-  the disabled awareness jobs, and the now-dead tables (signal_detector_cursors,
-  signal_outcomes, awareness_ticks, signal_log, etc.) + guard/retire their admin
-  readers. This is the "stop running two systems" cleanup Jamie wants — gated on
-  P1/P2 being live so nothing is lost.
+- **(7) Decommission the v4 signal/awareness system.** Mapped in full (2026-06-21).
+  STATUS: items 2b/2c/2e/2f/4 are live; 2d (tournaments) is folded here. This is a
+  large, moderately-entangled 5-phase removal with REAL risk to LIVE posting — do it
+  as a focused, carefully-tested pass, not a rushed one.
+
+  **Key finding:** v5 is cleanly decoupled (event_core imports nothing from the v4
+  signal system), BUT the v4 awareness DELIVERY is still actively used by FOUR
+  ENABLED jobs: award-detection (`_core.py:544`), player-progression (`_intel.py:137`),
+  weekly-discord-invite-relay (`_core.py:1271` arena-relay sidecars), and
+  tournament-watch (`_tournament.py:246`). These must be rewired to v5/direct posts
+  BEFORE deleting `runtime/signals/`. (Also verify whether player-progression's v4
+  delivery currently double-posts vs the v5 celebrate detectors — possible overlap.)
+
+  **Safe ordering (from the footprint map):**
+  - Phase 0 — relocate shared survivors OUT of to-be-deleted modules:
+    `build_lane_memory_context` (signal_lanes.py → runtime/helpers; used by
+    daily-clan-insight + intel) and `_post_system_signal_updates` (signals/system.py;
+    used by api-sentinel).
+  - Phase 1 — rewire the 4 enabled delivery callers to direct #channel posts / v5
+    intents (award-detection → #clan-events, player-progression → #player-highlights
+    or v5, weekly-invite-relay → direct leader-action card, tournament-watch →
+    direct #clan-events). Full-suite gate before any deletion.
+  - Phase 2 — remove disabled awareness jobs (clan-awareness, war-awareness,
+    clan-wars-intel activity [keep `_clan_wars_intel_report` as manual + drop its
+    war_season_rollover auto-trigger]; KEEP leadership-action-scan func — it drives
+    the kept leader-action system).
+  - Phase 3 — delete runtime/jobs/_signals.py, runtime/signals/ (pkg),
+    signal_lanes.py, runtime/situation.py, v4 `observe_and_post`; collapse heartbeat/
+    to ingest+awards only (keep `ingest_live_war_state` + `_awards.py`; drop
+    `_roster.py`/`_war.py`/`_helpers.py` + the detection half of `_pipeline.py`);
+    remove the admin `/signals` view. Trim the re-export blocks in
+    runtime/jobs/__init__.py + runtime/app.py FIRST (or app fails to import).
+  - Phase 4 — guard KEEP-side readers of signal_log/awareness_ticks
+    (get_system_status, admin status, retention rows in storage/metadata.py), then
+    DROP signal_log / signal_outcomes / signal_detector_cursors / awareness_ticks +
+    remove their storage accessors + the obsolete awareness-report skill.
+
+  Large test surface (test_awareness_loop, test_signal_flow_guardrails,
+  test_tournament_signals, big chunks of test_elixir_heartbeat/test_db_v2) must be
+  removed/rewritten in lockstep.
 
 ## Not doing
 - (5) paused automation — ignore. (6) disk cleanup — hold. POAP KINGS website —
