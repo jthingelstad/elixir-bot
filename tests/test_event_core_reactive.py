@@ -64,6 +64,30 @@ def test_policy_emits_scoped_intents_idempotently(world):
     conn.close()
 
 
+def test_policy_coalesces_celebrate_per_player_per_tick(world):
+    """A grinder who trips several celebrate detectors in one tick gets ONE
+    #player-highlights post, not several overlapping ones; other players are
+    unaffected."""
+    from event_core import db
+    from event_core.domain.detection import Detection
+    from event_core.mind.communication import CommunicationPolicy
+
+    for dedup, dtype, subj in [
+        ("card_level_milestone:#A:1", "card_level_milestone", "#A"),
+        ("battle_trophy_push:#A:1", "battle_trophy_push", "#A"),
+        ("best_trophies_peak:#B:6000", "best_trophies_peak", "#B"),
+    ]:
+        world.save(Detection(
+            dedup_key=dedup, detection_type=dtype, detector="t", subject_tag=subj,
+            occurred_at="2026-06-22T00:00:00Z", caused_by=["e"], payload={},
+        ))
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    pol = CommunicationPolicy(world, conn)
+    pol.reset()
+    assert pol.run() == 2  # #A's two celebrate detections coalesce to one; #B one
+    conn.close()
+
+
 def test_policy_maps_restored_coverage_detection_types(world):
     """v5 restored-coverage detections get the right intent_type prefix (which
     route_intent uses to pick the channel); non-public detections are filtered."""
@@ -88,9 +112,11 @@ def test_policy_maps_restored_coverage_detection_types(world):
         "anniv:#J:2026-06-21": ("join_anniversary", "clan"),
         "wkdon:2026W25": ("weekly_donation_leader", "clan"),
     }
-    for dedup, (dtype, _prefix) in cases.items():
+    # Unique subject per case so per-player celebrate coalescing doesn't collapse
+    # the three celebrate detections — this test checks type->prefix mapping only.
+    for i, (dedup, (dtype, _prefix)) in enumerate(cases.items()):
         world.save(Detection(
-            dedup_key=dedup, detection_type=dtype, detector="t", subject_tag="#J",
+            dedup_key=dedup, detection_type=dtype, detector="t", subject_tag=f"#S{i}",
             occurred_at="2026-06-21T00:00:00Z", caused_by=["e"], payload={},
         ))
     # Detections that should NOT post:
