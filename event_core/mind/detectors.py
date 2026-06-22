@@ -450,51 +450,110 @@ class MemberRoleChangeDetector(FollowerRunner):
         )
 
 
+def _trim_standings(ws: dict) -> list[dict]:
+    """Compact the live race standings for the detection payload (the agent
+    composes from this; it doesn't need every field)."""
+    return [
+        {
+            "rank": s.get("rank"),
+            "clan": s.get("clan_name"),
+            "fame": s.get("fame"),
+            "is_us": bool(s.get("is_us")),
+        }
+        for s in (ws.get("race_standings") or [])
+    ]
+
+
 class WarUpdateDetector(FollowerRunner):
-    """One war-progress update per active battle DAY -> #river-race.
+    """Clan-wars updates -> #river-race, ONE per battle day (Jamie: "no more than
+    one to two messages a day").
 
-    Follows RiverRace CurrentStateObserved. Fires at most once per (clan, section,
-    period_index) — i.e. once per battle day — and only on active battle days
-    (period_type == 'warDay'), so it gives ~1/day during the race (no training-day
-    or off-season noise, no fame-churn spam). The payload carries the day's fame /
-    period points / clan score so the agent can compose a real "where we stand"
-    update rather than a bare phase-transition note.
+    Scan-style (not per-event): each tick it reads the live war status and emits
+    at most:
 
-    Ceiling: standings vs other clans and who-hasn't-attacked still need the
-    per-participant war data, which is not captured in the event store yet
-    (see event-core-v5-autonomous-session-log.md backlog 2a)."""
+    - one `war_update` per battle day, in the EVENING (>= TARGET_HOUR Chicago) so
+      it's a real "where we stand near the end of today" standing rather than the
+      empty start-of-day snapshot the old event-driven detector caught (fame=0); and
+    - one `war_complete` per race when the section finalizes — the week's result.
+
+    The payload carries our rank/fame and the rival standings; the compose agent
+    enriches with live participation (who still has decks) via its CR tools. Dedup
+    keys (`war_day_key` / season+section) make both idempotent — once per day,
+    once per race — even across restarts/replays. Training and off-season ticks
+    no-op (battle_phase_active gate)."""
 
     name = "detector:war_update"
-    aggregate_name = "RiverRace"
-    ACTIVE_PERIOD_TYPES = {"warDay"}
+    aggregate_name = None  # scan-style: reads live war status, not the event log
+    TARGET_HOUR = 18  # Chicago hour from which the daily standing may post
 
-    def detect(self, event, notification) -> None:
-        if type(event).__name__ != "CurrentStateObserved":
-            return
-        obs = event.observation or {}
-        if obs.get("period_type") not in self.ACTIVE_PERIOD_TYPES:
-            return  # only post on active battle days; skip training / off-season
-        clan = obs.get("clan_tag") or ""
-        section = obs.get("section_index")
-        period_index = obs.get("period_index")
-        if section is None or period_index is None:
-            return
+    def detect(self, event, notification) -> None:  # unused (scan-style)
+        pass
+
+    def run(self, batch: int = 500) -> int:
+        import db as opdb
+        from datetime import timezone
+
+        try:
+            ws = opdb.get_current_war_status() or {}
+        except Exception:
+            return self.emitted  # no war data (e.g. isolated build/test store)
+        clan = ws.get("clan_tag")
+        if not clan:
+            return self.emitted
+
+        now = _chicago_now()
+        stamp = now.astimezone(timezone.utc).isoformat()
+
+        # 1) Finished race -> a single result/recap post.
+        if ws.get("race_completed"):
+            season = ws.get("season_id")
+            section = ws.get("section_index")
+            self.emit_detection(
+                dedup_key=f"war_complete:{season}:{section}",
+                detection_type="war_complete",
+                subject_tag=clan,
+                occurred_at=stamp,
+                caused_by=[f"war_complete:{season}:{section}"],
+                payload={
+                    "season_week": ws.get("season_week_label"),
+                    "final_rank": ws.get("race_rank"),
+                    "our_fame": ws.get("fame"),
+                    "trophy_change": ws.get("trophy_change"),
+                    "standings": _trim_standings(ws),
+                },
+            )
+            return self.emitted
+
+        # 2) Active battle day -> one evening standing.
+        if not ws.get("battle_phase_active"):
+            return self.emitted  # training / off-season: stay quiet
+        war_day_key = ws.get("war_day_key")
+        if not war_day_key:
+            return self.emitted
+        # Hold until the evening so it reads as an end-of-day standing — unless it's
+        # the final battle day, where we post as soon as we see it (the race can
+        # resolve before evening).
+        if now.hour < self.TARGET_HOUR and not ws.get("final_battle_day_active"):
+            return self.emitted
         self.emit_detection(
-            dedup_key=f"war_update:{clan}:{section}:{period_index}",
+            dedup_key=f"war_update:{war_day_key}",
             detection_type="war_update",
             subject_tag=clan,
-            occurred_at=event.observed_at,
-            caused_by=[self.evidence(notification)],
+            occurred_at=stamp,
+            caused_by=[f"war_update:{war_day_key}"],
             payload={
-                "section_index": section,
-                "period_index": period_index,
-                "period_type": obs.get("period_type"),
-                "war_state": obs.get("war_state"),
-                "fame": obs.get("fame"),
-                "period_points": obs.get("period_points"),
-                "clan_score": obs.get("clan_score"),
+                "season_week": ws.get("season_week_label"),
+                "battle_day": ws.get("battle_day_number"),
+                "battle_day_total": ws.get("battle_day_total"),
+                "final_battle_day": bool(ws.get("final_battle_day_active")),
+                "our_rank": ws.get("race_rank"),
+                "our_fame": ws.get("fame"),
+                "clan_score": ws.get("clan_score"),
+                "trophy_stakes": ws.get("trophy_stakes_text"),
+                "standings": _trim_standings(ws),
             },
         )
+        return self.emitted
 
 
 class NewSeasonDetector(FollowerRunner):
@@ -576,10 +635,14 @@ def _clan_founded() -> str:
         return _CLAN_FOUNDED_DEFAULT
 
 
-def _chicago_today():
+def _chicago_now():
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    return datetime.now(ZoneInfo("America/Chicago")).date()
+    return datetime.now(ZoneInfo("America/Chicago"))
+
+
+def _chicago_today():
+    return _chicago_now().date()
 
 
 def _table_exists(conn, name: str) -> bool:

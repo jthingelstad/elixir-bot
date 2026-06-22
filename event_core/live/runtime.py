@@ -96,7 +96,28 @@ def intent_context(intent, conn=None) -> str:
     summary = intent.summary or {}
     payload = {'type': intent.intent_type, 'player': intent.subject_tag, **summary}
 
-    if summary.get("detection_type") == "new_season":
+    dtype = summary.get("detection_type")
+    if dtype in ("war_update", "war_complete"):
+        facts = json.dumps(payload, indent=2, default=str)
+        if dtype == "war_complete":
+            ask = (
+                "Our clan-wars race just finished. Write ONE short result post for "
+                "the #river-race channel in your own voice — where we placed, the "
+                "fame total, and a nod to the clan. Celebratory but not over the top."
+            )
+        else:
+            ask = (
+                "Write ONE short clan-wars standing for the #river-race channel in "
+                "your own voice: where we sit right now (rank, fame, the gap to the "
+                "rival clans in \"standings\"), and a nudge to use remaining war decks. "
+                "Optionally use your tools to check who still has decks to play today. "
+                "Keep it to a few lines."
+            )
+        return (
+            f"{ask} Be concrete and motivating; use these facts and do not invent "
+            f"details.\n\n```json\n{facts}\n```"
+        )
+    if dtype == "new_season":
         # New clan-wars season -> an opponent intel briefing. The agent has CR
         # read tools; have it scout the competitor clans in our river-race group.
         facts = json.dumps(payload, indent=2, default=str)
@@ -143,6 +164,32 @@ def _extract_copy(result) -> str | None:
     return None
 
 
+# High-precision markers that the agent returned a meta/diagnostic note ("I'm not
+# posting this and here's why") instead of channel copy. Seen live: a "Signal data
+# inconsistent…" line posted to #player-highlights, and a "Signal is from… would
+# be stale" note in a war dry-run. None of these phrasings occur in a real Elixir
+# post, so matching any one means "don't post this; use the deterministic fallback."
+_META_MARKERS = (
+    "skipping post",
+    "skip this post",
+    "would be stale",
+    "is stale",
+    "signal is from",
+    "signal data",
+    "data inconsistent",
+    "inconsistent with",
+    "live race is now",
+    "as an ai",
+    "unable to compose",
+    "cannot compose",
+)
+
+
+def _looks_like_meta(copy: str) -> bool:
+    low = copy.lower()
+    return any(m in low for m in _META_MARKERS)
+
+
 def compose_copy(intent) -> str | None:
     """Agent composes voice-appropriate copy for the intent's channel lane.
 
@@ -170,6 +217,12 @@ def compose_copy(intent) -> str | None:
             ch["channel_name"], ch["lane"], intent_context(intent, conn), leadership=ch["leadership"]
         )
         copy = _extract_copy(result)
+        if copy and _looks_like_meta(copy):
+            logging.getLogger("elixir.event_core").warning(
+                "compose_copy: agent returned a meta/diagnostic note (not a post) for "
+                "%s; using fallback. text=%r", intent.dedup_key, copy[:160]
+            )
+            copy = None
         if copy:
             return copy
         logging.getLogger("elixir.event_core").warning(

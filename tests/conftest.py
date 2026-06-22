@@ -36,6 +36,16 @@ def _isolate_default_sqlite_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _neutralize_runtime_feature_flags(monkeypatch):
+    """Production runtime toggles set in .env (loaded via runtime.app's load_dotenv)
+    leak into the test process and would silently flip behavioral defaults. Scrub
+    them so tests exercise the code default; a test that wants a specific value
+    patches the flag explicitly."""
+    monkeypatch.delenv("PLAYER_INTEL_DELIVERY", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_v5_event_stores(tmp_path, monkeypatch):
     """Route the v5 event-sourcing stores to per-test tempfiles.
 

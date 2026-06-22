@@ -145,6 +145,62 @@ def test_cake_day_and_weekly_donation_detectors(world):
         conn.close()
 
 
+def test_war_update_detector_daily_evening_and_complete(world):
+    """Scan-style war detector: one evening standing per battle day (quiet in the
+    morning / on training days), and a single result post when the race finishes."""
+    from datetime import datetime
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfo
+
+    from event_core import db
+    from event_core.mind import detectors
+    from event_core.mind.detectors import WarUpdateDetector
+
+    morning = datetime(2026, 6, 20, 9, 0, tzinfo=ZoneInfo("America/Chicago"))
+    evening = datetime(2026, 6, 20, 19, 0, tzinfo=ZoneInfo("America/Chicago"))
+    battle_day = {
+        "clan_tag": "#CLN", "battle_phase_active": True, "final_battle_day_active": False,
+        "race_completed": False, "war_day_key": "s00133-w03-p018",
+        "race_rank": 1, "fame": 6870, "clan_score": 700, "battle_day_number": 3,
+        "season_week_label": "Season 133 Week 3",
+        "race_standings": [
+            {"rank": 1, "clan_name": "POAP KINGS", "fame": 6870, "is_us": True},
+            {"rank": 2, "clan_name": "55 club", "fame": 3600, "is_us": False},
+        ],
+    }
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        # Morning on a battle day: too early — stays quiet.
+        with patch.object(detectors, "_chicago_now", return_value=morning), \
+             patch("db.get_current_war_status", return_value=battle_day):
+            assert WarUpdateDetector(world, conn).run() == 0
+
+        # Evening: one standing, then idempotent.
+        with patch.object(detectors, "_chicago_now", return_value=evening), \
+             patch("db.get_current_war_status", return_value=battle_day):
+            assert WarUpdateDetector(world, conn).run() == 1
+            assert WarUpdateDetector(world, conn).run() == 0
+        rows = _detection_rows(world, conn)
+        assert rows["war_update"]["our_rank"] == 1
+        assert rows["war_update"]["standings"][1]["clan"] == "55 club"
+
+        # Training/off-season: quiet even in the evening.
+        training = {**battle_day, "battle_phase_active": False, "war_day_key": "s00133-w04-p021"}
+        with patch.object(detectors, "_chicago_now", return_value=evening), \
+             patch("db.get_current_war_status", return_value=training):
+            assert WarUpdateDetector(world, conn).run() == 0
+
+        # Race finished: a single result post, regardless of hour.
+        done = {**battle_day, "race_completed": True, "season_id": 133, "section_index": 2, "trophy_change": 30}
+        with patch.object(detectors, "_chicago_now", return_value=morning), \
+             patch("db.get_current_war_status", return_value=done):
+            assert WarUpdateDetector(world, conn).run() == 1
+        rows = _detection_rows(world, conn)
+        assert "war_complete" in rows and rows["war_complete"]["final_rank"] == 1
+    finally:
+        conn.close()
+
+
 def test_granular_level_change_emitted_after_baseline(world):
     from event_core.domain.player import player_id
 

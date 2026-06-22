@@ -49,6 +49,7 @@ PUBLIC_INTENT_PREFIX = {
     **{t: "clan" for t in _CLAN_SOCIAL},
     "member_joined": "welcome",
     "war_update": "war",
+    "war_complete": "war",
     "new_season": "war",
     "cohort_wave": "cohort",
 }
