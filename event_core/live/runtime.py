@@ -86,6 +86,33 @@ def _subject_history(conn, intent, limit: int = 12) -> list[dict]:
     return history
 
 
+def _resolve_player_name(conn, tag) -> str | None:
+    """subject_tag (#ABC) -> the member's display name, so the agent names the
+    PERSON, not the cryptic tag. Without this the agent leads with whatever
+    readable field it has — e.g. the card_name — producing "Wizard just hit level
+    16" (Wizard is the card, not the player). Best-effort."""
+    if conn is None or not tag or not str(tag).startswith("#"):
+        return None
+    try:
+        from event_core.domain.player import canon_tag
+        row = conn.execute(
+            "SELECT current_name FROM members WHERE player_tag=?", (canon_tag(tag),)
+        ).fetchone()
+        return row["current_name"] if row and row["current_name"] else None
+    except Exception:
+        return None
+
+
+# Naming guard appended to player-subject prompts: stops the agent from making a
+# card the grammatical subject (the "Wizard just hit level 16" bug).
+_NAMING_CLAUSE = (
+    "This is about the clan MEMBER in \"player_name\" — lead with their name (use the "
+    "tag only if no name is given). Card-related fields like \"card_name\" name the "
+    "card they leveled or unlocked, so write e.g. \"<member> maxed <card>\" or "
+    "\"<member> unlocked <card>\" — never make a card the subject of the sentence. "
+)
+
+
 def intent_context(intent, conn=None) -> str:
     """Presentation-free facts for the agent to compose from (NOT copy).
 
@@ -95,6 +122,9 @@ def intent_context(intent, conn=None) -> str:
     isolation."""
     summary = intent.summary or {}
     payload = {'type': intent.intent_type, 'player': intent.subject_tag, **summary}
+    player_name = _resolve_player_name(conn, intent.subject_tag)
+    if player_name:
+        payload["player_name"] = player_name
 
     dtype = summary.get("detection_type")
     if dtype in ("war_update", "war_complete"):
@@ -137,8 +167,9 @@ def intent_context(intent, conn=None) -> str:
     if history:
         return (
             "Compose a short, natural post in your own voice for this clan event. "
-            "The triggering event is the top-level fields (\"type\", \"player\", and "
-            "the detection fields); \"recent_history\" is what this player has done "
+            + _NAMING_CLAUSE +
+            "The triggering event is the top-level fields (\"type\", \"player_name\", "
+            "and the detection fields); \"recent_history\" is what this member has done "
             "recently, newest first. Where it makes the post better, set the moment "
             "in the context of their recent run (e.g. a streak of milestones, a hot "
             "week). Stay concise; use only these facts and do not invent details.\n\n"
@@ -146,6 +177,7 @@ def intent_context(intent, conn=None) -> str:
         )
     return (
         "Compose a short, natural post in your own voice for this clan event. "
+        + _NAMING_CLAUSE +
         "Use only these facts; do not invent details.\n\n"
         f"```json\n{facts}\n```"
     )

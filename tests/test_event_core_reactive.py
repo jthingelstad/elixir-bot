@@ -185,6 +185,34 @@ def test_looks_like_meta_rejects_agent_diagnostics():
     assert not _looks_like_meta("We're holding rank 1 with 9,800 fame. Use your last decks!")
 
 
+def test_intent_context_resolves_player_name_and_names_member():
+    """card_level_milestone etc. must name the MEMBER, not lead with the card.
+    intent_context resolves subject_tag -> member name and the prompt directs the
+    agent to lead with the person (the 'Wizard just hit level 16' fix)."""
+    from event_core import db
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live.runtime import intent_context
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    conn.execute("CREATE TABLE members (member_id INTEGER, player_tag TEXT, current_name TEXT, status TEXT)")
+    conn.execute("INSERT INTO members VALUES (1, '#PR8YLQ2CV', 'The Joesma', 'active')")
+    conn.execute(
+        "CREATE TABLE detections (dedup_key TEXT PRIMARY KEY, detection_type TEXT, detector TEXT, "
+        "subject_tag TEXT, occurred_at TEXT, scope TEXT, payload_json TEXT)"
+    )
+    conn.commit()
+    intent = CommunicationIntent(
+        dedup_key="intent:detection:card_level_milestone:#PR8YLQ2CV:26000017",
+        intent_type="celebrate:card_level_milestone", subject_tag="#PR8YLQ2CV", scope="public",
+        priority=1, caused_by=["e"],
+        summary={"detection_type": "card_level_milestone", "card_name": "Wizard", "milestone": 16},
+    )
+    prompt = intent_context(intent, conn)
+    assert "The Joesma" in prompt and '"player_name": "The Joesma"' in prompt
+    assert "never make a card the subject" in prompt
+    conn.close()
+
+
 def test_intent_context_no_history_is_clean():
     """A first-seen player (no prior detections) gets the original single-event
     prompt with no recent_history key."""
