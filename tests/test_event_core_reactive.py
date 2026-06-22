@@ -110,6 +110,81 @@ def test_policy_maps_restored_coverage_detection_types(world):
     conn.close()
 
 
+def test_intent_context_includes_subject_history():
+    """The compose prompt carries the subject player's recent detection stream
+    (newest first), excludes the triggering detection, and scope-gates leadership
+    rows out of a public post — the holistic-commentary enrichment."""
+    import json
+
+    from event_core import db
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live.runtime import intent_context
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    conn.execute(
+        "CREATE TABLE detections (dedup_key TEXT PRIMARY KEY, detection_type TEXT, detector TEXT, "
+        "subject_tag TEXT, occurred_at TEXT, scope TEXT, payload_json TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO detections VALUES(?,?,?,?,?,?,?)",
+        [
+            # the triggering detection (must NOT reappear as history)
+            ("best_trophies_peak:#A:6000", "best_trophies_peak", "t", "#A",
+             "2026-06-21T03:00:00Z", "public", json.dumps({"peak": 6000})),
+            ("card_level_milestone:#A:14", "card_level_milestone", "t", "#A",
+             "2026-06-20T03:00:00Z", "public", json.dumps({"card": "Mega Knight", "level": 14})),
+            ("player_level_up:#A:55", "player_level_up", "t", "#A",
+             "2026-06-19T03:00:00Z", "public", json.dumps({"level": 55})),
+            # leadership-scoped: a PUBLIC post must not see this
+            ("inactive_member_risk:#A", "inactive_member_risk", "t", "#A",
+             "2026-06-18T03:00:00Z", "leadership", "{}"),
+        ],
+    )
+    conn.commit()
+
+    intent = CommunicationIntent(
+        dedup_key="intent:detection:best_trophies_peak:#A:6000",
+        intent_type="celebrate:best_trophies_peak", subject_tag="#A", scope="public",
+        priority=1, caused_by=["e"], summary={"detection_type": "best_trophies_peak", "peak": 6000},
+    )
+    prompt = intent_context(intent, conn)
+    assert "recent_history" in prompt
+    # parse the embedded JSON block to assert precisely
+    block = prompt.split("```json\n", 1)[1].rsplit("\n```", 1)[0]
+    payload = json.loads(block)
+    hist = payload["recent_history"]
+    types = [h["type"] for h in hist]
+    assert "best_trophies_peak" not in types  # triggering detection excluded
+    assert types == ["card_level_milestone", "player_level_up"]  # newest first, public only
+    assert hist[0]["facts"]["card"] == "Mega Knight"  # payload carried through
+    conn.close()
+
+
+def test_intent_context_no_history_is_clean():
+    """A first-seen player (no prior detections) gets the original single-event
+    prompt with no recent_history key."""
+    import json
+
+    from event_core import db
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live.runtime import intent_context
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    conn.execute(
+        "CREATE TABLE detections (dedup_key TEXT PRIMARY KEY, detection_type TEXT, detector TEXT, "
+        "subject_tag TEXT, occurred_at TEXT, scope TEXT, payload_json TEXT)"
+    )
+    conn.commit()
+    intent = CommunicationIntent(
+        dedup_key="intent:detection:player_level_up:#NEW:10",
+        intent_type="celebrate:player_level_up", subject_tag="#NEW", scope="public",
+        priority=1, caused_by=["e"], summary={"detection_type": "player_level_up"},
+    )
+    prompt = intent_context(intent, conn)
+    assert "recent_history" not in prompt
+    conn.close()
+
+
 def test_agent_tools_resolve_evidence_and_scope():
     from event_core import db
     from event_core.read import tools
