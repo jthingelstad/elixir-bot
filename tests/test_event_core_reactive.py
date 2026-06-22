@@ -135,6 +135,10 @@ def test_intent_context_includes_subject_history():
              "2026-06-20T03:00:00Z", "public", json.dumps({"card": "Mega Knight", "level": 14})),
             ("player_level_up:#A:55", "player_level_up", "t", "#A",
              "2026-06-19T03:00:00Z", "public", json.dumps({"level": 55})),
+            # retired/non-postable type: present in the projection but must NOT
+            # pollute a public post's holistic context
+            ("battle_hot_streak:#A:1", "battle_hot_streak", "t", "#A",
+             "2026-06-18T12:00:00Z", "public", "{}"),
             # leadership-scoped: a PUBLIC post must not see this
             ("inactive_member_risk:#A", "inactive_member_risk", "t", "#A",
              "2026-06-18T03:00:00Z", "leadership", "{}"),
@@ -155,6 +159,7 @@ def test_intent_context_includes_subject_history():
     hist = payload["recent_history"]
     types = [h["type"] for h in hist]
     assert "best_trophies_peak" not in types  # triggering detection excluded
+    assert "battle_hot_streak" not in types  # retired/non-postable type filtered out
     assert types == ["card_level_milestone", "player_level_up"]  # newest first, public only
     assert hist[0]["facts"]["card"] == "Mega Knight"  # payload carried through
     conn.close()
