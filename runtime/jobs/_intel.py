@@ -83,8 +83,6 @@ async def _player_intel_refresh():
         runtime_status.mark_job_success("player_intel_refresh", "no member data")
         return
 
-    war = await asyncio.to_thread(db.get_current_war_status) or {}
-
     targets = await asyncio.to_thread(
         db.get_player_intel_refresh_targets,
         PLAYER_INTEL_BATCH_SIZE,
