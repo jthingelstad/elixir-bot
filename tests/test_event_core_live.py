@@ -227,3 +227,100 @@ def test_cadence_reflection():
     assert out["battles"] == 2 and out["active_players"] == 2
     assert out["detections"]["battle_trophy_push"] == 1
     conn.close()
+
+
+def test_consumer_drops_stale_backlog_instead_of_posting(world):
+    """F1: a long-outage backlog is bounded — intents older than MAX_INTENT_AGE_HOURS
+    are dropped (auditably) rather than posted, while fresh ones still post."""
+    from event_core.domain.communication_intent import CommunicationIntent, intent_id
+    from event_core.live.discord_consumer import IntentConsumer
+
+    world.save(CommunicationIntent(
+        dedup_key="stale1", intent_type="celebrate:x", subject_tag="#A", scope="public",
+        priority=1, caused_by=["e"], summary={},
+    ))
+    world.save(CommunicationIntent(
+        dedup_key="fresh1", intent_type="celebrate:x", subject_tag="#B", scope="public",
+        priority=1, caused_by=["e"], summary={},
+    ))
+    conn = _conn()
+    seen = []
+    consumer = IntentConsumer(world, conn, poster=lambda i: (seen.append(i.dedup_key) or True))
+    consumer.reset()
+    # mark only the first intent stale
+    consumer._is_stale = lambda intent: intent.dedup_key == "stale1"
+    consumer.run()
+
+    assert seen == ["fresh1"]  # stale not posted, fresh posted
+    assert consumer.dropped == 1 and consumer.posted == 1
+    assert world.repository.get(intent_id("stale1")).status == "dropped"
+    assert world.repository.get(intent_id("fresh1")).status == "fulfilled"
+    conn.close()
+
+
+def test_catch_up_drains_once_then_skips_on_restart(monkeypatch, world):
+    """F1: catch_up drains+marks at first go-live, then is a no-op on restart so it
+    can't silently fast-forward past unposted events."""
+    from event_core import db as _db
+    from event_core.live import service
+
+    # catch_up opens AND closes its own conn each call, so hand it a fresh conn to
+    # the same temp file (the marker persists in the file across calls). It imports
+    # config/db/ObservedWorld inside the function, so patch the source modules.
+    path = os.path.join(tempfile.mkdtemp(), "proj.db")
+    real_connect = _db.connect
+    monkeypatch.setattr("event_core.config.configure_eventstore_env", lambda *a, **k: None)
+    monkeypatch.setattr("event_core.application.ObservedWorld", lambda: world)
+    monkeypatch.setattr("event_core.db.connect", lambda *a, **k: real_connect(path))
+    monkeypatch.setattr("event_core.live.tick.fetch_payloads", lambda: {})
+    monkeypatch.setattr("event_core.live.engine.apply_payloads", lambda *a, **k: {})
+    monkeypatch.setattr("event_core.live.engine.advance", lambda *a, **k: {})
+    drains = []
+    monkeypatch.setattr("event_core.live.runtime.go_live_drain", lambda *a, **k: drains.append(1) or 7)
+
+    first = service.catch_up()
+    assert "drained_to_position" in first and len(drains) == 1  # drained once
+    vconn = real_connect(path)
+    assert service._cutover_done(vconn)  # marker set
+    vconn.close()
+
+    second = service.catch_up()
+    assert "skipped" in second and len(drains) == 1  # NOT drained again on restart
+
+    forced = service.catch_up(force=True)
+    assert "drained_to_position" in forced and len(drains) == 2  # force overrides
+
+
+def test_health_splits_deliverable_pending_from_drained(world, monkeypatch):
+    """F4: health reports deliverable backlog (Raised after the consumer cursor) vs
+    drained-historical, and excludes scan-style detectors from follower lag."""
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live import health
+
+    # two intents: the consumer will be parked between them
+    world.save(CommunicationIntent(
+        dedup_key="old", intent_type="celebrate:x", subject_tag="#A", scope="public",
+        priority=1, caused_by=[], summary={},
+    ))
+    world.save(CommunicationIntent(
+        dedup_key="new", intent_type="celebrate:x", subject_tag="#B", scope="public",
+        priority=1, caused_by=[], summary={},
+    ))
+    conn = _conn()  # temp proj.db with projection_tracking
+    # consumer parked at position 1: 'old' (id 1) is behind it (drained), 'new' (id 2) ahead (deliverable)
+    conn.execute("INSERT OR REPLACE INTO projection_tracking VALUES ('consumer:discord', 1, 't')")
+    # a stale scan-detector row that must NOT count as follower lag
+    conn.execute("INSERT OR REPLACE INTO projection_tracking VALUES ('detector:war_update', 0, 't')")
+    conn.execute("INSERT OR REPLACE INTO projection_tracking VALUES ('detections_proj', 2, 't')")
+    conn.commit()
+    # health_snapshot imports db/ObservedWorld inside the function — patch sources.
+    monkeypatch.setattr("event_core.config.configure_eventstore_env", lambda *a, **k: None)
+    monkeypatch.setattr("event_core.application.ObservedWorld", lambda: world)
+    monkeypatch.setattr("event_core.db.connect", lambda *a, **k: conn)
+
+    snap = health.health_snapshot()
+    assert snap["intents"]["deliverable_pending"] == 1  # only 'new' (ahead of cursor)
+    assert snap["intents"]["drained_historical"] == 1   # 'old' (behind cursor, unfulfilled)
+    assert "detector:war_update" not in snap["follower_lag"]  # scan detector excluded
+    assert "detector:war_update" in snap["scan_detectors"]
+    conn.close()

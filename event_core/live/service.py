@@ -49,11 +49,37 @@ async def reactive_tick(loop, post_coro) -> dict:
     return await asyncio.to_thread(_run_tick_sync, make_agent_poster(send))
 
 
-def catch_up() -> dict:
-    """Go-live, run ONCE at startup: ingest current CR state and advance (raising
-    intents for everything that happened during downtime), then drain ALL intents
-    WITHOUT posting. Reactive posting then begins fresh from the next tick, so
-    go-live never floods Discord with the historical/downtime backlog."""
+_CUTOVER_MARKER = "cutover:v5"
+
+
+def _cutover_done(conn) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM projection_tracking WHERE projection_name=?", (_CUTOVER_MARKER,)
+    ).fetchone() is not None
+
+
+def _mark_cutover(conn, position: int) -> None:
+    conn.execute(
+        "INSERT INTO projection_tracking(projection_name,last_global_position,updated_at) "
+        "VALUES(?,?,?) ON CONFLICT(projection_name) DO UPDATE SET "
+        "last_global_position=excluded.last_global_position, updated_at=excluded.updated_at",
+        (_CUTOVER_MARKER, position, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+
+
+def catch_up(force: bool = False) -> dict:
+    """ONE-TIME go-live drain — runs only at the true first cutover (or with
+    force=True). Ingests current CR state, advances (raising intents for the whole
+    history), then fast-forwards the consumer past it all WITHOUT posting, so the
+    first go-live never floods Discord with the entire historical backlog. A
+    durable marker (`cutover:v5` in projection_tracking) records that this ran.
+
+    On every SUBSEQUENT restart this is a NO-OP: the consumer resumes from its
+    tracked position and the next reactive tick posts the (small) downtime backlog
+    — so a restart can no longer silently fast-forward past unposted events. The
+    consumer's own staleness policy bounds a long-outage backlog (see
+    IntentConsumer), so skipping the drain here can't flood."""
     from event_core import config, db
     from event_core.application import ObservedWorld
     from event_core.live.engine import advance, apply_payloads
@@ -64,11 +90,18 @@ def catch_up() -> dict:
     app = ObservedWorld()
     conn = db.connect(config.PROJECTIONS_DB)
     try:
+        if _cutover_done(conn) and not force:
+            head = app.recorder.max_notification_id() or 0
+            return {
+                "skipped": "cutover already complete; consumer resumes from tracked position",
+                "event_log_head": head,
+            }
         payloads = fetch_payloads()
         ts = datetime.now(timezone.utc).isoformat()
         ingested = apply_payloads(app, conn, payloads, ts)
         advanced = advance(app, conn)
         drained = go_live_drain(app, conn)
+        _mark_cutover(conn, drained)
         return {"ingested": ingested, "advanced": advanced, "drained_to_position": drained}
     finally:
         conn.close()
