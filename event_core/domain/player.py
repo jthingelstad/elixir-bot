@@ -122,6 +122,18 @@ class Player(Aggregate):
             new_best = observation.get("best_trophies")
             if new_best is not None and new_best != old.get("best_trophies"):
                 self._best_trophies_changed(new_best, old.get("best_trophies"), observed_at, tag)
+            # Path-of-Legend: emit on any league or rank movement (detectors decide
+            # promotion vs demotion vs rank improvement). Only when PoL is present.
+            if "pol_league_number" in observation or "pol_rank" in observation:
+                old_league = old.get("pol_league_number")
+                new_league = observation.get("pol_league_number")
+                old_rank = old.get("pol_rank")
+                new_rank = observation.get("pol_rank")
+                if new_league != old_league or new_rank != old_rank:
+                    self._path_of_legend_changed(
+                        new_league, old_league, new_rank, old_rank,
+                        observation.get("pol_trophies"), observed_at, tag,
+                    )
         self._profile_observed(observation, observed_at, content_hash)
         return True
 
@@ -144,6 +156,15 @@ class Player(Aggregate):
     @event("BestTrophiesChanged")
     def _best_trophies_changed(self, new_best: int, old_best, observed_at: str, player_tag: str) -> None:
         self.profile["best_trophies"] = new_best
+
+    @event("PathOfLegendChanged")
+    def _path_of_legend_changed(
+        self, new_league, old_league, new_rank, old_rank,
+        new_trophies, observed_at: str, player_tag: str,
+    ) -> None:
+        self.profile["pol_league_number"] = new_league
+        self.profile["pol_rank"] = new_rank
+        self.profile["pol_trophies"] = new_trophies
 
     def observe_roster_state(
         self, observation: dict, observed_at: str, content_hash: str

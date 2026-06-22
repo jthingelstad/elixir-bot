@@ -184,6 +184,30 @@ Verified: zero `poap_kings_site`/site-publish refs in source; full suite green.
 - `roster_bios` workflow entries remain in agent/workflow_registry.py + chat.py +
   tool_policy (dead config, no generator) — harmless.
 
+## 6. Roadmap completion — Batch 1 (items 4, 2f, 2c, 2b)
+
+All new reactive coverage; route via existing prefixes (celebrate→#player-highlights,
+clan→#clan-events). Detectors read v4 operational tables directly (consolidated DB);
+guarded with _table_exists so they no-op in isolated build/test stores.
+
+- **2f Path-of-Legend** — capture PoL (league/trophies/rank) in profile ingest +
+  a granular `PathOfLegendChanged` event (event_core/ingest/profile.py,
+  domain/player.py). `PathOfLegendDetector` emits path_of_legend_promotion,
+  ultimate_champion_reached (crossing into league 10), path_of_legend_global_rank_attained
+  → #player-highlights. This closes the big PoL gap (was blocked on event capture).
+- **4 member_left** — enrich with name/role/trophies; SUPPRESS when the departure
+  was an accepted leader-action kick (kick_recommendation status=done within 14d).
+- **2c cake-day/birthday** — `CakeDayDetector` (date-driven scan): clan birthday,
+  member birthdays, quarterly join anniversaries → #clan-events.
+- **2b weekly donations** — `WeeklyDonationLeaderDetector`: last completed week's
+  top donor(s) from member_daily_metrics (survives Monday reset), once/week → #clan-events.
+
+Tests: PoL promotion/UC/rank, member_left enrich+kick-suppression, cake-day +
+weekly-donation, policy mappings (12 public types). Full mind suite (incl. build
+harness) green.
+
+Remaining: 2e (intel on new season), 2d (tournaments → v5 path), 7 (decommission v4).
+
 ## Review notes / decisions / risks
 - **Cosmetic log artifact:** `format_scheduler_startup_summary` lists ALL activities
   incl. the disabled ones (clan/war-awareness, leadership-action-scan,

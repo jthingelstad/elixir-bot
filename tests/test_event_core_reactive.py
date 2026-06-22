@@ -78,6 +78,13 @@ def test_policy_maps_restored_coverage_detection_types(world):
         "member_promoted:#J:elder:t0": ("member_promoted", "clan"),
         "war_update:#CLAN:5:warDay": ("war_update", "war"),
         "cohort_wave:badge_earned:2026-06-21": ("cohort_wave", "cohort"),
+        "pol_promo:#J:10": ("path_of_legend_promotion", "celebrate"),
+        "uc:#J": ("ultimate_champion_reached", "celebrate"),
+        "polrank:#J:1": ("path_of_legend_global_rank_attained", "celebrate"),
+        "clanbday:2026-06-21": ("clan_birthday", "clan"),
+        "bday:#J:2026-06-21": ("member_birthday", "clan"),
+        "anniv:#J:2026-06-21": ("join_anniversary", "clan"),
+        "wkdon:2026W25": ("weekly_donation_leader", "clan"),
     }
     for dedup, (dtype, _prefix) in cases.items():
         world.save(Detection(
@@ -94,7 +101,7 @@ def test_policy_maps_restored_coverage_detection_types(world):
     conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
     pol = CommunicationPolicy(world, conn)
     pol.reset()
-    assert pol.run() == 5  # only the public restored-coverage detections
+    assert pol.run() == len(cases)  # all public detections post; inactive_member_risk filtered
 
     for dedup, (_dtype, prefix) in cases.items():
         intent = world.repository.get(intent_id(f"intent:detection:{dedup}"))
