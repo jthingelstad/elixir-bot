@@ -352,30 +352,49 @@ class MemberRoleChangeDetector(FollowerRunner):
 
 
 class WarUpdateDetector(FollowerRunner):
-    """War phase transition -> #river-race. Follows RiverRace CurrentStateObserved;
-    fires once per (clan, section, period_type) so fame churn doesn't spam — only
-    entering a new war week / phase posts."""
+    """One war-progress update per active battle DAY -> #river-race.
+
+    Follows RiverRace CurrentStateObserved. Fires at most once per (clan, section,
+    period_index) — i.e. once per battle day — and only on active battle days
+    (period_type == 'warDay'), so it gives ~1/day during the race (no training-day
+    or off-season noise, no fame-churn spam). The payload carries the day's fame /
+    period points / clan score so the agent can compose a real "where we stand"
+    update rather than a bare phase-transition note.
+
+    Ceiling: standings vs other clans and who-hasn't-attacked still need the
+    per-participant war data, which is not captured in the event store yet
+    (see event-core-v5-autonomous-session-log.md backlog 2a)."""
 
     name = "detector:war_update"
     aggregate_name = "RiverRace"
+    ACTIVE_PERIOD_TYPES = {"warDay"}
 
     def detect(self, event, notification) -> None:
         if type(event).__name__ != "CurrentStateObserved":
             return
         obs = event.observation or {}
+        if obs.get("period_type") not in self.ACTIVE_PERIOD_TYPES:
+            return  # only post on active battle days; skip training / off-season
         clan = obs.get("clan_tag") or ""
         section = obs.get("section_index")
-        period = obs.get("period_type")
-        if section is None or period is None:
+        period_index = obs.get("period_index")
+        if section is None or period_index is None:
             return
         self.emit_detection(
-            dedup_key=f"war_update:{clan}:{section}:{period}",
+            dedup_key=f"war_update:{clan}:{section}:{period_index}",
             detection_type="war_update",
             subject_tag=clan,
             occurred_at=event.observed_at,
             caused_by=[self.evidence(notification)],
-            payload={"section_index": section, "period_type": period,
-                     "war_state": obs.get("war_state"), "fame": obs.get("fame")},
+            payload={
+                "section_index": section,
+                "period_index": period_index,
+                "period_type": obs.get("period_type"),
+                "war_state": obs.get("war_state"),
+                "fame": obs.get("fame"),
+                "period_points": obs.get("period_points"),
+                "clan_score": obs.get("clan_score"),
+            },
         )
 
 
@@ -419,10 +438,13 @@ class CohortWaveDetector(FollowerRunner):
 
 # Per-event detectors run in advance()'s detector loop. CohortWaveDetector is run
 # separately (after the detections projection is current) — see live/engine.advance.
+# BattleHotStreakDetector intentionally NOT registered: hot-streak is the
+# less-interesting twin of battle_trophy_push and posted redundantly alongside it.
+# We celebrate trophy/rank MOVEMENT instead (battle_trophy_push; mode-aware /
+# Path-of-Legend movement is the 2f follow-up). The class is retained for reference.
 ALL_DETECTORS = [
     PlayerLevelUpDetector,
     BestTrophiesPeakDetector,
-    BattleHotStreakDetector,
     CardLevelMilestoneDetector,
     NewCardUnlockedDetector,
     BadgeEarnedDetector,

@@ -17,9 +17,13 @@ from event_core.mind.follower import FollowerRunner
 # Public detection_type -> intent_type prefix. The prefix selects the channel in
 # route_intent (celebrate->#player-highlights, welcome->#welcome, war->#river-race,
 # cohort->#clan-events).
+# battle_hot_streak intentionally NOT here: it's the same "doing well in battle"
+# signal as battle_trophy_push (which posted alongside it — redundant double-post)
+# and is the less interesting of the two. We celebrate trophy/rank MOVEMENT, which
+# is the mode-appropriate metric. (Mode-aware movement incl. Path-of-Legend is the
+# 2f/3 follow-up.) The detector still runs only if re-added to ALL_DETECTORS.
 _CELEBRATE = (
     "best_trophies_peak",
-    "battle_hot_streak",
     "battle_trophy_push",
     "card_level_milestone",
     "new_card_unlocked",

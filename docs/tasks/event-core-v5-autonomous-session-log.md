@@ -141,6 +141,20 @@ intel report (port vs keep manual), demotion handling.
    leaders, cake-days, tournaments, intel report, Path-of-Legend (blocked).
 4. Optional next overhead cleanup: none pending — the dual-write is gone.
 
+## 4. Post-review execution (Jamie's decisions)
+
+Full decision set + sequencing in `event-core-v5-completion-roadmap.md`. Batch 1:
+- **2a war update** — `WarUpdateDetector` now fires once per active battle day
+  (period_type=="warDay", keyed on period_index), richer payload
+  (fame/period_points/clan_score/day). ~1/day during the race; no off-season noise.
+- **3 hot-streak** — dropped `battle_hot_streak` from the celebrate set + detector
+  registry (redundant with battle_trophy_push; "not interesting"). Fixes the
+  double-post. Mode-aware trophy/rank movement (incl. PoL) is the 2f follow-up.
+
+Next (sequenced): (4) enrich leave + suppress kicks, (2b) weekly donations,
+(2c) cake-days, then the big ones (2f Path-of-Legend capture, 2d tournaments,
+2e season-start intel), then (7) decommission the v4 signal system.
+
 ## Review notes / decisions / risks
 - **Cosmetic log artifact:** `format_scheduler_startup_summary` lists ALL activities
   incl. the disabled ones (clan/war-awareness, leadership-action-scan,
