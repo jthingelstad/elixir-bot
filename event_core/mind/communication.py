@@ -26,8 +26,12 @@ _CELEBRATE = (
     "best_trophies_peak",
     "battle_trophy_push",
     "card_level_milestone",
+    # new_card_unlocked covers legendary AND champion unlocks (its payload carries
+    # rarity, so the agent frames champions specially). new_champion_unlocked is a
+    # strict subset (same card_id) — it stays a detection for parity/cohort logic
+    # but is intentionally NOT a public intent type, else every champion unlock
+    # double-posts (seen live: pigsareus' Archer Queen posted twice in one tick).
     "new_card_unlocked",
-    "new_champion_unlocked",
     "badge_earned",
     "player_level_up",
     # Path-of-Legend (ranked ladder) milestones — a first-class celebration lane.

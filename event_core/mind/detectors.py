@@ -592,7 +592,9 @@ class CohortWaveDetector(FollowerRunner):
 
     name = "detector:cohort_wave"
     MIN_MEMBERS = 3
-    WAVE_TYPES = ("badge_earned", "card_level_milestone", "new_card_unlocked", "new_champion_unlocked")
+    # new_champion_unlocked omitted: it's a subset of new_card_unlocked (same
+    # card_id), so counting both would double-count champion unlocks in a wave.
+    WAVE_TYPES = ("badge_earned", "card_level_milestone", "new_card_unlocked")
 
     def detect(self, event, notification) -> None:  # unused (scans projection)
         pass
