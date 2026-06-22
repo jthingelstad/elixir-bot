@@ -51,19 +51,29 @@ def _subject_history(conn, intent, limit: int = 12) -> list[dict]:
     tag = intent.subject_tag or ""
     if not tag.startswith("#") or conn is None:
         return []
+    from event_core.mind.communication import PUBLIC_INTENT_PREFIX
     from event_core.read import tools
 
-    scope = "leadership" if route_intent(intent).get("leadership") else "public"
+    leadership = bool(route_intent(intent).get("leadership"))
+    scope = "leadership" if leadership else "public"
     current = (intent.dedup_key or "").removeprefix("intent:detection:")
     try:
-        rows = tools.get_player_detections(conn, tag, scope=scope, limit=limit + 1)
+        # Over-fetch so type-filtering below doesn't starve the window.
+        rows = tools.get_player_detections(conn, tag, scope=scope, limit=max(limit * 3, limit + 1))
     except Exception:
         return []
     history: list[dict] = []
     for r in rows:
         if r.get("dedup_key") == current:
             continue  # don't echo the triggering event back as "history"
-        entry = {"type": r.get("detection_type"), "when": r.get("occurred_at")}
+        dtype = r.get("detection_type")
+        # On a public post, only carry detection types we'd actually surface, so
+        # retired/internal signals (e.g. battle_hot_streak, which still has rows in
+        # the projection but no longer posts) don't pollute the holistic context.
+        # Leadership posts get the full stream.
+        if not leadership and dtype not in PUBLIC_INTENT_PREFIX:
+            continue
+        entry = {"type": dtype, "when": r.get("occurred_at")}
         raw = r.get("payload_json")
         if raw:
             try:
