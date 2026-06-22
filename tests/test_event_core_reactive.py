@@ -93,17 +93,25 @@ def test_policy_maps_restored_coverage_detection_types(world):
             dedup_key=dedup, detection_type=dtype, detector="t", subject_tag="#J",
             occurred_at="2026-06-21T00:00:00Z", caused_by=["e"], payload={},
         ))
-    # a detection that should NOT post (drives recommendations, not Discord)
+    # Detections that should NOT post:
+    #  - inactive_member_risk drives recommendations, not Discord
+    #  - new_champion_unlocked is a subset of new_card_unlocked (which DOES post);
+    #    posting both double-posts every champion unlock
     world.save(Detection(
         dedup_key="inactive_member_risk:#Z", detection_type="inactive_member_risk",
         detector="t", subject_tag="#Z", occurred_at="2026-06-21T00:00:00Z",
         caused_by=["e"], payload={},
     ))
+    world.save(Detection(
+        dedup_key="new_champion_unlocked:#J:26000072", detection_type="new_champion_unlocked",
+        detector="t", subject_tag="#J", occurred_at="2026-06-21T00:00:00Z",
+        caused_by=["e"], payload={"rarity": "champion"},
+    ))
 
     conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
     pol = CommunicationPolicy(world, conn)
     pol.reset()
-    assert pol.run() == len(cases)  # all public detections post; inactive_member_risk filtered
+    assert pol.run() == len(cases)  # public detections post; risk + champion-subset filtered
 
     for dedup, (_dtype, prefix) in cases.items():
         intent = world.repository.get(intent_id(f"intent:detection:{dedup}"))
