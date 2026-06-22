@@ -1,8 +1,31 @@
 # Event Core v5 Remediation Plan
 
-Status: Plan. Tracking issue: #101.
+Status: In progress. Tracking issue: #101.
 
 Captured: 2026-06-22.
+
+## Status (2026-06-22)
+
+- **F1 (startup catch-up drains) — DONE + verified live.** `catch_up()` is now a
+  one-time go-live drain guarded by a durable `cutover:v5` marker; subsequent
+  restarts no-op and the consumer resumes from its tracked position. A long-outage
+  backlog is bounded by `IntentConsumer.MAX_INTENT_AGE_HOURS` (drops stale intents
+  as `Dropped("stale_backlog")`, not silent fast-forward). Verified: restart #2
+  logged `skipped: cutover already complete`.
+- **F4 (health metrics) — DONE + verified live.** Health now reports
+  `deliverable_pending` (Raised intents after the consumer cursor) vs
+  `drained_historical`, and excludes scan-style detectors from follower lag.
+  Verified: `deliverable_pending: 0`, `drained_historical: 730`, `scan_detectors:
+  [detector:war_update]`.
+- **F2 (`game_event_stream` retirement) — FOLDED INTO ITEM 7.** It shares the same
+  modules as the v4 signal teardown (`runtime/signals/delivery.py`,
+  `runtime/signals/system.py`, `storage/player.py` battle-event writes). Run it as
+  ONE coordinated effort, not a parallel track — see
+  `event-core-v5-completion-roadmap.md` (item 7). The F2 reader/writer inventory and
+  replacement-source table below feed that plan.
+- **F3 (presentation boundary) — DEFERRED.** Benign (does not corrupt the store).
+  Do routing-only later if at all; do NOT build a `reactive_outbox` table that
+  duplicates F4's health computation.
 
 ## Goal
 
