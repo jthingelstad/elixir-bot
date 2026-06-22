@@ -497,6 +497,35 @@ class WarUpdateDetector(FollowerRunner):
         )
 
 
+class NewSeasonDetector(FollowerRunner):
+    """New clan-wars season -> #river-race opponent intel briefing. Follows
+    RiverRace CurrentStateObserved and fires once per season_id. The live payload
+    omits seasonId, so it's read from the aggregate (ingest infers it). The post is
+    composed by the agent, which scouts the competitor clans via its CR tools."""
+
+    name = "detector:new_season"
+    aggregate_name = "RiverRace"
+
+    def detect(self, event, notification) -> None:
+        if type(event).__name__ != "CurrentStateObserved":
+            return
+        try:
+            agg = self.app.repository.get(notification.originator_id)
+            season = getattr(agg, "season_id", None)
+        except Exception:
+            return
+        if season is None:
+            return
+        self.emit_detection(
+            dedup_key=f"new_season:{season}",
+            detection_type="new_season",
+            subject_tag=None,
+            occurred_at=event.observed_at,
+            caused_by=[self.evidence(notification)],
+            payload={"season_id": season},
+        )
+
+
 class CohortWaveDetector(FollowerRunner):
     """Clan-wide wave -> #clan-events. Scans the detections projection: when >=3
     distinct members share a celebratory detection_type on the same Chicago day,
@@ -699,6 +728,7 @@ ALL_DETECTORS = [
     MemberLeftDetector,
     MemberRoleChangeDetector,
     WarUpdateDetector,
+    NewSeasonDetector,
     CakeDayDetector,
     WeeklyDonationLeaderDetector,
 ]

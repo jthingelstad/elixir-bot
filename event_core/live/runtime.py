@@ -41,10 +41,25 @@ def route_intent(intent) -> dict:
 
 def intent_context(intent) -> str:
     """Presentation-free facts for the agent to compose from (NOT copy)."""
+    facts = json.dumps(
+        {'type': intent.intent_type, 'player': intent.subject_tag, **(intent.summary or {})},
+        indent=2, default=str,
+    )
+    if (intent.summary or {}).get("detection_type") == "new_season":
+        # New clan-wars season -> an opponent intel briefing. The agent has CR
+        # read tools; have it scout the competitor clans in our river-race group.
+        return (
+            "A new Clash Royale clan-wars season has started. Write a short opponent "
+            "intel briefing for the leadership-facing river-race channel in your own "
+            "voice: use your tools to look up the other clans in our current river race "
+            "group and call out the main threats (clan score, war trophies, notable "
+            "members). Be concrete; do not invent details.\n\n"
+            f"```json\n{facts}\n```"
+        )
     return (
         "Compose a short, natural post in your own voice for this clan event. "
         "Use only these facts; do not invent details.\n\n"
-        f"```json\n{json.dumps({'type': intent.intent_type, 'player': intent.subject_tag, **(intent.summary or {})}, indent=2, default=str)}\n```"
+        f"```json\n{facts}\n```"
     )
 
 

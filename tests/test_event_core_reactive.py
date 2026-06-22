@@ -77,6 +77,7 @@ def test_policy_maps_restored_coverage_detection_types(world):
         "member_left:#J:t0": ("member_left", "clan"),
         "member_promoted:#J:elder:t0": ("member_promoted", "clan"),
         "war_update:#CLAN:5:warDay": ("war_update", "war"),
+        "new_season:131": ("new_season", "war"),
         "cohort_wave:badge_earned:2026-06-21": ("cohort_wave", "cohort"),
         "pol_promo:#J:10": ("path_of_legend_promotion", "celebrate"),
         "uc:#J": ("ultimate_champion_reached", "celebrate"),
