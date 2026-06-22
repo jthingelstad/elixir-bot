@@ -219,11 +219,11 @@ def test_cadence_reflection():
     ])
     conn.execute("CREATE TABLE detections (detection_type TEXT, occurred_at TEXT)")
     conn.executemany("INSERT INTO detections VALUES(?,?)", [
-        ("battle_hot_streak", "20260621T120000.000Z"), ("best_trophies_peak", "20260621T120000.000Z"),
+        ("battle_trophy_push", "20260621T120000.000Z"), ("best_trophies_peak", "20260621T120000.000Z"),
     ])
     conn.commit()
 
     out = clan_activity_24h(conn, "20260621T000000.000Z")
     assert out["battles"] == 2 and out["active_players"] == 2
-    assert out["detections"]["battle_hot_streak"] == 1
+    assert out["detections"]["battle_trophy_push"] == 1
     conn.close()
