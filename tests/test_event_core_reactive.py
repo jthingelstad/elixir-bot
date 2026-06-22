@@ -77,6 +77,7 @@ def test_policy_maps_restored_coverage_detection_types(world):
         "member_left:#J:t0": ("member_left", "clan"),
         "member_promoted:#J:elder:t0": ("member_promoted", "clan"),
         "war_update:#CLAN:5:warDay": ("war_update", "war"),
+        "war_complete:131:2": ("war_complete", "war"),
         "new_season:131": ("new_season", "war"),
         "cohort_wave:badge_earned:2026-06-21": ("cohort_wave", "cohort"),
         "pol_promo:#J:10": ("path_of_legend_promotion", "celebrate"),
@@ -163,6 +164,17 @@ def test_intent_context_includes_subject_history():
     assert types == ["card_level_milestone", "player_level_up"]  # newest first, public only
     assert hist[0]["facts"]["card"] == "Mega Knight"  # payload carried through
     conn.close()
+
+
+def test_looks_like_meta_rejects_agent_diagnostics():
+    """compose_copy must not post the agent's meta/refusal notes; the guard catches
+    the phrasings seen live without flagging real celebratory copy."""
+    from event_core.live.runtime import _looks_like_meta
+
+    assert _looks_like_meta("Signal data inconsistent with player profile; skipping post")
+    assert _looks_like_meta("Signal is from Week 3 Battle Day 4; messaging would be stale.")
+    assert not _looks_like_meta("**King Thing** just hit 8,200 trophies — clean ladder work!")
+    assert not _looks_like_meta("We're holding rank 1 with 9,800 fame. Use your last decks!")
 
 
 def test_intent_context_no_history_is_clean():
