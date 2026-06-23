@@ -1,7 +1,6 @@
 """Tests for the weekly memory-synthesis job (PR3 of #12)."""
 
 import asyncio
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

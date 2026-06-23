@@ -1,12 +1,9 @@
 import asyncio
 import logging
-import os
-import re
 from datetime import datetime, timezone
 
 import db
 from runtime.activities import schedule_specs_from_registry
-from runtime import status as runtime_status
 
 DISCORD_MAX_MESSAGE_LEN = 2000
 DISCORD_CHUNK_SIZE = 1990  # leave room for overhead

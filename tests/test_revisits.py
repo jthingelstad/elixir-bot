@@ -2,8 +2,6 @@
 
 import json
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 

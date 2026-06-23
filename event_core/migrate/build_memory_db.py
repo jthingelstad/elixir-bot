@@ -35,7 +35,7 @@ _COPY_TABLES = (
 
 
 def build(source_path: str | None = None, out_path: str | None = None) -> dict:
-    from memory_store import CLAN_MEMORY_SCHEMA_SQL, get_memory_connection
+    from memory_store import get_memory_connection
 
     if source_path is None:
         import db as _opdb

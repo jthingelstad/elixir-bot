@@ -43,7 +43,6 @@ from runtime.helpers._common import (
     _schedule_specs,
     _scheduler,
     _status_badge,
-    _with_leader_ping,
 )
 
 

@@ -13,7 +13,6 @@ from typing import Optional
 
 from db import (
     _canon_tag,
-    _ensure_member,
     _json_or_none,
     _utcnow,
     managed_connection,

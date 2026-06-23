@@ -10,7 +10,7 @@ import time
 from anthropic import Anthropic, APIError, APIConnectionError
 
 import db
-from agent.workflow_registry import SONNET_RETAINED_WORKFLOWS, workflow_model_family
+from agent.workflow_registry import workflow_model_family
 from runtime import status as runtime_status
 
 log = logging.getLogger("elixir_agent")

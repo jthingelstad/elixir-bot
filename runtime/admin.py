@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass
 from contextlib import ExitStack, asynccontextmanager
 from datetime import datetime, timezone
@@ -9,7 +8,6 @@ from unittest.mock import patch
 import re
 
 from runtime.activities import (
-    list_registered_activities,
     normalize_activity_key,
     resolve_activity,
     schedule_specs_from_registry,

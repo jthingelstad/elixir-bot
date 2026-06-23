@@ -7,17 +7,12 @@ from datetime import datetime, timezone
 import cr_api
 import db
 from heartbeat._helpers import (
-    BATTLE_DAY_SECONDS,
-    _COLOSSEUM_FAME_TARGET,
-    _RACE_FAME_TARGET,
     _battle_lead_payload,
     _completed_war_races,
-    _compute_pace_status,
     _war_period_signal_log_type,
     _war_signal_date_for_state,
     _war_signal_date_for_values,
 )
-from storage.war_calendar import is_colosseum_week
 from storage.war_status import (
     _format_duration_short as _format_remaining_short,
     _fresh_time_left_seconds,

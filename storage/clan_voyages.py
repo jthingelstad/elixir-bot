@@ -7,7 +7,6 @@ import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
-from typing import Optional
 
 from db import _canon_tag, _json_or_none, _rowdicts, _utcnow, managed_connection
 from storage._formatting import callable_name

@@ -9,7 +9,6 @@ from db import (
     _canon_tag,
     _current_joined_at,
     _parse_cr_time,
-    _utcnow,
     managed_connection,
 )
 from storage._enrichment import _member_reference_fields
