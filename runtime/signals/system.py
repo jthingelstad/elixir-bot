@@ -57,13 +57,6 @@ async def _post_system_signal_updates(signals, clan, war):
     if not system_signals:
         return
 
-    await asyncio.to_thread(
-        db.record_signal_events,
-        system_signals,
-        source_system="system_signals",
-        source_detector="system_signals",
-    )
-
     for signal in system_signals:
         result = _preauthored_system_signal_result(signal)
         if not result:

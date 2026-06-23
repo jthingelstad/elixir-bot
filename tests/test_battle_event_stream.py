@@ -130,23 +130,7 @@ def _battle(battle_type, mode_id, mode_name, battle_time, opp_tag="#OPP"):
     }
 
 
-def test_snapshot_player_battlelog_projects_battle_events():
-    battle_log = [
-        _battle("pathOfLegend", 72000464, "Ranked1v1_NewArena2", "20260620T105524.000Z", "#A"),
-        _battle("PvP", 72000006, "Ladder", "20260620T110000.000Z", "#B"),
-        _battle("riverRacePvP", 72000266, "CW_Battle_1v1", "20260620T111500.000Z", "#C"),
-    ]
-    db.snapshot_player_battlelog("#PLAYERX", battle_log)
-
-    conn = db.get_connection()
-    rows = conn.execute(
-        "SELECT game_mode, COUNT(*) n FROM game_event_stream "
-        "WHERE event_class='battle' GROUP BY game_mode"
-    ).fetchall()
-    by_mode = {r["game_mode"]: r["n"] for r in rows}
-    assert by_mode.get("ranked") == 1
-    assert by_mode.get("ladder") == 1
-    assert by_mode.get("war") == 1
-
-    # these battle events must not leak into the signal-grain awareness view
-    assert db.summarize_events_by_window(conn=conn)["90d"]["total"] == 0
+# test_snapshot_player_battlelog_projects_battle_events was removed with F2:
+# snapshot_player_battlelog no longer shadow-writes battle-grain rows into
+# game_event_stream — battle telemetry now lives in the v5 battle_telemetry
+# projection (event_core.ingest.battles).
