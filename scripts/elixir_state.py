@@ -13,6 +13,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import db  # noqa: E402
+from event_core.read import event_facades  # noqa: E402
 
 
 DEFAULT_WINDOWS = (7, 28, 56, 90)
@@ -57,13 +58,12 @@ def _line_items(title: str, rows: list[dict], *, empty: str) -> list[str]:
 def _summary_payload(args) -> dict:
     limit = args.limit
     return {
-        "event_windows": db.summarize_events_by_window(windows=DEFAULT_WINDOWS, scope=args.scope),
-        "recent_events": db.list_recent_events(days=args.days, scope=args.scope, limit=limit),
+        "event_windows": event_facades.summarize_event_windows(windows=DEFAULT_WINDOWS, scope=args.scope),
+        "recent_events": event_facades.list_recent_events(days=args.days, scope=args.scope, limit=limit),
         "war_season": db.get_war_season_snapshot(),
         "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
         "recent_intents": db.list_recent_communication_intents(limit=limit),
         "failed_intents": db.list_recent_communication_intents(status="failed", limit=limit),
-        "recent_rollups": db.list_event_rollups(scope=args.scope, limit=limit),
     }
 
 
@@ -105,20 +105,17 @@ def _print_summary(data: dict) -> None:
     print("")
     for line in _line_items("Failed Communication Intents", data.get("failed_intents") or [], empty="none"):
         print(line)
-    print("")
-    for line in _line_items("Recent Event Rollups", data.get("recent_rollups") or [], empty="none"):
-        print(line)
 
 
 def _events_payload(args) -> dict:
     return {
-        "event_windows": db.summarize_events_by_window(
+        "event_windows": event_facades.summarize_event_windows(
             windows=DEFAULT_WINDOWS,
             scope=args.scope,
             subject_type=args.subject_type,
             subject_key=args.subject_key,
         ),
-        "events": db.list_recent_events(
+        "events": event_facades.list_recent_events(
             days=args.days,
             scope=args.scope,
             event_type=args.event_type,
@@ -154,21 +151,6 @@ def _intents_payload(args) -> dict:
             status=status,
             workflow=args.workflow,
             target_channel_key=args.target_channel_key,
-            limit=args.limit,
-        )
-    }
-
-
-def _rollups_payload(args) -> dict:
-    scope = None if args.scope == "all" else args.scope
-    return {
-        "rollups": db.list_event_rollups(
-            rollup_type=args.rollup_type,
-            scope=scope,
-            subject_type=args.subject_type,
-            subject_key=args.subject_key,
-            project_key=args.project_key,
-            season_id=args.season_id,
             limit=args.limit,
         )
     }
@@ -225,15 +207,6 @@ def build_parser() -> argparse.ArgumentParser:
     intents.add_argument("--workflow")
     intents.add_argument("--target-channel-key")
 
-    rollups = sub.add_parser("rollups", help="Show long-term event rollups.")
-    _add_common(rollups)
-    rollups.add_argument("--rollup-type", choices=("member_90d", "war_cycle", "project_summary", "case_history"))
-    rollups.add_argument("--scope", choices=("all", "public", "leadership", "system_internal"), default="all")
-    rollups.add_argument("--subject-type")
-    rollups.add_argument("--subject-key")
-    rollups.add_argument("--project-key")
-    rollups.add_argument("--season-id")
-
     return parser
 
 
@@ -258,8 +231,6 @@ def main(argv: list[str] | None = None) -> int:
         data = _cases_payload(args)
     elif args.command == "intents":
         data = _intents_payload(args)
-    elif args.command == "rollups":
-        data = _rollups_payload(args)
     else:
         parser.error(f"unknown command: {args.command}")
         return 2

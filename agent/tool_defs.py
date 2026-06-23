@@ -7,7 +7,7 @@
 #                   get_clan_voyage
 #   Cards:          lookup_cards (catalog), get_member_card_profile (digest),
 #                   lookup_member_cards (filtered slice)
-#   Elixir state:   get_elixir_state, get_event_rollups
+#   Elixir state:   get_elixir_state
 #   Utility:        update_member, save_clan_memory
 
 TOOLS = [
@@ -469,7 +469,6 @@ TOOLS = [
                         "decision_cases",
                         "communication_intents",
                         "communication_trace",
-                        "event_rollups",
                     ],
                 },
                 "scope": {
@@ -526,52 +525,6 @@ TOOLS = [
                 "message_id": {
                     "type": "string",
                     "description": "Discord message id for aspect='communication_trace'.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum rows to return. Default 25, max 100.",
-                    "default": 25,
-                },
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "get_event_rollups",
-        "description": (
-            "Read long-term event rollups that survive beyond the 90-day operational event stream. "
-            "Use this for historical views such as member_90d activity summaries, war_cycle summaries, "
-            "project_summary records, and case_history records. Leadership-scoped rollups are blocked "
-            "outside leadership workflows."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "rollup_type": {
-                    "type": "string",
-                    "description": "Optional rollup type filter.",
-                    "enum": ["member_90d", "war_cycle", "project_summary", "case_history"],
-                },
-                "scope": {
-                    "type": "string",
-                    "description": "Rollup scope: public, leadership, system_internal, or all. Non-leadership workflows are forced to public.",
-                    "enum": ["public", "leadership", "system_internal", "all"],
-                },
-                "subject_type": {
-                    "type": "string",
-                    "description": "Optional subject type filter, e.g. member or war.",
-                },
-                "subject_key": {
-                    "type": "string",
-                    "description": "Optional subject key filter.",
-                },
-                "project_key": {
-                    "type": "string",
-                    "description": "Optional project key filter.",
-                },
-                "season_id": {
-                    "type": "integer",
-                    "description": "Optional season filter.",
                 },
                 "limit": {
                     "type": "integer",
