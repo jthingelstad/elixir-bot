@@ -10,6 +10,11 @@ Read AGENTS.md and scripts/product-team/README.md before acting. The `log-triage
 
 Cadence: daily — catch regressions and noise fast.
 
+Evidence standard:
+* Use exact artifacts before summaries. For delivered Elixir copy and source-intent traces, start with `messages` and `communication_intents`; for requested leadership actions, start with `leader_action_recommendations`.
+* When citing Discord evidence, include channel, timestamp, Discord message ID, workflow/event type, intent ID, and action ID when present.
+* Treat `messages` as recent conversation memory, not a complete long-term audit archive. Use a Discord API/history export only to recover missing exact message bodies or IDs for a defined quality window.
+
 Every run:
 
 1. Run the shared git preflight from scripts/product-team/README.md.
@@ -17,6 +22,7 @@ Every run:
    * `scripts/review_agent_feedback.py` — 👎 reactions and prompt failures.
    * `python -m event_core.live.health` and `python -m event_core.live.monitor` — v5 reactive tick health, deliverable pending work, follower lag, and recent errors.
    * `detections`, `battle_telemetry`, and v5 recommendation/case evidence in `elixir-v5.db` / `elixir-v5-events.db`.
+   * Exact delivered copy and traces from `messages`, `communication_intents`, and `leader_action_recommendations`.
    * `prompt_failures` and remaining legacy tables such as `awareness_ticks`, `signal_outcomes`, and `game_event_stream` only when validating old compatibility paths or teardown work.
    * Recommendation → outcome history: were delivered notifications acted on or ignored?
 3. Assess against the quality questions:
