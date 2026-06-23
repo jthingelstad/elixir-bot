@@ -303,10 +303,10 @@ def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memor
     signals: list of signal dicts from heartbeat.tick(), or None when no detector output is being passed.
     recent_posts: list of recent message dicts from db.list_channel_messages().
     """
-    from runtime.signal_lanes import is_war_signal
-
-    # Only include war context when signals are war-related
-    has_war_signals = signals and any(is_war_signal(s) for s in signals)
+    # Only include war context when signals are war-related (type starts with "war_")
+    has_war_signals = signals and any(
+        str((s or {}).get("type") or "").startswith("war_") for s in signals
+    )
     context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT,
                             include_war=has_war_signals)
 

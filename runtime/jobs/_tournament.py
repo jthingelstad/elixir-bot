@@ -16,7 +16,7 @@ import db
 import elixir_agent
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
-from runtime.jobs._signals import _post_to_elixir
+from runtime.helpers._common import _post_to_elixir
 from runtime.discord_posting import compose_and_post
 
 

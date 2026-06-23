@@ -18,13 +18,9 @@ __all__ = [
 import asyncio
 import json
 import logging
-import re
-from datetime import datetime, timezone
 
 import db
 import elixir_agent
-import pytz
-import prompts
 from storage.contextual_memory import upsert_race_streak_memory, upsert_war_recap_memory
 from runtime.signal_lanes import (
     is_leadership_only_signal,
@@ -35,13 +31,18 @@ from runtime.signal_lanes import (
     plan_signal_outcomes,
     signal_source_key,
 )
-from runtime.helpers import _channel_scope, _get_singleton_channel_id
+from runtime.helpers import (
+    _channel_scope,
+    _get_singleton_channel_id,
+    _channel_config_by_key,
+    _WEEKLY_RECAP_HEADER_RE,
+    _strip_weekly_recap_header,
+    _format_weekly_recap_post,
+)
 from runtime import status as runtime_status
 from runtime.system_signals import queue_startup_system_signals
 
 
-_WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
-CHICAGO = pytz.timezone("America/Chicago")
 log = logging.getLogger("elixir")
 
 
@@ -62,37 +63,9 @@ async def _load_live_clan_context(*args, **kwargs):
     return await _runtime_app()._load_live_clan_context(*args, **kwargs)
 
 
-def _channel_config_by_key(channel_key: str) -> dict:
-    config = prompts.discord_channels_by_lane().get(channel_key)
-    if not config:
-        raise RuntimeError(f"channel lane not configured: {channel_key}")
-    return config
-
-
 def _signal_group_needs_recap_memory(signals):
     recap_types = {"war_battle_day_complete", "war_week_complete", "war_completed", "war_season_complete"}
     return any((signal.get("type") in recap_types) for signal in (signals or []))
-
-
-def _strip_weekly_recap_header(text: str) -> str:
-    body = (text or "").strip()
-    if not body:
-        return ""
-    lines = body.splitlines()
-    if lines and _WEEKLY_RECAP_HEADER_RE.match(lines[0] or ""):
-        lines = lines[1:]
-        while lines and not (lines[0] or "").strip():
-            lines = lines[1:]
-    return "\n".join(lines).strip()
-
-
-def _format_weekly_recap_post(recap_text: str, *, now: datetime | None = None) -> str:
-    body = _strip_weekly_recap_header(recap_text)
-    current = (now or datetime.now(timezone.utc)).astimezone(CHICAGO)
-    title = f"**Weekly Recap | {current.strftime('%B')} {current.day}, {current.year}**"
-    if not body:
-        return title
-    return f"{title}\n\n{body}"
 
 
 def _progression_signal_batches(signals):
