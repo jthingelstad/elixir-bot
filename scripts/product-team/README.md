@@ -8,14 +8,14 @@ These agents do not talk to each other directly. **GitHub Issues on `jthingelsta
 
 | Role | File | Lane | Commits code? |
 |------|------|------|---------------|
-| Data Analyst | `data-analyst.md` | Watches the CR API → DB → event stream for new/changed patterns | No — issue-only |
+| Data Analyst | `data-analyst.md` | Turns CR API data into product intelligence for the PM | No — issue-only |
 | Product Manager | `product-manager.md` | Discovers opportunities worth doing | No — issue-only |
 | Quality Manager | `quality-manager.md` | Judges if Elixir is actually working | No — issue-only |
 | Evaluator | `evaluator.md` | Datasets, scoring, benchmarks, regression tests | Yes — eval harnesses & tests only |
 | Build Manager | `build-manager.md` | Works the backlog into tested changes | **Yes — owns feature/bug code** |
 | Operations Manager | `operations-manager.md` | Production health & reliability | Yes — operational fixes only |
 
-Elixir is a data-driven agent: capability is downstream of the Clash Royale API data. The **Data Analyst sits at the front of the pipeline** — a new game mode, card, or event arrives as a *fresh data pattern* before it's ever a feature request. The analyst catches it and hands the Product Manager the data picture; the PM proposes; the Build Manager builds.
+Elixir is a data-driven agent: capability is downstream of the Clash Royale API data. The **Data Analyst sits at the front of the pipeline** as a primary input to the Product Manager — a new game mode, card, event, schema field, or behavior pattern arrives as a *fresh data pattern* before it's ever a feature request. The analyst catches it, quantifies it, and hands the Product Manager the product-intelligence picture; the PM decides what is worth proposing, and the Build Manager builds approved work.
 
 ## Commit ownership (strict lanes)
 
