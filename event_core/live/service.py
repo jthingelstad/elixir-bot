@@ -34,12 +34,16 @@ def _run_tick_sync(poster) -> dict:
 
 
 async def reactive_tick(loop, post_coro) -> dict:
-    """One live reactive tick. `post_coro(channel_id, text) -> awaitable[bool]` is
-    the bot's Discord send; it is awaited on `loop` from the worker thread."""
+    """One live reactive tick.
+
+    `post_coro(channel_id, text, metadata=None) -> awaitable[bool]` is the bot's
+    Discord send; it is awaited on `loop` from the worker thread.
+    """
     from event_core.live.runtime import make_agent_poster
 
-    def send(channel_id, text, scope) -> bool:
-        fut = asyncio.run_coroutine_threadsafe(post_coro(channel_id, text), loop)
+    def send(channel_id, text, scope, metadata=None) -> bool:
+        del scope
+        fut = asyncio.run_coroutine_threadsafe(post_coro(channel_id, text, metadata=metadata), loop)
         try:
             return bool(fut.result(timeout=45))
         except Exception:

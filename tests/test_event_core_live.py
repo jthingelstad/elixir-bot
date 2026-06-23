@@ -151,6 +151,41 @@ def test_render_intent_and_dry_run_poster(world):
     assert poster.posts == [("public", text)]
 
 
+def test_agent_poster_passes_delivery_metadata(monkeypatch):
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live import runtime
+
+    monkeypatch.setattr(runtime, "compose_copy", lambda intent: "TDuck hit a new peak.")
+    seen = []
+
+    def send(channel_id, text, scope, metadata):
+        seen.append((channel_id, text, scope, metadata))
+        return True
+
+    ci = CommunicationIntent(
+        dedup_key="intent:detection:best_trophies_peak:#A:6000",
+        intent_type="celebrate:best_trophies_peak",
+        subject_tag="#A",
+        scope="public",
+        priority=2,
+        caused_by=["best_trophies_peak:#A:6000"],
+        summary={"detection_type": "best_trophies_peak", "peak": 6000},
+    )
+
+    assert runtime.make_agent_poster(send)(ci) is True
+
+    channel_id, text, scope, metadata = seen[0]
+    assert channel_id == runtime.PUBLIC_HIGHLIGHTS["channel_id"]
+    assert text == "TDuck hit a new peak."
+    assert scope == "public"
+    assert metadata["event_core_intent_id"] == str(ci.id)
+    assert metadata["event_core_dedup_key"] == "intent:detection:best_trophies_peak:#A:6000"
+    assert metadata["intent_type"] == "celebrate:best_trophies_peak"
+    assert metadata["target_channel_key"] == "player-highlights"
+    assert metadata["source_signal_key"] == "best_trophies_peak:#A:6000"
+    assert metadata["source_signal_type"] == "best_trophies_peak"
+
+
 def test_route_intent_and_go_live_drain(world):
     from event_core.domain.communication_intent import CommunicationIntent
     from event_core.live.discord_consumer import IntentConsumer
