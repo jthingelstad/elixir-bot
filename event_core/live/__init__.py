@@ -5,5 +5,5 @@ shared ingest path, advance the Followers incrementally (resume from tracked
 positions — not a full rebuild), and consume CommunicationIntents to Discord.
 
 Built behind seams; nothing here touches the live service until the Stage 6
-go-live (see docs/tasks/event-core-v5-cutover-runbook.md).
+go-live (see docs/archive/event-core-v5/event-core-v5-cutover-runbook.md).
 """
