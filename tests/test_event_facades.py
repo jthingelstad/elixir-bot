@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS detections (
 )
 """
 
-_PROFILE_DDL = "CREATE TABLE IF NOT EXISTS player_current_profile (player_tag TEXT UNIQUE, name TEXT)"
+_MEMBERS_DDL = "CREATE TABLE IF NOT EXISTS members (player_tag TEXT UNIQUE, current_name TEXT)"
 
 
 def _seed(detections=(), battles=(), profiles=()):
@@ -27,7 +27,7 @@ def _seed(detections=(), battles=(), profiles=()):
     try:
         conn.execute(_DETECTIONS_DDL)
         conn.execute(BATTLE_TELEMETRY_DDL)
-        conn.execute(_PROFILE_DDL)
+        conn.execute(_MEMBERS_DDL)
         for d in detections:
             conn.execute(
                 "INSERT INTO detections(dedup_key,detection_type,detector,subject_tag,occurred_at,scope,payload_json) "
@@ -42,7 +42,7 @@ def _seed(detections=(), battles=(), profiles=()):
                 b,
             )
         for p in profiles:
-            conn.execute("INSERT INTO player_current_profile(player_tag,name) VALUES(?,?)", p)
+            conn.execute("INSERT INTO members(player_tag,current_name) VALUES(?,?)", p)
         conn.commit()
     finally:
         conn.close()

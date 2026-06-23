@@ -248,8 +248,8 @@ def summarize_battle_modes(
     """Per-mode battle activity from ``battle_telemetry`` (game-mode pulse).
 
     The v5-native replacement for ``summarize_battle_modes``. Member names come
-    from the v5 ``player_current_profile`` projection (no ``elixir.db`` lookup),
-    so this stays inside the projection DB.
+    from the ``members`` table, which lives in the same unified store as the
+    battle telemetry (db.DB_PATH == config.PROJECTIONS_DB).
     """
     now_dt = _now_dt(now)
     member_filter = canon_tag(subject_key) if subject_key else None
@@ -267,12 +267,12 @@ def summarize_battle_modes(
                 f"""
                 SELECT b.mode_group AS mode,
                        b.player_tag AS tag,
-                       p.name AS name,
+                       m.current_name AS name,
                        COUNT(*) AS battles,
                        SUM(CASE WHEN b.outcome = 'W' THEN 1 ELSE 0 END) AS wins,
                        SUM(CASE WHEN b.outcome = 'L' THEN 1 ELSE 0 END) AS losses
                 FROM battle_telemetry b
-                LEFT JOIN player_current_profile p ON p.player_tag = b.player_tag
+                LEFT JOIN members m ON m.player_tag = b.player_tag
                 WHERE {' AND '.join(where)}
                 GROUP BY b.mode_group, b.player_tag
                 """,

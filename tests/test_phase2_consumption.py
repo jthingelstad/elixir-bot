@@ -43,7 +43,7 @@ def _seed_v5_battles(rows, profiles=()):
     conn = ec_db.connect(config.PROJECTIONS_DB)
     try:
         conn.execute(BATTLE_TELEMETRY_DDL)
-        conn.execute("CREATE TABLE IF NOT EXISTS player_current_profile (player_tag TEXT UNIQUE, name TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS members (player_tag TEXT UNIQUE, current_name TEXT)")
         for (tag, when, btype, opp, mode_group, outcome) in rows:
             conn.execute(
                 "INSERT OR IGNORE INTO battle_telemetry(player_tag,battle_time,battle_type,opponent_tag,"
@@ -51,7 +51,7 @@ def _seed_v5_battles(rows, profiles=()):
                 (tag, when, btype, opp, 1, 0, mode_group, outcome, when),
             )
         for tag, name in profiles:
-            conn.execute("INSERT OR IGNORE INTO player_current_profile(player_tag,name) VALUES(?,?)", (tag, name))
+            conn.execute("INSERT OR IGNORE INTO members(player_tag,current_name) VALUES(?,?)", (tag, name))
         conn.commit()
     finally:
         conn.close()
