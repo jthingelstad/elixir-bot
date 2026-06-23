@@ -272,18 +272,38 @@ def compose_copy(intent) -> str | None:
 
 def make_agent_poster(send):
     """Build a SYNCHRONOUS poster for IntentConsumer: compose copy (agent voice)
-    then post via `send(channel_id, text, scope) -> bool`, returning the send
-    result. Critically, this composes AND sends before returning True, so the
+    then post via `send(channel_id, text, scope, metadata) -> bool`, returning
+    the send result. Critically, this composes AND sends before returning True, so the
     consumer only marks the intent fulfilled after a confirmed Discord post
     (at-least-once; no fulfil-before-send loss). `send` is the live service's
     bridge to the discord.py client (blocks on the actual post)."""
+
+    def _metadata(intent, channel):
+        summary = intent.summary if isinstance(intent.summary, dict) else {}
+        caused_by = [str(item) for item in (getattr(intent, "caused_by", None) or []) if item]
+        return {
+            "source": "event_core_v5",
+            "event_core_intent_id": str(getattr(intent, "id", "")),
+            "event_core_dedup_key": intent.dedup_key,
+            "intent_type": intent.intent_type,
+            "subject_tag": intent.subject_tag,
+            "scope": intent.scope,
+            "priority": intent.priority,
+            "caused_by": caused_by,
+            "source_signal_key": caused_by[0] if caused_by else None,
+            "source_signal_type": summary.get("detection_type"),
+            "summary": summary,
+            "target_channel_key": channel["channel_name"],
+            "target_lane": channel["lane"],
+            "target_channel_id": channel["channel_id"],
+        }
 
     def poster(intent) -> bool:
         ch = route_intent(intent)
         copy = compose_copy(intent)
         if not copy:
             return False
-        return bool(send(ch["channel_id"], copy, intent.scope))
+        return bool(send(ch["channel_id"], copy, intent.scope, _metadata(intent, ch)))
 
     return poster
 

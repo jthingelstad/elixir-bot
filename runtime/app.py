@@ -1,6 +1,7 @@
 """runtime.app — Elixir Discord bot runtime."""
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -319,13 +320,155 @@ from runtime.startup import (  # noqa: E402,F401
 
 register_elixir_app_commands(bot)
 
-async def _v5_post(channel_id, text) -> bool:
+def _v5_intent_key(metadata: dict | None) -> str:
+    metadata = metadata or {}
+    dedup_key = (metadata.get("event_core_dedup_key") or "").strip()
+    if dedup_key:
+        return f"v5:{dedup_key}"
+    event_core_intent_id = (metadata.get("event_core_intent_id") or "").strip()
+    if event_core_intent_id:
+        return f"v5:{event_core_intent_id}"
+    basis = json.dumps(metadata or {}, sort_keys=True, default=str).encode("utf-8")
+    return f"v5:unknown:{hashlib.sha256(basis).hexdigest()[:16]}"
+
+
+def _v5_message_payloads(sent_messages, fallback_text: str) -> list[dict]:
+    payloads = []
+    for idx, sent in enumerate(sent_messages or [], start=1):
+        discord_message_id = getattr(sent, "id", None)
+        content = getattr(sent, "content", None)
+        if content is None:
+            content = fallback_text if len(sent_messages or []) == 1 else ""
+        discord_created_at = getattr(sent, "created_at", None)
+        if hasattr(discord_created_at, "isoformat"):
+            discord_created_at = discord_created_at.isoformat()
+        payloads.append({
+            "index": idx,
+            "discord_message_id": str(discord_message_id) if discord_message_id is not None else None,
+            "content": str(content or ""),
+            "discord_created_at": discord_created_at,
+        })
+    return payloads
+
+
+def _upsert_v5_operational_intent(
+    *,
+    channel_id,
+    text: str,
+    metadata: dict | None,
+    status: str,
+    error_detail: str | None = None,
+) -> dict:
+    metadata = dict(metadata or {})
+    target_channel_id = metadata.get("target_channel_id") or channel_id
+    target_channel_key = metadata.get("target_channel_key")
+    summary = metadata.get("summary") if isinstance(metadata.get("summary"), dict) else {}
+    payload = {
+        **metadata,
+        "original_copy": text,
+        "audit_source": "runtime.app._v5_post",
+    }
+    return db.upsert_communication_intent(
+        intent_key=_v5_intent_key(metadata),
+        workflow="v5-reactive",
+        intent_type=metadata.get("intent_type") or "event_core",
+        status=status,
+        target_channel_key=target_channel_key,
+        target_channel_id=target_channel_id,
+        source_signal_key=metadata.get("source_signal_key"),
+        source_signal_type=metadata.get("source_signal_type"),
+        covers_signal_keys=metadata.get("caused_by") or [],
+        summary=_preview_text(summary, limit=500),
+        content_preview=_preview_text(text, limit=500),
+        error_detail=error_detail,
+        payload=payload,
+    )
+
+
+def _record_v5_delivery_failure(channel_id, text: str, metadata: dict | None, error_detail: str) -> None:
+    _upsert_v5_operational_intent(
+        channel_id=channel_id,
+        text=text,
+        metadata=metadata,
+        status="failed",
+        error_detail=error_detail,
+    )
+
+
+def _record_v5_delivery_success(channel, text: str, sent_messages, metadata: dict | None) -> None:
+    operational_intent = _upsert_v5_operational_intent(
+        channel_id=getattr(channel, "id", None),
+        text=text,
+        metadata=metadata,
+        status="planned",
+    )
+    intent_id = operational_intent.get("intent_id")
+    message_payloads = _v5_message_payloads(sent_messages, text)
+    for payload in message_payloads:
+        db.save_message(
+            _channel_scope(channel),
+            "assistant",
+            payload["content"],
+            **_channel_msg_kwargs(channel),
+            workflow="v5-reactive",
+            event_type=(metadata or {}).get("intent_type") or "event_core",
+            discord_message_id=payload.get("discord_message_id"),
+            raw_json={
+                **(metadata or {}),
+                "posted_message": payload,
+                "original_copy": text,
+            },
+            intent_id=int(intent_id) if intent_id is not None else None,
+        )
+    db.mark_communication_intent_delivered(
+        int(intent_id),
+        target_channel_id=getattr(channel, "id", None),
+        message_ids=[item["discord_message_id"] for item in message_payloads if item.get("discord_message_id")],
+        payload={
+            **(metadata or {}),
+            "posted_messages": message_payloads,
+            "original_copy": text,
+        },
+    )
+
+
+async def _v5_post(channel_id, text, *, metadata: dict | None = None) -> bool:
     """Post v5 agent-composed copy to a channel by id (the Discord send bridge)."""
     channel = bot.get_channel(int(channel_id))
     if channel is None:
         log.warning("v5: channel %s not found; skipping post", channel_id)
+        await asyncio.to_thread(
+            _record_v5_delivery_failure,
+            channel_id,
+            text,
+            metadata,
+            "channel_not_found",
+        )
         return False
-    await _post_to_elixir(channel, {"content": text})
+    try:
+        sent_messages = await _post_to_elixir(channel, {"content": text})
+    except Exception as exc:
+        await asyncio.to_thread(
+            _record_v5_delivery_failure,
+            channel_id,
+            text,
+            metadata,
+            f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    if not sent_messages:
+        await asyncio.to_thread(
+            _record_v5_delivery_failure,
+            channel_id,
+            text,
+            metadata,
+            "no_discord_messages_returned",
+        )
+        return False
+    try:
+        await asyncio.to_thread(_record_v5_delivery_success, channel, text, sent_messages, metadata)
+    except Exception:
+        log.exception("v5 delivery audit failed for channel %s", channel_id)
     return True
 
 

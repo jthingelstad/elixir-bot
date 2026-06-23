@@ -1280,6 +1280,90 @@ def test_post_to_elixir_resolves_custom_emoji_shortcodes():
     channel.send.assert_awaited_once_with("Keep climbing <:elixir_hype:321>")
 
 
+def _v5_delivery_metadata():
+    return {
+        "source": "event_core_v5",
+        "event_core_intent_id": "9710f84f-04da-5f62-97f5-806f9646e5a4",
+        "event_core_dedup_key": "intent:detection:best_trophies_peak:#A:6000",
+        "intent_type": "celebrate:best_trophies_peak",
+        "subject_tag": "#A",
+        "scope": "public",
+        "priority": 2,
+        "caused_by": ["best_trophies_peak:#A:6000"],
+        "source_signal_key": "best_trophies_peak:#A:6000",
+        "source_signal_type": "best_trophies_peak",
+        "summary": {"detection_type": "best_trophies_peak", "peak": 6000},
+        "target_channel_key": "player-highlights",
+        "target_lane": "member-highlights",
+        "target_channel_id": 1482352147029950474,
+    }
+
+
+def test_v5_post_persists_delivery_audit_rows():
+    channel = SimpleNamespace(
+        id=1482352147029950474,
+        name="player-highlights",
+        type="text",
+        guild=None,
+    )
+    sent_messages = [
+        SimpleNamespace(id=1001, content="TDuck just hit 6,000 trophies."),
+        SimpleNamespace(id=1002, content="That is a clean new peak."),
+    ]
+
+    with (
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("elixir._post_to_elixir", new=AsyncMock(return_value=sent_messages)) as mock_post,
+    ):
+        ok = asyncio.run(
+            elixir._v5_post(
+                channel.id,
+                "TDuck just hit 6,000 trophies.\n\nThat is a clean new peak.",
+                metadata=_v5_delivery_metadata(),
+            )
+        )
+
+    assert ok is True
+    mock_post.assert_awaited_once()
+
+    intent = elixir.db.get_communication_intent(
+        "v5:intent:detection:best_trophies_peak:#A:6000"
+    )
+    assert intent["status"] == "delivered"
+    assert intent["workflow"] == "v5-reactive"
+    assert intent["intent_type"] == "celebrate:best_trophies_peak"
+    assert intent["target_channel_key"] == "player-highlights"
+    assert intent["target_channel_id"] == str(channel.id)
+    assert intent["covers_signal_keys"] == ["best_trophies_peak:#A:6000"]
+    assert intent["payload"]["posted_messages"][0]["discord_message_id"] == "1001"
+    assert intent["payload"]["posted_messages"][0]["content"] == "TDuck just hit 6,000 trophies."
+
+    trace = elixir.db.get_communication_trace_for_message("1001")
+    assert trace["intent"]["intent_id"] == intent["intent_id"]
+    assert trace["message"]["content"] == "TDuck just hit 6,000 trophies."
+    assert trace["message"]["workflow"] == "v5-reactive"
+    assert trace["message"]["event_type"] == "celebrate:best_trophies_peak"
+
+
+def test_v5_post_records_failed_audit_when_channel_missing():
+    with patch.object(elixir.bot, "get_channel", return_value=None):
+        ok = asyncio.run(
+            elixir._v5_post(
+                1482352147029950474,
+                "TDuck just hit 6,000 trophies.",
+                metadata=_v5_delivery_metadata(),
+            )
+        )
+
+    assert ok is False
+    intent = elixir.db.get_communication_intent(
+        "v5:intent:detection:best_trophies_peak:#A:6000"
+    )
+    assert intent["status"] == "failed"
+    assert intent["error_detail"] == "channel_not_found"
+    assert intent["payload"]["original_copy"] == "TDuck just hit 6,000 trophies."
+
+
 def test_post_startup_message_posts_build_hash_to_elixir_log_webhook():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
