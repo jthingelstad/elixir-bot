@@ -524,18 +524,6 @@ def test_season_awards_granted_returns_none_when_only_participants():
     assert _build_season_awards_signal(131, per_award, "2026-04-06") is None
 
 
-def test_season_awards_signal_routes_to_clan_events_and_arena_relay():
-    """plan_signal_outcomes sends season awards to Discord and a final War Champ relay."""
-    from runtime.signal_lanes import plan_signal_outcomes
-    signal = {"type": "season_awards_granted", "season_id": 131}
-    outcomes = plan_signal_outcomes([signal])
-    assert len(outcomes) == 2
-    assert [(outcome["target_channel_key"], outcome["intent"], outcome["required"]) for outcome in outcomes] == [
-        ("clan-events", "season_awards_post", True),
-        ("arena-relay", "war_champ_winner_relay", False),
-    ]
-
-
 # -- list_awards + award_leaderboard helpers ---------------------------------
 
 def test_list_awards_filters_by_season_and_type():

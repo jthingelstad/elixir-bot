@@ -163,41 +163,6 @@ def test_schedule_revisit_tool_rejects_missing_args(memdb):
 # Situation integration
 # ---------------------------------------------------------------------------
 
-def test_build_situation_surfaces_due_revisits(memdb):
-    import heartbeat
-    from runtime.situation import build_situation, situation_is_quiet
-
-    schedule_revisit(
-        signal_key="war_battle_rank_change::s131:w2:p008::rank2",
-        due_at=_iso(minutes=-15),
-        rationale="Re-check rank at +4h.",
-    )
-    schedule_revisit(
-        signal_key="future::still-upcoming",
-        due_at=_iso(minutes=120),
-        rationale="Not due yet.",
-    )
-
-    bundle = heartbeat.HeartbeatTickResult(signals=[], clan={}, war={})
-    situation = build_situation(bundle)
-    due = situation.get("due_revisits") or []
-    keys = {r["signal_key"] for r in due}
-    assert "war_battle_rank_change::s131:w2:p008::rank2" in keys
-    assert "future::still-upcoming" not in keys
-
-    # A due revisit should wake the agent even with no raw signals.
-    assert not situation_is_quiet(situation)
-
-
-def test_build_situation_quiet_when_no_signals_and_no_due_revisits(memdb):
-    import heartbeat
-    from runtime.situation import build_situation, situation_is_quiet
-
-    bundle = heartbeat.HeartbeatTickResult(signals=[], clan={}, war={})
-    situation = build_situation(bundle)
-    assert situation_is_quiet(situation)
-
-
 # ---------------------------------------------------------------------------
 # Delivery layer: covered revisits get marked
 # ---------------------------------------------------------------------------
@@ -207,7 +172,7 @@ def test_mark_revisited_clears_covered_and_skipped_revisits(memdb):
     schedule_revisit(signal_key="skipped-key", due_at=_iso(minutes=-5), rationale="y")
     schedule_revisit(signal_key="untouched", due_at=_iso(minutes=-5), rationale="z")
 
-    # Simulate what runtime/jobs/_signals does after a successful tick: call
+    # Simulate what the reactive tick does after a successful pass: call
     # mark_revisited with everything the agent saw (covered + skipped + fallback).
     mark_revisited(["covered-key", "skipped-key"])
 

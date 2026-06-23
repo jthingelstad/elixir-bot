@@ -35,9 +35,6 @@ from runtime.clan_chat_copy import (
     role_action_clan_chat_copy,
 )
 from storage.contextual_memory import upsert_weekly_summary_memory
-from runtime.signal_lanes import (
-    OPTIONAL_PROGRESSION_SIGNAL_TYPES,
-)
 from runtime.helpers import (
     _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id,
     _channel_config_by_key, _format_weekly_recap_post, _strip_weekly_recap_header,

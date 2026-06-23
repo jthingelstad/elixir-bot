@@ -11,7 +11,6 @@
 """
 
 import db
-from runtime.jobs._signals import _mark_delivered_signals
 from storage.war_analytics import has_played_earlier_this_week
 
 
@@ -70,31 +69,3 @@ def test_has_played_earlier_this_week_ignores_other_weeks():
         assert not has_played_earlier_this_week(conn, "#PLCCYUQL", 131, 1, 12)
     finally:
         conn.close()
-
-
-def test_mark_delivered_signals_records_per_member_log_type():
-    """Group signals like war_surprise_participant carry one signal_log_type
-    per member. _mark_delivered_signals must log each so the detector's
-    per-member dedup check can actually find them next tick."""
-    from unittest.mock import patch
-
-    calls = []
-    with patch.object(db, "mark_signal_completed", side_effect=lambda t, d: calls.append((t, d))):
-        signal = {
-            "type": "war_surprise_participant",
-            "signal_date": "2026-04-18",
-            "members": [
-                {"tag": "#AAA", "signal_log_type": "war_surprise_participant:#AAA:s131:w2"},
-                {"tag": "#BBB", "signal_log_type": "war_surprise_participant:#BBB:s131:w2"},
-            ],
-        }
-        _mark_delivered_signals([signal])
-
-    logged = {t for t, _ in calls}
-    # Outer type still logged
-    assert "war_surprise_participant" in logged
-    # Per-member keys now logged too — detector dedup will work next tick
-    assert "war_surprise_participant:#AAA:s131:w2" in logged
-    assert "war_surprise_participant:#BBB:s131:w2" in logged
-    # Every call carries the signal_date from the signal envelope
-    assert all(d == "2026-04-18" for _, d in calls)

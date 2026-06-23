@@ -169,29 +169,3 @@ def test_anarchy_badges_do_not_attach_to_princess_battle_activity():
     assert "event_game_mode_name" not in summary["event_badge_completions"][0]
 
 
-def test_member_highlight_context_keeps_anarchy_badge_separate_from_princess_activity(monkeypatch):
-    from runtime.signals.context import _build_outcome_context
-
-    monkeypatch.setattr("runtime.signals.context._build_player_insight_context", lambda tag: [])
-
-    context = _build_outcome_context(
-        {"target_channel_key": "member-highlights", "intent": "member_highlights"},
-        [{
-            "type": "badge_earned",
-            "tag": "#ABC123",
-            "name": "Alpha",
-            "badge_name": "AnarchyLeagueCompletion",
-            "badge_label": "Anarchy League Completion",
-            "badge_level": 1,
-            "progress": 1,
-            "target": 2,
-        }],
-        clan={},
-        war={},
-    )
-
-    assert "CURRENT EVENT CONTEXT" in context
-    assert "current_event: Anarchy League" in context
-    assert "badge_progress: 1/2" in context
-    assert "All_Random_Princess" not in context
-    assert "evidence_boundary: No battle-mode source is encoded for this badge" in context

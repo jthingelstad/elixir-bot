@@ -77,9 +77,8 @@ def _block_real_llm_calls(_isolate_default_sqlite_db):
         raise RuntimeError(
             "Unmocked LLM call in test. Mock at the workflow layer "
             "(e.g. patch('elixir.elixir_agent.generate_channel_update')) "
-            "or patch agent.memory_tasks.extract_inference_facts / "
-            "runtime.jobs._signals._post_signal_memory before the code path "
-            "reaches agent.core._create_chat_completion."
+            "or patch agent.memory_tasks.extract_inference_facts before the "
+            "code path reaches agent.core._create_chat_completion."
         )
 
     fake_client = MagicMock()
