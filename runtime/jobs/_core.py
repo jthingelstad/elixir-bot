@@ -48,7 +48,6 @@ from runtime import status as runtime_status
 from runtime.system_signals import queue_startup_system_signals
 from runtime.jobs._signals import (
     _channel_config_by_key,
-    _deliver_arena_relay_sidecars,
     _deliver_signal_group_via_awareness,
     _format_weekly_recap_post,
     _load_live_clan_context,
@@ -1277,23 +1276,28 @@ async def _leadership_action_scan():
 async def _weekly_discord_invite_relay():
     runtime_status.mark_job_start("weekly_discord_invite_relay")
     try:
-        now = datetime.now(CHICAGO)
-        week_key = now.strftime("%G-W%V")
-        signal_key = f"discord_invite_reminder:{week_key}"
-        signal = {
-            "type": "discord_invite_reminder",
-            "signal_key": signal_key,
-            "signal_log_type": signal_key,
-            "week_key": week_key,
-        }
-        processed = await _deliver_arena_relay_sidecars([signal], {}, {})
+        # Direct leadership post (v5-style), replacing the v4 arena-relay sidecar
+        # awareness machinery (item 7). The weekly cron is itself the dedup.
+        channel_id = _get_singleton_channel_id("arena-relay")
+        channel = _bot().get_channel(channel_id) if channel_id else None
+        if channel is None:
+            runtime_status.mark_job_failure("weekly_discord_invite_relay", "arena-relay channel not found")
+            return
+        context = (
+            "Weekly reminder for the leadership channel: nudge leaders to share the "
+            "clan's Discord invite with active members who aren't in the server yet. "
+            "Keep it short and friendly, in your own voice."
+        )
+        ok = await compose_and_post(channel, lane="arena-relay", context=context, leadership=True)
+        if not ok:
+            runtime_status.mark_job_failure("weekly_discord_invite_relay", "invite relay post failed")
+            return
     except Exception as exc:
         runtime_status.mark_job_failure("weekly_discord_invite_relay", str(exc))
         log.warning("weekly Discord invite relay failed: %s", exc, exc_info=True)
         return
     runtime_status.mark_job_success(
-        "weekly_discord_invite_relay",
-        f"processed {processed} arena-relay invite signal(s)",
+        "weekly_discord_invite_relay", "posted weekly invite reminder",
     )
 
 
