@@ -847,7 +847,23 @@ def test_deliver_signal_group_posts_preauthored_system_signal_without_llm():
     assert mock_save.call_args.args[2] == "**Subject**\n\nPreauthored body."
 
 
-def test_system_signal_updates_deliver_preauthored_posts_through_awareness_intent():
+def _run_system_signal_post(signal):
+    """Drive _post_system_signal_updates with the channel/post/db layers mocked,
+    returning (config_mock, post_mock, mark_mock) for assertions."""
+    channel = SimpleNamespace(id=900, name="lane", type="text", guild=None)
+    bot = SimpleNamespace(get_channel=lambda cid: channel)
+    with (
+        patch("runtime.system_status_post._bot", return_value=bot),
+        patch("runtime.system_status_post._channel_config_by_key", return_value={"id": 900}) as mock_cfg,
+        patch("runtime.system_status_post._post_to_elixir", new=AsyncMock()) as mock_post,
+        patch("runtime.system_status_post.db.save_message"),
+        patch("runtime.system_status_post.db.mark_system_signal_announced") as mock_mark,
+    ):
+        asyncio.run(elixir._post_system_signal_updates([signal], {}, {}))
+    return channel, mock_cfg, mock_post, mock_mark
+
+
+def test_system_signal_updates_post_preauthored_to_target_lane():
     signal = {
         "type": "capability_unlock",
         "signal_key": "capability_test_v1",
@@ -858,24 +874,14 @@ def test_system_signal_updates_deliver_preauthored_posts_through_awareness_inten
         },
     }
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
+    channel, mock_cfg, mock_post, mock_mark = _run_system_signal_post(signal)
 
-    with (
-        patch("runtime.signals.system.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._signals._deliver_awareness_post", new=AsyncMock(return_value=True)) as mock_post,
-        patch("runtime.jobs._signals._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_awareness,
-        patch("runtime.jobs._signals._mark_signal_group_completed", new=AsyncMock()) as mock_completed,
-    ):
-        asyncio.run(elixir._post_system_signal_updates([signal], {}, {}))
-
-    mock_awareness.assert_not_awaited()
+    mock_cfg.assert_called_once_with("announcements")
     mock_post.assert_awaited_once()
-    post = mock_post.await_args.args[0]
-    assert post["channel"] == "announcements"
-    assert post["content"] == "**Subject**\n\nPreauthored body."
-    assert post["covers_signal_keys"] == ["capability_test_v1"]
-    mock_completed.assert_awaited_once_with([signal])
+    posted_channel, posted_entry = mock_post.await_args.args
+    assert posted_channel is channel
+    assert posted_entry == {"content": "**Subject**\n\nPreauthored body."}
+    mock_mark.assert_called_once_with("capability_test_v1")
 
 
 def test_system_signal_updates_route_api_sentinel_to_leader_lounge():
@@ -890,25 +896,13 @@ def test_system_signal_updates_route_api_sentinel_to_leader_lounge():
         },
     }
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
+    _channel, mock_cfg, mock_post, mock_mark = _run_system_signal_post(signal)
 
-    with (
-        patch("runtime.signals.system.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._signals._deliver_awareness_post", new=AsyncMock(return_value=True)) as mock_post,
-        patch("runtime.jobs._signals._deliver_signal_group_via_awareness", new=AsyncMock()) as mock_awareness,
-        patch("runtime.jobs._signals._mark_signal_group_completed", new=AsyncMock()) as mock_completed,
-    ):
-        asyncio.run(elixir._post_system_signal_updates([signal], {}, {}))
-
-    mock_awareness.assert_not_awaited()
+    # api-sentinel signals route to the leadership lane.
+    mock_cfg.assert_called_once_with("leader-lounge")
     mock_post.assert_awaited_once()
-    post = mock_post.await_args.args[0]
-    assert post["channel"] == "leader-lounge"
-    assert post["leads_with"] == "leadership"
-    assert post["content"] == "**CR API schema sentinel**\n\nFirst-seen shape."
-    assert post["covers_signal_keys"] == ["api_schema_sentinel:202606201102:a514cc7d15bb"]
-    mock_completed.assert_awaited_once_with([signal])
+    assert mock_post.await_args.args[1] == {"content": "**CR API schema sentinel**\n\nFirst-seen shape."}
+    mock_mark.assert_called_once_with("api_schema_sentinel:202606201102:a514cc7d15bb")
 
 
 def test_deliver_signal_group_stores_war_recap_memory_for_river_race_batch():

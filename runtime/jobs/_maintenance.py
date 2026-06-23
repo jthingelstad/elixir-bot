@@ -16,7 +16,7 @@ from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_
 from runtime import elixir_log
 from runtime import status as runtime_status
 from runtime.helpers._common import _post_to_elixir
-from runtime.signals.system import _post_system_signal_updates
+from runtime.system_status_post import _post_system_signal_updates
 from storage.api_sentinel import EVENT_SENTINEL_SIGNAL_TYPE, SCHEMA_SENTINEL_SIGNAL_TYPE
 
 
