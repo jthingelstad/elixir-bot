@@ -24,7 +24,7 @@ Discord bot for the POAP KINGS Clash Royale clan (#J2RGCRVG). Uses discord.py pl
 - `scripts/review_agent_feedback.py` — Review recent LLM/channel failures and `#ask-elixir` feedback from SQLite for debugging and prompt/tool routing analysis
 - `runtime/activities.py` — Canonical registry for recurring automated activities
 - `runtime/clan_chat_copy.py` — Dedicated Clash Royale in-game clan chat copy generation, validation, and fallback guardrails
-- `runtime/signal_lanes.py` — Signal family classification, legacy lane routing, and lane memory context
+- `event_core/` — Event-sourced v5 reactive engine: ingest payloads → detections / recommendations / decision-cases → communication intents → confirmed Discord delivery. This is the proactive path; it replaced the v4 signal/awareness loop (`runtime/signals/`, `signal_lanes.py`, `situation.py`), which has been deleted.
 - `runtime/channel_router.py` — Discord message routing for interactive channels
 - `storage/`, `agent/`, `runtime/` — Domain-first implementation packages for persistence, LLM behavior, and Discord runtime; root modules remain the stable public API surface
 - Facade discipline: `elixir_agent.py` is an explicit static facade over `agent/` (its import list is the public API; submodules may only reach it via function-level imports). `elixir` is a sys.modules alias for `runtime.app`, whose explicit import blocks declare the runtime surface that tests and `runtime.activities` address by name. No dynamic re-export machinery — if a name should be public, add it to the explicit lists.
@@ -73,7 +73,7 @@ venv/bin/python scripts/clean.py --db
 
 ## Database
 
-SQLite at `elixir.db` (auto-created, gitignored). The project now uses the baseline schema defined in `_migration_0()` in `db/__init__.py`. The key tables are:
+SQLite at `elixir-v5.db` (default `_DEFAULT_DB_PATH` in `db/__init__.py`; auto-created, gitignored; overridable via `ELIXIR_DB_PATH`). The v5 event-sourcing stores and the legacy domain tables now live in this one unified file — `db.DB_PATH` and `event_core.config.PROJECTIONS_DB` resolve to the same database. The project uses the baseline schema in `_migration_0()` in `db/__init__.py`. The key tables are:
 
 - Identity + metadata: `members`, `member_metadata`, `member_aliases`, `discord_users`, `discord_links`
 - Conversation memory: `conversation_threads`, `messages`, `memory_facts`, `memory_episodes`, `channel_state`
@@ -82,7 +82,10 @@ SQLite at `elixir.db` (auto-created, gitignored). The project now uses the basel
 - Player analytics: `player_profile_snapshots`, `member_card_collection_snapshots`, `member_deck_snapshots`, `member_card_usage_snapshots`, `member_battle_facts`, `member_recent_form`
 - War: `war_current_state`, `war_day_status`, `war_races`, `war_participation`
 - Manual activity capture: `clan_voyages`, `clan_voyage_entries`, `arena_relay_screenshot_observations`
-- Raw ingest + signals: `raw_api_payloads`, `signal_log`, `game_event_stream`, `event_rollups`, `cake_day_announcements`
+- Event Core (v5): `detections`, `battle_telemetry`, `communication_intents`, `decision_cases`, `elixir_projects`, `signal_detector_cursors` — the reactive engine's projections and read models
+- Raw ingest + support: `raw_api_payloads`, `signal_log`, `cake_day_announcements`
+
+The legacy v4 `game_event_stream` and `event_rollups` tables are retired — no code reads or writes them (their storage modules were deleted in the v4 teardown), and they remain on disk only as dormant historical data pending an eventual drop migration.
 
 All `db` module functions accept an optional `conn` parameter — pass one in tests, omit in production.
 
@@ -138,7 +141,7 @@ Current primary lanes:
 - `poapkings-com` — website publish visibility only (`#website-updates`)
 
 Current executable agents/workflows:
-- `awareness` — proactive operating loop that reads Situation, projects, cases, recent events, channel memory, and decides whether to create communication intents.
+- `awareness` — the compose workflow the v5 reactive engine (`_v5_reactive_tick`) drives: given a detection's context plus projects, cases, recent events, and channel memory, it decides whether to raise a communication intent and in what voice.
 - `interactive` — public read-only conversation in member-facing lanes.
 - `clanops` — private leadership conversation with gated write tools.
 - `reception` — constrained onboarding and identity-verification replies.
@@ -158,27 +161,12 @@ Each activity declares:
 - delivery targets
 - whether manual triggering is allowed
 
-Current recurring activities:
-- **Every 30 minutes, 24/7** — `clan-awareness` via `_clan_awareness_tick()`
-  Processes non-war clan signals and routes outcomes into channels like `#clan-events` and `#leaders`.
-- **Every hour at :00 Chicago** — `war-poll` via `_war_poll_tick()`
-  Polls live River Race state and stores the hourly war snapshot pipeline.
-- **Every hour at :05 Chicago** — `war-awareness` via `_war_awareness_tick()`
-  Reads stored war data, processes war-only signals, and owns scheduled River Race coordination across `#river-race` and optional leadership notes.
-- **Every 30 minutes** — `player-progression` via `_player_intel_refresh()`
-  Refreshes stored player profile and battle intelligence, then emits member highlights to `#player-highlights`.
-- **Every 4 hours** — `api-sentinel` via `_api_sentinel_tick()`
-  Records first-seen Clash Royale API schema paths and `/events` game-mode entries, then posts leadership-only drift notes to `#leaders`.
-- **Daily at 12:00 PM Chicago** — `daily-clan-insight` via `_ask_elixir_daily_insight()`
-  Posts one short data-driven hidden fact in `#ask-elixir` when the data supports a genuinely interesting insight.
-- **Friday 7:00 PM Chicago** — `leadership-review` via `_clanops_weekly_review()`
-  Posts the weekly leadership review in `#leaders`.
-- **Monday 9:00 AM Chicago** — `weekly-recap` via `_weekly_clan_recap()`
-  Posts the public weekly clan recap and syncs the members-page payload to the website.
-- **6:00 PM Chicago** — `site-content` via `_site_content_cycle()`
-  Refreshes daily POAP KINGS site content and publishes roster, clan, and home payloads to GitHub.
-- **Friday 9:00 AM Chicago** — `promotion-content` via `_promotion_content_cycle()`
-  Generates recruiting content for `#recruiting` and the website promotion payload.
+Read the exact, current list (keys, schedules, executors, enabled state) from `runtime/activities.py` — don't trust a hand-maintained copy here, which drifts. The shape today:
+
+- The proactive heartbeat is **`v5-reactive-tick`** (`_v5_reactive_tick`). It runs the Event Core engine — ingest → detections → recommendations/cases → communication intents → confirmed Discord delivery — and **replaced the deleted v4 `clan-awareness` / `war-awareness` ticks**. Leadership recommendations now flow through it too (`leadership-action-scan` is retained but disabled).
+- **Ingest / refresh:** `war-poll` (hourly River Race snapshot), `player-progression` (`_player_intel_refresh`, player profile + battle intel + `#player-highlights`), `card-catalog-sync`.
+- **Scheduled posts / reports:** `daily-clan-insight` (`#ask-elixir` hidden fact), `weekly-recap` (public recap + website sync), `weekly-discord-invite-relay`, `promotion-content` (`#recruiting` + website), `clan-wars-intel`, `award-detection`.
+- **Maintenance / ops:** `api-sentinel` (CR-API drift notes to `#leaders`), `memory-synthesis` (weekly memory hygiene), `db-maintenance`.
 
 ## Architecture: Prompts vs Code
 
@@ -265,8 +253,7 @@ venv/bin/python scripts/review_agent_feedback.py --workflow clanops --json
   - `signals`
   - `clan`
   - `war`
-- `elixir._clan_awareness_tick()` consumes this bundle and does not re-fetch clan/war in the same cycle.
-- `elixir._war_awareness_tick()` uses the same bundle shape but requests war-only signal detection.
+- The Event Core engine (`event_core/`), driven by `_v5_reactive_tick`, is the consumer of clan/war observations on the proactive path. The v4 `_clan_awareness_tick` / `_war_awareness_tick` consumers that previously read this bundle have been deleted.
 
 ## System Signals
 
@@ -278,20 +265,20 @@ One-time capability or upgrade announcements should use the queued `system_signa
   - `signal_type` such as `capability_unlock`
   - `payload` fields the channel-update workflow can talk about, including `audience` when the update is meant for the clan
 - Startup queues these signals idempotently via `queue_startup_system_signals()`
-- Clan-awareness surfaces pending signals through the normal channel-update routing flow and marks them announced after a successful post
+- Pending system signals are published by `runtime/system_status_post.py` (`_post_system_signal_updates`) — a direct post to the target lane that marks each announced after a successful send. The `api-sentinel` activity drives this for CR-API drift notes
 - Elixir also posts a separate startup check-in to the #elixir-log webhook with the running build hash and a short Clash Royale-flavored line
 
 This keeps feature announcements discoverable: future changes should usually mean “edit one list” instead of remembering startup-hook details.
 
 ## Query Layer (Current)
 
-Elixir’s core member/leader questions should be answered from structured query helpers and tools, not prompt reconstruction. The LLM has 22 domain-aligned tools organized into five groups:
+Elixir’s core member/leader questions should be answered from structured query helpers and tools, not prompt reconstruction. The LLM has a set of domain-aligned tools (defined in `agent/tool_defs.py`) organized into five groups:
 
 - **Member domain**: `resolve_member`, `get_member` (include: profile, form, battles, war, trend, deck, losses, history, memories, chests, awards), `get_member_war_detail` (aspect: summary, attendance, battles, missed_days, vs_clan_avg, war_decks)
 - **River Race domain**: `get_river_race` (live race state + competing clan standings), `get_war_season` (aspect: summary, standings, win_rates, boat_battles, score_trend, season_comparison, trending, perfect_attendance, no_participation), `get_clan_intel_report`
 - **Clan domain**: `get_clan_roster` (aspect: list, summary, recent_joins, longest_tenure, role_changes, max_cards, trends), `get_clan_health` (aspect: at_risk, hot_streaks, losing_streaks, trophy_drops, promotion_candidates), `get_clan_game_modes` (aspect: summary, ranked, side_modes, events), `get_clan_voyage`
 - **Card + awards domain**: `lookup_cards`, `get_member_card_profile`, `lookup_member_cards`, `get_awards`
-- **Elixir state + utility**: `get_elixir_state` (event stream, projects, decision cases, communication intents), `get_event_rollups`, `cr_api` (live Clash Royale API bridge for any external player/clan/tournament), `update_member`, `save_clan_memory`, `flag_member_watch`, `record_leadership_followup`, `schedule_revisit`
+- **Elixir state + utility**: `get_elixir_state` (aspects: recent detections / event windows / game modes, plus projects, decision cases, communication intents, season window), `cr_api` (live Clash Royale API bridge for any external player/clan/tournament), `update_member`, `save_clan_memory`, `flag_member_watch`, `record_leadership_followup`, `schedule_revisit`
 
 War tools include `war_player_type` (regular/occasional/rare/never) per member. Leadership evaluations include CR account age. Sensitive aspects (at_risk, promotion_candidates) are gated to leadership workflows at execution time.
 
