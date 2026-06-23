@@ -109,10 +109,22 @@ Decisions are keyed to the review list Jamie answered.
     the remaining enabled callers below.
   - CORRECTION — `ELIXIR_AWARENESS_LOOP` is RETIRED (no-op; see system_signals.py).
     The stale `.env` line can be deleted.
-  - REMAINING enabled delivery callers (rewire to direct posts before deleting
-    `runtime/signals/`): **award-detection** (`_core.py`), **weekly-discord-invite-
-    relay** (`_core.py` arena-relay sidecars), **tournament-watch** (`_tournament.py`
-    — this is item 2d). Each → a direct channel post.
+  - DONE (2026-06-22 overnight) — **all 3 enabled awareness-delivery callers
+    rewired to direct posts** via the new `runtime/discord_posting.compose_and_post`
+    (agent compose + post, reusing v5's `_extract_copy`/`_looks_like_meta`):
+    award-detection → #clan-events (262a735), tournament-watch live signals →
+    #clan-events / item 2d (7df45d5), weekly-discord-invite-relay → arena-relay
+    leadership post (committed). **No ENABLED job calls `_deliver_signal_group_via_
+    awareness` anymore** — only the DISABLED `_clan_awareness_tick`/`_war_awareness_
+    tick` reference it. Each rewire dry-run-verified for voice; all deployed; bot
+    starts clean.
+  - REMAINING (needs supervision / fresh context — deep import web, startup risk):
+    (a) Phase 0 relocate survivors; (b) F2 game_event_stream reader migration +
+    write-stop + table drop; (c) delete `runtime/signals/` + `_signals.py` +
+    `signal_lanes.py` + `situation.py` + the disabled clan/war-awareness jobs +
+    admin `/signals` view + re-export blocks in app.py/jobs/__init__.py, plus the
+    large dead test surface. ~12 modules import the signal package — untangle from
+    the leaves inward, full-suite + startup gate each step, commit only green.
   - SHARED SURVIVORS (Phase 0): `_post_to_elixir` / `_load_live_clan_context` in
     `_signals.py` are thin 2-line shims to `_runtime_app()` — trivial to relocate
     (or call the app method directly). `build_lane_memory_context` (signal_lanes) and
