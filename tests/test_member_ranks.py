@@ -1,6 +1,6 @@
 """Tests for storage.member_ranks — comparative rank fields on member references."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 import db
 from storage.member_ranks import (

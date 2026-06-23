@@ -11,13 +11,22 @@ ignore = [
     # E402: deferred imports are used deliberately throughout to avoid
     # circular-import issues between runtime/, storage/, and db/.
     "E402",
-    # F401: many modules import names solely so the __export_public facade
-    # pattern (db/__init__.py, runtime/app.py, heartbeat/__init__.py) can
-    # re-export them; ruff can't distinguish those from true dead imports.
-    "F401",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Calls names injected into module globals at import time by
-# __export_public; ruff can't see the dynamic namespace merge.
-"runtime/app.py" = ["F821"]
+# F401: these modules import names solely to re-export them — either through
+# the dynamic __export_public namespace merge (db/__init__.py, runtime/app.py,
+# agent/tools.py, storage/war.py, storage/revisits.py) or as a package
+# re-export hub. ruff can't see those re-exports, so it would flag every
+# re-exported import as dead. F401 stays ENABLED everywhere else so genuine
+# dead imports are caught.
+"db/__init__.py" = ["F401"]
+# runtime/app.py also references names injected into its globals at import time
+# by __export_public, which ruff can't see (F821).
+"runtime/app.py" = ["F401", "F821"]
+"runtime/jobs/__init__.py" = ["F401"]
+"runtime/helpers/__init__.py" = ["F401"]
+"heartbeat/__init__.py" = ["F401"]
+"agent/tools.py" = ["F401"]
+"storage/war.py" = ["F401"]
+"storage/revisits.py" = ["F401"]

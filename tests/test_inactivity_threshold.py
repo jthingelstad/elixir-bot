@@ -9,13 +9,11 @@ is more recent). Login freshness is only context — a member who opens the
 game but never battles is inactive.
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 import db
-from storage import war_analytics
 from storage.war_analytics import (
     BATTLE_RETENTION_DAYS,
-    INACTIVITY_DAYS_PER_1K_TROPHIES,
     INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE,
     INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT,
     LOOSE_MEMBER_COUNT,

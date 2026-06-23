@@ -17,7 +17,6 @@ from db import (
     _ensure_member,
     _hash_payload,
     _json_or_none,
-    _tag_key,
     _upsert_member_metadata,
     _utcnow,
     chicago_today,

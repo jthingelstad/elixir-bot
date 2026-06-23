@@ -4,7 +4,6 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import pytest
 
 import elixir
 from runtime import onboarding

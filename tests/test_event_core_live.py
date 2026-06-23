@@ -152,7 +152,6 @@ def test_render_intent_and_dry_run_poster(world):
 
 
 def test_route_intent_and_go_live_drain(world):
-    from event_core import db
     from event_core.domain.communication_intent import CommunicationIntent
     from event_core.live.discord_consumer import IntentConsumer
     from event_core.live.runtime import go_live_drain, route_intent

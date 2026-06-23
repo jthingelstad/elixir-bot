@@ -10,7 +10,6 @@ log = logging.getLogger("elixir_db")
 
 from db import (
     _canon_tag,
-    _current_joined_at,
     _parse_cr_time,
     _rowdicts,
     managed_connection,
@@ -27,7 +26,6 @@ from storage.war_calendar import (
     coerce_utc_datetime,
     format_utc_iso,
     is_colosseum_week,
-    normalize_period_type,
     phase_day_number,
     period_offset,
     resolve_phase,
@@ -37,7 +35,6 @@ from storage.war_calendar import (
 
 LIVE_FINISH_TIME_SENTINEL = "19691231T235959.000Z"
 
-from storage._formatting import format_member_reference as _format_member_reference
 
 
 def _load_war_payload(raw_json) -> dict:

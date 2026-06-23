@@ -20,7 +20,6 @@ from db import (
     _ensure_member,
     _get_current_membership,
     _normalize_date_string,
-    _parse_optional_int,
     _rowdicts,
     _tag_key,
     _upsert_member_metadata,

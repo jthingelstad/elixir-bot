@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import json
 
-from event_core.domain.player import ROSTER_FIELDS
 
 
 def build_roster_observation(member: dict) -> dict:

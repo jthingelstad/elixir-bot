@@ -136,7 +136,7 @@ def test_derive_war_anchor_minute_returns_none_when_no_log():
 def test_detect_returning_members_emits_signal_when_member_comes_back():
     """v4.7 #26: a previously stale member whose last_seen_api becomes fresh
     again fires member_active_again."""
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     conn = db.get_connection(":memory:")
     try:

@@ -4,7 +4,6 @@ Syncs and queries the Clash Royale card catalog from the /cards API endpoint.
 Provides the data foundation for the lookup_cards LLM tool.
 """
 
-import json
 from datetime import datetime, timezone
 
 from db import managed_connection

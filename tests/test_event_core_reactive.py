@@ -242,7 +242,6 @@ def test_intent_context_resolves_player_name_and_names_member():
 def test_intent_context_no_history_is_clean():
     """A first-seen player (no prior detections) gets the original single-event
     prompt with no recent_history key."""
-    import json
 
     from event_core import db
     from event_core.domain.communication_intent import CommunicationIntent
