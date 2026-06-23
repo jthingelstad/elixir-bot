@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import db
 import heartbeat
@@ -1158,24 +1158,28 @@ def test_clan_awareness_tick_does_not_mark_non_system_signal_sent_when_post_fail
     assert not all(row.get("delivery_status") in {"delivered", "skipped"} for row in outcome_rows)
 
 
-def test_weekly_discord_invite_relay_emits_weekly_signal():
-    async def fake_sidecars(signals, clan, war):
-        return len(signals)
+def test_weekly_discord_invite_relay_posts_direct_leadership_reminder():
+    """Item-7 teardown: the weekly relay posts a direct leadership reminder via
+    compose_and_post (arena-relay lane), not the v4 sidecar awareness machinery."""
+    from runtime.jobs import _core
 
+    channel = MagicMock()
     with (
         patch("elixir.runtime_status.mark_job_start") as mock_start,
         patch("elixir.runtime_status.mark_job_success") as mock_success,
         patch("elixir.runtime_status.mark_job_failure") as mock_failure,
-        patch("runtime.jobs._core._deliver_arena_relay_sidecars", new=AsyncMock(side_effect=fake_sidecars)) as mock_sidecars,
+        patch.object(_core, "_get_singleton_channel_id", return_value=1513758211206025227),
+        patch.object(_core, "_bot", return_value=MagicMock(get_channel=lambda _id: channel)),
+        patch.object(_core, "compose_and_post", new=AsyncMock(return_value=True)) as mock_post,
     ):
         asyncio.run(elixir._weekly_discord_invite_relay())
 
     mock_start.assert_called_once_with("weekly_discord_invite_relay")
     mock_failure.assert_not_called()
-    signal = mock_sidecars.await_args.args[0][0]
-    assert signal["type"] == "discord_invite_reminder"
-    assert signal["signal_key"].startswith("discord_invite_reminder:")
     mock_success.assert_called_once()
+    mock_post.assert_awaited_once()
+    assert mock_post.await_args.kwargs["lane"] == "arena-relay"
+    assert mock_post.await_args.kwargs["leadership"] is True
 
 
 def test_plan_signal_outcomes_routes_clan_audience_system_signal_to_announcements():
