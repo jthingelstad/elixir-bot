@@ -16,7 +16,8 @@ import db
 import elixir_agent
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
-from runtime.jobs._signals import _deliver_signal_group_via_awareness, _post_to_elixir
+from runtime.jobs._signals import _post_to_elixir
+from runtime.discord_posting import compose_and_post
 
 
 TOURNAMENT_POLL_MINUTES = int(os.getenv("TOURNAMENT_POLL_MINUTES", "5"))
@@ -240,17 +241,21 @@ async def _tournament_watch_tick():
             _schedule_tournament_recap(tag, delay_seconds=TOURNAMENT_RECAP_DELAY_SECONDS)
             stop_tournament_watch()
 
-        # Deliver live signals through awareness so events/intents stay unified.
+        # Post live tournament signals directly to #clan-events (v5-style),
+        # replacing the v4 awareness pipeline (item 7).
         if live_signals:
             try:
-                ok = await _deliver_signal_group_via_awareness(
-                    live_signals,
-                    {},
-                    {},
-                    workflow="tournament_watch",
-                )
-                if not ok:
-                    log.warning("Tournament watch: one or more signal deliveries failed")
+                channel_id = _get_singleton_channel_id("clan-events")
+                channel = _bot().get_channel(channel_id) if channel_id else None
+                if channel is None:
+                    log.error("Tournament watch: #clan-events channel not found")
+                else:
+                    ok = await compose_and_post(
+                        channel, lane="clan-events",
+                        context=_tournament_signal_context(live_signals),
+                    )
+                    if not ok:
+                        log.warning("Tournament watch: live signal post failed")
             except Exception as e:
                 log.warning("Tournament watch: signal delivery failed: %s", e)
 
@@ -262,6 +267,18 @@ async def _tournament_watch_tick():
     except Exception as exc:
         log.error("Tournament watch failed: %s", exc, exc_info=True)
         runtime_status.mark_job_failure("tournament_watch", str(exc))
+
+
+def _tournament_signal_context(signals: list[dict]) -> str:
+    """Facts for the agent to compose a live tournament update for #clan-events."""
+    import json
+
+    return (
+        "Live tournament update(s) for the clan. Write a short #clan-events post in "
+        "your own voice about what's happening (e.g. a tournament started, a lead "
+        "change). Use only these facts; do not invent details.\n\n"
+        f"```json\n{json.dumps(signals, indent=2, default=str)}\n```"
+    )
 
 
 def _format_tournament_close_post(tournament_name: str, api_data: dict, *, top_n: int = 10) -> str:
