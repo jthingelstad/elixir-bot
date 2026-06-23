@@ -6,7 +6,7 @@ from runtime.jobs._core import (  # noqa: F401
     WEEKLY_RECAP_DAY, WEEKLY_RECAP_HOUR,
     _query_or_default, _summarize_member_rows,
     _build_ask_elixir_daily_insight_context, _ask_elixir_daily_insight,
-    _clan_awareness_tick, _war_poll_tick, _war_awareness_tick,
+    _war_poll_tick,
     _award_detection_tick,
     _weekly_clan_recap,
     _leadership_action_scan,

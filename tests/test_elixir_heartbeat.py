@@ -13,106 +13,6 @@ import elixir
 from runtime.signal_lanes import plan_signal_outcomes
 
 
-def test_clan_awareness_tick_uses_bundle_without_refetch():
-    """_clan_awareness_tick should use heartbeat.tick bundle and not refetch CR API."""
-    bundle = heartbeat.HeartbeatTickResult(
-        signals=[{"type": "player_level_up", "name": "King Levy", "tag": "#ABC", "old_level": 65, "new_level": 66}],
-        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
-        war={"state": "warDay"},
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.heartbeat.tick", return_value=bundle),
-        patch("elixir.cr_api.get_clan") as mock_get_clan,
-        patch("elixir.cr_api.get_current_war") as mock_get_war,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)) as mock_deliver,
-    ):
-        asyncio.run(elixir._clan_awareness_tick())
-
-    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="clan_awareness")
-    mock_get_clan.assert_not_called()
-    mock_get_war.assert_not_called()
-
-
-def test_clan_awareness_tick_marks_failure_when_delivery_fails():
-    bundle = heartbeat.HeartbeatTickResult(
-        signals=[
-            {"type": "player_level_up", "tag": "#A", "name": "A"},
-            {"type": "player_level_up", "tag": "#B", "name": "B"},
-        ],
-        clan={"memberList": []},
-        war={},
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.heartbeat.tick", return_value=bundle),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=False)),
-        patch("runtime.jobs._core.runtime_status.mark_job_failure") as mock_fail,
-        patch("runtime.jobs._core.runtime_status.mark_job_success") as mock_success,
-    ):
-        asyncio.run(elixir._clan_awareness_tick())
-
-    mock_success.assert_not_called()
-    mock_fail.assert_called_once()
-    assert "2 of 2" in mock_fail.call_args.args[1]
-
-
-def test_clan_awareness_tick_revokes_member_role_for_leavers():
-    bundle = heartbeat.HeartbeatTickResult(
-        signals=[
-            {"type": "member_leave", "tag": "#GONE", "name": "WhoDis"},
-            {"type": "player_level_up", "tag": "#STAY", "name": "King Levy"},
-        ],
-        clan={"memberList": []},
-        war={},
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.heartbeat.tick", return_value=bundle),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)),
-        patch("runtime.onboarding.remove_member_role_for_tag", new=AsyncMock(return_value=(True, "Removed"))) as mock_remove,
-    ):
-        asyncio.run(elixir._clan_awareness_tick())
-
-    mock_remove.assert_awaited_once()
-    assert mock_remove.await_args.args[0] == "#GONE"
-    assert "WhoDis" in mock_remove.await_args.kwargs["reason"]
-
-
-def test_clan_awareness_tick_swallows_revoke_exceptions():
-    bundle = heartbeat.HeartbeatTickResult(
-        signals=[{"type": "member_leave", "tag": "#GONE", "name": "WhoDis"}],
-        clan={"memberList": []},
-        war={},
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.heartbeat.tick", return_value=bundle),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)),
-        patch("runtime.onboarding.remove_member_role_for_tag", new=AsyncMock(side_effect=RuntimeError("boom"))),
-        patch("runtime.jobs._core.runtime_status.mark_job_success") as mock_success,
-    ):
-        asyncio.run(elixir._clan_awareness_tick())
-
-    mock_success.assert_called_once()
-
-
 def test_leave_signal_marks_completed_kick_recommendation_as_leader_removal():
     from heartbeat._helpers import _enrich_leave_signal
 
@@ -220,27 +120,6 @@ def test_clan_events_skips_low_tenure_voluntary_departure():
     ]
     assert skip_calls
     assert "low_value_departure" in skip_calls[0].kwargs["error_detail"]
-
-
-def test_clan_awareness_tick_reseeds_startup_system_signals_before_tick():
-    bundle = heartbeat.HeartbeatTickResult(
-        signals=[],
-        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
-        war={"state": "warDay"},
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("runtime.jobs._core.queue_startup_system_signals") as mock_queue,
-        patch("elixir.heartbeat.tick", return_value=bundle),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.runtime_status.mark_job_success"),
-    ):
-        asyncio.run(elixir._clan_awareness_tick())
-
-    mock_queue.assert_called_once_with()
 
 
 def test_fresh_time_left_computes_from_period_ends_at():
@@ -761,30 +640,6 @@ def test_detect_role_changes_ignores_demotion_from_elder():
         conn.close()
 
 
-def test_war_awareness_tick_uses_stored_war_detection_bundle():
-    bundle = heartbeat.WarAwarenessResult(
-        signals=[{"type": "war_battle_day_live_update", "season_id": 129, "day_number": 1}],
-        clan={"name": "POAP KINGS", "tag": "#J2RGCRVG"},
-        war={"state": "warDay"},
-        cursor_updates=[{"detector_key": "war_live_state_pipeline", "scope_key": "", "cursor_int": 12, "cursor_text": None, "metadata": {}}],
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.heartbeat.detect_war_signals_from_storage", return_value=bundle) as mock_detect,
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)) as mock_deliver,
-        patch("runtime.jobs._core._persist_signal_detector_cursors") as mock_persist,
-    ):
-        asyncio.run(elixir._war_awareness_tick())
-
-    mock_detect.assert_called_once_with()
-    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="war_awareness")
-    mock_persist.assert_called_once_with(bundle.cursor_updates)
-
-
 def test_war_poll_tick_uses_war_ingest_entrypoint():
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -805,30 +660,6 @@ def test_war_poll_tick_uses_war_ingest_entrypoint():
     mock_clear.assert_called_once_with()
     assert mock_success.call_args.args[0] == "war_poll"
     assert "war snapshot stored" in mock_success.call_args.args[1]
-
-
-def test_war_awareness_tick_does_not_advance_cursors_when_delivery_fails():
-    bundle = heartbeat.WarAwarenessResult(
-        signals=[{"type": "war_battle_day_live_update", "season_id": 129, "day_number": 1}],
-        clan={"name": "POAP KINGS", "tag": "#J2RGCRVG"},
-        war={"state": "warDay"},
-        cursor_updates=[{"detector_key": "war_live_state_pipeline", "scope_key": "", "cursor_int": 12, "cursor_text": None, "metadata": {}}],
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.heartbeat.detect_war_signals_from_storage", return_value=bundle),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=False)),
-        patch("runtime.jobs._core._persist_signal_detector_cursors") as mock_persist,
-        patch("elixir.runtime_status.mark_job_failure") as mock_failure,
-    ):
-        asyncio.run(elixir._war_awareness_tick())
-
-    mock_persist.assert_not_called()
-    assert mock_failure.call_args.args[0] == "war_awareness"
 
 
 def test_heartbeat_tick_include_war_false_skips_live_war_fetch():
@@ -1124,38 +955,6 @@ def test_deliver_signal_group_stores_war_recap_memory_for_river_race_batch():
         asyncio.run(elixir._deliver_signal_group(signals, clan, war))
 
     mock_memory.assert_called_once_with(signals, ["Battle day recap post"], 1482352067573059675)
-
-
-def test_clan_awareness_tick_posts_join_messages_through_shared_sender():
-    bundle = heartbeat.HeartbeatTickResult(
-        signals=[{"type": "member_join", "name": "King Levy", "tag": "#ABC"}],
-        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
-        war={"state": "warDay"},
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.heartbeat.tick", return_value=bundle),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)) as mock_deliver,
-    ):
-        asyncio.run(elixir._clan_awareness_tick())
-
-    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="clan_awareness")
-
-
-def test_clan_awareness_tick_marks_non_system_signal_sent_after_successful_post():
-    signals = [{"type": "war_week_rollover", "season_id": 130, "week": 1}]
-    with patch("elixir.db.mark_signal_completed") as mock_mark_signal_sent:
-        asyncio.run(elixir._mark_signal_group_completed(signals))
-    mock_mark_signal_sent.assert_called_once_with("war_week_rollover", db.chicago_today())
-
-
-def test_clan_awareness_tick_does_not_mark_non_system_signal_sent_when_post_fails():
-    outcome_rows = [{"delivery_status": "failed"}]
-    assert not all(row.get("delivery_status") in {"delivered", "skipped"} for row in outcome_rows)
 
 
 def test_weekly_discord_invite_relay_posts_direct_leadership_reminder():
@@ -2219,106 +2018,6 @@ def test_arena_relay_result_builds_cr_account_cake_day_copy():
         "CR cake day: King Levy's Clash Royale account is 5 years old. "
         "That is real staying power."
     )
-
-
-def test_clan_awareness_tick_does_not_mark_system_signal_sent_before_success():
-    bundle = heartbeat.HeartbeatTickResult(
-        signals=[{
-            "type": "capability_unlock",
-            "signal_key": "capability_memory_system_v1",
-            "payload": {"title": "Achievement Unlocked: Stronger Memory"},
-            "title": "Achievement Unlocked: Stronger Memory",
-        }],
-        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
-        war={"state": "training"},
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.heartbeat.tick", return_value=bundle),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("elixir.db.mark_signal_completed") as mock_mark_signal_sent,
-        patch("elixir.db.mark_system_signal_announced") as mock_mark_announced,
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=False)) as mock_deliver,
-    ):
-        asyncio.run(elixir._clan_awareness_tick())
-
-    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="clan_awareness")
-    mock_mark_signal_sent.assert_not_called()
-    mock_mark_announced.assert_not_called()
-
-
-def test_clan_awareness_tick_hands_multiple_system_signals_to_awareness_loop():
-    bundle = heartbeat.HeartbeatTickResult(
-        signals=[
-            {
-                "type": "capability_unlock",
-                "signal_key": "capability_memory_system_v1",
-                "payload": {"title": "Achievement Unlocked: Stronger Memory"},
-            },
-            {
-                "type": "capability_unlock",
-                "signal_key": "capability_battle_pulse_v1",
-                "payload": {"title": "Achievement Unlocked: Battle Pulse"},
-            },
-        ],
-        clan={"memberList": [{"name": "King Levy", "tag": "#ABC"}]},
-        war={"state": "training"},
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.heartbeat.tick", return_value=bundle),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)) as mock_deliver,
-    ):
-        asyncio.run(elixir._clan_awareness_tick())
-
-    mock_deliver.assert_awaited_once_with(bundle.signals, bundle.clan, bundle.war, workflow="clan_awareness")
-
-
-def test_clan_awareness_tick_publishes_api_sentinels_before_awareness_loop():
-    api_sentinel = {
-        "type": "api_schema_sentinel",
-        "signal_type": "api_schema_sentinel",
-        "signal_key": "api_schema_sentinel:202606201102:a514cc7d15bb",
-        "payload": {
-            "title": "CR API schema sentinel",
-            "discord_content": "**CR API schema sentinel**\n\nFirst-seen shape.",
-            "audience": "leadership",
-        },
-    }
-    member_join = {
-        "type": "member_join",
-        "signal_log_type": "member_join:#ABC123",
-        "name": "King Levy",
-        "tag": "#ABC123",
-    }
-    bundle = heartbeat.HeartbeatTickResult(
-        signals=[api_sentinel, member_join],
-        clan={"memberList": [{"name": "King Levy", "tag": "#ABC123"}]},
-        war={"state": "training"},
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    with (
-        patch("elixir.heartbeat.tick", return_value=bundle),
-        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core._post_system_signal_updates", new=AsyncMock()) as mock_system_post,
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", new=AsyncMock(return_value=True)) as mock_deliver,
-        patch("elixir.runtime_status.mark_job_success") as mock_success,
-    ):
-        asyncio.run(elixir._clan_awareness_tick())
-
-    mock_system_post.assert_awaited_once_with([api_sentinel], bundle.clan, bundle.war)
-    mock_deliver.assert_awaited_once_with([member_join], bundle.clan, bundle.war, workflow="clan_awareness")
-    assert mock_success.call_args.args == ("clan_awareness", "2 signal(s) processed")
 
 
 def test_detect_pending_system_signals_retries_until_announced():
@@ -3505,38 +3204,6 @@ def test_detect_cake_days_dedupes_announcements_for_the_day():
         assert second == []
     finally:
         conn.close()
-
-
-def test_clan_awareness_tick_marks_cake_day_announcements_after_successful_post():
-    from runtime.jobs._signals import _mark_delivered_signals
-
-    bundle = heartbeat.HeartbeatTickResult(
-        signals=[{
-            "type": "member_birthday",
-            "members": [{"tag": "#ABC123", "name": "King Levy", "birth_month": 3, "birth_day": 8}],
-        }],
-        clan={"memberList": [{"name": "King Levy", "tag": "#ABC123"}]},
-        war={"state": "warDay"},
-    )
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    async def fake_deliver(signals, clan, war, workflow=None):
-        _mark_delivered_signals(signals)
-        return True
-
-    with (
-        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
-        patch("runtime.jobs._core.heartbeat.tick", return_value=bundle),
-        patch("runtime.jobs._core._deliver_signal_group_via_awareness", side_effect=fake_deliver),
-        patch("elixir.db.mark_signal_completed") as mock_mark_signal_sent,
-        patch("elixir.db.mark_announcement_sent") as mock_mark_announcement_sent,
-    ):
-        asyncio.run(elixir._clan_awareness_tick())
-
-    mock_mark_signal_sent.assert_called_once_with("member_birthday", db.chicago_today())
-    mock_mark_announcement_sent.assert_called_once_with(db.chicago_today(), "birthday", "#ABC123")
 
 
 def test_detect_war_rollovers_emits_week_rollover_for_new_live_week():
