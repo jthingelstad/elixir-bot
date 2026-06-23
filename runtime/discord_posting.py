@@ -119,3 +119,34 @@ async def _post_to_elixir(channel, entry: dict):
         else:
             sent_messages.append(await channel.send(post))
     return sent_messages
+
+
+async def compose_and_post(channel, *, lane: str, context: str, leadership: bool = False) -> bool:
+    """Agent-compose an in-voice update from `context` and post it to `channel`.
+
+    The v5-style replacement for the v4 awareness-delivery path (`_deliver_signal_
+    group_via_awareness`) in scheduled clan jobs (awards, tournaments, weekly relay):
+    one direct agent compose + post, reusing v5's copy extraction and meta-refusal
+    guard. Returns True only on a confirmed send."""
+    import asyncio
+
+    if channel is None:
+        return False
+    try:
+        import elixir_agent
+
+        result = await asyncio.to_thread(
+            elixir_agent.generate_channel_update,
+            getattr(channel, "name", lane), lane, context, leadership=leadership,
+        )
+    except Exception:
+        log.exception("compose_and_post: agent failed for lane %s", lane)
+        return False
+    from event_core.live.runtime import _extract_copy, _looks_like_meta
+
+    copy = _extract_copy(result)
+    if not copy or _looks_like_meta(copy):
+        log.warning("compose_and_post: no usable copy for lane %s", lane)
+        return False
+    await _post_to_elixir(channel, {"content": copy})
+    return True

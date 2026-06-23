@@ -40,6 +40,7 @@ from runtime.signal_lanes import (
     OPTIONAL_PROGRESSION_SIGNAL_TYPES,
 )
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id, _safe_create_task
+from runtime.discord_posting import compose_and_post
 from runtime.leader_action_observability import post_leader_action_skip
 from runtime.leader_action_policy import can_post_leader_action
 from runtime.leader_action_ui import CLASH_COPY_MAX_LENGTH, LEADER_ACTION_UI_VERSION, post_leader_action_card
@@ -512,6 +513,18 @@ async def _war_awareness_tick():
         runtime_status.mark_job_failure("war_awareness", str(e))
 
 
+def _award_announcement_context(signals: list[dict]) -> str:
+    """Facts for the agent to announce new clan awards in #clan-events voice."""
+    import json
+
+    return (
+        "New clan awards just landed. Announce them for the #clan-events channel in "
+        "your own voice — celebratory and concise; name the members and what they "
+        "earned. Use only these facts; do not invent details.\n\n"
+        f"```json\n{json.dumps(signals, indent=2, default=str)}\n```"
+    )
+
+
 async def _award_detection_tick():
     """Daily pass that grants season-wide clan awards.
 
@@ -540,12 +553,17 @@ async def _award_detection_tick():
             runtime_status.mark_job_success("award_detection", "no new awards")
             return
 
-        clan, war = await _runtime_app()._load_live_clan_context()
-        delivered_ok = await _deliver_signal_group_via_awareness(
-            signals, clan, war, workflow="award_detection",
-        )
+        # Post directly to #clan-events (v5-style), replacing the v4 awareness
+        # delivery pipeline (item 7 teardown).
+        channel_id = _get_singleton_channel_id("clan-events")
+        channel = _bot().get_channel(channel_id) if channel_id else None
+        if channel is None:
+            runtime_status.mark_job_failure("award_detection", "clan-events channel not found")
+            return
+        context = _award_announcement_context(signals)
+        delivered_ok = await compose_and_post(channel, lane="clan-events", context=context)
         if not delivered_ok:
-            runtime_status.mark_job_failure("award_detection", "award signal delivery failed")
+            runtime_status.mark_job_failure("award_detection", "award post failed")
             return
         runtime_status.mark_job_success(
             "award_detection", f"{len(signals)} new award signal(s)",
