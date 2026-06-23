@@ -1542,10 +1542,10 @@ def test_ask_elixir_daily_insight_posts_fun_fact():
         patch("runtime.jobs._core._load_live_clan_context", new=AsyncMock(return_value=({"name": "POAP KINGS", "tag": "#J2RGCRVG", "memberList": [{"name": "Jamie"}]}, {}))),
         patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 50, "donations_week_total": 12345, "avg_member_trophies": 8123}),
         patch("elixir.db.build_clan_trend_summary_context", return_value="Clan score is up over the last 7 days."),
-        patch("elixir.db.summarize_events_by_window", return_value={
+        patch("event_core.read.event_facades.summarize_event_windows", return_value={
             "7d": {"total": 4, "by_type": {"member_join": 2, "arena_change": 1}},
         }),
-        patch("elixir.db.list_recent_events", return_value=[
+        patch("event_core.read.event_facades.list_recent_events", return_value=[
             {"event_type": "member_join", "subject_key": "#ABC", "source_signal_key": "join:#ABC"},
         ]),
         patch("elixir.db.get_members_on_hot_streak", return_value=[{"name": "Jamie", "current_streak": 5}]),
@@ -3811,14 +3811,14 @@ def test_weekly_recap_context_includes_project_and_event_stream_pulse():
                 },
             },
         }),
-        patch("elixir.db.summarize_events_by_window", return_value={
+        patch("event_core.read.event_facades.summarize_event_windows", return_value={
             "7d": {"total": 14, "by_type": {"member_join": 3, "war_battle_day_started": 2}},
             "28d": {"total": 40, "by_type": {}},
         }),
-        patch("elixir.db.list_recent_events", return_value=[
+        patch("event_core.read.event_facades.list_recent_events", return_value=[
             {"event_type": "member_join", "subject_key": "#ABC", "source_signal_key": "join:#ABC"},
         ]),
-        patch("elixir.db.summarize_battle_modes", return_value={
+        patch("event_core.read.event_facades.summarize_battle_modes", return_value={
             "7d": {"modes": {
                 "ladder": {"label": "Trophy Road", "battles": 300, "active_members": 30, "win_rate": 0.55, "top_members": []},
                 "ranked": {"label": "Ranked", "battles": 40, "active_members": 5, "win_rate": 0.52,

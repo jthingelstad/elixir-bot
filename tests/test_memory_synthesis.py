@@ -223,10 +223,10 @@ def test_build_context_returns_expected_keys(memdb):
 
 
 def test_build_context_includes_operations_context(memdb, monkeypatch):
-    monkeypatch.setattr(memory_job.db, "summarize_events_by_window", lambda **kwargs: {
+    monkeypatch.setattr(memory_job.event_facades, "summarize_event_windows", lambda **kwargs: {
         "7d": {"total": 2, "by_type": {"member_join": 1}},
     })
-    monkeypatch.setattr(memory_job.db, "list_recent_events", lambda **kwargs: [
+    monkeypatch.setattr(memory_job.event_facades, "list_recent_events", lambda **kwargs: [
         {
             "event_key": "game_event:join",
             "event_type": "member_join",
@@ -240,7 +240,7 @@ def test_build_context_includes_operations_context(memdb, monkeypatch):
         "season_id": 133,
         "summary": "Season 133; rank 1",
     })
-    monkeypatch.setattr(memory_job.db, "summarize_battle_modes", lambda **kwargs: {
+    monkeypatch.setattr(memory_job.event_facades, "summarize_battle_modes", lambda **kwargs: {
         "7d": {"modes": {"ranked": {"battles": 12}}},
     })
     monkeypatch.setattr(memory_job.db, "get_season_window", lambda: {

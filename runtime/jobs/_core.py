@@ -28,6 +28,7 @@ import elixir_agent
 import heartbeat
 import pytz
 import prompts
+from event_core.read import event_facades
 from runtime.clan_chat_copy import (
     clip_clan_chat_text,
     generate_clan_chat_copy,
@@ -200,12 +201,12 @@ def _build_ask_elixir_daily_insight_context(clan, war):
     )
     event_windows = _query_or_default(
         "public_event_windows",
-        lambda: db.summarize_events_by_window(windows=(7,), scope="public") or {},
+        lambda: event_facades.summarize_event_windows(windows=(7,), scope="public") or {},
         {},
     )
     recent_events = _query_or_default(
         "public_recent_events",
-        lambda: db.list_recent_events(days=7, scope="public", limit=8) or [],
+        lambda: event_facades.list_recent_events(days=7, scope="public", limit=8) or [],
         [],
     )
 

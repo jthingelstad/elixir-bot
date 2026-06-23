@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 import db
 import elixir_agent
 import prompts
+from event_core.read import event_facades
 from memory_store import update_memory
 from storage.contextual_memory import upsert_weekly_summary_memory
 from runtime import elixir_log
@@ -322,13 +323,13 @@ def _build_memory_synthesis_context():
 
     operations_context = {}
     try:
-        operations_context["event_windows"] = db.summarize_events_by_window(
+        operations_context["event_windows"] = event_facades.summarize_event_windows(
             windows=(7, 28, 56, 90),
             scope=None,
         )
         operations_context["recent_events"] = [
             _compact_event_row(row)
-            for row in db.list_recent_events(days=7, limit=50)
+            for row in event_facades.list_recent_events(days=7, limit=50)
         ]
     except Exception:
         log.warning("memory synthesis: event stream load failed", exc_info=True)
@@ -337,7 +338,7 @@ def _build_memory_synthesis_context():
     except Exception:
         log.warning("memory synthesis: war season context load failed", exc_info=True)
     try:
-        operations_context["game_modes"] = db.summarize_battle_modes(windows=(7, 28))
+        operations_context["game_modes"] = event_facades.summarize_battle_modes(windows=(7, 28))
     except Exception:
         log.warning("memory synthesis: game modes context load failed", exc_info=True)
     try:
