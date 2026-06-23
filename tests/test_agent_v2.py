@@ -516,8 +516,8 @@ def test_execute_tool_get_clan_health_sensitive_aspect_blocked_in_interactive():
 
 
 def test_execute_tool_get_elixir_state_public_events_are_scope_filtered():
-    with patch("elixir_agent.db") as mock_db:
-        mock_db.list_recent_events.return_value = [
+    with patch("event_core.read.event_facades.list_recent_events") as mock_recent:
+        mock_recent.return_value = [
             {"event_key": "game_event:public", "scope": "public"},
         ]
 
@@ -531,7 +531,7 @@ def test_execute_tool_get_elixir_state_public_events_are_scope_filtered():
 
     assert result["scope"] == "public"
     assert result["events"][0]["scope"] == "public"
-    mock_db.list_recent_events.assert_called_once_with(
+    mock_recent.assert_called_once_with(
         days=14,
         scope="public",
         event_type=None,

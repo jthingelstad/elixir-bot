@@ -5,6 +5,7 @@ import cr_api
 
 from agent.core import log
 from agent.cr_api_tool import _execute_cr_api
+from event_core.read import event_facades
 
 
 class _ModuleProxy:
@@ -855,7 +856,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
         scope, error = _state_scope(arguments, workflow)
         if error:
             return error
-        return db.summarize_events_by_window(
+        return event_facades.summarize_event_windows(
             windows=_state_windows(arguments),
             scope=scope,
             subject_type=arguments.get("subject_type"),
@@ -870,7 +871,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
         return {
             "scope": scope or "all",
             "days": _state_days(arguments),
-            "events": db.list_recent_events(
+            "events": event_facades.list_recent_events(
                 days=_state_days(arguments),
                 scope=scope,
                 event_type=arguments.get("event_type"),
@@ -882,7 +883,7 @@ def _execute_get_elixir_state(arguments, workflow=None):
         }
 
     if aspect == "game_modes":
-        return db.summarize_battle_modes(
+        return event_facades.summarize_battle_modes(
             windows=_state_windows(arguments),
             top_members=int(arguments.get("top_members") or 5),
         )
@@ -939,9 +940,9 @@ def _execute_get_elixir_state(arguments, workflow=None):
 
     if aspect == "operational_summary":
         return {
-            "event_windows": db.summarize_events_by_window(windows=_ELIXIR_STATE_WINDOWS, scope=None),
-            "recent_events": db.list_recent_events(days=7, limit=10),
-            "game_modes": db.summarize_battle_modes(windows=(7,)),
+            "event_windows": event_facades.summarize_event_windows(windows=_ELIXIR_STATE_WINDOWS, scope=None),
+            "recent_events": event_facades.list_recent_events(days=7, limit=10),
+            "game_modes": event_facades.summarize_battle_modes(windows=(7,)),
             "war_season": db.get_war_season_snapshot(),
             "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
             "recent_intents": db.list_recent_communication_intents(limit=limit),
