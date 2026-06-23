@@ -31,6 +31,52 @@ def _battle(conn, tag, mode_group, battle_type, mode_name, when, outcome, opp):
     )
 
 
+def _seed_v5_battles(rows, profiles=()):
+    """Seed the v5 projection DB (battle_telemetry + names) for get_elixir_state.
+
+    rows: (tag, battle_time, battle_type, opponent_tag, mode_group, outcome).
+    """
+    from event_core import config
+    from event_core import db as ec_db
+    from event_core.ingest.battles import BATTLE_TELEMETRY_DDL
+
+    conn = ec_db.connect(config.PROJECTIONS_DB)
+    try:
+        conn.execute(BATTLE_TELEMETRY_DDL)
+        conn.execute("CREATE TABLE IF NOT EXISTS player_current_profile (player_tag TEXT UNIQUE, name TEXT)")
+        for (tag, when, btype, opp, mode_group, outcome) in rows:
+            conn.execute(
+                "INSERT OR IGNORE INTO battle_telemetry(player_tag,battle_time,battle_type,opponent_tag,"
+                "crowns_for,crowns_against,mode_group,outcome,observed_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (tag, when, btype, opp, 1, 0, mode_group, outcome, when),
+            )
+        for tag, name in profiles:
+            conn.execute("INSERT OR IGNORE INTO player_current_profile(player_tag,name) VALUES(?,?)", (tag, name))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _seed_v5_detection(dedup_key, detection_type, subject_tag, when, scope="public"):
+    from event_core import config
+    from event_core import db as ec_db
+
+    conn = ec_db.connect(config.PROJECTIONS_DB)
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS detections (dedup_key TEXT PRIMARY KEY, detection_type TEXT, "
+            "detector TEXT, subject_tag TEXT, occurred_at TEXT, scope TEXT, payload_json TEXT)"
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO detections(dedup_key,detection_type,detector,subject_tag,occurred_at,scope,payload_json) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (dedup_key, detection_type, "test", subject_tag, when, scope, "{}"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_summarize_battle_modes_counts_winrate_and_top_members():
     conn = db.get_connection()
     _seed_member(conn, "#P1", "Ranko")
@@ -105,11 +151,15 @@ def test_situation_blocks_are_safe_on_empty_db():
 def test_get_elixir_state_game_modes_aspect_is_pullable():
     from agent.tool_exec import _execute_get_elixir_state
 
-    conn = db.get_connection()
-    _seed_member(conn, "#GM1", "Climber")
-    for i, outcome in enumerate(["W", "W", "L", "W"]):
-        _battle(conn, "#GM1", "ranked", "pathOfLegend", "Ranked1v1_NewArena2",
-                f"20260620T12{i:02d}00.000Z", outcome, f"#X{i}")
+    # game_modes reads the v5 battle_telemetry projection; names come from the
+    # v5 player_current_profile projection (no elixir.db lookup).
+    _seed_v5_battles(
+        [
+            ("#GM1", f"20260620T12{i:02d}00.000Z", "Ranked1v1_NewArena2", f"#X{i}", "ranked", o)
+            for i, o in enumerate(["W", "W", "L", "W"])
+        ],
+        profiles=[("#GM1", "Climber")],
+    )
 
     # An interactive call can now pull per-mode clan activity on demand.
     result = _execute_get_elixir_state({"aspect": "game_modes"})
@@ -119,24 +169,22 @@ def test_get_elixir_state_game_modes_aspect_is_pullable():
     assert ranked["top_members"][0]["name"] == "Climber"
 
 
-def test_get_elixir_state_event_class_drills_into_battles():
+def test_get_elixir_state_recent_events_are_signal_grain():
     from agent.tool_exec import _execute_get_elixir_state
 
-    conn = db.get_connection()
-    _seed_member(conn, "#EC1", "Driller")
-    db.record_game_event(
-        event_type="badge_earned", source_system="player_intel",
-        subject_type="member", subject_key="#EC1", payload={}, conn=conn,
-    )
-    _battle(conn, "#EC1", "ranked", "pathOfLegend", "Ranked1v1_NewArena2",
-            "20260620T120000.000Z", "W", "#OPP")
+    # In the v5 model, recent_events serves signal-grain detections; battles
+    # live in battle_telemetry and surface via the game_modes aspect, not
+    # recent_events. event_class is vestigial (detections are always signal).
+    _seed_v5_detection("det:badge", "badge_earned", "#EC1", "20260620T120000.000Z")
+    _seed_v5_battles([("#EC1", "20260620T120000.000Z", "Ranked1v1_NewArena2", "#OPP", "ranked", "W")])
 
-    # default (signal) excludes battle telemetry
     signal_view = _execute_get_elixir_state({"aspect": "recent_events", "days": 90})
-    assert "battle_played" not in {e["event_type"] for e in signal_view["events"]}
-    # event_class='battle' drills into the per-battle stream
+    types = {e["event_type"] for e in signal_view["events"]}
+    assert "badge_earned" in types
+    assert "battle_played" not in types
+
     battle_view = _execute_get_elixir_state({"aspect": "recent_events", "days": 90, "event_class": "battle"})
-    assert {e["event_type"] for e in battle_view["events"]} == {"battle_played"}
+    assert "battle_played" not in {e["event_type"] for e in battle_view["events"]}
 
 
 def test_get_elixir_state_season_window_aspect_is_reachable():

@@ -504,7 +504,7 @@ TOOLS = [
                 },
                 "event_class": {
                     "type": "string",
-                    "description": "Event class for recent_events / event_summary: 'signal' (notable detector events, default), 'battle' (per-battle telemetry across all game modes), or 'all'.",
+                    "description": "Event class for recent_events / event_summary. These views are signal-grain (notable detector events) only; per-battle / game-mode activity is available via the 'game_modes' aspect. Retained for compatibility — 'battle' and 'all' behave like 'signal'.",
                     "enum": ["signal", "battle", "all"],
                 },
                 "case_type": {
