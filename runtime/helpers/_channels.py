@@ -13,6 +13,7 @@ __all__ = [
     "_is_bot_mentioned", "_leading_bot_mention_pattern", "_get_channel_behavior",
     "_get_singleton_channel", "_get_singleton_channel_id", "_channel_reply_target_name",
     "_safe_reply", "_reply_text", "_share_channel_result",
+    "_channel_config_by_key",
 ]
 
 from runtime.helpers._common import (
@@ -24,6 +25,13 @@ from runtime.helpers._common import (
     _post_to_elixir,
     _runtime_app,
 )
+
+
+def _channel_config_by_key(channel_key: str) -> dict:
+    config = prompts.discord_channels_by_lane().get(channel_key)
+    if not config:
+        raise RuntimeError(f"channel lane not configured: {channel_key}")
+    return config
 
 
 def _channel_scope(channel) -> str:

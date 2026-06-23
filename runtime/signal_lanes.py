@@ -272,59 +272,8 @@ def is_public_system_signal(signal: dict) -> bool:
     return (signal or {}).get("type") == "capability_unlock" and signal_audience(signal) == "clan"
 
 
-def _member_tag_from_signals(signals: list[dict]) -> str | None:
-    for signal in signals or []:
-        tag = signal.get("tag")
-        if tag:
-            return str(tag)
-    return None
-
-
 def _signal_memory_event_id(source_signal_key: str, outcome: dict) -> str:
     return f"{source_signal_key}:{outcome['target_channel_key']}"
-
-
-def build_lane_memory_context(channel_config: dict, *, discord_user_id=None, signals=None):
-    member_tag = _member_tag_from_signals(signals or [])
-    context = db.build_memory_context(
-        discord_user_id=discord_user_id,
-        member_tag=member_tag,
-        channel_id=channel_config["id"],
-        viewer_scope=channel_config.get("memory_scope") or "public",
-    )
-    if not channel_config.get("durable_memory_enabled"):
-        return context
-
-    filters = {}
-    if member_tag:
-        filters["member_tag"] = member_tag
-    elif any(signal.get("week") is not None and signal.get("season_id") is not None for signal in (signals or [])):
-        signal = next(
-            signal for signal in signals
-            if signal.get("week") is not None and signal.get("season_id") is not None
-        )
-        filters["war_week_id"] = f"{signal.get('season_id')}:{signal.get('week')}"
-    elif any(signal.get("season_id") is not None for signal in (signals or [])):
-        signal = next(signal for signal in signals if signal.get("season_id") is not None)
-        filters["war_season_id"] = str(signal.get("season_id"))
-    else:
-        return context
-
-    durable_memories = list_memories(
-        viewer_scope=channel_config.get("memory_scope") or "public",
-        filters=filters,
-        limit=10,
-    )
-    # Also load unscoped identity memories (e.g. win streak) regardless of week/season
-    identity_memories = list_memories(
-        viewer_scope=channel_config.get("memory_scope") or "public",
-        filters={"event_type": "clan_identity"},
-        limit=5,
-    )
-    all_memories = (durable_memories or []) + (identity_memories or [])
-    if all_memories:
-        context["durable_memories"] = all_memories
-    return context
 
 
 def plan_signal_outcomes(signals: list[dict]) -> list[dict]:
@@ -466,7 +415,6 @@ __all__ = [
     "ARENA_RELAY_CELEBRATION_SIGNAL_TYPES",
     "BATTLE_MODE_SIGNAL_TYPES",
     "batch_source_key",
-    "build_lane_memory_context",
     "is_arena_relay_celebration_signal",
     "is_battle_mode_signal",
     "is_progression_signal",

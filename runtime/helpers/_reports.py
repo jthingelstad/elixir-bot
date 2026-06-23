@@ -1,11 +1,15 @@
 import asyncio
 import os
+import re
 from datetime import datetime, timezone
 
 import cr_api
 import db
 import elixir_agent
+from memory_store import list_memories
 from runtime import status as runtime_status
+
+_WEEKLY_RECAP_HEADER_RE = re.compile(r"^\s*[*#_`\s]*weekly recap\b", re.IGNORECASE)
 
 __all__ = [
     "_build_roster_join_dates_report", "_build_kick_risk_report",
@@ -16,6 +20,9 @@ __all__ = [
     "_build_war_status_report", "_build_clan_status_short_report",
     "_build_help_report",
     "_build_weekly_clan_recap_context", "_load_live_clan_context",
+    "_WEEKLY_RECAP_HEADER_RE", "_strip_weekly_recap_header",
+    "_format_weekly_recap_post",
+    "build_lane_memory_context",
 ]
 
 from runtime.helpers._common import (
@@ -1047,3 +1054,75 @@ async def _load_live_clan_context():
     if war:
         await asyncio.to_thread(db.upsert_war_current_state, war)
     return clan, war
+
+
+def _strip_weekly_recap_header(text: str) -> str:
+    body = (text or "").strip()
+    if not body:
+        return ""
+    lines = body.splitlines()
+    if lines and _WEEKLY_RECAP_HEADER_RE.match(lines[0] or ""):
+        lines = lines[1:]
+        while lines and not (lines[0] or "").strip():
+            lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
+def _format_weekly_recap_post(recap_text: str, *, now: datetime | None = None) -> str:
+    body = _strip_weekly_recap_header(recap_text)
+    current = (now or datetime.now(timezone.utc)).astimezone(_chicago())
+    title = f"**Weekly Recap | {current.strftime('%B')} {current.day}, {current.year}**"
+    if not body:
+        return title
+    return f"{title}\n\n{body}"
+
+
+def _member_tag_from_signals(signals: list[dict]) -> str | None:
+    for signal in signals or []:
+        tag = signal.get("tag")
+        if tag:
+            return str(tag)
+    return None
+
+
+def build_lane_memory_context(channel_config: dict, *, discord_user_id=None, signals=None):
+    member_tag = _member_tag_from_signals(signals or [])
+    context = db.build_memory_context(
+        discord_user_id=discord_user_id,
+        member_tag=member_tag,
+        channel_id=channel_config["id"],
+        viewer_scope=channel_config.get("memory_scope") or "public",
+    )
+    if not channel_config.get("durable_memory_enabled"):
+        return context
+
+    filters = {}
+    if member_tag:
+        filters["member_tag"] = member_tag
+    elif any(signal.get("week") is not None and signal.get("season_id") is not None for signal in (signals or [])):
+        signal = next(
+            signal for signal in signals
+            if signal.get("week") is not None and signal.get("season_id") is not None
+        )
+        filters["war_week_id"] = f"{signal.get('season_id')}:{signal.get('week')}"
+    elif any(signal.get("season_id") is not None for signal in (signals or [])):
+        signal = next(signal for signal in signals if signal.get("season_id") is not None)
+        filters["war_season_id"] = str(signal.get("season_id"))
+    else:
+        return context
+
+    durable_memories = list_memories(
+        viewer_scope=channel_config.get("memory_scope") or "public",
+        filters=filters,
+        limit=10,
+    )
+    # Also load unscoped identity memories (e.g. win streak) regardless of week/season
+    identity_memories = list_memories(
+        viewer_scope=channel_config.get("memory_scope") or "public",
+        filters={"event_type": "clan_identity"},
+        limit=5,
+    )
+    all_memories = (durable_memories or []) + (identity_memories or [])
+    if all_memories:
+        context["durable_memories"] = all_memories
+    return context

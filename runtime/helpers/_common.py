@@ -65,6 +65,13 @@ async def _post_to_elixir(*args, **kwargs):
     return await _runtime_app()._post_to_elixir(*args, **kwargs)
 
 
+async def _load_live_clan_context(*args, **kwargs):
+    # Delegation wrapper forwarding to runtime.app so test patches on
+    # `elixir._load_live_clan_context` reach scheduled-job callers. The real
+    # implementation lives in runtime.helpers._reports (re-exported via app).
+    return await _runtime_app()._load_live_clan_context(*args, **kwargs)
+
+
 def _chunk_for_discord(text, size=DISCORD_CHUNK_SIZE):
     """Split text into chunks that fit within Discord's message limit.
 

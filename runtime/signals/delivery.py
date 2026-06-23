@@ -22,10 +22,10 @@ from runtime.clan_chat_copy import (
 from runtime.leader_action_observability import post_leader_action_skip
 from runtime.leader_action_policy import can_post_leader_action
 from runtime.leader_action_ui import LEADER_ACTION_UI_VERSION, post_leader_action_card
+from runtime.helpers import build_lane_memory_context
 from runtime.signal_lanes import (
     SEASON_AWARDS_SIGNAL_TYPES,
     batch_source_key,
-    build_lane_memory_context,
     is_arena_relay_celebration_signal,
     is_battle_mode_signal,
     is_leadership_only_signal,

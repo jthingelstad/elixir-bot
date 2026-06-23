@@ -23,12 +23,8 @@ import cr_api
 import db
 import elixir_agent
 from storage.contextual_memory import upsert_intel_report_memory
-from runtime.helpers import _get_singleton_channel_id
-from runtime.jobs._signals import (
-    _channel_config_by_key,
-    _post_to_elixir,
-)
-from runtime.signal_lanes import build_lane_memory_context
+from runtime.helpers import _get_singleton_channel_id, _channel_config_by_key, build_lane_memory_context
+from runtime.helpers._common import _post_to_elixir
 from runtime import status as runtime_status
 
 log = logging.getLogger("elixir")
