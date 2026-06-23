@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import cr_api
 import db
 import elixir_agent
+from event_core.read import event_facades
 from memory_store import list_memories
 from runtime import status as runtime_status
 
@@ -685,14 +686,14 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         _log().warning("Weekly recap war season context unavailable: %s", exc)
         war_project = None
     try:
-        event_windows = db.summarize_events_by_window(windows=(7, 28), scope="public")
-        recent_events = db.list_recent_events(days=7, scope="public", limit=12)
+        event_windows = event_facades.summarize_event_windows(windows=(7, 28), scope="public")
+        recent_events = event_facades.list_recent_events(days=7, scope="public", limit=12)
     except Exception as exc:
         _log().warning("Weekly recap event stream context unavailable: %s", exc)
         event_windows = {}
         recent_events = []
     try:
-        mode_pulse = db.summarize_battle_modes(windows=(7,))
+        mode_pulse = event_facades.summarize_battle_modes(windows=(7,))
     except Exception as exc:
         _log().warning("Weekly recap mode pulse unavailable: %s", exc)
         mode_pulse = {}
