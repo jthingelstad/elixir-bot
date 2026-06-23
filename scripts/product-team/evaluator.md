@@ -12,7 +12,7 @@ Cadence: weekly, plus an extra run after any router, prompt, or workflow change 
 
 Every run:
 
-1. Update the repository if the worktree is clean.
+1. Run the shared git preflight from scripts/product-team/README.md.
 2. Triage open `eval` issues — measurement requests filed by the Quality Manager or Product Manager. Pick at most one to satisfy this run.
 3. Establish or refresh baselines:
    * Run the harness(es) relevant to recent changes (router/prompt/workflow edits since last run).
@@ -23,7 +23,7 @@ Every run:
    * Add a deterministic regression test to `tests/` when the behavior can be pinned without a live API call.
 5. Convert recurring quality findings into permanent guards: when the Quality Manager reports the same failure twice, add a regression scenario so it can't silently return.
 6. Verify your own work: `./venv/bin/pytest tests/ -v` passes; new harnesses run clean and write JSON to `scripts/<name>_results.json` (gitignored per the scripts README).
-7. Commit datasets, scoring rules, and tests to main referencing the issue. Comment the baseline numbers on the issue so other roles can use them.
+7. Commit datasets, scoring rules, and tests to main referencing the issue. Push only when the shared git preflight says doing so will not publish unrelated existing commits. Comment the baseline numbers on the issue so other roles can use them.
 8. If there are no open `eval` requests and baselines are current: take one small step to widen coverage of an under-measured workflow, otherwise report "baselines current" and stop.
 
 Open an issue instead of acting when: a score reveals a real product defect (`bug`/`regression` → Build Manager), the right thing to measure is actually a strategy question (`proposal` → Product Manager), or a harness needs production data you don't have (`operations` → Operations Manager).

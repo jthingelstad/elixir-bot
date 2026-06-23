@@ -24,9 +24,34 @@ To stop two scheduled agents colliding on the same files, code-commit rights are
 - **Build Manager** — the only role that commits feature and bug-fix code to `main`.
 - **Operations Manager** — commits operational/reliability fixes only.
 - **Evaluator** — commits eval harnesses, datasets, scoring rules, and regression tests only.
-- **Data Analyst, Quality Manager & Product Manager** — never commit product code. They produce GitHub issues and `docs/tasks/` reports, and they commit *and push* those reports themselves so they never leave the worktree dirty for the Build Manager.
+- **Data Analyst, Quality Manager & Product Manager** — never commit product code. They produce GitHub issues and `docs/tasks/` reports, and they commit those reports themselves so they never leave the worktree dirty for the Build Manager. They push only when the shared git preflight says doing so will not publish unrelated existing commits.
 
 If a role finds work outside its lane, it does **not** reach in — it files a labeled issue and moves on.
+
+## Current runtime map
+
+Elixir is currently a v5/Event Core hybrid. Product-team agents should use this
+map when gathering evidence:
+
+- **v5 event store:** `elixir-v5-events.db` is the authoritative event-sourced
+  store for Event Core domain events, detections, recommendations, decision cases,
+  and reactive communication intent history.
+- **v5 operational DB:** `elixir-v5.db` contains operational read models,
+  survivor tables, `detections`, `battle_telemetry`, runtime status, messages,
+  memory indexes, and legacy tables that have not yet been retired.
+- **v5 memory DB:** `elixir-v5-memory.db` is the durable clan-memory store.
+- **Runtime health:** use `python -m event_core.live.health` and
+  `python -m event_core.live.monitor` for Event Core health, follower lag,
+  deliverable pending work, and recent reactive ticks.
+- **Legacy teardown surface:** `signal_log`, `signal_outcomes`,
+  `awareness_ticks`, `game_event_stream`, and `runtime/signals/` may still exist
+  as compatibility or teardown surfaces. Do not treat them as the primary live
+  reasoning model unless the task is explicitly about retiring or auditing legacy
+  behavior.
+
+The short version: **v5/Event Core owns proactive reactive behavior; the
+operational DB still owns many read/query surfaces.** When a role investigates
+Elixir's flow, check both layers and name which layer supplied the evidence.
 
 ## The issue loop
 
@@ -78,8 +103,8 @@ This is the live set after running `setup-labels.sh`. It's the shared vocabulary
 | `prompt` | Prompt / persona-text change | Product Manager, Quality Manager | Build Manager (+ Evaluator) |
 | `persona` | Gap vs. `SOUL.md` / `PURPOSE.md` (existing convention) | Product Manager, Quality Manager | Build Manager |
 | `eval` | Missing measurement | Quality Manager, Product Manager | Evaluator |
-| `data` | New/changed data pattern or data-quality finding | Data Analyst | Product Manager / Build Manager |
-| `quality` | Recommendation quality: accuracy, noise, routing, delivery | Quality Manager | Product Manager (weighs) |
+| `data` | New/changed data pattern or data-quality finding | Data Analyst | Product Manager triages / Build Manager only after relabel |
+| `quality` | Recommendation quality: accuracy, noise, routing, delivery | Quality Manager | Product Manager triages / Build Manager only after relabel |
 | `proposal` | PM idea **awaiting Jamie's approval — do not build** | Product Manager | Jamie reviews |
 | `approved` | Approved by Jamie — cleared to build | Jamie | Build Manager / Evaluator |
 | `ready` | Triaged, actionable now | Jamie / any | Build Manager picks these first |
@@ -112,9 +137,10 @@ Every role serves one end: **help POAP KINGS become a stronger, more connected, 
 Strict lanes stop two agents committing to the same files, but six agents reading one issue queue can still both pick up the same issue — most likely the Build and Operations Managers, who both scan `bug`/`regression`. The `wip` label is the claim:
 
 1. Before working an issue, **skip anything already labeled `wip`** — another agent has it.
-2. Claim it: add `wip` (and optionally a one-line comment, e.g. "Build Manager working this") *before* starting.
+2. Claim it: add `wip` and comment with role + timestamp, e.g. "Build Manager claiming this at 2026-06-23 09:00 CT." *before* starting.
 3. When done, remove `wip` (closing the issue with `Closes #N` is enough). If you stop without finishing, remove `wip` so it returns to the queue.
 4. `bug` routing: a `bug` defaults to the **Build Manager**. The Operations Manager only takes one if it's genuinely operational — and when it does, it relabels `operations` so ownership is unambiguous.
+5. Stale claim rule: if a `wip` issue has no update for 24 hours, another agent may take it by commenting with the stale evidence, replacing the claim, and continuing. If the stale issue is risky or ambiguous, leave a comment and stop instead of taking over.
 
 ## Backlog hygiene
 
@@ -122,7 +148,13 @@ Someone has to own the health of the queue, or it silently fills. The **Product 
 
 ## Operating rules shared by all roles
 
-1. Update the repo first; if the worktree is dirty, stop and open an issue. **End every run with `git status` clean** — if you wrote anything to `docs/tasks/`, commit and push it before you finish. An uncommitted report blocks the Build Manager, which refuses to engage on a dirty tree.
+1. Start with the shared git preflight:
+   - `git fetch origin --prune`
+   - `git status --short --branch`
+   - If the worktree is dirty, stop and open/comment an issue describing the unexpected state.
+   - If the branch is behind or diverged, stop and report; do not pull, merge, rebase, or stash from an automated run.
+   - If the branch is ahead before you begin, report that fact and do not push unless your role is explicitly expected to publish the existing ahead commits too.
+   - **End every run with `git status` clean.** If you wrote anything to `docs/tasks/`, commit it before you finish. Push only when doing so will not publish unrelated pre-existing local commits.
 2. Do **one** focused thing per run. Never bundle unrelated work.
 3. Claim before you work (`wip`), and skip anything already claimed. See *Concurrency* above.
 4. Tag every issue you file with `generated` so agent-filed work is distinguishable from human-filed.
@@ -130,3 +162,13 @@ Someone has to own the health of the queue, or it silently fills. The **Product 
 6. Don't flood the queue: file **at most ~3 new issues per run**. If you're seeing more than that, the signal is a pattern worth one summary issue, not ten.
 7. A quiet run is a valid run. If there's nothing safe and in-lane to do, report it and stop — don't manufacture work.
 8. Read `AGENTS.md` (source of truth for architecture, work tracking, conventions) before acting.
+
+## Label ownership notes
+
+- `quality` is a triage signal, not a build-ready work order. Quality Manager
+  files it for soft patterns; Product Manager weighs it and converts it into
+  `proposal`, `eval`, `bug`, or `regression` when there is a clear next action.
+  Build Manager skips bare `quality` issues.
+- `data` is similar: Data Analyst files it to describe what changed or what is
+  unused; Product Manager or Build Manager only acts when it is relabeled into an
+  actionable lane.

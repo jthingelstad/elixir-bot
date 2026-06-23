@@ -59,6 +59,7 @@ upsert "bug"         "D73A4A" "Reproducible defect — Build Manager fixes"
 upsert "regression"  "B60205" "Worked before, now broken (high priority) — Build Manager"
 upsert "enhancement" "A2EEEF" "New feature or capability — Build Manager builds"
 upsert "prompt"      "BFD4F2" "Prompt or persona-text change — Build Manager (+ Evaluator)"
+upsert "persona"     "C5DEF5" "Gap vs SOUL.md / PURPOSE.md — Product/Quality -> Build Manager"
 upsert "eval"        "5319E7" "Missing measurement — Evaluator"
 upsert "data"        "1D76DB" "New/changed data pattern or data-quality finding — Data Analyst -> Product Manager"
 
@@ -76,7 +77,6 @@ echo "==> Provenance"
 upsert "generated"   "FEF2C0" "Filed by an automated product-team agent (not a human)"
 
 # Kept as-is on purpose:
-#   persona                         — existing convention (gap vs SOUL.md / PURPOSE.md)
 #   documentation                   — useful default
 #   duplicate, invalid, question, wontfix — useful triage outcomes (wontfix declines proposals)
 #   dependencies, github_actions, python  — Dependabot auto-applies these
