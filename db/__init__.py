@@ -632,8 +632,6 @@ _STORAGE_FACADE_MODULES = (
     "storage.player",
     "storage.trends",
     "storage.messages",
-    "storage.event_stream",
-    "storage.event_rollups",
     "storage.projects",
     "storage.decision_cases",
     "storage.communication_intents",
