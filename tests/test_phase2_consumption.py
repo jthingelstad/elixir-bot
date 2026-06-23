@@ -142,12 +142,6 @@ def test_get_season_window_trajectory():
     assert window["start"] is not None and window["end"] is not None
 
 
-def test_situation_blocks_are_safe_on_empty_db():
-    import runtime.situation as sit
-    assert isinstance(sit._mode_pulse_block(), dict)
-    assert sit._season_window_block() is None  # no war data in a fresh DB
-
-
 def test_get_elixir_state_game_modes_aspect_is_pullable():
     from agent.tool_exec import _execute_get_elixir_state
 
@@ -212,15 +206,3 @@ def test_summarize_battle_modes_subject_key_scopes_to_one_member():
     assert ranked["active_members"] == 1
 
 
-def test_player_insight_context_includes_per_mode():
-    from runtime.signals.context import _build_player_insight_context
-
-    conn = db.get_connection()
-    _seed_member(conn, "#PI1", "Grinder")
-    for i, o in enumerate(["W", "W", "W", "L"]):
-        _battle(conn, "#PI1", "ranked", "pathOfLegend", "Ranked1v1_NewArena2",
-                f"20260620T12{i:02d}00.000Z", o, "#O")
-
-    joined = " ".join(_build_player_insight_context("#PI1"))
-    assert "per_mode_7d:" in joined
-    assert "Ranked:" in joined

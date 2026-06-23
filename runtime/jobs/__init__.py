@@ -31,17 +31,13 @@ from runtime.jobs._memory import (  # noqa: F401
 # _build_weekly_clan_recap_context is a delegation wrapper in _core.py that
 # forwards to runtime.app — re-exporting it here would create a recursive loop
 # when tests access it via the top-level elixir module.
-from runtime.jobs._signals import (  # noqa: F401
-    _WEEKLY_RECAP_HEADER_RE,
-    _channel_config_by_key, _signal_group_needs_recap_memory,
-    _build_outcome_context, _mark_signal_group_completed, _post_signal_memory,
-    _deliver_signal_outcome, _deliver_signal_group,
-    _strip_weekly_recap_header, _format_weekly_recap_post,
-    _progression_signal_batches,
-    _system_signal_updates, _store_recap_memories_for_signal_batch,
-    _build_system_signal_context, _preauthored_system_signal_result,
+from runtime.system_status_post import (  # noqa: F401
+    _system_signal_updates, _preauthored_system_signal_result,
     _post_system_signal_updates, _publish_pending_system_signal_updates,
-    _mark_delivered_signals, _persist_signal_detector_cursors,
+)
+from runtime.helpers import (  # noqa: F401
+    _WEEKLY_RECAP_HEADER_RE, _channel_config_by_key,
+    _strip_weekly_recap_header, _format_weekly_recap_post,
 )
 # _post_to_elixir and _load_live_clan_context are delegation wrappers in
 # _signals.py that forward to runtime.app — excluded to avoid recursion.
