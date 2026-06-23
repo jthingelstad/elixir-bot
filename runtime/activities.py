@@ -51,25 +51,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         activity_role="observer+communicator",
     ),
     ActivityDefinition(
-        activity_key="clan-awareness",
-        enabled_by_default=False,  # v5: replaced by the event-driven _v5_reactive_tick
-        owner_lane="clan-events",
-        purpose="Process non-war clan signals, leader-facing notes, and routed clan-event outcomes.",
-        job_id="clan-awareness",
-        job_function="_clan_awareness_tick",
-        schedule_kind="interval",
-        schedule_config={
-            "minutes": _attr("HEARTBEAT_INTERVAL_MINUTES", 30),
-            "max_instances": 1,
-            "coalesce": True,
-        },
-        delivery_targets=(
-            "Discord routed outcomes: #clan-events, #leaders",
-        ),
-        activity_role="observer+communicator",
-        legacy_commands=("heartbeat",),
-    ),
-    ActivityDefinition(
         activity_key="war-poll",
         owner_lane="river-race",
         purpose="Poll live war state and persist the hourly River Race snapshot pipeline.",
@@ -86,24 +67,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         ),
         activity_role="observer",
         manual_trigger_allowed=False,
-    ),
-    ActivityDefinition(
-        activity_key="war-awareness",
-        enabled_by_default=False,  # v5: replaced by the event-driven _v5_reactive_tick
-        owner_lane="river-race",
-        purpose="Process war-only signals and coordinate River Race messaging.",
-        job_id="war-awareness",
-        job_function="_war_awareness_tick",
-        schedule_kind="cron",
-        schedule_config={
-            "minute": _attr("WAR_AWARENESS_MINUTE", 5),
-            "max_instances": 1,
-            "coalesce": True,
-        },
-        delivery_targets=(
-            "Discord routed outcomes: #river-race, optional #leader-actions leader actions, optional #leaders",
-        ),
-        activity_role="observer+communicator",
     ),
     ActivityDefinition(
         activity_key="player-progression",

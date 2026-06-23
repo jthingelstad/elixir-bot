@@ -7,8 +7,8 @@ __all__ = [
     "_build_weekly_clan_recap_context",
     "_query_or_default", "_summarize_member_rows",
     "_build_ask_elixir_daily_insight_context",
-    "_ask_elixir_daily_insight", "_clan_awareness_tick",
-    "_war_poll_tick", "_war_awareness_tick",
+    "_ask_elixir_daily_insight",
+    "_war_poll_tick",
     "_weekly_clan_recap",
     "_leadership_action_scan",
     "_weekly_discord_invite_relay",
@@ -34,12 +34,11 @@ from runtime.clan_chat_copy import (
     role_action_clan_chat_copy,
 )
 from storage.contextual_memory import upsert_weekly_summary_memory
-from storage.api_sentinel import EVENT_SENTINEL_SIGNAL_TYPE, SCHEMA_SENTINEL_SIGNAL_TYPE
 from runtime.signal_lanes import (
     OPTIONAL_PROGRESSION_SIGNAL_TYPES,
 )
 from runtime.helpers import (
-    _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id, _safe_create_task,
+    _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id,
     _channel_config_by_key, _format_weekly_recap_post, _strip_weekly_recap_header,
     build_lane_memory_context,
 )
@@ -49,14 +48,6 @@ from runtime.leader_action_observability import post_leader_action_skip
 from runtime.leader_action_policy import can_post_leader_action
 from runtime.leader_action_ui import CLASH_COPY_MAX_LENGTH, LEADER_ACTION_UI_VERSION, post_leader_action_card
 from runtime import status as runtime_status
-from runtime.system_signals import queue_startup_system_signals
-from runtime.jobs._signals import (
-    _deliver_signal_group_via_awareness,
-    _mark_delivered_signals,
-    _persist_signal_detector_cursors,
-    _post_system_signal_updates,
-    _publish_pending_system_signal_updates,
-)
 from runtime.jobs._intel import _clan_wars_intel_report
 
 CHICAGO = pytz.timezone("America/Chicago")
@@ -360,98 +351,6 @@ async def _ask_elixir_daily_insight():
         )
     runtime_status.mark_job_success("daily_clan_insight", "daily insight published")
 
-async def _revoke_member_role_for_leavers(signals: list[dict]) -> None:
-    from runtime import onboarding
-
-    for signal in signals:
-        if signal.get("type") != "member_leave":
-            continue
-        tag = signal.get("tag")
-        if not tag:
-            continue
-        name = signal.get("name") or tag
-        try:
-            ok, detail = await onboarding.remove_member_role_for_tag(
-                tag, reason=f"Left clan: {name} ({tag})",
-            )
-        except Exception:
-            log.exception("member_role_revoke_failed tag=%s", tag)
-            continue
-        log.info("member_role_revoke tag=%s ok=%s detail=%s", tag, ok, detail)
-
-
-async def _clan_awareness_tick():
-    """Recurring clan-awareness activity for non-war signals and routed clan-event outcomes."""
-    runtime_status.mark_job_start("clan_awareness")
-
-    try:
-        await asyncio.to_thread(queue_startup_system_signals)
-
-        # Run the clan-awareness tick — fetches data, snapshots, detects signals
-        tick_result = await asyncio.to_thread(heartbeat.tick, include_war=False)
-        if tick_result.clan.get("memberList"):
-            _runtime_app()._clear_cr_api_failure_alert_if_recovered()
-        else:
-            await _runtime_app()._maybe_alert_cr_api_failure("clan awareness")
-        signals = tick_result.signals
-
-        if not signals:
-            log.info("Clan awareness: no signals, nothing to post")
-            runtime_status.mark_job_success("clan_awareness", "no signals")
-            return
-
-        log.info("Clan awareness: %d signals detected, routing outcomes", len(signals))
-
-        # Use clan + war data fetched during heartbeat.tick()
-        clan = tick_result.clan
-        war = tick_result.war
-
-        api_sentinel_types = {EVENT_SENTINEL_SIGNAL_TYPE, SCHEMA_SENTINEL_SIGNAL_TYPE}
-        api_sentinel_signals = [
-            signal for signal in signals
-            if (signal.get("signal_type") or signal.get("type")) in api_sentinel_types
-        ]
-        awareness_signals = [
-            signal for signal in signals
-            if (signal.get("signal_type") or signal.get("type")) not in api_sentinel_types
-        ]
-
-        if api_sentinel_signals:
-            await _post_system_signal_updates(api_sentinel_signals, clan, war)
-
-        if not awareness_signals:
-            runtime_status.mark_job_success(
-                "clan_awareness",
-                f"{len(api_sentinel_signals)} API sentinel signal(s) processed",
-            )
-            return
-
-        # One agent turn sees all remaining signals together and emits a post plan.
-        # Hard-post-floor signals fall back to per-signal on omission so
-        # coverage is still guaranteed.
-        failed = 0
-        ok = await _deliver_signal_group_via_awareness(awareness_signals, clan, war, workflow="clan_awareness")
-        if not ok:
-            failed = len(awareness_signals)
-
-        await _revoke_member_role_for_leavers(awareness_signals)
-
-        if failed:
-            runtime_status.mark_job_failure(
-                "clan_awareness",
-                f"{failed} of {len(awareness_signals)} signal(s) failed to deliver",
-            )
-        else:
-            runtime_status.mark_job_success(
-                "clan_awareness",
-                f"{len(signals)} signal(s) processed",
-            )
-
-    except Exception as e:
-        log.error("Clan awareness error: %s", e, exc_info=True)
-        runtime_status.mark_job_failure("clan_awareness", str(e))
-
-
 async def _war_poll_tick():
     """Predictable hourly war ingest for live state and race-log storage."""
     runtime_status.mark_job_start("war_poll")
@@ -473,42 +372,6 @@ async def _war_poll_tick():
         log.error("War poll error: %s", e, exc_info=True)
         await _runtime_app()._maybe_alert_cr_api_failure("war poll")
         runtime_status.mark_job_failure("war_poll", str(e))
-
-
-async def _war_awareness_tick():
-    """Stored-war observer that routes River Race signals on a fixed cadence."""
-    runtime_status.mark_job_start("war_awareness")
-    try:
-        detection_result = await asyncio.to_thread(
-            heartbeat.detect_war_signals_from_storage,
-        )
-        signals = detection_result.signals
-
-        if not signals:
-            if detection_result.cursor_updates:
-                await asyncio.to_thread(_persist_signal_detector_cursors, detection_result.cursor_updates)
-            runtime_status.mark_job_success("war_awareness", "no war signals")
-            return
-
-        clan = detection_result.clan
-        war = detection_result.war
-
-        delivered_ok = await _deliver_signal_group_via_awareness(signals, clan, war, workflow="war_awareness")
-
-        if not delivered_ok:
-            runtime_status.mark_job_failure("war_awareness", "one or more war signal batches failed")
-            return
-
-        if detection_result.cursor_updates:
-            await asyncio.to_thread(_persist_signal_detector_cursors, detection_result.cursor_updates)
-
-        if any(s.get("type") == "war_season_rollover" for s in signals):
-            _safe_create_task(_clan_wars_intel_report(), name="clan_wars_intel_auto")
-
-        runtime_status.mark_job_success("war_awareness", f"{len(signals)} war signal(s) processed")
-    except Exception as e:
-        log.error("War awareness error: %s", e, exc_info=True)
-        runtime_status.mark_job_failure("war_awareness", str(e))
 
 
 def _award_announcement_context(signals: list[dict]) -> str:

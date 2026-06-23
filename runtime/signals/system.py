@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import db
 from runtime.system_signals import queue_startup_system_signals
+
+log = logging.getLogger("elixir")
 
 
 def _system_signal_updates(signals):
@@ -47,7 +50,6 @@ def _preauthored_system_signal_target(signal):
 async def _post_system_signal_updates(signals, clan, war):
     from runtime.jobs._signals import (
         _deliver_awareness_post,
-        _deliver_signal_group_via_awareness,
         _mark_signal_group_completed,
     )
 
@@ -62,11 +64,17 @@ async def _post_system_signal_updates(signals, clan, war):
         source_detector="system_signals",
     )
 
-    remaining = []
     for signal in system_signals:
         result = _preauthored_system_signal_result(signal)
         if not result:
-            remaining.append(signal)
+            # System signals are expected to carry pre-authored copy (e.g.
+            # api-sentinel discord_content). The v4 awareness fallback for
+            # non-pre-authored system signals has been retired.
+            log.warning(
+                "system signal %s has no pre-authored content; skipping "
+                "(v4 awareness fallback retired)",
+                signal.get("signal_key") or signal.get("signal_log_type"),
+            )
             continue
         source_key = signal.get("signal_key") or signal.get("signal_log_type")
         channel_key, leads_with = _preauthored_system_signal_target(signal)
@@ -87,14 +95,6 @@ async def _post_system_signal_updates(signals, clan, war):
         delivered = await _deliver_awareness_post(post, [signal], intent=intent)
         if delivered:
             await _mark_signal_group_completed([signal])
-
-    if remaining:
-        await _deliver_signal_group_via_awareness(
-            remaining,
-            clan,
-            war,
-            workflow="system_signals",
-        )
 
 
 async def _publish_pending_system_signal_updates(*, seed_startup_signals: bool = False) -> int:

@@ -590,7 +590,7 @@ def _build_help_report(role: str) -> str:
             "- System: `/elixir system status`, `/elixir system storage`, `/elixir system schedule`.",
             "- Clan: `/elixir clan status`, `/elixir clan war`, `/elixir clan members`.",
             "- Member: `/elixir member show`, `/elixir member verify-discord`, `/elixir member set`, `/elixir member clear`.",
-            "- Signal: `/elixir signal show`, `/elixir signal publish-pending`.",
+            "- Signal: `/elixir signal publish-pending`.",
             "- Activity: `/elixir activity list`, `/elixir activity show`, `/elixir activity run`.",
             "- Integration: `/elixir integration list`, `/elixir integration status integration:poap-kings`, `/elixir integration publish integration:poap-kings target:...`.",
         ]

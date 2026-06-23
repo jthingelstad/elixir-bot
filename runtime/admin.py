@@ -26,7 +26,6 @@ class AdminCommandSpec:
     event_type: str | None = None
 
 
-SIGNAL_SHOW_VIEWS = {"all", "routes", "recent", "pending"}
 RELAY_STATUS_VIEWS = {"all", "pending", "decided"}
 
 COMMAND_SPECS = {
@@ -45,9 +44,7 @@ COMMAND_SPECS = {
     "memory.show": AdminCommandSpec("memory.show", ("memory", "show"), "Inspect stored conversation and contextual memory.", leader_only=True, event_type="memory_report"),
     "relay.status": AdminCommandSpec("relay.status", ("relay", "status"), "Show leader action recommendations and reaction decisions.", leader_only=True, event_type="relay_status_report"),
     "relay.test-card": AdminCommandSpec("relay.test-card", ("relay", "test-card"), "Post a test #leader-actions leader action card for a real action type.", leader_only=True, write=True, event_type="relay_test_card"),
-    "signal.show": AdminCommandSpec("signal.show", ("signal", "show"), "Show signal routing, recent routed signals, and pending system signals.", event_type="signals_report"),
     "signal.publish-pending": AdminCommandSpec("signal.publish-pending", ("signal", "publish-pending"), "Queue missing startup signals and publish pending system announcements.", leader_only=True, write=True, event_type="signal_publish_pending"),
-    "signal.backfill-joins": AdminCommandSpec("signal.backfill-joins", ("signal", "backfill-joins"), "Send belated welcome messages for members who joined without an announcement.", leader_only=True, write=True, event_type="signal_backfill_joins"),
     "activity.list": AdminCommandSpec("activity.list", ("activity", "list"), "List registered recurring activities.", event_type="activity_list"),
     "activity.show": AdminCommandSpec("activity.show", ("activity", "show"), "Show one recurring activity in detail.", event_type="activity_show"),
     "activity.run": AdminCommandSpec("activity.run", ("activity", "run"), "Run one registered activity now.", leader_only=True, write=True, event_type="activity_run"),
@@ -141,9 +138,8 @@ def render_admin_help(*, slash_prefix: str = "/elixir") -> str:
             f"- `{slash_prefix} clan members detail:full`",
             f"- `{slash_prefix} member show member:Ditika`",
             f"- `{slash_prefix} member set member:Ditika field:join-date value:2026-03-07`",
-            f"- `{slash_prefix} signal show view:recent`",
             f"- `{slash_prefix} relay status view:pending`",
-            f"- `{slash_prefix} activity run activity:clan-awareness preview:true`",
+            f"- `{slash_prefix} activity run activity:player-progression preview:true`",
         ]
     )
     return "\n".join(lines)
@@ -288,94 +284,6 @@ def _truncate_for_report(text, limit=160):
     if len(value) <= limit:
         return value
     return value[: limit - 3].rstrip() + "..."
-
-
-def _build_signals_report(*, view: str = "all", recent_limit: int = 10, conn=None) -> str:
-    import db
-    from runtime.signal_lanes import signal_routing_summary
-
-    close = conn is None
-    conn = conn or db.get_connection()
-    try:
-        view = normalize_admin_command(view) or "all"
-        if view not in SIGNAL_SHOW_VIEWS:
-            raise ValueError(f"invalid signal view: {view}")
-        recent_limit = max(1, min(int(recent_limit or 10), 20))
-        routing = signal_routing_summary()
-        pending_system = db.list_pending_system_signals(conn=conn)
-        recent_outcomes = db.list_recent_signal_outcomes(limit=recent_limit * 3, conn=conn)
-
-        grouped_outcomes: dict[str, dict] = {}
-        for outcome in recent_outcomes:
-            source_key = outcome.get("source_signal_key") or "unknown"
-            group = grouped_outcomes.setdefault(
-                source_key,
-                {
-                    "source_signal_key": source_key,
-                    "source_signal_type": outcome.get("source_signal_type") or "unknown",
-                    "updated_at": outcome.get("updated_at") or outcome.get("created_at"),
-                    "outcomes": [],
-                },
-            )
-            timestamp = outcome.get("updated_at") or outcome.get("created_at")
-            if timestamp and (group["updated_at"] is None or timestamp > group["updated_at"]):
-                group["updated_at"] = timestamp
-            group["outcomes"].append(outcome)
-
-        recent_groups = sorted(
-            grouped_outcomes.values(),
-            key=lambda item: ((item.get("updated_at") or ""), item.get("source_signal_key") or ""),
-            reverse=True,
-        )[:recent_limit]
-
-        lines = ["**Elixir Signals**"]
-        if view in {"all", "routes"}:
-            lines.extend(["", "Routing:"])
-            for item in routing:
-                lines.append(f"- `{item['family']}`: {item['match']}")
-                for target in item["targets"]:
-                    requirement = "required" if target.get("required") else "optional"
-                    condition = f" - {target['condition']}" if target.get("condition") else ""
-                    lines.append(
-                        f"  -> `{target['lane']}` `{target['intent']}` ({requirement}){condition}"
-                    )
-
-        if view in {"all", "recent"}:
-            lines.extend(["", f"Recent routed signals ({len(recent_groups)}):"])
-            if not recent_groups:
-                lines.append("_No routed signals recorded yet._")
-            else:
-                for group in recent_groups:
-                    timestamp = group.get("updated_at") or "n/a"
-                    lines.append(
-                        f"- `{group['source_signal_type']}` at {timestamp} - `{group['source_signal_key']}`"
-                    )
-                    for outcome in sorted(
-                        group["outcomes"],
-                        key=lambda item: ((item.get("target_channel_key") or ""), (item.get("intent") or "")),
-                    ):
-                        requirement = "required" if outcome.get("required") else "optional"
-                        error_detail = outcome.get("error_detail")
-                        error_text = f" - {_truncate_for_report(error_detail, 90)}" if error_detail else ""
-                        lines.append(
-                            f"  -> `{outcome.get('target_channel_key')}` `{outcome.get('intent')}` "
-                            f"{outcome.get('delivery_status') or 'unknown'} ({requirement}){error_text}"
-                        )
-
-        if view in {"all", "pending"}:
-            lines.extend(["", f"Pending system signals ({len(pending_system)}):"])
-            if not pending_system:
-                lines.append("_No pending system signals._")
-            else:
-                for signal in pending_system[:5]:
-                    lines.append(
-                        f"- `{signal.get('type') or signal.get('signal_type') or 'unknown'}` "
-                        f"`{signal.get('signal_key')}` created {signal.get('created_at') or 'n/a'}"
-                    )
-        return "\n".join(lines)
-    finally:
-        if close:
-            conn.close()
 
 
 def _format_leader_action_outcome(action: dict) -> str:
@@ -730,54 +638,6 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
     return f"Ran `{display_name}`."
 
 
-async def _run_backfill_joins(*, preview: bool) -> str:
-    import db
-    import elixir
-    from runtime.jobs._signals import _deliver_signal_group_via_awareness
-
-    conn = db.get_connection()
-    try:
-        rows = conn.execute(
-            """
-            SELECT m.player_tag, m.current_name, m.first_seen_at
-            FROM members m
-            WHERE m.status = 'active'
-              AND m.first_seen_at > '2026-04-14'
-              AND NOT EXISTS (
-                SELECT 1 FROM signal_log sl
-                WHERE sl.signal_type = 'member_join:' || m.player_tag
-              )
-            ORDER BY m.first_seen_at
-            """
-        ).fetchall()
-    finally:
-        conn.close()
-
-    if not rows:
-        return "No unannounced members found — everyone has been welcomed."
-
-    signals = [
-        {
-            "type": "member_join",
-            "tag": row["player_tag"],
-            "name": row["current_name"] or row["player_tag"],
-            "signal_log_type": f"member_join:{row['player_tag']}",
-        }
-        for row in rows
-    ]
-    names = ", ".join(s["name"] for s in signals)
-
-    if preview:
-        return f"Would send belated welcome for {len(signals)} member(s): {names}"
-
-    clan, war = await elixir._load_live_clan_context()
-    ok = await _deliver_signal_group_via_awareness(signals, clan, war, workflow="backfill_joins")
-
-    if ok:
-        return f"Backfill complete — sent belated welcome for {len(signals)} member(s): {names}"
-    return f"Backfill partially failed for {len(signals)} member(s): {names}"
-
-
 async def _run_system_signals(preview: bool) -> str:
     import elixir
 
@@ -1082,12 +942,6 @@ async def dispatch_admin_command(command: str | dict, *, preview: bool = False, 
         return elixir._build_db_status_report(group=None if group in {None, "", "all"} else group)
     if key == "system.schedule":
         return elixir._build_schedule_report()
-    if key == "signal.show":
-        return await asyncio.to_thread(
-            _build_signals_report,
-            view=args.get("view", "all"),
-            recent_limit=args.get("limit", 10),
-        )
     if key == "clan.status":
         clan, war = await elixir._load_live_clan_context()
         if short:
@@ -1127,8 +981,6 @@ async def dispatch_admin_command(command: str | dict, *, preview: bool = False, 
         return await _run_member_field_command("clear", preview=preview, args=args)
     if key == "signal.publish-pending":
         return await _run_system_signals(preview=preview)
-    if key == "signal.backfill-joins":
-        return await _run_backfill_joins(preview=preview)
     if key == "activity.list":
         return await asyncio.to_thread(_build_activity_list_report)
     if key == "activity.show":
@@ -1141,7 +993,6 @@ async def dispatch_admin_command(command: str | dict, *, preview: bool = False, 
 __all__ = [
     "LEADER_ONLY_COMMANDS",
     "admin_command_requires_leader",
-    "_build_signals_report",
     "_build_relay_status_report",
     "COMMAND_HELP",
     "COMMAND_ORDER",

@@ -342,22 +342,6 @@ def register_elixir_app_commands(bot) -> None:
             write=True,
         )
 
-    @signal_commands.command(name="show", description=COMMAND_SPECS["signal.show"].description)
-    @app_commands.describe(view="Choose which signal slice to inspect.", limit="Maximum recent signals to show.")
-    @app_commands.choices(view=[
-        app_commands.Choice(name="All", value="all"),
-        app_commands.Choice(name="Routes", value="routes"),
-        app_commands.Choice(name="Recent", value="recent"),
-        app_commands.Choice(name="Pending", value="pending"),
-    ])
-    async def slash_signal_show(interaction: discord.Interaction, view: str = "all", limit: app_commands.Range[int, 1, 20] = 10):
-        await run_admin_interaction(
-            interaction,
-            command_name="signal.show",
-            args={"view": view, "limit": str(limit)},
-            event_type=COMMAND_SPECS["signal.show"].event_type,
-        )
-
     @signal_commands.command(name="publish-pending", description=COMMAND_SPECS["signal.publish-pending"].description)
     @app_commands.describe(preview="Suppress Discord sends when supported.")
     async def slash_signal_publish_pending(interaction: discord.Interaction, preview: bool = False):
@@ -366,17 +350,6 @@ def register_elixir_app_commands(bot) -> None:
             command_name="signal.publish-pending",
             preview=preview,
             event_type=COMMAND_SPECS["signal.publish-pending"].event_type,
-            write=True,
-        )
-
-    @signal_commands.command(name="backfill-joins", description=COMMAND_SPECS["signal.backfill-joins"].description)
-    @app_commands.describe(preview="Preview which members would be welcomed without sending anything.")
-    async def slash_signal_backfill_joins(interaction: discord.Interaction, preview: bool = False):
-        await run_admin_interaction(
-            interaction,
-            command_name="signal.backfill-joins",
-            preview=preview,
-            event_type=COMMAND_SPECS["signal.backfill-joins"].event_type,
             write=True,
         )
 
@@ -466,35 +439,32 @@ def register_elixir_app_commands(bot) -> None:
         game_mode = api_data.get("gameMode") or {}
         status_label = {"inPreparation": "In Preparation", "inProgress": "In Progress"}.get(api_status, api_status)
 
-        # Announce the watch to the clan via the awareness pipeline.
-        from runtime.jobs._signals import _deliver_signal_group_via_awareness
-        watching_signal = {
-            "type": "tournament_watching_started",
-            "signal_key": f"tournament_watching_started|{clean_tag}",
-            "tournament_tag": clean_tag,
-            "tournament_name": api_data.get("name"),
-            "tournament_description": api_data.get("description"),
-            "tournament_type": api_data.get("type"),
-            "api_status": api_status,
-            "status_label": status_label,
-            "participant_count": len(members),
-            "max_capacity": api_data.get("maxCapacity"),
-            "game_mode_id": game_mode.get("id"),
-            "game_mode_name": game_mode.get("name"),
-            "level_cap": api_data.get("levelCap"),
-            "preparation_duration_seconds": api_data.get("preparationDuration"),
-            "duration_seconds": api_data.get("duration"),
-            "created_time": api_data.get("createdTime"),
-            "started_time": api_data.get("startedTime"),
-            "poll_interval_minutes": jobs.TOURNAMENT_POLL_MINUTES,
-        }
+        # Announce the watch to the clan via the v5 direct-post path
+        # (replaces the retired v4 awareness pipeline; mirrors the scheduled
+        # tournament-watch job's compose_and_post to #clan-events).
         try:
-            await _deliver_signal_group_via_awareness(
-                [watching_signal],
-                {},
-                {},
-                workflow="tournament_watch",
-            )
+            from runtime.discord_posting import compose_and_post
+
+            target_config = app.prompts.discord_singleton_lane("clan-events")
+            channel = app.bot.get_channel(target_config["id"])
+            if channel is None:
+                app.log.warning("tournament_watching_started: #clan-events channel unavailable")
+            else:
+                max_capacity = api_data.get("maxCapacity")
+                context = (
+                    "Elixir just started watching a new tournament for the clan. "
+                    "Announce it for #clan-events in your own voice — concise and "
+                    "inviting; let members know they can jump in. Use only these facts.\n\n"
+                    f"Tournament: {api_data.get('name')} (#{clean_tag})\n"
+                    f"Status: {status_label}\n"
+                    f"Participants: {len(members)}"
+                    + (f" / {max_capacity} max" if max_capacity else "")
+                    + "\n"
+                    f"Game mode: {game_mode.get('name') or game_mode.get('id') or 'Unknown'}\n"
+                    f"Type: {api_data.get('type') or 'unknown'}\n"
+                    f"Elixir polls for updates every {jobs.TOURNAMENT_POLL_MINUTES} minutes."
+                )
+                await compose_and_post(channel, lane="clan-events", context=context)
         except Exception as exc:
             app.log.warning("tournament_watching_started delivery failed: %s", exc)
 

@@ -1915,7 +1915,8 @@ def test_register_elixir_app_commands_includes_signals():
     root = bot.tree.commands[0]
     signal_group = root.get_command("signal")
     assert signal_group is not None
-    assert signal_group.get_command("show") is not None
+    assert signal_group.get_command("publish-pending") is not None
+    assert signal_group.get_command("show") is None
 
 
 def test_register_elixir_app_commands_includes_relay_status():
@@ -2104,74 +2105,6 @@ def test_dispatch_admin_command_handles_system_signals():
 
     assert result == "Published 1 pending system signal(s)."
     mock_run.assert_awaited_once_with(preview=False)
-
-
-def test_dispatch_admin_command_handles_signals():
-    with patch("runtime.admin._build_signals_report", return_value="**Elixir Signals**") as mock_report:
-        result = asyncio.run(
-            elixir.dispatch_admin_command(
-                "signal.show",
-                preview=False,
-                short=False,
-                args={"view": "all", "limit": "10"},
-            )
-        )
-
-    assert result == "**Elixir Signals**"
-    mock_report.assert_called_once_with(view="all", recent_limit="10")
-
-
-def test_build_signals_report_includes_routing_recent_and_pending():
-    conn = elixir.db.get_connection(":memory:")
-    try:
-        elixir.db.upsert_signal_outcome(
-            "member_join:#ABC123",
-            "member_join",
-            "clan-events",
-            1482352241628414013,
-            "member_join_public",
-            required=True,
-            delivery_status="delivered",
-            payload={"signals": [{"type": "member_join", "tag": "#ABC123", "name": "King Levy"}]},
-            delivered=True,
-            conn=conn,
-        )
-        elixir.db.upsert_signal_outcome(
-            "member_join:#ABC123",
-            "member_join",
-            "leader-lounge",
-            1474762000000000000,
-            "member_join_ops",
-            required=True,
-            delivery_status="failed",
-            error_detail="missing channel permissions",
-            payload={"signals": [{"type": "member_join", "tag": "#ABC123", "name": "King Levy"}]},
-            mark_attempt=True,
-            conn=conn,
-        )
-        elixir.db.queue_system_signal(
-            "capability_three_lane_elixir_v3",
-            "capability_unlock",
-            {"type": "capability_unlock", "payload": {"audience": "clan"}},
-            conn=conn,
-        )
-
-        from runtime.admin import _build_signals_report
-
-        report = _build_signals_report(conn=conn)
-    finally:
-        conn.close()
-
-    assert "**Elixir Signals**" in report
-    assert "Routing:" in report
-    assert "`member_join`" in report or "`member_join_public`" in report
-    assert "Recent routed signals" in report
-    assert "`member_join:#ABC123`" in report
-    assert "`clan-events` `member_join_public` delivered" in report
-    assert "`leader-lounge` `member_join_ops` failed" in report
-    assert "missing channel permissions" in report
-    assert "Pending system signals (1)" in report
-    assert "`capability_three_lane_elixir_v3`" in report
 
 
 def test_dispatch_admin_command_handles_activity_run():
@@ -2797,23 +2730,6 @@ def test_llm_outage_alert_dedupes_on_signature():
     mock_post.assert_not_awaited()
 
 
-def test_build_schedule_report_shows_47_minute_heartbeat():
-    scheduler = SimpleNamespace(
-        running=True,
-        get_jobs=lambda: [],
-    )
-
-    with (
-        patch("elixir.scheduler", scheduler),
-        patch.object(elixir, "HEARTBEAT_INTERVAL_MINUTES", 47),
-    ):
-        report = elixir._build_schedule_report()
-
-    assert "clan-events" in report
-    assert "clan-awareness" in report
-    assert "Every 47 minutes." in report
-
-
 def test_build_schedule_report_includes_promotion_content_sync():
     scheduler = SimpleNamespace(
         running=True,
@@ -2876,16 +2792,12 @@ def test_build_schedule_report_includes_clock_aligned_war_pipeline():
     with (
         patch("elixir.scheduler", scheduler),
         patch.object(elixir, "WAR_POLL_MINUTE", 0),
-        patch.object(elixir, "WAR_AWARENESS_MINUTE", 5),
     ):
         report = elixir._build_schedule_report()
 
     assert "river-race" in report
     assert "war-poll" in report
     assert "Every hour at :00 CT." in report
-    assert "war-awareness" in report
-    assert "Every hour at :05 CT." in report
-    assert "Discord routed outcomes: #river-race, optional #leader-actions leader actions, optional #leaders" in report
 
 
 def test_activity_registry_has_unique_keys_and_required_fields():
@@ -2911,7 +2823,6 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     # now shifts these minutes per season — see #20).
     with (
         patch.object(elixir, "WAR_POLL_MINUTE", 0),
-        patch.object(elixir, "WAR_AWARENESS_MINUTE", 5),
     ):
         specs = {spec["activity_key"]: spec for spec in schedule_specs_from_registry(elixir)}
 
@@ -2919,11 +2830,7 @@ def test_activity_registry_exposes_war_and_promotion_visibility():
     assert specs["war-poll"]["owner_lane"] == "river-race"
     assert specs["war-poll"]["activity_role"] == "observer"
     assert specs["war-poll"]["schedule"] == "Every hour at :00 CT."
-    assert "war-awareness" in specs
-    assert specs["war-awareness"]["owner_lane"] == "river-race"
-    assert specs["war-awareness"]["activity_role"] == "observer+communicator"
-    assert specs["war-awareness"]["schedule"] == "Every hour at :05 CT."
-    assert "#river-race" in " ".join(specs["war-awareness"]["delivery_targets"])
+    assert "war-awareness" not in specs
     assert "daily-clan-insight" in specs
     assert specs["daily-clan-insight"]["owner_lane"] == "ask-elixir"
     assert specs["daily-clan-insight"]["activity_role"] == "communicator"
@@ -3039,7 +2946,7 @@ def test_manual_activity_choices_exclude_internal_war_poll():
     choices = manual_activity_choices()
     values = {value for _, value in choices}
 
-    assert "war-awareness" in values
+    assert "daily-clan-insight" in values
     assert "war-poll" not in values
 
 
