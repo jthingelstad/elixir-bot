@@ -63,7 +63,7 @@ def advance(app, conn) -> dict:
     war_current_state_proj, war_participation_proj, roster_lifecycle) were RETIRED
     from the live tick on 2026-06-21: they had no live readers and only duplicated
     the v4 operational tables, costing a per-tick dual-write
-    (see docs/tasks/event-core-v5-architecture-boundary.md). The Mind consumes the
+    (see docs/archive/event-core-v5/event-core-v5-architecture-boundary.md). The Mind consumes the
     event store + battle_telemetry + the detections projection directly. The
     projections + their parity checks still live in build_foundation as an offline
     validation harness."""

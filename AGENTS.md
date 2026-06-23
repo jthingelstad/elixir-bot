@@ -305,9 +305,11 @@ A new clan forks elixir-bot and primarily rewrites `CLAN.md` and `DISCORD.md`, p
 - Use labels to cluster arcs: `persona` for work that closes the gap between
   Elixir's articulated persona (`prompts/SOUL.md`, `prompts/PURPOSE.md`) and
   the implementation. Add a tracking issue when an arc has 3+ child issues.
-- **`docs/tasks/*.md`** is for long-form design docs — the *why* behind an
-  arc, not the unit-of-work ledger. When a design doc exists, link it from
-  the tracking issue.
+- **`docs/tasks/*.md`** is for *active* long-form design docs — the *why*
+  behind an in-flight arc, not the unit-of-work ledger. When a design doc
+  exists, link it from the tracking issue. When an arc ships, move its doc to
+  `docs/archive/`; docs describing a stable, ongoing system live in
+  `docs/reference/`. See `docs/README.md` for the layout.
 - Default: create an issue before starting non-trivial work. Commit directly
   to `main` — PRs are not required. Reference the issue number in commit
   messages (e.g. `Closes #12`) so GitHub auto-closes on push.
