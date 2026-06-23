@@ -29,7 +29,7 @@ Elixir currently handles four main kinds of work:
    - a factual leadership note in `#leaders`
 
 3. Scheduled recurring activities
-   Elixir runs recurring activities like `clan-awareness`, `war-poll`, `war-awareness`, `player-progression`, `weekly-recap`, `promotion-content`, and the daily `#ask-elixir` hidden-fact post.
+   Elixir runs recurring activities like the `v5-reactive-tick` proactive heartbeat, `war-poll`, `player-progression`, `weekly-recap`, `promotion-content`, and the daily `#ask-elixir` hidden-fact post.
 
 4. POAP KINGS website publishing
    Elixir generates and publishes structured data for poapkings.com, pushes it to GitHub, and reports publish outcomes in `#website-updates`.
@@ -58,27 +58,20 @@ The live channel contract lives in [prompts/DISCORD.md](prompts/DISCORD.md).
 
 Recurring automated work is defined in [runtime/activities.py](runtime/activities.py). This is the canonical schedule registry.
 
-Current activities:
-- `clan-awareness`
-  Every 30 minutes, 24/7. Processes non-war clan signals and routes outcomes to lanes like `clan-events` and `leader-lounge`.
+See `runtime/activities.py` for the exact keys, schedules, and enabled state. The shape today:
+- `v5-reactive-tick`
+  The proactive heartbeat. Runs the Event Core engine (ingest → detections → recommendations/cases → communication intents → confirmed Discord delivery). This replaced the old `clan-awareness` / `war-awareness` ticks.
 - `war-poll`
-  Every hour at `:00` CT. Owns scheduled live war ingest and persists the River Race snapshot pipeline.
-- `war-awareness`
-  Every hour at `:05` CT. Reads stored war data, then owns scheduled River Race coordination and war-only signal handling.
+  Hourly live war ingest + River Race snapshot pipeline.
 - `player-progression`
-  Every 30 minutes. Refreshes player profiles and battle logs, then emits curated member highlights.
-- `api-sentinel`
-  Every 4 hours. Records first-seen Clash Royale API schema paths and `/events` game-mode entries, then alerts `#leaders` on new drift.
+  Refreshes player profiles and battle logs, then emits curated member highlights.
 - `daily-clan-insight`
-  Daily in `#ask-elixir` at 12:00 PM CT. Posts one short hidden fact when the data supports a genuinely interesting insight.
-- `leadership-review`
-  Weekly post in `#leaders`.
+  Daily `#ask-elixir` hidden fact when the data supports a genuinely interesting insight.
 - `weekly-recap`
   Weekly public recap in `#announcements`, plus members-page sync for the website.
-- `site-content`
-  Daily POAP KINGS website sync for clan, roster, and home payloads.
 - `promotion-content`
-  Weekly recruiting content for both `#recruiting` and the website.
+  Weekly recruiting content for `#recruiting` and the website.
+- Plus `api-sentinel`, `card-catalog-sync`, `award-detection`, `weekly-discord-invite-relay`, `memory-synthesis`, `clan-wars-intel`, and `db-maintenance`.
 
 ## Quick Start
 
@@ -146,9 +139,9 @@ Runtime architecture:
   Canonical recurring activity registry.
 - [runtime/channel_router.py](runtime/channel_router.py)
   Discord message routing and reply-policy enforcement.
-- [runtime/signal_lanes.py](runtime/signal_lanes.py)
-  Signal family classification, legacy lane routing, and channel-safe memory context.
-- [runtime/jobs.py](runtime/jobs.py)
+- [event_core/](event_core/)
+  Event-sourced v5 reactive engine (the proactive path that replaced the v4 signal/awareness loop).
+- [runtime/jobs/](runtime/jobs/)
   Scheduled activity executors.
 - [runtime/admin.py](runtime/admin.py)
   Admin command dispatch and manual activity execution.
@@ -237,7 +230,7 @@ Examples:
 
 ```text
 /elixir system status
-/elixir activity show activity:clan-awareness
+/elixir activity show activity:v5-reactive-tick
 /elixir integration publish integration:poap-kings target:data preview:true
 /elixir member set member:Ditika field:join-date value:2026-03-07
 /elixir signal show view:recent limit:5

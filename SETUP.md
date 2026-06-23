@@ -153,27 +153,14 @@ Database migrations run automatically at startup.
 
 The canonical schedule source is [runtime/activities.py](runtime/activities.py).
 
-Current recurring activity set:
-- `clan-awareness`
-  Every 30 minutes, 24/7.
+Current recurring activity set (read `runtime/activities.py` for exact schedules and enabled state):
+- `v5-reactive-tick`
+  The proactive Event Core heartbeat — replaced the old `clan-awareness` / `war-awareness` ticks.
 - `war-poll`
-  Every hour at `:00` CT.
-- `war-awareness`
-  Every hour at `:05` CT.
-- `player-progression`
-  Every 30 minutes.
-- `api-sentinel`
-  Every 4 hours.
-- `daily-clan-insight`
-  Daily at 12:00 PM CT.
-- `leadership-review`
-  Weekly.
-- `weekly-recap`
-  Weekly.
-- `site-content`
-  Daily.
-- `promotion-content`
-  Weekly.
+  Hourly live war ingest + River Race snapshot.
+- `player-progression`, `card-catalog-sync`, `award-detection`
+- `daily-clan-insight`, `weekly-recap`, `promotion-content`, `weekly-discord-invite-relay`, `clan-wars-intel`
+- `api-sentinel`, `memory-synthesis`, `db-maintenance`
 
 Use the live admin surface when you want the actual schedule rendered from the registry instead of trusting this file:
 
@@ -221,7 +208,7 @@ Typical healthy startup lines include:
 
 ```text
 Elixir online as ...
-Scheduler started — clan-awareness — Every 30 minutes., war-poll — Every hour at :00 CT., war-awareness — Every hour at :05 CT. ...
+Scheduler started — v5-reactive-tick — Every 60 minutes., war-poll — Every hour at :45 CT., player-progression — Every 30 minutes., ... api-sentinel — Every 240 minutes., db-maintenance — ...
 ```
 
 You should also see:
@@ -267,9 +254,8 @@ This reads from the Clash Royale API and writes to the local DB, but does not po
 If you want to run a recurring activity directly through the supported admin surface, use:
 
 ```text
-/elixir activity run activity:clan-awareness preview:true
-/elixir activity run activity:war-awareness preview:true
 /elixir activity run activity:player-progression preview:true
+/elixir activity run activity:daily-clan-insight preview:true
 ```
 
 ## Member Metadata Operations

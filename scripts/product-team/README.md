@@ -43,11 +43,13 @@ map when gathering evidence:
 - **Runtime health:** use `python -m event_core.live.health` and
   `python -m event_core.live.monitor` for Event Core health, follower lag,
   deliverable pending work, and recent reactive ticks.
-- **Legacy teardown surface:** `signal_log`, `signal_outcomes`,
-  `awareness_ticks`, `game_event_stream`, and `runtime/signals/` may still exist
-  as compatibility or teardown surfaces. Do not treat them as the primary live
-  reasoning model unless the task is explicitly about retiring or auditing legacy
-  behavior.
+- **Legacy teardown — mostly done:** the v4 signal/awareness code is deleted
+  (`runtime/signals/`, `signal_lanes.py`, `situation.py`, `runtime/jobs/_signals.py`),
+  and the `game_event_stream` / `event_rollups` storage modules are gone. Their
+  tables remain on disk only as dormant data pending a drop migration. A few
+  legacy tables (`signal_log`, `signal_detector_cursors`) are still read by live
+  code. Do not treat any of these as the primary live reasoning model unless the
+  task is explicitly about retiring or auditing legacy behavior.
 
 The short version: **v5/Event Core owns proactive reactive behavior; the
 operational DB still owns many read/query surfaces.** When a role investigates
