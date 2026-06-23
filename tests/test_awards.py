@@ -763,3 +763,34 @@ def test_perfect_war_participants_honors_post_victory_exemption():
         assert tags == ["#AAA"], f"expected Alice to qualify post-victory, got {tags}"
     finally:
         conn.close()
+
+
+def test_award_detection_tick_posts_to_clan_events_directly():
+    """Item-7 teardown: award-detection posts awards via the direct compose+post
+    path (compose_and_post → #clan-events), not the v4 awareness pipeline."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from runtime.jobs import _core
+
+    signals = [{"type": "season_awards_granted", "season_id": 131, "war_champ": [{"name": "dez42"}]}]
+    channel = MagicMock()
+
+    async def run():
+        with (
+            patch("heartbeat._awards.detect_season_awards", return_value=signals),
+            patch("heartbeat._awards.detect_war_participant_awards", return_value=[]),
+            patch.object(_core, "_get_singleton_channel_id", return_value=123),
+            patch.object(_core, "_bot", return_value=MagicMock(get_channel=lambda _id: channel)),
+            patch.object(_core, "compose_and_post", new=AsyncMock(return_value=True)) as mock_post,
+            patch.object(_core.runtime_status, "mark_job_success") as ok,
+            patch.object(_core.runtime_status, "mark_job_failure") as fail,
+        ):
+            await _core._award_detection_tick()
+        mock_post.assert_awaited_once()
+        assert mock_post.await_args.kwargs["lane"] == "clan-events"
+        assert mock_post.await_args.args[0] is channel
+        ok.assert_called_once()
+        fail.assert_not_called()
+
+    asyncio.run(run())
