@@ -15,8 +15,8 @@ from event_core.domain.communication_intent import CommunicationIntent, intent_i
 from event_core.mind.follower import FollowerRunner
 
 # Public detection_type -> intent_type prefix. The prefix selects the channel in
-# route_intent (celebrate->#player-highlights, welcome->#welcome, war->#river-race,
-# cohort->#clan-events).
+# route_intent (celebrate->#player-highlights, clan/cohort->#clan-events,
+# war->#river-race).
 # battle_hot_streak intentionally NOT here: it's the same "doing well in battle"
 # signal as battle_trophy_push (which posted alongside it — redundant double-post)
 # and is the less interesting of the two. We celebrate trophy/rank MOVEMENT, which
@@ -43,6 +43,7 @@ _CELEBRATE = (
 )
 # Clan-social detections that go to #clan-events (the "clan" prefix in route_intent).
 _CLAN_SOCIAL = (
+    "member_joined",
     "member_left",
     "member_promoted",
     "clan_birthday",
@@ -53,7 +54,6 @@ _CLAN_SOCIAL = (
 PUBLIC_INTENT_PREFIX = {
     **{t: "celebrate" for t in _CELEBRATE},
     **{t: "clan" for t in _CLAN_SOCIAL},
-    "member_joined": "welcome",
     "war_update": "war",
     "war_complete": "war",
     "new_season": "war",
