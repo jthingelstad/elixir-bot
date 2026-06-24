@@ -49,7 +49,7 @@ from cr_api import CLAN_TAG
 # ── Real-data tag fixtures ────────────────────────────────────────────────
 
 def _connect_db():
-    return sqlite3.connect("elixir.db")
+    return sqlite3.connect(os.fspath(db.DB_PATH))
 
 
 def sample_real_tags() -> dict:

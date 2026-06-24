@@ -231,7 +231,7 @@ def reset_tool_capture() -> list[tuple[str, dict]]:
 
 
 def _connect_db():
-    return sqlite3.connect("elixir.db")
+    return sqlite3.connect(os.fspath(db.DB_PATH))
 
 
 def _build_clan_war_context() -> tuple[dict, dict]:
