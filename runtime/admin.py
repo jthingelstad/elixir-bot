@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from contextlib import ExitStack, asynccontextmanager
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 import re
 
@@ -157,8 +158,13 @@ class _PreviewChannel:
         self.type = "text"
         self._captured_posts = captured_posts
 
-    async def send(self, content: str):
-        self._captured_posts.append((self.name, content))
+    async def send(self, content: str | None = None, **kwargs):
+        if content is None:
+            embed = kwargs.get("embed")
+            title = getattr(embed, "title", None) if embed is not None else None
+            content = f"[embed] {title}" if title else "[non-text message]"
+        self._captured_posts.append((self.name, str(content)))
+        return SimpleNamespace(id=len(self._captured_posts))
 
 
 class _ChannelLookup:
@@ -599,6 +605,7 @@ def _build_memory_report(*, member_query: str | None = None, query: str | None =
 @asynccontextmanager
 async def _preview_job_runtime():
     import prompts
+    import runtime.app as runtime_app
     from runtime import jobs as runtime_jobs
 
     captured_posts: list[tuple[str, str]] = []
@@ -608,7 +615,10 @@ async def _preview_job_runtime():
     }
     stack = ExitStack()
     try:
-        stack.enter_context(patch.object(runtime_jobs, "bot", _ChannelLookup(channels)))
+        preview_bot = _ChannelLookup(channels)
+        stack.enter_context(patch.object(runtime_app, "bot", preview_bot))
+        if hasattr(runtime_jobs, "bot"):
+            stack.enter_context(patch.object(runtime_jobs, "bot", preview_bot))
         yield captured_posts
     finally:
         stack.close()
