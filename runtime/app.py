@@ -410,9 +410,231 @@ def _v5_member_name_for_event(subject_tag: str | None, summary: dict) -> str | N
     )
 
 
+def _v5_int(value) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _v5_first_int(*values) -> int | None:
+    for value in values:
+        parsed = _v5_int(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _v5_latest_raw_player_payload(subject_tag: str | None) -> dict:
+    tag_key = (subject_tag or "").strip().upper().removeprefix("#")
+    if not tag_key:
+        return {}
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT payload_json, fetched_at FROM raw_api_payloads "
+            "WHERE endpoint = 'player' AND UPPER(REPLACE(entity_key, '#', '')) = ? "
+            "ORDER BY fetched_at DESC, payload_id DESC LIMIT 1",
+            (tag_key,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return {}
+    try:
+        payload = json.loads(row["payload_json"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    payload["_fetched_at"] = row["fetched_at"]
+    return payload
+
+
+def _v5_badge_map(player_payload: dict) -> dict:
+    badges = player_payload.get("badges") or []
+    if not isinstance(badges, list):
+        return {}
+    return {
+        str(badge.get("name") or ""): badge
+        for badge in badges
+        if isinstance(badge, dict) and badge.get("name")
+    }
+
+
+def _v5_badge_int(badges: dict, name: str, field: str = "progress") -> int | None:
+    badge = badges.get(name) or {}
+    if not isinstance(badge, dict):
+        return None
+    return _v5_int(badge.get(field))
+
+
+def _v5_member_profile_facts(subject_tag: str | None) -> dict:
+    """Collect compact player facts for v5 event relays.
+
+    New joins can exist in v5/raw API data before the legacy member-profile
+    projection has a full profile row. Read both sources so welcome copy can
+    still be grounded in the player Elixir just observed.
+    """
+    if not subject_tag:
+        return {}
+    try:
+        profile = db.get_member_profile(subject_tag) or {}
+    except Exception:
+        profile = {}
+    raw = _v5_latest_raw_player_payload(subject_tag)
+    badges = _v5_badge_map(raw)
+    favourite = raw.get("currentFavouriteCard") if isinstance(raw.get("currentFavouriteCard"), dict) else {}
+    arena = raw.get("arena") if isinstance(raw.get("arena"), dict) else {}
+
+    facts = {
+        "source": "member_profile/raw_player_payload",
+        "raw_player_fetched_at": raw.get("_fetched_at"),
+        "name": profile.get("member_name") or raw.get("name"),
+        "account_age_years": _v5_first_int(
+            profile.get("cr_account_age_years"),
+            _v5_badge_int(badges, "YearsPlayed", "level"),
+        ),
+        "account_age_days": _v5_first_int(
+            profile.get("cr_account_age_days"),
+            _v5_badge_int(badges, "YearsPlayed", "progress"),
+        ),
+        "collection_level": _v5_first_int(
+            profile.get("cr_collection_level"),
+            _v5_badge_int(badges, "CollectionLevel", "progress"),
+        ),
+        "battle_wins": _v5_first_int(
+            profile.get("cr_battle_wins"),
+            raw.get("wins"),
+            _v5_badge_int(badges, "BattleWins", "progress"),
+        ),
+        "clan_war_wins": _v5_first_int(
+            profile.get("cr_clan_war_wins"),
+            raw.get("warDayWins"),
+            _v5_badge_int(badges, "ClanWarWins", "progress"),
+            _v5_badge_int(badges, "ClanWarsVeteran", "progress"),
+        ),
+        "total_donations": _v5_first_int(
+            profile.get("cr_clan_donations"),
+            raw.get("totalDonations"),
+            _v5_badge_int(badges, "ClanDonations", "progress"),
+        ),
+        "banner_count": _v5_first_int(
+            profile.get("cr_banner_count"),
+            _v5_badge_int(badges, "BannerCollection", "progress"),
+        ),
+        "emote_count": _v5_first_int(
+            profile.get("cr_emote_count"),
+            _v5_badge_int(badges, "EmoteCollection", "progress"),
+        ),
+        "trophies": _v5_first_int(profile.get("trophies"), raw.get("trophies")),
+        "best_trophies": _v5_first_int(profile.get("best_trophies"), raw.get("bestTrophies")),
+        "battle_count": _v5_first_int(profile.get("career_battle_count"), raw.get("battleCount")),
+        "current_win_streak": _v5_int(raw.get("currentWinLoseStreak")),
+        "favorite_card": profile.get("current_favourite_card_name") or favourite.get("name"),
+        "arena_name": profile.get("arena_name") or arena.get("name"),
+    }
+    return {
+        key: value
+        for key, value in facts.items()
+        if value not in (None, "", [], {})
+    }
+
+
+def _v5_number(value: int) -> str:
+    return f"{int(value):,}"
+
+
+def _v5_member_profile_fact_phrases(facts: dict) -> list[str]:
+    phrases: list[str] = []
+    if facts.get("account_age_years") is not None:
+        years = int(facts["account_age_years"])
+        phrases.append(f"{years} year{'s' if years != 1 else ''} played")
+    if facts.get("battle_wins") is not None:
+        phrases.append(f"{_v5_number(facts['battle_wins'])} wins")
+    if facts.get("collection_level") is not None:
+        phrases.append(f"collection level {_v5_number(facts['collection_level'])}")
+    trophies = facts.get("trophies")
+    best = facts.get("best_trophies")
+    if trophies is not None:
+        if best is not None and int(best) > int(trophies):
+            phrases.append(f"{_v5_number(trophies)} trophies, best {_v5_number(best)}")
+        else:
+            phrases.append(f"{_v5_number(trophies)} trophies")
+    if facts.get("current_win_streak") is not None and int(facts["current_win_streak"]) > 1:
+        phrases.append(f"{int(facts['current_win_streak'])}-win streak")
+    if facts.get("battle_count") is not None:
+        phrases.append(f"{_v5_number(facts['battle_count'])} battles")
+    if facts.get("total_donations") is not None:
+        phrases.append(f"{_v5_number(facts['total_donations'])} donations")
+    if facts.get("favorite_card"):
+        phrases.append(f"{facts['favorite_card']} as a favorite card")
+    return phrases
+
+
+def _v5_join_facts_sentence(facts: dict, *, limit: int = 3) -> str:
+    phrases = _v5_member_profile_fact_phrases(facts)[:limit]
+    if not phrases:
+        return ""
+    if len(phrases) == 1:
+        return phrases[0]
+    if len(phrases) == 2:
+        return f"{phrases[0]} and {phrases[1]}"
+    return f"{', '.join(phrases[:-1])}, and {phrases[-1]}"
+
+
+def _v5_member_profile_fact_markers(facts: dict) -> list[str]:
+    markers: list[str] = []
+    for key in (
+        "account_age_years",
+        "battle_wins",
+        "collection_level",
+        "trophies",
+        "best_trophies",
+        "battle_count",
+        "total_donations",
+        "banner_count",
+        "emote_count",
+    ):
+        value = facts.get(key)
+        if value is None:
+            continue
+        number = int(value)
+        if number >= 10:
+            markers.extend([str(number), _v5_number(number)])
+    streak = facts.get("current_win_streak")
+    if streak is not None and int(streak) > 1:
+        markers.append(f"{int(streak)}-win")
+    for key in ("favorite_card", "arena_name"):
+        if facts.get(key):
+            markers.append(str(facts[key]))
+    seen = set()
+    unique = []
+    for marker in markers:
+        lowered = marker.lower()
+        if lowered not in seen:
+            seen.add(lowered)
+            unique.append(marker)
+    return unique
+
+
+def _v5_message_has_profile_fact(message: str, markers: list[str]) -> bool:
+    if not markers:
+        return True
+    lowered = (message or "").lower()
+    return any(marker.lower() in lowered for marker in markers)
+
+
 def _v5_event_action_copy(detection_type: str, subject_name: str | None, summary: dict) -> str:
     name = subject_name or summary.get("clan_name") or "POAP KINGS"
     if detection_type == "member_joined":
+        facts_text = _v5_join_facts_sentence(summary.get("profile_facts") or {})
+        if facts_text:
+            return f"Welcome to POAP KINGS, {name}! {facts_text} already caught my eye. Glad you're here."
         return f"Welcome to POAP KINGS, {name}! Glad to have you in the clan."
     if detection_type == "member_birthday":
         return f"Happy birthday, {name}! POAP KINGS is glad you're here."
@@ -455,6 +677,10 @@ def _v5_event_leader_action_spec(metadata: dict | None) -> dict | None:
         return None
     subject_tag = metadata.get("subject_tag")
     subject_name = _v5_member_name_for_event(subject_tag, summary)
+    profile_facts = _v5_member_profile_facts(subject_tag) if detection_type == "member_joined" else {}
+    if profile_facts:
+        summary = dict(summary)
+        summary["profile_facts"] = profile_facts
     copy = _v5_event_action_copy(detection_type, subject_name, summary)
     copy = copy[:CLASH_COPY_MAX_LENGTH]
     action_type = "welcome_relay" if detection_type == "member_joined" else "celebration_relay"
@@ -474,6 +700,8 @@ def _v5_event_leader_action_spec(metadata: dict | None) -> dict | None:
         "source_signal_key": source_key,
         "source_signal_type": detection_type,
         "copy": copy,
+        "profile_facts": profile_facts,
+        "profile_fact_markers": _v5_member_profile_fact_markers(profile_facts),
         "baseline": {
             "event_core": {
                 "intent_type": metadata.get("intent_type"),
@@ -481,12 +709,21 @@ def _v5_event_leader_action_spec(metadata: dict | None) -> dict | None:
                 "summary": summary,
                 "event_core_dedup_key": metadata.get("event_core_dedup_key"),
             },
+            "profile_facts": profile_facts,
         },
     }
 
 
 def _v5_event_clan_chat_context(spec: dict, metadata: dict | None) -> str:
     summary = (((metadata or {}).get("summary") or {}) if isinstance((metadata or {}).get("summary"), dict) else {})
+    profile_facts = spec.get("profile_facts") or {}
+    profile_line = ""
+    if spec.get("objective") == "member_joined" and profile_facts:
+        profile_line = (
+            "\nMember joined welcome rule: mention at least one player-profile fact so the welcome "
+            "feels researched, warm, and specific. Do not write a generic welcome."
+            f"\nPlayer profile facts JSON: {json.dumps(profile_facts, sort_keys=True, default=str)}"
+        )
     return (
         "V5 public event leader-action relay:\n"
         "Write ONE plain-text Clash Royale in-game clan chat message for a leader to paste.\n"
@@ -496,6 +733,7 @@ def _v5_event_clan_chat_context(spec: dict, metadata: dict | None) -> str:
         f"Target player tag: {spec.get('target_player_tag') or ''}\n"
         f"Event facts JSON: {json.dumps(summary, sort_keys=True, default=str)}\n"
         f"Fallback message: {spec.get('copy') or ''}"
+        f"{profile_line}"
     )
 
 
@@ -525,6 +763,16 @@ async def _v5_event_clan_chat_copy(spec: dict, metadata: dict | None) -> tuple[s
         )
         return fallback_signed, {"used_fallback": True, "reason": "generation_error"}
     if generated and generated.messages:
+        if (
+            spec.get("objective") == "member_joined"
+            and spec.get("profile_fact_markers")
+            and not _v5_message_has_profile_fact(generated.messages[0], spec["profile_fact_markers"])
+        ):
+            return fallback_signed, {
+                "used_fallback": True,
+                "reason": "missing_profile_fact",
+                "violations": ["missing_profile_fact"],
+            }
         return generated.messages[0], {
             "used_fallback": bool(generated.used_fallback),
             "summary": generated.summary,

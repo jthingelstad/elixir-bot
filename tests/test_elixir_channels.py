@@ -1323,6 +1323,56 @@ def _v5_join_anniversary_metadata():
     }
 
 
+def _v5_member_joined_metadata():
+    return {
+        "source": "event_core_v5",
+        "event_core_intent_id": "e9ffa4a7-d82f-5774-b753-f81a60a4f426",
+        "event_core_dedup_key": "intent:detection:member_joined:#VRL829LGY:2026-06-24T11:34:25.212758+00:00",
+        "intent_type": "welcome:member_joined",
+        "subject_tag": "#VRL829LGY",
+        "scope": "public",
+        "priority": 1,
+        "caused_by": ["member_joined:#VRL829LGY:2026-06-24T11:34:25.212758+00:00"],
+        "source_signal_key": "member_joined:#VRL829LGY:2026-06-24T11:34:25.212758+00:00",
+        "source_signal_type": "member_joined",
+        "summary": {
+            "detection_type": "member_joined",
+            "name": "p2w_gtr0410",
+            "role": "member",
+        },
+        "target_channel_key": "welcome",
+        "target_lane": "reception",
+        "target_channel_id": 1476456514121109514,
+    }
+
+
+def _store_v5_member_joined_raw_profile():
+    conn = elixir.db.get_connection()
+    try:
+        elixir.db._store_raw_payload(conn, "player", "VRL829LGY", {
+            "tag": "#VRL829LGY",
+            "name": "p2w_gtr0410",
+            "expLevel": 7,
+            "trophies": 5589,
+            "bestTrophies": 5589,
+            "wins": 394,
+            "losses": 138,
+            "battleCount": 532,
+            "currentWinLoseStreak": 2,
+            "totalDonations": 443,
+            "warDayWins": 0,
+            "arena": {"name": "Executioner's Kitchen"},
+            "badges": [
+                {"name": "BattleWins", "level": 3, "progress": 394},
+                {"name": "CollectionLevel", "level": 5, "progress": 935},
+                {"name": "ClanDonations", "level": 2, "progress": 443},
+            ],
+        })
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _v5_collection_level_metadata():
     return {
         "source": "event_core_v5",
@@ -1456,6 +1506,48 @@ def test_v5_post_creates_leader_action_for_required_event():
     mock_card.assert_awaited_once()
     assert mock_card.await_args.args[0] is relay_channel
     assert mock_card.await_args.kwargs["copy_messages"] == [action["copy_current_text"]]
+
+
+def test_v5_member_joined_leader_action_spec_uses_raw_profile_facts():
+    _store_v5_member_joined_raw_profile()
+
+    spec = elixir._v5_event_leader_action_spec(_v5_member_joined_metadata())
+
+    assert spec["action_type"] == "welcome_relay"
+    assert spec["objective"] == "member_joined"
+    assert spec["target_player_name"] == "p2w_gtr0410"
+    assert spec["profile_facts"]["battle_wins"] == 394
+    assert spec["profile_facts"]["collection_level"] == 935
+    assert spec["profile_facts"]["trophies"] == 5589
+    assert "394 wins" in spec["copy"]
+    assert "collection level 935" in spec["copy"]
+    assert "5,589 trophies" in spec["copy"]
+    assert "394" in spec["profile_fact_markers"]
+    assert spec["baseline"]["profile_facts"]["battle_wins"] == 394
+
+
+def test_v5_member_joined_clan_chat_copy_falls_back_when_generated_copy_is_generic():
+    _store_v5_member_joined_raw_profile()
+    spec = elixir._v5_event_leader_action_spec(_v5_member_joined_metadata())
+
+    with patch(
+        "elixir.generate_clan_chat_copy",
+        new=AsyncMock(return_value=ClanChatCopyResult(
+            messages=["Welcome to POAP KINGS, p2w_gtr0410! Glad you found us. - E"],
+        )),
+    ) as mock_copy:
+        copy, metadata = asyncio.run(elixir._v5_event_clan_chat_copy(spec, _v5_member_joined_metadata()))
+
+    mock_copy.assert_awaited_once()
+    context = mock_copy.await_args.kwargs["context"]
+    assert "Player profile facts JSON" in context
+    assert "394" in context
+    assert "935" in context
+    assert copy.endswith(" - E")
+    assert "394 wins" in copy
+    assert "collection level 935" in copy
+    assert metadata["used_fallback"] is True
+    assert metadata["reason"] == "missing_profile_fact"
 
 
 def test_v5_event_leader_action_spec_includes_collection_levels():
