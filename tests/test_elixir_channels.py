@@ -1323,6 +1323,31 @@ def _v5_join_anniversary_metadata():
     }
 
 
+def _v5_collection_level_metadata():
+    return {
+        "source": "event_core_v5",
+        "event_core_intent_id": "dc0364e4-7ed1-5432-b2f4-9a0171617cb4",
+        "event_core_dedup_key": "intent:detection:collection_level_milestone:#COLL:1700",
+        "intent_type": "celebrate:collection_level_milestone",
+        "subject_tag": "#COLL",
+        "scope": "public",
+        "priority": 1,
+        "caused_by": ["collection_level_milestone:#COLL:1700"],
+        "source_signal_key": "collection_level_milestone:#COLL:1700",
+        "source_signal_type": "collection_level_milestone",
+        "summary": {
+            "detection_type": "collection_level_milestone",
+            "name": "Collector",
+            "milestone": 1700,
+            "from": 1597,
+            "to": 1705,
+        },
+        "target_channel_key": "player-highlights",
+        "target_lane": "member-highlights",
+        "target_channel_id": 1482352147029950474,
+    }
+
+
 def test_v5_post_persists_delivery_audit_rows():
     channel = SimpleNamespace(
         id=1482352147029950474,
@@ -1421,6 +1446,19 @@ def test_v5_post_creates_leader_action_for_required_event():
     mock_card.assert_awaited_once()
     assert mock_card.await_args.args[0] is relay_channel
     assert mock_card.await_args.kwargs["copy_messages"] == [action["copy_current_text"]]
+
+
+def test_v5_event_leader_action_spec_includes_collection_levels():
+    spec = elixir._v5_event_leader_action_spec(_v5_collection_level_metadata())
+
+    assert spec["action_type"] == "celebration_relay"
+    assert spec["objective"] == "collection_level_milestone"
+    assert spec["target_player_name"] == "Collector"
+    assert spec["source_signal_type"] == "collection_level_milestone"
+    assert spec["action_key"] == (
+        "v5_event_leader_action:intent:detection:collection_level_milestone:#COLL:1700"
+    )
+    assert "collection level 1,700" in spec["copy"]
 
 
 def test_v5_event_leader_action_backfill_scans_delivered_intents():

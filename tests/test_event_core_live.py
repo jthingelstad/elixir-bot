@@ -152,6 +152,12 @@ def test_render_intent_and_dry_run_poster(world):
         summary={"detection_type": "career_wins_milestone", "milestone": 1000},
     )
     assert "1000 career wins" in render_intent(wins)
+    collection = CommunicationIntent(
+        dedup_key="c", intent_type="celebrate:collection_level_milestone", subject_tag="#A",
+        scope="public", priority=1, caused_by=[],
+        summary={"detection_type": "collection_level_milestone", "milestone": 1700},
+    )
+    assert "collection level 1700" in render_intent(collection)
 
     poster = DryRunPoster()
     assert poster(ci) is True

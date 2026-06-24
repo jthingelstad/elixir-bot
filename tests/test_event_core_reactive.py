@@ -105,6 +105,7 @@ def test_policy_maps_restored_coverage_detection_types(world):
         "new_season:131": ("new_season", "war"),
         "cohort_wave:badge_earned:2026-06-21": ("cohort_wave", "cohort"),
         "wins:#J:1000": ("career_wins_milestone", "celebrate"),
+        "collection:#J:1700": ("collection_level_milestone", "celebrate"),
         "pol_promo:#J:10": ("path_of_legend_promotion", "celebrate"),
         "uc:#J": ("ultimate_champion_reached", "celebrate"),
         "polrank:#J:1": ("path_of_legend_global_rank_attained", "celebrate"),

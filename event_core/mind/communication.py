@@ -27,6 +27,7 @@ _CELEBRATE = (
     "battle_trophy_push",
     "career_wins_milestone",
     "card_level_milestone",
+    "collection_level_milestone",
     # new_card_unlocked covers legendary AND champion unlocks (its payload carries
     # rarity, so the agent frames champions specially). new_champion_unlocked is a
     # strict subset (same card_id) — it stays a detection for parity/cohort logic
