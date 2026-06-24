@@ -70,6 +70,138 @@ def test_projection_reflects_latest(world):
     assert row["exp_level"] == 51
 
 
+def test_profile_observation_derives_badge_backed_profile_fields():
+    from event_core.ingest.profile import build_profile_observation
+
+    obs = build_profile_observation(
+        {
+            "tag": "#BADGE",
+            "name": "Badge Keeper",
+            "badges": [
+                {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473},
+                {"name": "CollectionLevel", "level": 8, "maxLevel": 8, "progress": 1639},
+                {"name": "ClanWarWins", "level": 5, "maxLevel": 10, "progress": 421},
+                {"name": "BattleWins", "level": 7, "maxLevel": 10, "progress": 6400},
+                {"name": "ClanWarsVeteran", "level": 6, "maxLevel": 10, "progress": 273},
+                {"name": "ClanDonations", "level": 9, "maxLevel": 10, "progress": 32145},
+                {"name": "BannerCollection", "level": 3, "maxLevel": 10, "progress": 88},
+                {"name": "EmoteCollection", "level": 4, "maxLevel": 10, "progress": 123},
+                {"name": "MasteryFireball", "level": 7, "progress": 25000},
+            ],
+        }
+    )
+
+    assert obs["cr_account_age_days"] == 1473
+    assert obs["cr_account_age_years"] == 4
+    assert obs["cr_collection_level"] == 1639
+    assert obs["cr_collection_level_badge_tier"] == 8
+    assert obs["cr_collection_level_badge_max_tier"] == 8
+    assert obs["cr_clan_war_wins"] == 421
+    assert obs["cr_battle_wins"] == 6400
+    assert obs["cr_clan_wars_veteran"] == 273
+    assert obs["cr_clan_wars_veteran_badge_tier"] == 6
+    assert obs["cr_clan_wars_veteran_badge_max_tier"] == 10
+    assert obs["cr_clan_donations"] == 32145
+    assert obs["cr_banner_count"] == 88
+    assert obs["cr_emote_count"] == 123
+    assert "MasteryFireball" not in obs
+
+
+def test_profile_projection_folds_badge_profile_fields_and_preserves_raw_badges(world):
+    import json
+
+    from event_core import db
+    from event_core.ingest.collections import ingest_player_collections
+    from event_core.ingest.profile import ingest_player_payload
+    from event_core.projections.collections import PlayerCurrentCollections
+    from event_core.projections.player_state import PlayerCurrentProfile
+
+    payload = {
+        "tag": "#BADGE",
+        "name": "Badge Keeper",
+        "badges": [
+            {"name": "YearsPlayed", "level": 4, "maxLevel": 11, "progress": 1473},
+            {"name": "CollectionLevel", "level": 8, "maxLevel": 8, "progress": 1639},
+            {"name": "BattleWins", "level": 7, "maxLevel": 10, "progress": 6400},
+            {"name": "ClanWarsVeteran", "level": 6, "maxLevel": 10, "progress": 273},
+            {"name": "MasteryFireball", "level": 7, "progress": 25000},
+        ],
+    }
+    assert ingest_player_payload(world, payload, "2026-06-24T12:00:00Z") is True
+    assert ingest_player_collections(world, payload, "2026-06-24T12:00:00Z")["badges"] is True
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        PlayerCurrentProfile(world, conn).setup()
+        PlayerCurrentProfile(world, conn).run()
+        PlayerCurrentCollections(world, conn).setup()
+        PlayerCurrentCollections(world, conn).run()
+
+        profile = conn.execute(
+            "SELECT cr_account_age_days, cr_account_age_years, cr_collection_level, "
+            "cr_collection_level_badge_tier, cr_collection_level_badge_max_tier, "
+            "cr_battle_wins, cr_clan_wars_veteran, cr_clan_wars_veteran_badge_tier, "
+            "cr_clan_wars_veteran_badge_max_tier "
+            "FROM player_current_profile WHERE player_tag='#BADGE'"
+        ).fetchone()
+        assert dict(profile) == {
+            "cr_account_age_days": 1473,
+            "cr_account_age_years": 4,
+            "cr_collection_level": 1639,
+            "cr_collection_level_badge_tier": 8,
+            "cr_collection_level_badge_max_tier": 8,
+            "cr_battle_wins": 6400,
+            "cr_clan_wars_veteran": 273,
+            "cr_clan_wars_veteran_badge_tier": 6,
+            "cr_clan_wars_veteran_badge_max_tier": 10,
+        }
+
+        row = conn.execute(
+            "SELECT badges_json FROM player_current_collections WHERE player_tag='#BADGE'"
+        ).fetchone()
+        raw_badges = json.loads(row["badges_json"])
+        assert {badge["name"] for badge in raw_badges} == {
+            "YearsPlayed",
+            "CollectionLevel",
+            "BattleWins",
+            "ClanWarsVeteran",
+            "MasteryFireball",
+        }
+    finally:
+        conn.close()
+
+
+def test_profile_projection_setup_adds_badge_columns_to_existing_table(world):
+    from event_core import db
+    from event_core.projections.player_state import PlayerCurrentProfile
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE player_current_profile (
+                aggregate_id TEXT PRIMARY KEY,
+                player_tag TEXT UNIQUE,
+                observed_at TEXT,
+                name TEXT,
+                trophies INTEGER
+            )
+            """
+        )
+        conn.commit()
+
+        PlayerCurrentProfile(world, conn).setup()
+
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(player_current_profile)")
+        }
+        assert "cr_collection_level" in columns
+        assert "cr_clan_wars_veteran" in columns
+    finally:
+        conn.close()
+
+
 def test_roster_observation_extraction_matches_legacy_defaults():
     from event_core.ingest.roster import build_roster_observation
 
@@ -174,6 +306,11 @@ def test_foundation_parity_determinism_idempotency():
     assert pp["mismatched"] == 0
     assert pp["missing_projection"] == 0
     assert pp["matched"] == pp["reproducible_members"] > 0
+
+    bp = r1["parity"]["player_profile_badges"]
+    assert bp["mismatched"] == 0
+    assert bp["missing_projection"] == 0
+    assert bp["matched"] == bp["reproducible_members"] > 0
 
     # roster: no true mismatches (v5_more_current divergences are expected/explained)
     rp = r1["parity"]["member_current_state"]

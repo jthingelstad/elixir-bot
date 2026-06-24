@@ -6,11 +6,17 @@ player_tag; correlated to the aggregate by its UUID.
 """
 from __future__ import annotations
 
-from event_core.domain.player import PROFILE_SCALAR_FIELDS
+from event_core.domain.player import PROFILE_BADGE_FIELD_TYPES, PROFILE_SCALAR_FIELDS
 from event_core.projections.runner import ProjectionRunner
 
-# Projection columns = aggregate attribute names (the scalar profile fields).
-PROFILE_COLUMNS = list(PROFILE_SCALAR_FIELDS.values())
+# Projection columns = aggregate attribute names for tracked profile fields.
+PROFILE_COLUMN_TYPES = {
+    **{c: "INTEGER" for c in PROFILE_SCALAR_FIELDS.values()},
+    "name": "TEXT",
+    "role": "TEXT",
+    **PROFILE_BADGE_FIELD_TYPES,
+}
+PROFILE_COLUMNS = list(PROFILE_SCALAR_FIELDS.values()) + list(PROFILE_BADGE_FIELD_TYPES)
 
 
 class PlayerCurrentProfile(ProjectionRunner):
@@ -18,7 +24,7 @@ class PlayerCurrentProfile(ProjectionRunner):
     aggregate_name = "Player"
 
     def setup(self) -> None:
-        cols = ",\n            ".join(f"{c} {'TEXT' if c in ('name','role') else 'INTEGER'}" for c in PROFILE_COLUMNS)
+        cols = ",\n            ".join(f"{c} {PROFILE_COLUMN_TYPES[c]}" for c in PROFILE_COLUMNS)
         self.conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS player_current_profile (
@@ -29,6 +35,15 @@ class PlayerCurrentProfile(ProjectionRunner):
             )
             """
         )
+        existing = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(player_current_profile)")
+        }
+        for col in PROFILE_COLUMNS:
+            if col not in existing:
+                self.conn.execute(
+                    f"ALTER TABLE player_current_profile ADD COLUMN {col} {PROFILE_COLUMN_TYPES[col]}"
+                )
         self.conn.commit()
 
     def reset(self) -> None:

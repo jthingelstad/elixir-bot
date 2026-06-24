@@ -45,6 +45,25 @@ PROFILE_SCALAR_FIELDS: dict[str, str] = {
     "legacyTrophyRoadHighScore": "legacy_trophy_road_high_score",
 }
 
+# Badge-backed profile facts that are stable player metrics rather than
+# achievements. These ride the Player profile observation so read-model parity
+# does not require callers to reconstruct profile state from raw badge JSON.
+PROFILE_BADGE_FIELD_TYPES: dict[str, str] = {
+    "cr_account_age_days": "INTEGER",
+    "cr_account_age_years": "INTEGER",
+    "cr_collection_level": "INTEGER",
+    "cr_collection_level_badge_tier": "INTEGER",
+    "cr_collection_level_badge_max_tier": "INTEGER",
+    "cr_clan_war_wins": "INTEGER",
+    "cr_battle_wins": "INTEGER",
+    "cr_clan_wars_veteran": "INTEGER",
+    "cr_clan_wars_veteran_badge_tier": "INTEGER",
+    "cr_clan_wars_veteran_badge_max_tier": "INTEGER",
+    "cr_clan_donations": "INTEGER",
+    "cr_banner_count": "INTEGER",
+    "cr_emote_count": "INTEGER",
+}
+
 # Roster-state fields observed via the /clans memberList entry, mapped to the
 # legacy member_current_state columns. Attached to the Player aggregate so a
 # player's profile and roster observations share one timeline. (Clan-level

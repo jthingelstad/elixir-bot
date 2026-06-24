@@ -70,6 +70,7 @@ def build(clean: bool = True) -> dict:
     from event_core.parity import (
         check_battle_telemetry_parity,
         check_member_current_state_parity,
+        check_player_profile_badge_parity,
         check_player_profile_parity,
     )
     from event_core.projections.clan_metrics import ClanDailyMetrics
@@ -127,6 +128,7 @@ def build(clean: bool = True) -> dict:
         "projection_events_applied": applied,
         "parity": {
             "player_profile": check_player_profile_parity(),
+            "player_profile_badges": check_player_profile_badge_parity(),
             "member_current_state": check_member_current_state_parity(),
             "battle_telemetry": check_battle_telemetry_parity(),
             "collections": check_collections_parity(),
