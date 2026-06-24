@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Optional
 
@@ -122,14 +123,25 @@ def list_game_mode_contexts(
         params.append(context_type)
     sql = (
         "SELECT context_type, source_key, display_name, game_mode_id, game_mode_name, "
-        "event_tag, leaderboard_id, source_endpoint, first_seen_at, last_seen_at "
+        "event_tag, leaderboard_id, source_endpoint, first_seen_at, last_seen_at, raw_json "
         "FROM game_mode_contexts"
     )
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY last_seen_at DESC, display_name COLLATE NOCASE LIMIT ?"
     params.append(max(1, min(int(limit or 25), 100)))
-    return _rowdicts(conn.execute(sql, tuple(params)).fetchall())
+    contexts = _rowdicts(conn.execute(sql, tuple(params)).fetchall())
+    for context in contexts:
+        raw = {}
+        try:
+            raw_value = json.loads(context.pop("raw_json") or "{}")
+            raw = raw_value if isinstance(raw_value, dict) else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raw = {}
+        if context.get("context_type") == "event":
+            context["event_name"] = context.get("display_name")
+            context["event_description"] = raw.get("description")
+    return contexts
 
 
 __all__ = [
