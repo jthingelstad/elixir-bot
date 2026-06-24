@@ -1424,6 +1424,12 @@ def test_v5_post_creates_leader_action_for_required_event():
             return_value={"id": relay_channel.id, "name": "#leader-actions", "lane_key": "arena-relay"},
         ),
         patch("elixir._post_to_elixir", new=AsyncMock(return_value=sent_public)),
+        patch(
+            "elixir.generate_clan_chat_copy",
+            new=AsyncMock(return_value=ClanChatCopyResult(
+                messages=["Happy 3-month anniversary, OllieTurtle. Glad you're still battling with us. - E"],
+            )),
+        ) as mock_copy,
         patch("elixir.post_leader_action_card", new=AsyncMock(return_value=sent_card)) as mock_card,
     ):
         ok = asyncio.run(
@@ -1443,6 +1449,10 @@ def test_v5_post_creates_leader_action_for_required_event():
     assert action["target_player_name"] == "OllieTurtle"
     assert action["source_signal_type"] == "join_anniversary"
     assert "3-month anniversary" in action["copy_current_text"]
+    assert action["copy_current_text"].endswith(" - E")
+    mock_copy.assert_awaited_once()
+    assert mock_copy.await_args.kwargs["intent"] == "v5_event_join_anniversary"
+    assert "OllieTurtle" in mock_copy.await_args.kwargs["context"]
     mock_card.assert_awaited_once()
     assert mock_card.await_args.args[0] is relay_channel
     assert mock_card.await_args.kwargs["copy_messages"] == [action["copy_current_text"]]
@@ -1459,6 +1469,18 @@ def test_v5_event_leader_action_spec_includes_collection_levels():
         "v5_event_leader_action:intent:detection:collection_level_milestone:#COLL:1700"
     )
     assert "collection level 1,700" in spec["copy"]
+
+
+def test_v5_event_leader_action_copy_falls_back_signed_when_generation_empty():
+    spec = elixir._v5_event_leader_action_spec(_v5_join_anniversary_metadata())
+
+    with patch("elixir.generate_clan_chat_copy", new=AsyncMock(return_value=None)) as mock_copy:
+        copy, metadata = asyncio.run(elixir._v5_event_clan_chat_copy(spec, _v5_join_anniversary_metadata()))
+
+    mock_copy.assert_awaited_once()
+    assert copy.endswith(" - E")
+    assert "3-month anniversary" in copy
+    assert metadata == {"used_fallback": True, "reason": "empty_generation"}
 
 
 def test_v5_event_leader_action_backfill_scans_delivered_intents():
@@ -1487,6 +1509,12 @@ def test_v5_event_leader_action_backfill_scans_delivered_intents():
         patch(
             "elixir._channel_config_by_key",
             return_value={"id": relay_channel.id, "name": "#leader-actions", "lane_key": "arena-relay"},
+        ),
+        patch(
+            "elixir.generate_clan_chat_copy",
+            new=AsyncMock(return_value=ClanChatCopyResult(
+                messages=["Happy 3-month anniversary, OllieTurtle. Glad you're still battling with us. - E"],
+            )),
         ),
         patch("elixir.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=2001)])) as mock_card,
     ):

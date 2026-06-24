@@ -311,6 +311,10 @@ from runtime.discord_posting import (  # noqa: E402,F401
     _post_to_elixir,
     _resolve_custom_emoji,
 )
+from runtime.clan_chat_copy import (  # noqa: E402,F401
+    generate_clan_chat_copy,
+    sign_clan_chat_text,
+)
 from runtime.leader_action_ui import (  # noqa: E402,F401
     CLASH_COPY_MAX_LENGTH,
     LEADER_ACTION_UI_VERSION,
@@ -481,6 +485,54 @@ def _v5_event_leader_action_spec(metadata: dict | None) -> dict | None:
     }
 
 
+def _v5_event_clan_chat_context(spec: dict, metadata: dict | None) -> str:
+    summary = (((metadata or {}).get("summary") or {}) if isinstance((metadata or {}).get("summary"), dict) else {})
+    return (
+        "V5 public event leader-action relay:\n"
+        "Write ONE plain-text Clash Royale in-game clan chat message for a leader to paste.\n"
+        "Keep it warm, specific, and natural for POAP KINGS clan chat.\n"
+        f"Event type: {spec.get('objective')}\n"
+        f"Target player name: {spec.get('target_player_name') or 'POAP KINGS'}\n"
+        f"Target player tag: {spec.get('target_player_tag') or ''}\n"
+        f"Event facts JSON: {json.dumps(summary, sort_keys=True, default=str)}\n"
+        f"Fallback message: {spec.get('copy') or ''}"
+    )
+
+
+async def _v5_event_clan_chat_copy(spec: dict, metadata: dict | None) -> tuple[str, dict]:
+    fallback = spec.get("copy") or "POAP KINGS keeps building together."
+    fallback_signed = sign_clan_chat_text(fallback, limit=CLASH_COPY_MAX_LENGTH)
+    try:
+        generated = await generate_clan_chat_copy(
+            intent=f"v5_event_{spec.get('objective') or 'leader_action'}",
+            context=_v5_event_clan_chat_context(spec, metadata),
+            max_messages=1,
+            max_chars=CLASH_COPY_MAX_LENGTH,
+            forbidden_terms=("http://", "https://", "www.", "Discord"),
+            fallback_messages=[fallback],
+            metadata={
+                "source": "v5_event_leader_action",
+                "event_type": spec.get("objective"),
+                "action_type": spec.get("action_type"),
+                "target_player_tag": spec.get("target_player_tag"),
+            },
+        )
+    except Exception:
+        log.warning(
+            "v5 event leader-action clan-chat copy generation failed action_key=%s",
+            spec.get("action_key"),
+            exc_info=True,
+        )
+        return fallback_signed, {"used_fallback": True, "reason": "generation_error"}
+    if generated and generated.messages:
+        return generated.messages[0], {
+            "used_fallback": bool(generated.used_fallback),
+            "summary": generated.summary,
+            "violations": generated.violations,
+        }
+    return fallback_signed, {"used_fallback": True, "reason": "empty_generation"}
+
+
 async def _post_v5_event_leader_action(metadata: dict | None, sent_messages=None) -> bool:
     spec = _v5_event_leader_action_spec(metadata)
     if not spec:
@@ -506,11 +558,13 @@ async def _post_v5_event_leader_action(metadata: dict | None, sent_messages=None
             if getattr(message, "id", None) is not None
         ],
     }
+    copy, copy_metadata = await _v5_event_clan_chat_copy(spec, metadata)
+    prompt_text = f"Paste this clan-chat note for the {spec['objective'].replace('_', ' ')} event: {copy}"
     action = await asyncio.to_thread(
         db.create_leader_action_recommendation,
         action_type=spec["action_type"],
         objective=spec["objective"],
-        prompt_text=spec["prompt_text"],
+        prompt_text=prompt_text,
         rationale=spec["rationale"],
         target_channel_key="arena-relay",
         target_channel_id=channel_config["id"],
@@ -518,8 +572,8 @@ async def _post_v5_event_leader_action(metadata: dict | None, sent_messages=None
         target_player_name=spec["target_player_name"],
         source_signal_key=spec["source_signal_key"],
         source_signal_type=spec["source_signal_type"],
-        copy_original_text=spec["copy"],
-        copy_current_text=spec["copy"],
+        copy_original_text=copy,
+        copy_current_text=copy,
         baseline=baseline,
         action_key=spec["action_key"],
         ui_version=LEADER_ACTION_UI_VERSION,
@@ -527,13 +581,13 @@ async def _post_v5_event_leader_action(metadata: dict | None, sent_messages=None
     if not action or action.get("source_message_id"):
         return False
 
-    card_messages = await post_leader_action_card(relay_channel, action, copy_messages=[spec["copy"]])
+    card_messages = await post_leader_action_card(relay_channel, action, copy_messages=[copy])
     first_message_id = getattr(card_messages[0], "id", None) if card_messages else None
     await asyncio.to_thread(
         db.save_message,
         _channel_scope(relay_channel),
         "assistant",
-        spec["copy"],
+        copy,
         summary=f"Leader action R{action.get('action_id')}: {spec['objective']}",
         **_channel_msg_kwargs(relay_channel),
         workflow="arena-relay",
@@ -541,7 +595,8 @@ async def _post_v5_event_leader_action(metadata: dict | None, sent_messages=None
         discord_message_id=first_message_id,
         raw_json={
             "leader_action": action,
-            "clan_chat_copy": spec["copy"],
+            "clan_chat_copy": copy,
+            "clan_chat_copy_metadata": copy_metadata,
             "event_core": metadata or {},
         },
     )
