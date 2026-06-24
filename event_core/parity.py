@@ -10,14 +10,22 @@ snapshot predates the archive are reported separately, not as failures.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from event_core import config
-from event_core.domain.player import ROSTER_FIELDS, canon_tag
+from event_core.domain.player import PROFILE_BADGE_FIELD_TYPES, ROSTER_FIELDS, canon_tag
+from event_core.ingest.profile import build_profile_observation
 from event_core.projections.player_state import PROFILE_COLUMNS
 
-# Columns present in BOTH the projection and player_profile_snapshots.
-PARITY_COLUMNS = [c for c in PROFILE_COLUMNS if c not in ("name", "role")]
+# Columns present in BOTH the projection and player_profile_snapshots. Badge-backed
+# profile fields are validated separately against raw /players payloads because
+# legacy stored them in member_metadata or not at all.
+PARITY_COLUMNS = [
+    c
+    for c in PROFILE_COLUMNS
+    if c not in ("name", "role") and c not in PROFILE_BADGE_FIELD_TYPES
+]
 
 
 def _tag_key(tag: str) -> str:
@@ -90,6 +98,70 @@ def check_player_profile_parity(
         "mismatched": len(mismatches),
         "missing_projection": len(missing_projection),
         "outside_archive_horizon": len(outside_archive),
+        "mismatch_detail": mismatches[:25],
+        "missing_detail": missing_projection[:25],
+    }
+
+
+def check_player_profile_badge_parity(
+    legacy_path: str | None = None, projections_path: str | None = None
+) -> dict:
+    """Compare v5 badge-backed profile fields against latest raw /players payloads."""
+    legacy = sqlite3.connect(legacy_path or config.LEGACY_DB)
+    legacy.row_factory = sqlite3.Row
+    proj = sqlite3.connect(projections_path or config.PROJECTIONS_DB)
+    proj.row_factory = sqlite3.Row
+
+    try:
+        latest_payloads: dict[str, dict] = {}
+        for r in legacy.execute(
+            "SELECT entity_key, payload_json FROM raw_api_payloads "
+            "WHERE endpoint='player' ORDER BY entity_key, fetched_at DESC, payload_id DESC"
+        ):
+            tk = _tag_key(r["entity_key"])
+            if tk not in latest_payloads:
+                latest_payloads[tk] = json.loads(r["payload_json"])
+
+        proj_rows = {
+            _tag_key(r["player_tag"]): r
+            for r in proj.execute("SELECT * FROM player_current_profile")
+        }
+    finally:
+        legacy.close()
+        proj.close()
+
+    matched, mismatches, missing_projection, without_badges = [], [], [], []
+    badge_cols = tuple(PROFILE_BADGE_FIELD_TYPES)
+
+    for tk, payload in latest_payloads.items():
+        expected = build_profile_observation(payload)
+        if not any(col in expected for col in badge_cols):
+            without_badges.append(tk)
+            continue
+        pr = proj_rows.get(tk)
+        if pr is None:
+            missing_projection.append(tk)
+            continue
+        field_diffs = {}
+        for col in badge_cols:
+            expected_value = expected.get(col)
+            projected_value = pr[col]
+            if expected_value != projected_value:
+                field_diffs[col] = {
+                    "raw_payload": expected_value,
+                    "projection": projected_value,
+                }
+        if field_diffs:
+            mismatches.append({"tag": tk, "diffs": field_diffs})
+        else:
+            matched.append(tk)
+
+    return {
+        "reproducible_members": len(matched) + len(mismatches) + len(missing_projection),
+        "matched": len(matched),
+        "mismatched": len(mismatches),
+        "missing_projection": len(missing_projection),
+        "without_badges": len(without_badges),
         "mismatch_detail": mismatches[:25],
         "missing_detail": missing_projection[:25],
     }
