@@ -20,6 +20,7 @@ def render_intent(intent) -> str:
             "best_trophies_peak": f"🏆 {subj} hit a new best of {s.get('peak')} trophies!",
             "battle_hot_streak": f"🔥 {subj} is on a {s.get('streak', '')}-win streak!",
             "battle_trophy_push": f"📈 {subj} pushed +{s.get('trophy_delta')} over {s.get('battle_count')} battles.",
+            "career_wins_milestone": f"🏆 {subj} reached {s.get('milestone')} career wins!",
             "card_level_milestone": f"⭐ {subj} took {s.get('card_name')} to level {s.get('milestone')}.",
             "new_card_unlocked": f"🎉 {subj} unlocked {s.get('card_name')} ({s.get('rarity')}).",
             "new_champion_unlocked": f"👑 {subj} unlocked Champion {s.get('card_name')}!",

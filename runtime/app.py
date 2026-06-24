@@ -311,6 +311,11 @@ from runtime.discord_posting import (  # noqa: E402,F401
     _post_to_elixir,
     _resolve_custom_emoji,
 )
+from runtime.leader_action_ui import (  # noqa: E402,F401
+    CLASH_COPY_MAX_LENGTH,
+    LEADER_ACTION_UI_VERSION,
+    post_leader_action_card,
+)
 from runtime.startup import (  # noqa: E402,F401
     _member_role_grant_status,
     _post_startup_message,
@@ -349,6 +354,239 @@ def _v5_message_payloads(sent_messages, fallback_text: str) -> list[dict]:
             "discord_created_at": discord_created_at,
         })
     return payloads
+
+
+_V5_EVENT_LEADER_ACTION_TYPES = {
+    "member_joined",
+    "member_birthday",
+    "join_anniversary",
+    "clan_birthday",
+    "career_wins_milestone",
+}
+
+
+def _v5_event_detection_type(metadata: dict | None) -> str | None:
+    metadata = metadata or {}
+    summary = metadata.get("summary") if isinstance(metadata.get("summary"), dict) else {}
+    detection_type = summary.get("detection_type") or metadata.get("source_signal_type")
+    if detection_type:
+        return str(detection_type)
+    intent_type = metadata.get("intent_type") or ""
+    if ":" in intent_type:
+        return intent_type.split(":", 1)[1]
+    return None
+
+
+def _v5_event_source_key(metadata: dict | None) -> str:
+    metadata = metadata or {}
+    return (
+        str(metadata.get("event_core_dedup_key") or "").strip()
+        or str(metadata.get("source_signal_key") or "").strip()
+        or str(metadata.get("event_core_intent_id") or "").strip()
+        or _v5_intent_key(metadata)
+    )
+
+
+def _v5_member_name_for_event(subject_tag: str | None, summary: dict) -> str | None:
+    name = (summary.get("name") or summary.get("player_name") or "").strip()
+    if name:
+        return name
+    if not subject_tag:
+        return None
+    try:
+        profile = db.get_member_profile(subject_tag) or {}
+    except Exception:
+        profile = {}
+    return (
+        profile.get("member_name")
+        or profile.get("current_name")
+        or profile.get("name")
+        or subject_tag
+    )
+
+
+def _v5_event_action_copy(detection_type: str, subject_name: str | None, summary: dict) -> str:
+    name = subject_name or summary.get("clan_name") or "POAP KINGS"
+    if detection_type == "member_joined":
+        return f"Welcome to POAP KINGS, {name}! Glad to have you in the clan."
+    if detection_type == "member_birthday":
+        return f"Happy birthday, {name}! POAP KINGS is glad you're here."
+    if detection_type == "join_anniversary":
+        months = int(summary.get("months") or 0)
+        if months and months % 12 == 0:
+            years = months // 12
+            label = f"{years}-year"
+        elif months:
+            label = f"{months}-month"
+        else:
+            label = "POAP KINGS"
+        return f"Happy {label} anniversary, {name}! Glad you're still battling with us."
+    if detection_type == "clan_birthday":
+        years = int(summary.get("years") or 0)
+        label = f"{years}-year" if years else "birthday"
+        return f"Happy {label} birthday, POAP KINGS. Thanks for building this clan together."
+    if detection_type == "career_wins_milestone":
+        milestone = summary.get("milestone")
+        try:
+            milestone_label = f"{int(milestone):,}"
+        except (TypeError, ValueError):
+            milestone_label = str(milestone or "another big")
+        return f"{name} hit {milestone_label} career wins. Huge POAP KINGS milestone."
+    return f"Share a quick POAP KINGS shoutout for {name}."
+
+
+def _v5_event_leader_action_spec(metadata: dict | None) -> dict | None:
+    metadata = metadata or {}
+    summary = metadata.get("summary") if isinstance(metadata.get("summary"), dict) else {}
+    detection_type = _v5_event_detection_type(metadata)
+    if detection_type not in _V5_EVENT_LEADER_ACTION_TYPES:
+        return None
+    subject_tag = metadata.get("subject_tag")
+    subject_name = _v5_member_name_for_event(subject_tag, summary)
+    copy = _v5_event_action_copy(detection_type, subject_name, summary)
+    copy = copy[:CLASH_COPY_MAX_LENGTH]
+    action_type = "welcome_relay" if detection_type == "member_joined" else "celebration_relay"
+    source_key = _v5_event_source_key(metadata)
+    return {
+        "action_type": action_type,
+        "action_key": f"v5_event_leader_action:{source_key}",
+        "objective": detection_type,
+        "prompt_text": f"Paste this clan-chat note for the {detection_type.replace('_', ' ')} event: {copy}",
+        "rationale": (
+            "A v5 public clan event was delivered to Discord; joins, cake days, "
+            "and career-win milestones also require an in-game leader-action card."
+        ),
+        "target_player_tag": subject_tag if subject_tag else None,
+        "target_player_name": subject_name,
+        "source_signal_key": source_key,
+        "source_signal_type": detection_type,
+        "copy": copy,
+        "baseline": {
+            "event_core": {
+                "intent_type": metadata.get("intent_type"),
+                "detection_type": detection_type,
+                "summary": summary,
+                "event_core_dedup_key": metadata.get("event_core_dedup_key"),
+            },
+        },
+    }
+
+
+async def _post_v5_event_leader_action(metadata: dict | None, sent_messages=None) -> bool:
+    spec = _v5_event_leader_action_spec(metadata)
+    if not spec:
+        return False
+    existing = await asyncio.to_thread(db.get_leader_action_by_key, spec["action_key"])
+    if existing and existing.get("source_message_id"):
+        return False
+    try:
+        channel_config = _channel_config_by_key("arena-relay")
+    except Exception:
+        log.warning("v5 event leader-action skipped: arena-relay unavailable")
+        return False
+    relay_channel = bot.get_channel(int(channel_config["id"]))
+    if relay_channel is None:
+        log.warning("v5 event leader-action skipped: arena-relay channel not found")
+        return False
+
+    baseline = dict(spec["baseline"])
+    baseline["public_delivery"] = {
+        "message_ids": [
+            str(getattr(message, "id", ""))
+            for message in (sent_messages or [])
+            if getattr(message, "id", None) is not None
+        ],
+    }
+    action = await asyncio.to_thread(
+        db.create_leader_action_recommendation,
+        action_type=spec["action_type"],
+        objective=spec["objective"],
+        prompt_text=spec["prompt_text"],
+        rationale=spec["rationale"],
+        target_channel_key="arena-relay",
+        target_channel_id=channel_config["id"],
+        target_player_tag=spec["target_player_tag"],
+        target_player_name=spec["target_player_name"],
+        source_signal_key=spec["source_signal_key"],
+        source_signal_type=spec["source_signal_type"],
+        copy_original_text=spec["copy"],
+        copy_current_text=spec["copy"],
+        baseline=baseline,
+        action_key=spec["action_key"],
+        ui_version=LEADER_ACTION_UI_VERSION,
+    )
+    if not action or action.get("source_message_id"):
+        return False
+
+    card_messages = await post_leader_action_card(relay_channel, action, copy_messages=[spec["copy"]])
+    first_message_id = getattr(card_messages[0], "id", None) if card_messages else None
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(relay_channel),
+        "assistant",
+        spec["copy"],
+        summary=f"Leader action R{action.get('action_id')}: {spec['objective']}",
+        **_channel_msg_kwargs(relay_channel),
+        workflow="arena-relay",
+        event_type=spec["action_type"],
+        discord_message_id=first_message_id,
+        raw_json={
+            "leader_action": action,
+            "clan_chat_copy": spec["copy"],
+            "event_core": metadata or {},
+        },
+    )
+    return True
+
+
+def _recent_delivered_v5_event_metadata(limit: int = 50) -> list[dict]:
+    rows: list[dict] = []
+    conn = db.get_connection()
+    try:
+        for row in conn.execute(
+            """
+            SELECT intent_key, intent_type, source_signal_key, source_signal_type,
+                   target_channel_key, target_channel_id, payload_json, delivered_at
+            FROM communication_intents
+            WHERE workflow = 'v5-reactive'
+              AND status = 'delivered'
+              AND delivered_at >= datetime('now', '-7 days')
+            ORDER BY delivered_at DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ):
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            metadata = dict(payload)
+            metadata.setdefault("intent_type", row["intent_type"])
+            metadata.setdefault("source_signal_key", row["source_signal_key"])
+            metadata.setdefault("source_signal_type", row["source_signal_type"])
+            metadata.setdefault("target_channel_key", row["target_channel_key"])
+            metadata.setdefault("target_channel_id", row["target_channel_id"])
+            metadata.setdefault("operational_intent_key", row["intent_key"])
+            metadata.setdefault("delivered_at", row["delivered_at"])
+            if _v5_event_detection_type(metadata) in _V5_EVENT_LEADER_ACTION_TYPES:
+                rows.append(metadata)
+    finally:
+        conn.close()
+    return rows
+
+
+async def _post_missing_v5_event_leader_actions(limit: int = 50) -> int:
+    count = 0
+    for metadata in await asyncio.to_thread(_recent_delivered_v5_event_metadata, limit):
+        try:
+            if await _post_v5_event_leader_action(metadata):
+                count += 1
+        except Exception:
+            log.exception(
+                "v5 event leader-action backfill failed source=%s",
+                _v5_event_source_key(metadata),
+            )
+    return count
 
 
 def _upsert_v5_operational_intent(
@@ -469,6 +707,10 @@ async def _v5_post(channel_id, text, *, metadata: dict | None = None) -> bool:
         await asyncio.to_thread(_record_v5_delivery_success, channel, text, sent_messages, metadata)
     except Exception:
         log.exception("v5 delivery audit failed for channel %s", channel_id)
+    try:
+        await _post_v5_event_leader_action(metadata, sent_messages=sent_messages)
+    except Exception:
+        log.exception("v5 event leader-action failed for channel %s", channel_id)
     return True
 
 
@@ -479,6 +721,12 @@ async def _v5_reactive_tick():
 
     loop = asyncio.get_running_loop()
     result = await service.reactive_tick(loop, _v5_post)
+    try:
+        leader_actions_posted = await _post_missing_v5_event_leader_actions()
+        if leader_actions_posted:
+            result = {**result, "leader_actions_posted": leader_actions_posted}
+    except Exception:
+        log.exception("v5 event leader-action backfill scan failed")
     log.info("v5 reactive tick: %s", result)
     return result
 

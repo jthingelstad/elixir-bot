@@ -218,6 +218,47 @@ def test_granular_level_change_emitted_after_baseline(world):
     assert "PlayerLevelChanged" in topics
 
 
+def test_career_wins_milestones_emit_after_baseline(world):
+    from event_core import db
+    from event_core.domain.player import player_id
+    from event_core.mind.detectors import CareerWinsMilestoneDetector
+    from event_core.projections.detections import DetectionsProjection
+
+    world.observe_player_profile("#WIN", {"wins": 950, "name": "x"}, "t0", "h0")
+    world.observe_player_profile(
+        "#WIN",
+        {"wins": 2050, "name": "x"},
+        "2026-06-24T12:00:00Z",
+        "h1",
+    )
+
+    p = world.repository.get(player_id("#WIN"))
+    assert p.profile["wins"] == 2050
+    topics = [
+        n.topic.rsplit(".", 1)[-1]
+        for n in world.recorder.select_notifications(start=1, limit=100)
+    ]
+    assert "PlayerWinsChanged" in topics
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        det = CareerWinsMilestoneDetector(world, conn)
+        det.reset()
+        assert det.run() == 2
+        assert CareerWinsMilestoneDetector(world, conn).run() == 0
+
+        dp = DetectionsProjection(world, conn)
+        dp.setup()
+        dp.run()
+        rows = conn.execute(
+            "SELECT dedup_key, payload_json FROM detections "
+            "WHERE detection_type = 'career_wins_milestone' ORDER BY dedup_key"
+        ).fetchall()
+        assert [json.loads(row["payload_json"])["milestone"] for row in rows] == [1000, 2000]
+    finally:
+        conn.close()
+
+
 def test_detector_emits_and_is_idempotent(world):
     from event_core import db
     from event_core.mind.detectors import PlayerLevelUpDetector

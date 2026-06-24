@@ -103,8 +103,10 @@ class Player(Aggregate):
         for milestone-worthy fields, by diffing against current folded state. The
         coarse ProfileObserved remains the source for the current-profile
         projection; granular events are what detectors (Followers) consume.
-        High-frequency churn (trophies/donations/wins) stays in ProfileObserved
-        only — it is telemetry, not durable per §5.6.
+        High-frequency churn (trophies/donations) stays in ProfileObserved only —
+        it is telemetry, not durable per §5.6. Career wins also ride in the profile,
+        but we emit a granular change event so the Mind can catch 1,000-win
+        boundaries without making every profile observation a Discord event.
         """
         if content_hash == self.last_profile_hash:
             return False
@@ -122,6 +124,9 @@ class Player(Aggregate):
             new_best = observation.get("best_trophies")
             if new_best is not None and new_best != old.get("best_trophies"):
                 self._best_trophies_changed(new_best, old.get("best_trophies"), observed_at, tag)
+            new_wins = observation.get("wins")
+            if new_wins is not None and new_wins != old.get("wins"):
+                self._wins_changed(new_wins, old.get("wins"), observed_at, tag)
             # Path-of-Legend: emit on any league or rank movement (detectors decide
             # promotion vs demotion vs rank improvement). Only when PoL is present.
             if "pol_league_number" in observation or "pol_rank" in observation:
@@ -156,6 +161,10 @@ class Player(Aggregate):
     @event("BestTrophiesChanged")
     def _best_trophies_changed(self, new_best: int, old_best, observed_at: str, player_tag: str) -> None:
         self.profile["best_trophies"] = new_best
+
+    @event("PlayerWinsChanged")
+    def _wins_changed(self, new_wins: int, old_wins, observed_at: str, player_tag: str) -> None:
+        self.profile["wins"] = new_wins
 
     @event("PathOfLegendChanged")
     def _path_of_legend_changed(
