@@ -186,6 +186,35 @@ def test_agent_poster_passes_delivery_metadata(monkeypatch):
     assert metadata["source_signal_type"] == "best_trophies_peak"
 
 
+def test_agent_poster_leaves_leadership_intents_for_action_card_scan(monkeypatch):
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live import runtime
+
+    monkeypatch.setattr(
+        runtime,
+        "compose_copy",
+        lambda intent: pytest.fail("leadership intents should not become plain text"),
+    )
+    seen = []
+
+    def send(channel_id, text, scope, metadata):
+        seen.append((channel_id, text, scope, metadata))
+        return True
+
+    ci = CommunicationIntent(
+        dedup_key="intent:recommendation:kick:#B",
+        intent_type="leadership:kick",
+        subject_tag="#B",
+        scope="leadership",
+        priority=2,
+        caused_by=["recommendation:kick:#B"],
+        summary={"recommendation_type": "kick", "reason_codes": ["inactive"]},
+    )
+
+    assert runtime.make_agent_poster(send)(ci) is True
+    assert seen == []
+
+
 def test_route_intent_and_go_live_drain(world):
     from event_core.domain.communication_intent import CommunicationIntent
     from event_core.live.discord_consumer import IntentConsumer

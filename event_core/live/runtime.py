@@ -11,6 +11,7 @@ so the downtime backlog is NOT posted; only post-go-live events are.
 from __future__ import annotations
 
 import json
+import logging
 
 # intent-type prefix -> Discord channel (ids/lanes from prompts/DISCORD.md).
 PUBLIC_HIGHLIGHTS = {"channel_id": 1482352147029950474, "channel_name": "player-highlights", "lane": "member-highlights", "leadership": False}
@@ -300,6 +301,14 @@ def make_agent_poster(send):
 
     def poster(intent) -> bool:
         ch = route_intent(intent)
+        if (intent.intent_type or "").startswith("leadership:"):
+            # #leader-actions is an interactive card board, not a plain-text lane.
+            # Until v5 has a direct card adapter, the bounded legacy scan owns it.
+            logging.getLogger("elixir.event_core").info(
+                "leadership intent %s left for leadership-action-scan card pipeline",
+                intent.dedup_key,
+            )
+            return True
         copy = compose_copy(intent)
         if not copy:
             return False
