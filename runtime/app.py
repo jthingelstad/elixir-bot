@@ -827,6 +827,12 @@ async def on_ready():
             await restore_leader_action_views(bot)
         except Exception as exc:
             log.warning("Leader action view restore failed: %s", exc)
+        try:
+            posted_event_actions = await _post_missing_v5_event_leader_actions()
+            if posted_event_actions:
+                log.info("Posted %s missing v5 event leader-action card(s)", posted_event_actions)
+        except Exception:
+            log.exception("Startup v5 event leader-action backfill failed")
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 
