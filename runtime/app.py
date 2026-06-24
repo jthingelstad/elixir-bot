@@ -362,6 +362,7 @@ _V5_EVENT_LEADER_ACTION_TYPES = {
     "join_anniversary",
     "clan_birthday",
     "career_wins_milestone",
+    "collection_level_milestone",
 }
 
 
@@ -432,6 +433,13 @@ def _v5_event_action_copy(detection_type: str, subject_name: str | None, summary
         except (TypeError, ValueError):
             milestone_label = str(milestone or "another big")
         return f"{name} hit {milestone_label} career wins. Huge POAP KINGS milestone."
+    if detection_type == "collection_level_milestone":
+        milestone = summary.get("milestone")
+        try:
+            milestone_label = f"{int(milestone):,}"
+        except (TypeError, ValueError):
+            milestone_label = str(milestone or "another big")
+        return f"{name} hit collection level {milestone_label}. Huge POAP KINGS milestone."
     return f"Share a quick POAP KINGS shoutout for {name}."
 
 
@@ -454,7 +462,8 @@ def _v5_event_leader_action_spec(metadata: dict | None) -> dict | None:
         "prompt_text": f"Paste this clan-chat note for the {detection_type.replace('_', ' ')} event: {copy}",
         "rationale": (
             "A v5 public clan event was delivered to Discord; joins, cake days, "
-            "and career-win milestones also require an in-game leader-action card."
+            "career-win milestones, and collection-level milestones also require "
+            "an in-game leader-action card."
         ),
         "target_player_tag": subject_tag if subject_tag else None,
         "target_player_name": subject_name,

@@ -259,6 +259,59 @@ def test_career_wins_milestones_emit_after_baseline(world):
         conn.close()
 
 
+def test_collection_level_milestones_emit_after_baseline(world):
+    from event_core import db
+    from event_core.mind.detectors import CollectionLevelMilestoneDetector
+    from event_core.projections.detections import DetectionsProjection
+
+    world.observe_player_collections(
+        "#COLL",
+        cards_json="[]",
+        support_cards_json="[]",
+        cards_hash="cards0",
+        badges_json=json.dumps([{"name": "CollectionLevel", "level": 8, "progress": 1597}]),
+        badges_hash="badges0",
+        achievements_json="[]",
+        achievements_hash="ach0",
+        observed_at="t0",
+    )
+    world.observe_player_collections(
+        "#COLL",
+        cards_json="[]",
+        support_cards_json="[]",
+        cards_hash="cards0",
+        badges_json=json.dumps([{"name": "CollectionLevel", "level": 8, "progress": 1705}]),
+        badges_hash="badges1",
+        achievements_json="[]",
+        achievements_hash="ach0",
+        observed_at="2026-06-24T12:00:00Z",
+    )
+
+    topics = [
+        n.topic.rsplit(".", 1)[-1]
+        for n in world.recorder.select_notifications(start=1, limit=100)
+    ]
+    assert "BadgeLevelChanged" in topics
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        det = CollectionLevelMilestoneDetector(world, conn)
+        det.reset()
+        assert det.run() == 2
+        assert CollectionLevelMilestoneDetector(world, conn).run() == 0
+
+        dp = DetectionsProjection(world, conn)
+        dp.setup()
+        dp.run()
+        rows = conn.execute(
+            "SELECT dedup_key, payload_json FROM detections "
+            "WHERE detection_type = 'collection_level_milestone' ORDER BY dedup_key"
+        ).fetchall()
+        assert [json.loads(row["payload_json"])["milestone"] for row in rows] == [1600, 1700]
+    finally:
+        conn.close()
+
+
 def test_detector_emits_and_is_idempotent(world):
     from event_core import db
     from event_core.mind.detectors import PlayerLevelUpDetector

@@ -290,6 +290,33 @@ class BadgeEarnedDetector(FollowerRunner):
         )
 
 
+class CollectionLevelMilestoneDetector(FollowerRunner):
+    name = "detector:collection_level_milestone"
+    aggregate_name = "PlayerCollections"
+    STEP = 100
+    BADGE_NAME = "CollectionLevel"
+
+    def detect(self, event, notification) -> None:
+        if type(event).__name__ != "BadgeLevelChanged":
+            return
+        if event.badge_name != self.BADGE_NAME:
+            return
+        for milestone in _milestones(event.old_progress, event.new_progress, self.STEP):
+            self.emit_detection(
+                dedup_key=f"collection_level_milestone:{event.player_tag}:{milestone}",
+                detection_type="collection_level_milestone",
+                subject_tag=event.player_tag,
+                occurred_at=event.observed_at,
+                caused_by=[self.evidence(notification)],
+                payload={
+                    "milestone": milestone,
+                    "from": event.old_progress,
+                    "to": event.new_progress,
+                    "badge_level": event.new_level,
+                },
+            )
+
+
 class BattleTrophyPushDetector(FollowerRunner):
     """Telemetry-input detector (like BattleHotStreakDetector): scans
     battle_telemetry rather than the log.
@@ -808,6 +835,7 @@ ALL_DETECTORS = [
     CardLevelMilestoneDetector,
     NewCardUnlockedDetector,
     BadgeEarnedDetector,
+    CollectionLevelMilestoneDetector,
     BattleTrophyPushDetector,
     MemberJoinedDetector,
     MemberLeftDetector,
