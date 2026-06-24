@@ -125,7 +125,73 @@ def test_game_mode_contexts_capture_events_and_leaderboards():
         conn.close()
 
     assert events[0]["display_name"] == "Princess Gambit"
+    assert events[0]["event_name"] == "Princess Gambit"
     assert boards[0]["display_name"] == "Merge Tactics"
     assert json.dumps(events + boards)
 
+
+def test_special_event_activity_uses_event_context_display_names():
+    conn = db.get_connection(":memory:")
+    try:
+        db.snapshot_members([{"tag": "#ABC123", "name": "Alpha", "role": "member"}], conn=conn)
+        db.upsert_game_mode_contexts_from_events(
+            [
+                {
+                    "eventTag": "#REST",
+                    "title": "Restless Undead",
+                    "description": "Tombstones randomly appear around the Arena.",
+                    "gameMode": {"id": 72000376, "name": "Event_RestlessDead"},
+                },
+                {
+                    "eventTag": "#SEASON",
+                    "title": "Seasonal Trophy Road",
+                    "description": "A rotating seasonal ladder.",
+                    "gameMode": {"id": 72000006, "name": "Ladder"},
+                },
+            ],
+            conn=conn,
+        )
+        db.snapshot_player_battlelog(
+            "#ABC123",
+            [
+                _battle(
+                    _battle_ts("101000"),
+                    battle_type="PvP",
+                    game_mode_id=72000376,
+                    game_mode_name="Event_RestlessDead",
+                    event_tag="#REST",
+                ),
+                _battle(
+                    _battle_ts("101100"),
+                    battle_type="PvP",
+                    game_mode_id=72000006,
+                    game_mode_name="Ladder",
+                    event_tag="#SEASON",
+                ),
+            ],
+            conn=conn,
+        )
+
+        summary = db.get_clan_game_mode_summary(days=1, mode_group="special_event", limit=10, conn=conn)
+        member = db.get_member_special_event_activity("#ABC123", days=1, conn=conn)
+    finally:
+        conn.close()
+
+    activity_by_tag = {row["event_tag"]: row for row in summary["by_game_mode"]}
+    assert activity_by_tag["#REST"]["event_name"] == "Restless Undead"
+    assert activity_by_tag["#REST"]["event_description"] == "Tombstones randomly appear around the Arena."
+    assert activity_by_tag["#REST"]["game_mode_name"] == "Event_RestlessDead"
+    assert activity_by_tag["#SEASON"]["event_name"] == "Seasonal Trophy Road"
+    assert activity_by_tag["#SEASON"]["game_mode_name"] == "Ladder"
+
+    participation_by_tag = {row["event_tag"]: row for row in summary["event_participation"]}
+    assert participation_by_tag["#REST"]["event_name"] == "Restless Undead"
+    assert participation_by_tag["#REST"]["member_ref"]
+
+    active_by_tag = {row["event_tag"]: row for row in summary["active_events"]}
+    assert active_by_tag["#REST"]["event_name"] == "Restless Undead"
+    assert active_by_tag["#REST"]["event_description"] == "Tombstones randomly appear around the Arena."
+
+    member_modes = {row["event_tag"]: row for row in member["by_game_mode"]}
+    assert member_modes["#REST"]["event_name"] == "Restless Undead"
 
