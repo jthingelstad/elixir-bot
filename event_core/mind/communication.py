@@ -25,6 +25,7 @@ from event_core.mind.follower import FollowerRunner
 _CELEBRATE = (
     "best_trophies_peak",
     "battle_trophy_push",
+    "career_wins_milestone",
     "card_level_milestone",
     # new_card_unlocked covers legendary AND champion unlocks (its payload carries
     # rarity, so the agent frames champions specially). new_champion_unlocked is a

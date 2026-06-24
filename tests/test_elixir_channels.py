@@ -1299,6 +1299,30 @@ def _v5_delivery_metadata():
     }
 
 
+def _v5_join_anniversary_metadata():
+    return {
+        "source": "event_core_v5",
+        "event_core_intent_id": "934d6c8e-cc15-55ef-a7d8-f8d06b1998c6",
+        "event_core_dedup_key": "intent:detection:join_anniversary:#OLLIE:2026-06-24",
+        "intent_type": "clan:join_anniversary",
+        "subject_tag": "#OLLIE",
+        "scope": "public",
+        "priority": 1,
+        "caused_by": ["join_anniversary:#OLLIE:2026-06-24"],
+        "source_signal_key": "join_anniversary:#OLLIE:2026-06-24",
+        "source_signal_type": "join_anniversary",
+        "summary": {
+            "detection_type": "join_anniversary",
+            "name": "OllieTurtle",
+            "months": 3,
+            "years": 0,
+        },
+        "target_channel_key": "clan-events",
+        "target_lane": "clan-events",
+        "target_channel_id": 1482352147029950475,
+    }
+
+
 def test_v5_post_persists_delivery_audit_rows():
     channel = SimpleNamespace(
         id=1482352147029950474,
@@ -1343,6 +1367,95 @@ def test_v5_post_persists_delivery_audit_rows():
     assert trace["message"]["content"] == "TDuck just hit 6,000 trophies."
     assert trace["message"]["workflow"] == "v5-reactive"
     assert trace["message"]["event_type"] == "celebrate:best_trophies_peak"
+
+
+def test_v5_post_creates_leader_action_for_required_event():
+    public_channel = SimpleNamespace(
+        id=1482352147029950475,
+        name="clan-events",
+        type="text",
+        guild=None,
+    )
+    relay_channel = SimpleNamespace(
+        id=1482352147029950499,
+        name="leader-actions",
+        type="text",
+        guild=None,
+    )
+    sent_public = [SimpleNamespace(id=1001, content="OllieTurtle has been here three months.")]
+    sent_card = [SimpleNamespace(id=2001), SimpleNamespace(id=2002, content="copy")]
+
+    def channel_for(channel_id):
+        if int(channel_id) == public_channel.id:
+            return public_channel
+        if int(channel_id) == relay_channel.id:
+            return relay_channel
+        return None
+
+    with (
+        patch.object(elixir.bot, "get_channel", side_effect=channel_for),
+        patch(
+            "elixir._channel_config_by_key",
+            return_value={"id": relay_channel.id, "name": "#leader-actions", "lane_key": "arena-relay"},
+        ),
+        patch("elixir._post_to_elixir", new=AsyncMock(return_value=sent_public)),
+        patch("elixir.post_leader_action_card", new=AsyncMock(return_value=sent_card)) as mock_card,
+    ):
+        ok = asyncio.run(
+            elixir._v5_post(
+                public_channel.id,
+                "OllieTurtle has been here three months.",
+                metadata=_v5_join_anniversary_metadata(),
+            )
+        )
+
+    assert ok is True
+    action = elixir.db.get_leader_action_by_key(
+        "v5_event_leader_action:intent:detection:join_anniversary:#OLLIE:2026-06-24"
+    )
+    assert action["action_type"] == "celebration_relay"
+    assert action["objective"] == "join_anniversary"
+    assert action["target_player_name"] == "OllieTurtle"
+    assert action["source_signal_type"] == "join_anniversary"
+    assert "3-month anniversary" in action["copy_current_text"]
+    mock_card.assert_awaited_once()
+    assert mock_card.await_args.args[0] is relay_channel
+    assert mock_card.await_args.kwargs["copy_messages"] == [action["copy_current_text"]]
+
+
+def test_v5_event_leader_action_backfill_scans_delivered_intents():
+    public_channel = SimpleNamespace(
+        id=1482352147029950475,
+        name="clan-events",
+        type="text",
+        guild=None,
+    )
+    relay_channel = SimpleNamespace(
+        id=1482352147029950499,
+        name="leader-actions",
+        type="text",
+        guild=None,
+    )
+    metadata = _v5_join_anniversary_metadata()
+    elixir._record_v5_delivery_success(
+        public_channel,
+        "OllieTurtle has been here three months.",
+        [SimpleNamespace(id=1001, content="OllieTurtle has been here three months.")],
+        metadata,
+    )
+
+    with (
+        patch.object(elixir.bot, "get_channel", return_value=relay_channel),
+        patch(
+            "elixir._channel_config_by_key",
+            return_value={"id": relay_channel.id, "name": "#leader-actions", "lane_key": "arena-relay"},
+        ),
+        patch("elixir.post_leader_action_card", new=AsyncMock(return_value=[SimpleNamespace(id=2001)])) as mock_card,
+    ):
+        count = asyncio.run(elixir._post_missing_v5_event_leader_actions())
+
+    assert count == 1
+    mock_card.assert_awaited_once()
 
 
 def test_v5_post_records_failed_audit_when_channel_missing():

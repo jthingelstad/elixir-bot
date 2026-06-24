@@ -60,6 +60,25 @@ class BestTrophiesPeakDetector(FollowerRunner):
             )
 
 
+class CareerWinsMilestoneDetector(FollowerRunner):
+    name = "detector:career_wins_milestone"
+    aggregate_name = "Player"
+    STEP = 1000
+
+    def detect(self, event, notification) -> None:
+        if type(event).__name__ != "PlayerWinsChanged":
+            return
+        for milestone in _milestones(event.old_wins, event.new_wins, self.STEP):
+            self.emit_detection(
+                dedup_key=f"career_wins_milestone:{event.player_tag}:{milestone}",
+                detection_type="career_wins_milestone",
+                subject_tag=event.player_tag,
+                occurred_at=event.observed_at,
+                caused_by=[self.evidence(notification)],
+                payload={"milestone": milestone, "from": event.old_wins, "to": event.new_wins},
+            )
+
+
 class PathOfLegendDetector(FollowerRunner):
     """Path-of-Legend milestones -> #player-highlights. Follows PathOfLegendChanged.
     Emits league promotions, Ultimate Champion (crossing into league 10), and global
@@ -784,6 +803,7 @@ class WeeklyDonationLeaderDetector(FollowerRunner):
 ALL_DETECTORS = [
     PlayerLevelUpDetector,
     BestTrophiesPeakDetector,
+    CareerWinsMilestoneDetector,
     PathOfLegendDetector,
     CardLevelMilestoneDetector,
     NewCardUnlockedDetector,

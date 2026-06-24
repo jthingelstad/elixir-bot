@@ -146,6 +146,13 @@ def test_render_intent_and_dry_run_poster(world):
     text = render_intent(ci)
     assert "6000" in text and "#A" in text
 
+    wins = CommunicationIntent(
+        dedup_key="w", intent_type="celebrate:career_wins_milestone", subject_tag="#A",
+        scope="public", priority=1, caused_by=[],
+        summary={"detection_type": "career_wins_milestone", "milestone": 1000},
+    )
+    assert "1000 career wins" in render_intent(wins)
+
     poster = DryRunPoster()
     assert poster(ci) is True
     assert poster.posts == [("public", text)]
