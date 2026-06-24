@@ -381,7 +381,7 @@ class BattleTrophyPushDetector(FollowerRunner):
 
 
 class MemberJoinedDetector(FollowerRunner):
-    """New clan member -> welcome (restores #welcome). Follows Clan MemberJoined."""
+    """New clan member -> #clan-events. Follows Clan MemberJoined."""
 
     name = "detector:member_joined"
     aggregate_name = "Clan"

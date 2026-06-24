@@ -1328,7 +1328,7 @@ def _v5_member_joined_metadata():
         "source": "event_core_v5",
         "event_core_intent_id": "e9ffa4a7-d82f-5774-b753-f81a60a4f426",
         "event_core_dedup_key": "intent:detection:member_joined:#VRL829LGY:2026-06-24T11:34:25.212758+00:00",
-        "intent_type": "welcome:member_joined",
+        "intent_type": "clan:member_joined",
         "subject_tag": "#VRL829LGY",
         "scope": "public",
         "priority": 1,
@@ -1340,9 +1340,9 @@ def _v5_member_joined_metadata():
             "name": "p2w_gtr0410",
             "role": "member",
         },
-        "target_channel_key": "welcome",
-        "target_lane": "reception",
-        "target_channel_id": 1476456514121109514,
+        "target_channel_key": "clan-events",
+        "target_lane": "clan-events",
+        "target_channel_id": 1482352241628414013,
     }
 
 

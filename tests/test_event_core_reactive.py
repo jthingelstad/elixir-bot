@@ -97,7 +97,7 @@ def test_policy_maps_restored_coverage_detection_types(world):
     from event_core.mind.communication import CommunicationPolicy
 
     cases = {
-        "member_joined:#J:t0": ("member_joined", "welcome"),
+        "member_joined:#J:t0": ("member_joined", "clan"),
         "member_left:#J:t0": ("member_left", "clan"),
         "member_promoted:#J:elder:t0": ("member_promoted", "clan"),
         "war_update:#CLAN:5:warDay": ("war_update", "war"),
