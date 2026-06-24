@@ -123,7 +123,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="leadership-action-scan",
-        enabled_by_default=False,  # v5: leadership recs now flow through _v5_reactive_tick
+        enabled_by_default=True,
         owner_lane="arena-relay",
         purpose="Continuously scan for singular leader actions and post crisp action cards when the data warrants one.",
         job_id="leadership-action-scan",
