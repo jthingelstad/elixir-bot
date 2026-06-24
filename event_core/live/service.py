@@ -54,6 +54,7 @@ async def reactive_tick(loop, post_coro) -> dict:
 
 
 _CUTOVER_MARKER = "cutover:v5"
+_POST_CUTOVER_FOLLOWERS = ("detector:collection_level_milestone",)
 
 
 def _cutover_done(conn) -> bool:
@@ -70,6 +71,25 @@ def _mark_cutover(conn, position: int) -> None:
         (_CUTOVER_MARKER, position, datetime.now(timezone.utc).isoformat()),
     )
     conn.commit()
+
+
+def _fast_forward_missing_post_cutover_followers(conn, position: int) -> list[str]:
+    fast_forwarded: list[str] = []
+    for follower_name in _POST_CUTOVER_FOLLOWERS:
+        row = conn.execute(
+            "SELECT 1 FROM projection_tracking WHERE projection_name=?", (follower_name,)
+        ).fetchone()
+        if row is not None:
+            continue
+        conn.execute(
+            "INSERT INTO projection_tracking(projection_name,last_global_position,updated_at) "
+            "VALUES(?,?,?)",
+            (follower_name, position, datetime.now(timezone.utc).isoformat()),
+        )
+        fast_forwarded.append(follower_name)
+    if fast_forwarded:
+        conn.commit()
+    return fast_forwarded
 
 
 def catch_up(force: bool = False) -> dict:
@@ -96,9 +116,11 @@ def catch_up(force: bool = False) -> dict:
     try:
         if _cutover_done(conn) and not force:
             head = app.recorder.max_notification_id() or 0
+            fast_forwarded = _fast_forward_missing_post_cutover_followers(conn, head)
             return {
                 "skipped": "cutover already complete; consumer resumes from tracked position",
                 "event_log_head": head,
+                "fast_forwarded_followers": fast_forwarded,
             }
         payloads = fetch_payloads()
         ts = datetime.now(timezone.utc).isoformat()

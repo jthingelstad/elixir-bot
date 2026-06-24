@@ -367,6 +367,30 @@ def test_catch_up_drains_once_then_skips_on_restart(monkeypatch, world):
     assert "drained_to_position" in forced and len(drains) == 2  # force overrides
 
 
+def test_catch_up_seeds_missing_post_cutover_followers():
+    from event_core import db
+    from event_core.live import service
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        seeded = service._fast_forward_missing_post_cutover_followers(conn, 123)
+        assert seeded == ["detector:collection_level_milestone"]
+        row = conn.execute(
+            "SELECT last_global_position FROM projection_tracking WHERE projection_name=?",
+            ("detector:collection_level_milestone",),
+        ).fetchone()
+        assert row["last_global_position"] == 123
+
+        assert service._fast_forward_missing_post_cutover_followers(conn, 456) == []
+        row = conn.execute(
+            "SELECT last_global_position FROM projection_tracking WHERE projection_name=?",
+            ("detector:collection_level_milestone",),
+        ).fetchone()
+        assert row["last_global_position"] == 123
+    finally:
+        conn.close()
+
+
 def test_health_splits_deliverable_pending_from_drained(world, monkeypatch):
     """F4: health reports deliverable backlog (Raised after the consumer cursor) vs
     drained-historical, and excludes scan-style detectors from follower lag."""
