@@ -472,7 +472,24 @@ def _leader_action_activity_reason(member: dict) -> str | None:
     return None
 
 
+def _leader_action_tenure_reason(member: dict) -> str | None:
+    tenure_days = member.get("tenure_days")
+    joined_date = member.get("joined_date") or member.get("joined_at")
+    try:
+        tenure_days = int(tenure_days) if tenure_days is not None else None
+    except (TypeError, ValueError):
+        tenure_days = None
+    if tenure_days is not None and joined_date:
+        return f"tenure {tenure_days}d (joined {str(joined_date)[:10]})"
+    if tenure_days is not None:
+        return f"tenure {tenure_days}d"
+    if joined_date:
+        return f"joined {str(joined_date)[:10]}"
+    return None
+
+
 def _leader_action_reason(member: dict, *, promotion: bool) -> str:
+    tenure_reason = _leader_action_tenure_reason(member)
     if promotion:
         bits = []
         rank = member.get("elder_donation_rank")
@@ -486,6 +503,8 @@ def _leader_action_reason(member: dict, *, promotion: bool) -> str:
             bits.append(f"{member.get('war_races_played')} recent war races")
         if member.get("days_since_battle") is not None:
             bits.append(f"battle activity {member.get('days_since_battle')}d ago")
+        if tenure_reason:
+            bits.append(tenure_reason)
         return ", ".join(bits) or "inside Elder donation leaderboard"
     if member.get("reason"):
         bits = [str(member.get("reason"))]
@@ -493,7 +512,9 @@ def _leader_action_reason(member: dict, *, promotion: bool) -> str:
             bits.append(f"{member.get('war_races_played')} recent war races")
         if member.get("days_since_battle") is not None:
             bits.append(f"battle activity {member.get('days_since_battle')}d ago")
-        return "; ".join(bits[:3])
+        if tenure_reason:
+            bits.append(tenure_reason)
+        return "; ".join(bits[:4])
     reasons = member.get("reasons") or []
     has_inactive_reason = any(reason.get("type") == "inactive" for reason in reasons if isinstance(reason, dict))
     bits = []

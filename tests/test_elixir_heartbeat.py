@@ -802,6 +802,37 @@ def test_role_action_clan_chat_copy_is_short_and_public_reasoned():
     assert all(len(copy) <= CLAN_CHAT_ACTION_COPY_LIMIT for copy in (promotion, kick, demotion, long_kick, monica_kick))
 
 
+def test_role_action_reason_includes_tenure_context_for_role_changes():
+    from runtime.jobs._core import _leader_action_reason
+
+    promotion = _leader_action_reason(
+        {
+            "elder_donation_rank": 2,
+            "elder_target_rank": 7,
+            "rolling_donations_avg": 220.0,
+            "donations": 210,
+            "war_races_played": 2,
+            "days_since_battle": 0,
+            "tenure_days": 28,
+            "joined_date": "2026-05-27",
+        },
+        promotion=True,
+    )
+    demotion = _leader_action_reason(
+        {
+            "reason": "outside Elder group: rank 20/7 on recent donations",
+            "war_races_played": 4,
+            "days_since_battle": 0,
+            "tenure_days": 109,
+            "joined_date": "2026-03-07",
+        },
+        promotion=False,
+    )
+
+    assert "tenure 28d (joined 2026-05-27)" in promotion
+    assert "tenure 109d (joined 2026-03-07)" in demotion
+
+
 def test_detect_pending_system_signals_retries_until_announced():
     conn = db.get_connection(":memory:")
     try:

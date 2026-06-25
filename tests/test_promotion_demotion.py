@@ -17,13 +17,23 @@ from storage.war_analytics import get_demotion_candidates, get_promotion_candida
 ANCHOR = datetime(2026, 4, 18, tzinfo=timezone.utc).date()
 
 
-def _seed_member(conn, tag, name, role, trophies=8000, donations_week=20, last_seen="20260418T120000.000Z"):
+def _seed_member(
+    conn,
+    tag,
+    name,
+    role,
+    trophies=8000,
+    donations_week=20,
+    last_seen="20260418T120000.000Z",
+    joined_date="2026-01-01",
+):
     db.snapshot_members(
         [{"tag": tag, "name": name, "role": role, "expLevel": 60,
           "trophies": trophies, "clanRank": 1, "donations": donations_week,
           "lastSeen": last_seen}],
         conn=conn,
     )
+    db.set_member_join_date(tag, name, joined_date, conn=conn)
     return conn.execute("SELECT member_id FROM members WHERE player_tag = ?", (tag,)).fetchone()["member_id"]
 
 
@@ -82,7 +92,16 @@ def _seed_daily_metrics(conn, member_id, *, peaks: list[int]):
     conn.commit()
 
 
-def _make_eligible(conn, war_race_id, tag, name, role="member", peaks=None, donations_week=None):
+def _make_eligible(
+    conn,
+    war_race_id,
+    tag,
+    name,
+    role="member",
+    peaks=None,
+    donations_week=None,
+    joined_date="2026-01-01",
+):
     peaks = peaks or [20]
     member_id = _seed_member(
         conn,
@@ -90,6 +109,7 @@ def _make_eligible(conn, war_race_id, tag, name, role="member", peaks=None, dona
         name,
         role,
         donations_week=donations_week if donations_week is not None else peaks[0],
+        joined_date=joined_date,
     )
     _seed_daily_metrics(conn, member_id, peaks=peaks)
     _seed_battle(conn, member_id)
@@ -197,6 +217,35 @@ def test_recent_battle_activity_is_required_for_elder_board():
 
         assert "#STALE" not in {m["tag"] for m in result["recommended"]}
         assert "activity" in stale["missing"]
+    finally:
+        conn.close()
+
+
+def test_under_tenure_high_donor_is_not_immediate_promotion_candidate():
+    conn = db.get_connection(":memory:")
+    try:
+        race = _seed_war_race(conn)
+        _make_eligible(conn, race, "#E1", "Top Elder", role="elder", peaks=[100, 100])
+        _make_eligible(conn, race, "#E2", "Middle Elder", role="elder", peaks=[90, 90])
+        _make_eligible(conn, race, "#E3", "Low Elder", role="elder", peaks=[5, 5])
+        _make_eligible(
+            conn,
+            race,
+            "#NEW",
+            "New Donor",
+            peaks=[500, 500],
+            joined_date="2026-04-11",
+        )
+        for idx, peak in enumerate([30, 25, 20, 15, 10, 1]):
+            _make_eligible(conn, race, f"#F{idx}", f"F{idx}", peaks=[peak, peak])
+
+        result = get_promotion_candidates(conn=conn)
+        fresh = next(m for m in result["borderline"] if m["tag"] == "#NEW")
+
+        assert result["criteria"]["min_tenure_days"] == 21
+        assert "#NEW" not in {m["tag"] for m in result["recommended"]}
+        assert "tenure" in fresh["missing"]
+        assert fresh["tenure_days"] == 7
     finally:
         conn.close()
 
