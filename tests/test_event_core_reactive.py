@@ -265,6 +265,7 @@ def test_policy_maps_restored_coverage_detection_types(world):
         "pol_promo:#J:10": ("path_of_legend_promotion", "celebrate"),
         "uc:#J": ("ultimate_champion_reached", "celebrate"),
         "polrank:#J:1": ("path_of_legend_global_rank_attained", "celebrate"),
+        "rankedpulse:#J:20260625": ("ranked_activity_pulse", "celebrate"),
         "clanbday:2026-06-21": ("clan_birthday", "clan"),
         "bday:#J:2026-06-21": ("member_birthday", "clan"),
         "anniv:#J:2026-06-21": ("join_anniversary", "clan"),

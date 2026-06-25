@@ -7,6 +7,7 @@ shape. Validation is vs legacy signal_log *dates* (it has no per-event evidence)
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 from event_core.mind.follower import FollowerRunner
 
@@ -377,6 +378,143 @@ class BattleTrophyPushDetector(FollowerRunner):
                 run = []
         if current_tag is not None:
             self._flush(current_tag, run)
+        return self.emitted
+
+
+def _utc_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _cr_timestamp(dt: datetime) -> str:
+    return dt.strftime("%Y%m%dT%H%M%S")
+
+
+class RankedActivityPulseDetector(FollowerRunner):
+    """Bounded Ranked / Path of Legends mode pulse.
+
+    This is intentionally narrower than the retired hot-streak detector: it emits
+    one player-level candidate only when recent ranked telemetry shows both real
+    volume and a strong record. Generic activity volume stays queryable through
+    tools and recaps instead of becoming a proactive post.
+    """
+
+    name = "detector:ranked_activity_pulse"
+    WINDOW_DAYS = 7
+    MIN_BATTLES = 12
+    MIN_DECIDED = 12
+    MIN_WINS = 9
+    MIN_WIN_RATE = 0.70
+    MODE_LABEL = "Ranked / Path of Legends"
+
+    def detect(self, event, notification) -> None:  # unused (telemetry scan)
+        pass
+
+    @staticmethod
+    def _rate(wins: int, losses: int) -> float:
+        decided = wins + losses
+        return round(wins / decided, 3) if decided else 0.0
+
+    def run(self, batch: int = 500) -> int:
+        if not _table_exists(self.conn, "battle_telemetry") or not _table_exists(self.conn, "members"):
+            return self.emitted
+
+        now = _utc_now()
+        cutoff = _cr_timestamp(now - timedelta(days=self.WINDOW_DAYS))
+        day_key = _cr_timestamp(now)[:8]
+        rows = self.conn.execute(
+            """
+            SELECT b.player_tag AS tag,
+                   m.current_name AS name,
+                   COUNT(*) AS battles,
+                   SUM(CASE WHEN b.outcome = 'W' THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN b.outcome = 'L' THEN 1 ELSE 0 END) AS losses,
+                   MAX(b.battle_time) AS last_battle_time
+            FROM battle_telemetry b
+            JOIN members m ON m.player_tag = b.player_tag
+            WHERE b.mode_group = 'ranked'
+              AND b.battle_time >= ?
+              AND b.outcome IN ('W', 'L')
+              AND m.current_name IS NOT NULL
+              AND TRIM(m.current_name) != ''
+            GROUP BY b.player_tag, m.current_name
+            """,
+            (cutoff,),
+        ).fetchall()
+
+        candidates = []
+        total_battles = 0
+        total_wins = 0
+        total_losses = 0
+        for row in rows:
+            battles = int(row["battles"] or 0)
+            wins = int(row["wins"] or 0)
+            losses = int(row["losses"] or 0)
+            total_battles += battles
+            total_wins += wins
+            total_losses += losses
+            decided = wins + losses
+            win_rate = self._rate(wins, losses)
+            if (
+                battles >= self.MIN_BATTLES
+                and decided >= self.MIN_DECIDED
+                and wins >= self.MIN_WINS
+                and win_rate >= self.MIN_WIN_RATE
+            ):
+                candidates.append((row, battles, wins, losses, win_rate))
+
+        if not candidates:
+            return self.emitted
+
+        ranked = sorted(
+            candidates,
+            key=lambda item: (
+                item[4],
+                item[2],
+                item[1],
+                str(item[0]["last_battle_time"] or ""),
+            ),
+            reverse=True,
+        )
+        row, battles, wins, losses, win_rate = ranked[0]
+        tag = row["tag"]
+        latest = self.conn.execute(
+            """
+            SELECT battle_time, battle_type, opponent_tag
+            FROM battle_telemetry
+            WHERE player_tag = ? AND mode_group = 'ranked' AND battle_time >= ?
+            ORDER BY battle_time DESC, battle_type DESC, opponent_tag DESC
+            LIMIT 1
+            """,
+            (tag, cutoff),
+        ).fetchone()
+        if latest is None:
+            return self.emitted
+
+        clan_win_rate = self._rate(total_wins, total_losses)
+        self.emit_detection(
+            dedup_key=f"ranked_activity_pulse:{tag}:{day_key}",
+            detection_type="ranked_activity_pulse",
+            subject_tag=tag,
+            occurred_at=latest["battle_time"],
+            caused_by=[
+                f"battle_telemetry:{tag}:{latest['battle_time']}:{latest['battle_type']}:{latest['opponent_tag']}"
+            ],
+            payload={
+                "signal": "strong_ranked_run",
+                "mode": "ranked",
+                "mode_label": self.MODE_LABEL,
+                "player_name": row["name"],
+                "window_days": self.WINDOW_DAYS,
+                "battle_count": battles,
+                "wins": wins,
+                "losses": losses,
+                "win_rate": win_rate,
+                "active_ranked_members": len(rows),
+                "clan_ranked_battles": total_battles,
+                "clan_ranked_win_rate": clan_win_rate,
+                "ranked_leaderboard_position": 1,
+            },
+        )
         return self.emitted
 
 
@@ -825,8 +963,8 @@ class WeeklyDonationLeaderDetector(FollowerRunner):
 # separately (after the detections projection is current) — see live/engine.advance.
 # BattleHotStreakDetector intentionally NOT registered: hot-streak is the
 # less-interesting twin of battle_trophy_push and posted redundantly alongside it.
-# We celebrate trophy/rank MOVEMENT instead (battle_trophy_push; mode-aware /
-# Path-of-Legend movement is the 2f follow-up). The class is retained for reference.
+# RankedActivityPulseDetector is the bounded Path-of-Legends exception: it only
+# emits when real recent volume plus a strong record makes a player story.
 ALL_DETECTORS = [
     PlayerLevelUpDetector,
     BestTrophiesPeakDetector,
@@ -837,6 +975,7 @@ ALL_DETECTORS = [
     BadgeEarnedDetector,
     CollectionLevelMilestoneDetector,
     BattleTrophyPushDetector,
+    RankedActivityPulseDetector,
     MemberJoinedDetector,
     MemberLeftDetector,
     MemberRoleChangeDetector,
