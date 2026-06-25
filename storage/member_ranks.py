@@ -24,8 +24,10 @@ __all__ = [
 
 
 # Same gate defaults used by storage.war_analytics.get_promotion_candidates.
+# Elder is a trust role; require enough clan tenure to avoid direct promotion
+# cards for members who only have a brief donation spike.
 ELDER_ELIGIBILITY_DEFAULTS = {
-    "min_tenure_days": 0,
+    "min_tenure_days": 21,
     "active_within_days": 7,
     "min_war_races": 1,
     "rolling_donation_weeks": 4,

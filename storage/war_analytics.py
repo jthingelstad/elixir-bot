@@ -12,6 +12,7 @@ from db import (
     managed_connection,
 )
 from storage._enrichment import _member_reference_fields
+from storage.member_ranks import ELDER_ELIGIBILITY_DEFAULTS, evaluate_elder_eligibility
 from storage.war_status import _season_bounds, get_current_season_id
 
 from storage._formatting import format_member_reference as _format_member_reference
@@ -1187,9 +1188,9 @@ def _elder_role_counts(conn) -> dict:
 
 def _elder_role_review(
     *,
-    min_tenure_days: int = 0,
-    active_within_days: int = 7,
-    min_war_races: int = 1,
+    min_tenure_days: int = ELDER_ELIGIBILITY_DEFAULTS["min_tenure_days"],
+    active_within_days: int = ELDER_ELIGIBILITY_DEFAULTS["active_within_days"],
+    min_war_races: int = ELDER_ELIGIBILITY_DEFAULTS["min_war_races"],
     rolling_weeks: int = ELDER_DONATION_ROLLING_WEEKS,
     war_race_window: int = 4,
     conn,
@@ -1226,7 +1227,6 @@ def _elder_role_review(
         )
         donation_stats = _rolling_donation_stats(conn, row["member_id"], today, weeks=rolling_weeks)
 
-        from storage.member_ranks import evaluate_elder_eligibility
         eligibility = evaluate_elder_eligibility(
             tenure_days=tenure_days,
             days_since_battle=days_since_battle,
@@ -1425,8 +1425,13 @@ def get_demotion_candidates(min_donations_week: int = 50, conn: Optional[sqlite3
 
 
 @managed_connection
-def get_promotion_candidates(min_donations_week: int = 50, min_tenure_days: int = 0, active_within_days: int = 7,
-                             min_war_races: int = 1, conn: Optional[sqlite3.Connection] = None) -> dict:
+def get_promotion_candidates(
+    min_donations_week: int = 50,
+    min_tenure_days: int = ELDER_ELIGIBILITY_DEFAULTS["min_tenure_days"],
+    active_within_days: int = ELDER_ELIGIBILITY_DEFAULTS["active_within_days"],
+    min_war_races: int = ELDER_ELIGIBILITY_DEFAULTS["min_war_races"],
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
     # ``min_donations_week`` is kept for backward-compatible callers. Elder
     # selection is now relative: a smoothed donation leaderboard under the cap.
     return _elder_role_review(

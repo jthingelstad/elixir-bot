@@ -6098,7 +6098,7 @@ def test_promotion_candidates_use_v2_review_logic():
             conn=conn,
         )
         db.set_member_join_date("#DEF456", "Vijay", "2025-10-01", conn=conn)
-        db.set_member_join_date("#GHI789", "Finn", "2026-03-01", conn=conn)
+        db.set_member_join_date("#GHI789", "Finn", "2025-10-01", conn=conn)
         conn.execute(
             "INSERT INTO member_battle_facts (member_id, battle_time, battle_type, outcome) "
             "SELECT member_id, '20260307T110000.000Z', 'PvP', 'win' "

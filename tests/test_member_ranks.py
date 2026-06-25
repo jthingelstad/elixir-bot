@@ -22,6 +22,7 @@ def _seed_member(
     trophies=8000,
     clan_rank=1,
     last_seen="20260420T120000.000Z",
+    joined_date="2026-01-01",
 ):
     """Insert a member with a current_state row. Returns member_id."""
     db.snapshot_members(
@@ -32,6 +33,7 @@ def _seed_member(
         }],
         conn=conn,
     )
+    db.set_member_join_date(tag, name, joined_date, conn=conn)
     return conn.execute(
         "SELECT member_id FROM members WHERE player_tag = ?", (tag,)
     ).fetchone()["member_id"]
