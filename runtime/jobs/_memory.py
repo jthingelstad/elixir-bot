@@ -14,6 +14,7 @@ __all__ = [
     "MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", "MEMORY_SYNTHESIS_POST_CHARS",
     "_memory_synthesis_cycle",
     "_build_memory_synthesis_context",
+    "_reduce_memory_synthesis_context_for_retry",
     "_apply_memory_synthesis_plan",
 ]
 
@@ -62,6 +63,14 @@ MEMORY_SYNTHESIS_PRIOR_ARC_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_PRIOR_ARC_LIM
 MEMORY_SYNTHESIS_POSTS_PER_CHANNEL = int(os.getenv("MEMORY_SYNTHESIS_POSTS_PER_CHANNEL", "12"))
 MEMORY_SYNTHESIS_MEMORY_BODY_CHARS = int(os.getenv("MEMORY_SYNTHESIS_MEMORY_BODY_CHARS", "500"))
 MEMORY_SYNTHESIS_POST_CHARS = int(os.getenv("MEMORY_SYNTHESIS_POST_CHARS", "700"))
+MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT", "30"))
+MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT", "6"))
+MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL = int(os.getenv("MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL", "5"))
+MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT", "20"))
+MEMORY_SYNTHESIS_RETRY_RECENT_INTENTS_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_RETRY_RECENT_INTENTS_LIMIT", "10"))
+MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT = int(os.getenv("MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT", "8"))
+MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS = int(os.getenv("MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS", "280"))
+MEMORY_SYNTHESIS_RETRY_POST_CHARS = int(os.getenv("MEMORY_SYNTHESIS_RETRY_POST_CHARS", "350"))
 # Cap contradiction cards per weekly run so a bad synthesis can't flood the
 # action board.
 MEMORY_CONTRADICTION_CARD_LIMIT = int(os.getenv("MEMORY_CONTRADICTION_CARD_LIMIT", "3"))
@@ -189,6 +198,258 @@ def _compact_intent_row(row: dict) -> dict:
         "skipped_reason": _clip_text(row.get("skipped_reason"), 160),
         "updated_at": row.get("updated_at"),
     }
+
+
+def _compact_retry_memory_row(row: dict) -> dict:
+    compact = _compact_memory_row(row)
+    compact["title"] = _clip_text(compact.get("title"), 120)
+    compact["body"] = _clip_text(compact.get("body"), MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS)
+    compact["summary"] = _clip_text(compact.get("summary"), 160)
+    return compact
+
+
+def _compact_retry_post_row(row: dict) -> dict:
+    compact = _compact_post_row(row)
+    compact["content"] = _clip_text(compact.get("content"), MEMORY_SYNTHESIS_RETRY_POST_CHARS)
+    compact["summary"] = _clip_text(compact.get("summary"), 160)
+    return compact
+
+
+def _compact_retry_intent_row(row: dict) -> dict:
+    compact = _compact_intent_row(row)
+    compact["summary"] = _clip_text(compact.get("summary"), 120)
+    compact["skipped_reason"] = _clip_text(compact.get("skipped_reason"), 120)
+    return compact
+
+
+def _compact_retry_decision_case(row: dict) -> dict:
+    fields = (
+        "case_id",
+        "case_type",
+        "status",
+        "subject_type",
+        "subject_key",
+        "subject_tag",
+        "subject_name",
+        "objective",
+        "reason",
+        "summary",
+        "next_action",
+        "due_at",
+        "updated_at",
+    )
+    compact = {}
+    for key in fields:
+        if key not in row:
+            continue
+        value = row.get(key)
+        if key in {"objective", "reason", "summary", "next_action"}:
+            value = _clip_text(value, 180)
+        compact[key] = value
+    return compact
+
+
+def _compact_retry_decision_cases(snapshot) -> dict:
+    if not isinstance(snapshot, dict):
+        return {}
+    compact = {}
+    for key, value in snapshot.items():
+        if isinstance(value, list):
+            compact[key] = [
+                _compact_retry_decision_case(item)
+                for item in value[:MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT]
+                if isinstance(item, dict)
+            ]
+        else:
+            compact[key] = value
+    return compact
+
+
+def _compact_retry_standings(rows) -> list[dict]:
+    if not isinstance(rows, list):
+        return []
+    compact = []
+    for row in rows[:5]:
+        if not isinstance(row, dict):
+            continue
+        compact.append({
+            "rank": row.get("rank"),
+            "name": row.get("name") or row.get("clan_name"),
+            "tag": row.get("tag") or row.get("clan_tag"),
+            "score": row.get("score") or row.get("fame") or row.get("clan_score"),
+            "finish_time": row.get("finish_time") or row.get("finished_at"),
+        })
+    return compact
+
+
+def _compact_retry_war_season(snapshot) -> dict:
+    if not isinstance(snapshot, dict):
+        return {}
+    state = snapshot.get("state") if isinstance(snapshot.get("state"), dict) else {}
+    race = state.get("race") if isinstance(state.get("race"), dict) else {}
+    participation = (
+        state.get("participation_health")
+        if isinstance(state.get("participation_health"), dict)
+        else {}
+    )
+    compact_state = {}
+    for key in (
+        "season_id",
+        "week",
+        "day",
+        "day_number",
+        "phase",
+        "is_colosseum_week",
+        "observed_at",
+    ):
+        if key in state:
+            compact_state[key] = state.get(key)
+    if race:
+        compact_state["race"] = {
+            "rank": race.get("rank"),
+            "clan_score": race.get("clan_score") or race.get("score"),
+            "race_completed": race.get("race_completed"),
+            "standings": _compact_retry_standings(
+                race.get("standings") or race.get("clans") or race.get("race_standings")
+            ),
+        }
+    if participation:
+        compact_state["participation_health"] = {
+            "total_members": participation.get("total_members"),
+            "complete_members": participation.get("complete_members"),
+            "partial_members": participation.get("partial_members"),
+            "zero_attack_members": participation.get("zero_attack_members"),
+            "missed_battle_count": participation.get("missed_battle_count"),
+            "time_left_text": _clip_text(participation.get("time_left_text"), 120),
+        }
+    return {
+        "season_id": snapshot.get("season_id"),
+        "summary": _clip_text(snapshot.get("summary"), 260),
+        "started_at": snapshot.get("started_at"),
+        "last_observed_at": snapshot.get("last_observed_at"),
+        "state": compact_state,
+    }
+
+
+def _compact_retry_game_modes(snapshot) -> dict:
+    if not isinstance(snapshot, dict):
+        return {}
+    compact = {}
+    for window, payload in snapshot.items():
+        if not isinstance(payload, dict):
+            compact[window] = payload
+            continue
+        window_payload = {}
+        for key, value in payload.items():
+            if key != "modes" or not isinstance(value, dict):
+                window_payload[key] = value
+                continue
+            modes = {}
+            for mode_key, mode in value.items():
+                if not isinstance(mode, dict):
+                    continue
+                top_members = mode.get("top_members") or mode.get("members") or []
+                modes[mode_key] = {
+                    "label": mode.get("label") or mode.get("mode"),
+                    "battles": mode.get("battles"),
+                    "wins": mode.get("wins"),
+                    "losses": mode.get("losses"),
+                    "win_rate": mode.get("win_rate"),
+                    "active_members": mode.get("active_members"),
+                    "top_members": [
+                        {
+                            "name": member.get("name"),
+                            "tag": member.get("tag"),
+                            "battles": member.get("battles"),
+                            "wins": member.get("wins"),
+                            "losses": member.get("losses"),
+                            "win_rate": member.get("win_rate"),
+                        }
+                        for member in top_members[:3]
+                        if isinstance(member, dict)
+                    ],
+                }
+            window_payload["modes"] = modes
+        compact[window] = window_payload
+    return compact
+
+
+def _compact_retry_operations_context(operations_context) -> dict:
+    if not isinstance(operations_context, dict):
+        return {}
+    compact = {}
+    if "event_windows" in operations_context:
+        compact["event_windows"] = operations_context.get("event_windows")
+    if "recent_events" in operations_context:
+        compact["recent_events"] = [
+            _compact_event_row(row)
+            for row in (operations_context.get("recent_events") or [])[:MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT]
+            if isinstance(row, dict)
+        ]
+    if "war_season" in operations_context:
+        compact["war_season"] = _compact_retry_war_season(operations_context.get("war_season"))
+    if "game_modes" in operations_context:
+        compact["game_modes"] = _compact_retry_game_modes(operations_context.get("game_modes"))
+    if "season_window" in operations_context:
+        compact["season_window"] = operations_context.get("season_window")
+    if "decision_cases" in operations_context:
+        compact["decision_cases"] = _compact_retry_decision_cases(operations_context.get("decision_cases"))
+    if "recent_intents" in operations_context:
+        compact["recent_intents"] = [
+            _compact_retry_intent_row(row)
+            for row in (operations_context.get("recent_intents") or [])[:MEMORY_SYNTHESIS_RETRY_RECENT_INTENTS_LIMIT]
+            if isinstance(row, dict)
+        ]
+    return compact
+
+
+def _reduce_memory_synthesis_context_for_retry(context: dict) -> dict:
+    """Build a smaller second-attempt payload after model output truncation."""
+    if not isinstance(context, dict):
+        context = {}
+    week_posts = {}
+    for channel_key, rows in (context.get("week_posts") or {}).items():
+        week_posts[channel_key] = [
+            _compact_retry_post_row(row)
+            for row in (rows or [])[:MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL]
+            if isinstance(row, dict)
+        ]
+    return {
+        "retry_context": {
+            "reason": "initial_response_truncated",
+            "instruction": (
+                "Use a concise synthesis: only durable arcs, stale-memory IDs, "
+                "leader-review contradictions, and a short digest."
+            ),
+        },
+        "week_window": context.get("week_window") or {},
+        "week_memories": [
+            _compact_retry_memory_row(row)
+            for row in (context.get("week_memories") or [])[:MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT]
+            if isinstance(row, dict)
+        ],
+        "prior_arcs": [
+            _compact_retry_memory_row(row)
+            for row in (context.get("prior_arcs") or [])[:MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT]
+            if isinstance(row, dict)
+        ],
+        "week_posts": week_posts,
+        "live_clan_state": context.get("live_clan_state") or {},
+        "operations_context": _compact_retry_operations_context(context.get("operations_context")),
+    }
+
+
+def _memory_synthesis_error(plan) -> dict | None:
+    if isinstance(plan, dict) and isinstance(plan.get("_error"), dict):
+        return plan["_error"]
+    return None
+
+
+def _memory_synthesis_error_message(error: dict) -> str:
+    kind = error.get("kind") or "agent_error"
+    phase = error.get("phase") or "unknown"
+    detail = error.get("detail") or error.get("result_preview") or "no detail"
+    return f"agent {kind} during {phase}: {detail}"
 
 
 def _contradiction_text(item: dict) -> str:
@@ -554,17 +815,36 @@ async def _memory_synthesis_cycle():
     if plan is None:
         runtime_status.mark_job_failure("memory_synthesis", "agent returned no plan")
         return
-    if isinstance(plan, dict) and isinstance(plan.get("_error"), dict):
-        error = plan["_error"]
-        kind = error.get("kind") or "agent_error"
-        phase = error.get("phase") or "unknown"
-        detail = error.get("detail") or error.get("result_preview") or "no detail"
+    error = _memory_synthesis_error(plan)
+    if error:
         log.warning("memory_synthesis: agent returned structured error: %s", error)
-        runtime_status.mark_job_failure(
-            "memory_synthesis",
-            f"agent {kind} during {phase}: {detail}",
-        )
-        return
+        if error.get("kind") == "truncation":
+            retry_context = _reduce_memory_synthesis_context_for_retry(context)
+            log.warning("memory_synthesis: retrying after truncation with reduced context")
+            try:
+                plan = await asyncio.to_thread(elixir_agent.run_memory_synthesis, retry_context)
+            except Exception as exc:
+                log.error("memory_synthesis: retry agent call failed: %s", exc, exc_info=True)
+                runtime_status.mark_job_failure("memory_synthesis", f"retry agent call failed: {exc}")
+                return
+            if plan is None:
+                runtime_status.mark_job_failure("memory_synthesis", "retry agent returned no plan")
+                return
+            context = retry_context
+            error = _memory_synthesis_error(plan)
+            if error:
+                log.warning("memory_synthesis: retry agent returned structured error: %s", error)
+                runtime_status.mark_job_failure(
+                    "memory_synthesis",
+                    f"retry {_memory_synthesis_error_message(error)}",
+                )
+                return
+        else:
+            runtime_status.mark_job_failure(
+                "memory_synthesis",
+                _memory_synthesis_error_message(error),
+            )
+            return
     if not isinstance(plan, dict):
         runtime_status.mark_job_failure(
             "memory_synthesis",
