@@ -78,6 +78,117 @@ def test_path_of_legend_detector(world):
         conn.close()
 
 
+def _insert_ranked_telemetry(conn, tag: str, when: str, outcome: str, opponent: str) -> None:
+    crowns_for = 2 if outcome == "W" else 1
+    crowns_against = 1 if outcome == "W" else 2
+    conn.execute(
+        "INSERT OR IGNORE INTO battle_telemetry("
+        "player_tag,battle_time,battle_type,opponent_tag,crowns_for,crowns_against,"
+        "mode_group,outcome,is_competitive,observed_at"
+        ") VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            tag,
+            when,
+            "pathOfLegend",
+            opponent,
+            crowns_for,
+            crowns_against,
+            "ranked",
+            outcome,
+            1,
+            when,
+        ),
+    )
+
+
+def test_ranked_activity_pulse_detector_emits_strong_named_path_of_legend_run(world):
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from event_core import db
+    from event_core.ingest.battles import BATTLE_TELEMETRY_DDL
+    from event_core.mind import detectors
+    from event_core.mind.detectors import RankedActivityPulseDetector
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        conn.execute(BATTLE_TELEMETRY_DDL)
+        conn.execute("CREATE TABLE members (player_tag TEXT PRIMARY KEY, current_name TEXT)")
+        conn.execute("INSERT INTO members VALUES ('#POL', 'Atternam')")
+        conn.execute("INSERT INTO members VALUES ('#EVEN', 'Busy Climber')")
+        for i, outcome in enumerate(["W"] * 11 + ["L"] * 3):
+            _insert_ranked_telemetry(
+                conn,
+                "#POL",
+                f"20260624T{i:02d}0000.000Z",
+                outcome,
+                f"#OP{i}",
+            )
+        for i, outcome in enumerate(["W"] * 7 + ["L"] * 7):
+            _insert_ranked_telemetry(
+                conn,
+                "#EVEN",
+                f"20260623T{i:02d}0000.000Z",
+                outcome,
+                f"#EV{i}",
+            )
+        conn.commit()
+
+        with patch.object(detectors, "_utc_now", return_value=datetime(2026, 6, 25, 12, 0, 0)):
+            assert RankedActivityPulseDetector(world, conn).run() == 1
+
+        rows = _detection_rows(world, conn)
+        payload = rows["ranked_activity_pulse"]
+        assert payload["player_name"] == "Atternam"
+        assert payload["mode_label"] == "Ranked / Path of Legends"
+        assert payload["battle_count"] == 14
+        assert payload["wins"] == 11
+        assert payload["losses"] == 3
+        assert payload["win_rate"] == 0.786
+        assert "Ranked1v1_NewArena2" not in json.dumps(payload)
+    finally:
+        conn.close()
+
+
+def test_ranked_activity_pulse_detector_suppresses_raw_ranked_volume(world):
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from event_core import db
+    from event_core.ingest.battles import BATTLE_TELEMETRY_DDL
+    from event_core.mind import detectors
+    from event_core.mind.detectors import RankedActivityPulseDetector
+    from event_core.projections.detections import DetectionsProjection
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        conn.execute(BATTLE_TELEMETRY_DDL)
+        conn.execute("CREATE TABLE members (player_tag TEXT PRIMARY KEY, current_name TEXT)")
+        conn.execute("INSERT INTO members VALUES ('#GRIND', 'Raw Volume')")
+        for i, outcome in enumerate(["W"] * 8 + ["L"] * 8):
+            _insert_ranked_telemetry(
+                conn,
+                "#GRIND",
+                f"20260624T{i:02d}0000.000Z",
+                outcome,
+                f"#RV{i}",
+            )
+        conn.commit()
+
+        with patch.object(detectors, "_utc_now", return_value=datetime(2026, 6, 25, 12, 0, 0)):
+            assert RankedActivityPulseDetector(world, conn).run() == 0
+
+        dp = DetectionsProjection(world, conn)
+        dp.setup()
+        dp.run()
+        rows = conn.execute(
+            "SELECT detection_type FROM detections WHERE detection_type = 'ranked_activity_pulse'"
+        ).fetchall()
+        assert rows == []
+    finally:
+        conn.close()
+
+
 def test_member_left_enriches_and_suppresses_kicks(world):
     from event_core import db
     from event_core.mind.detectors import MemberLeftDetector

@@ -46,6 +46,7 @@ _CELEBRATE = (
     "path_of_legend_promotion",
     "ultimate_champion_reached",
     "path_of_legend_global_rank_attained",
+    "ranked_activity_pulse",
 )
 # Clan-social detections that go to #clan-events (the "clan" prefix in route_intent).
 _CLAN_SOCIAL = (
@@ -81,6 +82,7 @@ _CELEBRATE_PRIORITY = {
     "player_level_up": 55,
     "path_of_legend_promotion": 50,
     "best_trophies_peak": 40,
+    "ranked_activity_pulse": 15,
     "battle_trophy_push": 10,
 }
 
