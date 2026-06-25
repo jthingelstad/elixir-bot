@@ -19,6 +19,7 @@ from runtime.jobs._memory import (
     _apply_memory_synthesis_plan,
     _build_memory_synthesis_context,
     _memory_synthesis_cycle,
+    _reduce_memory_synthesis_context_for_retry,
 )
 import runtime.jobs._memory as memory_job
 
@@ -294,6 +295,102 @@ def test_build_context_bounds_memory_count_and_text_size(memdb, monkeypatch):
     assert all(item["body"].endswith("…") for item in context["week_memories"])
 
 
+def test_reduce_memory_synthesis_context_for_retry_bounds_large_payload():
+    context = {
+        "week_window": {"war_week_id": "131:4"},
+        "week_memories": [
+            {
+                "memory_id": idx,
+                "title": "x" * 240,
+                "body": "b" * 1000,
+                "summary": "s" * 500,
+            }
+            for idx in range(40)
+        ],
+        "prior_arcs": [
+            {
+                "memory_id": idx,
+                "title": "arc " + ("x" * 240),
+                "body": "a" * 1000,
+                "summary": "s" * 500,
+            }
+            for idx in range(10)
+        ],
+        "week_posts": {
+            "leader-lounge": [
+                {"content": "p" * 1000, "summary": "s" * 500, "created_at": "2026-06-20"}
+                for _ in range(10)
+            ]
+        },
+        "live_clan_state": {"roster": {"member_count": 50}},
+        "operations_context": {
+            "event_windows": {"7d": {"total": 5}},
+            "recent_events": [{"event_key": f"event:{idx}", "event_type": "join"} for idx in range(40)],
+            "war_season": {
+                "season_id": 131,
+                "summary": "war " * 200,
+                "state": {
+                    "week": 4,
+                    "phase": "battle",
+                    "race": {
+                        "rank": 1,
+                        "clan_score": 12345,
+                        "standings": [
+                            {"rank": idx, "name": f"Clan {idx}", "score": idx * 100}
+                            for idx in range(8)
+                        ],
+                    },
+                    "participation_health": {
+                        "total_members": 50,
+                        "complete_members": 30,
+                        "partial_members": 12,
+                        "zero_attack_members": 8,
+                        "time_left_text": "left " * 80,
+                    },
+                },
+            },
+            "game_modes": {
+                "7d": {
+                    "modes": {
+                        "ranked": {
+                            "label": "Ranked",
+                            "battles": 12,
+                            "top_members": [
+                                {"name": f"Player {idx}", "tag": f"#{idx}", "battles": idx}
+                                for idx in range(6)
+                            ],
+                        }
+                    }
+                }
+            },
+            "season_window": {"season_id": 131},
+            "decision_cases": {
+                "due": [{"case_id": idx, "summary": "d" * 500} for idx in range(12)],
+                "open": [{"case_id": idx, "reason": "r" * 500} for idx in range(12)],
+            },
+            "recent_intents": [
+                {"intent_id": idx, "summary": "i" * 500, "skipped_reason": "r" * 500}
+                for idx in range(20)
+            ],
+        },
+    }
+
+    reduced = _reduce_memory_synthesis_context_for_retry(context)
+
+    assert reduced["retry_context"]["reason"] == "initial_response_truncated"
+    assert len(reduced["week_memories"]) == memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
+    assert len(reduced["prior_arcs"]) == memory_job.MEMORY_SYNTHESIS_RETRY_PRIOR_ARC_LIMIT
+    assert len(reduced["week_posts"]["leader-lounge"]) == memory_job.MEMORY_SYNTHESIS_RETRY_POSTS_PER_CHANNEL
+    assert len(reduced["week_memories"][0]["body"]) <= memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS
+    assert len(reduced["week_posts"]["leader-lounge"][0]["content"]) <= memory_job.MEMORY_SYNTHESIS_RETRY_POST_CHARS
+    operations = reduced["operations_context"]
+    assert len(operations["recent_events"]) == memory_job.MEMORY_SYNTHESIS_RETRY_RECENT_EVENTS_LIMIT
+    assert len(operations["recent_intents"]) == memory_job.MEMORY_SYNTHESIS_RETRY_RECENT_INTENTS_LIMIT
+    assert len(operations["decision_cases"]["due"]) == memory_job.MEMORY_SYNTHESIS_RETRY_DECISION_CASE_LIMIT
+    assert len(operations["war_season"]["state"]["race"]["standings"]) == 5
+    assert len(operations["game_modes"]["7d"]["modes"]["ranked"]["top_members"]) == 3
+
+
 def test_memory_synthesis_cycle_posts_only_leader_review_contradiction_cards():
     """The weekly synthesis keeps its memory writes but ships no digest
     report. Derived-state contradictions are auto-expired/logged; only
@@ -397,6 +494,57 @@ def test_memory_synthesis_cycle_quiet_week_posts_nothing():
     assert "contradiction_cards=0" in mock_success.call_args.args[1]
 
 
+def test_memory_synthesis_cycle_retries_truncated_agent_with_reduced_context():
+    context = {
+        "week_window": {"war_week_id": "131:4"},
+        "week_memories": [{"memory_id": idx, "body": "b" * 1000} for idx in range(40)],
+        "prior_arcs": [{"memory_id": idx, "body": "a" * 1000} for idx in range(10)],
+        "week_posts": {"leader-lounge": [{"content": "p" * 1000} for _ in range(10)]},
+        "operations_context": {
+            "recent_events": [{"event_key": f"event:{idx}"} for idx in range(40)],
+            "recent_intents": [{"intent_id": idx, "summary": "i" * 500} for idx in range(20)],
+        },
+    }
+    truncation = {
+        "_error": {
+            "kind": "truncation",
+            "phase": "initial_response",
+            "detail": "LLM response truncated by max_tokens=3000",
+        }
+    }
+    plan = {"digest": "", "arc_memories": [], "stale_memory_ids": [], "contradictions": []}
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch("runtime.jobs._memory.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._memory._build_memory_synthesis_context", return_value=context),
+        patch(
+            "runtime.jobs._memory.elixir_agent.run_memory_synthesis",
+            side_effect=[truncation, plan],
+        ) as mock_agent,
+        patch("runtime.jobs._memory._apply_memory_synthesis_plan", return_value={
+            "arcs_written": 0, "stale_expired": 0, "contradictions_flagged": 0,
+            "arcs_requested": 0, "stale_requested": 0, "dry_run": False,
+        }) as mock_apply,
+        patch("runtime.jobs._memory.MEMORY_SYNTHESIS_DRY_RUN", False),
+        patch("runtime.jobs._memory.runtime_status.mark_job_start"),
+        patch("runtime.jobs._memory.runtime_status.mark_job_success") as mock_success,
+        patch("runtime.jobs._memory.runtime_status.mark_job_failure") as mock_failure,
+    ):
+        asyncio.run(_memory_synthesis_cycle())
+
+    assert mock_agent.call_count == 2
+    retry_context = mock_agent.call_args_list[1].args[0]
+    assert retry_context["retry_context"]["reason"] == "initial_response_truncated"
+    assert len(retry_context["week_memories"]) == memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_LIMIT
+    assert len(retry_context["week_memories"][0]["body"]) <= memory_job.MEMORY_SYNTHESIS_RETRY_MEMORY_BODY_CHARS
+    assert mock_apply.call_args.kwargs["week_id"] == "131:4"
+    mock_failure.assert_not_called()
+    mock_success.assert_called_once()
+
+
 def test_memory_synthesis_cycle_marks_structured_agent_error_as_failure():
     channel = MagicMock()
     with (
@@ -407,9 +555,9 @@ def test_memory_synthesis_cycle_marks_structured_agent_error_as_failure():
             "runtime.jobs._memory.elixir_agent.run_memory_synthesis",
             return_value={
                 "_error": {
-                    "kind": "truncation",
+                    "kind": "schema_error",
                     "phase": "initial_response",
-                    "detail": "LLM response truncated by max_tokens=3000",
+                    "detail": "missing required digest field",
                 }
             },
         ),
@@ -421,4 +569,4 @@ def test_memory_synthesis_cycle_marks_structured_agent_error_as_failure():
     mock_start.assert_called_once_with("memory_synthesis")
     mock_failure.assert_called_once()
     assert mock_failure.call_args.args[0] == "memory_synthesis"
-    assert "truncation" in mock_failure.call_args.args[1]
+    assert "schema_error" in mock_failure.call_args.args[1]
