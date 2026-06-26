@@ -67,9 +67,33 @@ PUBLIC_INTENT_PREFIX = {
     "cohort_wave": "cohort",
 }
 
-PLAYER_HIGHLIGHT_COOLDOWN = timedelta(days=14)
-PLAYER_HIGHLIGHT_COOLDOWN_REASON = "player_highlight_cooldown:14d"
+PLAYER_HIGHLIGHT_WINDOW = timedelta(days=14)
+PLAYER_HIGHLIGHT_THRESHOLD = 80
+PLAYER_HIGHLIGHT_POLICY = "player_highlight_score:v1"
+PLAYER_HIGHLIGHT_ACCRUING_REASON = "player_highlight_accruing"
 PLAYER_HIGHLIGHT_COALESCED_REASON = "player_highlight_coalesced:same_tick"
+
+_PLAYER_HIGHLIGHT_BASE_SCORES = {
+    "ultimate_champion_reached": 120,
+    "path_of_legend_global_rank_attained": 110,
+    "card_level_milestone": 95,
+    "career_wins_milestone": 85,
+    "collection_level_milestone": 80,
+    "player_level_up": 80,
+    "badge_earned": 55,
+    "path_of_legend_promotion": 45,
+    "best_trophies_peak": 40,
+    "ranked_activity_pulse": 30,
+}
+
+_PLAYER_HIGHLIGHT_BYPASS_TYPES = {
+    "ultimate_champion_reached",
+    "path_of_legend_global_rank_attained",
+    "card_level_milestone",
+    "career_wins_milestone",
+    "collection_level_milestone",
+    "player_level_up",
+}
 
 _CELEBRATE_PRIORITY = {
     "ultimate_champion_reached": 100,
@@ -112,6 +136,17 @@ class _CelebrateCandidate:
         return _parse_utc(getattr(self.event, "occurred_at", None))
 
 
+@dataclass(frozen=True)
+class _RecognitionEvidence:
+    dedup_key: str
+    detection_type: str
+    score: int
+    bypass: bool
+    occurred_at: datetime | None
+    occurred_at_text: str | None
+    notification_id: int
+
+
 def _parse_utc(value) -> datetime | None:
     if not value:
         return None
@@ -137,6 +172,32 @@ def _summary_for_detection(event, **extra) -> dict:
         "occurred_at": event.occurred_at,
         **{k: v for k, v in extra.items() if v is not None},
     }
+
+
+def _int_payload(payload: dict, key: str) -> int:
+    value = payload.get(key)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _score_detection(event) -> tuple[int, bool]:
+    payload = getattr(event, "payload", None) or {}
+    detection_type = getattr(event, "detection_type", "")
+    if detection_type == "new_card_unlocked":
+        rarity = str(payload.get("rarity") or "").strip().lower()
+        if rarity == "champion":
+            return 90, True
+        if rarity == "legendary":
+            return 65, False
+        return 0, False
+    if detection_type == "battle_trophy_push":
+        delta = _int_payload(payload, "trophy_delta")
+        bonus = max(0, delta - 100) // 50 * 5
+        return min(45, 25 + bonus), False
+    score = _PLAYER_HIGHLIGHT_BASE_SCORES.get(detection_type, 0)
+    return score, detection_type in _PLAYER_HIGHLIGHT_BYPASS_TYPES
 
 
 class CommunicationPolicy(FollowerRunner):
@@ -235,7 +296,7 @@ class CommunicationPolicy(FollowerRunner):
                         intent = self.app.repository.get(event.originator_id)
                     except Exception:
                         log.exception(
-                            "%s: could not inspect intent notification %s for cooldown",
+                            "%s: could not inspect intent notification %s for recognition policy",
                             self.name,
                             n.id,
                         )
@@ -276,29 +337,138 @@ class CommunicationPolicy(FollowerRunner):
             candidate.notification_id,
         )
 
-    def _cooldown_match(
+    def _latest_public_highlight(
         self,
         candidate: _CelebrateCandidate,
         prior_intents: list[CommunicationIntent],
     ) -> CommunicationIntent | None:
         candidate_time = candidate.occurred_at or datetime.now(timezone.utc)
-        now = datetime.now(timezone.utc)
         matches: list[tuple[datetime, CommunicationIntent]] = []
         for intent in prior_intents:
             reference_time, from_signal = self._intent_reference_time(intent)
             if reference_time is None:
                 continue
-            if from_signal:
-                if reference_time <= candidate_time and candidate_time - reference_time < PLAYER_HIGHLIGHT_COOLDOWN:
-                    matches.append((reference_time, intent))
-            elif now - reference_time < PLAYER_HIGHLIGHT_COOLDOWN:
-                # Pre-cooldown v5 intents did not carry signal time in their
-                # summary. Treat recent delivered/planned rows as active so the
-                # policy starts protecting the live channel immediately.
-                matches.append((reference_time, intent))
+            if from_signal and reference_time > candidate_time:
+                continue
+            matches.append((reference_time, intent))
         if not matches:
             return None
         return max(matches, key=lambda item: item[0])[1]
+
+    @staticmethod
+    def _recognition_evidence_for_event(event, notification_id: int) -> _RecognitionEvidence | None:
+        score, bypass = _score_detection(event)
+        if score <= 0:
+            return None
+        return _RecognitionEvidence(
+            dedup_key=event.dedup_key,
+            detection_type=event.detection_type,
+            score=score,
+            bypass=bypass,
+            occurred_at=_parse_utc(getattr(event, "occurred_at", None)),
+            occurred_at_text=getattr(event, "occurred_at", None),
+            notification_id=notification_id,
+        )
+
+    @staticmethod
+    def _evidence_is_in_window(
+        evidence: _RecognitionEvidence,
+        *,
+        anchor_time: datetime,
+        cutoff_time: datetime,
+        latest_highlight_time: datetime | None,
+    ) -> bool:
+        if evidence.occurred_at is None:
+            return False
+        if evidence.occurred_at < cutoff_time or evidence.occurred_at > anchor_time:
+            return False
+        return latest_highlight_time is None or evidence.occurred_at > latest_highlight_time
+
+    def _recognition_evidence(
+        self,
+        *,
+        subject_tag: str | None,
+        group: list[_CelebrateCandidate],
+        selected: _CelebrateCandidate,
+        latest_highlight: CommunicationIntent | None,
+    ) -> list[_RecognitionEvidence]:
+        anchor_time = selected.occurred_at or datetime.now(timezone.utc)
+        cutoff_time = anchor_time - PLAYER_HIGHLIGHT_WINDOW
+        latest_highlight_time = None
+        if latest_highlight is not None:
+            latest_highlight_time, _from_signal = self._intent_reference_time(latest_highlight)
+
+        evidence_by_key: dict[str, _RecognitionEvidence] = {}
+
+        def add(evidence: _RecognitionEvidence | None) -> None:
+            if evidence is None:
+                return
+            if not self._evidence_is_in_window(
+                evidence,
+                anchor_time=anchor_time,
+                cutoff_time=cutoff_time,
+                latest_highlight_time=latest_highlight_time,
+            ):
+                return
+            evidence_by_key[evidence.dedup_key] = evidence
+
+        if subject_tag:
+            pos = 0
+            while True:
+                notifs = self.app.recorder.select_notifications(start=pos + 1, limit=1000)
+                if not notifs:
+                    break
+                for n in notifs:
+                    if self._aggregate_of(n) != "Detection":
+                        pos = n.id
+                        continue
+                    try:
+                        event = self.app.mapper.to_domain_event(n)
+                    except Exception:
+                        log.exception(
+                            "%s: could not inspect detection notification %s for recognition policy",
+                            self.name,
+                            n.id,
+                        )
+                        pos = n.id
+                        continue
+                    if (
+                        type(event).__name__ == "Detected"
+                        and event.subject_tag == subject_tag
+                        and PUBLIC_INTENT_PREFIX.get(event.detection_type) == "celebrate"
+                    ):
+                        add(self._recognition_evidence_for_event(event, n.id))
+                    pos = n.id
+
+        for candidate in group:
+            add(self._recognition_evidence_for_event(candidate.event, candidate.notification_id))
+
+        return sorted(
+            evidence_by_key.values(),
+            key=lambda e: (e.occurred_at or _UTC_MIN, e.notification_id, e.dedup_key),
+        )
+
+    @staticmethod
+    def _recognition_summary(
+        *,
+        decision: str,
+        evidence: list[_RecognitionEvidence],
+    ) -> dict:
+        return {
+            "recognition_policy": PLAYER_HIGHLIGHT_POLICY,
+            "recognition_decision": decision,
+            "recognition_score": sum(item.score for item in evidence),
+            "recognition_threshold": PLAYER_HIGHLIGHT_THRESHOLD,
+            "recognition_evidence": [
+                {
+                    "dedup_key": item.dedup_key,
+                    "detection_type": item.detection_type,
+                    "score": item.score,
+                    "occurred_at": item.occurred_at_text,
+                }
+                for item in evidence
+            ],
+        }
 
     def _drop_candidate(
         self,
@@ -307,6 +477,7 @@ class CommunicationPolicy(FollowerRunner):
         reason: str,
         suppressed_by_intent: CommunicationIntent | None = None,
         selected_candidate: _CelebrateCandidate | None = None,
+        summary_extra: dict | None = None,
     ) -> None:
         self._raise_intent(
             dedup_key=f"intent:detection:{candidate.dedup_key}",
@@ -322,6 +493,7 @@ class CommunicationPolicy(FollowerRunner):
                 suppressed_by_intent_key=getattr(suppressed_by_intent, "dedup_key", None),
                 selected_detection_key=getattr(selected_candidate, "dedup_key", None),
                 selected_detection_type=getattr(selected_candidate, "detection_type", None),
+                **(summary_extra or {}),
             ),
             drop_reason=reason,
         )
@@ -338,19 +510,34 @@ class CommunicationPolicy(FollowerRunner):
             selected = max(group, key=self._candidate_sort_key)
             if selected.subject_tag:
                 self._celebrated_this_run.add(selected.subject_tag)
-            cooldown_intent = self._cooldown_match(
+            latest_highlight = self._latest_public_highlight(
                 selected,
                 active_highlights.get(selected.subject_tag or "", []),
             )
-            if cooldown_intent is not None:
+            evidence = self._recognition_evidence(
+                subject_tag=selected.subject_tag,
+                group=group,
+                selected=selected,
+                latest_highlight=latest_highlight,
+            )
+            score = sum(item.score for item in evidence)
+            selected_score, selected_bypass = _score_detection(selected.event)
+            if not selected_bypass and score < PLAYER_HIGHLIGHT_THRESHOLD:
+                summary_extra = self._recognition_summary(
+                    decision="accruing",
+                    evidence=evidence,
+                )
+                summary_extra["recognition_evidence_count"] = len(evidence)
                 for candidate in group:
                     self._drop_candidate(
                         candidate,
-                        reason=PLAYER_HIGHLIGHT_COOLDOWN_REASON,
-                        suppressed_by_intent=cooldown_intent,
+                        reason=PLAYER_HIGHLIGHT_ACCRUING_REASON,
+                        suppressed_by_intent=latest_highlight,
+                        summary_extra=summary_extra,
                     )
                 continue
 
+            decision = "bypass" if selected_bypass else "accrued"
             self._raise_intent(
                 dedup_key=f"intent:detection:{selected.dedup_key}",
                 intent_type=f"celebrate:{selected.detection_type}",
@@ -358,7 +545,11 @@ class CommunicationPolicy(FollowerRunner):
                 scope="public",
                 priority=1,
                 caused_by=[selected.evidence, *selected.event.caused_by],
-                summary=_summary_for_detection(selected.event),
+                summary=_summary_for_detection(
+                    selected.event,
+                    **self._recognition_summary(decision=decision, evidence=evidence),
+                    recognition_selected_score=selected_score,
+                ),
             )
             for candidate in group:
                 if candidate is selected:
