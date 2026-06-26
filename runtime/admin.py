@@ -13,6 +13,12 @@ from runtime.activities import (
     resolve_activity,
     schedule_specs_from_registry,
 )
+from runtime.activity_runner import (
+    ActivityRunError,
+    ManualActivityNotAllowed,
+    UnknownActivityError,
+    run_activity_once,
+)
 from storage.contextual_memory import archive_member_note_memory, upsert_member_note_memory
 
 @dataclass(frozen=True)
@@ -630,17 +636,20 @@ async def _run_runtime_job(job_name: str, preview: bool) -> str:
     if not activity_key:
         return f"Unknown job: {job_name}"
     resolved = resolve_activity(activity_key, elixir)
-    job_callable = resolved["job_callable"]
     display_name = resolved["activity_key"]
+    if not resolved["manual_trigger_allowed"]:
+        return f"`{display_name}` cannot be run manually."
     if preview:
         async with _preview_job_runtime() as captured_posts:
             try:
-                await job_callable()
+                await run_activity_once(display_name, runtime_module=elixir)
             except Exception as exc:
                 return f"`{display_name}` failed in preview mode: {exc}"
             return f"Ran `{display_name}` in preview mode.\n\n{_format_preview_posts(captured_posts)}"
     try:
-        await job_callable()
+        await run_activity_once(display_name, runtime_module=elixir)
+    except (UnknownActivityError, ManualActivityNotAllowed, ActivityRunError) as exc:
+        return f"`{display_name}` failed: {exc}"
     except Exception as exc:
         return f"`{display_name}` failed: {exc}"
     return f"Ran `{display_name}`."

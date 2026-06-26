@@ -100,3 +100,19 @@ def test_restart_aborts_without_stopping_when_backup_fails(tmp_path):
     assert any(line.startswith("python ") for line in calls)
     assert not any(" bootout " in line for line in calls)
     assert not any(" bootstrap " in line for line in calls)
+
+
+def test_activity_run_uses_registered_activity_runner(tmp_path):
+    admin_script, env, log_path = _admin_script_fixture(tmp_path)
+
+    result = subprocess.run(
+        ["bash", str(admin_script), "activity", "run", "v5-reactive-tick"],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    calls = log_path.read_text(encoding="utf-8").splitlines()
+    assert calls == ["python -m runtime.activity_runner run v5-reactive-tick"]
