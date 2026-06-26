@@ -96,6 +96,53 @@ def _create_leader_action_eval_schema(conn):
     )
 
 
+def _create_player_highlight_eval_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE communication_intents (
+            intent_id INTEGER PRIMARY KEY,
+            intent_key TEXT,
+            workflow TEXT,
+            intent_type TEXT,
+            status TEXT,
+            target_channel_key TEXT,
+            target_channel_id TEXT,
+            source_signal_key TEXT,
+            source_signal_type TEXT,
+            covers_signal_keys_json TEXT,
+            event_keys_json TEXT,
+            project_id INTEGER,
+            case_id INTEGER,
+            summary TEXT,
+            content_preview TEXT,
+            skipped_reason TEXT,
+            error_detail TEXT,
+            payload_json TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            delivered_at TEXT,
+            failed_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE messages (
+            discord_message_id TEXT PRIMARY KEY,
+            channel_id TEXT,
+            author_type TEXT,
+            workflow TEXT,
+            event_type TEXT,
+            content TEXT,
+            summary TEXT,
+            created_at TEXT,
+            raw_json TEXT,
+            intent_id INTEGER
+        )
+        """
+    )
+
+
 def _insert_leader_action(conn, **overrides):
     row = {
         "action_id": 1,
@@ -142,6 +189,45 @@ def _insert_leader_action(conn, **overrides):
     columns = list(row)
     conn.execute(
         f"INSERT INTO leader_action_recommendations ({', '.join(columns)}) "
+        f"VALUES ({', '.join('?' for _ in columns)})",
+        [row[column] for column in columns],
+    )
+
+
+def _insert_player_highlight_intent(conn, **overrides):
+    row = {
+        "intent_id": 11,
+        "intent_key": "v5:intent:detection:best_trophies_peak:#AAA111:6000",
+        "workflow": "v5-reactive",
+        "intent_type": "celebrate:best_trophies_peak",
+        "status": "delivered",
+        "target_channel_key": "player-highlights",
+        "target_channel_id": "1482352147029950474",
+        "source_signal_key": "best_trophies_peak:#AAA111:6000",
+        "source_signal_type": "best_trophies_peak",
+        "covers_signal_keys_json": '["best_trophies_peak:#AAA111:6000"]',
+        "event_keys_json": "[]",
+        "project_id": None,
+        "case_id": None,
+        "summary": '{"detection_type": "best_trophies_peak", "peak": 6000}',
+        "content_preview": "**Eval Alice** just hit 6000 trophies.",
+        "skipped_reason": None,
+        "error_detail": None,
+        "payload_json": (
+            '{"message_ids": ["4001"], "posted_messages": ['
+            '{"discord_message_id": "4001", '
+            '"content": "**Eval Alice** just hit 6000 trophies.", '
+            '"discord_created_at": "2026-06-24T12:00:02Z"}]}'
+        ),
+        "created_at": "2026-06-24T12:00:00Z",
+        "updated_at": "2026-06-24T12:00:02Z",
+        "delivered_at": "2026-06-24T12:00:02Z",
+        "failed_at": None,
+    }
+    row.update(overrides)
+    columns = list(row)
+    conn.execute(
+        f"INSERT INTO communication_intents ({', '.join(columns)}) "
         f"VALUES ({', '.join('?' for _ in columns)})",
         [row[column] for column in columns],
     )
@@ -251,3 +337,71 @@ def test_eval_leader_actions_flags_stale_open_cards(tmp_path):
     assert result["passed"] is False
     assert result["metrics"]["stale_open_count"]["value"] == 1
     assert result["stale_open_action_ids"] == [2]
+
+
+def test_eval_player_highlights_scores_exact_artifacts(tmp_path):
+    from scripts import eval_player_highlights
+
+    db_path = tmp_path / "player-highlights.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_player_highlight_eval_schema(conn)
+        _insert_player_highlight_intent(conn)
+        conn.execute(
+            """
+            INSERT INTO messages VALUES (
+                '4001', '1482352147029950474', 'assistant', 'v5-reactive',
+                'celebrate:best_trophies_peak', '**Eval Alice** just hit 6000 trophies.',
+                'Player highlight body', '2026-06-24T12:00:02Z', '{"raw": true}', 11
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = eval_player_highlights.evaluate(
+        db_path,
+        since=eval_player_highlights._parse_time("2026-06-24T00:00:00Z"),
+        end=eval_player_highlights._parse_time("2026-06-25T00:00:00Z"),
+    )
+
+    assert result["passed"] is True
+    assert result["metrics"]["delivery_rate"]["value"] == 1.0
+    assert result["metrics"]["trace_rate"]["value"] == 1.0
+    assert result["metrics"]["message_id_rate"]["value"] == 1.0
+    assert result["metrics"]["exact_copy_rate"]["value"] == 1.0
+    assert result["metrics"]["non_meta_copy_rate"]["value"] == 1.0
+    assert result["artifacts"][0]["exact_copies"][0]["source"] == "messages"
+    assert result["artifacts"][0]["messages"][0]["discord_message_id"] == "4001"
+
+
+def test_eval_player_highlights_flags_meta_copy(tmp_path):
+    from scripts import eval_player_highlights
+
+    db_path = tmp_path / "player-highlights-meta.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_player_highlight_eval_schema(conn)
+        _insert_player_highlight_intent(
+            conn,
+            payload_json=(
+                '{"message_ids": ["4002"], "posted_messages": ['
+                '{"discord_message_id": "4002", '
+                '"content": "Signal data inconsistent with player profile; skipping post", '
+                '"discord_created_at": "2026-06-24T12:00:02Z"}]}'
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = eval_player_highlights.evaluate(
+        db_path,
+        since=eval_player_highlights._parse_time("2026-06-24T00:00:00Z"),
+        end=eval_player_highlights._parse_time("2026-06-25T00:00:00Z"),
+    )
+
+    assert result["passed"] is False
+    assert result["metrics"]["non_meta_copy_rate"]["value"] == 0.0
+    assert result["meta_copy_intent_ids"] == [11]
