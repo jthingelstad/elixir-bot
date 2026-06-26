@@ -143,6 +143,29 @@ def _create_player_highlight_eval_schema(conn):
     )
 
 
+def _create_ask_elixir_alignment_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE messages (
+            message_id INTEGER PRIMARY KEY,
+            discord_message_id TEXT,
+            thread_id INTEGER,
+            channel_id TEXT,
+            discord_user_id TEXT,
+            member_id INTEGER,
+            author_type TEXT,
+            workflow TEXT,
+            event_type TEXT,
+            content TEXT,
+            summary TEXT,
+            created_at TEXT,
+            raw_json TEXT,
+            intent_id INTEGER
+        )
+        """
+    )
+
+
 def _insert_leader_action(conn, **overrides):
     row = {
         "action_id": 1,
@@ -228,6 +251,32 @@ def _insert_player_highlight_intent(conn, **overrides):
     columns = list(row)
     conn.execute(
         f"INSERT INTO communication_intents ({', '.join(columns)}) "
+        f"VALUES ({', '.join('?' for _ in columns)})",
+        [row[column] for column in columns],
+    )
+
+
+def _insert_alignment_message(conn, **overrides):
+    row = {
+        "message_id": 1,
+        "discord_message_id": "5001",
+        "thread_id": 99,
+        "channel_id": "1482368505058955467",
+        "discord_user_id": "u1",
+        "member_id": 1,
+        "author_type": "user",
+        "workflow": "interactive",
+        "event_type": None,
+        "content": "Who are the donation leaders?",
+        "summary": "Who are the donation leaders?",
+        "created_at": "2026-06-25T17:24:00Z",
+        "raw_json": None,
+        "intent_id": None,
+    }
+    row.update(overrides)
+    columns = list(row)
+    conn.execute(
+        f"INSERT INTO messages ({', '.join(columns)}) "
         f"VALUES ({', '.join('?' for _ in columns)})",
         [row[column] for column in columns],
     )
@@ -405,3 +454,121 @@ def test_eval_player_highlights_flags_meta_copy(tmp_path):
     assert result["passed"] is False
     assert result["metrics"]["non_meta_copy_rate"]["value"] == 0.0
     assert result["meta_copy_intent_ids"] == [11]
+
+
+def test_eval_ask_elixir_alignment_flags_blank_user_reply(tmp_path):
+    from scripts import eval_ask_elixir_alignment
+
+    db_path = tmp_path / "ask-elixir-alignment.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_ask_elixir_alignment_schema(conn)
+        _insert_alignment_message(
+            conn,
+            content="",
+            summary="",
+            workflow="deck_review",
+            created_at="2026-06-25T17:26:11Z",
+        )
+        _insert_alignment_message(
+            conn,
+            message_id=2,
+            discord_message_id="5002",
+            author_type="assistant",
+            workflow="deck_review",
+            event_type="deck_review_response",
+            content="**War Deck Review** stale answer.",
+            summary="War deck review.",
+            created_at="2026-06-25T17:26:32Z",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = eval_ask_elixir_alignment.evaluate(
+        db_path,
+        since=eval_ask_elixir_alignment._parse_time("2026-06-25T00:00:00Z"),
+        end=eval_ask_elixir_alignment._parse_time("2026-06-26T00:00:00Z"),
+        log_paths=[],
+    )
+
+    assert result["passed"] is False
+    assert result["metrics"]["blank_user_reply_count"]["value"] == 1
+    assert result["findings"]["blank_user_replies"][0]["assistant_message_id"] == 2
+
+
+def test_eval_ask_elixir_alignment_flags_donation_topic_mismatch(tmp_path):
+    from scripts import eval_ask_elixir_alignment
+
+    db_path = tmp_path / "ask-elixir-topic.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_ask_elixir_alignment_schema(conn)
+        _insert_alignment_message(conn)
+        _insert_alignment_message(
+            conn,
+            message_id=2,
+            discord_message_id="5002",
+            author_type="assistant",
+            workflow="deck_review",
+            event_type="deck_review_response",
+            content="**War Deck Review** Your four decks need Arrows coverage.",
+            summary="War deck review.",
+            created_at="2026-06-25T17:24:30Z",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = eval_ask_elixir_alignment.evaluate(
+        db_path,
+        since=eval_ask_elixir_alignment._parse_time("2026-06-25T00:00:00Z"),
+        end=eval_ask_elixir_alignment._parse_time("2026-06-26T00:00:00Z"),
+        log_paths=[],
+    )
+
+    assert result["passed"] is False
+    assert result["metrics"]["topic_mismatch_count"]["value"] == 1
+    assert result["findings"]["topic_mismatches"][0]["domain"] == "donations"
+
+
+def test_eval_ask_elixir_alignment_flags_ignored_question_then_blank_route(tmp_path):
+    from scripts import eval_ask_elixir_alignment
+
+    db_path = tmp_path / "ask-elixir-log.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_ask_elixir_alignment_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    log_path = tmp_path / "elixir-v5.log"
+    log_path.write_text(
+        "\n".join([
+            "2026-06-25 12:24:27,643 [INFO] elixir: intent_router mode=dispatch "
+            "channel_id=1482368505058955467 author_id=1422141611122491503 "
+            "workflow=interactive mentioned=False route=not_for_bot confidence=0.95 "
+            "sub_mode=None target_member=None latency_ms=1369.2 fallback_reason=None "
+            "rationale='asking clan members' raw_question='Who is donating beast in our clan???'",
+            "2026-06-25 12:26:11,119 [INFO] elixir: message_route "
+            "route=deck_review_war_review channel_id=1482368505058955467 "
+            "author_id=1422141611122491503 mentioned=True lane=ask-elixir "
+            "workflow=interactive deck_target=None mode='war' subject='review' "
+            "raw_question='' original='<@1477043197443182832>'",
+        ])
+    )
+
+    result = eval_ask_elixir_alignment.evaluate(
+        db_path,
+        since=eval_ask_elixir_alignment._parse_time("2026-06-25T00:00:00Z"),
+        end=eval_ask_elixir_alignment._parse_time("2026-06-26T00:00:00Z"),
+        log_paths=[str(log_path)],
+    )
+
+    assert result["passed"] is False
+    assert result["metrics"]["blank_route_count"]["value"] == 1
+    assert result["metrics"]["ignored_question_blank_route_count"]["value"] == 1
+    finding = result["findings"]["ignored_question_blank_routes"][0]
+    assert finding["ignored_question"] == "Who is donating beast in our clan???"
+    assert finding["blank_route"] == "deck_review_war_review"
