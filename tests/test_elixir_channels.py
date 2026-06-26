@@ -156,6 +156,95 @@ def test_on_message_routes_ask_elixir_without_mention():
     mock_process.assert_not_awaited()
 
 
+def test_on_message_keeps_open_ask_elixir_not_for_bot_in_llm_path():
+    message = _make_message(1482368505058955467, "ask-elixir", "Who is donating beast in our clan???")
+    message.reply = AsyncMock(return_value=SimpleNamespace(id=990))
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=False),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1482368505058955467,
+            "name": "#ask-elixir",
+            "lane": "ask-elixir",
+            "workflow": "interactive",
+            "reply_policy": "open_channel",
+            "memory_scope": "public",
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages", return_value=[]),
+        patch("elixir.db.build_memory_context", return_value={}),
+        patch("elixir.db.save_message"),
+        patch(
+            "agent.intent_router.classify_intent",
+            return_value={
+                "route": "not_for_bot",
+                "confidence": 0.95,
+                "rationale": "asking clan members about donations",
+            },
+        ) as mock_classify,
+        patch("elixir._load_live_clan_context", new=AsyncMock(return_value=({"memberList": []}, {}))),
+        patch(
+            "elixir.elixir_agent.respond_in_channel",
+            return_value={
+                "event_type": "channel_response",
+                "content": "I can check donation leaders from the current clan data.",
+                "summary": "donations",
+            },
+        ) as mock_respond,
+        patch("elixir._share_channel_result", new=AsyncMock()) as mock_share,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_classify.assert_called_once()
+    assert mock_classify.call_args.kwargs["allows_open_channel_reply"] is True
+    mock_respond.assert_called_once()
+    message.reply.assert_awaited_once_with("I can check donation leaders from the current clan data.")
+    mock_share.assert_awaited_once()
+    mock_process.assert_not_awaited()
+
+
+def test_on_message_ignores_blank_ask_elixir_mention_before_intent_routing():
+    message = _make_message(1482368505058955467, "ask-elixir", "<@1477043197443182832>")
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    with (
+        patch.object(elixir.bot, "process_commands", new=AsyncMock()) as mock_process,
+        patch("elixir.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("elixir._is_bot_mentioned", return_value=True),
+        patch("elixir._strip_bot_mentions", return_value=""),
+        patch("elixir._get_channel_behavior", return_value={
+            "id": 1482368505058955467,
+            "name": "#ask-elixir",
+            "lane": "ask-elixir",
+            "workflow": "interactive",
+            "reply_policy": "open_channel",
+            "memory_scope": "public",
+        }),
+        patch("elixir.db.upsert_discord_user"),
+        patch("elixir.db.list_thread_messages") as mock_history,
+        patch("elixir.db.save_message") as mock_save,
+        patch("agent.intent_router.classify_intent") as mock_classify,
+        patch("elixir.elixir_agent.respond_in_deck_review") as mock_review,
+        patch("elixir.elixir_agent.respond_in_channel") as mock_respond,
+    ):
+        asyncio.run(elixir.on_message(message))
+
+    mock_history.assert_not_called()
+    mock_classify.assert_not_called()
+    mock_review.assert_not_called()
+    mock_respond.assert_not_called()
+    mock_save.assert_not_called()
+    message.reply.assert_not_awaited()
+    mock_process.assert_not_awaited()
+
+
 def test_on_message_routes_ask_elixir_image_only_screenshot():
     attachment = SimpleNamespace(
         filename="clan-chat.jpg",

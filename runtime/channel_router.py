@@ -1592,6 +1592,31 @@ def _log_intent_classification(app, message, ctx, intent, *, mode_label="dispatc
     )
 
 
+def _has_readable_user_request(ctx: dict) -> bool:
+    """Return whether this turn has text or readable image context to route."""
+    if str(ctx.get("raw_question") or "").strip():
+        return True
+    return bool(ctx.get("image_blocks"))
+
+
+def _normalize_open_channel_intent(ctx: dict, intent: dict) -> dict:
+    """Keep open bot lanes from silently dropping ordinary user questions."""
+    if (
+        ctx.get("workflow") == "interactive"
+        and ctx.get("allows_open_channel_reply")
+        and str(ctx.get("raw_question") or "").strip()
+        and intent.get("route") == "not_for_bot"
+    ):
+        normalized = dict(intent)
+        normalized["route"] = "llm_chat"
+        normalized["fallback_reason"] = "open_channel_not_for_bot_override"
+        normalized["rationale"] = (
+            "Open bot lane question classified not_for_bot; falling back to chat."
+        )
+        return normalized
+    return intent
+
+
 async def route_message(message):
     import runtime.app as app
     from agent import intent_router as _intent_router
@@ -1654,6 +1679,18 @@ async def route_message(message):
             ctx["raw_question"] = _question_with_unreadable_attachment_context(stripped_content, image_attachments)
     raw_question = ctx["raw_question"]
 
+    if bot_should_consider and workflow in {"interactive", "clanops"} and not _has_readable_user_request(ctx):
+        app.log.info(
+            "empty_addressed_message_ignored channel_id=%s author_id=%s mentioned=%s lane=%s workflow=%s original=%r",
+            message.channel.id,
+            message.author.id,
+            mentioned,
+            lane,
+            workflow,
+            message.content,
+        )
+        return
+
     # LLM intent classifier — only for interactive/clanops where the bot was
     # addressed. Reception has its own onboarding pipeline below.
     if workflow in {"interactive", "clanops"} and bot_should_consider:
@@ -1680,6 +1717,7 @@ async def route_message(message):
         except Exception as exc:
             app.log.warning("intent_router_dispatch_failed: %s", exc, exc_info=True)
             intent = {"route": "llm_chat", "fallback_reason": "dispatch_exception"}
+        intent = _normalize_open_channel_intent(ctx, intent)
         _log_intent_classification(app, message, ctx, intent)
         if await _dispatch_intent(app, message, ctx, intent):
             return

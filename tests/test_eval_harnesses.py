@@ -606,3 +606,61 @@ def test_eval_ask_elixir_alignment_flags_ignored_question_then_blank_route(tmp_p
     finding = result["findings"]["ignored_question_blank_routes"][0]
     assert finding["ignored_question"] == "Who is donating beast in our clan???"
     assert finding["blank_route"] == "deck_review_war_review"
+
+
+def test_eval_ask_elixir_alignment_accepts_open_lane_llm_chat_and_ignored_blank_mention(tmp_path):
+    from scripts import eval_ask_elixir_alignment
+
+    db_path = tmp_path / "ask-elixir-fixed.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_ask_elixir_alignment_schema(conn)
+        _insert_alignment_message(
+            conn,
+            content="Who is donating beast in our clan???",
+            summary="Who is donating beast in our clan???",
+        )
+        _insert_alignment_message(
+            conn,
+            message_id=2,
+            discord_message_id="5002",
+            author_type="assistant",
+            workflow="interactive",
+            event_type="channel_response",
+            content="The current donation leaders are Finn and King Levy.",
+            summary="Donation leaders.",
+            created_at="2026-06-25T17:24:30Z",
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    log_path = tmp_path / "elixir-v5.log"
+    log_path.write_text(
+        "\n".join([
+            "2026-06-25 12:24:27,643 [INFO] elixir: intent_router mode=dispatch "
+            "channel_id=1482368505058955467 author_id=1422141611122491503 "
+            "workflow=interactive mentioned=False route=llm_chat confidence=0.95 "
+            "sub_mode=None target_member=None latency_ms=1369.2 "
+            "fallback_reason='open_channel_not_for_bot_override' "
+            "rationale='Open bot lane question classified not_for_bot; falling back to chat.' "
+            "raw_question='Who is donating beast in our clan???'",
+            "2026-06-25 12:26:11,119 [INFO] elixir: "
+            "empty_addressed_message_ignored channel_id=1482368505058955467 "
+            "author_id=1422141611122491503 mentioned=True lane=ask-elixir "
+            "workflow=interactive original='<@1477043197443182832>'",
+        ])
+    )
+
+    result = eval_ask_elixir_alignment.evaluate(
+        db_path,
+        since=eval_ask_elixir_alignment._parse_time("2026-06-25T00:00:00Z"),
+        end=eval_ask_elixir_alignment._parse_time("2026-06-26T00:00:00Z"),
+        log_paths=[str(log_path)],
+    )
+
+    assert result["passed"] is True
+    assert result["metrics"]["not_for_bot_route_count"]["value"] == 0
+    assert result["metrics"]["blank_route_count"]["value"] == 0
+    assert result["metrics"]["ignored_question_blank_route_count"]["value"] == 0
+    assert result["metrics"]["topic_mismatch_count"]["value"] == 0
