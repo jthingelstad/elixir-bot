@@ -532,6 +532,39 @@ def test_eval_ask_elixir_alignment_flags_donation_topic_mismatch(tmp_path):
     assert result["findings"]["topic_mismatches"][0]["domain"] == "donations"
 
 
+def test_eval_ask_elixir_alignment_flags_not_for_bot_in_open_lane(tmp_path):
+    from scripts import eval_ask_elixir_alignment
+
+    db_path = tmp_path / "ask-elixir-not-for-bot.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_ask_elixir_alignment_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    log_path = tmp_path / "elixir-v5.log"
+    log_path.write_text(
+        "2026-06-25 12:24:27,643 [INFO] elixir: intent_router mode=dispatch "
+        "channel_id=1482368505058955467 author_id=1422141611122491503 "
+        "workflow=interactive mentioned=False route=not_for_bot confidence=0.95 "
+        "sub_mode=None target_member=None latency_ms=1369.2 fallback_reason=None "
+        "rationale='asking clan members' raw_question='Who is donating beast in our clan???'\n"
+    )
+
+    result = eval_ask_elixir_alignment.evaluate(
+        db_path,
+        since=eval_ask_elixir_alignment._parse_time("2026-06-25T00:00:00Z"),
+        end=eval_ask_elixir_alignment._parse_time("2026-06-26T00:00:00Z"),
+        log_paths=[str(log_path)],
+    )
+
+    assert result["passed"] is False
+    assert result["metrics"]["not_for_bot_route_count"]["value"] == 1
+    finding = result["findings"]["not_for_bot_routes"][0]
+    assert finding["raw_question"] == "Who is donating beast in our clan???"
+
+
 def test_eval_ask_elixir_alignment_flags_ignored_question_then_blank_route(tmp_path):
     from scripts import eval_ask_elixir_alignment
 
@@ -567,6 +600,7 @@ def test_eval_ask_elixir_alignment_flags_ignored_question_then_blank_route(tmp_p
     )
 
     assert result["passed"] is False
+    assert result["metrics"]["not_for_bot_route_count"]["value"] == 1
     assert result["metrics"]["blank_route_count"]["value"] == 1
     assert result["metrics"]["ignored_question_blank_route_count"]["value"] == 1
     finding = result["findings"]["ignored_question_blank_routes"][0]
