@@ -634,18 +634,59 @@ class MemberRoleChangeDetector(FollowerRunner):
         )
 
 
+def _active_score_summary(
+    item: dict,
+    *,
+    use_period_points: bool = False,
+) -> tuple[int | None, str, str]:
+    fame = item.get("fame")
+    period_points = item.get("period_points", item.get("periodPoints"))
+    active_score = item.get("active_score")
+    if active_score is None:
+        active_score = period_points if use_period_points or (not fame and period_points) else fame
+    score_source = item.get("score_source")
+    if not score_source:
+        score_source = "period_points" if use_period_points or (not fame and period_points) else "fame"
+    score_label = item.get("score_label")
+    if not score_label:
+        score_label = "period points" if score_source == "period_points" else "fame"
+    return active_score, score_source, score_label
+
+
+def _uses_period_points_scoring(ws: dict) -> bool:
+    standings = ws.get("race_standings") or []
+    if standings:
+        return any(
+            s.get("score_source") == "period_points"
+            or (not s.get("fame") and s.get("period_points"))
+            for s in standings
+        )
+    return ws.get("score_source") == "period_points" or (
+        not ws.get("fame") and ws.get("period_points")
+    )
+
+
 def _trim_standings(ws: dict) -> list[dict]:
     """Compact the live race standings for the detection payload (the agent
     composes from this; it doesn't need every field)."""
-    return [
-        {
+    standings = []
+    use_period_points = _uses_period_points_scoring(ws)
+    for s in (ws.get("race_standings") or []):
+        active_score, score_source, score_label = _active_score_summary(
+            s,
+            use_period_points=use_period_points,
+        )
+        standings.append({
             "rank": s.get("rank"),
             "clan": s.get("clan_name"),
             "fame": s.get("fame"),
+            "period_points": s.get("period_points"),
+            "active_score": active_score,
+            "score_source": score_source,
+            "score_label": score_label,
             "is_us": bool(s.get("is_us")),
-        }
-        for s in (ws.get("race_standings") or [])
-    ]
+        })
+    return standings
 
 
 class WarUpdateDetector(FollowerRunner):
@@ -689,6 +730,11 @@ class WarUpdateDetector(FollowerRunner):
         stamp = now.astimezone(timezone.utc).isoformat()
 
         # 1) Finished race -> a single result/recap post.
+        use_period_points = _uses_period_points_scoring(ws)
+        active_score, score_source, score_label = _active_score_summary(
+            ws,
+            use_period_points=use_period_points,
+        )
         if ws.get("race_completed"):
             season = ws.get("season_id")
             section = ws.get("section_index")
@@ -702,6 +748,10 @@ class WarUpdateDetector(FollowerRunner):
                     "season_week": ws.get("season_week_label"),
                     "final_rank": ws.get("race_rank"),
                     "our_fame": ws.get("fame"),
+                    "our_period_points": ws.get("period_points"),
+                    "our_active_score": active_score,
+                    "score_source": score_source,
+                    "score_label": score_label,
                     "trophy_change": ws.get("trophy_change"),
                     "standings": _trim_standings(ws),
                 },
@@ -732,6 +782,10 @@ class WarUpdateDetector(FollowerRunner):
                 "final_battle_day": bool(ws.get("final_battle_day_active")),
                 "our_rank": ws.get("race_rank"),
                 "our_fame": ws.get("fame"),
+                "our_period_points": ws.get("period_points"),
+                "our_active_score": active_score,
+                "score_source": score_source,
+                "score_label": score_label,
                 "clan_score": ws.get("clan_score"),
                 "trophy_stakes": ws.get("trophy_stakes_text"),
                 "standings": _trim_standings(ws),
