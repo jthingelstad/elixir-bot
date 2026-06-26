@@ -39,9 +39,9 @@ def test_policy_emits_scoped_intents_idempotently(world):
     from event_core.mind.communication import CommunicationPolicy
 
     world.save(Detection(
-        dedup_key="best_trophies_peak:#A:6000", detection_type="best_trophies_peak",
+        dedup_key="career_wins_milestone:#A:1000", detection_type="career_wins_milestone",
         detector="t", subject_tag="#A", occurred_at="2026-06-21T00:00:00Z",
-        caused_by=["e1"], payload={"peak": 6000},
+        caused_by=["e1"], payload={"milestone": 1000},
     ))
     world.save(Recommendation(
         dedup_key="kick:#B", recommendation_type="kick", player_tag="#B",
@@ -53,7 +53,7 @@ def test_policy_emits_scoped_intents_idempotently(world):
     pol.reset()
     assert pol.run() == 2  # one public (detection) + one leadership (recommendation)
 
-    pub = world.repository.get(intent_id("intent:detection:best_trophies_peak:#A:6000"))
+    pub = world.repository.get(intent_id("intent:detection:career_wins_milestone:#A:1000"))
     assert pub.scope == "public" and pub.subject_tag == "#A"
     lead = world.repository.get(intent_id("intent:recommendation:kick:#B"))
     assert lead.scope == "leadership"
@@ -79,11 +79,12 @@ def test_policy_coalesces_celebrate_per_player_per_tick(world):
     for dedup, dtype, subj in [
         ("card_level_milestone:#A:1", "card_level_milestone", "#A"),
         ("battle_trophy_push:#A:1", "battle_trophy_push", "#A"),
-        ("best_trophies_peak:#B:6000", "best_trophies_peak", "#B"),
+        ("career_wins_milestone:#B:1000", "career_wins_milestone", "#B"),
     ]:
         world.save(Detection(
             dedup_key=dedup, detection_type=dtype, detector="t", subject_tag=subj,
-            occurred_at="2026-06-22T00:00:00Z", caused_by=["e"], payload={},
+            occurred_at="2026-06-22T00:00:00Z", caused_by=["e"],
+            payload={"milestone": 1000} if dtype == "career_wins_milestone" else {},
         ))
     conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
     pol = CommunicationPolicy(world, conn)
@@ -97,13 +98,14 @@ def test_policy_coalesces_celebrate_per_player_per_tick(world):
     conn.close()
 
 
-def test_policy_suppresses_repeated_player_highlight_inside_cooldown(world):
+def test_policy_accrues_under_threshold_player_highlight_evidence(world):
     from event_core import db
     from event_core.domain.communication_intent import intent_id
     from event_core.domain.detection import Detection
     from event_core.mind.communication import (
         CommunicationPolicy,
-        PLAYER_HIGHLIGHT_COOLDOWN_REASON,
+        PLAYER_HIGHLIGHT_ACCRUING_REASON,
+        PLAYER_HIGHLIGHT_THRESHOLD,
     )
 
     conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
@@ -114,31 +116,39 @@ def test_policy_suppresses_repeated_player_highlight_inside_cooldown(world):
     ))
     pol = CommunicationPolicy(world, conn)
     pol.reset()
-    assert pol.run() == 1
+    assert pol.run() == 0
 
     world.save(Detection(
-        dedup_key="battle_trophy_push:#A:2", detection_type="battle_trophy_push",
+        dedup_key="badge_earned:#A:1", detection_type="badge_earned",
         detector="t", subject_tag="#A", occurred_at="2026-06-22T01:00:00Z",
-        caused_by=["e2"], payload={"trophy_delta": 140},
+        caused_by=["e2"], payload={"badge_name": "Tenacious"},
     ))
-    assert CommunicationPolicy(world, conn).run() == 0
+    assert CommunicationPolicy(world, conn).run() == 1
 
     first = world.repository.get(intent_id("intent:detection:battle_trophy_push:#A:1"))
-    second = world.repository.get(intent_id("intent:detection:battle_trophy_push:#A:2"))
-    assert first.status == "raised"
-    assert second.status == "dropped"
-    assert second.drop_reason == PLAYER_HIGHLIGHT_COOLDOWN_REASON
-    assert second.summary["suppressed_by_intent_key"] == first.dedup_key
+    second = world.repository.get(intent_id("intent:detection:badge_earned:#A:1"))
+    assert first.status == "dropped"
+    assert first.drop_reason == PLAYER_HIGHLIGHT_ACCRUING_REASON
+    assert first.summary["recognition_score"] == 25
+    assert first.summary["recognition_threshold"] == PLAYER_HIGHLIGHT_THRESHOLD
+    assert first.summary["recognition_evidence_count"] == 1
+    assert second.status == "raised"
+    assert second.summary["recognition_decision"] == "accrued"
+    assert second.summary["recognition_score"] == PLAYER_HIGHLIGHT_THRESHOLD
+    assert [e["detection_type"] for e in second.summary["recognition_evidence"]] == [
+        "battle_trophy_push",
+        "badge_earned",
+    ]
     conn.close()
 
 
-def test_policy_cooldown_crosses_detection_types(world):
+def test_policy_cross_type_evidence_accumulates(world):
     from event_core import db
     from event_core.domain.communication_intent import intent_id
     from event_core.domain.detection import Detection
     from event_core.mind.communication import (
         CommunicationPolicy,
-        PLAYER_HIGHLIGHT_COOLDOWN_REASON,
+        PLAYER_HIGHLIGHT_ACCRUING_REASON,
     )
 
     conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
@@ -149,47 +159,83 @@ def test_policy_cooldown_crosses_detection_types(world):
     ))
     pol = CommunicationPolicy(world, conn)
     pol.reset()
-    assert pol.run() == 1
+    assert pol.run() == 0
 
     world.save(Detection(
-        dedup_key="battle_trophy_push:#A:2", detection_type="battle_trophy_push",
+        dedup_key="path_of_legend_promotion:#A:10", detection_type="path_of_legend_promotion",
         detector="t", subject_tag="#A", occurred_at="2026-06-22T06:00:00Z",
-        caused_by=["e2"], payload={"trophy_delta": 110},
+        caused_by=["e2"], payload={"league": 10},
     ))
-    assert CommunicationPolicy(world, conn).run() == 0
+    assert CommunicationPolicy(world, conn).run() == 1
 
-    second = world.repository.get(intent_id("intent:detection:battle_trophy_push:#A:2"))
-    assert second.status == "dropped"
-    assert second.drop_reason == PLAYER_HIGHLIGHT_COOLDOWN_REASON
+    first = world.repository.get(intent_id("intent:detection:best_trophies_peak:#A:6000"))
+    second = world.repository.get(intent_id("intent:detection:path_of_legend_promotion:#A:10"))
+    assert first.status == "dropped"
+    assert first.drop_reason == PLAYER_HIGHLIGHT_ACCRUING_REASON
+    assert second.status == "raised"
+    assert second.summary["recognition_decision"] == "accrued"
+    assert second.summary["recognition_score"] == 85
+    assert {e["detection_type"] for e in second.summary["recognition_evidence"]} == {
+        "best_trophies_peak",
+        "path_of_legend_promotion",
+    }
     conn.close()
 
 
-def test_policy_keeps_player_highlight_cooldown_for_seven_days(world):
+def test_policy_bypass_event_raises_after_recent_lower_value_highlight(world):
     from event_core import db
+    from event_core.domain.communication_intent import CommunicationIntent
     from event_core.domain.communication_intent import intent_id
     from event_core.domain.detection import Detection
-    from event_core.mind.communication import PLAYER_HIGHLIGHT_COOLDOWN_REASON, CommunicationPolicy
+    from event_core.mind.communication import CommunicationPolicy
 
     conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
-    world.save(Detection(
-        dedup_key="battle_trophy_push:#A:1", detection_type="battle_trophy_push",
-        detector="t", subject_tag="#A", occurred_at="2026-06-01T00:00:00Z",
-        caused_by=["e1"], payload={"trophy_delta": 110},
+    world.save(CommunicationIntent(
+        dedup_key="intent:detection:badge_earned:#A:1",
+        intent_type="celebrate:badge_earned",
+        subject_tag="#A",
+        scope="public",
+        priority=1,
+        caused_by=["e1"],
+        summary={"detection_type": "badge_earned", "occurred_at": "2026-06-01T00:00:00Z"},
     ))
-    pol = CommunicationPolicy(world, conn)
-    pol.reset()
-    assert pol.run() == 1
-
     world.save(Detection(
         dedup_key="card_level_milestone:#A:16", detection_type="card_level_milestone",
         detector="t", subject_tag="#A", occurred_at="2026-06-08T00:00:00Z",
         caused_by=["e2"], payload={"card_name": "Wizard", "milestone": 16},
     ))
-    assert CommunicationPolicy(world, conn).run() == 0
+    pol = CommunicationPolicy(world, conn)
+    pol.reset()
+    assert pol.run() == 1
 
     later = world.repository.get(intent_id("intent:detection:card_level_milestone:#A:16"))
-    assert later.status == "dropped"
-    assert later.drop_reason == PLAYER_HIGHLIGHT_COOLDOWN_REASON
+    assert later.status == "raised"
+    assert later.summary["recognition_decision"] == "bypass"
+    assert later.summary["recognition_score"] == 95
+    conn.close()
+
+
+def test_policy_durable_milestone_raises_by_itself(world):
+    from event_core import db
+    from event_core.domain.communication_intent import intent_id
+    from event_core.domain.detection import Detection
+    from event_core.mind.communication import CommunicationPolicy
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    world.save(Detection(
+        dedup_key="career_wins_milestone:#A:1000", detection_type="career_wins_milestone",
+        detector="t", subject_tag="#A", occurred_at="2026-06-22T00:00:00Z",
+        caused_by=["e1"], payload={"milestone": 1000, "from": 998, "to": 1002},
+    ))
+    pol = CommunicationPolicy(world, conn)
+    pol.reset()
+    assert pol.run() == 1
+
+    intent = world.repository.get(intent_id("intent:detection:career_wins_milestone:#A:1000"))
+    assert intent.status == "raised"
+    assert intent.summary["recognition_decision"] == "bypass"
+    assert intent.summary["recognition_score"] == 85
+    assert intent.summary["recognition_evidence"][0]["dedup_key"] == "career_wins_milestone:#A:1000"
     conn.close()
 
 
@@ -200,47 +246,76 @@ def test_policy_allows_different_players_inside_highlight_window(world):
     from event_core.mind.communication import CommunicationPolicy
 
     conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
-    for tag in ("#A", "#B"):
-        world.save(Detection(
-            dedup_key=f"battle_trophy_push:{tag}:1", detection_type="battle_trophy_push",
-            detector="t", subject_tag=tag, occurred_at="2026-06-22T00:00:00Z",
-            caused_by=["e"], payload={"trophy_delta": 110},
-        ))
-    pol = CommunicationPolicy(world, conn)
-    pol.reset()
-    assert pol.run() == 2
-
-    for tag in ("#A", "#B"):
-        intent = world.repository.get(intent_id(f"intent:detection:battle_trophy_push:{tag}:1"))
-        assert intent.status == "raised"
-    conn.close()
-
-
-def test_policy_allows_player_highlight_after_fourteen_days(world):
-    from event_core import db
-    from event_core.domain.communication_intent import intent_id
-    from event_core.domain.detection import Detection
-    from event_core.mind.communication import CommunicationPolicy
-
-    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
     world.save(Detection(
         dedup_key="battle_trophy_push:#A:1", detection_type="battle_trophy_push",
-        detector="t", subject_tag="#A", occurred_at="2026-06-01T00:00:00Z",
-        caused_by=["e1"], payload={"trophy_delta": 110},
+        detector="t", subject_tag="#A", occurred_at="2026-06-22T00:00:00Z",
+        caused_by=["e"], payload={"trophy_delta": 110},
+    ))
+    world.save(Detection(
+        dedup_key="badge_earned:#A:1", detection_type="badge_earned",
+        detector="t", subject_tag="#A", occurred_at="2026-06-22T00:10:00Z",
+        caused_by=["e"], payload={"badge_name": "Tenacious"},
+    ))
+    world.save(Detection(
+        dedup_key="battle_trophy_push:#B:1", detection_type="battle_trophy_push",
+        detector="t", subject_tag="#B", occurred_at="2026-06-22T00:00:00Z",
+        caused_by=["e"], payload={"trophy_delta": 110},
     ))
     pol = CommunicationPolicy(world, conn)
     pol.reset()
     assert pol.run() == 1
 
-    world.save(Detection(
-        dedup_key="battle_trophy_push:#A:2", detection_type="battle_trophy_push",
-        detector="t", subject_tag="#A", occurred_at="2026-06-15T00:00:01Z",
-        caused_by=["e2"], payload={"trophy_delta": 120},
-    ))
-    assert CommunicationPolicy(world, conn).run() == 1
+    a = world.repository.get(intent_id("intent:detection:badge_earned:#A:1"))
+    b = world.repository.get(intent_id("intent:detection:battle_trophy_push:#B:1"))
+    assert a.status == "raised"
+    assert a.summary["recognition_score"] == 80
+    assert b.status == "dropped"
+    assert b.summary["recognition_score"] == 25
+    conn.close()
 
-    second = world.repository.get(intent_id("intent:detection:battle_trophy_push:#A:2"))
-    assert second.status == "raised"
+
+def test_policy_does_not_recount_evidence_before_latest_public_highlight(world):
+    from event_core import db
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.domain.communication_intent import intent_id
+    from event_core.domain.detection import Detection
+    from event_core.mind.communication import PLAYER_HIGHLIGHT_ACCRUING_REASON, CommunicationPolicy
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    world.save(CommunicationIntent(
+        dedup_key="intent:detection:career_wins_milestone:#A:1000",
+        intent_type="celebrate:career_wins_milestone",
+        subject_tag="#A",
+        scope="public",
+        priority=1,
+        caused_by=["e0"],
+        summary={
+            "detection_type": "career_wins_milestone",
+            "milestone": 1000,
+            "occurred_at": "2026-06-10T00:00:00Z",
+        },
+    ))
+    world.save(Detection(
+        dedup_key="battle_trophy_push:#A:1", detection_type="battle_trophy_push",
+        detector="t", subject_tag="#A", occurred_at="2026-06-09T00:00:00Z",
+        caused_by=["e1"], payload={"trophy_delta": 300},
+    ))
+    world.save(Detection(
+        dedup_key="badge_earned:#A:1", detection_type="badge_earned",
+        detector="t", subject_tag="#A", occurred_at="2026-06-11T00:00:00Z",
+        caused_by=["e2"], payload={"badge_name": "Tenacious"},
+    ))
+    pol = CommunicationPolicy(world, conn)
+    pol.reset()
+    assert pol.run() == 0
+
+    current = world.repository.get(intent_id("intent:detection:badge_earned:#A:1"))
+    assert current.status == "dropped"
+    assert current.drop_reason == PLAYER_HIGHLIGHT_ACCRUING_REASON
+    assert current.summary["recognition_score"] == 55
+    assert [e["dedup_key"] for e in current.summary["recognition_evidence"]] == [
+        "badge_earned:#A:1",
+    ]
     conn.close()
 
 
@@ -272,7 +347,7 @@ def test_policy_maps_restored_coverage_detection_types(world):
         "wkdon:2026W25": ("weekly_donation_leader", "clan"),
     }
     # Unique subject per case so per-player celebrate coalescing doesn't collapse
-    # the three celebrate detections — this test checks type->prefix mapping only.
+    # the celebrate detections — this test checks type->prefix mapping only.
     for i, (dedup, (dtype, _prefix)) in enumerate(cases.items()):
         world.save(Detection(
             dedup_key=dedup, detection_type=dtype, detector="t", subject_tag=f"#S{i}",
@@ -296,7 +371,18 @@ def test_policy_maps_restored_coverage_detection_types(world):
     conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
     pol = CommunicationPolicy(world, conn)
     pol.reset()
-    assert pol.run() == len(cases)  # public detections post; risk + champion-subset filtered
+    expected_raised = sum(
+        1
+        for _dedup, (dtype, prefix) in cases.items()
+        if prefix != "celebrate"
+        or dtype in {
+            "career_wins_milestone",
+            "collection_level_milestone",
+            "ultimate_champion_reached",
+            "path_of_legend_global_rank_attained",
+        }
+    )
+    assert pol.run() == expected_raised
 
     for dedup, (_dtype, prefix) in cases.items():
         intent = world.repository.get(intent_id(f"intent:detection:{dedup}"))

@@ -30,33 +30,33 @@ def test_incremental_tick_detects_and_posts(world):
     from event_core.live.tick import run_tick
 
     conn = _conn()
-    # baseline: best_trophies just below a 100 boundary
+    # baseline: career wins just below a durable 1,000-win boundary
     apply_payloads(
         world, conn,
-        {"player_profiles": [{"tag": "#A", "name": "A", "trophies": 5000, "bestTrophies": 5950}]},
+        {"player_profiles": [{"tag": "#A", "name": "A", "trophies": 5000, "bestTrophies": 5950, "wins": 990}]},
         "2026-06-21T00:00:00Z",
     )
     advance(world, conn)
     base_detections = conn.execute("SELECT COUNT(*) FROM detections").fetchone()[0]
 
-    # a tick where best_trophies crosses 6000
+    # a tick where career wins crosses 1000
     posted = []
     poster = lambda intent: (posted.append(intent.dedup_key) or True)  # noqa: E731
     res = run_tick(
         world, conn,
-        {"player_profiles": [{"tag": "#A", "name": "A", "trophies": 5000, "bestTrophies": 6050}]},
+        {"player_profiles": [{"tag": "#A", "name": "A", "trophies": 5000, "bestTrophies": 5950, "wins": 1002}]},
         "2026-06-22T00:00:00Z", poster,
     )
 
     after = conn.execute("SELECT COUNT(*) FROM detections").fetchone()[0]
-    assert after > base_detections  # best_trophies_peak detected incrementally
+    assert after > base_detections  # career_wins_milestone detected incrementally
     assert res["posted"] >= 1 and posted  # intent posted via the consumer
 
     # idempotent: same observation again -> nothing new ingested/detected/posted
     posted.clear()
     res2 = run_tick(
         world, conn,
-        {"player_profiles": [{"tag": "#A", "name": "A", "trophies": 5000, "bestTrophies": 6050}]},
+        {"player_profiles": [{"tag": "#A", "name": "A", "trophies": 5000, "bestTrophies": 5950, "wins": 1002}]},
         "2026-06-22T01:00:00Z", poster,
     )
     assert res2["ingested"]["profiles"] == 0
