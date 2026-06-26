@@ -97,6 +97,15 @@ update_awards() {
     python "$PROJECT_DIR/scripts/backfill_awards.py" --all
 }
 
+run_activity() {
+    if [ "${2:-}" != "run" ] || [ -z "${3:-}" ]; then
+        echo "Usage: $0 activity run <activity-key>"
+        exit 1
+    fi
+    source "$PROJECT_DIR/venv/bin/activate"
+    python -m runtime.activity_runner run "$3"
+}
+
 case "${1:-}" in
     stop)     stop_bot ;;
     start)    start_bot ;;
@@ -106,8 +115,9 @@ case "${1:-}" in
     status)   status ;;
     backup)   backup_db ;;
     awards)   update_awards ;;
+    activity) run_activity "$@" ;;
     *)
-        echo "Usage: $0 {start|stop|restart|upgrade|install|status|backup|awards}"
+        echo "Usage: $0 {start|stop|restart|upgrade|install|status|backup|awards|activity run <activity-key>}"
         exit 1
         ;;
 esac

@@ -55,6 +55,16 @@ The short version: **v5/Event Core owns proactive reactive behavior; the
 operational DB still owns many read/query surfaces.** When a role investigates
 Elixir's flow, check both layers and name which layer supplied the evidence.
 
+Operations shell activity runs:
+
+```bash
+bash scripts/admin.sh activity run v5-reactive-tick
+```
+
+This resolves the activity through `runtime/activities.py`, refuses entries with
+`manual_trigger_allowed=False`, and uses a short-lived Discord REST client
+rather than starting a second gateway bot process.
+
 ## The issue loop
 
 ```

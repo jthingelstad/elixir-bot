@@ -2447,6 +2447,19 @@ def test_dispatch_admin_command_returns_runtime_job_failure_text():
     assert result == "`weekly-recap` failed: weekly recap post failed: missing Discord permissions in #weekly-digest"
 
 
+def test_dispatch_admin_command_rejects_non_manual_activity():
+    result = asyncio.run(
+        elixir.dispatch_admin_command(
+            "activity.run",
+            preview=False,
+            short=False,
+            args={"activity": "war-poll"},
+        )
+    )
+
+    assert result == "`war-poll` cannot be run manually."
+
+
 def test_dispatch_admin_command_handles_system_signals():
     with patch("runtime.admin._run_system_signals", new=AsyncMock(return_value="Published 1 pending system signal(s).")) as mock_run:
         result = asyncio.run(
