@@ -63,6 +63,7 @@ DOMAIN_RULES = {
 @dataclass(frozen=True)
 class Thresholds:
     max_blank_user_reply_count: int = 0
+    max_not_for_bot_route_count: int = 0
     max_blank_route_count: int = 0
     max_ignored_question_blank_route_count: int = 0
     max_topic_mismatch_count: int = 0
@@ -317,6 +318,15 @@ def _blank_routes(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _not_for_bot_routes(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        entry
+        for entry in entries
+        if entry["kind"] == "intent_router"
+        and entry["route"] == "not_for_bot"
+    ]
+
+
 def _ignored_question_blank_routes(
     entries: list[dict[str, Any]],
     *,
@@ -324,10 +334,8 @@ def _ignored_question_blank_routes(
 ) -> list[dict[str, Any]]:
     intents = [
         entry
-        for entry in entries
-        if entry["kind"] == "intent_router"
-        and entry["route"] == "not_for_bot"
-        and str(entry.get("raw_question") or "").strip()
+        for entry in _not_for_bot_routes(entries)
+        if str(entry.get("raw_question") or "").strip()
     ]
     routes = _blank_routes(entries)
     findings: list[dict[str, Any]] = []
@@ -386,6 +394,7 @@ def evaluate(
         messages,
         followup_minutes=thresholds.followup_minutes,
     )
+    not_for_bot_routes = _not_for_bot_routes(entries)
     blank_routes = _blank_routes(entries)
     ignored_then_blank = _ignored_question_blank_routes(
         entries,
@@ -399,6 +408,12 @@ def evaluate(
             {"<=": thresholds.max_blank_user_reply_count},
             len(blank_user_replies) <= thresholds.max_blank_user_reply_count,
             "Stored blank/empty #ask-elixir user messages followed by an assistant reply in the same thread within followup_minutes.",
+        ),
+        "not_for_bot_route_count": _metric(
+            len(not_for_bot_routes),
+            {"<=": thresholds.max_not_for_bot_route_count},
+            len(not_for_bot_routes) <= thresholds.max_not_for_bot_route_count,
+            "#ask-elixir intent_router traces classified as not_for_bot. This open lane is defined as addressed to Elixir.",
         ),
         "blank_route_count": _metric(
             len(blank_routes),
@@ -445,6 +460,16 @@ def evaluate(
                     "log_path": entry["log_path"],
                 }
                 for entry in blank_routes
+            ],
+            "not_for_bot_routes": [
+                {
+                    "timestamp": entry["timestamp_text"],
+                    "route": entry["route"],
+                    "author_id": entry["author_id"],
+                    "raw_question": entry.get("raw_question"),
+                    "log_path": entry["log_path"],
+                }
+                for entry in not_for_bot_routes
             ],
             "ignored_question_blank_routes": ignored_then_blank,
             "topic_mismatches": topic_mismatches,
