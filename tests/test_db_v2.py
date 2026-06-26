@@ -4806,7 +4806,17 @@ def test_current_war_status_supports_absolute_training_period_index_and_period_l
         conn.close()
 
 
-def _seed_active_war(conn, *, section_index=1, period_index=10, period_type="warDay"):
+def _seed_active_war(
+    conn,
+    *,
+    section_index=1,
+    period_index=10,
+    period_type="warDay",
+    our_fame=0,
+    our_period_points=0,
+    rival_fame=3950,
+    rival_period_points=0,
+):
     """Seed a minimal current-war-state row so build_war_now_context() has data."""
     db.store_war_log(
         {
@@ -4836,15 +4846,27 @@ def _seed_active_war(conn, *, section_index=1, period_index=10, period_type="war
             "clan": {
                 "tag": "#J2RGCRVG",
                 "name": "POAP KINGS",
-                "fame": 0,
+                "fame": our_fame,
                 "repairPoints": 0,
-                "periodPoints": 0,
+                "periodPoints": our_period_points,
                 "clanScore": 140,
                 "participants": [],
             },
             "clans": [
-                {"tag": "#J2RGCRVG", "name": "POAP KINGS", "fame": 0, "repairPoints": 0, "periodPoints": 0},
-                {"tag": "#OTHER1", "name": "Dragon Riders", "fame": 3950, "repairPoints": 0, "periodPoints": 0},
+                {
+                    "tag": "#J2RGCRVG",
+                    "name": "POAP KINGS",
+                    "fame": our_fame,
+                    "repairPoints": 0,
+                    "periodPoints": our_period_points,
+                },
+                {
+                    "tag": "#OTHER1",
+                    "name": "Dragon Riders",
+                    "fame": rival_fame,
+                    "repairPoints": 0,
+                    "periodPoints": rival_period_points,
+                },
             ],
             "periodLogs": [],
         },
@@ -4881,6 +4903,34 @@ def test_build_war_now_context_battle_day_regular_week():
         # #river-race when the LLM miscounted `day_total`).
         assert "today + 2 more battle days" in text
         assert "Colosseum" not in text
+    finally:
+        conn.close()
+
+
+def test_build_war_now_context_uses_period_points_when_fame_zero():
+    conn = db.get_connection(":memory:")
+    try:
+        _seed_active_war(
+            conn,
+            section_index=1,
+            period_index=10,
+            period_type="warDay",
+            our_fame=0,
+            our_period_points=9125,
+            rival_fame=0,
+            rival_period_points=0,
+        )
+        data, text = db.build_war_now_context(conn=conn)
+
+        assert data is not None
+        ours = next(clan for clan in data["race_standings"] if clan["is_us"])
+        assert ours["fame"] == 0
+        assert ours["period_points"] == 9125
+        assert ours["active_score"] == 9125
+        assert ours["score_source"] == "period_points"
+        assert ours["score_label"] == "period points"
+        assert "9,125 period points" in text
+        assert "0 fame" not in text
     finally:
         conn.close()
 

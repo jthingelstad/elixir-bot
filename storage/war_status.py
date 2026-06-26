@@ -49,6 +49,37 @@ def _load_war_payload(raw_json) -> dict:
         return {}
 
 
+def _coerce_int(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _uses_period_points_scoring(clans: list[dict]) -> bool:
+    return any(
+        _coerce_int(clan.get("fame")) == 0
+        and _coerce_int(clan.get("periodPoints", clan.get("period_points"))) > 0
+        for clan in clans
+    )
+
+
+def _active_score_fields(fame, period_points, *, use_period_points: bool = False) -> dict:
+    fame_score = _coerce_int(fame)
+    period_score = _coerce_int(period_points)
+    if use_period_points or (fame_score == 0 and period_score > 0):
+        return {
+            "active_score": period_score,
+            "score_source": "period_points",
+            "score_label": "period points",
+        }
+    return {
+        "active_score": fame_score,
+        "score_source": "fame",
+        "score_label": "fame",
+    }
+
+
 def _was_signal_sent_any_date(conn: sqlite3.Connection, signal_type: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM signal_log WHERE signal_type = ?",
@@ -61,13 +92,18 @@ def _resolve_live_race_rank(payload: dict, clan_tag: Optional[str]) -> Optional[
     canon_clan_tag = _canon_tag(clan_tag) if clan_tag else None
     if not clans or not canon_clan_tag:
         return None
+    use_period_points = _uses_period_points_scoring(clans)
     ranked = sorted(
         clans,
         key=lambda clan: (
-            clan.get("fame") or 0,
-            clan.get("repairPoints") or 0,
-            clan.get("periodPoints") or 0,
-            clan.get("clanScore") or 0,
+            _active_score_fields(
+                clan.get("fame"),
+                clan.get("periodPoints"),
+                use_period_points=use_period_points,
+            )["active_score"],
+            _coerce_int(clan.get("repairPoints")),
+            _coerce_int(clan.get("periodPoints")),
+            _coerce_int(clan.get("clanScore")),
         ),
         reverse=True,
     )
@@ -83,28 +119,36 @@ def _extract_race_standings(payload: dict, our_clan_tag: Optional[str]) -> list[
     if not clans:
         return []
     canon_our_tag = _canon_tag(our_clan_tag) if our_clan_tag else None
+    use_period_points = _uses_period_points_scoring(clans)
     ranked = sorted(
         clans,
         key=lambda clan: (
-            clan.get("fame") or 0,
-            clan.get("repairPoints") or 0,
-            clan.get("periodPoints") or 0,
-            clan.get("clanScore") or 0,
+            _active_score_fields(
+                clan.get("fame"),
+                clan.get("periodPoints"),
+                use_period_points=use_period_points,
+            )["active_score"],
+            _coerce_int(clan.get("repairPoints")),
+            _coerce_int(clan.get("periodPoints")),
+            _coerce_int(clan.get("clanScore")),
         ),
         reverse=True,
     )
     standings = []
     for rank, clan in enumerate(ranked, start=1):
         tag = _canon_tag(clan.get("tag"))
+        fame = _coerce_int(clan.get("fame"))
+        period_points = _coerce_int(clan.get("periodPoints"))
         standings.append({
             "rank": rank,
             "clan_tag": tag,
             "clan_name": clan.get("name"),
-            "fame": clan.get("fame") or 0,
-            "repair_points": clan.get("repairPoints") or 0,
-            "period_points": clan.get("periodPoints") or 0,
-            "clan_score": clan.get("clanScore") or 0,
+            "fame": fame,
+            "repair_points": _coerce_int(clan.get("repairPoints")),
+            "period_points": period_points,
+            "clan_score": _coerce_int(clan.get("clanScore")),
             "is_us": tag == canon_our_tag,
+            **_active_score_fields(fame, period_points, use_period_points=use_period_points),
         })
     return standings
 
@@ -160,6 +204,14 @@ def _build_live_war_state(row, latest_logged_race) -> Optional[dict]:
     phase = resolve_phase(period_type, period_index)
     offset = period_offset(period_index)
     clan_payload = payload.get("clan") or {}
+    scoring_clans = payload.get("clans") or ([clan_payload] if clan_payload else [])
+    result.update(
+        _active_score_fields(
+            result.get("fame"),
+            result.get("period_points"),
+            use_period_points=_uses_period_points_scoring(scoring_clans),
+        )
+    )
     finish_time, race_completed_at = _finish_time_fields(clan_payload.get("finishTime"))
 
     if season_id is not None:
@@ -395,9 +447,11 @@ def _format_war_now_text(data: dict) -> str:
         lines.append("Race standings:")
         for clan in standings:
             marker = " (us)" if clan.get("is_us") else ""
+            score = clan.get("active_score", clan.get("fame", 0))
+            label = clan.get("score_label") or "fame"
             lines.append(
                 f"  {clan['rank']}. {clan.get('clan_name', '?')}{marker} | "
-                f"{clan.get('fame', 0):,} fame"
+                f"{score:,} {label}"
             )
     return "\n".join(lines)
 

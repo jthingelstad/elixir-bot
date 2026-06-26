@@ -295,6 +295,48 @@ def test_war_update_detector_daily_evening_and_complete(world):
         assert rows["war_update"]["our_rank"] == 1
         assert rows["war_update"]["standings"][1]["clan"] == "55 club"
 
+        # Active battle-day scoring can arrive as periodPoints while fame remains
+        # zero; the generated war_update facts must carry the nonzero score.
+        period_points_day = {
+            **battle_day,
+            "war_day_key": "s00133-w03-p019",
+            "fame": 0,
+            "period_points": 9125,
+            "race_standings": [
+                {
+                    "rank": 1,
+                    "clan_name": "POAP KINGS",
+                    "fame": 0,
+                    "period_points": 9125,
+                    "is_us": True,
+                },
+                {
+                    "rank": 2,
+                    "clan_name": "55 club",
+                    "fame": 0,
+                    "period_points": 0,
+                    "is_us": False,
+                },
+            ],
+        }
+        with patch.object(detectors, "_chicago_now", return_value=evening), \
+             patch("db.get_current_war_status", return_value=period_points_day):
+            assert WarUpdateDetector(world, conn).run() == 1
+        _detection_rows(world, conn)
+        row = conn.execute(
+            "SELECT payload_json FROM detections WHERE dedup_key = ?",
+            ("war_update:s00133-w03-p019",),
+        ).fetchone()
+        payload = json.loads(row["payload_json"])
+        assert payload["our_fame"] == 0
+        assert payload["our_period_points"] == 9125
+        assert payload["our_active_score"] == 9125
+        assert payload["score_source"] == "period_points"
+        assert payload["score_label"] == "period points"
+        assert payload["standings"][0]["fame"] == 0
+        assert payload["standings"][0]["active_score"] == 9125
+        assert payload["standings"][0]["score_label"] == "period points"
+
         # Training/off-season: quiet even in the evening.
         training = {**battle_day, "battle_phase_active": False, "war_day_key": "s00133-w04-p021"}
         with patch.object(detectors, "_chicago_now", return_value=evening), \
