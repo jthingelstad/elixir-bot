@@ -484,6 +484,35 @@ def _execute_get_member_war_detail(arguments):
 
 # ── River Race domain execution ────────────────────────────────────────────
 
+def _remaining_deck_participant_summary(day_state: dict) -> dict:
+    total_participants = int(day_state.get("total_participants") or 0)
+    finished_count = int(day_state.get("finished_count") or 0)
+    untouched_count = int(day_state.get("untouched_count") or 0)
+
+    used_some = day_state.get("used_some")
+    if isinstance(used_some, list):
+        partial_count = len(used_some)
+    else:
+        partial_count = max(0, total_participants - finished_count - untouched_count)
+
+    participants_with_decks_left = max(0, total_participants - finished_count)
+    if partial_count + untouched_count != participants_with_decks_left:
+        partial_count = max(0, participants_with_decks_left - untouched_count)
+
+    return {
+        "total": participants_with_decks_left,
+        "partial": partial_count,
+        "untouched": untouched_count,
+        "finished": finished_count,
+        "total_participants": total_participants,
+        "count_source": "used_some + used_none",
+        "summary": (
+            f"{participants_with_decks_left} participants have decks left today: "
+            f"{untouched_count} untouched, {partial_count} partial."
+        ),
+    }
+
+
 def _execute_get_river_race(arguments):
     """Execute the consolidated get_river_race tool."""
     aspect = arguments.get("aspect", "standings")
@@ -511,6 +540,7 @@ def _execute_get_river_race(arguments):
         if not data:
             return {"error": "No active war data available."}
         day_state = db.get_current_war_day_state() or {}
+        remaining_deck_participants = _remaining_deck_participant_summary(day_state)
         data.update({
             "war_day_key": day_state.get("war_day_key"),
             "clan_fame": day_state.get("clan_fame"),
@@ -518,6 +548,9 @@ def _execute_get_river_race(arguments):
             "engaged_count": day_state.get("engaged_count"),
             "finished_count": day_state.get("finished_count"),
             "untouched_count": day_state.get("untouched_count"),
+            "partial_deck_participant_count": remaining_deck_participants["partial"],
+            "participants_with_decks_left_count": remaining_deck_participants["total"],
+            "remaining_deck_participants": remaining_deck_participants,
             "top_fame_today": day_state.get("top_fame_today"),
             "top_fame_total": day_state.get("top_fame_total"),
             "used_all_4": day_state.get("used_all_4"),
