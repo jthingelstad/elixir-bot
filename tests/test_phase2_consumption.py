@@ -6,6 +6,8 @@ battle-grain stream and war tables.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import db
 
 
@@ -42,6 +44,11 @@ def _seed_v5_battles(rows, profiles=()):
         conn.commit()
     finally:
         conn.close()
+
+
+def _recent_cr_battle_time(minutes_ago: int) -> str:
+    when = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    return when.strftime("%Y%m%dT%H%M%S.000Z")
 
 
 def _seed_v5_detection(dedup_key, detection_type, subject_tag, when, scope="public"):
@@ -90,7 +97,7 @@ def test_get_elixir_state_game_modes_aspect_is_pullable():
     # v5 player_current_profile projection (no elixir.db lookup).
     _seed_v5_battles(
         [
-            ("#GM1", f"20260620T12{i:02d}00.000Z", "Ranked1v1_NewArena2", f"#X{i}", "ranked", o)
+            ("#GM1", _recent_cr_battle_time(60 + i), "Ranked1v1_NewArena2", f"#X{i}", "ranked", o)
             for i, o in enumerate(["W", "W", "L", "W"])
         ],
         profiles=[("#GM1", "Climber")],
@@ -126,5 +133,4 @@ def test_get_elixir_state_season_window_aspect_is_reachable():
     from agent.tool_exec import _execute_get_elixir_state
     # public-reachable (before the leadership gate); None when no active war
     assert _execute_get_elixir_state({"aspect": "season_window"}) is None
-
 
