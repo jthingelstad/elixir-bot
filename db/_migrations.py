@@ -2382,7 +2382,44 @@ def _migration_53(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49, _migration_50, _migration_51, _migration_52, _migration_53]
+def _migration_54(conn: sqlite3.Connection) -> None:
+    """Repair truncated v5 communication-intent trace summaries."""
+    rows = conn.execute(
+        """
+        SELECT intent_id, summary, payload_json
+        FROM communication_intents
+        WHERE workflow = 'v5-reactive'
+          AND summary IS NOT NULL
+          AND payload_json IS NOT NULL
+        """
+    ).fetchall()
+    repairs: list[tuple[str, int]] = []
+    for row in rows:
+        try:
+            stored_summary = json.loads(row["summary"])
+        except (TypeError, ValueError):
+            stored_summary = None
+        if isinstance(stored_summary, dict):
+            continue
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        payload_summary = payload.get("summary")
+        if not isinstance(payload_summary, dict):
+            continue
+        repairs.append((
+            json.dumps(payload_summary, default=str, ensure_ascii=False),
+            int(row["intent_id"]),
+        ))
+    if repairs:
+        conn.executemany(
+            "UPDATE communication_intents SET summary = ? WHERE intent_id = ?",
+            repairs,
+        )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49, _migration_50, _migration_51, _migration_52, _migration_53, _migration_54]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

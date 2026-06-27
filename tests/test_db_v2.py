@@ -1627,6 +1627,54 @@ def test_runtime_job_status_round_trips():
         conn.close()
 
 
+def test_migration_repairs_truncated_v5_intent_summary(tmp_path):
+    db_path = tmp_path / "repair-trace-summary.db"
+    conn = db.get_connection(str(db_path))
+    full_summary = {
+        "detection_type": "best_trophies_peak",
+        "peak": 6000,
+        "recognition_policy": "player_highlight_score:v1",
+        "recognition_evidence": [
+            {
+                "dedup_key": f"battle_trophy_push:#A:{index}",
+                "detection_type": "battle_trophy_push",
+                "score": 25 + index,
+            }
+            for index in range(20)
+        ],
+    }
+    broken_summary = json.dumps(full_summary, ensure_ascii=False)[:500]
+    try:
+        db.upsert_communication_intent(
+            intent_key="v5:intent:detection:best_trophies_peak:#A:6000",
+            workflow="v5-reactive",
+            intent_type="celebrate:best_trophies_peak",
+            status="delivered",
+            target_channel_key="player-highlights",
+            target_channel_id=1482352147029950474,
+            source_signal_key="best_trophies_peak:#A:6000",
+            source_signal_type="best_trophies_peak",
+            covers_signal_keys=["best_trophies_peak:#A:6000"],
+            summary=broken_summary,
+            payload={"summary": full_summary},
+            conn=conn,
+        )
+        conn.execute(f"PRAGMA user_version = {len(db._MIGRATIONS) - 1}")
+        conn.commit()
+    finally:
+        conn.close()
+
+    conn = db.get_connection(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT summary FROM communication_intents WHERE intent_key = ?",
+            ("v5:intent:detection:best_trophies_peak:#A:6000",),
+        ).fetchone()
+        assert json.loads(row["summary"]) == full_summary
+    finally:
+        conn.close()
+
+
 def test_arena_relay_screenshot_observation_round_trips():
     conn = db.get_connection(":memory:")
     try:
