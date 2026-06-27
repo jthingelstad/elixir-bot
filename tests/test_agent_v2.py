@@ -232,6 +232,44 @@ def test_build_tool_result_envelope_drops_oversized_lists_instead_of_slicing():
     assert envelope["meta"]["original_size"] > envelope["meta"]["char_limit"]
 
 
+def test_build_tool_result_envelope_preserves_river_race_remaining_deck_summary_when_buckets_drop():
+    used_some = [{"member_ref": f"Partial {i}", "decks_used_today": 2} for i in range(4)]
+    used_none = [
+        {"member_ref": f"Untouched {i}", "decks_used_today": 0, "context": "x" * 800}
+        for i in range(44)
+    ]
+    raw = json.dumps({
+        "phase_display": "Battle Day 2",
+        "participants_with_decks_left_count": 48,
+        "partial_deck_participant_count": 4,
+        "untouched_count": 44,
+        "remaining_deck_participants": {
+            "total": 48,
+            "partial": 4,
+            "untouched": 44,
+            "finished": 11,
+            "total_participants": 59,
+            "count_source": "used_some + used_none",
+            "summary": "48 participants have decks left today: 44 untouched, 4 partial.",
+        },
+        "used_some": used_some,
+        "used_none": used_none,
+    })
+
+    envelope = json.loads(elixir_agent._build_tool_result_envelope("get_river_race", raw))
+
+    assert envelope["truncated"] is True
+    assert envelope["ok"] is True
+    data = envelope["data"]
+    assert data["participants_with_decks_left_count"] == 48
+    assert data["partial_deck_participant_count"] == 4
+    assert data["untouched_count"] == 44
+    assert data["remaining_deck_participants"]["total"] == 48
+    assert data["remaining_deck_participants"]["count_source"] == "used_some + used_none"
+    assert data["used_none"]["dropped"] is True
+    assert data["used_none"]["original_count"] == 44
+
+
 def test_build_tool_result_envelope_under_limit_unchanged():
     """Small payloads should pass through untouched."""
     raw = json.dumps({"summary": {"total_cards": 10}, "cards": [{"name": "Knight"}]})
@@ -685,6 +723,17 @@ def test_execute_tool_get_river_race_engagement():
         assert result["time_left_text"] == "3h 20m"
         assert result["engaged_count"] == 30
         assert result["untouched_count"] == 10
+        assert result["participants_with_decks_left_count"] == 20
+        assert result["partial_deck_participant_count"] == 10
+        assert result["remaining_deck_participants"] == {
+            "total": 20,
+            "partial": 10,
+            "untouched": 10,
+            "finished": 20,
+            "total_participants": 40,
+            "count_source": "used_some + used_none",
+            "summary": "20 participants have decks left today: 10 untouched, 10 partial.",
+        }
         assert "RIVER RACE — CURRENT MOMENT" in result["now_text"]
         mock_db.build_war_now_context.assert_called_once()
 
