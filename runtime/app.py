@@ -101,6 +101,13 @@ def _preview_text(value, limit=500):
     return text[:limit]
 
 
+def _json_trace_text(value):
+    try:
+        return json.dumps(value, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return json.dumps({"repr": repr(value)}, ensure_ascii=False)
+
+
 def _normalize_prompt_failure_question(question):
     text = (question or "").strip()
     text = re.sub(r"<@!?\d+>", " ", text)
@@ -928,7 +935,7 @@ def _upsert_v5_operational_intent(
         source_signal_key=metadata.get("source_signal_key"),
         source_signal_type=metadata.get("source_signal_type"),
         covers_signal_keys=metadata.get("caused_by") or [],
-        summary=_preview_text(summary, limit=500),
+        summary=_json_trace_text(summary),
         content_preview=_preview_text(text, limit=500),
         error_detail=error_detail,
         payload=payload,

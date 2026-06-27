@@ -1533,6 +1533,48 @@ def test_v5_post_persists_delivery_audit_rows():
     assert trace["message"]["event_type"] == "celebrate:best_trophies_peak"
 
 
+def test_v5_post_preserves_long_trace_summary_json():
+    channel = SimpleNamespace(
+        id=1482352147029950474,
+        name="player-highlights",
+        type="text",
+        guild=None,
+    )
+    metadata = _v5_delivery_metadata()
+    metadata["summary"] = {
+        "detection_type": "best_trophies_peak",
+        "peak": 6000,
+        "recognition_policy": "player_highlight_score:v1",
+        "recognition_decision": "bypass",
+        "recognition_evidence": [
+            {
+                "dedup_key": f"battle_trophy_push:#A:{index}",
+                "detection_type": "battle_trophy_push",
+                "score": 25 + index,
+                "occurred_at": f"2026-06-26T18:{index:02d}:00Z",
+            }
+            for index in range(20)
+        ],
+    }
+    text = "TDuck just hit 6,000 trophies. " * 30
+
+    elixir._record_v5_delivery_success(
+        channel,
+        text,
+        [SimpleNamespace(id=1001, content="TDuck just hit 6,000 trophies.")],
+        metadata,
+    )
+
+    intent = elixir.db.get_communication_intent(
+        "v5:intent:detection:best_trophies_peak:#A:6000"
+    )
+    summary = json.loads(intent["summary"])
+    assert len(intent["summary"]) > 500
+    assert summary["detection_type"] == "best_trophies_peak"
+    assert summary["recognition_evidence"][-1]["dedup_key"] == "battle_trophy_push:#A:19"
+    assert len(intent["content_preview"]) == 500
+
+
 def test_v5_post_creates_leader_action_for_required_event():
     public_channel = SimpleNamespace(
         id=1482352147029950475,
