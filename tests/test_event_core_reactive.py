@@ -534,14 +534,16 @@ def test_agent_tools_resolve_evidence_and_scope():
         [
             ("d1", "battle_hot_streak", "x", "#A", "20260621T120000.000Z", "public", "{}"),
             ("d2", "inactive_member_risk", "x", "#A", "20260621T120000.000Z", "leadership", "{}"),
+            ("d3", "badge_earned", "x", "#A", "2026-06-21T12:30:00Z", "public", "{}"),
         ],
     )
     conn.commit()
 
-    ev = tools.resolve_evidence(conn, {"subject_tag": "#A", "occurred_at": "20260621T120000.000Z"})
+    ev = tools.resolve_evidence(conn, {"subject_tag": "#A", "occurred_at": "2026-06-21T12:00:00Z"})
     assert len(ev) == 2 and ev[0]["opponent_tag"] in ("#OPP1", "#OPP2")
 
     # scope gating: public caller does not see the leadership detection
-    assert len(tools.get_player_detections(conn, "#A", scope="public")) == 1
-    assert len(tools.get_player_detections(conn, "#A", scope="leadership")) == 2
+    public_detections = tools.get_player_detections(conn, "#A", scope="public")
+    assert [row["dedup_key"] for row in public_detections] == ["d3", "d1"]
+    assert len(tools.get_player_detections(conn, "#A", scope="leadership")) == 3
     conn.close()

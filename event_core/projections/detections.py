@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 from event_core.projections.runner import ProjectionRunner
+from event_core.timeutil import cr_utc_timestamp
 
 
 class DetectionsProjection(ProjectionRunner):
@@ -47,7 +48,7 @@ class DetectionsProjection(ProjectionRunner):
             "VALUES(?,?,?,?,?,?,?)",
             (
                 event.dedup_key, event.detection_type, event.detector,
-                event.subject_tag, event.occurred_at, event.scope,
+                event.subject_tag, cr_utc_timestamp(event.occurred_at), event.scope,
                 json.dumps(event.payload, default=str),
             ),
         )

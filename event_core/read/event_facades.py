@@ -29,6 +29,7 @@ from typing import Optional
 from event_core import config
 from event_core import db as ec_db
 from event_core.domain.player import canon_tag
+from event_core.read.timestamps import cr_comparable_expr
 from storage.game_modes import mode_group_label
 
 # Mirror the legacy EVENT_STREAM_WINDOWS so windowed-summary callers are unchanged.
@@ -91,7 +92,7 @@ def _detection_filters(
     clauses: list[str] = []
     args: list = []
     if cutoff:
-        clauses.append("occurred_at >= ?")
+        clauses.append(f"{cr_comparable_expr('occurred_at')} >= ?")
         args.append(cutoff)
     if scope:
         clauses.append("scope = ?")
@@ -202,7 +203,7 @@ def list_recent_events(
         )
         rows = c.execute(
             f"SELECT * FROM detections {where} "
-            "ORDER BY occurred_at DESC, dedup_key DESC LIMIT ?",
+            f"ORDER BY {cr_comparable_expr('occurred_at')} DESC, dedup_key DESC LIMIT ?",
             (*args, max(1, int(limit or 100))),
         ).fetchall()
         return [_row_to_event(row) for row in rows]

@@ -8,6 +8,8 @@ from __future__ import annotations
 import sqlite3
 
 from event_core.domain.player import canon_tag
+from event_core.read.timestamps import cr_comparable_expr
+from event_core.timeutil import cr_utc_timestamp
 
 
 def _rows(conn, sql, params=()):
@@ -47,9 +49,15 @@ def get_player_detections(
     """Detections about a player, newest first. Honors scope."""
     tag = canon_tag(player_tag)
     if scope == "public":
-        sql = "SELECT * FROM detections WHERE subject_tag=? AND scope='public' ORDER BY occurred_at DESC LIMIT ?"
+        sql = (
+            "SELECT * FROM detections WHERE subject_tag=? AND scope='public' "
+            f"ORDER BY {cr_comparable_expr('occurred_at')} DESC LIMIT ?"
+        )
     else:
-        sql = "SELECT * FROM detections WHERE subject_tag=? ORDER BY occurred_at DESC LIMIT ?"
+        sql = (
+            "SELECT * FROM detections WHERE subject_tag=? "
+            f"ORDER BY {cr_comparable_expr('occurred_at')} DESC LIMIT ?"
+        )
     return _rows(conn, sql, (tag, limit))
 
 
@@ -64,6 +72,7 @@ def resolve_evidence(conn: sqlite3.Connection, detection: dict) -> list[dict]:
     occurred_at = detection.get("occurred_at")
     if not tag or not occurred_at:
         return []
+    occurred_at = cr_utc_timestamp(occurred_at)
     return _rows(
         conn,
         "SELECT battle_time, battle_type, mode_group, outcome, crowns_for, crowns_against, "

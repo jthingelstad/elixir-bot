@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -54,6 +55,35 @@ def _detection_rows(world, conn):
     dp.run()
     return {r["detection_type"]: json.loads(r["payload_json"] or "{}")
             for r in conn.execute("SELECT detection_type, payload_json FROM detections")}
+
+
+def test_detections_projection_normalizes_iso_occurred_at():
+    from event_core import db
+    from event_core.projections.detections import DetectionsProjection
+
+    class Detected(SimpleNamespace):
+        pass
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        projection = DetectionsProjection(SimpleNamespace(), conn)
+        projection.setup()
+        projection.handle(
+            Detected(
+                dedup_key="d1",
+                detection_type="badge_earned",
+                detector="badge",
+                subject_tag="#AAA",
+                occurred_at="2026-06-22T12:30:45.123456+00:00",
+                scope="public",
+                payload={},
+            ),
+            None,
+        )
+        row = conn.execute("SELECT occurred_at FROM detections WHERE dedup_key = 'd1'").fetchone()
+        assert row["occurred_at"] == "20260622T123045.000Z"
+    finally:
+        conn.close()
 
 
 def test_path_of_legend_detector(world):
