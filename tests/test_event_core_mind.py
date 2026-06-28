@@ -219,6 +219,56 @@ def test_ranked_activity_pulse_detector_suppresses_raw_ranked_volume(world):
         conn.close()
 
 
+def test_cohort_wave_detector_includes_member_names(world):
+    from event_core import db
+    from event_core.domain.detection import Detection
+    from event_core.mind.detectors import CohortWaveDetector
+    from event_core.projections.detections import DetectionsProjection
+
+    members = [
+        ("#BBB222", "Ben"),
+        ("#AAA111", "Asha"),
+        ("#CCC333", "Cy"),
+    ]
+    for tag, _name in members:
+        world.save(Detection(
+            dedup_key=f"badge_earned:{tag}:Mastery",
+            detection_type="badge_earned",
+            detector="detector:badge_earned",
+            subject_tag=tag,
+            occurred_at="2026-06-28T14:00:00Z",
+            caused_by=["e"],
+            payload={"badge_name": "Mastery"},
+        ))
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    try:
+        conn.execute("CREATE TABLE members (player_tag TEXT PRIMARY KEY, current_name TEXT)")
+        conn.executemany("INSERT INTO members(player_tag, current_name) VALUES (?, ?)", members)
+        projection = DetectionsProjection(world, conn)
+        projection.setup()
+        projection.run()
+
+        detector = CohortWaveDetector(world, conn)
+        detector.reset()
+        assert detector.run() == 1
+
+        projection.run()
+        row = conn.execute(
+            "SELECT payload_json FROM detections WHERE dedup_key = ?",
+            ("cohort_wave:badge_earned:2026-06-28",),
+        ).fetchone()
+        payload = json.loads(row["payload_json"])
+        assert payload["member_count"] == 3
+        assert payload["members"] == [
+            {"name": "Asha"},
+            {"name": "Ben"},
+            {"name": "Cy"},
+        ]
+    finally:
+        conn.close()
+
+
 def test_member_left_enriches_and_suppresses_kicks(world):
     from event_core import db
     from event_core.mind.detectors import MemberLeftDetector

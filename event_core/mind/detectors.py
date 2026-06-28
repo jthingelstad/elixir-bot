@@ -850,15 +850,39 @@ class CohortWaveDetector(FollowerRunner):
         for r in rows:
             day = chicago_day_for_utc(r["occurred_at"])
             groups.setdefault((r["detection_type"], day), set()).add(r["subject_tag"])
+        member_names: dict[str, str] = {}
+        if groups and _table_exists(self.conn, "members"):
+            tags = sorted({tag for members in groups.values() for tag in members if tag})
+            if tags:
+                placeholders = ",".join("?" for _ in tags)
+                name_rows = self.conn.execute(
+                    f"SELECT player_tag, current_name FROM members WHERE player_tag IN ({placeholders})",
+                    tags,
+                ).fetchall()
+                member_names = {
+                    row["player_tag"]: row["current_name"]
+                    for row in name_rows
+                    if row["player_tag"] and row["current_name"]
+                }
         for (dtype, day), members in groups.items():
             if len(members) >= self.MIN_MEMBERS:
+                member_list = [
+                    {"name": member_names.get(tag)}
+                    for tag in sorted(members, key=lambda tag: (member_names.get(tag) or tag).lower())
+                    if member_names.get(tag)
+                ]
                 self.emit_detection(
                     dedup_key=f"cohort_wave:{dtype}:{day}",
                     detection_type="cohort_wave",
                     subject_tag=None,
                     occurred_at=f"{day}T12:00:00Z",
                     caused_by=[f"cohort:{dtype}:{day}"],
-                    payload={"wave_type": dtype, "day": day, "member_count": len(members)},
+                    payload={
+                        "wave_type": dtype,
+                        "day": day,
+                        "member_count": len(members),
+                        "members": member_list,
+                    },
                 )
         return self.emitted
 

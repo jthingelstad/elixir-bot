@@ -180,14 +180,47 @@ def test_render_intent_fallback_never_leaks_raw_public_payloads():
             "wave_type": "badge_earned",
             "day": "2026-06-28",
             "member_count": 3,
+            "members": [
+                {"tag": "#AAA111", "name": "Asha"},
+                {"tag": "#BBB222", "name": "Ben"},
+                {"tag": "#CCC333", "name": "Cy"},
+            ],
             "occurred_at": "2026-06-28T12:00:00Z",
         },
     )
     cohort_text = render_intent(cohort)
-    assert "3 POAP KINGS members" in cohort_text
+    assert "Asha, Ben, and Cy" in cohort_text
+    assert "3 POAP KINGS members" not in cohort_text
     assert "[public]" not in cohort_text
     assert "cohort:cohort_wave" not in cohort_text
     assert "{'" not in cohort_text
+    assert "#AAA111" not in cohort_text
+
+    card_cohort = CommunicationIntent(
+        dedup_key="intent:detection:cohort_wave:card_level_milestone:2026-06-28",
+        intent_type="cohort:cohort_wave",
+        subject_tag="",
+        scope="public",
+        priority=1,
+        caused_by=["cohort:card_level_milestone:2026-06-28"],
+        summary={
+            "detection_type": "cohort_wave",
+            "wave_type": "card_level_milestone",
+            "day": "2026-06-28",
+            "member_count": 4,
+            "members": [
+                {"tag": "#AAA111", "name": "Asha"},
+                {"tag": "#BBB222", "name": "Ben"},
+                {"tag": "#CCC333", "name": "Cy"},
+                {"tag": "#DDD444", "name": "Dee"},
+            ],
+        },
+    )
+    card_cohort_text = render_intent(card_cohort)
+    assert "Asha, Ben, Cy, and Dee" in card_cohort_text
+    assert "leveled cards" in card_cohort_text
+    assert "4 POAP KINGS members" not in card_cohort_text
+    assert "#DDD444" not in card_cohort_text
 
     unlocked = CommunicationIntent(
         dedup_key="intent:detection:new_card_unlocked:#20G9RY299P:26000077",
