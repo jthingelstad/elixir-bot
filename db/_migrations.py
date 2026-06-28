@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 
 from db import _existing_tables, _table_columns, _trusted_current_joined_at, _utcnow
 
@@ -2419,7 +2420,46 @@ def _migration_54(conn: sqlite3.Connection) -> None:
         )
 
 
-_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49, _migration_50, _migration_51, _migration_52, _migration_53, _migration_54]
+def _compact_detection_timestamp(value: str | None) -> str | None:
+    if not value:
+        return value
+    text = str(value).strip()
+    if not text or ("-" not in text and "T" in text):
+        return text
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S.000Z")
+
+
+def _migration_55(conn: sqlite3.Connection) -> None:
+    """Normalize detection projection timestamps to CR-sortable UTC strings."""
+    if "detections" not in _existing_tables(conn):
+        return
+    rows = conn.execute(
+        """
+        SELECT dedup_key, occurred_at
+        FROM detections
+        WHERE occurred_at IS NOT NULL
+          AND substr(occurred_at, 5, 1) = '-'
+        """
+    ).fetchall()
+    repairs: list[tuple[str, str]] = []
+    for row in rows:
+        normalized = _compact_detection_timestamp(row["occurred_at"])
+        if normalized and normalized != row["occurred_at"]:
+            repairs.append((normalized, row["dedup_key"]))
+    if repairs:
+        conn.executemany(
+            "UPDATE detections SET occurred_at = ? WHERE dedup_key = ?",
+            repairs,
+        )
+
+
+_MIGRATIONS = [_migration_0, _migration_1, _migration_2, _migration_3, _migration_4, _migration_5, _migration_6, _migration_7, _migration_8, _migration_9, _migration_10, _migration_11, _migration_12, _migration_13, _migration_14, _migration_15, _migration_16, _migration_17, _migration_18, _migration_19, _migration_20, _migration_21, _migration_22, _migration_23, _migration_24, _migration_25, _migration_26, _migration_27, _migration_28, _migration_29, _migration_30, _migration_31, _migration_32, _migration_33, _migration_34, _migration_35, _migration_36, _migration_37, _migration_38, _migration_39, _migration_40, _migration_41, _migration_42, _migration_43, _migration_44, _migration_45, _migration_46, _migration_47, _migration_48, _migration_49, _migration_50, _migration_51, _migration_52, _migration_53, _migration_54, _migration_55]
 
 
 def _run_migrations(conn: sqlite3.Connection) -> None:

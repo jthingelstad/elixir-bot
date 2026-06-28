@@ -66,6 +66,19 @@ def test_summarize_event_windows_counts_by_type_and_scope():
     assert out["56d"]["total"] == 4  # d4 now included
 
 
+def test_summarize_event_windows_counts_mixed_timestamp_formats():
+    _seed(detections=[
+        ("d1", "battle_trophy_push", "push", "#AAA", "20260620T120000.000Z", "public", "{}"),
+        ("d2", "badge_earned", "badge", "#BBB", "2026-06-22T12:30:00Z", "public", "{}"),
+        ("d3", "war_update", "war", None, "2026-06-01T12:00:00Z", "public", "{}"),
+    ])
+    out = event_facades.summarize_event_windows(now=NOW, windows=(7, 28))
+
+    assert out["7d"]["total"] == 2
+    assert out["7d"]["by_type"] == {"badge_earned": 1, "battle_trophy_push": 1}
+    assert out["28d"]["total"] == 3
+
+
 def test_summarize_event_windows_scope_and_subject_filters():
     _seed(detections=[
         ("d1", "battle_trophy_push", "push", "#AAA", "20260620T120000.000Z", "public", "{}"),
@@ -92,6 +105,17 @@ def test_list_recent_events_shape_and_order():
     assert first["occurred_at"] == "20260622T120000.000Z"
     assert events[1]["payload_json"] == {"k": 1}  # parsed dict
     assert events[1]["subject_type"] == "member" and events[1]["subject_key"] == "#AAA"
+
+
+def test_list_recent_events_orders_mixed_timestamp_formats():
+    _seed(detections=[
+        ("d1", "battle_trophy_push", "push", "#AAA", "20260622T120000.000Z", "public", "{}"),
+        ("d2", "badge_earned", "badge", "#AAA", "2026-06-22T12:30:00Z", "public", "{}"),
+        ("d3", "new_card_unlocked", "card", "#AAA", "2026-06-16T12:00:00Z", "public", "{}"),
+    ])
+    events = event_facades.list_recent_events(now=NOW, days=7, limit=10)
+
+    assert [e["event_key"] for e in events] == ["d2", "d1", "d3"]
 
 
 def test_list_recent_events_filters_and_limit():

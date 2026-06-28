@@ -8,21 +8,25 @@ from __future__ import annotations
 
 import sqlite3
 
+from event_core.read.timestamps import cr_comparable_expr
+from event_core.timeutil import cr_utc_timestamp
+
 
 def clan_activity_24h(conn: sqlite3.Connection, since_iso: str) -> dict:
-    """Battles + detections in the window [since_iso, now]. `since_iso` is a UTC
-    timestamp string comparable to battle_time / detection occurred_at."""
+    """Battles + detections in the window [since_iso, now]."""
+    since_cr = cr_utc_timestamp(since_iso) or since_iso
     battles = conn.execute(
-        "SELECT COUNT(*) FROM battle_telemetry WHERE battle_time >= ?", (since_iso,)
+        f"SELECT COUNT(*) FROM battle_telemetry WHERE {cr_comparable_expr('battle_time')} >= ?",
+        (since_cr,),
     ).fetchone()[0]
     active_players = conn.execute(
-        "SELECT COUNT(DISTINCT player_tag) FROM battle_telemetry WHERE battle_time >= ?",
-        (since_iso,),
+        f"SELECT COUNT(DISTINCT player_tag) FROM battle_telemetry WHERE {cr_comparable_expr('battle_time')} >= ?",
+        (since_cr,),
     ).fetchone()[0]
     dets = conn.execute(
-        "SELECT detection_type, COUNT(*) FROM detections WHERE occurred_at >= ? "
+        f"SELECT detection_type, COUNT(*) FROM detections WHERE {cr_comparable_expr('occurred_at')} >= ? "
         "GROUP BY detection_type ORDER BY 2 DESC",
-        (since_iso,),
+        (since_cr,),
     ).fetchall()
     return {
         "window_start": since_iso,

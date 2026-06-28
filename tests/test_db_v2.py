@@ -1659,7 +1659,10 @@ def test_migration_repairs_truncated_v5_intent_summary(tmp_path):
             payload={"summary": full_summary},
             conn=conn,
         )
-        conn.execute(f"PRAGMA user_version = {len(db._MIGRATIONS) - 1}")
+        migration_54_version = next(
+            index for index, fn in enumerate(db._MIGRATIONS) if fn.__name__ == "_migration_54"
+        )
+        conn.execute(f"PRAGMA user_version = {migration_54_version}")
         conn.commit()
     finally:
         conn.close()
@@ -1671,6 +1674,59 @@ def test_migration_repairs_truncated_v5_intent_summary(tmp_path):
             ("v5:intent:detection:best_trophies_peak:#A:6000",),
         ).fetchone()
         assert json.loads(row["summary"]) == full_summary
+    finally:
+        conn.close()
+
+
+def test_migration_normalizes_detection_timestamps(tmp_path):
+    db_path = tmp_path / "repair-detection-timestamps.db"
+    conn = db.get_connection(str(db_path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE detections (
+                dedup_key TEXT PRIMARY KEY,
+                detection_type TEXT,
+                detector TEXT,
+                subject_tag TEXT,
+                occurred_at TEXT,
+                scope TEXT,
+                payload_json TEXT
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO detections VALUES(?,?,?,?,?,?,?)",
+            [
+                ("d1", "badge_earned", "badge", "#AAA", "2026-06-22T12:30:45Z", "public", "{}"),
+                (
+                    "d2",
+                    "new_card_unlocked",
+                    "card",
+                    "#BBB",
+                    "2026-06-22T13:30:45.123456+00:00",
+                    "public",
+                    "{}",
+                ),
+                ("d3", "battle_trophy_push", "push", "#CCC", "20260622T143045.000Z", "public", "{}"),
+            ],
+        )
+        conn.execute(f"PRAGMA user_version = {len(db._MIGRATIONS) - 1}")
+        conn.commit()
+    finally:
+        conn.close()
+
+    conn = db.get_connection(str(db_path))
+    try:
+        rows = {
+            row["dedup_key"]: row["occurred_at"]
+            for row in conn.execute("SELECT dedup_key, occurred_at FROM detections")
+        }
+        assert rows == {
+            "d1": "20260622T123045.000Z",
+            "d2": "20260622T133045.000Z",
+            "d3": "20260622T143045.000Z",
+        }
     finally:
         conn.close()
 
