@@ -144,7 +144,7 @@ def test_render_intent_and_dry_run_poster(world):
         summary={"detection_type": "best_trophies_peak", "peak": 6000},
     )
     text = render_intent(ci)
-    assert "6000" in text and "#A" in text
+    assert "6000" in text and "#A" not in text
 
     wins = CommunicationIntent(
         dedup_key="w", intent_type="celebrate:career_wins_milestone", subject_tag="#A",
@@ -162,6 +162,50 @@ def test_render_intent_and_dry_run_poster(world):
     poster = DryRunPoster()
     assert poster(ci) is True
     assert poster.posts == [("public", text)]
+
+
+def test_render_intent_fallback_never_leaks_raw_public_payloads():
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live.discord import render_intent
+
+    cohort = CommunicationIntent(
+        dedup_key="intent:detection:cohort_wave:badge_earned:2026-06-28",
+        intent_type="cohort:cohort_wave",
+        subject_tag="",
+        scope="public",
+        priority=1,
+        caused_by=["cohort:badge_earned:2026-06-28"],
+        summary={
+            "detection_type": "cohort_wave",
+            "wave_type": "badge_earned",
+            "day": "2026-06-28",
+            "member_count": 3,
+            "occurred_at": "2026-06-28T12:00:00Z",
+        },
+    )
+    cohort_text = render_intent(cohort)
+    assert "3 POAP KINGS members" in cohort_text
+    assert "[public]" not in cohort_text
+    assert "cohort:cohort_wave" not in cohort_text
+    assert "{'" not in cohort_text
+
+    unlocked = CommunicationIntent(
+        dedup_key="intent:detection:new_card_unlocked:#20G9RY299P:26000077",
+        intent_type="celebrate:new_card_unlocked",
+        subject_tag="#20G9RY299P",
+        scope="public",
+        priority=1,
+        caused_by=["new_card_unlocked:#20G9RY299P:26000077"],
+        summary={
+            "detection_type": "new_card_unlocked",
+            "card_name": "Monk",
+            "rarity": "champion",
+        },
+    )
+    unlocked_text = render_intent(unlocked)
+    assert "Monk" in unlocked_text
+    assert "#20G9RY299P" not in unlocked_text
+    assert "{'" not in unlocked_text
 
 
 def test_agent_poster_passes_delivery_metadata(monkeypatch):
