@@ -421,6 +421,7 @@ def test_eval_player_highlights_scores_exact_artifacts(tmp_path):
     assert result["metrics"]["message_id_rate"]["value"] == 1.0
     assert result["metrics"]["exact_copy_rate"]["value"] == 1.0
     assert result["metrics"]["non_meta_copy_rate"]["value"] == 1.0
+    assert result["metrics"]["raw_player_tag_copy_count"]["value"] == 0
     assert result["artifacts"][0]["exact_copies"][0]["source"] == "messages"
     assert result["artifacts"][0]["messages"][0]["discord_message_id"] == "4001"
 
@@ -454,6 +455,39 @@ def test_eval_player_highlights_flags_meta_copy(tmp_path):
     assert result["passed"] is False
     assert result["metrics"]["non_meta_copy_rate"]["value"] == 0.0
     assert result["meta_copy_intent_ids"] == [11]
+
+
+def test_eval_player_highlights_flags_raw_player_tag_copy(tmp_path):
+    from scripts import eval_player_highlights
+
+    db_path = tmp_path / "player-highlights-raw-tag.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_player_highlight_eval_schema(conn)
+        _insert_player_highlight_intent(
+            conn,
+            payload_json=(
+                '{"message_ids": ["4003"], "posted_messages": ['
+                '{"discord_message_id": "4003", '
+                '"content": "Huge push from #20G9RY299P to 6000 trophies.", '
+                '"discord_created_at": "2026-06-24T12:00:02Z"}]}'
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = eval_player_highlights.evaluate(
+        db_path,
+        since=eval_player_highlights._parse_time("2026-06-24T00:00:00Z"),
+        end=eval_player_highlights._parse_time("2026-06-25T00:00:00Z"),
+    )
+
+    assert result["passed"] is False
+    assert result["metrics"]["raw_player_tag_copy_count"]["value"] == 1
+    assert result["raw_player_tag_copy_intents"] == [
+        {"intent_id": 11, "tags": ["#20G9RY299P"]}
+    ]
 
 
 def test_eval_ask_elixir_alignment_flags_blank_user_reply(tmp_path):
