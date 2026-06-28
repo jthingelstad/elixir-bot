@@ -40,6 +40,25 @@ def _with_article(value: str | None, fallback: str) -> str:
     return _clean_value(value) or fallback
 
 
+def _join_names(names: list[str]) -> str:
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return f"{', '.join(names[:-1])}, and {names[-1]}"
+
+
+def _member_names(summary: dict) -> list[str]:
+    names: list[str] = []
+    for member in summary.get("members") or []:
+        if not isinstance(member, dict):
+            continue
+        name = _clean_value(member.get("name"))
+        if name and not _looks_like_player_tag(name):
+            names.append(name)
+    return names
+
+
 def render_intent(intent) -> str:
     s = intent.summary or {}
     subj = _subject_label(intent)
@@ -85,10 +104,24 @@ def render_intent(intent) -> str:
         return f"{subj} hit a new clan milestone."
     if t.startswith("cohort:"):
         wave_type = _clean_value(s.get("wave_type") or s.get("detection_type"))
+        names = _member_names(s)
+        label = _join_names(names) if names else None
         member_count = _clean_value(s.get("member_count"))
         count = member_count or "multiple"
         if wave_type == "badge_earned":
+            if label:
+                return f"🎖️ {label} earned new badges today."
             return f"🎖️ {count} POAP KINGS members earned new badges today."
+        if wave_type == "card_level_milestone":
+            if label:
+                return f"👑 {label} leveled cards today."
+            return f"👑 {count} POAP KINGS members leveled cards today."
+        if wave_type == "new_card_unlocked":
+            if label:
+                return f"✨ {label} unlocked new cards today."
+            return f"✨ {count} POAP KINGS members unlocked new cards today."
+        if label:
+            return f"✨ {label} hit fresh milestones today."
         return f"✨ {count} POAP KINGS members hit fresh milestones today."
     if t.startswith("clan:"):
         dt = s.get("detection_type", t.split(":", 1)[-1])
