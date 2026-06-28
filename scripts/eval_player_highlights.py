@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ import db
 
 TARGET_CHANNEL_KEY = "player-highlights"
 DELIVERED_STATUSES = {"delivered", "fulfilled"}
+RAW_PLAYER_TAG_RE = re.compile(r"#(?:[0289PYLQGRJCUV]{3,})\b", re.IGNORECASE)
 META_PATTERNS = (
     "signal data",
     "messaging would be stale",
@@ -47,6 +49,7 @@ class Thresholds:
     min_message_id_rate: float = 0.95
     min_exact_copy_rate: float = 0.95
     min_non_meta_copy_rate: float = 1.0
+    max_raw_player_tag_copy_count: int = 0
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -161,6 +164,12 @@ def _looks_like_meta(text: str | None) -> bool:
     return any(pattern in lowered for pattern in META_PATTERNS)
 
 
+def _raw_player_tags(text: str | None) -> list[str]:
+    if not text:
+        return []
+    return list(dict.fromkeys(match.group(0).upper() for match in RAW_PLAYER_TAG_RE.finditer(text)))
+
+
 def _exact_copy_texts(
     row: sqlite3.Row,
     payload: dict[str, Any],
@@ -272,11 +281,17 @@ def _score(
         if _exact_copy_texts(row, _json_loads(row["payload_json"], {}), messages)
     ]
     meta_copy = []
+    raw_player_tag_copy = []
     for row in delivered:
         payload = _json_loads(row["payload_json"], {})
         copies = _exact_copy_texts(row, payload, messages)
         if any(_looks_like_meta(copy.get("content")) for copy in copies):
             meta_copy.append(row)
+        tags = []
+        for copy in copies:
+            tags.extend(_raw_player_tags(copy.get("content")))
+        if tags:
+            raw_player_tag_copy.append((row, list(dict.fromkeys(tags))))
 
     delivery_rate = _rate(len(delivered), total)
     trace_rate = _rate(len(traceable), total)
@@ -315,6 +330,12 @@ def _score(
             non_meta_copy_rate is None or non_meta_copy_rate >= thresholds.min_non_meta_copy_rate,
             "Delivered player-highlight intents whose exact copy does not look like agent diagnostics or refusal text.",
         ),
+        "raw_player_tag_copy_count": _metric(
+            len(raw_player_tag_copy),
+            {"<=": thresholds.max_raw_player_tag_copy_count},
+            len(raw_player_tag_copy) <= thresholds.max_raw_player_tag_copy_count,
+            "Delivered player-highlight intents whose exact public copy contains a raw Clash Royale player tag.",
+        ),
     }
     return {
         "metrics": metrics,
@@ -326,8 +347,13 @@ def _score(
             "delivered_with_message_ids": len(with_ids),
             "delivered_with_exact_copy": len(with_copy),
             "delivered_with_meta_copy": len(meta_copy),
+            "delivered_with_raw_player_tag_copy": len(raw_player_tag_copy),
         },
         "meta_copy_intent_ids": [row["intent_id"] for row in meta_copy],
+        "raw_player_tag_copy_intents": [
+            {"intent_id": row["intent_id"], "tags": tags}
+            for row, tags in raw_player_tag_copy
+        ],
     }
 
 
@@ -395,6 +421,7 @@ def main() -> None:
     parser.add_argument("--min-message-id-rate", type=float, default=0.95)
     parser.add_argument("--min-exact-copy-rate", type=float, default=0.95)
     parser.add_argument("--min-non-meta-copy-rate", type=float, default=1.0)
+    parser.add_argument("--max-raw-player-tag-copy-count", type=int, default=0)
     parser.add_argument("--strict", action="store_true", help="Exit non-zero when thresholds fail")
     args = parser.parse_args()
 
@@ -405,6 +432,7 @@ def main() -> None:
         min_message_id_rate=args.min_message_id_rate,
         min_exact_copy_rate=args.min_exact_copy_rate,
         min_non_meta_copy_rate=args.min_non_meta_copy_rate,
+        max_raw_player_tag_copy_count=args.max_raw_player_tag_copy_count,
     )
     result = evaluate(args.db, since=since, end=end, thresholds=thresholds)
 
