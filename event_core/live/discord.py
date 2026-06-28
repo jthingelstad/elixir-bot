@@ -10,30 +10,109 @@ Posters are callables `(intent) -> bool` (True if posted), matching IntentConsum
 from __future__ import annotations
 
 
+def _clean_value(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _looks_like_player_tag(value: str | None) -> bool:
+    if not value:
+        return False
+    text = value.strip()
+    return text.startswith("#") and text[1:].isalnum()
+
+
+def _subject_label(intent, fallback: str = "A clanmate") -> str:
+    s = intent.summary or {}
+    for key in ("player_name", "member_name", "current_name", "name"):
+        value = _clean_value(s.get(key))
+        if value and not _looks_like_player_tag(value):
+            return value
+    subject = _clean_value(intent.subject_tag)
+    if subject and not _looks_like_player_tag(subject):
+        return subject
+    return fallback
+
+
+def _with_article(value: str | None, fallback: str) -> str:
+    return _clean_value(value) or fallback
+
+
 def render_intent(intent) -> str:
     s = intent.summary or {}
-    subj = intent.subject_tag or ""
+    subj = _subject_label(intent)
     t = intent.intent_type or ""
     if t.startswith("celebrate:"):
         dt = s.get("detection_type", t.split(":", 1)[-1])
-        templates = {
-            "best_trophies_peak": f"🏆 {subj} hit a new best of {s.get('peak')} trophies!",
-            "battle_hot_streak": f"🔥 {subj} is on a {s.get('streak', '')}-win streak!",
-            "battle_trophy_push": f"📈 {subj} pushed +{s.get('trophy_delta')} over {s.get('battle_count')} battles.",
-            "career_wins_milestone": f"🏆 {subj} reached {s.get('milestone')} career wins!",
-            "card_level_milestone": f"⭐ {subj} took {s.get('card_name')} to level {s.get('milestone')}.",
-            "collection_level_milestone": f"📚 {subj} reached collection level {s.get('milestone')}.",
-            "new_card_unlocked": f"🎉 {subj} unlocked {s.get('card_name')} ({s.get('rarity')}).",
-            "new_champion_unlocked": f"👑 {subj} unlocked Champion {s.get('card_name')}!",
-            "badge_earned": f"🎖️ {subj} earned the {s.get('badge_name')} badge.",
-            "player_level_up": f"⬆️ {subj} reached King level {s.get('level')}.",
-        }
-        return templates.get(dt, f"{subj}: {dt} {s}")
+        if dt == "best_trophies_peak":
+            peak = _clean_value(s.get("peak"))
+            return f"🏆 {subj} hit a new trophy best" + (f" of {peak}!" if peak else "!")
+        if dt == "battle_hot_streak":
+            streak = _clean_value(s.get("streak"))
+            return f"🔥 {subj} is on a hot streak" + (f" — {streak} wins straight!" if streak else "!")
+        if dt == "battle_trophy_push":
+            delta = _clean_value(s.get("trophy_delta"))
+            battles = _clean_value(s.get("battle_count"))
+            if delta and battles:
+                return f"📈 {subj} pushed +{delta} trophies over {battles} battles."
+            return f"📈 {subj} is climbing."
+        if dt == "career_wins_milestone":
+            milestone = _clean_value(s.get("milestone"))
+            return f"🏆 {subj} reached {milestone} career wins!" if milestone else f"🏆 {subj} reached a career wins milestone."
+        if dt == "card_level_milestone":
+            card = _with_article(s.get("card_name"), "a card")
+            milestone = _clean_value(s.get("milestone"))
+            return f"⭐ {subj} took {card} to level {milestone}." if milestone else f"⭐ {subj} leveled up {card}."
+        if dt == "collection_level_milestone":
+            milestone = _clean_value(s.get("milestone"))
+            return f"📚 {subj} reached collection level {milestone}." if milestone else f"📚 {subj} reached a collection milestone."
+        if dt == "new_card_unlocked":
+            card = _with_article(s.get("card_name"), "a new card")
+            rarity = _clean_value(s.get("rarity"))
+            suffix = f" ({rarity})." if rarity else "."
+            return f"🎉 {subj} unlocked {card}{suffix}"
+        if dt == "new_champion_unlocked":
+            card = _with_article(s.get("card_name"), "a Champion")
+            return f"👑 {subj} unlocked Champion {card}!"
+        if dt == "badge_earned":
+            badge = _clean_value(s.get("badge_name"))
+            return f"🎖️ {subj} earned the {badge} badge." if badge else f"🎖️ {subj} earned a new badge."
+        if dt == "player_level_up":
+            level = _clean_value(s.get("level"))
+            return f"⬆️ {subj} reached King level {level}." if level else f"⬆️ {subj} reached a new King level."
+        return f"{subj} hit a new clan milestone."
+    if t.startswith("cohort:"):
+        wave_type = _clean_value(s.get("wave_type") or s.get("detection_type"))
+        member_count = _clean_value(s.get("member_count"))
+        count = member_count or "multiple"
+        if wave_type == "badge_earned":
+            return f"🎖️ {count} POAP KINGS members earned new badges today."
+        return f"✨ {count} POAP KINGS members hit fresh milestones today."
+    if t.startswith("clan:"):
+        dt = s.get("detection_type", t.split(":", 1)[-1])
+        if dt == "member_joined":
+            return f"Welcome to POAP KINGS, {_subject_label(intent, 'new member')}."
+        if dt == "member_left":
+            return "A member left POAP KINGS."
+        if dt in {"member_promoted", "role_change"}:
+            return f"👑 {_subject_label(intent)} earned a new clan role."
+        return "POAP KINGS has a new clan update."
+    if t.startswith("war:"):
+        dt = s.get("detection_type", t.split(":", 1)[-1])
+        if dt == "war_complete":
+            rank = _clean_value(s.get("final_rank"))
+            fame = _clean_value(s.get("our_fame") or s.get("our_active_score"))
+            if rank and fame:
+                return f"🏁 River Race complete: POAP KINGS finished rank {rank} with {fame} fame."
+            return "🏁 River Race complete for POAP KINGS."
+        return "⚔️ POAP KINGS has a fresh River Race update."
     if t.startswith("leadership:"):
         rec = s.get("recommendation_type", t.split(":", 1)[-1])
         reasons = ", ".join(s.get("reason_codes", []) or [])
-        return f"[leadership] {rec} candidate: {subj} ({reasons})"
-    return f"[{intent.scope}] {t} {subj}: {s}"
+        return f"Leadership review: {rec}" + (f" ({reasons})" if reasons else "")
+    return "POAP KINGS has a new update."
 
 
 class DryRunPoster:
