@@ -17,3 +17,7 @@ scripts/*.json
 
 # v5 event-sourcing databases (large; rebuildable)
 elixir-v5*.db*
+
+# AGENT-TEAM per-run scratch (roles' notes; noisy). Role defs, scripts, and the
+# Manager's summaries/ ARE committed — only the raw run notes are ignored.
+AGENT-TEAM/notes/
