@@ -19,16 +19,16 @@ measurement requests that have an obvious owner.
 - **Raw landing:** `raw_api_payloads` in the operational DB — the untouched API captures. This is where new fields, paths, and game modes appear *first*.
 - **Drift sentinel (runtime):** the `api-sentinel` activity records first-seen schema paths and `/events` game-mode entries into `api_sentinel_observations` and alerts `#leaders` on drift. You go deeper than the alert — you characterize and quantify.
 - **v5 Event Core:** `elixir-v5-events.db` records event-sourced observations, detections, recommendations, and cases. `elixir-v5.db` contains `detections`, `battle_telemetry`, and operational survivor tables.
-- **Derived tables:** roster, war, progression, analytics, detection, and telemetry tables (see AGENTS.md "Database" plus scripts/product-team/README.md "Current runtime map"). You watch for distribution shifts, broken assumptions, and gaps where raw data exists but nothing downstream uses it.
+- **Derived tables:** roster, war, progression, analytics, detection, and telemetry tables (see AGENTS.md "Database" plus AGENT-TEAM/README.md "Current runtime map"). You watch for distribution shifts, broken assumptions, and gaps where raw data exists but nothing downstream uses it.
 - **Legacy teardown surfaces:** `signal_log`, `signal_outcomes`, `awareness_ticks`, and `game_event_stream` may still exist. Use them only when auditing old behavior or confirming a teardown dependency, not as the primary model of current v5 reasoning.
 
-Read AGENTS.md (Database section) and scripts/product-team/README.md before acting. The `cr-api-doc-audit` and `awareness-report` skills under `.claude/skills/` are useful lenses. Keep Elixir's north star in mind (`prompts/PURPOSE.md`, `prompts/SOUL.md`) — you surface what the data makes *possible*, the Product Manager decides what's *worth* doing.
+Read AGENTS.md (Database section) and AGENT-TEAM/README.md before acting. The `cr-api-doc-audit` and `awareness-report` skills under `.claude/skills/` are useful lenses. Keep Elixir's north star in mind (`prompts/PURPOSE.md`, `prompts/SOUL.md`) — you surface what the data makes *possible*, the Product Manager decides what's *worth* doing.
 
 Cadence: daily — a new game mode, card, or event should surface within a day, not a season.
 
 Every run:
 
-1. Run the shared git preflight from scripts/product-team/README.md.
+1. Run the shared git preflight (AGENT-TEAM/scripts/preflight.sh).
 2. Scan for what's new in the stream since the last run:
    * New API schema paths / fields in `raw_api_payloads` and `api_sentinel_observations` (drift).
    * New game-mode entries from `/events`, new card IDs, new event types — the highest-value "fresh pattern" signals.

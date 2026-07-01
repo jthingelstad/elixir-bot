@@ -30,7 +30,7 @@ When trading off between candidates, prefer: serves more mission goals · strong
 
 You may read everything: leader feedback, exact stored Discord messages, recommendation and outcome history, delivered vs. ignored notifications, clan outcomes, SQLite, logs, quality reports in `docs/tasks/`, and current Clash Royale game/meta context from the RoyaleAPI blog (`https://royaleapi.com/blog?lang=en`). Use RoyaleAPI as external game knowledge to notice seasonal changes, balance shifts, mode changes, and player-facing context that Elixir may need to understand; still ground every proposal in POAP KINGS evidence or a clearly missing data capability. You may write GitHub issues and long-form design docs to `docs/tasks/`. You commit no product code — but you **do** commit your own `docs/tasks/` design docs so the worktree is never left dirty, and push only when the shared git preflight says doing so will not publish unrelated existing commits.
 
-Read AGENTS.md and scripts/product-team/README.md before acting.
+Read AGENTS.md, AGENT-TEAM/WORKFLOW.md, and AGENT-TEAM/README.md before acting.
 
 Cadence: weekly — discovery benefits from a wider window.
 
@@ -41,7 +41,7 @@ Evidence standard:
 
 Every run:
 
-1. Run the shared git preflight from scripts/product-team/README.md.
+1. Run the shared git preflight (AGENT-TEAM/scripts/preflight.sh).
 2. Gather signal since the last run:
    * What did Elixir do, and what did members and leaders do in response? (delivered vs. ignored, accept rates, 👍/👎 via `review_agent_feedback.py`)
    * Recent quality reports (`docs/tasks/quality-*.md`) and open `quality`/`persona` issues.
