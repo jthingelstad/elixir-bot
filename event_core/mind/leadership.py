@@ -11,6 +11,7 @@ inactivity_review targets — not row-for-row reproduction of legacy's policy ou
 """
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 
 from eventsourcing.application import AggregateNotFoundError
@@ -70,11 +71,16 @@ class InactivityRiskDetector(FollowerRunner):
         now = datetime.now(timezone.utc).isoformat()
         # Current roster = members present in the most recent roster observation batch
         # (all current members share that observed_at; anyone who left has an older one).
-        rows = self.conn.execute(
-            "SELECT m.player_tag AS tag, cs.last_seen_api AS last_seen "
-            "FROM members m JOIN member_current_state cs ON cs.member_id = m.member_id "
-            "WHERE cs.observed_at = (SELECT MAX(observed_at) FROM member_current_state)"
-        ).fetchall()
+        try:
+            rows = self.conn.execute(
+                "SELECT m.player_tag AS tag, cs.last_seen_api AS last_seen "
+                "FROM members m JOIN member_current_state cs ON cs.member_id = m.member_id "
+                "WHERE cs.observed_at = (SELECT MAX(observed_at) FROM member_current_state)"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # No roster read model this run (fresh store, or a tick with no clan
+            # payload) — nothing to scan. Must not wedge the shared advance() loop.
+            return 0
         for r in rows:
             last_seen = r["last_seen"]
             d = days_inactive(last_seen, now)
