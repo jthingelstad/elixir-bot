@@ -87,6 +87,39 @@ def _subject_history(conn, intent, limit: int = 12) -> list[dict]:
     return history
 
 
+def _recent_win_for_subject(conn, tag, limit: int = 25) -> dict | None:
+    """The subject's most recent competitive WIN, as compact telemetry facts, to seed a
+    player-milestone post. The distilled telemetry has the opponent TAG + mode + crowns but
+    not the opponent name or deck cards — the composer enriches those from its CR battle-log
+    tools. Best-effort: returns None for non-players or any read error (the post degrades to
+    milestone-only, never fails)."""
+    if conn is None or not tag or not str(tag).startswith("#"):
+        return None
+    from event_core.read import tools
+    try:
+        rows = tools.get_player_battles(conn, tag, limit=limit)
+    except Exception:
+        return None
+    for r in rows:
+        if not r.get("is_competitive"):
+            continue
+        won = str(r.get("outcome") or "").lower() == "win" or (
+            (r.get("crowns_for") or 0) > (r.get("crowns_against") or 0)
+        )
+        if not won:
+            continue
+        return {
+            "battle_time": r.get("battle_time"),
+            "opponent_tag": r.get("opponent_tag"),
+            "mode": r.get("game_mode_name") or r.get("mode_group"),
+            "crowns_for": r.get("crowns_for"),
+            "crowns_against": r.get("crowns_against"),
+            "arena": r.get("arena_name"),
+            "trophy_change": r.get("trophy_change"),
+        }
+    return None
+
+
 def _resolve_player_name(conn, tag) -> str | None:
     """subject_tag (#ABC) -> the member's display name, so the agent names the
     PERSON, not the cryptic tag. Without this the agent leads with whatever
@@ -158,6 +191,33 @@ def intent_context(intent, conn=None) -> str:
             "voice: use your tools to look up the other clans in our current river race "
             "group and call out the main threats (clan score, war trophies, notable "
             "members). Be concrete; do not invent details.\n\n"
+            f"```json\n{facts}\n```"
+        )
+
+    # Player milestones (#player-highlights) get the agentic treatment: seed the payload with
+    # the member's most recent competitive win (grounded telemetry) and tell the composer to
+    # enrich it via its CR read tools (opponent name, a notable card or two) and feature it —
+    # so a milestone reads like "you crushed <opponent> with <card>", not a bare "congrats".
+    from event_core.mind.communication import PUBLIC_INTENT_PREFIX
+    if PUBLIC_INTENT_PREFIX.get(dtype) == "celebrate":
+        win = _recent_win_for_subject(conn, intent.subject_tag)
+        if win:
+            payload["recent_win"] = win
+        history = _subject_history(conn, intent)
+        if history:
+            payload["recent_history"] = history
+        facts = json.dumps(payload, indent=2, default=str)
+        return (
+            "Compose a short, natural #player-highlights post celebrating this milestone, in "
+            "your own voice. " + _NAMING_CLAUSE +
+            "Make it interesting — not a bare 'congrats on N wins'. Feature a concrete recent "
+            "moment: if \"recent_win\" is present it's the member's latest competitive win from "
+            "telemetry (opponent TAG, mode, crowns) — USE YOUR CR READ TOOLS (their battle log) "
+            "to enrich it with the opponent's NAME and a notable card or two from that battle, and "
+            "work that into the post (who they beat, the mode, how it went). \"recent_history\" is "
+            "their recent run for extra color (a streak, a hot week). Ground EVERY specific "
+            "(opponent, cards, numbers) in tool or telemetry output — do not invent details. Keep "
+            "it to a line or two.\n\n"
             f"```json\n{facts}\n```"
         )
 
