@@ -504,7 +504,49 @@ def test_intent_context_no_history_is_clean():
         priority=1, caused_by=["e"], summary={"detection_type": "player_level_up"},
     )
     prompt = intent_context(intent, conn)
-    assert "recent_history" not in prompt
+    # No history/win data injected for a first-seen player. (The milestone prompt now
+    # *names* recent_history/recent_win in its instructions, so check the facts key, not
+    # a bare substring: the quoted key-with-colon only appears in the JSON payload.)
+    assert '"recent_history":' not in prompt
+    assert '"recent_win":' not in prompt
+    conn.close()
+
+
+def test_intent_context_milestone_seeds_recent_win_and_asks_for_tools():
+    """A player milestone seeds the composer with the member's most recent competitive win
+    (grounded telemetry) and instructs it to enrich the game via its CR read tools — so the
+    post features the win instead of a bare 'congrats'."""
+    from event_core import db
+    from event_core.domain.communication_intent import CommunicationIntent
+    from event_core.live.runtime import intent_context
+
+    conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    conn.execute(
+        "CREATE TABLE detections (dedup_key TEXT PRIMARY KEY, detection_type TEXT, detector TEXT, "
+        "subject_tag TEXT, occurred_at TEXT, scope TEXT, payload_json TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE battle_telemetry (player_tag TEXT, battle_time TEXT, opponent_tag TEXT, "
+        "crowns_for INT, crowns_against INT, game_mode_name TEXT, mode_group TEXT, outcome TEXT, "
+        "is_competitive INT, arena_name TEXT, trophy_change INT)"
+    )
+    conn.execute(
+        "INSERT INTO battle_telemetry (player_tag, battle_time, opponent_tag, crowns_for, "
+        "crowns_against, game_mode_name, mode_group, outcome, is_competitive, arena_name, "
+        "trophy_change) VALUES "
+        "('#TH15','20260702T010000.000Z','#OPP',3,1,'Ranked','ranked','win',1,'Legendary Arena',30)"
+    )
+    conn.commit()
+    intent = CommunicationIntent(
+        dedup_key="intent:detection:career_wins_milestone:#TH15:2000",
+        intent_type="celebrate:career_wins_milestone", subject_tag="#TH15", scope="public",
+        priority=1, caused_by=["e"],
+        summary={"detection_type": "career_wins_milestone", "milestone": 2000},
+    )
+    prompt = intent_context(intent, conn)
+    assert '"recent_win":' in prompt and "#OPP" in prompt          # grounded win seed injected
+    assert "CR READ TOOLS" in prompt or "battle log" in prompt     # agentic enrichment requested
+    assert "do not invent" in prompt                               # anti-hallucination guard kept
     conn.close()
 
 
