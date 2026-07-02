@@ -110,6 +110,12 @@ else:
     )
 LEADERSHIP_ACTION_SCAN_MINUTES = int(os.getenv("LEADERSHIP_ACTION_SCAN_MINUTES", "240"))
 LEADERSHIP_ACTION_SCAN_MAX_ACTIONS = int(os.getenv("LEADERSHIP_ACTION_SCAN_MAX_ACTIONS", "2"))
+# How many due decision cases to *consider* per case type. This is the candidate
+# pool, NOT the post cap (that stays LEADERSHIP_ACTION_SCAN_MAX_ACTIONS): the scan
+# must be able to skip stale/ineligible cases (old deferred rows, departed members)
+# and still reach fresh eligible ones. When this equalled max_actions, a backlog of
+# old cases permanently occupied the window and starved newer eligible cases.
+LEADERSHIP_ACTION_DUE_CASE_SCAN_LIMIT = int(os.getenv("LEADERSHIP_ACTION_DUE_CASE_SCAN_LIMIT", "50"))
 KICK_RECOMMENDATION_FRESH_JOIN_GRACE_DAYS = int(os.getenv("KICK_RECOMMENDATION_FRESH_JOIN_GRACE_DAYS", "7"))
 # How long a leader's decline suppresses re-proposing the same role action
 # for the same member. Role situations change on roster timescales, so the
@@ -1095,7 +1101,7 @@ async def _post_candidate_leader_action_recommendations(*, max_actions: int = 3)
         due_cases = await asyncio.to_thread(
             db.list_due_decision_cases,
             case_type=case_type,
-            limit=max_actions,
+            limit=LEADERSHIP_ACTION_DUE_CASE_SCAN_LIMIT,
         )
         # Case-first: due cases drive the cards. A deferred case re-surfaces when
         # its due_at passes even if the live detector no longer flags the member —
