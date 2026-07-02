@@ -721,7 +721,25 @@ def _v5_event_leader_action_spec(metadata: dict | None) -> dict | None:
     }
 
 
-def _v5_event_clan_chat_context(spec: dict, metadata: dict | None) -> str:
+def _recent_win_facts(player_tag: str | None) -> dict | None:
+    """The player's most recent competitive win (opponent tag, mode, crowns) from the v5
+    projections DB, to seed a celebration relay so it can reference the actual game. The
+    composer enriches opponent name + cards from its CR tools. Best-effort → None on error."""
+    if not player_tag:
+        return None
+    try:
+        from event_core import db as v5db
+        from event_core.live.runtime import _recent_win_for_subject
+        conn = v5db.connect()
+        try:
+            return _recent_win_for_subject(conn, player_tag)
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def _v5_event_clan_chat_context(spec: dict, metadata: dict | None, recent_win: dict | None = None) -> str:
     summary = (((metadata or {}).get("summary") or {}) if isinstance((metadata or {}).get("summary"), dict) else {})
     profile_facts = spec.get("profile_facts") or {}
     profile_line = ""
@@ -730,6 +748,16 @@ def _v5_event_clan_chat_context(spec: dict, metadata: dict | None) -> str:
             "\nMember joined welcome rule: mention at least one player-profile fact so the welcome "
             "feels researched, warm, and specific. Do not write a generic welcome."
             f"\nPlayer profile facts JSON: {json.dumps(profile_facts, sort_keys=True, default=str)}"
+        )
+    win_line = ""
+    if recent_win:
+        win_line = (
+            "\nCelebration rule: do NOT write a bare 'congrats on N wins'. The member's most recent "
+            "competitive win is below — USE YOUR CR READ TOOLS (their battle log) to name the opponent "
+            "and one notable card from that game, and reference the win concretely (who they beat / the "
+            "mode). Ground every specific in tool or telemetry output; do not invent. It's a short "
+            "in-game line, so pick the single most interesting detail and keep it tight."
+            f"\nRecent win JSON: {json.dumps(recent_win, sort_keys=True, default=str)}"
         )
     return (
         "V5 public event leader-action relay:\n"
@@ -741,16 +769,22 @@ def _v5_event_clan_chat_context(spec: dict, metadata: dict | None) -> str:
         f"Event facts JSON: {json.dumps(summary, sort_keys=True, default=str)}\n"
         f"Fallback message: {spec.get('copy') or ''}"
         f"{profile_line}"
+        f"{win_line}"
     )
 
 
 async def _v5_event_clan_chat_copy(spec: dict, metadata: dict | None) -> tuple[str, dict]:
     fallback = spec.get("copy") or "POAP KINGS keeps building together."
     fallback_signed = sign_clan_chat_text(fallback, limit=CLASH_COPY_MAX_LENGTH)
+    # Celebration relays (milestones etc.) get the member's recent win seeded in, so the line
+    # can feature the actual game instead of a bare "congrats". Welcome relays don't.
+    recent_win = None
+    if spec.get("action_type") == "celebration_relay":
+        recent_win = await asyncio.to_thread(_recent_win_facts, spec.get("target_player_tag"))
     try:
         generated = await generate_clan_chat_copy(
             intent=f"v5_event_{spec.get('objective') or 'leader_action'}",
-            context=_v5_event_clan_chat_context(spec, metadata),
+            context=_v5_event_clan_chat_context(spec, metadata, recent_win),
             max_messages=1,
             max_chars=CLASH_COPY_MAX_LENGTH,
             forbidden_terms=("http://", "https://", "www.", "Discord"),
