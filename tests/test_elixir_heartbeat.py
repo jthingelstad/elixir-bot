@@ -1196,6 +1196,46 @@ def test_leader_action_scan_posts_due_inactivity_case():
     assert mock_create.call_args.kwargs["target_player_tag"] == "#UGQPVQ9U9"
 
 
+def test_leader_action_scan_considers_full_due_pool_not_just_post_cap():
+    """Regression: the due-case query limit is decoupled from the post cap, so a
+    backlog of stale/ineligible cases can't starve fresh eligible ones sitting past
+    the first max_actions rows (the live starvation that hid idle members from the
+    leadership scan)."""
+    async def fake_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    channel = AsyncMock()
+    channel.id = 1513758211206025227
+    channel.name = "leader-actions"
+    channel.type = "text"
+
+    captured: dict = {}
+
+    def fake_list_due(*, case_type=None, limit=20, **kwargs):
+        captured[case_type] = limit
+        return []
+
+    with (
+        patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
+        patch("runtime.jobs._core.prompts.discord_singleton_lane", return_value={"id": 1513758211206025227, "name": "#leader-actions"}),
+        patch.object(elixir.bot, "get_channel", return_value=channel),
+        patch("runtime.jobs._core.db.get_promotion_candidates", return_value={"recommended": [], "demotion_candidates": []}),
+        patch("runtime.jobs._core.db.get_members_at_risk", return_value={"members": []}),
+        patch("runtime.jobs._core.db.list_due_decision_cases", side_effect=fake_list_due),
+        patch("runtime.jobs._core.can_post_leader_action", return_value=(True, None)),
+    ):
+        from runtime.jobs._core import (
+            LEADERSHIP_ACTION_DUE_CASE_SCAN_LIMIT,
+            _post_candidate_leader_action_recommendations,
+        )
+        asyncio.run(_post_candidate_leader_action_recommendations(max_actions=2))
+
+    # the pool queried per case type must exceed the post cap, or old stale cases
+    # permanently occupy the window and newer eligible ones never post.
+    assert captured.get("inactivity_review") == LEADERSHIP_ACTION_DUE_CASE_SCAN_LIMIT
+    assert LEADERSHIP_ACTION_DUE_CASE_SCAN_LIMIT > 2
+
+
 def test_leader_action_scan_resurfaces_due_deferred_case_without_fresh_signal():
     """A deferred case re-surfaces when due even if the detector no longer flags
     the member — the leader deferred it, so it is carded (not dismissed)."""
