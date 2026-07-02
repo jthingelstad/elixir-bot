@@ -20,6 +20,7 @@ SCAN_STYLE_DETECTORS = {
     "detector:cake_day",
     "detector:weekly_donation_leader",
     "detector:battle_trophy_push",
+    "detector:inactive_member_risk",
 }
 
 

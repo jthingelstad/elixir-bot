@@ -60,23 +60,47 @@ def test_days_inactive():
     assert days_inactive(None, "2026-06-21T00:00:00Z") is None
 
 
-# --- generator pipeline: roster -> detection -> recommendation + case ---
+# --- scan pipeline: current roster -> detection -> recommendation + case ---
 def test_inactivity_pipeline(world):
+    from datetime import datetime, timedelta, timezone
+
     from event_core import db
     from event_core.domain.decision_case import case_id
     from event_core.domain.recommendation import recommendation_id
     from event_core.mind.leadership import InactivityRiskDetector, LeadershipGenerator
 
-    # an obviously inactive member (last seen 20 days before observation)
-    world.observe_member_roster(
-        "#INA", {"last_seen_api": "20260601T000000.000Z", "role": "member", "trophies": 5000},
-        "2026-06-21T00:00:00Z", "h0",
-    )
+    now = datetime.now(timezone.utc)
+
+    def cr(dt):  # CR-compact last_seen stamp
+        return dt.strftime("%Y%m%dT%H%M%S.000Z")
+
+    # The scan reads the current-roster projection directly, NOT roster events — an
+    # idle member is the *absence* of events, so seed member_current_state as the live
+    # tick would. Current roster = rows sharing the most recent observed_at.
     conn = db.connect(os.path.join(tempfile.mkdtemp(), "proj.db"))
+    conn.executescript(
+        "CREATE TABLE members (member_id INTEGER PRIMARY KEY, player_tag TEXT, current_name TEXT);"
+        "CREATE TABLE member_current_state "
+        "(member_id INTEGER PRIMARY KEY, observed_at TEXT, last_seen_api TEXT);"
+    )
+    latest = now.isoformat()
+    left_batch = (now - timedelta(days=10)).isoformat()
+    conn.executemany(
+        "INSERT INTO members VALUES (?,?,?)",
+        [(1, "#INA", "Idle Guy"), (2, "#ACTIVE", "Active Guy"), (3, "#LEFT", "Departed Guy")],
+    )
+    conn.executemany(
+        "INSERT INTO member_current_state VALUES (?,?,?)",
+        [
+            (1, latest, cr(now - timedelta(days=20))),      # idle 20d, current batch -> flagged
+            (2, latest, cr(now - timedelta(days=1))),       # active 1d, current batch -> skipped
+            (3, left_batch, cr(now - timedelta(days=30))),  # idle but not current (left) -> ignored
+        ],
+    )
+    conn.commit()
 
     det = InactivityRiskDetector(world, conn)
-    det.reset()
-    assert det.run() == 1  # one inactive_member_risk detection
+    assert det.run() == 1  # only #INA — active member and departed member excluded
 
     gen = LeadershipGenerator(world, conn)
     gen.reset()
@@ -89,7 +113,8 @@ def test_inactivity_pipeline(world):
     case = world.repository.get(case_id("inactivity_review:#INA"))
     assert case.case_type == "inactivity_review" and case.status == "open"
 
-    # idempotent: re-running emits nothing new
+    # idempotent: re-scanning the same (tag, last_seen) emits nothing new
+    assert InactivityRiskDetector(world, conn).run() == 0
     gen2 = LeadershipGenerator(world, conn)
     gen2.reset()
     assert gen2.run() == 0

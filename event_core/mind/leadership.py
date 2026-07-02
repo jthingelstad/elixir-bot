@@ -50,27 +50,46 @@ def days_inactive(last_seen: str | None, observed_at: str | None) -> float | Non
 
 
 class InactivityRiskDetector(FollowerRunner):
+    """SCAN-style, not log-driven. Inactivity is the *absence* of activity, so it
+    cannot be reliably detected by following roster-change events: an idle member
+    stops changing and therefore stops generating RosterStateObserved events (they
+    only surface incidentally when their clan rank shifts), so an event-driven check
+    flags them late or never — especially when roster observation itself is sparse
+    (e.g. a flaky /clans endpoint). Instead, each run scans the CURRENT clan roster's
+    last_seen against *now* and flags anyone past the threshold. Idempotent via the
+    (tag, last_seen) dedup key — one detection per inactivity episode; a returning
+    member gets a fresh last_seen, so a later lapse is a new episode."""
+
     name = "detector:inactive_member_risk"
-    aggregate_name = "Player"
     THRESHOLD_DAYS = 7
 
-    def detect(self, event, notification) -> None:
-        if type(event).__name__ != "RosterStateObserved":
-            return
-        last_seen = event.observation.get("last_seen_api")
-        d = days_inactive(last_seen, event.observed_at)
-        if d is None or d < self.THRESHOLD_DAYS:
-            return
-        # One detection per inactivity episode (keyed by the stale lastSeen value).
-        self.emit_detection(
-            dedup_key=f"inactive_member_risk:{event.player_tag}:{last_seen}",
-            detection_type="inactive_member_risk",
-            subject_tag=event.player_tag,
-            occurred_at=event.observed_at,
-            caused_by=[self.evidence(notification)],
-            payload={"days_inactive": round(d, 1), "last_seen": last_seen},
-            scope="leadership",
-        )
+    def detect(self, event, notification) -> None:  # unused (scan-style, not log-driven)
+        pass
+
+    def run(self, batch: int = 500) -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        # Current roster = members present in the most recent roster observation batch
+        # (all current members share that observed_at; anyone who left has an older one).
+        rows = self.conn.execute(
+            "SELECT m.player_tag AS tag, cs.last_seen_api AS last_seen "
+            "FROM members m JOIN member_current_state cs ON cs.member_id = m.member_id "
+            "WHERE cs.observed_at = (SELECT MAX(observed_at) FROM member_current_state)"
+        ).fetchall()
+        for r in rows:
+            last_seen = r["last_seen"]
+            d = days_inactive(last_seen, now)
+            if d is None or d < self.THRESHOLD_DAYS:
+                continue
+            self.emit_detection(
+                dedup_key=f"inactive_member_risk:{r['tag']}:{last_seen}",
+                detection_type="inactive_member_risk",
+                subject_tag=r["tag"],
+                occurred_at=now,
+                caused_by=[f"member_current_state:{r['tag']}:{last_seen}"],
+                payload={"days_inactive": round(d, 1), "last_seen": last_seen},
+                scope="leadership",
+            )
+        return self.emitted
 
 
 class LeadershipGenerator(FollowerRunner):
