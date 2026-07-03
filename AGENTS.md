@@ -163,7 +163,7 @@ Each activity declares:
 
 Read the exact, current list (keys, schedules, executors, enabled state) from `runtime/activities.py` — don't trust a hand-maintained copy here, which drifts. The shape today:
 
-- The proactive heartbeat is **`v5-reactive-tick`** (`_v5_reactive_tick`). It runs the Event Core engine — ingest → detections → recommendations/cases → communication intents → confirmed Discord delivery — and **replaced the deleted v4 `clan-awareness` / `war-awareness` ticks**. Leadership recommendations now flow through it too (`leadership-action-scan` is retained but disabled).
+- The proactive heartbeat is **`v5-reactive-tick`** (`_v5_reactive_tick`). It runs the Event Core engine — ingest → detections → recommendations/cases → communication intents → confirmed Discord delivery — and **replaced the deleted v4 `clan-awareness` / `war-awareness` ticks**. Leadership recommendations now flow through it too (`leadership-action-scan` is retained and **enabled** — `enabled_by_default=True`, 240-minute interval, `runtime/activities.py`; it refreshes action outcomes, re-queues feedback synthesis, and gates posting through `can_post_leader_action`).
 - **Ingest / refresh:** `war-poll` (hourly River Race snapshot), `player-progression` (`_player_intel_refresh`, player profile + battle intel + `#player-highlights`), `card-catalog-sync`.
 - **Scheduled posts / reports:** `daily-clan-insight` (`#ask-elixir` hidden fact), `weekly-recap` (public recap + website sync), `weekly-discord-invite-relay`, `promotion-content` (`#recruiting` + website), `clan-wars-intel`, `award-detection`.
 - **Maintenance / ops:** `api-sentinel` (CR-API drift notes to `#leaders`), `memory-synthesis` (weekly memory hygiene), `db-maintenance`.
