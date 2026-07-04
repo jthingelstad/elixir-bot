@@ -46,10 +46,32 @@ def retry_intent(intent_id: int) -> bool:
         conn.close()
 
 
+class _NoCommitConnection:
+    """Dry-run guard (cold review 2026-07-04 #9): the ROLLBACK guarantee rests
+    entirely on nothing inside the review committing. That's true today, but
+    one refactor (e.g. calling create_leader_action_recommendation, which
+    commits internally) would silently make the dry run real. This proxy makes
+    any commit() during the dry run raise instead."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def commit(self):  # noqa: D102 — the whole point
+        raise RuntimeError(
+            "commit() during weekly-review DRY RUN — a code path inside "
+            "run_weekly_review now commits; the dry run would have mutated "
+            "live state. Fix the path or drop the dry-run feature."
+        )
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
 def weekly_review_dryrun() -> dict:
     """Run the weekly review inside a transaction and ROLL BACK: renders what
     Monday would decide without rolling week_anchor or the hysteresis
-    counters (verified: run_weekly_review never commits internally)."""
+    counters. The _NoCommitConnection proxy turns any accidental commit into
+    a loud failure rather than a silent live mutation."""
     from engine import management
 
     today = date.today()
@@ -58,7 +80,7 @@ def weekly_review_dryrun() -> dict:
     try:
         conn.execute("BEGIN")
         try:
-            result = management.run_weekly_review(conn, monday)
+            result = management.run_weekly_review(_NoCommitConnection(conn), monday)
         finally:
             conn.rollback()
         result["dry_run"] = True

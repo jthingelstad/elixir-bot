@@ -132,7 +132,7 @@ Sourced from `currentriverrace` + `riverracelog` diffs against the
 | `war_day_opened` | `war_day_opened:{season_id}:{section_index}:{day}` | `{period_type, day_index}` | Carries the day-transition half of `war_update` (`:774`); the pace/momentum half is the war clock's job (§16.2), not an event. |
 | `colosseum_detected` | `colosseum_detected:{season_id}` | `{section_index}` | **New** — §16.1's end-is-discovered rule as a first-class fact (`periodType == 'colosseum'`, verified in live payloads, feedback New-1). |
 | `week_finished` | `week_finished:{season_id}:{section_index}` | `{our_rank, our_fame, standings: [{clan_tag, fame, rank}]}` | `war_complete` (`:743`); also writes `war_weeks` / `war_week_clans`. |
-| `race_finished` | `race_finished:{season_id}:{section_index}` | `{finished_at}` | **New** — we crossed the finish line mid-week; drives the §16.4 urgency→recognition tone shift. |
+| `race_finished` | `race_finished:{season_id}:{section_index}` | `{finished_at}` | **New** — we crossed the finish line mid-week; drives the §16.4 urgency→recognition tone shift. **Normal weeks only (10,000 fame):** Colosseum has no finish line, so this event never fires there (revised 2026-07-04). |
 | `season_closed` | `season_closed:{season_id}` | `{final_rank, weeks, war_champ_tag, free_pass_tag, standings_top: […]}` | **New** — fires after Colosseum war days complete; computes Q2's honor + rotation outcome into `war_seasons`; the Q5 award pass consumes exactly this event (writing the `war_champ` **podium** — ranks 1–3 from `standings_top`, carried behavior — plus the single `free_pass` row). |
 
 Tournament bounded streams keep their existing tidy capture (Part I §4) **and

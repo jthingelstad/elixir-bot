@@ -87,3 +87,52 @@ def test_meta_marker_copy_falls_back_to_render(engine_conn):
     delivery.consume(engine_conn, send, lambda i: "skipping post — data inconsistent", NOW)
     assert sent, "fallback copy should still post"
     assert not looks_like_meta(sent[0])
+
+
+def test_lane_failure_does_not_block_other_lanes(engine_conn):
+    # Cold review 2026-07-04 #2: fail-stop is PER LANE.
+    delivery.raise_intent(engine_conn, None, "celebrate", "member-highlights",
+                          "public", {"subject_tag": "#A"}, NOW)
+    delivery.raise_intent(engine_conn, None, "clan", "clan-events",
+                          "public", {"subject_tag": "#B"}, NOW)
+    delivery.raise_intent(engine_conn, None, "celebrate", "member-highlights",
+                          "public", {"subject_tag": "#C"}, NOW)
+    engine_conn.commit()
+
+    def send_highlights_broken(lane, copy):
+        if lane == "member-highlights":
+            raise RuntimeError("lane down")
+        return "msg-ok"
+
+    counters = delivery.consume(engine_conn, send_highlights_broken,
+                                lambda i: "copy", NOW)
+    rows = {r["lane"]: r["status"] for r in engine_conn.execute(
+        "SELECT lane, status FROM communication_intents WHERE intent_id IN (1, 2)")}
+    # clan-events delivered despite member-highlights failing
+    assert rows["clan-events"] == "fulfilled"
+    assert rows["member-highlights"] == "failed"
+    # the second highlights intent waited (lane fail-stop), not failed
+    third = engine_conn.execute(
+        "SELECT status FROM communication_intents WHERE intent_id = 3").fetchone()
+    assert third["status"] == "pending"
+    assert counters["delivered"] == 1 and counters["failed"] == 1
+
+
+def test_terminal_status_commits_immediately(engine_conn):
+    # Cold review 2026-07-04 #1: a fulfilled mark must survive an exception
+    # escaping later in the same consume (no rollback-resend of posted msgs).
+    _raise(engine_conn, n=2)
+    calls = []
+
+    def send_then_explode(lane, copy):
+        calls.append(1)
+        if len(calls) == 1:
+            return "msg-1"
+        raise KeyboardInterrupt("simulated escape mid-consume")
+
+    try:
+        delivery.consume(engine_conn, send_then_explode, lambda i: "copy", NOW)
+    except KeyboardInterrupt:
+        pass
+    engine_conn.rollback()  # simulate the tick guard skipping its commit
+    assert _statuses(engine_conn)[0] == "fulfilled"  # survived the rollback

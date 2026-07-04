@@ -918,7 +918,19 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
         return 0
     posted = 0
     for action in pending[:limit]:
+        # Mark BEFORE posting (cold review #7): a failure after the Discord
+        # post but before the id write must not double-post next tick. The
+        # sentinel is cleared ONLY when we know the post never happened;
+        # otherwise it sticks — at-most-once is the right direction for cards
+        # (the action row itself stays visible in DB + Observatory).
+        post_attempted = False
         try:
+            await asyncio.to_thread(
+                lambda a=action: db.update_leader_action_message(
+                    a["action_id"], source_message_id="posting"
+                )
+            )
+            post_attempted = True
             card_messages = await post_leader_action_card(relay_channel, action)
             first_id = getattr(card_messages[0], "id", None) if card_messages else None
             if first_id is not None:
@@ -930,6 +942,16 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
             posted += 1
         except Exception:
             log.exception("engine leader-action card post failed for %s", action.get("action_id"))
+            if not post_attempted:
+                try:  # sentinel write itself failed pre-post — safe to retry
+                    await asyncio.to_thread(
+                        lambda a=action: db.update_leader_action_message(
+                            a["action_id"], source_message_id=None
+                        )
+                    )
+                except Exception:
+                    log.debug("sentinel clear failed for %s", action.get("action_id"),
+                              exc_info=True)
     return posted
 
 
@@ -945,12 +967,16 @@ async def _relay_engine_clan_chat_actions(fulfilled_intents: list) -> int:
 
     # Daily cap — the in-game channel is scarce space (volume principle).
     def _relays_today() -> int:
+        # Chicago-day bound (cold review #7): a UTC-midnight window resets at
+        # 18:00/19:00 local, allowing up to 2× the cap in one Chicago day.
+        day_start_utc, _ = db.chicago_day_bounds_utc(db.chicago_today())
         conn = db.get_connection()
         try:
             return conn.execute(
                 """SELECT COUNT(*) FROM leader_action_recommendations
                    WHERE action_key LIKE 'v5_event_leader_action:%'
-                     AND created_at >= strftime('%Y-%m-%dT00:00:00', 'now')""",
+                     AND created_at >= ?""",
+                (day_start_utc,),
             ).fetchone()[0]
         finally:
             conn.close()

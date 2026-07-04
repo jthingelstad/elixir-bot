@@ -132,14 +132,17 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
     epoch_row = conn.execute("SELECT MIN(observed_at) FROM battle_events").fetchone()
     if not epoch_row or not epoch_row[0]:
         return []  # stream empty (fresh cut warm-up) — no data, no judgment
-    epoch = _parse_ts(epoch_row[0])
     fired: list[dict] = []
     members = conn.execute(
         """SELECT mm.player_tag, mm.tenure_days, mm.role, mm.kick_state,
                   mm.kick_state_since, mm.state_json,
-                  pcs.trophies
+                  pcs.trophies, p.last_seen_at,
+                  (SELECT MAX(cm2.joined_at) FROM clan_memberships cm2
+                   WHERE cm2.player_tag = mm.player_tag AND cm2.left_at IS NULL)
+                  AS membership_joined_at
            FROM member_management mm
            LEFT JOIN player_current_state pcs ON pcs.player_tag = mm.player_tag
+           LEFT JOIN players p ON p.player_tag = mm.player_tag
            WHERE EXISTS (SELECT 1 FROM clan_memberships cm
                          WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL)"""
     ).fetchall()
@@ -148,7 +151,23 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
         last_row = conn.execute(
             "SELECT MAX(battle_time) FROM battle_events WHERE player_tag = ?", (tag,)
         ).fetchone()
-        reference = _parse_ts(last_row[0]) if last_row and last_row[0] else epoch
+        if last_row and last_row[0]:
+            reference = _parse_ts(last_row[0])
+        else:
+            # Never battled in the stream: idle from THEIR OWN anchor — the
+            # later of membership joined_at and players.last_seen_at — never
+            # the shared stream epoch (cold review 2026-07-04 #10: the epoch
+            # marched every zero-battle member toward at_risk in lockstep,
+            # false kick cards landing as a batch mid-July).
+            candidates = [
+                _parse_ts(v)
+                for v in (m["membership_joined_at"], m["last_seen_at"])
+                if v
+            ]
+            candidates = [c for c in candidates if c is not None]
+            if not candidates:
+                continue  # no personal anchor — no judgment
+            reference = max(candidates)
         days_idle = (now_dt - reference).total_seconds() / 86400.0
 
         state = m["kick_state"] or "none"

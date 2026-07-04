@@ -124,7 +124,10 @@ END;
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
+    # Engine Z-convention (cold review #8): the table briefly held three
+    # timestamp formats on day one; scripts/migrate_v51/fix_memories_ts.py
+    # normalized the migrated rows to match.
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _canon_tag(tag: Optional[str]) -> str:
@@ -438,7 +441,7 @@ def purge_expired_memories(*, conn=None) -> int:
         """DELETE FROM memories WHERE
              (expires_at IS NOT NULL AND expires_at <= ?)
              OR (retired_at IS NOT NULL
-                 AND retired_at <= datetime(?, ?))""",
+                 AND retired_at <= strftime('%Y-%m-%dT%H:%M:%SZ', ?, ?))""",
         (now, now, f"-{RETIRED_PURGE_GRACE_DAYS} days"),
     )
     conn.commit()
@@ -574,13 +577,18 @@ def select_memories(*, member_tag: Optional[str] = None, channel_key: Optional[s
                 match[r["memory_id"]] = max(match.get(r["memory_id"], 0.0), strength)
         except sqlite3.OperationalError:
             pass
-    # A recency backstop so context never comes back empty on a fresh subject.
-    for r in conn.execute(
-        f"SELECT memory_id FROM memories m WHERE {scope_sql()} "
-        "ORDER BY m.updated_at DESC LIMIT 20",
-        base_args,
-    ).fetchall():
-        match.setdefault(r["memory_id"], 0.0)
+    # Recency backstop ONLY for unfiltered calls (no member/channel/query):
+    # with subject filters given, candidates come from matches alone — the
+    # old unconditional backstop let a fresh high-conf memory about member B
+    # outscore member A's sparse matches and inject wrong-subject facts into
+    # A's answer context (cold review 2026-07-04 #5).
+    if not (member_tag or channel_key or (query and query.strip())):
+        for r in conn.execute(
+            f"SELECT memory_id FROM memories m WHERE {scope_sql()} "
+            "ORDER BY m.updated_at DESC LIMIT 20",
+            base_args,
+        ).fetchall():
+            match.setdefault(r["memory_id"], 0.0)
 
     scored = []
     for memory_id, strength in match.items():
