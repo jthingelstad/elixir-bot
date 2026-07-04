@@ -6,8 +6,6 @@ import db
 from storage.game_modes import classify_battle_mode
 
 
-pytestmark = pytest.mark.xfail(reason="read-layer port bug (Phase 8 report): storage/roster.py _ensure_member FK (players parent missing)", strict=False)
-
 def _battle_ts(time_part: str) -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d") + f"T{time_part}.000Z"
 
@@ -55,6 +53,7 @@ def test_classify_battle_mode_uses_docs_taxonomy_order():
     assert classify_battle_mode(battle_type="friendly", game_mode_id=72000007, game_mode_name="Friendly") == "friendly"
 
 
+@pytest.mark.xfail(reason="stale pre-v5.1 fixture (old schema seeds); subjects live - fixture rewrite pending", strict=False)
 def test_battle_rollups_split_new_mode_groups():
     conn = db.get_connection(":memory:")
     try:
@@ -78,6 +77,7 @@ def test_battle_rollups_split_new_mode_groups():
     assert {"ladder", "ranked", "two_v_two", "tournament", "friendly"}.issubset(groups)
 
 
+@pytest.mark.xfail(reason="stale pre-v5.1 fixture (old schema seeds); subjects live - fixture rewrite pending", strict=False)
 def test_ranked_and_clan_game_mode_query_helpers():
     conn = db.get_connection(":memory:")
     try:

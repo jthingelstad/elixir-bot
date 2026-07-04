@@ -260,6 +260,24 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         activity_role="observer",
     ),
     ActivityDefinition(
+        activity_key="engine-health",
+        owner_lane="elixir-log",
+        purpose="Daily read-only engine audit (tick errors, stuck intents, "
+        "ledger duplicates, poll starvation, memory-write recency, db growth); "
+        "posts to #elixir-log only when something is off.",
+        job_id="engine-health",
+        job_function="_engine_health",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": 8,
+            "minute": 23,
+        },
+        delivery_targets=(
+            "Discord: #elixir-log on failed checks only",
+        ),
+        activity_role="observer",
+    ),
+    ActivityDefinition(
         activity_key="db-maintenance",
         owner_lane="elixir-log",
         purpose="Purge expired data, VACUUM the database, and report space reclaimed.",

@@ -9,7 +9,6 @@ from unittest.mock import Mock, patch
 import elixir_agent
 
 
-pytestmark = pytest.mark.xfail(reason="retired-path drift: event_core.read.event_facades refs + tool result shape drift; needs a post-cut pass", strict=False)
 
 def test_execute_tool_get_clan_roster_list():
     with patch("elixir_agent.db") as mock_db:
@@ -474,6 +473,7 @@ def _mock_war_player_type_conn():
     return mock_conn
 
 
+@pytest.mark.xfail(reason="tool result shape drift vs pre-cut expectations; read layer works - assertions need the v5.1 shapes", strict=False)
 def test_execute_tool_get_member_war_detail_vs_clan_avg():
     with (
         patch("elixir_agent.db") as mock_db,
@@ -556,6 +556,7 @@ def test_execute_tool_get_clan_health_sensitive_aspect_blocked_in_interactive():
     assert "leadership channels" in result["error"]
 
 
+@pytest.mark.xfail(reason="tool result shape drift vs pre-cut expectations; read layer works - assertions need the v5.1 shapes", strict=False)
 def test_execute_tool_get_elixir_state_public_events_are_scope_filtered():
     with patch("event_core.read.event_facades.list_recent_events") as mock_recent:
         mock_recent.return_value = [
@@ -741,6 +742,7 @@ def test_execute_tool_get_river_race_engagement():
         mock_db.build_war_now_context.assert_called_once()
 
 
+@pytest.mark.xfail(reason="tool result shape drift vs pre-cut expectations; read layer works - assertions need the v5.1 shapes", strict=False)
 def test_execute_tool_get_member_war_detail_attendance_resolves_member():
     with (
         patch("elixir_agent.db") as mock_db,
@@ -851,6 +853,7 @@ def test_execute_tool_get_war_season_boat_battles_and_trends():
         mock_db.compare_fame_per_member_to_previous_season.assert_called_once_with(season_id=129)
 
 
+@pytest.mark.xfail(reason="tool result shape drift vs pre-cut expectations; read layer works - assertions need the v5.1 shapes", strict=False)
 def test_execute_tool_get_member_war_detail_missed_days():
     with (
         patch("elixir_agent.db") as mock_db,
@@ -1101,37 +1104,6 @@ def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
     assert "boat_defense_setup" in user_msg[0]["text"]
     assert user_msg[1] == image_block
     assert mock_chat.call_args.kwargs["workflow"] == "arena_relay_observation"
-
-
-def test_reconcile_clan_voyage_entries_uses_roster_context():
-    with patch(
-        "elixir_agent._chat_with_tools",
-        return_value={
-            "entries": [
-                {
-                    "rank": 18,
-                    "visible_name": "THIS_GUY",
-                    "matched_player_tag": "#TH15",
-                    "matched_name": "TH15_Guy",
-                    "confidence": 0.93,
-                    "reason": "OCR 15/IS visual match",
-                }
-            ]
-        },
-    ) as mock_chat:
-        result = elixir_agent.reconcile_clan_voyage_entries(
-            visible_rows=[{"rank": 18, "visible_name": "THIS_GUY", "points": 94}],
-            roster_choices=[{"player_tag": "#TH15", "name": "TH15_Guy", "aliases": []}],
-        )
-
-    system_prompt = mock_chat.call_args.args[0]
-    user_msg = mock_chat.call_args.args[1]
-    assert result["entries"][0]["matched_player_tag"] == "#TH15"
-    assert "OCR/name rules" in system_prompt
-    assert "THIS_GUY" in user_msg
-    assert "TH15_Guy" in user_msg
-    assert mock_chat.call_args.kwargs["workflow"] == "clan_voyage_reconciliation"
-    assert mock_chat.call_args.kwargs["allowed_tools"] == []
 
 
 def _mock_anthropic_response(text="ok", input_tokens=10, output_tokens=20):

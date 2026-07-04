@@ -97,6 +97,10 @@ regenerate it after any deliberate dependency upgrade.
 - `tests/conftest.py` builds the v5.1 schema from `scripts/migrate_v51/schema_v51.py` (plus the archive's DDL export for carried tables) into a session template, copied per test.
 - Test fixtures handle DB connection lifecycle — use `pytest.fixture` instead of manual try/finally.
 
+### Review discipline
+
+A green suite is necessary, not sufficient. Before deploying a substantive change, do a **cold adversarial review** of the diff — read it as a skeptic hunting for what breaks, not as the author confirming what works. After deploying, do a **live behavioral audit**: watch what the running system actually does (Observatory, tick counters, posted messages) rather than what the code says it should do. The 2026-07-04 end-to-end review is the reference case: the suite was green, yet the live audit found a season-breaking gap (the awards consumer was never built — two work streams each assumed the other owned it) and the cold review found ten more real defects (delivery commit ordering, per-lane fail-stop, timestamp-format mismatches, CSRF host matching). The `engine-health` daily activity (`runtime/health.py`) institutionalizes the live audit's checks, but it covers only known failure classes — new changes need fresh adversarial eyes. Never mark a cross-stream feature done without verifying the consumer end-to-end.
+
 ## Cleanup
 
 ```bash
@@ -196,7 +200,7 @@ Read the exact, current list (keys, schedules, executors, enabled state) from `r
 - **Clan management:** `weekly-leadership-review` (Mon 7:00 CT — rolls the weekly hysteresis grain, surfaces promote/demote candidacies as leader actions, posts one review) and `action-outcome-refresh` (daily 9:30 CT — leader-action outcome evaluation + feedback-synthesis re-queue). The old `leadership-action-scan` is **gone**; its scan/creation role lives in the engine's reactive kick path.
 - **War:** `war-attendance-snapshot` (daily 4:15 CT — finalizes `war_attendance_days` just before the ~09:15 UTC war-day boundary; evaluators read finalized days only).
 - **Scheduled posts / reports:** `daily-clan-insight` (`#ask-elixir` hidden fact), `weekly-recap` (public recap), `weekly-discord-invite-relay`, `promotion-content` (`#recruiting`), `clan-wars-intel`.
-- **Maintenance / ops:** `api-sentinel` (CR-API drift notes to `#leaders`), `memory-synthesis` (weekly memory hygiene), `card-catalog-sync`, `db-maintenance`.
+- **Maintenance / ops:** `api-sentinel` (CR-API drift notes to `#leaders`), `memory-synthesis` (weekly memory hygiene), `card-catalog-sync`, `db-maintenance`, `db-backup` (daily 3:37 CT iCloud snapshot), `engine-health` (daily 8:23 CT read-only audit — `runtime/health.py`; posts to `#elixir-log` only when a check fails).
 - **Tournaments:** the watch is leader-started/stopped (`runtime/jobs/_tournament.py`), a dynamic job that resumes on restart — not a registry entry.
 
 ## Architecture: Prompts vs Code
