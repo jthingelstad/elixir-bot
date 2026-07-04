@@ -104,16 +104,18 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
         plan = polling.plan(conn, now_iso)
         counters["planned_calls"] = len(plan)
         for endpoint, tag in plan:
+            # Release the writer BEFORE the fetch: cr_api persists the raw
+            # payload on its own connection during the call, so the tick must
+            # not hold a write transaction across the HTTP round-trip
+            # (that's a 30 s busy-timeout stall per call — observed live).
             ensure_player(conn, tag, None, now_iso)
+            conn.commit()
             if endpoint == "battlelog":
                 battlelogs[tag] = api.get_player_battle_log(tag) or []
                 polling.note_polled(conn, tag, "battlelog", now_iso)
             else:
                 player_payloads[tag] = api.get_player(tag) or {}
                 polling.note_polled(conn, tag, "profile", now_iso)
-            # Commit per call: the poll loop spans minutes (2 s spacing), and
-            # cr_api persists raw payloads on its own connection — holding one
-            # long write transaction here starves it ('database is locked').
             conn.commit()
 
     # refresh the clock from the fresh race payload before ingest needs it
