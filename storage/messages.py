@@ -253,64 +253,12 @@ def upsert_signal_outcome(
     conn.commit()
 
 
-@managed_connection
-def record_awareness_tick(
-    *,
-    workflow: Optional[str] = None,
-    signals_in: int = 0,
-    posts_delivered: int = 0,
-    posts_rejected: int = 0,
-    covered_keys: int = 0,
-    considered_skipped: int = 0,
-    hard_fallback: int = 0,
-    hard_fallback_failed: int = 0,
-    all_ok: bool = True,
-    skipped_reason: Optional[str] = None,
-    signal_outcomes: Optional[list[dict]] = None,
-    write_calls_issued: int = 0,
-    write_calls_succeeded: int = 0,
-    write_calls_denied: int = 0,
-    ticked_at: Optional[str] = None,
-    conn: Optional[sqlite3.Connection] = None,
-) -> int:
-    """Record one awareness-loop tick for admin observability.
-
-    ``signal_outcomes`` is an optional list of per-signal decisions shaped as
-    ``[{"signal_key": str, "signal_type": str, "status": str}, ...]`` where
-    status is one of ``"covered"``, ``"skipped"``, ``"fallback"``, or
-    ``"fallback_failed"``. Stored as JSON for audit without requiring a child
-    table join. Returns the new ``tick_id``.
-    """
-    now = ticked_at or _utcnow()
-    cursor = conn.execute(
-        """
-        INSERT INTO awareness_ticks (
-            ticked_at, workflow, signals_in, posts_delivered, posts_rejected,
-            covered_keys, considered_skipped, hard_fallback, hard_fallback_failed,
-            all_ok, skipped_reason, signal_outcomes_json,
-            write_calls_issued, write_calls_succeeded, write_calls_denied
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            now,
-            workflow,
-            signals_in,
-            posts_delivered,
-            posts_rejected,
-            covered_keys,
-            considered_skipped,
-            hard_fallback,
-            hard_fallback_failed,
-            1 if all_ok else 0,
-            skipped_reason,
-            _json_or_none(signal_outcomes),
-            write_calls_issued,
-            write_calls_succeeded,
-            write_calls_denied,
-        ),
-    )
-    conn.commit()
-    return int(cursor.lastrowid or 0)
+def record_awareness_tick(*args, **kwargs) -> int:
+    """Retired at the v5.1 cut: awareness_ticks was a Gen B audit table
+    (dropped, schema.md §8.1). Engine telemetry now lives in
+    runtime_job_status + the recognition ledger's suppression traces.
+    Kept as a no-op so any stray caller degrades instead of crashing."""
+    return 0
 
 
 @managed_connection

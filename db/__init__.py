@@ -489,9 +489,14 @@ def _enable_sqlite_vec(conn: sqlite3.Connection) -> None:
 
     try:
         sqlite_vec.load(conn)
-        conn.execute(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS clan_memory_vec USING vec0(memory_id INTEGER PRIMARY KEY, embedding float[1536])"
-        )
+        # v5.1: clan_memory_vec belongs to the memory DB only. Creating it
+        # unconditionally polluted the engine DB with vec shadow tables and
+        # made the empty-DB spine check unreachable — only create it where
+        # the clan_memories spine lives.
+        if "clan_memories" in _existing_tables(conn):
+            conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS clan_memory_vec USING vec0(memory_id INTEGER PRIMARY KEY, embedding float[1536])"
+            )
         if "clan_memory_index_status" in _existing_tables(conn):
             conn.execute(
                 "UPDATE clan_memory_index_status SET value = '1' WHERE key = 'sqlite_vec_enabled'"
@@ -610,6 +615,7 @@ _STORAGE_FACADE_MODULES = (
     "storage.metadata",
     "storage.tournament",
     "storage.card_catalog",
+    "storage.war_status",
     "storage.revisits",
     "storage.awards",
     "storage.member_ranks",
