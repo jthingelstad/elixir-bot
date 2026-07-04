@@ -515,6 +515,10 @@ def _configure_connection(conn: sqlite3.Connection, path: str) -> None:
     if path != ":memory:":
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
+        # The engine tick can hold the writer slot across a step batch;
+        # side-writers (cr_api raw-payload persistence, tool paths) must wait
+        # instead of failing with 'database is locked'.
+        conn.execute("PRAGMA busy_timeout = 30000")
     _enable_sqlite_vec(conn)
 
 
