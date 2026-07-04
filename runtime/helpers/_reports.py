@@ -662,6 +662,37 @@ def _public_story_arc_lines(*, days: int = 8, limit: int = 8) -> list[str]:
     return lines
 
 
+def _playstyle_identity_lines(limit: int = 10) -> list[str]:
+    """Non-'quiet' member identities from engine.profiles, most battles first
+    (one line each, capped) — grounded 28d labels for the recap composer."""
+    from engine.profiles import player_mode_profile
+
+    conn = db.get_connection()
+    try:
+        tags = [r["player_tag"] for r in conn.execute(
+            """SELECT cm.player_tag FROM clan_memberships cm
+               WHERE cm.left_at IS NULL"""
+        ).fetchall()]
+        profiles = []
+        for tag in tags:
+            p = player_mode_profile(conn, tag)
+            if p["identity"] in ("quiet",):
+                continue
+            name_row = conn.execute(
+                "SELECT current_name FROM players WHERE player_tag = ?", (tag,)
+            ).fetchone()
+            profiles.append((name_row[0] if name_row else tag, p))
+        profiles.sort(key=lambda np: -np[1]["total_battles"])
+        return [
+            f"- {name}: {p['identity']}"
+            + (f" (+ {', '.join(p['secondary'])})" if p["secondary"] else "")
+            + f" — {p['total_battles']} battles/28d"
+            for name, p in profiles[:limit]
+        ]
+    finally:
+        conn.close()
+
+
 def _build_weekly_clan_recap_context(clan=None, war=None):
     clan = clan or {}
     war = war or {}
@@ -671,11 +702,6 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
     except Exception as exc:
         _log().warning("Weekly recap clan trend summary unavailable: %s", exc)
         clan_trend_summary = ""
-    try:
-        clan_voyage_context = db.build_clan_voyage_context(limit=2)
-    except Exception as exc:
-        _log().warning("Weekly recap Clan Voyage context unavailable: %s", exc)
-        clan_voyage_context = ""
     try:
         war_project = db.get_war_season_snapshot()
     except Exception as exc:
@@ -727,9 +753,6 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
     lines.append("")
     lines.append("=== STORY BEATS (the week's narrative — lead with this) ===")
 
-    if clan_voyage_context and "No Clan Voyage screenshots" not in clan_voyage_context:
-        lines.append("manual Clan Voyage activity: use only as positive recognition; screenshots may be partial")
-        lines.append(clan_voyage_context)
 
     if war_project:
         lines.append(
@@ -782,6 +805,16 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
                 f"- {info.get('label')}: {info.get('battles')} battles across "
                 f"{info.get('active_members')} member(s){wr_text}{top_text}"
             )
+    # Playstyle identities (ranked-and-profiles.md §2.3): deterministic labels
+    # over the 28d mode mix — who the members ARE, not just what happened.
+    try:
+        identity_lines = _playstyle_identity_lines()
+    except Exception as exc:
+        _log().warning("Weekly recap playstyle identities unavailable: %s", exc)
+        identity_lines = []
+    if identity_lines:
+        lines.append("member playstyle identities (28d mode mix — grounded labels):")
+        lines.extend(identity_lines)
 
     if recent_events:
         lines.append(

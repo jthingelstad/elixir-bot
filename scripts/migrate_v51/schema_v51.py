@@ -11,8 +11,8 @@ Usage:
     ./venv/bin/python scripts/migrate_v51/schema_v51.py \
         --db elixir-v51.db --archive elixir-v5-archive-2026H2.db
 
-Expected table count: 54 designed tables (50 engine incl. tick_history + 4 conversation set;
-clan_memories live in elixir-v5-memory.db, untouched — migration.md T12).
+Expected table count: 57 designed tables (51 engine incl. tick_history +
+editor_verdicts, 3 conversation set, 3 memory — memory.md D1).
 """
 
 from __future__ import annotations
@@ -106,7 +106,7 @@ CREATE TABLE battle_events (
     is_war INTEGER, is_ladder INTEGER, is_ranked INTEGER, is_competitive INTEGER,
     is_special_event INTEGER, trophy_change INTEGER, starting_trophies INTEGER,
     deck_selection TEXT, deck_json TEXT,
-    arena_id INTEGER, arena_name TEXT, league_number INTEGER,
+    arena_id INTEGER, arena_name TEXT, teammate_tag TEXT, league_number INTEGER,
     is_hosted_match INTEGER, tournament_tag TEXT, event_tag TEXT,
     season_id INTEGER, section_index INTEGER, war_day_index INTEGER
 );
@@ -478,6 +478,36 @@ CREATE TABLE tick_history (
     counters_json TEXT NOT NULL
 );
 
+-- editor_verdicts: the Editor's inline-gate trace (editor.md §5; added
+-- 2026-07-04 — lazily created live by engine/editor.py ensure_editor_schema)
+CREATE TABLE editor_verdicts (
+    verdict_id INTEGER PRIMARY KEY,
+    intent_id INTEGER NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('pass','revise','fallback','error')),
+    dimensions_json TEXT,
+    original_copy TEXT, final_copy TEXT,
+    at TEXT NOT NULL
+);
+CREATE INDEX idx_editor_verdicts_intent ON editor_verdicts(intent_id);
+
+-- Ranked season lifecycle (ranked-and-profiles.md §2.1; D1–D7 ratified
+-- 2026-07-04). Ids are canonical 'YYYY-MM' (the month the season starts in;
+-- first-Monday to first-Monday). Discovered lifecycle, war-tracker style.
+CREATE TABLE pol_seasons (
+    pol_season_id TEXT PRIMARY KEY,
+    started_at TEXT,
+    ended_at TEXT,
+    closed INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE pol_season_results (
+    pol_season_id TEXT NOT NULL REFERENCES pol_seasons(pol_season_id),
+    player_tag TEXT NOT NULL,
+    league INTEGER, rating INTEGER, global_rank INTEGER,
+    battles INTEGER, wins INTEGER,
+    observed_at TEXT NOT NULL,
+    PRIMARY KEY (pol_season_id, player_tag)
+);
+
 -- v5.1 memory system (memory.md §2.2; D1–D5 ratified 2026-07-04) -------------
 CREATE TABLE memories (
     memory_id INTEGER PRIMARY KEY,
@@ -568,7 +598,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 56  # 50 engine + 3 conversation + 3 memory (memory.md)
+EXPECTED_TABLE_COUNT = 59  # 53 engine (incl. editor_verdicts, pol_seasons ×2) + 3 conversation + 3 memory
 
 
 _DEAD_MEMBERS_FK = re.compile(
@@ -592,13 +622,38 @@ def export_carried_ddl(archive: sqlite3.Connection) -> list[str]:
     return stmts
 
 
-def build(db_path: str, archive_path: str) -> None:
+CARRIED_DDL_FILE = os.path.join(os.path.dirname(__file__), "carried_ddl.sql")
+
+
+def carried_ddl(archive_path: str | None) -> list[str]:
+    """Prefer the live archive when present; fall back to the frozen export
+    (carried_ddl.sql) so CI and archive-less checkouts can build. The archive
+    is immutable, so the two sources can never legitimately diverge — when
+    both are available we assert exactly that."""
+    frozen = None
+    if os.path.exists(CARRIED_DDL_FILE):
+        with open(CARRIED_DDL_FILE) as f:
+            body = "".join(line for line in f if not line.startswith("--"))
+        frozen = [s.strip() for s in body.split(";\n") if s.strip()]
+    if archive_path and os.path.exists(archive_path):
+        archive = sqlite3.connect(f"file:{archive_path}?immutable=1", uri=True)
+        live = export_carried_ddl(archive)
+        if frozen is not None and [s.strip() for s in live] != frozen:
+            raise SystemExit("carried_ddl.sql has drifted from the archive export — regenerate it")
+        return live
+    if frozen is None:
+        raise SystemExit(
+            f"need either the archive ({archive_path}) or {CARRIED_DDL_FILE} to build the schema"
+        )
+    return frozen
+
+
+def build(db_path: str, archive_path: str | None) -> None:
     if os.path.exists(db_path):
         raise SystemExit(f"{db_path} already exists — refusing to overwrite")
-    archive = sqlite3.connect(f"file:{archive_path}?immutable=1", uri=True)
     new = sqlite3.connect(db_path)
     new.execute("PRAGMA journal_mode=WAL")
-    for stmt in export_carried_ddl(archive):
+    for stmt in carried_ddl(archive_path):
         new.execute(stmt)
     new.executescript(NEW_DDL)
     new.commit()

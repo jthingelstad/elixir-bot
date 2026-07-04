@@ -61,6 +61,23 @@ def ensure_player(conn, player_tag: str, name: str | None = None,
     )
 
 
+def ensure_clan(conn, clan_tag: str, name: str | None = None,
+                observed_at: str | None = None, is_home: bool = False) -> None:
+    """clans-row upsert (clan_memberships FKs onto it). Live DBs carry
+    migrated rows; a fresh DB (cold start, simulator) bootstraps here —
+    without it the first roster diff dies on the membership FK and the
+    unrolled baseline re-emits member_joined every tick (flood class)."""
+    at = observed_at or utcnow()
+    conn.execute(
+        """INSERT INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(clan_tag) DO UPDATE SET
+             last_seen_at = excluded.last_seen_at,
+             name = COALESCE(excluded.name, clans.name)""",
+        (clan_tag, name, at, at, 1 if is_home else 0),
+    )
+
+
 # ---------------------------------------------------------------- cursors
 
 def cursor_get(conn, consumer_key: str, scope_key: str = "") -> int:

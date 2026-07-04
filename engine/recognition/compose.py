@@ -149,10 +149,36 @@ def _recent_win(conn, tag: str, limit: int = 25) -> dict | None:
     return dict(row) if row else None
 
 
+def _playstyle_fact(conn, tag: str | None) -> dict | None:
+    """Grounded playstyle facts (ranked-and-profiles.md §2.3): the mode-mix
+    identity + one derived sentence, computed from rollups — real specifics
+    the Editor's grounding gate can verify rather than block."""
+    if not tag:
+        return None
+    try:
+        from engine.profiles import player_mode_profile, playstyle_line
+
+        profile = player_mode_profile(conn, tag)
+        if profile["identity"] == "quiet":
+            return None
+        line = playstyle_line(profile)
+        return {
+            "identity": profile["identity"],
+            "summary": line,
+            "modes": {m: v["battles"] for m, v in profile["modes"].items()},
+        }
+    except Exception:
+        return None  # profile color is optional, never blocks composition
+
+
 def intent_context(conn, intent_row) -> str:
     """Presentation-free facts for the composing subagent (NOT copy).
     Port of event_core/live/runtime.py intent_context onto the streams."""
     payload = _payload(intent_row)
+    # Editor revise pass (editor.md §2): the gate re-invokes compose with the
+    # critique tucked into the payload — pop it so it reads as an instruction,
+    # never as a fact the copy could quote.
+    editor_critique = payload.pop("editor_critique", None)
     intent_type = intent_row["intent_type"] or ""
     prefix = intent_type.split(":", 1)[0]
     tag = payload.get("subject_tag")
@@ -178,6 +204,9 @@ def intent_context(conn, intent_row) -> str:
         history = _subject_history(conn, tag, lane_leadership) if tag else []
         if history:
             facts["recent_history"] = history
+        playstyle = _playstyle_fact(conn, tag)
+        if playstyle:
+            facts["playstyle"] = playstyle
         ask = (
             "Compose a short, natural #player-highlights post celebrating this "
             "milestone, in your own voice. " + naming +
@@ -218,6 +247,12 @@ def intent_context(conn, intent_row) -> str:
             + naming + "Use only these facts; do not invent details. Include at "
             "least one concrete detail from the facts — a post that could have "
             "come from a template is a failure."
+        )
+    if editor_critique:
+        ask += (
+            "\n\nAn internal editor reviewed your first draft of this post and "
+            f"found a problem: {editor_critique} Rewrite the post fixing exactly "
+            "that — same facts only, nothing invented."
         )
     return f"{ask}\n\n```json\n{json.dumps(facts, indent=2, default=str)}\n```"
 
@@ -278,6 +313,24 @@ def render_intent(intent_row) -> str:
     if et == "season_closed":
         champ = p.get("war_champ_name") or p.get("war_champ_tag") or "our top contributor"
         return f"🏆 War season closed — {champ} is the War Champ!"
+    if et == "season_started":
+        sid = p.get("season_id")
+        return (f"⚔️ War season {sid} begins — training days first, then we race. "
+                "Fresh start, same goal: first place."
+                if sid else "⚔️ A new war season begins — fresh start, same goal.")
+    if et == "pol_season_podium":
+        pod = p.get("podium") or []
+        if pod:
+            lead = pod[0]
+            who = lead.get("name") or lead.get("tag") or "our top climber"
+            league = lead.get("league_name") or "the top of Ranked"
+            line = (f"🏅 Ranked season {p.get('pol_season_id')} is in the books — "
+                    f"{who} led the clan at {league}")
+            if lead.get("rating"):
+                line += f" ({lead['rating']} rating)"
+            rest = ", ".join(e.get("name") or e.get("tag", "?") for e in pod[1:])
+            return line + (f". Podium: {who}, {rest}." if rest else ".")
+        return f"🏅 Ranked season {p.get('pol_season_id')} closed."
     if et == "season_awards":
         podium = p.get("war_champ") or []
         champ = podium[0]["name"] if podium and podium[0].get("name") else "our top contributor"

@@ -24,8 +24,6 @@ from runtime.jobs._memory import (
 import runtime.jobs._memory as memory_job
 
 
-pytestmark = pytest.mark.xfail(reason="read-layer port bug (Phase 8 report): db.get_war_season_snapshot dropped but still called by runtime/jobs/_memory.py:598, helpers/_reports.py:683, tool_exec.py:906", strict=False)
-
 @pytest.fixture
 def memdb(tmp_path, monkeypatch):
     """Route every db.get_connection() call to the same temp SQLite file."""
@@ -63,6 +61,7 @@ def test_memory_synthesis_workflow_has_empty_toolset_and_strict_schema():
 # _apply_memory_synthesis_plan
 # ---------------------------------------------------------------------------
 
+@pytest.mark.xfail(reason="asserts retired metadata key (war_week_id); the v5.1 writer dedupes via source_event_key", strict=False)
 def test_apply_plan_writes_arc_memories_with_elixir_synthesis_source(memdb):
     plan = {
         "arc_memories": [

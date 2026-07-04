@@ -376,12 +376,12 @@ def refresh_management_inputs(conn, player_tag, now=None):
     attendance = conn.execute(
         """SELECT CAST(SUM(decks_used) AS REAL) / NULLIF(SUM(decks_available), 0)
            FROM war_attendance_days
-           WHERE player_tag = ? AND observed_at >= datetime(?, '-28 days')""",
+           WHERE player_tag = ? AND observed_at >= strftime('%Y-%m-%dT%H:%M:%S', ?, '-28 days')""",
         (tag, now),
     ).fetchone()[0]
     battle_days = conn.execute(
         "SELECT battle_time FROM battle_events WHERE player_tag = ? "
-        "AND observed_at >= datetime(?, '-28 days')",
+        "AND observed_at >= strftime('%Y-%m-%dT%H:%M:%S', ?, '-28 days')",
         (tag, now),
     ).fetchall()
     days = {

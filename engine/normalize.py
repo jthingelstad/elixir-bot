@@ -123,6 +123,36 @@ def arena_kind(arena_id) -> str | None:
     return "road" if arena_id <= ARENA_UP_MAX_CANONICAL_ID else "seasonal"
 
 
+# Ranked league display names span TWO epochs (catalog row 2026-07-04): the
+# mid-2025 rework replaced the 10-league Path of Legends ladder with seven
+# leagues, but best*SeasonResult fields keep old-scale values forever (live:
+# best=10 beside a current max of 7). Display maps by era; API field names
+# still say PathOfLegend*, display copy says "Ranked" (Jamie, 2026-07-04).
+RANKED_LEAGUES = {
+    1: "Master 1", 2: "Master 2", 3: "Master 3", 4: "Champion",
+    5: "Grand Champion", 6: "Royal Champion", 7: "Ultimate Champion",
+}
+LEGACY_POL_LEAGUES = {  # pre-rework Path of Legends scale (docs/cr-api-docs)
+    1: "Challenger I", 2: "Challenger II", 3: "Challenger III",
+    4: "Master I", 5: "Master II", 6: "Master III", 7: "Champion",
+    8: "Grand Champion", 9: "Royal Champion", 10: "Ultimate Champion",
+}
+RANKED_UC_LEAGUE = 7            # current scheme
+LEGACY_POL_UC_LEAGUE = 10       # old scheme (emitters' constant predates this)
+
+
+def ranked_league_name(league, *, legacy: bool = False) -> str | None:
+    """League number → display name, era-aware. `legacy=True` for values known
+    to predate the rework (best*SeasonResult snapshots); those get the
+    '(Path of Legends era)' suffix so old honors read honestly."""
+    if not isinstance(league, int):
+        return None
+    if legacy:
+        name = LEGACY_POL_LEAGUES.get(league)
+        return f"{name} (Path of Legends era)" if name else None
+    return RANKED_LEAGUES.get(league)
+
+
 def pol_rank_improved(old_rank, new_rank) -> bool:
     """Path of Legends global ranks are lower-is-better (rank 1 beats 100) —
     docs/cr-api-docs/leaderboards.md. Newly attained (old None) counts."""

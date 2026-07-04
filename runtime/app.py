@@ -1057,10 +1057,13 @@ async def _engine_tick():
         return message_id
 
     def _run():
+        from engine import editor as engine_editor
+
         conn = engine_db.connect()
         try:
             counters = engine_tick_mod.run_tick(
-                conn, api=_cr_api, send_fn=send_fn, compose_fn=_engine_compose_copy
+                conn, api=_cr_api, send_fn=send_fn, compose_fn=_engine_compose_copy,
+                editor_gate=engine_editor.gate,  # live only — offline/tests never inject it
             )
             fulfilled = conn.execute(
                 """SELECT * FROM communication_intents
@@ -1169,6 +1172,116 @@ async def _weekly_leadership_review():
         "weekly_leadership_review",
         f"promote={len(result.get('promote_eligible') or [])} "
         f"demote={len(result.get('demote_eligible') or [])}",
+    )
+    return result
+
+
+async def _engine_health():
+    """Daily engine health audit (runtime/health.py) — the institutionalized
+    version of the 2026-07-04 live behavioral audit. Read-only checks; posts
+    to #elixir-log ONLY when something is off, silent when healthy."""
+    from runtime import elixir_log, health
+
+    runtime_status.mark_job_start("engine_health")
+
+    def _run():
+        conn = db.get_connection()
+        try:
+            row = conn.execute(
+                "SELECT status_json FROM runtime_job_status WHERE job_name = 'engine_health'"
+            ).fetchone()
+            previous_size = None
+            if row:
+                try:
+                    last = json.loads(json.loads(row["status_json"]).get("last_summary") or "{}")
+                    previous_size = last.get("db_size_bytes")
+                except (TypeError, ValueError):
+                    pass
+            return health.run_all(conn, previous_size)
+        finally:
+            conn.close()
+
+    try:
+        problems, size = await asyncio.to_thread(_run)
+    except Exception as exc:
+        runtime_status.mark_job_failure("engine_health", str(exc))
+        log.exception("engine health audit failed")
+        return
+    if problems:
+        body = "\n".join(f"- {p}" for p in problems)
+        await asyncio.to_thread(
+            elixir_log.post_event, f"**Engine health: {len(problems)} issue(s)**\n{body}"
+        )
+        log.warning("engine health: %d issue(s): %s", len(problems), "; ".join(problems))
+    else:
+        log.info("engine health: all checks clean (db %.1fMB)", size / 1e6)
+    runtime_status.mark_job_success(
+        "engine_health",
+        json.dumps({"problems": len(problems), "db_size_bytes": size}),
+    )
+    return {"problems": problems, "db_size_bytes": size}
+
+
+async def _editorial_sweep():
+    """Daily Editor rubric feeder (editor.md §3): yesterday's 👎/👍 prompt
+    feedback becomes anti-pattern/exemplar candidates. Kept separate from
+    engine-health so that job stays strictly read-only."""
+    from engine import db as engine_db
+    from engine import editor as engine_editor
+
+    runtime_status.mark_job_start("editorial_sweep")
+
+    def _run():
+        conn = engine_db.connect()
+        try:
+            return engine_editor.sweep_prompt_feedback(conn)
+        finally:
+            conn.close()
+
+    try:
+        counters = await asyncio.to_thread(_run)
+    except Exception as exc:
+        runtime_status.mark_job_failure("editorial_sweep", str(exc))
+        log.exception("editorial sweep failed")
+        return
+    runtime_status.mark_job_success("editorial_sweep", json.dumps(counters))
+    log.info("editorial sweep: %s", counters)
+    return counters
+
+
+async def _editorial_review():
+    """The Editor's weekly self-review (editor.md §4, Sun 20:07 CT): score the
+    week's gated output, write the synthesis memory, post ONE report with the
+    drift line + proposed rubric additions (auto-added at confidence 0.6;
+    Jamie's 👎 or a note retires them — silence is consent)."""
+    from engine import db as engine_db
+    from engine import editor as engine_editor
+    from runtime import elixir_log
+
+    runtime_status.mark_job_start("editorial_review")
+
+    def _run():
+        conn = engine_db.connect()
+        try:
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            return engine_editor.compose_weekly_review(conn, now)
+        finally:
+            conn.close()
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except Exception as exc:
+        runtime_status.mark_job_failure("editorial_review", str(exc))
+        log.exception("editorial review failed")
+        return
+    try:
+        await asyncio.to_thread(elixir_log.post_event, result["report"])
+    except Exception:
+        log.exception("editorial review report post failed")
+    runtime_status.mark_job_success(
+        "editorial_review",
+        json.dumps({"verdicts": result.get("verdict_counts"),
+                    "proposals": len(result.get("proposals") or [])}),
     )
     return result
 
@@ -1403,6 +1516,45 @@ async def on_member_update(before, after):
 @bot.event
 async def on_message(message):
     await route_message(message)
+
+
+@bot.event
+async def on_message_delete(message):
+    """Editor deletion feeder (editor.md §3): an admin deleting one of
+    Elixir's OWN posts in one of its posting lanes is the strongest
+    anti-pattern signal — capture the copy before it's gone."""
+    try:
+        if bot.user is None or message.author is None or message.author.id != bot.user.id:
+            return
+        from engine import editor as engine_editor
+        from engine.recognition import compose as engine_compose
+
+        lane_channel_ids = {
+            ch["channel_id"]: ch["channel_name"]
+            for ch in engine_compose.channels().values()
+        }
+        channel_name = lane_channel_ids.get(getattr(message.channel, "id", None))
+        if channel_name is None:
+            return
+
+        def _record():
+            from engine import db as engine_db
+
+            conn = engine_db.connect()
+            try:
+                return engine_editor.record_deleted_post(
+                    conn, str(message.id), channel_name, message.content or ""
+                )
+            finally:
+                conn.close()
+
+        mid = await asyncio.to_thread(_record)
+        if mid:
+            log.info("editor: deletion of message %s in #%s recorded as anti-pattern memory %s",
+                     message.id, channel_name, mid)
+    except Exception:
+        log.exception("editor deletion feeder failed for message %s",
+                      getattr(message, "id", "?"))
 
 
 @bot.event

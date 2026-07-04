@@ -36,6 +36,24 @@
 </div>
 <h2>Intent payload (presentation-free facts)</h2>
 <pre>{{ intent.payload | tojson_pretty }}</pre>
+
+{% if verdicts %}
+<h2>Editor verdicts</h2>
+{% for v in verdicts %}
+<div class="card">
+  <dl class="kv">
+    <dt>verdict</dt><dd><span class="badge {{ 'good' if v.verdict == 'pass' else ('bad' if v.verdict in ('fallback','error') else '') }}">{{ v.verdict }}</span> <span class="muted">{{ v.at }} ({{ v.at | reltime }})</span></dd>
+    {% if v.verdict != 'pass' %}
+    <dt>original</dt><dd>{{ v.original_copy }}</dd>
+    <dt>final</dt><dd>{{ v.final_copy }}</dd>
+    {% else %}
+    <dt>copy</dt><dd>{{ v.final_copy }}</dd>
+    {% endif %}
+  </dl>
+  {% if v.dimensions %}<pre>{{ v.dimensions | tojson_pretty }}</pre>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
 {% endif %}
 
 <p><a href="/recognition">← recognition</a></p>
