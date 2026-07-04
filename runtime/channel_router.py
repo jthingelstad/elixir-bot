@@ -607,6 +607,11 @@ def _reconciliation_confidence(value) -> float:
 
 
 def _reconcile_clan_voyage_result(result: dict) -> dict:
+    # C6 (Q6): Clan Voyages were dropped at the v5.1 cut — the storage module
+    # and tables no longer exist, so this reconciliation (and the clan-chat
+    # recognition relay behind it) is retired. The screenshot readout itself
+    # is unaffected. Helpers below are debris pending deletion.
+    return result
     payload = _clan_voyage_payload_from_result(result)
     if not payload:
         return result

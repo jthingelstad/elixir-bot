@@ -363,6 +363,12 @@ def _v5_message_payloads(sent_messages, fallback_text: str) -> list[dict]:
     return payloads
 
 
+# Which recognized moments ALSO reach in-game clan chat (as a redraft of the
+# posted Discord copy — the single-pipeline rule). Widened 2026-07-04 (Jamie:
+# "should be for most clan chat communications, not only member joins") from
+# the carried six-type tradition set. At most half the players use Discord
+# (Q7), so the big moments must reach the in-game channel too. Per-type
+# guards (promoted-only, champion-only) live in the relay loop.
 _V5_EVENT_LEADER_ACTION_TYPES = {
     "member_joined",
     "member_birthday",
@@ -370,6 +376,13 @@ _V5_EVENT_LEADER_ACTION_TYPES = {
     "clan_birthday",
     "career_wins_milestone",
     "collection_level_milestone",
+    "arena_up",
+    "level_up",
+    "card_unlocked",          # champion rarity only (guard in relay)
+    "role_changed",           # promoted only (guard in relay)
+    "weekly_donation_leader",
+    "week_finished",
+    "season_closed",
 }
 
 
@@ -938,6 +951,11 @@ async def _relay_engine_clan_chat_actions(fulfilled_intents: list) -> int:
             payload = {}
         event_type = payload.get("event_type") or (intent["intent_type"] or "").split(":", 1)[-1]
         if event_type not in _V5_EVENT_LEADER_ACTION_TYPES:
+            continue
+        # Per-type guards: only celebration-grade variants reach in-game chat.
+        if event_type == "role_changed" and payload.get("direction") != "promoted":
+            continue
+        if event_type == "card_unlocked" and str(payload.get("rarity", "")).lower() != "champion":
             continue
         discord_copy = None
         try:
