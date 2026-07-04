@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Streams{% endblock %}
+{% block content %}
+<h1>Event streams</h1>
+<p class="muted">Four streams: <span class="badge">battle</span> native (exact timestamps, mirrored from battlelogs) ·
+<span class="badge">player</span> / <span class="badge">clan</span> / <span class="badge">war</span> emitted
+(diffs against the baselines below; timing estimated). First sight emits nothing.</p>
+
+<form class="filters" method="get" action="/streams">
+  <select name="stream">
+    <option value="">all streams</option>
+    {% for s in ['battle','player','clan','war'] %}
+      <option value="{{ s }}" {{ 'selected' if stream == s else '' }}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <input name="event_type" placeholder="event_type filter" value="{{ event_type }}">
+  <button class="btn ghost" type="submit">Filter</button>
+</form>
+
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>observed</th><th>stream</th><th>type</th><th>subject</th><th>payload</th></tr>
+    {% for e in events %}
+      <tr>
+        <td title="{{ e.get('observed_at','') }}">{{ e.get('observed_at','') | reltime }}</td>
+        <td><span class="badge">{{ e.get('stream','') }}</span></td>
+        <td><code>{{ e.get('event_type','') }}</code></td>
+        <td>{% if e.get('subject_key','').startswith('#') %}<a href="/member/{{ e.get('subject_key','')[1:] }}">{{ e.get('subject_key','') }}</a>{% else %}{{ e.get('subject_key','') }}{% endif %}</td>
+        <td class="muted" style="max-width:28rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ (e.get('payload') or e.get('payload_json') or '') | string | truncate(140) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">No events in the window.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Baseline freshness</h2>
+<div class="card">
+  <table>
+    <tr><th>kind</th><th>aspect</th><th class="num">entities</th><th>oldest</th><th>newest</th></tr>
+    {% for b in baselines %}
+      <tr>
+        <td>{{ b.entity_kind }}</td><td>{{ b.aspect }}</td>
+        <td class="num">{{ b.entities }}</td>
+        <td>{{ b.oldest | reltime }}</td><td>{{ b.newest | reltime }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">No baselines yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Baselines <span class="muted" style="font-size:.8rem;">what Elixir last knew, per entity/aspect</span></h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>kind</th><th>entity</th><th>aspect</th><th>observed</th><th>previous</th></tr>
+    {% for b in baseline_rows %}
+      <tr>
+        <td>{{ b.entity_kind }}</td>
+        <td><a href="/baseline?kind={{ b.entity_kind | urlencode }}&tag={{ b.entity_tag | urlencode }}&aspect={{ b.aspect | urlencode }}">{{ b.entity_tag }}</a></td>
+        <td>{{ b.aspect }}</td>
+        <td>{{ b.observed_at | reltime }}</td>
+        <td>{{ b.prev_observed_at | reltime if b.prev_observed_at else '— first sight' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">No baselines yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Raw API payloads <span class="muted" style="font-size:.8rem;">the data Elixir is seeing (14-day buffer)</span></h2>
+<div class="card">
+  <table>
+    <tr><th>id</th><th>endpoint</th><th>entity</th><th>fetched</th></tr>
+    {% for r in raw_payloads %}
+      <tr>
+        <td><a href="/raw/{{ r.payload_id }}">{{ r.payload_id }}</a></td>
+        <td><code>{{ r.endpoint }}</code></td>
+        <td>{{ r.entity_key }}</td>
+        <td>{{ r.fetched_at | reltime }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">No raw payloads.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

@@ -15,7 +15,7 @@ __all__ = [
     "_leader_role_id", "_bot_role_id", "_post_to_elixir",
     "_chunk_for_discord", "_safe_create_task",
     "_fmt_iso_short", "_fmt_relative", "_fmt_bytes", "_fmt_num", "_status_badge",
-    "_member_label", "_join_member_bits", "_canon_tag",
+    "_member_label", "_join_member_bits", "_bare_tag",
     "_format_relative_join_age", "_recent_join_display_rows",
     "_leader_role_mention", "_with_leader_ping",
     "_job_next_runs", "_schedule_specs",
@@ -195,7 +195,7 @@ def _join_member_bits(members, formatter, limit=3):
     return ", ".join(formatter(member) for member in members[:limit])
 
 
-def _canon_tag(tag):
+def _bare_tag(tag):
     return (str(tag or "").strip().upper().lstrip("#"))
 
 

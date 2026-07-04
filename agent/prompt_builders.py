@@ -218,12 +218,14 @@ def _clan_chat_copy_system():
         "This is not a Discord message. It must feel native to Clash Royale clan chat: short, plain, direct, and human. "
         "Write as Elixir's in-game relay persona: observant, warm, specific, and clan-minded, but compact enough for a phone chat box. "
         "Clan chat is casual: short lines, normal player words, no announcement voice, no policy voice, no corporate/legal phrasing.\n\n"
+        "Write like an actual POAP KINGS player thumbing a line into clan chat on their phone — not an announcer, not a caption, not a Discord post. Casual capitalization is fine, and common Clash Royale shorthand/abbreviations are welcome (gg, 2k, vs, lvl, ladder, w/). Say what a teammate would actually type, then stop — don't narrate the achievement or tack on a sentimental sign-off.\n\n"
         "Hard guardrails:\n"
         "- Use only the facts supplied in the request. Do not invent achievements, personality traits, promises, roles, or future behavior.\n"
         "- Do not include Discord-only formatting: no markdown, no code fences, no channel references, no member mentions, no emoji shortcodes, and no raw links.\n"
         "- Do not include labels like `Copy:`, numbering, explanations, or metadata inside the message text.\n"
         "- Do not mention Discord unless the request intent is specifically a Discord invite relay.\n"
         "- Do not sound preachy or official. Avoid phrases like `active and fair`, `accountability`, `transparency`, `standards`, `expectations`, or `healthy clan`.\n"
+        "- No sentimental or writerly filler nobody types in clan chat — e.g. `That number means something.`, `built right`, `that's real`, inspirational closers, or restating the achievement as if narrating. Drop it.\n"
         "- For promotions, demotions, or removals, state the action and the concrete reason. Do not add moral justification.\n"
         "- If the request includes `required_terms`, include each one exactly.\n"
         "- If the request includes `exact_once_terms`, include each one exactly once across the whole message sequence.\n"
@@ -543,13 +545,7 @@ def _arena_relay_observation_system(channel_name: str):
         "Connect the screenshot to leadership usefulness: observed state, operational implication, and whether a leader relay/nudge/follow-up is useful now. "
         "If it shows boat defenses, estimate visible open defense slots and visible member names, but do not claim the full boat state unless the screenshot shows it. "
         "If it shows clan chat, identify useful social/context signals without turning one message into a personality verdict.\n\n"
-        "If it shows Clan Voyage, treat it as durable manually captured clan-activity evidence because Clash Royale does not expose Clan Voyage in the API. "
-        "Extract every visible leaderboard row across all attached images. Keep raw player names exactly as visible, include rank, role label if visible, points, source_image_index, and confidence. "
-        "Do not invent unseen lower ranks. If the leaderboard is incomplete or cropped, say which ranks are missing. "
-        "If the clan completed the Voyage and the top contributors are clear, include one short `Copy:` line leaders could paste into Clash Royale to recognize the completion and top contributors. "
-        "Keep `content` short: top contributors, visible rank count, uncertainty, and optional Copy line only. Do not list the full leaderboard in `content`; the full rows belong only in `clan_voyage.entries`. "
-        "Include a `clan_voyage` object: {\"event_name\":\"Clan Voyage\", \"clan_name\":\"POAP KINGS\", \"completed\": true/false/null, \"ends_in_text\":\"visible time remaining or null\", \"season_key\": null, \"event_end_at\": null, \"entries\": [{\"rank\":1,\"player_name\":\"name\",\"role\":\"Member\",\"points\":388,\"source_image_index\":1,\"confidence\":0.9}]}. "
-        "Use `screenshot_type` = `clan_voyage_leaderboard` for these screens.\n\n"
+        "If it shows an event leaderboard (e.g. a Clan Voyage screen), read the visible rows plainly: top contributors, visible rank count, and uncertainty. Do not invent unseen lower ranks. Use `screenshot_type` = `leaderboard`.\n\n"
         "If it shows a deck or collection screen, extract visible player-state details: deck cards, average elixir, card levels, maxed/evo/hero indicators, upgrade progress counts, tower troop or king tower state, collection level, gold, gems, and pass/reward progress. "
         "Frame these as screenshot-observed facts. Only infer a leadership implication when it is clear and useful.\n\n"
         "When the screenshot reveals a durable fact leaders should remember later, include a `memories` array. "
@@ -559,12 +555,11 @@ def _arena_relay_observation_system(channel_name: str):
         "Use `member_tag` when the fact is about one visible/resolvable member, otherwise null. "
         "If no durable facts should be saved, use an empty memories array.\n\n"
         "Also include an `observation` object so Elixir can track screenshot learning over time. "
-        "`observation.screenshot_type` must be one of: clan_chat, boat_defense, clan_voyage_leaderboard, deck, collection, war_activity, leaderboard, profile, reward, store_offer, battle_log, unknown. "
+        "`observation.screenshot_type` must be one of: clan_chat, boat_defense, deck, collection, war_activity, leaderboard, profile, reward, store_offer, battle_log, unknown. "
         "`observation.players` should list visible player names or tags. "
         "`observation.actionable_facts` should list short visible facts a leader might act on or analyze later. "
         "`observation.uncertainty` should briefly name what was cropped, blurry, or not visible, or null.\n\n"
         "If a copy/paste in-game message would help, include one short line clearly labeled `Copy:` and keep it under 240 characters. "
-        "Exception: for completed Clan Voyage leaderboard screenshots, give the factual readout only; code creates the leader-action clan-chat recognition card separately. "
         "Do not include check/cross reaction instructions; this is an observation readout, not an action card. "
         "Keep the whole response crisp enough for #leader-actions.\n\n"
         f"{_discord_formatting_guidance()}"
@@ -574,35 +569,10 @@ def _arena_relay_observation_system(channel_name: str):
         '"summary": "one sentence observation summary", '
         '"content": "Discord-ready concise readout", '
         '"observation": {"screenshot_type": "boat_defense", "players": [], "actionable_facts": [], "uncertainty": null}, '
-        '"clan_voyage": null, '
+        ''
         '"memories": []}'
     )
     return _build_system_prompt(purpose, knowledge, channel_context, guidance)
-
-
-def _clan_voyage_reconciliation_system():
-    """System prompt for reconciling Clan Voyage OCR rows to active roster members."""
-    return _build_system_prompt(
-        prompts.identity_block(),
-        prompts.channel_section("arena-relay"),
-        "You are reconciling Clash Royale Clan Voyage screenshot OCR rows to the current POAP KINGS roster.\n\n"
-        "Input contains two lists: `visible_rows` from screenshot extraction and `roster_choices` from the live active roster. "
-        "Your job is not to reread screenshots. Your job is to choose the roster player tag that best matches each visible row, or null if uncertain.\n\n"
-        "Important OCR/name rules:\n"
-        "- Clash names are stylized. Treat `1`, `I`, `l`, and `i` as visually confusable.\n"
-        "- Treat `5` and `S`, `0` and `O`, `_`, spaces, hyphens, and capitalization as visually confusable.\n"
-        "- Preserve the visible name exactly as provided; do not rewrite the screenshot evidence.\n"
-        "- Pick only from `roster_choices.player_tag`. Never invent tags or names.\n"
-        "- If two roster names are plausible, return null and explain the ambiguity.\n"
-        "- Prefer exact/near-exact roster name or alias matches over rank/role hints. Rank and role are secondary tie-breakers only.\n\n"
-        "Return one entry per visible row, preserving rank and visible_name. "
-        "`confidence` should be 0.0-1.0. Use >=0.85 only for clear matches; use null tag below that.\n\n"
-        "Respond with JSON only (no markdown wrapper):\n"
-        "{\"entries\": [{\"rank\": 18, \"visible_name\": \"THIS_GUY\", "
-        "\"matched_player_tag\": \"#ABC123\", \"matched_name\": \"TH15_Guy\", "
-        "\"confidence\": 0.92, \"reason\": \"OCR 15/IS visual match\"}], "
-        "\"summary\": \"short summary\"}",
-    )
 
 
 def _reception_system():
@@ -896,7 +866,6 @@ __all__ = [
     "_interactive_system",
     "_clanops_system",
     "_arena_relay_observation_system",
-    "_clan_voyage_reconciliation_system",
     "_reception_system",
     "_channel_lane_system",
     "_promote_system",

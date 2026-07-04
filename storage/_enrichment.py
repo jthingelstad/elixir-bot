@@ -13,14 +13,10 @@ from storage._formatting import callable_name, format_member_reference
 from storage.member_ranks import RANK_FIELDS, compute_member_ranks
 
 
-def _member_reference_fields(conn: sqlite3.Connection, member_id: int, item: dict) -> dict:
-    tag = item.get("player_tag") or item.get("tag")
-    if not tag:
-        row = conn.execute(
-            "SELECT player_tag FROM members WHERE member_id = ?",
-            (member_id,),
-        ).fetchone()
-        tag = row["player_tag"] if row else None
+def _member_reference_fields(conn: sqlite3.Connection, member_id, item: dict) -> dict:
+    # v5.1: the second argument IS the player tag (§7 — the tag is the key).
+    # The name is kept so seven storage modules' call sites read unchanged.
+    tag = item.get("player_tag") or item.get("tag") or member_id
     if not tag:
         return item
     item["member_ref"] = format_member_reference(tag, conn=conn)
@@ -31,7 +27,7 @@ def _member_reference_fields(conn: sqlite3.Connection, member_id: int, item: dic
     for name_field in ("current_name", "name", "player_name", "member_name"):
         if item.get(name_field):
             item[name_field] = callable_name(item[name_field])
-    item.update(_member_ranks_for(conn, member_id))
+    item.update(_member_ranks_for(conn, tag))
     return item
 
 
@@ -67,7 +63,7 @@ def _member_ranks_for(conn: sqlite3.Connection, member_id: int) -> dict:
         if len(_MEMBER_RANKS_CACHE) >= _MEMBER_RANKS_CACHE_MAX:
             _MEMBER_RANKS_CACHE.pop(next(iter(_MEMBER_RANKS_CACHE)))
         _MEMBER_RANKS_CACHE[key] = cache
-    member_entry = cache.get(member_id)
+    member_entry = cache.get(member_id)  # keyed by player_tag in v5.1
     if member_entry is None:
         return {field: None for field in RANK_FIELDS}
     return dict(member_entry)

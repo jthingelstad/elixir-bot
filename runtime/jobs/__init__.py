@@ -1,24 +1,15 @@
 """Recurring job executors for Elixir."""
 
 from runtime.jobs._core import (  # noqa: F401
-    WAR_POLL_MINUTE, WAR_AWARENESS_MINUTE,
     WEEKLY_DISCORD_INVITE_RELAY_DAY, WEEKLY_DISCORD_INVITE_RELAY_HOUR,
     WEEKLY_RECAP_DAY, WEEKLY_RECAP_HOUR,
     _query_or_default, _summarize_member_rows,
     _build_ask_elixir_daily_insight_context, _ask_elixir_daily_insight,
-    _war_poll_tick,
-    _award_detection_tick,
     _weekly_clan_recap,
-    _leadership_action_scan,
     _weekly_discord_invite_relay,
 )
 from runtime.jobs._intel import (  # noqa: F401
     _clan_wars_intel_report,
-    _player_intel_refresh_minutes, PLAYER_INTEL_REFRESH_MINUTES,
-    PLAYER_INTEL_REFRESH_HOURS,
-    PLAYER_INTEL_BATCH_SIZE, PLAYER_INTEL_STALE_HOURS,
-    PLAYER_INTEL_REQUEST_SPACING_SECONDS,
-    _player_intel_refresh,
 )
 from runtime.jobs._memory import (  # noqa: F401
     MEMORY_SYNTHESIS_DAY, MEMORY_SYNTHESIS_HOUR,

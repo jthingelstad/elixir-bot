@@ -13,7 +13,13 @@ How the documentation here is organized.
 
 ## Current contents
 
-**`reference/`** — `memory-system.md`, `long-term-trend-data.md`, `signal-inventory.md`.
+**`reference/`** — `v5.1/` (the v5.1 engine build spec, now the stable-system
+reference: architecture, schema, events, recognition, runtime, management,
+migration, plus `open-questions.md` as the decision record — shipped
+2026-07-03/04), `memory-system.md`, `long-term-trend-data.md`,
+`signal-inventory.md`. Note: `signal-inventory.md` and parts of
+`memory-system.md` describe the pre-v5.1 signal system — superseded where
+they conflict with `v5.1/`.
 
 **`archive/event-core-v5/`** — the v5 Event Core migration + v4 signal-system teardown (shipped 2026-06): the event-sourcing design plan, architecture-boundary decision, completion roadmap, cutover runbook, remediation plan, review findings, the v4-deletion runbook, the internal-data-subsystem pivot, and the original agentic-awareness-loop vision it replaced.
 

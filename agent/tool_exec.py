@@ -5,7 +5,7 @@ import cr_api
 
 from agent.core import log
 from agent.cr_api_tool import _execute_cr_api
-from event_core.read import event_facades
+from storage import events_read as event_facades
 
 
 class _ModuleProxy:
@@ -190,10 +190,10 @@ def _enrich_war_player_type(result, tag):
     conn = get_connection()
     try:
         row = conn.execute(
-            "SELECT member_id FROM members WHERE player_tag = ?", (canon,),
+            "SELECT 1 FROM players WHERE player_tag = ?", (canon,),
         ).fetchone()
         if row:
-            result["war_player_type"] = _war_player_type(conn, row["member_id"])
+            result["war_player_type"] = _war_player_type(conn, canon)
     finally:
         conn.close()
 
@@ -384,13 +384,7 @@ def _execute_get_member(arguments, workflow=None):
         result["chests"] = cr_api.get_player_chests(member_tag)
 
     if "awards" in include:
-        profile = result.get("profile") or _enrich_member_profile(
-            db.get_member_profile(member_tag)
-        )
-        member_id = profile.get("member_id") if profile else None
-        result["awards"] = (
-            db.get_member_trophy_case(int(member_id)) if member_id is not None else []
-        )
+        result["awards"] = db.get_member_trophy_case(member_tag)
 
     return result
 
@@ -776,26 +770,6 @@ def _execute_get_clan_game_modes(arguments):
             "mode_mix": summary["by_group"],
         }
     return {"aspect": aspect, **summary}
-
-
-def _execute_get_clan_voyage(arguments):
-    """Execute the Clan Voyage manual-capture history tool."""
-    aspect = arguments.get("aspect", "latest")
-    limit = arguments.get("limit", 5)
-    if aspect == "latest":
-        return db.get_latest_clan_voyage(include_entries=True) or {
-            "summary": "No Clan Voyage screenshots have been captured yet.",
-            "entries": [],
-        }
-    if aspect == "history":
-        return {
-            "voyages": db.list_clan_voyages(limit=limit, include_entries=True),
-            "context": db.build_clan_voyage_context(limit=limit),
-        }
-    if aspect == "member":
-        member_tag = _resolve_member_tag(arguments["member_tag"])
-        return db.get_member_clan_voyage_summary(member_tag, limit=limit)
-    return {"error": f"Unknown aspect: {aspect}"}
 
 
 _ELIXIR_STATE_WINDOWS = (7, 28, 56, 90)
@@ -1271,8 +1245,6 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_clan_health(arguments, workflow=workflow)
         elif name == "get_clan_game_modes":
             result = _execute_get_clan_game_modes(arguments)
-        elif name == "get_clan_voyage":
-            result = _execute_get_clan_voyage(arguments)
         elif name == "get_elixir_state":
             result = _execute_get_elixir_state(arguments, workflow=workflow)
         elif name == "lookup_cards":

@@ -108,14 +108,6 @@ _WORKFLOW_SPECS = (
     ),
     WorkflowSpec("deck_review", response_schema=_CHANNEL_SCHEMA, tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=10),
     WorkflowSpec("arena_relay_observation", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=4),
-    WorkflowSpec(
-        "clan_voyage_reconciliation",
-        response_schema={"required": ["entries"]},
-        tools=[],
-        max_tool_rounds=1,
-        model_family="chat",
-        tools_allowed=False,
-    ),
     WorkflowSpec("intel_report", response_schema=_CHANNEL_SCHEMA, tools=INTEL_REPORT_TOOLS, max_tool_rounds=15, model_family="chat"),
     WorkflowSpec("tournament_recap", response_schema={"required": ["content"]}, tools=TOURNAMENT_RECAP_TOOLS, max_tool_rounds=8, model_family="chat"),
     WorkflowSpec("tournament_update", response_schema=_CHANNEL_SCHEMA, tools=TOURNAMENT_UPDATE_TOOLS, max_tool_rounds=4),
@@ -152,6 +144,9 @@ _WORKFLOW_SPECS = (
         model_family="chat",
         tools_allowed=False,
     ),
+    # The Editor's critic + weekly self-review (editor.md §2/§4): one strict-
+    # JSON call, no tools, lightweight family (haiku-class — ~10-20 posts/day).
+    WorkflowSpec("editorial", tools=[], max_tool_rounds=1, tools_allowed=False),
     WorkflowSpec("weekly_digest", model_family="chat"),
     WorkflowSpec("site_promote_content", model_family="promotion"),
 )

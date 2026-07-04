@@ -8,19 +8,12 @@ via tools and composes the Discord-ready post itself.
 
 __all__ = [
     "_clan_wars_intel_report",
-    "_player_intel_refresh",
-    "_player_intel_refresh_minutes",
-    "PLAYER_INTEL_REFRESH_MINUTES", "PLAYER_INTEL_REFRESH_HOURS",
-    "PLAYER_INTEL_BATCH_SIZE", "PLAYER_INTEL_STALE_HOURS",
-    "PLAYER_INTEL_REQUEST_SPACING_SECONDS",
 ]
 
 import asyncio
 import logging
-import os
 
 import cr_api
-import db
 import elixir_agent
 from storage.contextual_memory import upsert_intel_report_memory
 from runtime.helpers import _get_singleton_channel_id, _channel_config_by_key, build_lane_memory_context
@@ -40,119 +33,10 @@ def _bot():
     return _runtime_app().bot
 
 
-def _player_intel_refresh_minutes() -> int:
-    minutes = os.getenv("PLAYER_INTEL_REFRESH_MINUTES")
-    if minutes:
-        return max(1, int(minutes))
-    legacy_hours = os.getenv("PLAYER_INTEL_REFRESH_HOURS")
-    if legacy_hours:
-        return max(1, int(float(legacy_hours) * 60))
-    return 30
 
 
-PLAYER_INTEL_REFRESH_MINUTES = _player_intel_refresh_minutes()
-PLAYER_INTEL_REFRESH_HOURS = PLAYER_INTEL_REFRESH_MINUTES / 60
-PLAYER_INTEL_BATCH_SIZE = int(os.getenv("PLAYER_INTEL_BATCH_SIZE", "5"))
-PLAYER_INTEL_STALE_HOURS = int(os.getenv("PLAYER_INTEL_STALE_HOURS", "1"))
-PLAYER_INTEL_REQUEST_SPACING_SECONDS = float(os.getenv("PLAYER_INTEL_REQUEST_SPACING_SECONDS", "2.0"))
 
 
-async def _player_intel_refresh():
-    """Refresh stored player profile and battle intelligence for a subset of active
-    members. This job is now REFRESH-ONLY: it keeps the v4 read model (profile /
-    battle snapshots the agent's tools read) current. Member highlights are posted
-    by the v5 celebrate detectors (#player-highlights); the old v4 progression
-    delivery was removed in the item-7 decommission."""
-    runtime_status.mark_job_start("player_intel_refresh")
-    try:
-        clan = await asyncio.to_thread(cr_api.get_clan)
-        _runtime_app()._clear_cr_api_failure_alert_if_recovered()
-    except Exception as e:
-        log.error("Player intel refresh: clan fetch failed: %s", e)
-        await _runtime_app()._maybe_alert_cr_api_failure("player intel refresh")
-        runtime_status.mark_job_failure("player_intel_refresh", f"clan fetch failed: {e}")
-        return
-
-    members = clan.get("memberList", [])
-    if not members:
-        log.info("Player intel refresh: no member data, skipping")
-        runtime_status.mark_job_success("player_intel_refresh", "no member data")
-        return
-
-    targets = await asyncio.to_thread(
-        db.get_player_intel_refresh_targets,
-        PLAYER_INTEL_BATCH_SIZE,
-        PLAYER_INTEL_STALE_HOURS,
-    )
-    if not targets:
-        log.info("Player intel refresh: no stale targets")
-        runtime_status.mark_job_success("player_intel_refresh", "no stale targets")
-        return
-
-    refreshed = 0
-    profile_failures = 0
-    battle_log_failures = 0
-    failed_targets = 0
-    processing_failures = 0
-    for target in targets:
-        tag = target["tag"]
-        try:
-            profile_ok = False
-            battle_log_ok = False
-            profile = await asyncio.to_thread(cr_api.get_player, tag)
-            if profile is not None:
-                profile_ok = True
-            else:
-                profile_failures += 1
-            if profile:
-                # snapshot_player_profile writes the v4 read model (the refresh);
-                # its returned progression signals are no longer delivered (v5 owns
-                # #player-highlights) so we don't collect them.
-                await asyncio.to_thread(db.snapshot_player_profile, profile)
-            battle_log = await asyncio.to_thread(cr_api.get_player_battle_log, tag)
-            if battle_log is not None:
-                battle_log_ok = True
-            else:
-                battle_log_failures += 1
-            if battle_log:
-                await asyncio.to_thread(db.snapshot_player_battlelog, tag, battle_log)
-            if profile_ok or battle_log_ok:
-                refreshed += 1
-            else:
-                failed_targets += 1
-            await asyncio.sleep(PLAYER_INTEL_REQUEST_SPACING_SECONDS)
-        except Exception as e:
-            processing_failures += 1
-            failed_targets += 1
-            log.warning("Player intel refresh failed for %s: %s", tag, e)
-
-    if profile_failures or battle_log_failures:
-        await _runtime_app()._maybe_alert_cr_api_failure("player intel refresh")
-
-    total_targets = len(targets)
-    failure_summary = []
-    if profile_failures:
-        failure_summary.append(f"profile failures {profile_failures}")
-    if battle_log_failures:
-        failure_summary.append(f"battle log failures {battle_log_failures}")
-    if failed_targets:
-        failure_summary.append(f"full target failures {failed_targets}")
-    if processing_failures:
-        failure_summary.append(f"processing failures {processing_failures}")
-
-    if refreshed == 0 and failure_summary:
-        detail = f"refreshed 0 of {total_targets} member(s); " + "; ".join(failure_summary)
-        log.error("Player intel refresh failed: %s", detail)
-        runtime_status.mark_job_failure("player_intel_refresh", detail)
-        return
-
-    summary = f"refreshed {refreshed} of {total_targets} member(s)"
-    if failure_summary:
-        summary = f"{summary}; " + "; ".join(failure_summary)
-        log.warning("Player intel refresh completed with partial failures: %s", summary)
-    else:
-        log.info("Player intel refresh complete: %s", summary)
-    runtime_status.mark_job_success("player_intel_refresh", summary)
 
 
 async def _clan_wars_intel_report():

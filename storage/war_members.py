@@ -4,13 +4,17 @@ from datetime import datetime, timedelta, timezone
 
 from db import (
     _canon_tag,
-    _parse_cr_time,
     managed_connection,
 )
 from storage._enrichment import _member_reference_fields
 from storage.war_status import _season_bounds, get_current_season_id, get_current_war_status
 
 from storage._formatting import format_member_reference as _format_member_reference
+
+# v5.1 sources: war_participation is keyed (season_id, section_index,
+# player_tag); the per-day source is war_attendance_days; war battle records
+# read battle_events war keys (schema.md §9).
+
 
 @managed_connection
 def get_member_war_status(tag, season_id=None, conn=None):
@@ -19,25 +23,33 @@ def get_member_war_status(tag, season_id=None, conn=None):
         season_id = get_current_season_id(conn=conn)
     current_day = None
     current_war = get_current_war_status(conn=conn)
-    current_war_key = (current_war or {}).get("war_day_key")
-    current_day_row = None
-    if current_war and current_war.get("battle_phase_active") and current_war_key:
-        current_day_row = conn.execute(
-            "SELECT w.battle_date, w.decks_used_today, w.decks_used_total, w.fame, w.repair_points "
-            "FROM war_day_status w JOIN members m ON m.member_id = w.member_id "
-            "WHERE m.player_tag = ? AND w.battle_date = ?",
-            (canon_tag, current_war_key),
+    if current_war and season_id is not None and current_war.get("section_index") is not None:
+        day_row = conn.execute(
+            "SELECT war_day_index, decks_used, decks_available, fame_delta "
+            "FROM war_attendance_days "
+            "WHERE season_id = ? AND section_index = ? AND player_tag = ? "
+            "ORDER BY war_day_index DESC LIMIT 1",
+            (season_id, current_war.get("section_index"), canon_tag),
         ).fetchone()
-    elif not current_war or current_war.get("phase") is None:
-        current_day_row = conn.execute(
-            "SELECT w.battle_date, w.decks_used_today, w.decks_used_total, w.fame, w.repair_points "
-            "FROM war_day_status w JOIN members m ON m.member_id = w.member_id "
-            "WHERE m.player_tag = ? ORDER BY w.observed_at DESC, w.battle_date DESC LIMIT 1",
-            (canon_tag,),
+        totals = conn.execute(
+            "SELECT fame, repair_points, decks_used, decks_used_today FROM war_participation "
+            "WHERE season_id = ? AND section_index = ? AND player_tag = ?",
+            (season_id, current_war.get("section_index"), canon_tag),
         ).fetchone()
-    if current_day_row:
-        current_day = dict(current_day_row)
-        current_day["decks_left_today"] = max(0, 4 - (current_day["decks_used_today"] or 0))
+        if day_row or totals:
+            decks_today = (
+                (totals["decks_used_today"] if totals else None)
+                if totals and totals["decks_used_today"] is not None
+                else (day_row["decks_used"] if day_row else 0)
+            ) or 0
+            current_day = {
+                "battle_date": current_war.get("war_day_key"),
+                "decks_used_today": decks_today,
+                "decks_used_total": (totals["decks_used"] if totals else None) or 0,
+                "fame": (totals["fame"] if totals else None) or 0,
+                "repair_points": (totals["repair_points"] if totals else None) or 0,
+                "decks_left_today": max(0, 4 - decks_today),
+            }
 
     summary = {
         "season_id": season_id,
@@ -50,12 +62,12 @@ def get_member_war_status(tag, season_id=None, conn=None):
         season_row = conn.execute(
             "SELECT COUNT(*) AS races_played, SUM(COALESCE(wp.fame, 0)) AS total_fame, "
             "SUM(COALESCE(wp.decks_used, 0)) AS total_decks_used, AVG(COALESCE(wp.fame, 0)) AS avg_fame "
-            "FROM war_participation wp JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-            "WHERE wr.season_id = ? AND wp.player_tag = ?",
+            "FROM war_participation wp "
+            "WHERE wp.season_id = ? AND wp.player_tag = ?",
             (season_id, canon_tag),
         ).fetchone()
         total_races = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM war_races WHERE season_id = ?",
+            "SELECT COUNT(*) AS cnt FROM war_weeks WHERE season_id = ?",
             (season_id,),
         ).fetchone()["cnt"]
         season = dict(season_row)
@@ -64,23 +76,22 @@ def get_member_war_status(tag, season_id=None, conn=None):
         summary["season"] = season
     return summary
 
+
 @managed_connection
 def get_member_war_stats(tag, conn=None):
+    canon = _canon_tag(tag)
     rows = conn.execute(
-        "SELECT wp.participation_id AS id, wp.player_tag AS tag, wp.player_name AS name, wp.fame, wp.repair_points, wp.decks_used, wr.season_id, wr.section_index, wr.our_rank, wr.created_date FROM war_participation wp JOIN war_races wr ON wr.war_race_id = wp.war_race_id WHERE wp.player_tag = ? ORDER BY wr.created_date DESC",
-        (_canon_tag(tag),),
+        "SELECT (wp.season_id * 100 + wp.section_index) AS id, wp.player_tag AS tag, "
+        "p.current_name AS name, wp.fame, wp.repair_points, wp.decks_used, "
+        "wp.season_id, wp.section_index, ww.our_rank, ww.created_date "
+        "FROM war_participation wp "
+        "LEFT JOIN war_weeks ww ON ww.season_id = wp.season_id AND ww.section_index = wp.section_index "
+        "LEFT JOIN players p ON p.player_tag = wp.player_tag "
+        "WHERE wp.player_tag = ? ORDER BY wp.season_id DESC, wp.section_index DESC",
+        (canon,),
     ).fetchall()
-    result = []
-    for row in rows:
-        item = dict(row)
-        member_id = conn.execute(
-            "SELECT member_id FROM members WHERE player_tag = ?",
-            (_canon_tag(tag),),
-        ).fetchone()
-        if member_id:
-            item = _member_reference_fields(conn, member_id["member_id"], item)
-        result.append(item)
-    return result
+    return [_member_reference_fields(conn, canon, dict(row)) for row in rows]
+
 
 @managed_connection
 def get_member_war_attendance(tag, season_id=None, conn=None):
@@ -88,7 +99,7 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     member = conn.execute(
-        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        "SELECT player_tag, current_name FROM players WHERE player_tag = ?",
         (canon_tag,),
     ).fetchone()
     if not member:
@@ -97,27 +108,28 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
     season_row = None
     if season_id is not None:
         total_races = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM war_races WHERE season_id = ?",
+            "SELECT COUNT(*) AS cnt FROM war_weeks WHERE season_id = ?",
             (season_id,),
         ).fetchone()["cnt"]
         season_row = conn.execute(
             "SELECT COUNT(*) AS races_played, SUM(COALESCE(wp.fame, 0)) AS total_fame, "
             "SUM(COALESCE(wp.decks_used, 0)) AS total_decks_used "
-            "FROM war_participation wp JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-            "WHERE wr.season_id = ? AND wp.member_id = ? AND COALESCE(wp.decks_used, 0) > 0",
-            (season_id, member["member_id"]),
+            "FROM war_participation wp "
+            "WHERE wp.season_id = ? AND wp.player_tag = ? AND COALESCE(wp.decks_used, 0) > 0",
+            (season_id, canon_tag),
         ).fetchone()
 
     four_week_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=28)).strftime("%Y%m%dT%H%M%S.000Z")
     recent_total = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM war_races WHERE created_date >= ?",
+        "SELECT COUNT(*) AS cnt FROM war_weeks WHERE created_date >= ?",
         (four_week_cutoff,),
     ).fetchone()["cnt"]
     recent_played = conn.execute(
         "SELECT COUNT(*) AS cnt "
-        "FROM war_participation wp JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-        "WHERE wr.created_date >= ? AND wp.member_id = ? AND COALESCE(wp.decks_used, 0) > 0",
-        (four_week_cutoff, member["member_id"]),
+        "FROM war_participation wp "
+        "JOIN war_weeks ww ON ww.season_id = wp.season_id AND ww.section_index = wp.section_index "
+        "WHERE ww.created_date >= ? AND wp.player_tag = ? AND COALESCE(wp.decks_used, 0) > 0",
+        (four_week_cutoff, canon_tag),
     ).fetchone()["cnt"]
     return {
         "season_id": season_id,
@@ -139,30 +151,36 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
         },
     }
 
+
 @managed_connection
 def get_member_war_battle_record(tag, season_id=None, conn=None):
     canon_tag = _canon_tag(tag)
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     member = conn.execute(
-        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        "SELECT player_tag, current_name FROM players WHERE player_tag = ?",
         (canon_tag,),
     ).fetchone()
     if not member:
         return None
-    start_bound, end_bound = _season_bounds(conn, season_id) if season_id is not None else (None, None)
-    where = ["member_id = ?", "is_war = 1"]
-    params = [member["member_id"]]
-    if start_bound and end_bound:
-        where.extend(["battle_time >= ?", "battle_time < ?"])
-        params.extend([start_bound, end_bound])
+    where = ["player_tag = ?", "is_war = 1"]
+    params: list = [canon_tag]
+    if season_id is not None:
+        # battle_events carry war keys directly (schema.md §5.1) — prefer them;
+        # fall back to season date bounds for battles that predate a key stamp.
+        where.append("(season_id = ? OR season_id IS NULL)")
+        params.append(season_id)
+        bounds = _season_bounds(conn, season_id)
+        if bounds[0] and bounds[1]:
+            where.extend(["battle_time >= ?", "battle_time < ?"])
+            params.extend(list(bounds))
     row = conn.execute(
         "SELECT "
         "SUM(CASE WHEN outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
         "SUM(CASE WHEN outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
         "SUM(CASE WHEN outcome = 'D' THEN 1 ELSE 0 END) AS draws, "
         "COUNT(*) AS battles "
-        f"FROM member_battle_facts WHERE {' AND '.join(where)}",
+        f"FROM battle_events WHERE {' AND '.join(where)}",
         tuple(params),
     ).fetchone()
     wins = row["wins"] or 0
@@ -181,48 +199,35 @@ def get_member_war_battle_record(tag, season_id=None, conn=None):
         "win_rate": round(wins / battles, 4) if battles else 0,
     }
 
+
 @managed_connection
 def get_member_missed_war_days(tag, season_id=None, conn=None):
     canon_tag = _canon_tag(tag)
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     member = conn.execute(
-        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        "SELECT player_tag, current_name FROM players WHERE player_tag = ?",
         (canon_tag,),
     ).fetchone()
     if not member or season_id is None:
         return None
-    start_bound, end_bound = _season_bounds(conn, season_id)
-    if not start_bound or not end_bound:
-        return None
     tracked_days = conn.execute(
-        "SELECT DISTINCT battle_date, section_index, period_index, phase_day_number "
-        "FROM war_day_status WHERE season_id = ? AND phase = 'battle' "
-        "ORDER BY section_index ASC, period_index ASC, battle_date ASC",
+        "SELECT DISTINCT section_index, war_day_index FROM war_attendance_days "
+        "WHERE season_id = ? ORDER BY section_index ASC, war_day_index ASC",
         (season_id,),
     ).fetchall()
-    if not tracked_days:
-        start_dt = _parse_cr_time(start_bound)
-        end_dt = _parse_cr_time(end_bound)
-        tracked_days = conn.execute(
-            "SELECT DISTINCT battle_date, NULL AS section_index, NULL AS period_index, NULL AS phase_day_number "
-            "FROM war_day_status WHERE battle_date >= ? AND battle_date < ? ORDER BY battle_date",
-            (start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")),
-        ).fetchall()
     missed = []
     participated = 0
     for row in tracked_days:
         status = conn.execute(
-            "SELECT decks_used_today FROM war_day_status WHERE member_id = ? AND battle_date = ?",
-            (member["member_id"], row["battle_date"]),
+            "SELECT decks_used FROM war_attendance_days "
+            "WHERE season_id = ? AND section_index = ? AND war_day_index = ? AND player_tag = ?",
+            (season_id, row["section_index"], row["war_day_index"], canon_tag),
         ).fetchone()
-        if status and (status["decks_used_today"] or 0) > 0:
+        if status and (status["decks_used"] or 0) > 0:
             participated += 1
         else:
-            if row["section_index"] is not None and row["phase_day_number"] is not None:
-                missed.append(f"Week {row['section_index'] + 1} Battle Day {row['phase_day_number']}")
-            else:
-                missed.append(row["battle_date"])
+            missed.append(f"Week {row['section_index'] + 1} Battle Day {row['war_day_index'] + 1}")
     return {
         "season_id": season_id,
         "tag": canon_tag,

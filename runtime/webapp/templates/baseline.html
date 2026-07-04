@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Baseline {{ row.entity_kind }}/{{ row.aspect }}{% endblock %}
+{% block content %}
+<h1>Baseline — {{ row.entity_kind }} · {{ row.entity_tag }} · {{ row.aspect }}</h1>
+<dl class="kv">
+  <dt>observed</dt><dd>{{ row.observed_at }} ({{ row.observed_at | reltime }})</dd>
+  <dt>previous observation</dt><dd>{{ row.prev_observed_at or '— (first sight)' }}</dd>
+  <dt>hash</dt><dd><code>{{ row.payload_hash[:16] }}…</code></dd>
+</dl>
+<p class="muted">This is the exact last-known state the emitter diffs against — "what Elixir knew"
+for this aspect. Changes between this and the next poll become events.</p>
+<pre>{{ row.payload_json | tojson_pretty }}</pre>
+<p><a href="/streams">← streams</a></p>
+{% endblock %}

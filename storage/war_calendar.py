@@ -22,13 +22,9 @@ def _parse_utc_iso(value: Optional[str]) -> Optional[datetime]:
 
 
 def _parse_cr_utc(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        clean = value.split(".")[0]
-        return datetime.strptime(clean, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
-        return None
+    from engine.normalize import parse_cr_time  # the single parser
+
+    return parse_cr_time(value)
 
 
 def coerce_utc_datetime(value: datetime | str | None) -> Optional[datetime]:
@@ -79,12 +75,15 @@ def resolve_phase(period_type: Optional[str], period_index: Optional[int]) -> Op
 
 
 def phase_day_number(phase: Optional[str], period_index: Optional[int]) -> Optional[int]:
-    offset = period_offset(period_index)
-    if offset is None or phase not in {"battle", "practice"}:
+    """Delegates to engine.normalize.war_day (public signature unchanged)."""
+    from engine.normalize import war_day
+
+    wd = war_day(period_index)
+    if wd is None or phase not in {"battle", "practice"}:
         return None
     if phase == "battle":
-        return offset - FIRST_BATTLE_PERIOD_OFFSET + 1
-    return offset + 1
+        return (wd.war_day_index + 1) if wd.war_day_index is not None else None
+    return wd.day_in_week + 1
 
 
 def war_week_day(period_index: Optional[int]) -> Optional[int]:
@@ -92,10 +91,10 @@ def war_week_day(period_index: Optional[int]) -> Optional[int]:
     battle days. Days 1-3 are practice; days 4-7 are battle. Returns None if
     period_index is missing or out of range.
     """
-    offset = period_offset(period_index)
-    if offset is None:
-        return None
-    return offset + 1
+    from engine.normalize import war_day
+
+    wd = war_day(period_index)
+    return (wd.day_in_week + 1) if wd is not None else None
 
 
 def is_colosseum_week(period_type: Optional[str] = None) -> bool:

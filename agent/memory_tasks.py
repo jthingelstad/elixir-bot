@@ -426,7 +426,7 @@ _SIGNAL_FACT_MAP = {
 
 def store_observation_facts(signals: list[dict], channel_id: str | int | None = None, conn=None) -> int:
     """Store structured observation facts from signals. Returns count stored."""
-    from db import _canon_tag, get_connection
+    from db import get_connection
     from storage.contextual_memory import upsert_summary_memory
 
     saved = 0
@@ -447,11 +447,10 @@ def store_observation_facts(signals: list[dict], channel_id: str | int | None = 
             fact = mapper(signal)
             if not fact:
                 continue
-            member_row = op_conn.execute(
-                "SELECT member_id FROM members WHERE player_tag = ?",
-                (_canon_tag(tag),),
-            ).fetchone()
-            member_id = member_row["member_id"] if member_row else None
+            # v5.1: members/member_id are gone from the engine DB; the memory
+            # DB's legacy member_id link column is the deferred pass's to
+            # reconcile — member_tag on the link is the durable key.
+            member_id = None
             try:
                 result = upsert_summary_memory(
                     event_type=fact["event_type"],

@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 import db
 import elixir_agent
 import prompts
-from event_core.read import event_facades
+from runtime.helpers import _stream_facades as event_facades
 from memory_store import update_memory
 from storage.contextual_memory import upsert_weekly_summary_memory
 from runtime import elixir_log

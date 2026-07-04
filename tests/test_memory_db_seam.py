@@ -1,14 +1,16 @@
-"""Tests for the durable-memory DB seam (elixir-v5-memory.db).
+"""v5.1 memory seam tests (memory.md D1, ratified 2026-07-04).
 
-clan_memories* live in their own DB. memory_store ops default (conn=None) to that
-DB via get_memory_connection; passing an explicit conn still threads through (used
-by tests and the unified in-memory topology).
+This file's old subject — the separate elixir-v5-memory.db seam — is retired:
+memories live in the ENGINE DB. These tests pin the new seam: default
+connections land in the operational DB, FTS stays in sync via triggers, and
+the embedding pipeline is a documented no-op (D2).
 """
+
 from __future__ import annotations
 
 import db
 from memory_store import (
-    CLAN_MEMORY_SCHEMA_SQL,
+    MEMORY_SCHEMA_SQL,  # noqa: F401  (public export pinned by this test file)
     create_memory,
     get_memory,
     get_memory_connection,
@@ -17,78 +19,57 @@ from memory_store import (
 )
 
 
-def test_default_writes_go_to_memory_db_not_operational():
-    mem = create_memory(
-        body="Leader noted strong war attendance.",
-        source_type="leader_note",
-        is_inference=False,
-        confidence=1.0,
-        created_by="leader:test",
+def test_default_writes_land_in_engine_db():
+    memory = create_memory(
+        body="seam test body", source_type="system", is_inference=False,
+        confidence=1.0, created_by="test", scope="public", title="Seam test",
     )
-    mid = mem["memory_id"]
-
-    # present in the memory DB (default routing)
-    assert get_memory(mid) is not None
-    mc = get_memory_connection()
+    conn = db.get_connection()
     try:
-        assert mc.execute("SELECT COUNT(*) FROM clan_memories WHERE memory_id=?", (mid,)).fetchone()[0] == 1
+        row = conn.execute(
+            "SELECT kind, scope FROM memories WHERE memory_id = ?",
+            (memory["memory_id"],),
+        ).fetchone()
+        assert row is not None and row["kind"] == "system"
     finally:
-        mc.close()
+        conn.close()
 
-    # absent from the operational DB
-    oc = db.get_connection()
+
+def test_explicit_conn_threads_through():
+    conn = get_memory_connection()
     try:
-        assert oc.execute("SELECT COUNT(*) FROM clan_memories WHERE memory_id=?", (mid,)).fetchone()[0] == 0
+        memory = create_memory(
+            body="threaded", source_type="leader_note", is_inference=False,
+            confidence=1.0, created_by="test", scope="leadership",
+            title="Thread", conn=conn,
+        )
+        assert get_memory(memory["memory_id"], conn=conn) is not None
     finally:
-        oc.close()
+        conn.close()
 
 
 def test_fts_triggers_keep_search_in_sync():
-    create_memory(
-        body="Unique-token zephyrqualm appears here.",
-        source_type="leader_note",
-        is_inference=False,
-        confidence=1.0,
-        created_by="leader:test",
-    )
-    results = search_memories("zephyrqualm", viewer_scope="leadership")
-    assert any("zephyrqualm" in (r.memory.get("body") or "") for r in results)
-
-
-def test_embedding_roundtrip_on_memory_db():
-    mem = create_memory(
-        body="Embeddable note.", source_type="leader_note", is_inference=False,
-        confidence=1.0, created_by="leader:test",
-    )
-    upsert_embedding(mem["memory_id"], [0.1] * 1536)
-    mc = get_memory_connection()
+    conn = get_memory_connection()
     try:
-        row = mc.execute(
-            "SELECT embedding_model FROM clan_memory_embeddings WHERE memory_id=?",
-            (mem["memory_id"],),
-        ).fetchone()
-        assert row is not None
+        create_memory(
+            body="Unique-token zephyrqualm appears here.",
+            source_type="leader_note", is_inference=False,
+            confidence=1.0, created_by="leader:test", scope="leadership",
+            title="Zephyr", conn=conn,
+        )
+        results = search_memories("zephyrqualm", viewer_scope="leadership", conn=conn)
+        assert any("zephyrqualm" in (r.memory.get("body") or "") for r in results)
     finally:
-        mc.close()
+        conn.close()
 
 
-def test_memory_schema_matches_operational_clan_memories():
-    """Guards against drift: CLAN_MEMORY_SCHEMA_SQL must track the operational
-    clan_memories schema produced by the migration chain."""
-    oc = db.get_connection()  # operational tmp, full v4 migrations
-    mc = get_memory_connection()  # memory tmp, canonical schema
+def test_embeddings_are_retired_noop():
+    # D2: no embeddings in v1 — the compat shim must not raise or write.
+    upsert_embedding(12345, [0.1] * 1536)
+    conn = db.get_connection()
     try:
-        def cols(c):
-            return [
-                (r["name"], r["type"], r["notnull"], r["dflt_value"], r["pk"])
-                for r in c.execute("PRAGMA table_info(clan_memories)")
-            ]
-
-        assert cols(oc) == cols(mc)
-        osql = oc.execute("SELECT sql FROM sqlite_master WHERE name='clan_memories'").fetchone()[0]
-        # both carry the widened source_type CHECK (migration 29)
-        assert "elixir_synthesis" in osql
-        assert "elixir_synthesis" in CLAN_MEMORY_SCHEMA_SQL
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'clan_memory_embeddings'"
+        ).fetchone() is None
     finally:
-        oc.close()
-        mc.close()
+        conn.close()

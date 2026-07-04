@@ -1,7 +1,9 @@
 from storage import war_analytics as _war_analytics
-from storage import war_ingest as _war_ingest
 from storage import war_members as _war_members
 from storage import war_status as _war_status
+
+# v5.1: war_ingest retired — the engine's war emitter owns riverrace ingest
+# (engine/emitters/war.py); this shim now aggregates only the read side.
 
 
 def __export_public(module):
@@ -13,7 +15,7 @@ def __export_public(module):
     return names
 
 
-for _module in (_war_status, _war_members, _war_analytics, _war_ingest):
+for _module in (_war_status, _war_members, _war_analytics):
     __export_public(_module)
 
 __all__ = [name for name in globals() if not name.startswith("__")]
