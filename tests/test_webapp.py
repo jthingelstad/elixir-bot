@@ -202,14 +202,21 @@ def test_recognition_shows_suppression_and_status():
 
 # ------------------------------------------------------------- ring buffer
 
-def test_tick_ring_buffer():
+def test_tick_history_persists_and_orders():
+    # Since 2026-07-04 record_tick dual-writes: in-memory ring (fast path,
+    # maxlen 288) + the tick_history table (30d, survives restarts).
     webapp_ticks._TICKS.clear()
     for i in range(300):
         webapp_ticks.record_tick({"n": i})
     recent = webapp_ticks.recent_ticks(5)
     assert [t["n"] for t in recent] == [299, 298, 297, 296, 295]
-    assert len(webapp_ticks.recent_ticks(1000)) == 288  # maxlen
     assert all("recorded_at" in t for t in recent)
+    # Ring stays bounded; the table holds everything within retention.
+    assert len(webapp_ticks._TICKS) == 288
+    assert len(webapp_ticks.recent_ticks(1000)) == 300
+    # Persistence survives a "restart" (ring cleared).
+    webapp_ticks._TICKS.clear()
+    assert [t["n"] for t in webapp_ticks.recent_ticks(3)] == [299, 298, 297]
 
 
 # ---------------------------------------------------------------- safe ops

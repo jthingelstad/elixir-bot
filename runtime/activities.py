@@ -245,6 +245,21 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         activity_role="observer+communicator",
     ),
     ActivityDefinition(
+        activity_key="db-backup",
+        owner_lane="elixir-log",
+        purpose="Daily compressed snapshot of the operational + memory databases "
+        "to iCloud Drive (offsite via sync).",
+        job_id="db-backup",
+        job_function="_db_backup",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": _attr("DB_BACKUP_HOUR", 3),
+            "minute": 37,
+        },
+        delivery_targets=(),
+        activity_role="observer",
+    ),
+    ActivityDefinition(
         activity_key="db-maintenance",
         owner_lane="elixir-log",
         purpose="Purge expired data, VACUUM the database, and report space reclaimed.",

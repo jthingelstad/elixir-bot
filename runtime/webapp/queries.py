@@ -183,11 +183,37 @@ def members_page() -> dict:
 def streams_page(stream: str | None, event_type: str | None, limit: int = 100) -> dict:
     conn = db.get_connection()
     try:
-        events = events_read.list_recent_events(
-            days=30, event_type=event_type or None, limit=limit, conn=conn
-        )
-        if stream:
-            events = [e for e in events if e.get("stream") == stream]
+        if stream == "battle":
+            # The battle stream's log IS battle_events (no event_type column —
+            # the events reader covers only the emitted streams). Present
+            # battles in the row shape the template renders. Live fix
+            # 2026-07-04: the Battle filter rendered empty.
+            rows = _rows(conn, """
+                SELECT battle_time, player_tag, mode_group, outcome,
+                       trophy_change, arena_name, game_mode_name, is_war,
+                       season_id, section_index
+                FROM battle_events
+                WHERE (? = '' OR mode_group = ?)
+                ORDER BY rowid DESC LIMIT ?""",
+                          (event_type or "", event_type or "", limit))
+            events = [{
+                "stream": "battle",
+                "event_type": r["mode_group"] or "battle",
+                "subject": r["player_tag"],
+                "observed_at": r["battle_time"],
+                "payload": {
+                    "outcome": r["outcome"], "trophy_change": r["trophy_change"],
+                    "arena": r["arena_name"], "mode": r["game_mode_name"],
+                    "war": bool(r["is_war"]),
+                    "season": r["season_id"], "week": r["section_index"],
+                },
+            } for r in rows]
+        else:
+            events = events_read.list_recent_events(
+                days=30, event_type=event_type or None, limit=limit, conn=conn
+            )
+            if stream:
+                events = [e for e in events if e.get("stream") == stream]
         windows = events_read.summarize_event_windows(conn=conn)
         baselines = _rows(conn, """
             SELECT entity_kind, aspect, COUNT(*) AS entities,
