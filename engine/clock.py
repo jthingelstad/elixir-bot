@@ -22,7 +22,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 FAME_FINISH_LINE = 10_000
-FAME_FINISH_LINE_COLOSSEUM = 5_000
+# Colosseum has NO finish line — fame accrues across all four battle days
+# (verified live 2026-07-03: 20,600 fame on Colosseum day 2, race still on).
+# The spec's 5,000 constant (§16.4) was wrong; feedback.md New-1 had flagged
+# it as unverified. race_finished can therefore only be true in normal weeks.
 PERIODS_PER_SECTION = 7
 TRAINING_DAYS = 3
 WAR_DAYS = 4
@@ -43,7 +46,7 @@ class WarClock:
     battle_days_remaining: int
     hours_left_in_period: float
     our_fame: int
-    finish_line: int
+    finish_line: int | None  # None during Colosseum (no line)
     race_finished: bool
     pace_status: str  # 'training' | 'ahead' | 'behind' | 'won'
 
@@ -94,8 +97,10 @@ def war_clock(race_payload: dict, now: datetime, season_id: int | None = None) -
 
     clan = payload.get("clan") or {}
     our_fame = int(clan.get("fame") or 0)
-    finish_line = FAME_FINISH_LINE_COLOSSEUM if is_colosseum else FAME_FINISH_LINE
-    race_finished = phase != "training" and our_fame >= finish_line
+    finish_line = None if is_colosseum else FAME_FINISH_LINE
+    race_finished = (
+        not is_colosseum and phase != "training" and our_fame >= FAME_FINISH_LINE
+    )
 
     if phase == "training":
         battle_days_remaining = WAR_DAYS
@@ -115,6 +120,10 @@ def war_clock(race_payload: dict, now: datetime, season_id: int | None = None) -
         pace = "training"
     elif race_finished:
         pace = "won"
+    elif is_colosseum:
+        # No finish line to pace against; urgency runs all four days and the
+        # composer leans on standings, not a line.
+        pace = "colosseum"
     else:
         # Linear pace across the 4 battle days: after day k of 4, expect
         # (k+1)/4 of the finish line.

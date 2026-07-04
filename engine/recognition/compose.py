@@ -72,6 +72,8 @@ META_MARKERS = (
     "is stale",
     "signal is from",
     "signal data",
+    "signal lacks",   # live incident 2026-07-03: "card milestone signal lacks card names" posted as copy
+    "lacks card names",
     "data inconsistent",
     "inconsistent with",
     "live race is now",
