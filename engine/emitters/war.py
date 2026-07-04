@@ -239,11 +239,38 @@ def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> i
            WHERE season_id = ?""",
         (observed_at, final_rank, weeks, champ, free_pass, season_id),
     )
-    return _emit(conn, season_id, None, observed_at, None, "season_closed",
-                 f"season_closed:{season_id}",
-                 {"final_rank": final_rank, "weeks": weeks,
-                  "war_champ_tag": champ, "free_pass_tag": free_pass,
-                  "standings_top": standings[:3]})
+    n = _emit(conn, season_id, None, observed_at, None, "season_closed",
+              f"season_closed:{season_id}",
+              {"final_rank": final_rank, "weeks": weeks,
+               "war_champ_tag": champ, "free_pass_tag": free_pass,
+               "standings_top": standings[:3]})
+    # Q5: awards fire on the season-death event — grant the durable rows in
+    # the same transaction, then raise ONE summary intent (volume principle:
+    # one clan-events post for the whole slate, not one per award). The
+    # season_closed recap intent is separate (the war recognizer owns it).
+    try:
+        from engine import awards as engine_awards
+        from engine import delivery
+        from engine.recognition import ledger
+
+        grants = engine_awards.grant_season_awards(conn, season_id, observed_at)
+        if grants["granted"] and ledger.claim(
+            conn, f"season_awards:{season_id}", "war",
+            [f"season_closed:{season_id}"], 0,
+        ):
+            intent_id = delivery.raise_intent(
+                conn, f"season_awards:{season_id}", "clan:season_awards",
+                "clan-events", "public",
+                {"event_type": "season_awards", **grants}, observed_at,
+            )
+            ledger.attach_intent(conn, f"season_awards:{season_id}", intent_id)
+    except Exception:  # award failure must never lose the season_closed event
+        import logging
+
+        logging.getLogger("engine.war").exception(
+            "season award grant failed for season %s", season_id
+        )
+    return n
 
 
 def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:

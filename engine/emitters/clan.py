@@ -49,7 +49,10 @@ def project_clan_aspects(payload: dict) -> dict[str, dict]:
             "role": (m.get("role") or "").lower(),
             "trophies": m.get("trophies"),
             "donations": m.get("donations"),
+            "donations_received": m.get("donationsReceived"),
             "exp_level": m.get("expLevel"),
+            "clan_rank": m.get("clanRank"),
+            "previous_clan_rank": m.get("previousClanRank"),
         }
     roster = {"members": members}
     clan_entity = {

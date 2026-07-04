@@ -42,6 +42,7 @@
 | `seasonId` absent from live race payloads | absent in ALL 259 archived payloads; always inferred | `engine/clock.py:infer_season_id` (correct home; catalog it) | cataloged, stays in clock |
 | PoL ranks are lower-is-better | rank 1 beats rank 100 | player emitter + read layer each know it implicitly | `pol_rank_improved(old, new) -> bool` |
 | Tag canonicalization | `#`-prefixed, uppercase, O→0 | `db._canon_tag` (correct home; catalog it) | re-export as `canon_tag` |
+| CR-compact timestamps leak into OUR OWN tables | migration/seed paths copied '20260628T…' into columns where live code writes ISO-Z — compact sorts ABOVE ISO, mis-bucketing time-ordered queries | recognition_ledger.claimed_at T14 seeds (found 2026-07-04 live audit; one-time fix scripts/migrate_v51/fix_ledger_seed_ts.py) | write-side convention: always `parse_cr_time(...).strftime(ISO)` before persisting |
 | SQLite `datetime('now')` is space-separated | stored timestamps are ISO-T; `'T' > ' '` so `>=` cutoffs match EVERYTHING and `<` cutoffs match NOTHING | 12 sites (live incident 2026-07-04: the clan-chat relay's 15-min freshness filter never filtered — R108–R114 spam) — all fixed to `strftime('%Y-%m-%dT%H:%M:%S','now',…)` | SQL convention, catalogued; grep gate candidate |
 | Colosseum has no finish line | fame accrues all 4 days (live: 20,600 on day 2); spec's 5,000 was wrong | fixed in clock.py 2026-07-04 | cataloged, stays in clock |
 
