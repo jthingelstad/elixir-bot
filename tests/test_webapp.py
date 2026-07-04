@@ -62,12 +62,67 @@ def test_any_login_allowed_when_env_empty(monkeypatch):
 
 def test_pages_render_on_empty_db():
     async def body(client):
-        for path in ("/", "/ticks", "/streams", "/recognition", "/polling",
-                     "/management", "/war", "/llm", "/chat"):
+        for path in ("/", "/members", "/awards", "/ticks", "/streams",
+                     "/recognition", "/polling", "/management", "/war",
+                     "/llm", "/chat"):
             r = await client.get(path, headers=LOGIN)
             assert r.status == 200, path
             text = await r.text()
             assert "Elixir" in text, path
+
+    _client_run(body)
+
+
+def test_members_awards_baseline_render_seeded():
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at)
+               VALUES ('#ROSTER1', 'Rosterling', '2026-06-01T00:00:00Z', '2026-07-04T00:00:00Z')"""
+        )
+        conn.execute(
+            """INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home)
+               VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', '2026-07-04', 1)"""
+        )
+        conn.execute(
+            """INSERT INTO clan_memberships (player_tag, joined_at, join_source)
+               VALUES ('#ROSTER1', '2026-06-01', 'test')"""
+        )
+        conn.execute(
+            """INSERT INTO awards (award_type, season_id, player_tag, rank,
+                                   metric_value, metric_unit, awarded_at)
+               VALUES ('war_champ', 133, '#ROSTER1', 1, 12345, 'fame',
+                       '2026-07-04T00:00:00Z')"""
+        )
+        conn.execute(
+            """INSERT INTO state_baselines
+               (entity_kind, entity_tag, aspect, payload_json, payload_hash,
+                observed_at)
+               VALUES ('player', '#ROSTER1', 'profile',
+                       '{"level": 45, "name": "Rosterling"}', 'h1',
+                       '2026-07-04T00:00:00Z')"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    async def body(client):
+        r = await client.get("/members", headers=LOGIN)
+        assert r.status == 200
+        assert "Rosterling" in await r.text()
+        r = await client.get("/awards", headers=LOGIN)
+        assert r.status == 200
+        text = await r.text()
+        assert "war_champ" in text and "Season 133" in text
+        r = await client.get(
+            "/baseline?kind=player&tag=%23ROSTER1&aspect=profile", headers=LOGIN
+        )
+        assert r.status == 200
+        text = await r.text()
+        assert "Rosterling" in text and "first sight" in text
+        r = await client.get("/baseline?kind=player&tag=%23NOPE&aspect=profile",
+                             headers=LOGIN)
+        assert r.status == 404
 
     _client_run(body)
 

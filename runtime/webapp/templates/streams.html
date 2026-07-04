@@ -2,6 +2,9 @@
 {% block title %}Streams{% endblock %}
 {% block content %}
 <h1>Event streams</h1>
+<p class="muted">Four streams: <span class="badge">battle</span> native (exact timestamps, mirrored from battlelogs) ·
+<span class="badge">player</span> / <span class="badge">clan</span> / <span class="badge">war</span> emitted
+(diffs against the baselines below; timing estimated). First sight emits nothing.</p>
 
 <form class="filters" method="get" action="/streams">
   <select name="stream">
@@ -40,6 +43,24 @@
         <td>{{ b.entity_kind }}</td><td>{{ b.aspect }}</td>
         <td class="num">{{ b.entities }}</td>
         <td>{{ b.oldest | reltime }}</td><td>{{ b.newest | reltime }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">No baselines yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Baselines <span class="muted" style="font-size:.8rem;">what Elixir last knew, per entity/aspect</span></h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>kind</th><th>entity</th><th>aspect</th><th>observed</th><th>previous</th></tr>
+    {% for b in baseline_rows %}
+      <tr>
+        <td>{{ b.entity_kind }}</td>
+        <td><a href="/baseline?kind={{ b.entity_kind | urlencode }}&tag={{ b.entity_tag | urlencode }}&aspect={{ b.aspect | urlencode }}">{{ b.entity_tag }}</a></td>
+        <td>{{ b.aspect }}</td>
+        <td>{{ b.observed_at | reltime }}</td>
+        <td>{{ b.prev_observed_at | reltime if b.prev_observed_at else '— first sight' }}</td>
       </tr>
     {% else %}
       <tr><td colspan="5" class="muted">No baselines yet.</td></tr>
