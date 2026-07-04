@@ -1214,6 +1214,12 @@ async def _engine_tick():
     except Exception:
         log.exception("engine tick post-steps failed")
     log.info("engine tick: %s", counters)
+    try:  # Observatory tick history (in-memory ring; never fails the tick)
+        from runtime.webapp import ticks as webapp_ticks
+
+        webapp_ticks.record_tick(dict(counters))
+    except Exception:
+        log.debug("webapp tick recording failed", exc_info=True)
     runtime_status.mark_job_success("engine_tick", json.dumps(counters, default=str)[:900])
     return counters
 
@@ -1397,6 +1403,15 @@ async def on_ready():
     guild = bot.get_guild(GUILD_ID)
     if guild:
         await sync_emoji(guild)
+    # The Observatory (admin web UI) — in-process, loopback-only, tailnet-gated.
+    # Outside the scheduler guard (a reconnect must not skip it); start_webapp
+    # is idempotent, and a webapp failure must never block the bot.
+    try:
+        from runtime.webapp.server import start_webapp
+
+        await start_webapp(deps={"bot": bot})
+    except Exception:
+        log.exception("observatory webapp startup failed")
     if not scheduler.running:
         cleared_stale_jobs = await asyncio.to_thread(runtime_status.clear_stale_running_jobs)
         if cleared_stale_jobs:
