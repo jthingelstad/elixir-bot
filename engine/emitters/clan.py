@@ -106,7 +106,7 @@ def emit_roster(conn, clan_tag, old, new, observed_at, window_start) -> int:
         n += _emit(conn, clan_tag, tag, observed_at, window_start, "member_joined",
                    f"member_joined:{tag}:{observed_at}",
                    {"name": info.get("name"), "trophies": info.get("trophies"),
-                    "role": info.get("role")})
+                    "role": info.get("role"), "exp_level": info.get("exp_level")})
         open_row = conn.execute(
             "SELECT 1 FROM clan_memberships WHERE player_tag = ? AND left_at IS NULL",
             (tag,),

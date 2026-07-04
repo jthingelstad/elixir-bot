@@ -183,12 +183,31 @@ def intent_context(conn, intent_row) -> str:
             "milestone, in your own voice. " + naming +
             "Feature a concrete recent moment if recent_win is present; "
             "recent_history is their recent run for color. Ground every specific "
-            "in these facts — do not invent details. A line or two."
+            "in these facts — do not invent details. A line or two. Vary your "
+            "phrasing — avoid stock lines (e.g. 'momentum is real') that repeat "
+            "across posts."
         )
     elif prefix == "cohort":
         ask = (
             "Several members hit the same milestone today. Compose ONE short "
-            "#clan-events post naming them together. " + naming
+            "#clan-events post naming them together. " + naming +
+            "Name what the milestone actually was — never a generic 'hit milestones'."
+        )
+    elif payload.get("event_type") == "member_joined":
+        ask = (
+            "A new member just joined the clan. Compose a short, warm welcome for "
+            "#clan-events that shows you actually looked at who they are — work in "
+            "a concrete first impression from the facts (their trophies, king "
+            "level). " + naming +
+            "A bare 'Welcome, <name>' with no substance is a failure; so is "
+            "inventing details not in the facts."
+        )
+    elif payload.get("event_type") == "member_left":
+        ask = (
+            "A member left the clan. Compose a brief, warm sendoff for "
+            "#clan-events. " + naming +
+            "If tenure_days is present, acknowledge their time with us "
+            "concretely. Never speculate about why they left."
         )
     else:
         history = _subject_history(conn, tag, lane_leadership) if tag else []
@@ -196,7 +215,9 @@ def intent_context(conn, intent_row) -> str:
             facts["recent_history"] = history
         ask = (
             "Compose a short, natural post in your own voice for this clan event. "
-            + naming + "Use only these facts; do not invent details."
+            + naming + "Use only these facts; do not invent details. Include at "
+            "least one concrete detail from the facts — a post that could have "
+            "come from a template is a failure."
         )
     return f"{ask}\n\n```json\n{json.dumps(facts, indent=2, default=str)}\n```"
 
