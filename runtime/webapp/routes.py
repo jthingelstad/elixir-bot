@@ -136,6 +136,14 @@ async def recognition_page(request: web.Request) -> web.Response:
     return render("recognition.html", request, nav="recognition", flash=flash, **data)
 
 
+async def memories_page(request: web.Request) -> web.Response:
+    kind = request.query.get("kind") or None
+    member = request.query.get("member") or None
+    q = request.query.get("q") or None
+    data = await asyncio.to_thread(queries.memories_page, kind, member, q)
+    return render("memories.html", request, nav="memories", **data)
+
+
 async def recognition_detail(request: web.Request) -> web.Response:
     key = request.match_info["key"]
     data = await asyncio.to_thread(queries.recognition_detail, key)
@@ -249,6 +257,7 @@ def add_routes(app: web.Application) -> None:
         web.get("/streams", streams_page),
         web.get("/raw/{payload_id}", raw_payload_page),
         web.get("/recognition", recognition_page),
+        web.get("/memories", memories_page),
         web.get("/recognition/{key:.+}", recognition_detail),
         web.get("/member/{tag}", member_page),
         web.get("/polling", polling_page),

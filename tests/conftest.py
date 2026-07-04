@@ -67,7 +67,10 @@ def v51_full_ddl(v51_schema_template):
     conn = sqlite3.connect(f"file:{v51_schema_template}?mode=ro", uri=True)
     rows = conn.execute(
         "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL "
-        "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'clan_memory_vec%'"
+        "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'clan_memory_vec%' "
+        # memories_fts shadow tables are (re)created by the virtual-table
+        # CREATE itself — dumping their DDL too makes the replay collide.
+        "AND name NOT LIKE 'memories_fts_%'"
     ).fetchall()
     conn.close()
     return ";\n".join(r[0] for r in rows)

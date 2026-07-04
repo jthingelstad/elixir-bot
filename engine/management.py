@@ -195,18 +195,18 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
 
 def _has_leadership_hold(tag: str) -> bool:
     """Open flag_member_watch hold: an active leadership watch memory for the
-    tag (memory lives in elixir-v5-memory.db — deferred pass owns the store;
-    this is a read-only guard). Fail-open to False so a memory-store hiccup
-    never blocks the pipeline silently — the policy gate still applies."""
+    tag. v5.1 memory pass: memories live in the engine DB (memory.md D1), so
+    this reads `memories` directly — member_tag column, not the never-populated
+    link table. Fail-open to False so a memory hiccup never blocks the
+    pipeline silently — the policy gate still applies."""
     try:
-        from memory_store import get_memory_connection
+        from engine.db import connect
 
-        mconn = get_memory_connection()
+        mconn = connect()
         row = mconn.execute(
-            """SELECT 1 FROM clan_memories m
-               JOIN clan_memory_member_links l ON l.memory_id = m.memory_id
-               WHERE l.member_tag = ? AND m.title LIKE 'Watch:%'
-                 AND m.status = 'active'
+            """SELECT 1 FROM memories m
+               WHERE m.member_tag = ? AND m.title LIKE 'Watch:%'
+                 AND m.retired_at IS NULL
                  AND (m.expires_at IS NULL OR m.expires_at > datetime('now'))
                LIMIT 1""",
             (tag,),

@@ -525,3 +525,42 @@ def llm_page(limit: int = 50) -> dict:
                 "suggestions": suggestions}
     finally:
         conn.close()
+
+
+def memories_page(kind: str | None, member: str | None, q: str | None, limit: int = 100) -> dict:
+    """The memory half of "see what Elixir knows" (memory.md M6): browse +
+    FTS search over the v5.1 memories store, kind/member filters."""
+    import memory_store
+
+    conn = db.get_connection()
+    try:
+        memory_store.ensure_memory_schema(conn)
+        if q:
+            results = memory_store.search_memories(
+                q, viewer_scope="leadership",
+                filters={"kind": kind} if kind else None,
+                limit=limit, conn=conn,
+            )
+            rows = [dict(r.memory, rank_score=round(r.rank_score, 3)) for r in results]
+            if member:
+                canon = member if member.startswith("#") else f"#{member}"
+                rows = [r for r in rows if (r.get("member_tag") or "").upper() == canon.upper()]
+        else:
+            filters = {}
+            if kind:
+                filters["kind"] = kind
+            if member:
+                filters["member_tag"] = member
+            rows = memory_store.list_memories(
+                viewer_scope="leadership", filters=filters or None,
+                limit=limit, conn=conn,
+            )
+        counts = _rows(conn, """
+            SELECT kind, COUNT(*) AS n,
+                   SUM(CASE WHEN retired_at IS NOT NULL THEN 1 ELSE 0 END) AS retired
+            FROM memories GROUP BY kind ORDER BY n DESC""")
+        total = _one(conn, "SELECT COUNT(*) AS n FROM memories")
+        return {"memories": rows, "counts": counts, "total": (total or {}).get("n", 0),
+                "kind": kind or "", "member": member or "", "q": q or ""}
+    finally:
+        conn.close()

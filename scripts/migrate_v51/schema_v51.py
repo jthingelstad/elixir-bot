@@ -477,6 +477,65 @@ CREATE TABLE tick_history (
     recorded_at TEXT NOT NULL,
     counters_json TEXT NOT NULL
 );
+
+-- v5.1 memory system (memory.md §2.2; D1–D5 ratified 2026-07-04) -------------
+CREATE TABLE memories (
+    memory_id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN
+        ('leader_note','inference','system','synthesis','conversation_digest')),
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    summary TEXT,
+    scope TEXT NOT NULL DEFAULT 'public' CHECK (scope IN ('public','leadership')),
+    confidence REAL NOT NULL DEFAULT 0.9,
+    member_tag TEXT,
+    channel_key TEXT,
+    source_event_key TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    expires_at TEXT,
+    retired_at TEXT
+);
+CREATE INDEX idx_memories_member ON memories(member_tag, updated_at DESC);
+CREATE INDEX idx_memories_kind ON memories(kind, updated_at DESC);
+CREATE INDEX idx_memories_event ON memories(source_event_key);
+
+CREATE TABLE memory_tags (
+    memory_id INTEGER NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (memory_id, tag)
+);
+CREATE INDEX idx_memory_tags_tag ON memory_tags(tag);
+
+CREATE TABLE memory_log (
+    log_id INTEGER PRIMARY KEY,
+    memory_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    at TEXT NOT NULL,
+    diff_json TEXT
+);
+
+CREATE VIRTUAL TABLE memories_fts USING fts5(
+    title, summary, body,
+    content='memories',
+    content_rowid='memory_id'
+);
+CREATE TRIGGER memories_fts_ai AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, title, summary, body)
+    VALUES (new.memory_id, new.title, new.summary, new.body);
+END;
+CREATE TRIGGER memories_fts_ad AFTER DELETE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, title, summary, body)
+    VALUES('delete', old.memory_id, old.title, old.summary, old.body);
+END;
+CREATE TRIGGER memories_fts_au AFTER UPDATE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, title, summary, body)
+    VALUES('delete', old.memory_id, old.title, old.summary, old.body);
+    INSERT INTO memories_fts(rowid, title, summary, body)
+    VALUES (new.memory_id, new.title, new.summary, new.body);
+END;
 """
 
 # Tables whose DDL exports verbatim from the archive (schema.md: "carried
@@ -505,11 +564,11 @@ CARRIED_VERBATIM = [
     # column becomes a soft ref for the deferred memory/conversation pass.
     "conversation_threads",
     "messages",
-    "memory_facts",
+    # memory_facts retired (memory.md M3): dead since 2026-06-16, rolled up
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 54  # 49 engine + 4 conversation set
+EXPECTED_TABLE_COUNT = 56  # 50 engine + 3 conversation + 3 memory (memory.md)
 
 
 _DEAD_MEMBERS_FK = re.compile(
@@ -545,7 +604,7 @@ def build(db_path: str, archive_path: str) -> None:
     new.commit()
     count = new.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
-        "AND name NOT LIKE 'sqlite_%'"
+        "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'memories_fts%'"
     ).fetchone()[0]
     print(f"created {db_path}: {count} designed tables (expected {EXPECTED_TABLE_COUNT})")
     if count != EXPECTED_TABLE_COUNT:

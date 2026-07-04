@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sqlite3
 from typing import Optional
+
+log = logging.getLogger("storage.identity")
 
 from db import (
     _canon_tag,
@@ -352,30 +355,28 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         "(SELECT COUNT(*) FROM battle_events) AS battle_fact_count"
     ).fetchone()
     counts = dict(counts)
-    # clan_memories live in the separate memory DB (elixir-v5-memory.db);
-    # fail-soft so system status never breaks on the memory DB being absent.
+    # v5.1: memories live in the engine DB (memory.md D1) — same connection.
     try:
-        from memory_store import get_memory_connection
+        from memory_store import ensure_memory_schema
 
-        mconn = get_memory_connection()
+        ensure_memory_schema(conn)
+        mconn = conn
         try:
             mem = mconn.execute(
                 "SELECT COUNT(*) AS total, "
-                "SUM(CASE WHEN source_type = 'leader_note' THEN 1 ELSE 0 END) AS leader_notes, "
-                "SUM(CASE WHEN source_type = 'elixir_inference' THEN 1 ELSE 0 END) AS inferences, "
-                "SUM(CASE WHEN source_type = 'system' THEN 1 ELSE 0 END) AS system_notes, "
-                "MAX(created_at) AS latest FROM clan_memories"
+                "SUM(CASE WHEN kind = 'leader_note' THEN 1 ELSE 0 END) AS leader_notes, "
+                "SUM(CASE WHEN kind = 'inference' THEN 1 ELSE 0 END) AS inferences, "
+                "SUM(CASE WHEN kind = 'system' THEN 1 ELSE 0 END) AS system_notes, "
+                "MAX(created_at) AS latest FROM memories"
             ).fetchone()
             counts["contextual_memory_count"] = mem["total"] or 0
             counts["contextual_leader_notes"] = mem["leader_notes"] or 0
             counts["contextual_inferences"] = mem["inferences"] or 0
             counts["contextual_system_notes"] = mem["system_notes"] or 0
             _memory_latest = mem["latest"]
-            _memory_vec = mconn.execute(
-                "SELECT value FROM clan_memory_index_status WHERE key = 'sqlite_vec_enabled'"
-            ).fetchone()
+            _memory_vec = None  # embeddings retired in v5.1 (memory.md D2)
         finally:
-            mconn.close()
+            pass  # shared operational connection — caller owns its lifecycle
     except Exception:
         counts.setdefault("contextual_memory_count", 0)
         counts.setdefault("contextual_leader_notes", 0)
@@ -552,7 +553,13 @@ def get_database_status(conn: Optional[sqlite3.Connection] = None) -> dict:
 
 
 @managed_connection
-def build_memory_context(discord_user_id: Optional[str | int] = None, member_tag: Optional[str] = None, channel_id: Optional[str | int] = None, *, viewer_scope: str = "public", durable_memory_limit: int = 5, conn: Optional[sqlite3.Connection] = None) -> dict:
+def build_memory_context(discord_user_id: Optional[str | int] = None, member_tag: Optional[str] = None, channel_id: Optional[str | int] = None, *, viewer_scope: str = "public", durable_memory_limit: int = 5, query: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> dict:
+    """v2 (memory.md §2.3): durable memories come from ranked selection —
+    member/channel match + optional query FTS + confidence + recency — via
+    memory_store.select_memories on the SAME engine-DB connection (the old
+    cross-DB call silently returned [] after the cut). memory_facts sections
+    are retired (the table was dead since 2026-06-16); episodes and channel
+    state are unchanged."""
     context = {
         "discord_user": None,
         "member": None,
@@ -562,7 +569,7 @@ def build_memory_context(discord_user_id: Optional[str | int] = None, member_tag
     if include_cross_channel_conversation and discord_user_id is not None:
         key = str(discord_user_id)
         context["discord_user"] = {
-            "facts": get_memory_facts("discord_user", key, conn=conn),
+            "facts": [],
             "episodes": get_memory_episodes("discord_user", key, conn=conn),
         }
     if include_cross_channel_conversation and member_tag:
@@ -573,7 +580,7 @@ def build_memory_context(discord_user_id: Optional[str | int] = None, member_tag
         if member:
             key = str(member["player_tag"])
             context["member"] = {
-                "facts": get_memory_facts("member", key, conn=conn),
+                "facts": [],
                 "episodes": get_memory_episodes("member", key, conn=conn),
             }
     if channel_id is not None:
@@ -584,16 +591,18 @@ def build_memory_context(discord_user_id: Optional[str | int] = None, member_tag
         }
     if durable_memory_limit:
         try:
-            from memory_store import list_memories
+            from memory_store import select_memories
 
-            filters = {"member_tag": _canon_tag(member_tag)} if member_tag else None
-            memories = list_memories(
+            memories = select_memories(
+                member_tag=_canon_tag(member_tag) if member_tag else None,
+                channel_key=str(channel_id) if channel_id is not None else None,
+                query=query,
                 viewer_scope=viewer_scope or "public",
-                filters=filters,
                 limit=max(1, int(durable_memory_limit)),
                 conn=conn,
             )
         except Exception:
+            log.exception("durable memory selection failed")
             memories = []
         if memories:
             context["durable_memories"] = memories

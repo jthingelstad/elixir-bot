@@ -1,7 +1,14 @@
 # Elixir v5.1 — Memory System (the deferred pass)
 
-> **Status:** ✅ **D1–D5 ratified as recommended (Jamie, 2026-07-04)** — build
-> underway. This executes the pass `architecture.md` §0 deferred ("curated
+> **Status:** ✅ **Built 2026-07-04** (D1–D5 ratified as recommended). Two
+> build deviations, both found live: `memory_episodes` stays as the episode
+> table (already engine-resident and richer than §2.2's `episodes` sketch —
+> M2 became verify + re-key of its Gen-A integer member keys, 15 subjects),
+> and `memory_facts` stays physically present until cutover (readers are
+> retired; the rollup memory carries its content; drop at cutover). Also
+> fixed en route: durable memories had been silently ABSENT from chat since
+> the cut (cross-DB conn mismatch swallowed by a bare except) — the
+> engine-native store resolves it structurally. This executes the pass `architecture.md` §0 deferred ("curated
 > clan_memories, conversational memory, the interactive-conversation UX").
 > Same conventions as the v5.1 set.
 > **Owner:** Jamie · **Last worked:** 2026-07-04
@@ -137,7 +144,7 @@ returns a known memory by a word in its body.
 | D4 | Migrate all 3,886 memories vs curated subset | **All** — storage is trivial; ranking (not deletion) handles noise |
 | D5 | History: single `memory_log` vs none | **Single log**, fresh from cut; archive keeps the old dual history |
 
-## 5. Build plan (after D1–D5)
+## 5. Build plan — ✅ built 2026-07-04
 
 1. Schema: tables above into `schema_v51.py` (+count) and live CREATEs.
 2. `engine/memory.py` (or evolve `memory_store/`): writers + ranked retrieval;
