@@ -278,6 +278,14 @@ def render_intent(intent_row) -> str:
     if et == "season_closed":
         champ = p.get("war_champ_name") or p.get("war_champ_tag") or "our top contributor"
         return f"🏆 War season closed — {champ} is the War Champ!"
+    if et == "season_awards":
+        podium = p.get("war_champ") or []
+        champ = podium[0]["name"] if podium and podium[0].get("name") else "our top contributor"
+        fp = (p.get("free_pass") or [{}])[0]
+        line = f"🏆 Season {p.get('season_id')} awards — War Champ: {champ}"
+        if fp.get("name") and fp.get("rotation_applied"):
+            line += f"; Free Pass rotates to {fp['name']}"
+        return line + ". Full podium in the books!"
     if et.startswith("cohort_wave"):
         return "🎉 Multiple members hit the same milestone today — a clan wave!"
     return f"📣 {subj}: {et.replace('_', ' ')}."

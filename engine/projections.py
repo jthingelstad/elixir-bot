@@ -72,15 +72,20 @@ def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observ
     ranked_league = (p.get("currentPathOfLegendSeasonResult") or {}).get("leagueNumber")
     ranked_trophies = current.get("trophies")
     deck = p.get("currentDeck")
+    # NOTE: `r` is the PROJECTED roster entry (engine/emitters/clan.py
+    # project_clan_aspects — snake_case keys), not a raw CR memberList item.
+    # Live incident 2026-07-04: camelCase lookups here meant exp_level /
+    # clan_rank / donations_received never populated from roster refreshes.
+    # Raw-key fallbacks kept for direct callers passing CR-shaped dicts.
     vals = {
         "role": r.get("role"),
-        "exp_level": p.get("expLevel") or r.get("expLevel"),
+        "exp_level": p.get("expLevel") or r.get("exp_level") or r.get("expLevel"),
         "trophies": r.get("trophies") if r.get("trophies") is not None else p.get("trophies"),
         "best_trophies": p.get("bestTrophies"),
-        "clan_rank": r.get("clanRank"),
-        "previous_clan_rank": r.get("previousClanRank"),
+        "clan_rank": r.get("clan_rank") or r.get("clanRank"),
+        "previous_clan_rank": r.get("previous_clan_rank") or r.get("previousClanRank"),
         "donations_week": r.get("donations"),
-        "donations_received_week": r.get("donationsReceived"),
+        "donations_received_week": r.get("donations_received") or r.get("donationsReceived"),
         "arena_id": arena.get("id") if arena else (r.get("arena") or {}).get("id"),
         "arena_name": arena.get("name") if arena else (r.get("arena") or {}).get("name"),
         "ranked_league": ranked_league,
