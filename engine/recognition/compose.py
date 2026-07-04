@@ -246,6 +246,12 @@ def render_intent(intent_row) -> str:
         leaders = p.get("leaders") or []
         top = leaders[0]["name"] if leaders and isinstance(leaders[0], dict) else subj
         return f"🎁 {top} led donations this week. Thank you!"
+    if et == "war_day_opened":
+        day = p.get("war_day_human") or "a new battle day"
+        where = "Colosseum" if (p.get("war_clock") or {}).get("is_colosseum_week") else "the river race"
+        return f"⚔️ {day.capitalize()} is open in {where} — get your war decks in!"
+    if et == "race_finished":
+        return "🏁 We crossed the finish line — race won! Decks still count for personal rewards."
     if et == "week_finished":
         return f"🏁 War week finished — we placed #{p.get('our_rank')} with {p.get('our_fame')} fame."
     if et == "season_closed":

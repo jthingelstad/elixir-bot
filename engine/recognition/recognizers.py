@@ -454,6 +454,19 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
                           "hours_left_in_period", "race_finished")
                 if k in clock
             }
+            # war_day_index is 0-based engine data; copy must speak human
+            # ("battle day 3 of 4"). And right after a day opens, the clock's
+            # next-10:00Z boundary reads as minutes-left on a fresh 24h day
+            # (CR rolls ~09:37Z; live incident 2026-07-04: "day 2, 14 minutes
+            # left" composed at the day-3 open). Correct both for the composer.
+            wdi = payload.get("war_day_index")
+            if isinstance(wdi, int):
+                payload["war_day_human"] = f"battle day {wdi + 1} of 4"
+            if et == "war_day_opened":
+                hours = payload["war_clock"].get("hours_left_in_period")
+                if isinstance(hours, (int, float)) and hours < 12:
+                    payload["war_clock"]["hours_left_in_period"] = hours + 24.0
+                payload["day_just_opened"] = True
         if et == "season_closed":
             champ, fp = payload.get("war_champ_tag"), payload.get("free_pass_tag")
             payload["war_champ_name"] = compose.resolve_name(conn, champ)
