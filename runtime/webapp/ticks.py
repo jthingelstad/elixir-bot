@@ -40,7 +40,7 @@ def record_tick(counters: dict) -> None:
             )
             # Self-pruning: cheap DELETE on every insert (144 rows/day).
             conn.execute(
-                "DELETE FROM tick_history WHERE recorded_at < datetime('now', ?)",
+                "DELETE FROM tick_history WHERE recorded_at < strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)",
                 (f"-{_RETENTION_DAYS} days",),
             )
             conn.commit()

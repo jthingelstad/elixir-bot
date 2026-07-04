@@ -42,6 +42,7 @@
 | `seasonId` absent from live race payloads | absent in ALL 259 archived payloads; always inferred | `engine/clock.py:infer_season_id` (correct home; catalog it) | cataloged, stays in clock |
 | PoL ranks are lower-is-better | rank 1 beats rank 100 | player emitter + read layer each know it implicitly | `pol_rank_improved(old, new) -> bool` |
 | Tag canonicalization | `#`-prefixed, uppercase, O→0 | `db._canon_tag` (correct home; catalog it) | re-export as `canon_tag` |
+| SQLite `datetime('now')` is space-separated | stored timestamps are ISO-T; `'T' > ' '` so `>=` cutoffs match EVERYTHING and `<` cutoffs match NOTHING | 12 sites (live incident 2026-07-04: the clan-chat relay's 15-min freshness filter never filtered — R108–R114 spam) — all fixed to `strftime('%Y-%m-%dT%H:%M:%S','now',…)` | SQL convention, catalogued; grep gate candidate |
 | Colosseum has no finish line | fame accrues all 4 days (live: 20,600 on day 2); spec's 5,000 was wrong | fixed in clock.py 2026-07-04 | cataloged, stays in clock |
 
 ## 3. Build plan (executed 2026-07-04)

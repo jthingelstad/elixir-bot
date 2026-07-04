@@ -106,10 +106,10 @@ def overview() -> dict:
         statuses = runtime_status.list_runtime_job_status(conn=conn)
         failed_intents_24h = conn.execute(
             "SELECT COUNT(*) FROM communication_intents "
-            "WHERE status IN ('failed','expired') AND created_at >= datetime('now','-1 day')"
+            "WHERE status IN ('failed','expired') AND created_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now','-1 day')"
         ).fetchone()[0]
         prompt_failures_24h = conn.execute(
-            "SELECT COUNT(*) FROM prompt_failures WHERE recorded_at >= datetime('now','-1 day')"
+            "SELECT COUNT(*) FROM prompt_failures WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now','-1 day')"
         ).fetchone()[0]
         job_errors = {
             name: state.get("last_error")
