@@ -73,30 +73,11 @@ _CHICAGO = ZoneInfo("America/Chicago")
 
 
 def parse_utc(value) -> datetime | None:
-    """Parse ISO ('2026-07-03T12:00:00Z') or CR-compact ('20260703T120000.000Z')."""
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        dt = value
-    else:
-        text = str(value)
-        if "T" in text and "-" not in text.split("T", 1)[0]:
-            # CR compact: 20260703T120000.000Z
-            core = text.rstrip("Z").split(".", 1)[0]
-            try:
-                dt = datetime.strptime(core, "%Y%m%dT%H%M%S")
-            except ValueError:
-                return None
-        else:
-            if text.endswith("Z"):
-                text = f"{text[:-1]}+00:00"
-            try:
-                dt = datetime.fromisoformat(text)
-            except ValueError:
-                return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+    """Parse ISO or CR-compact timestamps — delegates to the normalizer's
+    single parser (engine/normalize.py); name kept for its importers."""
+    from engine.normalize import parse_cr_time
+
+    return parse_cr_time(value)
 
 
 def chicago_day(value) -> str | None:

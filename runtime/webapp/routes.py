@@ -110,7 +110,21 @@ async def raw_payload_page(request: web.Request) -> web.Response:
     row = await asyncio.to_thread(queries.raw_payload, payload_id)
     if row is None:
         raise web.HTTPNotFound(text="no such payload")
-    return render("raw.html", request, nav="streams", row=row)
+    annotated = request.query.get("annotated") == "1"
+    body = row.get("payload_json")
+    if annotated:
+        import json as _json
+
+        from engine.normalize import annotate as _annotate
+
+        try:
+            body = _json.dumps(
+                _annotate(_json.loads(body), row.get("endpoint")), indent=2
+            )
+        except (TypeError, ValueError):
+            annotated = False
+    return render("raw.html", request, nav="streams", row=row,
+                  body=body, annotated=annotated)
 
 
 async def recognition_page(request: web.Request) -> web.Response:

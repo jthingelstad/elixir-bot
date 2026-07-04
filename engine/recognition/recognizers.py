@@ -62,14 +62,10 @@ def _battle_id(row) -> str:
     return row["dedup_key"]
 
 
-# Canonical Trophy Road arenas have stable ids; above this id the "arena" is
-# the seasonal-league zone whose ids/names rotate monthly ("PANCAKES!",
-# "Summit of Heroes", ...) — verified against live battle data 2026-07-03:
-# ids <= 54000016 (Dragon Spa) hold stable names/trophy bands; ids above churn
-# with the season. Seasonal renames + the season trophy reset otherwise read
-# as arena-ups (the go-live tick posted 7 of them). One constant to revisit
-# if Supercell extends the road.
-ARENA_UP_MAX_CANONICAL_ID = 54000016
+# Trophy-Road-vs-seasonal arena classification lives in the normalizer
+# (engine/normalize.py — the quirk catalog); see its docstring for the
+# go-live incident that taught it.
+from engine.normalize import ARENA_UP_MAX_CANONICAL_ID  # noqa: E402
 
 
 def _arena_up_candidates(conn, tags: set[str]) -> list[Candidate]:
@@ -459,14 +455,11 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
                           "hours_left_in_period", "race_finished")
                 if k in clock
             }
-            # war_day_index is 0-based engine data; copy must speak human
-            # ("battle day 3 of 4"). And right after a day opens, the clock's
-            # next-10:00Z boundary reads as minutes-left on a fresh 24h day
-            # (CR rolls ~09:37Z; live incident 2026-07-04: "day 2, 14 minutes
-            # left" composed at the day-3 open). Correct both for the composer.
-            wdi = payload.get("war_day_index")
-            if isinstance(wdi, int):
-                payload["war_day_human"] = f"battle day {wdi + 1} of 4"
+            # war_day_human now arrives in the event payload (set at EMIT
+            # time by the normalizer — engine/emitters/war.py). Right after a
+            # day opens the clock's nominal boundary can still read as
+            # minutes-left on a fresh 24h day when no drift anchor exists yet
+            # (belt-and-braces on top of period_anchor_from_events).
             if et == "war_day_opened":
                 hours = payload["war_clock"].get("hours_left_in_period")
                 if isinstance(hours, (int, float)) and hours < 12:

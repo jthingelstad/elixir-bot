@@ -21,14 +21,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from engine.normalize import (  # single source for war-week structure
+    PERIODS_PER_SECTION,
+    TRAINING_DAYS,
+    WAR_DAYS,
+    parse_cr_time,
+)
+
 FAME_FINISH_LINE = 10_000
 # Colosseum has NO finish line — fame accrues across all four battle days
 # (verified live 2026-07-03: 20,600 fame on Colosseum day 2, race still on).
 # The spec's 5,000 constant (§16.4) was wrong; feedback.md New-1 had flagged
 # it as unverified. race_finished can therefore only be true in normal weeks.
-PERIODS_PER_SECTION = 7
-TRAINING_DAYS = 3
-WAR_DAYS = 4
 PERIOD_BOUNDARY_HOUR_UTC = 10
 
 _PHASE = {"training": "training", "warDay": "war_day", "colosseum": "colosseum"}
@@ -177,20 +181,9 @@ def _effective_war_date(dt: datetime) -> datetime:
 
 
 def parse_battle_time(value: str) -> datetime | None:
-    """Parse CR compact battle time ('20260703T211500.000Z')."""
-    if not value:
-        return None
-    raw = str(value).replace(".000Z", "").replace("Z", "")
-    try:
-        return datetime.strptime(raw, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
-    except ValueError:
-        try:
-            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-            if dt.tzinfo is None:  # engine convention: suffixless timestamps are UTC
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except ValueError:
-            return None
+    """Parse CR compact battle time — delegates to the normalizer's single
+    parser (engine/normalize.py); name kept for its importers."""
+    return parse_cr_time(value)
 
 
 def resolve_war_keys(

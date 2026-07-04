@@ -1,8 +1,11 @@
 # Elixir v5.1 — CR Normalizer Layer (addendum)
 
-> **Status:** 🟡 Spec'd 2026-07-04 (Jamie: "spec first, build later" — build after
-> the season-close bake gate passes). Companion to the v5.1 set; same
-> conventions (detail wins, ground everything).
+> **Status:** ✅ **Built 2026-07-04** (`engine/normalize.py` + migration sweep +
+> tool annotation + `tests/test_engine_normalize.py` incl. grep gates).
+> Companion to the v5.1 set; same conventions (detail wins, ground everything).
+> Build additions the gates caught: `card_display_max_level` (a 4th card-math
+> site in storage/player.py the inventory missed) and list-form battlelog
+> handling in `annotate`.
 > **Owner:** Jamie · **Last worked:** 2026-07-04
 >
 > **The problem (Jamie, go-live night):** CR API representational quirks leak
@@ -41,7 +44,7 @@
 | Tag canonicalization | `#`-prefixed, uppercase, O→0 | `db._canon_tag` (correct home; catalog it) | re-export as `canon_tag` |
 | Colosseum has no finish line | fame accrues all 4 days (live: 20,600 on day 2); spec's 5,000 was wrong | fixed in clock.py 2026-07-04 | cataloged, stays in clock |
 
-## 3. Build plan (post-bake)
+## 3. Build plan (executed 2026-07-04)
 
 1. `engine/normalize.py` with the functions above + docstring citations; unit
    tests (golden values per quirk, incl. the live-incident cases).

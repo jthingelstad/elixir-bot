@@ -31,10 +31,10 @@ def _compute_ends_time(started_time: Optional[str], duration_seconds) -> Optiona
     """
     if not started_time or not isinstance(duration_seconds, int):
         return None
-    try:
-        clean = started_time.split(".")[0]
-        started_dt = datetime.strptime(clean, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
+    from engine.normalize import parse_cr_time  # the single parser
+
+    started_dt = parse_cr_time(started_time)
+    if started_dt is None:
         return None
     ends_dt = started_dt + timedelta(seconds=duration_seconds)
     return ends_dt.strftime("%Y%m%dT%H%M%S.000Z")

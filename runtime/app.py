@@ -188,7 +188,7 @@ from runtime.helpers import (  # noqa: E402,F401
     _build_top_war_contributors_report,
     _build_war_status_report,
     _build_weekly_clan_recap_context,
-    _canon_tag,
+    _bare_tag,
     _channel_conversation_scope,
     _channel_msg_kwargs,
     _channel_reply_target_name,

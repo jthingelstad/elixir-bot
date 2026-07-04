@@ -149,13 +149,12 @@ def _hash_payload(payload) -> str:
 
 
 def _parse_cr_time(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        clean = value.split(".")[0]
-        return datetime.strptime(clean, "%Y%m%dT%H%M%S")
-    except (ValueError, TypeError):
-        return None
+    """Delegates to the normalizer's single parser (engine/normalize.py).
+    Now tz-aware; the only caller (chicago_date_for_cr_timestamp) already
+    guards for either."""
+    from engine.normalize import parse_cr_time
+
+    return parse_cr_time(value)
 
 
 def _parse_iso_time(value: Optional[str]) -> Optional[datetime]:
@@ -222,13 +221,11 @@ def _build_form_summary(wins: int, losses: int, draws: int, sample_size: int, la
 
 
 def _card_level(card: dict) -> Optional[int]:
-    level = card.get("level")
-    if not isinstance(level, int):
-        return None
-    max_level = card.get("maxLevel")
-    if not isinstance(max_level, int) or max_level <= 0 or max_level > 16:
-        return level
-    return level + max(0, 16 - max_level)
+    """Delegates to the normalizer (engine/normalize.py) — the single home
+    for the rarity-relative display-level math."""
+    from engine.normalize import card_display_level
+
+    return card_display_level(card.get("level"), card.get("maxLevel"))
 
 
 def _played_as(card: dict) -> Optional[str]:

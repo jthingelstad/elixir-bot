@@ -14,7 +14,7 @@ answerable (management.md §4).
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from engine.db import utcnow
 
@@ -36,13 +36,10 @@ ELDER_PLUS = ("elder", "coLeader", "leader")
 
 
 def _parse_ts(value: str) -> datetime:
-    v = value.replace(".000Z", "Z")
-    if "T" in v and "-" not in v[:10]:  # CR compact 20260703T210000Z
-        return datetime.strptime(v, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-    dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
-    if dt.tzinfo is None:  # engine convention: suffixless timestamps are UTC
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt
+    """Delegates to the normalizer's single parser (engine/normalize.py)."""
+    from engine.normalize import parse_cr_time
+
+    return parse_cr_time(value)
 
 
 def _state(row) -> dict:
