@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sqlite3
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,8 @@ from typing import Optional
 
 import db as _db
 from db import managed_connection
+
+log = logging.getLogger("elixir.storage.leader_actions")
 
 
 ACTION_DONE = "done"
@@ -465,6 +468,15 @@ def update_leader_action_copy_text(
         ),
     )
     conn.commit()
+    # Editor copy-edit feeder (editor.md §3): the leader's rewrite is a paired
+    # before/after exemplar for the rubric. Never blocks the edit itself.
+    try:
+        from engine import editor as _editor
+
+        _editor.record_copy_edit_pair(conn, int(action_id), original, clean)
+    except Exception:
+        log.debug("editor copy-edit feeder failed for action %s", action_id,
+                  exc_info=True)
     return get_leader_action_by_id(action_id, conn=conn)
 
 

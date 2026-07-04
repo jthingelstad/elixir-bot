@@ -538,14 +538,19 @@ def _recency(updated_at: str, now: datetime) -> float:
 
 @managed_memory_connection
 def select_memories(*, member_tag: Optional[str] = None, channel_key: Optional[str] = None,
-                    query: Optional[str] = None, viewer_scope: str = "public",
+                    query: Optional[str] = None, tags: Optional[list] = None,
+                    viewer_scope: str = "public",
                     limit: int = 5, conn=None) -> list[dict]:
     """Ranked selection for answer-time context (memory.md §2.3):
     score = W_MATCH·match + W_CONF·confidence + W_RECENCY·decay(updated_at).
-    Deterministic; no embeddings."""
+    Deterministic; no embeddings.
+
+    tags: candidates must carry ALL given tags (the Editor's rubric retrieval,
+    editor.md §3 — tag-scoped pools like 'editorial' rank within themselves)."""
     scopes = _allowed_scopes(viewer_scope)
     now = datetime.now(timezone.utc)
     match: dict[int, float] = {}
+    tags = [t.strip().lower() for t in (tags or []) if t and t.strip()]
 
     def scope_sql(alias="m"):
         return f"{alias}.scope IN ({','.join('?' for _ in scopes)}) AND {alias}.retired_at IS NULL " \
@@ -577,12 +582,24 @@ def select_memories(*, member_tag: Optional[str] = None, channel_key: Optional[s
                 match[r["memory_id"]] = max(match.get(r["memory_id"], 0.0), strength)
         except sqlite3.OperationalError:
             pass
+    if tags:
+        # Tag pool is its own candidate source: a tag-scoped call must see the
+        # whole pool even when the FTS query matches nothing (base strength is
+        # low — confidence + recency rank within the pool).
+        for r in conn.execute(
+            f"SELECT m.memory_id FROM memories m "
+            f"JOIN memory_tags mt ON mt.memory_id = m.memory_id "
+            f"WHERE {scope_sql()} AND mt.tag = ? "
+            "ORDER BY m.updated_at DESC LIMIT 40",
+            (*base_args, tags[0]),
+        ).fetchall():
+            match[r["memory_id"]] = max(match.get(r["memory_id"], 0.0), 0.4)
     # Recency backstop ONLY for unfiltered calls (no member/channel/query):
     # with subject filters given, candidates come from matches alone — the
     # old unconditional backstop let a fresh high-conf memory about member B
     # outscore member A's sparse matches and inject wrong-subject facts into
     # A's answer context (cold review 2026-07-04 #5).
-    if not (member_tag or channel_key or (query and query.strip())):
+    if not (member_tag or channel_key or (query and query.strip()) or tags):
         for r in conn.execute(
             f"SELECT memory_id FROM memories m WHERE {scope_sql()} "
             "ORDER BY m.updated_at DESC LIMIT 20",
@@ -594,6 +611,8 @@ def select_memories(*, member_tag: Optional[str] = None, channel_key: Optional[s
     for memory_id, strength in match.items():
         row = _fetch_memory(conn, memory_id)
         if not row or row["scope"] not in scopes:
+            continue
+        if tags and not set(tags) <= set(row.get("tags") or []):
             continue
         score = (W_MATCH * strength
                  + W_CONF * float(row.get("confidence") or 0.0)

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Editorial{% endblock %}
+{% block content %}
+<h1>The Editor</h1>
+<p class="muted">Inline gate verdicts, the living rubric, and weekly self-reviews (editor.md).</p>
+
+<div class="cards">
+  {% for c in counts %}
+  <div class="card">
+    <span class="badge {{ 'good' if c.verdict == 'pass' else ('bad' if c.verdict in ('fallback','error') else '') }}">{{ c.verdict }}</span>
+    <div style="font-size:1.6rem; font-weight:700;">{{ c.n }}</div>
+  </div>
+  {% else %}
+  <div class="card"><span class="muted">No gate verdicts yet — the first gated post lands here.</span></div>
+  {% endfor %}
+</div>
+
+<h2>Recent verdicts</h2>
+<table>
+  <tr><th>id</th><th>verdict</th><th>intent</th><th>final copy</th><th>at</th></tr>
+  {% for v in verdicts %}
+  <tr>
+    <td class="num">{{ v.verdict_id }}</td>
+    <td><span class="badge {{ 'good' if v.verdict == 'pass' else ('bad' if v.verdict in ('fallback','error') else '') }}">{{ v.verdict }}</span></td>
+    <td>
+      {% if v.recognition_key %}<a href="/recognition/{{ v.recognition_key }}"><code>{{ v.intent_type }}</code></a>
+      {% else %}<code>{{ v.intent_type or v.intent_id }}</code>{% endif %}
+      <span class="muted">→ {{ v.lane or '?' }}</span>
+    </td>
+    <td>{{ (v.final_copy or '')[:160] }}{% if v.verdict in ('revise','fallback') %}<br>
+        <span class="muted">was: {{ (v.original_copy or '')[:120] }}</span>{% endif %}</td>
+    <td class="muted">{{ v.at | reltime }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">none yet</td></tr>
+  {% endfor %}
+</table>
+
+<h2>The living rubric</h2>
+<table>
+  <tr><th>kind</th><th>title</th><th>body</th><th>conf</th><th>source</th><th>added</th></tr>
+  {% for r in rubric %}
+  <tr>
+    <td><span class="badge {{ 'bad' if r.kind_label == 'anti-pattern' else 'good' }}">{{ r.kind_label }}</span>
+        {% if r.is_candidate %}<br><span class="muted">candidate</span>{% endif %}</td>
+    <td>{{ r.title }}</td>
+    <td style="max-width:26rem;">{{ (r.body or '')[:280] }}</td>
+    <td class="num">{{ '%.2f' | format(r.confidence) }}</td>
+    <td class="muted">{{ r.created_by }}</td>
+    <td class="muted">{{ r.created_at | reltime }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">no rubric entries yet</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Weekly self-reviews</h2>
+{% for rep in reports %}
+<div class="card">
+  <strong>{{ rep.title }}</strong>
+  <p style="margin:.4rem 0 0; white-space:pre-wrap;">{{ rep.body }}</p>
+</div>
+{% else %}
+<p class="muted">First report posts Sunday 20:07 CT.</p>
+{% endfor %}
+{% endblock %}

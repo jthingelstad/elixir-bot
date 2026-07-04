@@ -11,8 +11,8 @@ Usage:
     ./venv/bin/python scripts/migrate_v51/schema_v51.py \
         --db elixir-v51.db --archive elixir-v5-archive-2026H2.db
 
-Expected table count: 54 designed tables (50 engine incl. tick_history + 4 conversation set;
-clan_memories live in elixir-v5-memory.db, untouched — migration.md T12).
+Expected table count: 57 designed tables (51 engine incl. tick_history +
+editor_verdicts, 3 conversation set, 3 memory — memory.md D1).
 """
 
 from __future__ import annotations
@@ -478,6 +478,18 @@ CREATE TABLE tick_history (
     counters_json TEXT NOT NULL
 );
 
+-- editor_verdicts: the Editor's inline-gate trace (editor.md §5; added
+-- 2026-07-04 — lazily created live by engine/editor.py ensure_editor_schema)
+CREATE TABLE editor_verdicts (
+    verdict_id INTEGER PRIMARY KEY,
+    intent_id INTEGER NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('pass','revise','fallback','error')),
+    dimensions_json TEXT,
+    original_copy TEXT, final_copy TEXT,
+    at TEXT NOT NULL
+);
+CREATE INDEX idx_editor_verdicts_intent ON editor_verdicts(intent_id);
+
 -- v5.1 memory system (memory.md §2.2; D1–D5 ratified 2026-07-04) -------------
 CREATE TABLE memories (
     memory_id INTEGER PRIMARY KEY,
@@ -568,7 +580,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 56  # 50 engine + 3 conversation + 3 memory (memory.md)
+EXPECTED_TABLE_COUNT = 57  # 51 engine (incl. editor_verdicts) + 3 conversation + 3 memory
 
 
 _DEAD_MEMBERS_FK = re.compile(

@@ -47,8 +47,15 @@ def raise_intent(conn, recognition_key: str | None, intent_type: str, lane: str,
     return cur.lastrowid
 
 
-def consume(conn, send_fn, compose_fn, now: str) -> dict:
-    """Deliver pending/failed intents oldest-first, per lane. Returns counters."""
+def consume(conn, send_fn, compose_fn, now: str, *, editor_gate=None) -> dict:
+    """Deliver pending/failed intents oldest-first, per lane. Returns counters.
+
+    editor_gate(conn, intent, copy, compose_fn, now) -> str is the Editor's
+    inline gate (engine.editor.gate) — injected by the LIVE tick only, so the
+    offline rehearsal and tests never touch the critic. It judges composed
+    copy (never the deterministic fallback, which is grounded by construction)
+    and is fail-open by contract: it returns original/revised/fallback copy
+    and never raises past its own guard."""
     counters = {"delivered": 0, "expired": 0, "failed": 0, "skipped": 0}
     now_dt = parse_utc(now)
     rows = conn.execute(
@@ -84,6 +91,12 @@ def consume(conn, send_fn, compose_fn, now: str) -> dict:
                 log.exception("compose failed for intent %s; using fallback", intent["intent_id"])
             if not copy or _compose.looks_like_meta(copy):
                 copy = _compose.render_intent(intent)   # deterministic fallback (§7 guard)
+            elif editor_gate is not None:
+                try:
+                    copy = editor_gate(conn, intent, copy, compose_fn, now)
+                except Exception:  # belt over the gate's own fail-open braces
+                    log.exception("editor gate raised for intent %s; sending original",
+                                  intent["intent_id"])
             try:
                 message_id = send_fn(intent["lane"], copy)
             except Exception as exc:

@@ -144,6 +144,9 @@ _WORKFLOW_SPECS = (
         model_family="chat",
         tools_allowed=False,
     ),
+    # The Editor's critic + weekly self-review (editor.md §2/§4): one strict-
+    # JSON call, no tools, lightweight family (haiku-class — ~10-20 posts/day).
+    WorkflowSpec("editorial", tools=[], max_tool_rounds=1, tools_allowed=False),
     WorkflowSpec("weekly_digest", model_family="chat"),
     WorkflowSpec("site_promote_content", model_family="promotion"),
 )

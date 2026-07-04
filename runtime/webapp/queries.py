@@ -339,12 +339,21 @@ def recognition_detail(recognition_key: str) -> dict | None:
             return None
         claim["refs"] = _parse_json(claim.get("event_refs_json"), {})
         intent = None
+        verdicts = []
         if claim.get("intent_id") is not None:
             intent = _one(conn, "SELECT * FROM communication_intents WHERE intent_id = ?",
                           (claim["intent_id"],))
             if intent:
                 intent["payload"] = _parse_json(intent.get("payload_json"), {})
-        return {"claim": claim, "intent": intent}
+            try:  # editor.md §2 trace — table appears lazily on first gate
+                verdicts = _rows(conn, """
+                    SELECT * FROM editor_verdicts WHERE intent_id = ?
+                    ORDER BY verdict_id DESC""", (claim["intent_id"],))
+                for v in verdicts:
+                    v["dimensions"] = _parse_json(v.pop("dimensions_json", None), {})
+            except Exception:
+                verdicts = []
+        return {"claim": claim, "intent": intent, "verdicts": verdicts}
     finally:
         conn.close()
 
@@ -562,5 +571,50 @@ def memories_page(kind: str | None, member: str | None, q: str | None, limit: in
         total = _one(conn, "SELECT COUNT(*) AS n FROM memories")
         return {"memories": rows, "counts": counts, "total": (total or {}).get("n", 0),
                 "kind": kind or "", "member": member or "", "q": q or ""}
+    finally:
+        conn.close()
+
+
+def editorial_page(limit: int = 50) -> dict:
+    """The Editor's Observatory surface (editor.md): rubric browser (editorial
+    memories with tags + provenance), recent gate verdicts, weekly reports."""
+    from engine import editor as engine_editor
+
+    conn = db.get_connection()
+    try:
+        engine_editor.ensure_editor_schema(conn)
+        rubric = _rows(conn, """
+            SELECT m.memory_id, m.title, m.body, m.confidence, m.created_by,
+                   m.created_at, m.retired_at,
+                   (SELECT group_concat(tag, ' ') FROM memory_tags t
+                    WHERE t.memory_id = m.memory_id) AS tags
+            FROM memories m
+            WHERE m.memory_id IN (SELECT memory_id FROM memory_tags WHERE tag = 'editorial')
+              AND NOT EXISTS (SELECT 1 FROM memory_tags t2
+                              WHERE t2.memory_id = m.memory_id AND t2.tag = 'weekly-review')
+            ORDER BY m.updated_at DESC LIMIT 100""")
+        for r in rubric:
+            tags = set((r.get("tags") or "").split())
+            r["kind_label"] = ("anti-pattern" if "anti-pattern" in tags
+                               else "exemplar" if "exemplar" in tags else "note")
+            r["is_candidate"] = "candidate" in tags or "proposed" in tags
+        verdicts = _rows(conn, """
+            SELECT v.*, i.intent_type, i.lane, i.recognition_key
+            FROM editor_verdicts v
+            LEFT JOIN communication_intents i ON i.intent_id = v.intent_id
+            ORDER BY v.verdict_id DESC LIMIT ?""", (limit,))
+        for v in verdicts:
+            v["dimensions"] = _parse_json(v.pop("dimensions_json", None), {})
+        counts = _rows(conn, """
+            SELECT verdict, COUNT(*) AS n FROM editor_verdicts
+            GROUP BY verdict ORDER BY n DESC""")
+        reports = _rows(conn, """
+            SELECT m.memory_id, m.title, m.body, m.created_at
+            FROM memories m
+            JOIN memory_tags t ON t.memory_id = m.memory_id AND t.tag = 'weekly-review'
+            WHERE m.memory_id IN (SELECT memory_id FROM memory_tags WHERE tag = 'editorial')
+            ORDER BY m.created_at DESC LIMIT 10""")
+        return {"rubric": rubric, "verdicts": verdicts, "counts": counts,
+                "reports": reports}
     finally:
         conn.close()
