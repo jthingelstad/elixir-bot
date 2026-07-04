@@ -102,6 +102,17 @@ def test_members_awards_baseline_render_seeded():
                        '{"level": 45, "name": "Rosterling"}', 'h1',
                        '2026-07-04T00:00:00Z')"""
         )
+        # Regression (live incident 2026-07-04): feedback_value is TEXT
+        # 'up'/'down'; a numeric comparison in llm.html 500'd on real rows.
+        conn.execute(
+            """INSERT INTO prompt_feedback (assistant_discord_message_id,
+                   discord_user_id, workflow, channel_name, feedback_value,
+                   question, response_preview, recorded_at, updated_at)
+               VALUES ('m1', 'u1', 'ask_elixir', '#ask-elixir', 'up', 'test q',
+                       'test resp', '2026-07-04T00:00:00Z', '2026-07-04T00:00:00Z'),
+                      ('m2', 'u1', 'ask_elixir', '#ask-elixir', 'down', 'test q2',
+                       'test resp2', '2026-07-04T00:00:00Z', '2026-07-04T00:00:00Z')"""
+        )
         conn.commit()
     finally:
         conn.close()
@@ -123,6 +134,10 @@ def test_members_awards_baseline_render_seeded():
         r = await client.get("/baseline?kind=player&tag=%23NOPE&aspect=profile",
                              headers=LOGIN)
         assert r.status == 404
+        r = await client.get("/llm", headers=LOGIN)
+        assert r.status == 200
+        text = await r.text()
+        assert "up" in text and "down" in text  # text feedback values render
 
     _client_run(body)
 
