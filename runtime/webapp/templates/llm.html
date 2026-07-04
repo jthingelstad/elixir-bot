@@ -53,7 +53,7 @@
         <td>{{ f.recorded_at | reltime }}</td>
         <td><code>{{ f.workflow }}</code></td>
         <td>{{ f.channel_name }}</td>
-        <td>{% if f.feedback_value and f.feedback_value > 0 %}<span class="badge good">+{{ f.feedback_value }}</span>{% else %}<span class="badge bad">{{ f.feedback_value }}</span>{% endif %}</td>
+        <td>{% if f.feedback_value == 'up' %}<span class="badge good">👍 up</span>{% elif f.feedback_value == 'down' %}<span class="badge bad">👎 down</span>{% else %}<span class="badge">{{ f.feedback_value }}</span>{% endif %}</td>
         <td class="muted">{{ f.question }}</td>
         <td class="muted">{{ f.response_preview }}</td>
       </tr>
