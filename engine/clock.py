@@ -77,10 +77,17 @@ def infer_season_id(conn, race_payload: dict) -> int | None:
     return logged_season
 
 
-def war_clock(race_payload: dict, now: datetime, season_id: int | None = None) -> WarClock:
+def war_clock(
+    race_payload: dict,
+    now: datetime,
+    season_id: int | None = None,
+    period_anchor: datetime | None = None,
+) -> WarClock:
     """Compute the clock from a currentriverrace payload. Pure — no DB.
 
     `season_id` comes from infer_season_id (the payload almost never carries it).
+    `period_anchor` is when the current period was first observed (see
+    period_anchor_from_events) — the drift-adaptive day boundary.
     """
     payload = race_payload or {}
     period_type = payload.get("periodType") or ""
@@ -109,11 +116,27 @@ def war_clock(race_payload: dict, now: datetime, season_id: int | None = None) -
     else:
         battle_days_remaining = max(0, WAR_DAYS - 1 - war_day_index)
 
-    boundary = now.astimezone(timezone.utc).replace(
-        hour=PERIOD_BOUNDARY_HOUR_UTC, minute=0, second=0, microsecond=0
-    )
-    if boundary <= now.astimezone(timezone.utc):
-        boundary += timedelta(days=1)
+    # Carried learning (pre-v5.1 heartbeat, issue #20): CR seasons skew off
+    # the nominal 10:00Z reset, and the skew drifts season to season — the
+    # observed period-start beats any hardcoded hour. When the caller supplies
+    # the period anchor (the war_day_opened event's observed_at — the first
+    # tick that saw this period), the day ends anchor+24h; the fixed hour is
+    # only the no-anchor fallback.
+    if period_anchor is not None:
+        anchor = period_anchor.astimezone(timezone.utc)
+        boundary = anchor + timedelta(days=1)
+        if boundary <= now.astimezone(timezone.utc):
+            # anchor is stale (we're past its day, e.g. missed polls);
+            # fall back to the nominal boundary rather than negative time
+            boundary = None
+    else:
+        boundary = None
+    if boundary is None:
+        boundary = now.astimezone(timezone.utc).replace(
+            hour=PERIOD_BOUNDARY_HOUR_UTC, minute=0, second=0, microsecond=0
+        )
+        if boundary <= now.astimezone(timezone.utc):
+            boundary += timedelta(days=1)
     hours_left = (boundary - now.astimezone(timezone.utc)).total_seconds() / 3600.0
 
     if phase == "training":
@@ -202,3 +225,17 @@ def resolve_war_keys(
     day = period % PERIODS_PER_SECTION
     war_day = day - TRAINING_DAYS if day >= TRAINING_DAYS else None
     return (clock.season_id, section, war_day)
+
+
+def period_anchor_from_events(conn, season_id, section_index, day_index) -> datetime | None:
+    """When the current period was first observed — the war_day_opened event's
+    observed_at (carried learning: CR's reset hour skews per season; the
+    observed period-start is the accurate 24h anchor). None when the event
+    doesn't exist (e.g. training days, or the engine started mid-period)."""
+    if season_id is None or section_index is None or day_index is None:
+        return None
+    row = conn.execute(
+        "SELECT observed_at FROM war_events WHERE dedup_key = ?",
+        (f"war_day_opened:{season_id}:{section_index}:{day_index}",),
+    ).fetchone()
+    return parse_battle_time(str(row[0])) if row else None
