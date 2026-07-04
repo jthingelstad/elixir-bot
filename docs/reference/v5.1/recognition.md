@@ -81,7 +81,7 @@ scores keep meaning):
 | `collection_level_milestone` | every 100 (`STEP = 100`) | `:297` |
 | `card_level_milestone` | each level ≥ 16 (`MIN_LEVEL = 16`) | `:187` |
 | `ultimate_champion_reached` | Path-of-Legend league 10 (`ULTIMATE_CHAMPION_LEAGUE = 10`) | `:91` |
-| `trophy_push` | a run of ≥3 consecutive positive-trophy competitive battles totaling ≥100 (`MIN_BATTLES = 3`, `MIN_DELTA = 100`); keyed on the run's **last** battle | `:334–346` |
+| `trophy_push` | a run of ≥3 consecutive positive-trophy competitive battles totaling ≥100 (`MIN_BATTLES = 3`, `MIN_DELTA = 100`); keyed on the run's **first** battle (revised 2026-07-04 — see events.md §2) | `:334–346` |
 | `ranked_pulse` | ≥12 PoL battles with ≥12 decided, ≥9 wins, ≥70% win rate in a trailing 7-day window (`WINDOW_DAYS = 7`, `MIN_BATTLES = 12`, `MIN_DECIDED = 12`, `MIN_WINS = 9`, `MIN_WIN_RATE = 0.70`) | `:400–405` |
 | `hot_streak` | — **not computed in v5.1** (matches today: detector intentionally unregistered; contributes no accrual evidence) | events.md §2 |
 
