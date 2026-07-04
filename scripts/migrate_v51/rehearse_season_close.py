@@ -86,8 +86,21 @@ aw = {r[0]: (r[1], r[2]) for r in conn.execute(
 g["war_champ podium x3"] = aw.get("war_champ", (0,))[0] == 3
 g["free_pass x1"] = aw.get("free_pass", (0,))[0] == 1
 g["donation_champ present"] = "donation_champ" in aw
-g["war_participant == fame>0"] = aw.get("war_participant", (0,))[0] == conn.execute(
-    "SELECT COUNT(*) FROM (SELECT player_tag FROM war_participation WHERE season_id=133 GROUP BY 1 HAVING SUM(fame)>0)").fetchone()[0]
+# awards.py grants war_participant only to ACTIVE members (open membership).
+# The table also carries mid-season rows migrated from v5 (awarded 06-15,
+# some for players who left since), so equality can't hold — the invariant
+# that matters is coverage: nobody active with fame>0 is missed.
+missing = conn.execute(
+    """SELECT COUNT(*) FROM (
+         SELECT wp.player_tag FROM war_participation wp
+         WHERE wp.season_id=133
+           AND EXISTS (SELECT 1 FROM clan_memberships m
+                       WHERE m.player_tag = wp.player_tag AND m.left_at IS NULL)
+         GROUP BY wp.player_tag HAVING SUM(wp.fame)>0)
+       WHERE player_tag NOT IN (
+         SELECT player_tag FROM awards
+         WHERE season_id=133 AND award_type='war_participant')""").fetchone()[0]
+g["war_participant covers active fame>0"] = missing == 0
 g["iron_king absent"] = "iron_king" not in aw
 led = conn.execute("SELECT COUNT(*), COUNT(DISTINCT recognition_key) FROM recognition_ledger").fetchone()
 g["ledger no dupes"] = led[0] == led[1]

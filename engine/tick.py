@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 from engine import baselines, delivery, ingest, management, polling, projections, recognition
 from engine.clock import infer_season_id, period_anchor_from_events, war_clock
-from engine.db import canon_tag, chicago_today, ensure_player, utcnow
+from engine.db import canon_tag, chicago_today, ensure_clan, ensure_player, utcnow
 from engine.emitters import emit
 from engine.emitters.clan import (
     calendar_already_ran,
@@ -32,7 +32,7 @@ HOME_CLAN = "#J2RGCRVG"
 TRAINING_RIVERRACE_POLL_SECONDS = 3600  # hourly on training days (runtime.md §4)
 
 
-def _guard(counters: dict, step: str):
+def _guard(counters: dict, step: str, conn=None):
     class _Ctx:
         def __enter__(self):
             return self
@@ -41,6 +41,15 @@ def _guard(counters: dict, step: str):
             if exc is not None:
                 log.exception("engine tick step %s failed", step)
                 counters[f"{step}_error"] = repr(exc)
+                if conn is not None:
+                    # Discard the failed step's partial writes. Every step
+                    # commits at its own end, so only the broken step's work
+                    # rolls back — without this, a later step's commit
+                    # persists half an emit (e.g. a member_joined event whose
+                    # membership insert failed), the baseline never rolls,
+                    # and the diff re-fires every tick (simulator finding:
+                    # 286 welcome intents from one join).
+                    conn.rollback()
                 return True  # tick continues; cursor not advanced by the step
             return False
 
@@ -93,7 +102,8 @@ def _current_clock(conn, now: datetime):
     return _anchored_clock(conn, cr_shaped, now, p.get("season_id"))
 
 
-def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> dict:
+def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn,
+             editor_gate=None) -> dict:
     now = now or datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     counters: dict = {}
@@ -112,17 +122,40 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
     # warm in the same tick, making 'hot' unreachable and quietly adding up
     # to ~30 min recognition latency (cold review 2026-07-04 #4; matches
     # polling.decay_all's own docstring).
-    with _guard(counters, "decay"):
+    with _guard(counters, "decay", conn):
         polling.decay_all(conn, now_iso)
         conn.commit()
 
-    with _guard(counters, "poll"):
+    with _guard(counters, "poll", conn):
         clan_payload = api.get_clan()
         if _riverrace_due(conn, clock, now):
             race_payload = api.get_current_war()
-        roster_tags = [
-            canon_tag(m.get("tag")) for m in (clan_payload or {}).get("memberList", [])
-        ]
+        if clan_payload:
+            ensure_clan(conn, HOME_CLAN, clan_payload.get("name"), now_iso, is_home=True)
+        roster_tags = []
+        for m in (clan_payload or {}).get("memberList", []):
+            tag = canon_tag(m.get("tag"))
+            roster_tags.append(tag)
+            # players row must exist before poll_state / projections touch the
+            # tag (FK) — live DBs carry migrated rows, but a fresh DB (cold
+            # start, simulator) bootstraps right here.
+            ensure_player(conn, tag, m.get("name"), now_iso)
+            # Self-healing membership backfill: polling.plan only considers
+            # players with an OPEN membership, and first sight of a roster
+            # deliberately emits nothing — so a member without a row (cold
+            # start, or drift) would never be deep-polled at all (simulator
+            # finding). A current roster member IS an open membership by
+            # definition; the roster-diff emitter still owns the
+            # member_joined event and skips its insert when a row exists.
+            if conn.execute(
+                "SELECT 1 FROM clan_memberships WHERE player_tag = ? AND left_at IS NULL",
+                (tag,),
+            ).fetchone() is None:
+                conn.execute(
+                    "INSERT INTO clan_memberships (player_tag, clan_tag, joined_at, join_source) "
+                    "VALUES (?, ?, ?, 'backfill')",
+                    (tag, HOME_CLAN, now_iso),
+                )
         polling.seed_new_members(conn, roster_tags, now_iso)
         plan = polling.plan(conn, now_iso)
         counters["planned_calls"] = len(plan)
@@ -147,7 +180,7 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
         clock = _anchored_clock(conn, race_payload, now, season_id)
 
     # -- step 2: INGEST — battle mirror (war keys from the battle's own time)
-    with _guard(counters, "ingest"):
+    with _guard(counters, "ingest", conn):
         new_battles_total = 0
         for tag, battlelog in battlelogs.items():
             n = ingest.mirror_battles(conn, tag, battlelog, now_iso, clock, now=now)
@@ -157,7 +190,7 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
         counters["battles_ingested"] = new_battles_total
 
     # -- step 3: EMIT — diff baselines → events; calendar once per Chicago day
-    with _guard(counters, "emit"):
+    with _guard(counters, "emit", conn):
         emitted = 0
         if clan_payload:
             for aspect, aspect_payload in project_clan_aspects(clan_payload).items():
@@ -177,7 +210,7 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
         conn.commit()
 
     # -- step 4: PROJECT — refresh what the polls touched
-    with _guard(counters, "project"):
+    with _guard(counters, "project", conn):
         roster_by_tag = {
             canon_tag(m.get("tag")): m
             for m in (clan_payload or {}).get("memberList", [])
@@ -201,7 +234,7 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
         conn.commit()
 
     # -- step 5: MANAGE — kick_state is reactive (Q1); weekly grain rolls in the review
-    with _guard(counters, "manage"):
+    with _guard(counters, "manage", conn):
         transitions = management.run_tick_evaluators(conn, now=now_iso)
         counters["kick_transitions"] = len(transitions)
         if transitions:
@@ -222,15 +255,16 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
         conn.commit()
 
     # -- step 6: RECOGNIZE — score → coalesce → claim → raise intents
-    with _guard(counters, "recognize"):
+    with _guard(counters, "recognize", conn):
         clock_dict = asdict(clock) if clock is not None else None
         rec = recognition.run_recognizers(conn, clock_dict, now_iso)
         counters.update({f"recognize_{k}": v for k, v in rec.items()})
         conn.commit()
 
     # -- step 7: DELIVER — at-least-once
-    with _guard(counters, "deliver"):
-        d = delivery.consume(conn, send_fn, compose_fn, now_iso)
+    with _guard(counters, "deliver", conn):
+        d = delivery.consume(conn, send_fn, compose_fn, now_iso,
+                             editor_gate=editor_gate)
         counters.update({f"deliver_{k}": v for k, v in d.items()})
         conn.commit()
 

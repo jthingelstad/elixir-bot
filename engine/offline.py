@@ -81,8 +81,11 @@ class OfflineEngine:
         # riverracelog / cards / events / clan_by_tag: no offline consumer
         self.conn.commit()
 
-    def finish(self) -> dict:
-        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    def finish(self, now: datetime | None = None) -> dict:
+        """Run recognition + delivery once. `now` freezes the wall clock so
+        the time-travel simulator (scripts/simulate.py) is deterministic;
+        rehearsal callers omit it and get real time as before."""
+        now_iso = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
         sent: list[tuple[str, str]] = []
 
         def send_fn(lane: str, copy: str) -> str:
