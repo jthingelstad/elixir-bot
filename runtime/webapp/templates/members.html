@@ -8,6 +8,7 @@
 <div class="card" style="overflow-x:auto;">
   <table>
     <tr><th>member</th><th>role</th><th class="num">trophies</th><th>temp</th>
+        <th>playstyle</th>
         <th>donor</th><th>war</th><th>battle</th>
         <th>promote</th><th>demote</th><th>kick</th>
         <th class="num">tenure</th><th>last battle</th></tr>
@@ -17,6 +18,7 @@
         <td>{{ r.role or '' }}</td>
         <td class="num">{{ r.trophies if r.trophies is not none else '' }}</td>
         <td>{% if r.temperature %}<span class="badge">{{ r.temperature }}</span>{% endif %}</td>
+        <td>{% if r.identity and r.identity != 'quiet' %}<span class="badge" title="{{ r.mode_mix or '' }}">{{ r.identity }}</span>{% else %}<span class="muted" title="{{ r.mode_mix or '' }}">–</span>{% endif %}</td>
         <td>{{ r.sustained_donor or '–' }}</td>
         <td>{{ r.war_reliable or '–' }}</td>
         <td>{{ r.battle_active or '–' }}</td>
@@ -27,7 +29,7 @@
         <td>{{ r.last_battle_seen | reltime }}</td>
       </tr>
     {% else %}
-      <tr><td colspan="12" class="muted">No open memberships (empty DB?).</td></tr>
+      <tr><td colspan="13" class="muted">No open memberships (empty DB?).</td></tr>
     {% endfor %}
   </table>
 </div>

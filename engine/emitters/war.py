@@ -270,6 +270,18 @@ def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> i
         logging.getLogger("engine.war").exception(
             "season award grant failed for season %s", season_id
         )
+    # D7: the season's chronicle memory — deterministic prose from the rows
+    # just written (no LLM in the tick path), guarded like the awards.
+    try:
+        from engine import chronicles
+
+        chronicles.write_season_chronicle(conn, "war", season_id, observed_at)
+    except Exception:
+        import logging
+
+        logging.getLogger("engine.war").exception(
+            "season chronicle failed for season %s", season_id
+        )
     return n
 
 

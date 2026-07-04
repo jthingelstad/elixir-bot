@@ -18,7 +18,11 @@ COLLECTION_LEVEL_STEP = 100  # detectors.py:297 STEP
 CAREER_WINS_STEP = 1000      # detectors.py:67 STEP
 LEVEL_UP_STEP = 5            # detectors.py:35 _milestones(step=5)
 BEST_TROPHIES_STEP = 100     # detectors.py:53
-ULTIMATE_CHAMPION_LEAGUE = 10  # detectors.py:91
+# detectors.py:91 said 10 — the OLD Path of Legends scale. The mid-2025 rework
+# has seven leagues (7 = Ultimate Champion), so the carried constant meant
+# ultimate_champion_reached could never fire (found building ranked seasons,
+# 2026-07-04). engine/normalize.py owns the era maps.
+from engine.normalize import RANKED_UC_LEAGUE as ULTIMATE_CHAMPION_LEAGUE  # noqa: E402
 
 
 def _milestones(old, new, step) -> list[int]:
@@ -68,11 +72,20 @@ def project_player_aspects(payload: dict) -> dict[str, dict]:
         },
         "collection_level": badges.get("CollectionLevel") or {},
     }
+    def _season_result(key: str) -> dict:
+        r = payload.get(key) or {}
+        return {"league": r.get("leagueNumber"), "rank": r.get("rank"),
+                "trophies": r.get("trophies")}
+
     pol = payload.get("currentPathOfLegendSeasonResult") or {}
     ranked = {
         "league": pol.get("leagueNumber"),
         "rank": pol.get("rank"),
         "trophies": pol.get("trophies"),
+        # D6 (ranked-and-profiles.md): last/best carried so the emitter can
+        # observe the monthly rollover (current resets, last swaps).
+        "last": _season_result("lastPathOfLegendSeasonResult"),
+        "best": _season_result("bestPathOfLegendSeasonResult"),
     }
     return {"profile": profile, "cards": cards, "ranked": ranked}
 
@@ -153,6 +166,12 @@ def emit_cards(conn, tag, old, new, observed_at, window_start) -> int:
 
 def emit_ranked(conn, tag, old, new, observed_at, window_start) -> int:
     n = 0
+    # Cold-start self-seed (ranked-and-profiles.md §2.1): any ranked diff
+    # ensures the currently-open season row exists, so the first observed
+    # rollover has a season to close. INSERT OR IGNORE — free after the first.
+    from engine import pol_seasons
+
+    pol_seasons.ensure_open_season(conn, observed_at)
     ol, nl = old.get("league"), new.get("league")
     orank, nrank = old.get("rank"), new.get("rank")
     # pol_promotion — league increase (PathOfLegendDetector)
@@ -170,4 +189,17 @@ def emit_ranked(conn, tag, old, new, observed_at, window_start) -> int:
     if pol_rank_improved(orank, nrank):
         n += _emit(conn, tag, observed_at, window_start, "pol_global_rank_attained", nrank,
                    {"from_rank": orank, "to_rank": nrank, "league": nl})
+
+    # Ranked season rollover (ranked-and-profiles.md §2.1): `last` changes
+    # only at the monthly reset. First-diff guard (D6): a baseline written
+    # before the aspect carried last/best has no "last" key — the shape
+    # change alone must observe nothing.
+    old_last, new_last = old.get("last"), new.get("last")
+    if (
+        "last" in old
+        and isinstance(old_last, dict) and isinstance(new_last, dict)
+        and old_last != new_last
+        and new_last.get("league") is not None
+    ):
+        n += pol_seasons.observe_rollover(conn, tag, old, new, observed_at)
     return n

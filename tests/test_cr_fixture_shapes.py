@@ -27,7 +27,9 @@ PROFILE_KEYS = {
     "exp_level", "name", "trophies", "wins",
 }
 CARDS_KEYS = {"cards", "collection_level"}
-RANKED_KEYS = {"league", "rank", "trophies"}
+# last/best added 2026-07-04 (ranked-and-profiles.md D6 — rollover detection);
+# the no-emit-on-shape-change guard lives in tests/test_ranked_seasons.py.
+RANKED_KEYS = {"league", "rank", "trophies", "last", "best"}
 CLAN_ASPECTS = {"clan_entity", "roster"}
 CLAN_ENTITY_KEYS = {"clan_score", "name", "war_trophies"}
 ROSTER_MEMBER_KEYS = {

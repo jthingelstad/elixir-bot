@@ -64,6 +64,11 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
         opp = b.get("opponent") or [{}]
         t0 = team[0] if team else {}
         o0 = opp[0] if opp else {}
+        # D3 (ranked-and-profiles.md): 2v2 carries the duo partner in team[1];
+        # without this the who-plays-with-whom graph evaporates with the
+        # 14-day raw buffer.
+        t1 = team[1] if len(team) > 1 and isinstance(team[1], dict) else None
+        teammate = canon_tag(t1["tag"]) if t1 and t1.get("tag") else None
         gm = b.get("gameMode") or {}
         arena = b.get("arena") or {}
         mode_group = classify_battle_mode(
@@ -100,6 +105,7 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
                 "deck_json": _deck_json(t0),
                 "arena_id": arena.get("id") if isinstance(arena, dict) else None,
                 "arena_name": arena.get("name") if isinstance(arena, dict) else None,
+                "teammate_tag": teammate,
                 "league_number": b.get("leagueNumber"),
                 "is_hosted_match": int(b["isHostedMatch"])
                 if isinstance(b.get("isHostedMatch"), bool)
@@ -117,7 +123,7 @@ _INSERT_COLUMNS = (
     "game_mode_id", "game_mode_name", "mode_group", "outcome",
     "is_war", "is_ladder", "is_ranked", "is_competitive", "is_special_event",
     "trophy_change", "starting_trophies", "deck_selection", "deck_json",
-    "arena_id", "arena_name", "league_number", "is_hosted_match",
+    "arena_id", "arena_name", "teammate_tag", "league_number", "is_hosted_match",
     "tournament_tag", "event_tag", "season_id", "section_index", "war_day_index",
 )
 

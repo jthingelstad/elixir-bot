@@ -106,7 +106,7 @@ CREATE TABLE battle_events (
     is_war INTEGER, is_ladder INTEGER, is_ranked INTEGER, is_competitive INTEGER,
     is_special_event INTEGER, trophy_change INTEGER, starting_trophies INTEGER,
     deck_selection TEXT, deck_json TEXT,
-    arena_id INTEGER, arena_name TEXT, league_number INTEGER,
+    arena_id INTEGER, arena_name TEXT, teammate_tag TEXT, league_number INTEGER,
     is_hosted_match INTEGER, tournament_tag TEXT, event_tag TEXT,
     season_id INTEGER, section_index INTEGER, war_day_index INTEGER
 );
@@ -490,6 +490,24 @@ CREATE TABLE editor_verdicts (
 );
 CREATE INDEX idx_editor_verdicts_intent ON editor_verdicts(intent_id);
 
+-- Ranked season lifecycle (ranked-and-profiles.md §2.1; D1–D7 ratified
+-- 2026-07-04). Ids are canonical 'YYYY-MM' (the month the season starts in;
+-- first-Monday to first-Monday). Discovered lifecycle, war-tracker style.
+CREATE TABLE pol_seasons (
+    pol_season_id TEXT PRIMARY KEY,
+    started_at TEXT,
+    ended_at TEXT,
+    closed INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE pol_season_results (
+    pol_season_id TEXT NOT NULL REFERENCES pol_seasons(pol_season_id),
+    player_tag TEXT NOT NULL,
+    league INTEGER, rating INTEGER, global_rank INTEGER,
+    battles INTEGER, wins INTEGER,
+    observed_at TEXT NOT NULL,
+    PRIMARY KEY (pol_season_id, player_tag)
+);
+
 -- v5.1 memory system (memory.md §2.2; D1–D5 ratified 2026-07-04) -------------
 CREATE TABLE memories (
     memory_id INTEGER PRIMARY KEY,
@@ -580,7 +598,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 57  # 51 engine (incl. editor_verdicts) + 3 conversation + 3 memory
+EXPECTED_TABLE_COUNT = 59  # 53 engine (incl. editor_verdicts, pol_seasons ×2) + 3 conversation + 3 memory
 
 
 _DEAD_MEMBERS_FK = re.compile(
