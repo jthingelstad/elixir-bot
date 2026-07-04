@@ -517,11 +517,16 @@ CREATE TABLE awards (                       -- re-keyed: member_id dropped
 );
 ```
 
-`free_pass` is the new Q2/C5 ledger row (seeded from archived `war_champ` rows at the
-cut — historically champ = pass recipient). The three deprecated types
-(`perfect_week`, `victory_lap`, `donation_champ_weekly`, `heartbeat/_awards.py:32`)
-do not carry. Grants fire on the war stream's season-death event (Q5), keyed
-idempotently by the UNIQUE constraint.
+**`war_champ` is a podium**, carried behavior: three rows per season, ranks 1–3
+(`heartbeat/_awards.py` grants top-3; verified live — 4 seasons × 3 rows). The
+**War Champ honor is rank 1**; ranks 2–3 are podium records for `get_awards`
+leaderboards. `free_pass` is the new Q2/C5 ledger row — **exactly one per
+season**, seeded at the cut from archived **rank-1** `war_champ` rows only
+(historically champ = pass recipient; seeding all podium rows would mint three
+passes per season). The three deprecated types (`perfect_week`, `victory_lap`,
+`donation_champ_weekly`, `heartbeat/_awards.py:32`) do not carry. Grants fire on
+the war stream's season-death event (Q5), keyed idempotently by the UNIQUE
+constraint.
 
 ### 7.6 Engine control & tournaments
 
