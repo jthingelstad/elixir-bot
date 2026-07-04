@@ -105,7 +105,7 @@ venv/bin/python scripts/clean.py --db
 ```
 
 - default: remove cache directories like `__pycache__` and `.pytest_cache`
-- `--db`: also remove legacy local runtime files (e.g. a stray `elixir.db`, `elixir.pid`) — it never touches `elixir-v51.db`, the memory DB, or the archive
+- `--db`: also remove legacy local runtime files (e.g. a stray `elixir.db`, `elixir.pid`) — it never touches `elixir-v51.db` or the archives
 
 ## Database
 
@@ -113,7 +113,7 @@ SQLite at `elixir-v51.db` (overridable via `ELIXIR_DB_PATH`; gitignored).
 Three database files exist, with distinct roles:
 
 - **`elixir-v51.db`** — the operational engine DB: 49 engine tables + 4 conversation tables (53 designed). The baseline schema source of truth is `scripts/migrate_v51/schema_v51.py`; `db.get_connection()` **refuses** databases that do not carry the v5.1 spine — this build never rebuilds or migrates a database in place.
-- **`elixir-v5-memory.db`** — durable memory (`clan_memories` + satellites + FTS/vec). Owned by the deferred memory/conversation pass; accessed through the `memory_store` seam (`ELIXIR_V5_MEMORY_DB`).
+- Durable memory lives IN the engine DB since 2026-07-04 (the v5.1 memory pass, `docs/reference/v5.1/memory.md`): `memories` + `memory_tags` + `memory_log` + `memories_fts`, accessed through the `memory_store` seam. The old `elixir-v5-memory.db` is archived (`elixir-v5-memory-archive-2026H2.db`, read-only); `ELIXIR_V5_MEMORY_DB` is retired. **One database for all runtime activity.**
 - **`elixir-v5-archive-2026H2.db`** — the pre-cut cold archive. Read-only (chmod 444), never written; open with `file:…?immutable=1`. Everything historical lives here.
 
 The engine DB follows the layered retention model (`docs/reference/v5.1/schema.md`):
@@ -140,7 +140,7 @@ There is no in-place migration runner anymore. The v5.1 baseline in
 schema change means extending that module and applying it deliberately
 (`db/_migrations.py` is the retired pre-v5.1 history, kept for reference
 only — nothing imports it). Backups: `scripts/backup_db.py` covers the
-operational DB + the memory DB (the archive needs no backup — it never
+operational DB only — single database since the memory pass (the archive needs no backup — it never
 changes).
 
 ## Website Note
@@ -221,7 +221,7 @@ Activity scheduling, channel routing, stream emission and recognition scoring (d
 
 Elixir uses two memory layers:
 - conversational memory in identity/message storage (`discord_user`, `member`, `channel`)
-- durable scoped memory in contextual memory (`public`, `leadership`, `system_internal`), stored in `elixir-v5-memory.db`
+- durable scoped memory (`public`, `leadership`) in the engine DB's `memories` tables, ranked at retrieval (match + confidence + recency) with FTS search
 
 Important rules:
 - channel lanes read destination-channel conversational context, not a global blended chat history
