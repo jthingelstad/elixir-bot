@@ -278,6 +278,11 @@ def render_intent(intent_row) -> str:
     if et == "season_closed":
         champ = p.get("war_champ_name") or p.get("war_champ_tag") or "our top contributor"
         return f"🏆 War season closed — {champ} is the War Champ!"
+    if et == "season_started":
+        sid = p.get("season_id")
+        return (f"⚔️ War season {sid} begins — training days first, then we race. "
+                "Fresh start, same goal: first place."
+                if sid else "⚔️ A new war season begins — fresh start, same goal.")
     if et == "season_awards":
         podium = p.get("war_champ") or []
         champ = podium[0]["name"] if podium and podium[0].get("name") else "our top contributor"

@@ -129,6 +129,13 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
             (tag, today, state["exp_level"], state["trophies"], state["best_trophies"], state["clan_rank"], state["donations_week"], state["donations_received_week"]),
         )
         if create_if_missing and not _get_current_membership(conn, tag):
+            # clan_tag defaults to the home clan and FKs clans — guaranteed on
+            # migrated DBs (T3) but not fresh ones; ensure defensively.
+            conn.execute(
+                "INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
+                "VALUES ('#J2RGCRVG', 'POAP KINGS', ?, ?, 1)",
+                (today, today),
+            )
             conn.execute(
                 "INSERT INTO clan_memberships (player_tag, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, ?, NULL)",
                 (tag, today, "clan_api_snapshot"),

@@ -23,8 +23,6 @@ from storage.revisits import (
 )
 
 
-pytestmark = pytest.mark.xfail(reason="read-layer port bug (Phase 8 report): storage/revisits.py still writes signal_key; v5.1 schema renamed it revisit_key (T11)", strict=False)
-
 @pytest.fixture
 def memdb(tmp_path, monkeypatch):
     """Route every db.get_connection() call to the same temp SQLite file."""
