@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import db
 from engine.clock import war_clock
 from engine.tick import HOME_CLAN
-from storage import events_read, leader_actions, runtime_status, war_status
+from storage import cases, events_read, leader_actions, revisits, runtime_status, war_status
 
 
 def _now() -> datetime:
@@ -135,7 +135,47 @@ def overview() -> dict:
 def ticks_page() -> dict:
     conn = db.get_connection()
     try:
-        return {"statuses": runtime_status.list_runtime_job_status(conn=conn)}
+        cursors = _rows(conn, """
+            SELECT consumer_key, scope_key, cursor_int, cursor_text, updated_at,
+                   metadata_json
+            FROM stream_cursors ORDER BY consumer_key, scope_key LIMIT 100""")
+        return {
+            "statuses": runtime_status.list_runtime_job_status(conn=conn),
+            "cursors": cursors,
+        }
+    finally:
+        conn.close()
+
+
+def members_page() -> dict:
+    conn = db.get_connection()
+    try:
+        rows = _rows(conn, """
+            SELECT p.player_tag, p.current_name,
+                   pcs.role, pcs.trophies,
+                   ps.temperature, ps.last_battle_seen,
+                   mm.sustained_donor, mm.war_reliable, mm.battle_active,
+                   mm.promote_state, mm.demote_state, mm.kick_state,
+                   mm.tenure_days
+            FROM clan_memberships cm
+            JOIN players p ON p.player_tag = cm.player_tag
+            LEFT JOIN player_current_state pcs ON pcs.player_tag = p.player_tag
+            LEFT JOIN poll_state ps ON ps.player_tag = p.player_tag
+            LEFT JOIN member_management mm ON mm.player_tag = p.player_tag
+            WHERE cm.left_at IS NULL
+            ORDER BY (COALESCE(mm.kick_state,'none') != 'none') DESC,
+                     (COALESCE(mm.promote_state,'none') != 'none') DESC,
+                     (COALESCE(mm.demote_state,'none') != 'none') DESC,
+                     p.current_name COLLATE NOCASE
+            LIMIT 200""")
+        leavers = _rows(conn, """
+            SELECT p.player_tag, p.current_name, cm.joined_at, cm.left_at,
+                   cm.leave_source
+            FROM clan_memberships cm
+            JOIN players p ON p.player_tag = cm.player_tag
+            WHERE cm.left_at IS NOT NULL
+            ORDER BY cm.left_at DESC LIMIT 10""")
+        return {"rows": rows, "leavers": leavers}
     finally:
         conn.close()
 
@@ -156,8 +196,12 @@ def streams_page(stream: str | None, event_type: str | None, limit: int = 100) -
         raw = _rows(conn, """
             SELECT payload_id, endpoint, entity_key, fetched_at
             FROM raw_api_payloads ORDER BY payload_id DESC LIMIT 30""")
+        baseline_rows = _rows(conn, """
+            SELECT entity_kind, entity_tag, aspect, observed_at, prev_observed_at
+            FROM state_baselines ORDER BY entity_kind, aspect, entity_tag LIMIT 100""")
         return {"events": events, "windows": windows, "baselines": baselines,
-                "raw_payloads": raw, "stream": stream or "", "event_type": event_type or ""}
+                "baseline_rows": baseline_rows, "raw_payloads": raw,
+                "stream": stream or "", "event_type": event_type or ""}
     finally:
         conn.close()
 
@@ -166,6 +210,64 @@ def raw_payload(payload_id: int) -> dict | None:
     conn = db.get_connection()
     try:
         return _one(conn, "SELECT * FROM raw_api_payloads WHERE payload_id = ?", (payload_id,))
+    finally:
+        conn.close()
+
+
+def baseline_detail(entity_kind: str, entity_tag: str, aspect: str) -> dict | None:
+    conn = db.get_connection()
+    try:
+        return _one(conn, """
+            SELECT entity_kind, entity_tag, aspect, payload_json, payload_hash,
+                   observed_at, prev_observed_at
+            FROM state_baselines
+            WHERE entity_kind = ? AND entity_tag = ? AND aspect = ?""",
+            (entity_kind, entity_tag, aspect))
+    finally:
+        conn.close()
+
+
+def awards_page() -> dict:
+    conn = db.get_connection()
+    try:
+        rows = _rows(conn, """
+            SELECT a.award_type, a.season_id, a.player_tag, p.current_name,
+                   a.rank, a.metric_value, a.metric_unit, a.awarded_at
+            FROM awards a LEFT JOIN players p ON p.player_tag = a.player_tag
+            WHERE a.award_type != 'war_participant'
+            ORDER BY a.season_id DESC, a.award_type, a.rank LIMIT 300""")
+        participants = {r["season_id"]: r["n"] for r in conn.execute(
+            """SELECT season_id, COUNT(*) AS n FROM awards
+               WHERE award_type = 'war_participant' GROUP BY season_id"""
+        ).fetchall()}
+        seasons: dict[int, dict] = {}
+        for r in rows:
+            season = seasons.setdefault(
+                r["season_id"],
+                {"season_id": r["season_id"], "awards": [],
+                 "war_participants": participants.get(r["season_id"], 0)},
+            )
+            season["awards"].append(r)
+        for sid, n in participants.items():  # seasons with only participant rows
+            seasons.setdefault(
+                sid, {"season_id": sid, "awards": [], "war_participants": n}
+            )
+        # Rotation visibility (Q2): flag seasons where the free pass diverged
+        # from the rank-1 war champ.
+        for season in seasons.values():
+            champ = next((a["player_tag"] for a in season["awards"]
+                          if a["award_type"] == "war_champ" and a["rank"] == 1), None)
+            fp = next((a["player_tag"] for a in season["awards"]
+                       if a["award_type"] == "free_pass"), None)
+            season["rotation_diverged"] = bool(champ and fp and champ != fp)
+        season_rows = _rows(conn, """
+            SELECT season_id, started_at, ended_at, final_rank, weeks,
+                   war_champ_tag, free_pass_tag
+            FROM war_seasons ORDER BY season_id DESC LIMIT 20""")
+        return {
+            "seasons": sorted(seasons.values(), key=lambda s: -s["season_id"]),
+            "war_seasons": season_rows,
+        }
     finally:
         conn.close()
 
@@ -258,10 +360,20 @@ def member_page(tag: str) -> dict | None:
             FROM war_attendance_days WHERE player_tag = ?
             ORDER BY season_id DESC, section_index DESC, war_day_index DESC LIMIT 20""",
             (tag,))
+        links = _rows(conn, """
+            SELECT dl.discord_user_id, du.display_name, du.username,
+                   dl.confidence, dl.source, dl.linked_at, dl.is_primary
+            FROM discord_links dl
+            LEFT JOIN discord_users du ON du.discord_user_id = dl.discord_user_id
+            WHERE dl.player_tag = ? ORDER BY dl.is_primary DESC, dl.linked_at""",
+            (tag,))
+        aliases = _rows(conn, """
+            SELECT alias, source, observed_at FROM player_aliases
+            WHERE player_tag = ? ORDER BY observed_at DESC LIMIT 15""", (tag,))
         return {"player": player, "state": state, "poll": poll,
                 "management": management, "membership": membership,
                 "claims": claims, "events": events, "battles": battles,
-                "attendance": attendance}
+                "attendance": attendance, "links": links, "aliases": aliases}
     finally:
         conn.close()
 
@@ -307,7 +419,14 @@ def management_page() -> dict:
             r.pop("state_json", None)
         actions = leader_actions.list_leader_actions(status="proposed", limit=25, conn=conn)
         recent = leader_actions.list_leader_actions(limit=15, conn=conn)
-        return {"rows": rows, "open_actions": actions, "recent_actions": recent}
+        open_cases = cases.list_decision_cases(limit=25, conn=conn)  # open + deferred
+        resolved_cases = cases.list_decision_cases(
+            statuses=(cases.CASE_RESOLVED, cases.CASE_DISMISSED), limit=10, conn=conn
+        )
+        pending_revisits = revisits.list_pending_revisits(limit=25, conn=conn)
+        return {"rows": rows, "open_actions": actions, "recent_actions": recent,
+                "open_cases": open_cases, "resolved_cases": resolved_cases,
+                "pending_revisits": pending_revisits}
     finally:
         conn.close()
 
@@ -366,6 +485,17 @@ def llm_page(limit: int = 50) -> dict:
                    substr(COALESCE(question,''),1,140) AS question,
                    substr(COALESCE(detail,''),1,200) AS detail
             FROM prompt_failures ORDER BY failure_id DESC LIMIT 25""")
-        return {"calls": calls, "failures": failures}
+        feedback = _rows(conn, """
+            SELECT recorded_at, workflow, channel_name, feedback_value,
+                   substr(COALESCE(question,''),1,120) AS question,
+                   substr(COALESCE(response_preview,''),1,160) AS response_preview
+            FROM prompt_feedback ORDER BY prompt_feedback_id DESC LIMIT 20""")
+        suggestions = _rows(conn, """
+            SELECT created_at, category, status, severity, title,
+                   github_issue_url
+            FROM elixir_improvement_suggestions
+            ORDER BY suggestion_id DESC LIMIT 15""")
+        return {"calls": calls, "failures": failures, "feedback": feedback,
+                "suggestions": suggestions}
     finally:
         conn.close()

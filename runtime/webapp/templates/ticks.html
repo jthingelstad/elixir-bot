@@ -24,6 +24,24 @@ latest persisted state below survives restarts.</p>
   </table>
 </div>
 
+<h2>Stream cursors</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>consumer</th><th>scope</th><th class="num">position</th><th>updated</th><th>metadata</th></tr>
+    {% for c in cursors %}
+      <tr>
+        <td><code>{{ c.consumer_key }}</code></td>
+        <td>{{ c.scope_key or '' }}</td>
+        <td class="num">{{ c.cursor_int if c.cursor_int is not none else c.cursor_text or '' }}</td>
+        <td>{{ c.updated_at | reltime }}</td>
+        <td class="muted" style="font-size:.8rem;">{{ (c.metadata_json or '') | truncate(80) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">No cursors yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
 <h2>Persisted job status</h2>
 <div class="card" style="overflow-x:auto;">
   <table>

@@ -72,6 +72,29 @@ async def ticks_page(request: web.Request) -> web.Response:
                   counter_keys=keys, **data)
 
 
+async def members_page(request: web.Request) -> web.Response:
+    data = await asyncio.to_thread(queries.members_page)
+    return render("members.html", request, nav="members", **data)
+
+
+async def awards_page(request: web.Request) -> web.Response:
+    data = await asyncio.to_thread(queries.awards_page)
+    return render("awards.html", request, nav="awards", **data)
+
+
+async def baseline_page(request: web.Request) -> web.Response:
+    # Query-param form (tags contain '#', which fights path segments).
+    kind = request.query.get("kind", "")
+    tag = request.query.get("tag", "")
+    aspect = request.query.get("aspect", "")
+    if not (kind and tag and aspect):
+        raise web.HTTPBadRequest(text="kind, tag and aspect are required")
+    row = await asyncio.to_thread(queries.baseline_detail, kind, tag, aspect)
+    if row is None:
+        raise web.HTTPNotFound(text="no such baseline")
+    return render("baseline.html", request, nav="streams", row=row)
+
+
 async def streams_page(request: web.Request) -> web.Response:
     stream = request.query.get("stream") or None
     event_type = request.query.get("event_type") or None
@@ -205,6 +228,9 @@ def add_routes(app: web.Application) -> None:
     app.add_routes([
         web.get("/healthz", healthz),
         web.get("/", overview),
+        web.get("/members", members_page),
+        web.get("/awards", awards_page),
+        web.get("/baseline", baseline_page),
         web.get("/ticks", ticks_page),
         web.get("/streams", streams_page),
         web.get("/raw/{payload_id}", raw_payload_page),

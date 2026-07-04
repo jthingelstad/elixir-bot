@@ -43,4 +43,42 @@
     {% endfor %}
   </table>
 </div>
+
+<h2>Member feedback (👍/👎 on posts)</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>at</th><th>workflow</th><th>channel</th><th>value</th><th>question</th><th>response</th></tr>
+    {% for f in feedback %}
+      <tr>
+        <td>{{ f.recorded_at | reltime }}</td>
+        <td><code>{{ f.workflow }}</code></td>
+        <td>{{ f.channel_name }}</td>
+        <td>{% if f.feedback_value and f.feedback_value > 0 %}<span class="badge good">+{{ f.feedback_value }}</span>{% else %}<span class="badge bad">{{ f.feedback_value }}</span>{% endif %}</td>
+        <td class="muted">{{ f.question }}</td>
+        <td class="muted">{{ f.response_preview }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No feedback recorded.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Improvement suggestions</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>at</th><th>category</th><th>status</th><th>severity</th><th>title</th><th>issue</th></tr>
+    {% for s in suggestions %}
+      <tr>
+        <td>{{ s.created_at | reltime }}</td>
+        <td>{{ s.category }}</td>
+        <td><span class="badge">{{ s.status }}</span></td>
+        <td>{{ s.severity }}</td>
+        <td class="muted">{{ s.title }}</td>
+        <td>{% if s.github_issue_url %}<a href="{{ s.github_issue_url }}">issue</a>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No suggestions recorded.</td></tr>
+    {% endfor %}
+  </table>
+</div>
 {% endblock %}

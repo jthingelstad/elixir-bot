@@ -19,6 +19,13 @@
         <dt>donations wk</dt><dd>{{ state.donations_week }}</dd>
         <dt>observed</dt><dd>{{ state.observed_at | reltime }}</dd>
       {% endif %}
+      {% for link in links %}
+        <dt>discord</dt><dd>{{ link.display_name or link.username or link.discord_user_id }}
+          <span class="muted">(conf {{ link.confidence }}, {{ link.source }}{{ ', primary' if link.is_primary else '' }})</span></dd>
+      {% endfor %}
+      {% if aliases %}
+        <dt>aliases</dt><dd>{% for a in aliases %}{{ a.alias }}{{ ' · ' if not loop.last else '' }}{% endfor %}</dd>
+      {% endif %}
     </dl>
   </div>
 
