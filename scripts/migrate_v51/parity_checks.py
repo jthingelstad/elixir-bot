@@ -93,10 +93,14 @@ def old_awards(old):
         """SELECT award_type, season_id, COUNT(*) AS n FROM awards
            GROUP BY award_type, season_id ORDER BY award_type, season_id""",
     )
-    war_champ_rows = _one(old, "SELECT COUNT(*) FROM awards WHERE award_type = 'war_champ'")
+    # war_champ is a podium (ranks 1-3 per season); the free_pass seed is
+    # one row per season from rank 1 only (T6, Q2 erratum).
+    rank1_champs = _one(
+        old, "SELECT COUNT(*) FROM awards WHERE award_type = 'war_champ' AND rank = 1"
+    )
     return {
         "per_type_season": [tuple(r) for r in rows],
-        "war_champ_rows": war_champ_rows,  # verify: new free_pass count == this
+        "rank1_war_champ_rows": rank1_champs,  # verify: new free_pass count == this
     }
 
 
@@ -194,9 +198,9 @@ def new_awards(new):
            GROUP BY award_type, season_id ORDER BY award_type, season_id""",
     )
     free_pass = _one(new, "SELECT COUNT(*) FROM awards WHERE award_type = 'free_pass'")
-    return {"per_type_season": [tuple(r) for r in rows], "war_champ_rows": free_pass}
-    # war_champ_rows key holds the free_pass count so the comparator lines up:
-    # T6 seeds exactly one free_pass row per archived war_champ row.
+    return {"per_type_season": [tuple(r) for r in rows], "rank1_war_champ_rows": free_pass}
+    # rank1_war_champ_rows key holds the free_pass count so the comparator lines
+    # up: T6 seeds exactly one free_pass row per archived rank-1 war_champ row.
 
 
 def new_war_history(new):

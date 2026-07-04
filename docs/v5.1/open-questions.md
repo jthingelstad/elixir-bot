@@ -125,8 +125,12 @@ no variant mechanism at all:
   `free_pass` award type alongside `war_champ` in the awards ledger (or a
   `free_pass` flag/column on the season-close record). The existing `awards` table
   history shows `war_champ` only, so this is a **new** durable record; the archive's
-  `war_champ` rows seed it for the sequential check at the first post-cut season
-  close (acceptable approximation: historically champ = pass recipient).
+  **rank-1** `war_champ` rows seed it for the sequential check at the first post-cut
+  season close (acceptable approximation: historically champ = pass recipient).
+  *Erratum (2026-07-03, Phase 0):* `war_champ` in the live table is a **podium** —
+  ranks 1–3 per season, 4 seasons (129–132), 12 rows total (`heartbeat/_awards.py`
+  grants top-3). Earlier drafts read "12 rows" as "12 seasons." The seed is
+  one row per season from rank 1 (**4 rows**), never the podium.
 - Determinism edge: the rule needs exactly rank-1 and rank-2 of the final standings
   plus last season's pass recipient. No LLM involvement (§16.3 holds).
 
@@ -182,8 +186,9 @@ it a manual tradition.
   live on the website and related systems… Elixir should not claim to directly issue
   or manage POAP drops unless tools for that exist" (`prompts/CLAN.md:48–49`). No POAP
   issuance code exists in the repo (verified: no matches outside prompts/docs).
-- Season close already produces a durable record: `war_champ` awards exist for 12
-  seasons through season 132 (live DB, `awards` table).
+- Season close already produces a durable record: `war_champ` podium awards exist
+  for 4 seasons (129–132; 12 rows, ranks 1–3 — see the Q2 erratum) in the live
+  `awards` table.
 - The Leader Action structure (§13.4) is the established human-in-the-loop surface,
   and season POAPs are a real tradition (`CLAN.md:39`: "We issue POAPs for seasons…").
 
@@ -229,8 +234,9 @@ general eligibility/grant engine."
   signal keys `award_earned::{type}::{season}::{scope}::{tag}::r{rank}`
   (`heartbeat/_awards.py:45`) and gated on `season_is_complete`
   (`storage/awards.py:743`). New grants post directly to `#clan-events`.
-- Live counts: `war_champ` 12, `iron_king` 9, `donation_champ` 12, `rookie_mvp` 12
-  (through season 132); `war_participant` 135 (accruing in season 133).
+- Live counts: `war_champ` 12 rows (**podium: ranks 1–3 × 4 seasons, 129–132** —
+  see the Q2 erratum), `iron_king` 9, `donation_champ` 12, `rookie_mvp` 12;
+  `war_participant` 135 (accruing in season 133).
 - **Re-key ripple:** `insert_award` writes both `member_id` and `player_tag`
   (`storage/awards.py:64`) — under §7 the `member_id` column drops.
 

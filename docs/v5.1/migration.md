@@ -65,7 +65,7 @@ joins through the archive's `members` table.
 | T3 | `clans` | distinct clan tags from `clan_daily_metrics` + **`war_period_clan_status`** (the full opponent-tag history T9 needs — the raw-payload archive is only a 14-day window and would under-seed the FK) | `is_home` for `#J2RGCRVG`. **Ordering: T3 runs before T9** so every `war_week_clans.clan_tag` has its parent row |
 | T4 | `discord_users`, `discord_links` | same | links re-keyed to `player_tag`; drop duplicate name columns |
 | T5 | `clan_memberships` | same | re-key; add `clan_tag` |
-| T6 | `awards` | `awards` | re-key; **seed `free_pass` rows from `war_champ` rows** (Q2/C5: historically champ = recipient); drop deprecated-type rows (already deleted live, verify zero) |
+| T6 | `awards` | `awards` | re-key; **seed one `free_pass` row per season from the rank-1 `war_champ` row** (Q2/C5: historically champ = recipient; `war_champ` is a podium — ranks 1–3 — so seeding every row would mint three passes/season); drop deprecated-type rows (already deleted live, verify zero) |
 | T7 | `player_daily_metrics`, `player_daily_battle_rollups` | `member_daily_metrics`, `member_daily_battle_rollups` | re-key only |
 | T8 | `clan_daily_metrics`, `clan_daily_battle_rollups` | same | drop `raw_json` column |
 | T9 | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation` | `war_races`, `war_participation`, `war_period_clan_status` | seasons synthesized per distinct `season_id` (rank/weeks from its `war_races` rows; `war_champ_tag`/`free_pass_tag` from T6); participation re-keyed to `(season, section, tag)`. `war_attendance_days` starts **empty** — per-day history isn't reliably reconstructable; the evaluators tolerate a warm-up season |
@@ -142,7 +142,7 @@ Run before go-live; every check is a script with an expected-vs-actual print.
 | Identity | `COUNT(players)` = archive `COUNT(members)`; every open membership's tag resolves; `resolve_member` succeeds for all current roster names |
 | Links | `COUNT(discord_links)` preserved; confidence values byte-identical |
 | Tenure | per-tag `(joined_at, left_at)` spans identical |
-| Awards | per `(award_type, season_id)` counts identical **plus** one `free_pass` row per archived `war_champ` row |
+| Awards | per `(award_type, season_id)` counts identical **plus** one `free_pass` row per archived **rank-1** `war_champ` row (4 at Phase-0 validation — seasons 129–132) |
 | War history | per season: final rank + weeks in `war_seasons` match the archive's `war_races`; distinct-season count = the archive's `war_races` count (**5** at Phase-0 validation — the war tables purge at 180 d, so only recent seasons have race detail; the 12 award seasons stay awards-only, which is correct: the rotation seed reads `awards`, not `war_seasons`) |
 | Rollups | sampled sums (10 random players × donations/trophies/battle counts per month) identical |
 | Q&A smoke | every tool × aspect in the coverage matrix returns non-error on live data; leadership-gated aspects still refuse public workflows (AGENTS.md tool policy) |
