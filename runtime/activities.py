@@ -278,6 +278,46 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         activity_role="observer",
     ),
     ActivityDefinition(
+        activity_key="editorial-sweep",
+        owner_lane="elixir-log",
+        purpose="Daily Editor rubric feeder (editor.md §3): yesterday's 👎/👍 "
+        "prompt feedback becomes anti-pattern/exemplar rubric candidates.",
+        job_id="editorial-sweep",
+        job_function="_editorial_sweep",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": _attr("EDITORIAL_SWEEP_HOUR", 8),
+            "minute": 31,
+        },
+        delivery_targets=(
+            "Storage: editorial rubric candidate memories",
+        ),
+        activity_role="observer",
+    ),
+    ActivityDefinition(
+        activity_key="editorial-review",
+        owner_lane="elixir-log",
+        purpose="The Editor's weekly self-review (editor.md §4): score the "
+        "week's gated output against the rubric, write the synthesis memory, "
+        "post one report with the drift line + proposed rubric additions "
+        "(auto-added at confidence 0.6, Jamie's veto by 👎).",
+        job_id="editorial-review",
+        job_function="_editorial_review",
+        schedule_kind="cron",
+        schedule_config={
+            "day_of_week": _attr("EDITORIAL_REVIEW_DAY", "sun"),
+            "hour": _attr("EDITORIAL_REVIEW_HOUR", 20),
+            "minute": 7,
+            "timezone": "America/Chicago",
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Discord webhook: #elixir-log weekly editorial report",
+        ),
+        activity_role="observer+communicator",
+    ),
+    ActivityDefinition(
         activity_key="db-maintenance",
         owner_lane="elixir-log",
         purpose="Purge expired data, VACUUM the database, and report space reclaimed.",

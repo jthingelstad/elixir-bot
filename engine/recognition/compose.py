@@ -153,6 +153,10 @@ def intent_context(conn, intent_row) -> str:
     """Presentation-free facts for the composing subagent (NOT copy).
     Port of event_core/live/runtime.py intent_context onto the streams."""
     payload = _payload(intent_row)
+    # Editor revise pass (editor.md §2): the gate re-invokes compose with the
+    # critique tucked into the payload — pop it so it reads as an instruction,
+    # never as a fact the copy could quote.
+    editor_critique = payload.pop("editor_critique", None)
     intent_type = intent_row["intent_type"] or ""
     prefix = intent_type.split(":", 1)[0]
     tag = payload.get("subject_tag")
@@ -218,6 +222,12 @@ def intent_context(conn, intent_row) -> str:
             + naming + "Use only these facts; do not invent details. Include at "
             "least one concrete detail from the facts — a post that could have "
             "come from a template is a failure."
+        )
+    if editor_critique:
+        ask += (
+            "\n\nAn internal editor reviewed your first draft of this post and "
+            f"found a problem: {editor_critique} Rewrite the post fixing exactly "
+            "that — same facts only, nothing invented."
         )
     return f"{ask}\n\n```json\n{json.dumps(facts, indent=2, default=str)}\n```"
 
