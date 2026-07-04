@@ -12,7 +12,12 @@
 
 ## 1. Ground truth (explored 2026-07-04, live data)
 
-### 1.1 What the API gives us for Path of Legend / Ranked
+### 1.1 What the API gives us for Ranked (né Path of Legends)
+
+> **Naming (Jamie, 2026-07-04):** the mode was renamed from "Path of
+> Legends" to **"Ranked"** in mid-2025. API field names still say
+> `PathOfLegend*` and internal `pol_*` names may match them, but ALL
+> display copy (posts, Observatory, labels) says **Ranked**.
 
 - Player profiles carry three season-result objects —
   `currentPathOfLegendSeasonResult` / `last…` / `best…`, each
@@ -28,6 +33,14 @@
   `YYYY-MM` from `GET /locations/global/seasons`; per-season top-1000 via
   `/locations/global/pathoflegend/{seasonId}/rankings/players`. Both already
   wrapped in `cr_api.py` (`get_pathoflegend_season_rankings` — unused).
+- Season cadence (Jamie-confirmed): Ranked seasons reset on the **first
+  Monday of each month**, placing players back at Master 1 League — so the
+  boundary is *anticipatable*, unlike war weeks. House philosophy still
+  holds: the first-Monday rule sets the EXPECTED window; the observed
+  rollover is the truth (never post from the calendar alone). Note: the
+  "Master 1" placement suggests the mid-2025 rename also reshuffled league
+  display names — verify the leagueNumber→name map against current game
+  data before any copy uses league names.
 - A rollover is **observed**, war-style: `current` league/rating drop-reset
   while `last` swaps to the just-ended values. §16.1's discovered-lifecycle
   philosophy applies cleanly.
@@ -87,7 +100,7 @@ CREATE TABLE pol_season_results (       -- one row per player per season
   emits `pol_season_closed:{tag}:{season}` per player *once*, and the first
   such observation births/closes the `pol_seasons` rows (same
   first-observation-wins pattern as `war_day_opened`).
-- Season id: derived locally as the `YYYY-MM` of the close month (D1);
+- Season id: `YYYY-MM` — Jamie-confirmed as the canonical scheme (matches RoyaleAPI and Supercell's own data; no thematic names for Ranked, unlike Trophy Road seasons). Derived locally at the observed close (D1 ✅ ratified 2026-07-04);
   optionally verified against `/locations/global/seasons` (one call a month,
   already wrapped).
 - At close, `pol_season_results` fills from each player's `last…` values +
