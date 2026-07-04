@@ -749,3 +749,71 @@ def get_season_window(
         "weeks_recorded": len(trajectory),
         "week_trajectory": trajectory,
     }
+
+
+def get_war_season_snapshot(conn: Optional[sqlite3.Connection] = None) -> dict | None:
+    """Season-state snapshot for memory-synthesis, leadership reports, and
+    get_elixir_state. Lean v5.1 rebuild of the retired storage.projects
+    version: computed from the war clock + war tables on demand; the Gen C
+    project machinery (active_risks, recent_communications,
+    prior_cycle_comparison) is gone, so those keys return empty — callers
+    render this dict generically. Returns None when no season is active."""
+    current = get_current_war_status(conn=conn) or {}
+    season_id = current.get("season_id")
+    if season_id is None:
+        return None
+
+    @managed_connection
+    def _build(*, conn: Optional[sqlite3.Connection] = None) -> dict:
+        season = conn.execute(
+            "SELECT started_at, weeks, final_rank FROM war_seasons WHERE season_id = ?",
+            (season_id,),
+        ).fetchone()
+        weeks = conn.execute(
+            """SELECT section_index, our_rank, our_fame, trophy_change
+               FROM war_weeks WHERE season_id = ? ORDER BY section_index""",
+            (season_id,),
+        ).fetchall()
+        participation = conn.execute(
+            """SELECT COUNT(DISTINCT player_tag) AS players,
+                      COALESCE(SUM(fame), 0) AS fame,
+                      COALESCE(SUM(decks_used), 0) AS decks_used
+               FROM war_participation WHERE season_id = ?""",
+            (season_id,),
+        ).fetchone()
+        phase = current.get("phase")
+        summary_bits = [f"Season {season_id}"]
+        if current.get("section_index") is not None:
+            summary_bits.append(f"week {int(current['section_index']) + 1}")
+        if phase:
+            summary_bits.append(str(phase))
+        if current.get("race_rank"):
+            summary_bits.append(f"race rank {current['race_rank']}")
+        return {
+            "season_id": season_id,
+            "summary": ", ".join(summary_bits),
+            "started_at": season["started_at"] if season else None,
+            "last_observed_at": current.get("observed_at"),
+            "state": {
+                "season_id": season_id,
+                "week": current.get("section_index"),
+                "phase": phase,
+                "phase_display": current.get("phase_display") or phase,
+                "day_number": current.get("day_number"),
+                "race": {
+                    "standings": current.get("standings") or [],
+                    "our_fame": current.get("our_fame"),
+                    "finish_line": current.get("finish_line"),
+                },
+                "participation_health": dict(participation) if participation else {},
+                "season_summary": {
+                    "weeks_recorded": len(weeks),
+                    "week_trajectory": [dict(w) for w in weeks],
+                },
+                "active_risks": {},
+                "recent_communications": [],
+                "prior_cycle_comparison": {},
+            },
+        }
+
+    return _build(conn=conn)

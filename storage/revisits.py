@@ -55,15 +55,15 @@ def schedule_revisit(
     now = _db._utcnow()
     conn.execute(
         "INSERT OR IGNORE INTO revisits "
-        "(signal_key, created_by_workflow, due_at, rationale, created_at) "
+        "(revisit_key, created_by_workflow, due_at, rationale, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
         (key, created_by_workflow or "awareness", normalized_due, (rationale or "").strip() or None, now),
     )
     conn.commit()
     row = conn.execute(
-        "SELECT revisit_id, signal_key, created_by_workflow, due_at, rationale, "
+        "SELECT revisit_id, revisit_key AS signal_key, created_by_workflow, due_at, rationale, "
         "revisited_at, created_at FROM revisits "
-        "WHERE signal_key = ? AND due_at = ?",
+        "WHERE revisit_key = ? AND due_at = ?",
         (key, normalized_due),
     ).fetchone()
     return dict(row) if row else {}
@@ -83,7 +83,7 @@ def list_due_revisits(
     """
     cutoff = _normalize_due_at(now) if now else _db._utcnow()
     rows = conn.execute(
-        "SELECT revisit_id, signal_key, created_by_workflow, due_at, rationale, "
+        "SELECT revisit_id, revisit_key AS signal_key, created_by_workflow, due_at, rationale, "
         "created_at FROM revisits "
         "WHERE revisited_at IS NULL AND due_at <= ? "
         "ORDER BY due_at ASC LIMIT ?",
@@ -109,7 +109,7 @@ def mark_revisited(
     placeholders = ",".join("?" for _ in keys)
     cursor = conn.execute(
         f"UPDATE revisits SET revisited_at = ? "
-        f"WHERE revisited_at IS NULL AND signal_key IN ({placeholders})",
+        f"WHERE revisited_at IS NULL AND revisit_key IN ({placeholders})",
         (stamp, *keys),
     )
     conn.commit()
@@ -126,7 +126,7 @@ def list_pending_revisits(
     admin tooling, not the tick flow.
     """
     rows = conn.execute(
-        "SELECT revisit_id, signal_key, created_by_workflow, due_at, rationale, "
+        "SELECT revisit_id, revisit_key AS signal_key, created_by_workflow, due_at, rationale, "
         "created_at FROM revisits "
         "WHERE revisited_at IS NULL "
         "ORDER BY due_at ASC LIMIT ?",
