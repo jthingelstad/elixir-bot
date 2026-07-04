@@ -622,13 +622,38 @@ def export_carried_ddl(archive: sqlite3.Connection) -> list[str]:
     return stmts
 
 
-def build(db_path: str, archive_path: str) -> None:
+CARRIED_DDL_FILE = os.path.join(os.path.dirname(__file__), "carried_ddl.sql")
+
+
+def carried_ddl(archive_path: str | None) -> list[str]:
+    """Prefer the live archive when present; fall back to the frozen export
+    (carried_ddl.sql) so CI and archive-less checkouts can build. The archive
+    is immutable, so the two sources can never legitimately diverge — when
+    both are available we assert exactly that."""
+    frozen = None
+    if os.path.exists(CARRIED_DDL_FILE):
+        with open(CARRIED_DDL_FILE) as f:
+            body = "".join(line for line in f if not line.startswith("--"))
+        frozen = [s.strip() for s in body.split(";\n") if s.strip()]
+    if archive_path and os.path.exists(archive_path):
+        archive = sqlite3.connect(f"file:{archive_path}?immutable=1", uri=True)
+        live = export_carried_ddl(archive)
+        if frozen is not None and [s.strip() for s in live] != frozen:
+            raise SystemExit("carried_ddl.sql has drifted from the archive export — regenerate it")
+        return live
+    if frozen is None:
+        raise SystemExit(
+            f"need either the archive ({archive_path}) or {CARRIED_DDL_FILE} to build the schema"
+        )
+    return frozen
+
+
+def build(db_path: str, archive_path: str | None) -> None:
     if os.path.exists(db_path):
         raise SystemExit(f"{db_path} already exists — refusing to overwrite")
-    archive = sqlite3.connect(f"file:{archive_path}?immutable=1", uri=True)
     new = sqlite3.connect(db_path)
     new.execute("PRAGMA journal_mode=WAL")
-    for stmt in export_carried_ddl(archive):
+    for stmt in carried_ddl(archive_path):
         new.execute(stmt)
     new.executescript(NEW_DDL)
     new.commit()
