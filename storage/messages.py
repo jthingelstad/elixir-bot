@@ -8,7 +8,6 @@ from typing import Optional
 from db import (
     CONVERSATION_MAX_PER_SCOPE,
     CONVERSATION_RETENTION_DAYS,
-    _canon_tag,
     _ensure_channel,
     _ensure_member,
     _ensure_thread,
@@ -24,23 +23,29 @@ from storage.identity import save_memory_episode, save_memory_fact, upsert_disco
 
 @managed_connection
 def was_signal_completed(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> bool:
-    """Return whether this signal key has already completed delivery.
-
-    The underlying table is still named ``signal_log`` for compatibility, but
-    the row is a delivery-completion marker/detector cursor. It is not the
-    observation ledger; new observations belong in ``game_event_stream``.
-    """
-    return conn.execute("SELECT 1 FROM signal_log WHERE signal_type = ? AND signal_date = ?", (signal_type, date_str)).fetchone() is not None
+    """v5.1: signal_log retired with Gen B — the recognition ledger owns
+    delivery dedup. Reads the ledger so legacy callers keep working."""
+    del date_str
+    return conn.execute(
+        "SELECT 1 FROM recognition_ledger WHERE recognition_key = ?", (signal_type,)
+    ).fetchone() is not None
 
 
 @managed_connection
 def was_signal_completed_any_date(signal_type: str, conn: Optional[sqlite3.Connection] = None) -> bool:
-    return conn.execute("SELECT 1 FROM signal_log WHERE signal_type = ?", (signal_type,)).fetchone() is not None
+    return conn.execute(
+        "SELECT 1 FROM recognition_ledger WHERE recognition_key = ?", (signal_type,)
+    ).fetchone() is not None
 
 
 @managed_connection
 def mark_signal_completed(signal_type: str, date_str: str, conn: Optional[sqlite3.Connection] = None) -> None:
-    conn.execute("INSERT OR IGNORE INTO signal_log (signal_type, signal_date) VALUES (?, ?)", (signal_type, date_str))
+    """v5.1: records a ledger claim (stream 'legacy-signal')."""
+    conn.execute(
+        "INSERT OR IGNORE INTO recognition_ledger (recognition_key, stream, event_refs_json, score, claimed_at) "
+        "VALUES (?, 'legacy-signal', '[]', 0, ?)",
+        (signal_type, date_str),
+    )
     conn.commit()
 
 
@@ -177,20 +182,16 @@ def mark_system_signal_announced(signal_key: str, conn: Optional[sqlite3.Connect
 
 @managed_connection
 def mark_announcement_sent(date_str: str, announcement_type: str, target_tag: Optional[str], conn: Optional[sqlite3.Connection] = None) -> None:
-    conn.execute(
-        "INSERT OR IGNORE INTO cake_day_announcements (announcement_date, announcement_type, target_tag) VALUES (?, ?, ?)",
-        (date_str, announcement_type, _canon_tag(target_tag) if target_tag else None),
-    )
-    conn.commit()
+    """v5.1: retired — the recognition ledger owns calendar dedup
+    (cake_day_announcements dropped; kept as a no-op for callers)."""
+    del date_str, announcement_type, target_tag, conn
 
 
 @managed_connection
 def was_announcement_sent(date_str: str, announcement_type: str, target_tag: Optional[str], conn: Optional[sqlite3.Connection] = None) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM cake_day_announcements WHERE announcement_date = ? AND announcement_type = ? AND target_tag IS ?",
-        (date_str, announcement_type, _canon_tag(target_tag) if target_tag else None),
-    ).fetchone()
-    return row is not None
+    """v5.1: retired — always False; the recognition ledger owns calendar dedup."""
+    del date_str, announcement_type, target_tag, conn
+    return False
 
 
 @managed_connection
@@ -392,7 +393,7 @@ def save_message(scope: str, author_type: str, content: str, summary: Optional[s
         upsert_discord_user(discord_user_id, username=username, display_name=display_name, conn=conn)
         if member_id is None:
             link = conn.execute(
-                "SELECT member_id FROM discord_links WHERE discord_user_id = ? AND is_primary = 1",
+                "SELECT player_tag AS member_id FROM discord_links WHERE discord_user_id = ? AND is_primary = 1",
                 (str(discord_user_id),),
             ).fetchone()
             if link:

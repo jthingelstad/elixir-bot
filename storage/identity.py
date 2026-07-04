@@ -36,23 +36,26 @@ def _upsert_discord_user_record(conn, discord_user_id, *, username=None, global_
 
 def _apply_discord_link(conn, discord_user_id, member_tag, *, username=None, display_name=None,
                         source="manual_link", confidence=1.0, is_primary=True):
-    member_id = _ensure_member(conn, member_tag, name=None)
+    # v5.1: discord_links is discord_user_id <-> player_tag; the username /
+    # display-name columns dropped (they duplicate discord_users). The
+    # username/display_name params are accepted for caller compatibility.
+    del username, display_name
+    player_tag = _ensure_member(conn, member_tag, name=None)
     if is_primary:
         conn.execute("UPDATE discord_links SET is_primary = 0 WHERE discord_user_id = ?", (str(discord_user_id),))
-        conn.execute("UPDATE discord_links SET is_primary = 0 WHERE member_id = ?", (member_id,))
+        conn.execute("UPDATE discord_links SET is_primary = 0 WHERE player_tag = ?", (player_tag,))
     conn.execute(
-        "INSERT INTO discord_links (discord_user_id, member_id, discord_username, discord_display_name, linked_at, source, confidence, is_primary) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(discord_user_id, member_id) DO UPDATE SET discord_username = excluded.discord_username, discord_display_name = excluded.discord_display_name, linked_at = excluded.linked_at, source = excluded.source, confidence = excluded.confidence, is_primary = excluded.is_primary",
-        (str(discord_user_id), member_id, username, display_name, _utcnow(), source, confidence, 1 if is_primary else 0),
+        "INSERT INTO discord_links (discord_user_id, player_tag, linked_at, source, confidence, is_primary) VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(discord_user_id, player_tag) DO UPDATE SET linked_at = excluded.linked_at, source = excluded.source, confidence = excluded.confidence, is_primary = excluded.is_primary",
+        (str(discord_user_id), player_tag, _utcnow(), source, confidence, 1 if is_primary else 0),
     )
-    return member_id
+    return player_tag
 
 
 def _infer_member_tag_for_discord_user(conn, discord_user_id, *, username=None, global_name=None, display_name=None):
     existing = conn.execute(
-        "SELECT m.player_tag "
+        "SELECT dl.player_tag "
         "FROM discord_links dl "
-        "JOIN members m ON m.member_id = dl.member_id "
         "WHERE dl.discord_user_id = ? AND dl.is_primary = 1",
         (str(discord_user_id),),
     ).fetchone()
@@ -196,19 +199,19 @@ def link_discord_user_to_member(discord_user_id: str | int, member_tag: str, use
 
 
 @managed_connection
-def clear_member_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> int:
-    member_id = _ensure_member(conn, member_tag)
-    conn.execute("UPDATE discord_links SET is_primary = 0 WHERE member_id = ?", (member_id,))
+def clear_member_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> str:
+    player_tag = _ensure_member(conn, member_tag)
+    conn.execute("UPDATE discord_links SET is_primary = 0 WHERE player_tag = ?", (player_tag,))
     conn.commit()
-    return member_id
+    return player_tag
 
 
 @managed_connection
 def get_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
-        "SELECT m.player_tag, m.current_name, du.discord_user_id, dl.discord_username, dl.discord_display_name "
-        "FROM members m "
-        "LEFT JOIN discord_links dl ON dl.member_id = m.member_id AND dl.is_primary = 1 "
+        "SELECT m.player_tag, m.current_name, du.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name "
+        "FROM players m "
+        "LEFT JOIN discord_links dl ON dl.player_tag = m.player_tag AND dl.is_primary = 1 "
         "LEFT JOIN discord_users du ON du.discord_user_id = dl.discord_user_id "
         "WHERE m.player_tag = ?",
         (_canon_tag(member_tag),),
@@ -219,10 +222,10 @@ def get_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None)
 @managed_connection
 def get_member_identity(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
-        "SELECT m.member_id, m.player_tag, m.current_name AS member_name, du.discord_user_id, dl.discord_username, dl.discord_display_name, "
+        "SELECT m.player_tag, m.current_name AS member_name, du.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name, "
         "CASE WHEN dl.discord_user_id IS NULL THEN 0 ELSE 1 END AS in_discord "
-        "FROM members m "
-        "LEFT JOIN discord_links dl ON dl.member_id = m.member_id AND dl.is_primary = 1 "
+        "FROM players m "
+        "LEFT JOIN discord_links dl ON dl.player_tag = m.player_tag AND dl.is_primary = 1 "
         "LEFT JOIN discord_users du ON du.discord_user_id = dl.discord_user_id "
         "WHERE m.player_tag = ?",
         (_canon_tag(member_tag),),
@@ -233,9 +236,9 @@ def get_member_identity(member_tag: str, conn: Optional[sqlite3.Connection] = No
 @managed_connection
 def get_linked_member_for_discord_user(discord_user_id: str | int, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
-        "SELECT m.member_id, m.player_tag, m.current_name AS member_name, du.discord_user_id, dl.discord_username, dl.discord_display_name "
+        "SELECT m.player_tag, m.current_name AS member_name, du.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name "
         "FROM discord_links dl "
-        "JOIN members m ON m.member_id = dl.member_id "
+        "JOIN players m ON m.player_tag = dl.player_tag "
         "LEFT JOIN discord_users du ON du.discord_user_id = dl.discord_user_id "
         "WHERE dl.discord_user_id = ? AND dl.is_primary = 1",
         (str(discord_user_id),),
@@ -339,35 +342,61 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
     schema_display = f"baseline schema (migration v{schema_version})"
     counts = conn.execute(
         "SELECT "
-        "(SELECT COUNT(*) FROM members) AS members_total, "
-        "(SELECT COUNT(*) FROM members WHERE status = 'active') AS members_active, "
-        "(SELECT COUNT(*) FROM members WHERE status != 'active') AS members_inactive, "
+        "(SELECT COUNT(*) FROM players) AS members_total, "
+        "(SELECT COUNT(*) FROM clan_memberships WHERE left_at IS NULL) AS members_active, "
+        "(SELECT COUNT(*) FROM players WHERE player_tag NOT IN (SELECT player_tag FROM clan_memberships WHERE left_at IS NULL)) AS members_inactive, "
         "(SELECT COUNT(*) FROM discord_users) AS discord_users, "
         "(SELECT COUNT(*) FROM discord_links WHERE is_primary = 1) AS discord_links, "
         "(SELECT COUNT(*) FROM messages) AS message_count, "
         "(SELECT COUNT(*) FROM raw_api_payloads) AS raw_payload_count, "
-        "(SELECT COUNT(*) FROM member_battle_facts) AS battle_fact_count, "
-        "(SELECT COUNT(*) FROM clan_memories) AS contextual_memory_count, "
-        "(SELECT COUNT(*) FROM clan_memories WHERE source_type = 'leader_note') AS contextual_leader_notes, "
-        "(SELECT COUNT(*) FROM clan_memories WHERE source_type = 'elixir_inference') AS contextual_inferences, "
-        "(SELECT COUNT(*) FROM clan_memories WHERE source_type = 'system') AS contextual_system_notes"
+        "(SELECT COUNT(*) FROM battle_events) AS battle_fact_count"
     ).fetchone()
+    counts = dict(counts)
+    # clan_memories live in the separate memory DB (elixir-v5-memory.db);
+    # fail-soft so system status never breaks on the memory DB being absent.
+    try:
+        from memory_store import get_memory_connection
+
+        mconn = get_memory_connection()
+        try:
+            mem = mconn.execute(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN source_type = 'leader_note' THEN 1 ELSE 0 END) AS leader_notes, "
+                "SUM(CASE WHEN source_type = 'elixir_inference' THEN 1 ELSE 0 END) AS inferences, "
+                "SUM(CASE WHEN source_type = 'system' THEN 1 ELSE 0 END) AS system_notes, "
+                "MAX(created_at) AS latest FROM clan_memories"
+            ).fetchone()
+            counts["contextual_memory_count"] = mem["total"] or 0
+            counts["contextual_leader_notes"] = mem["leader_notes"] or 0
+            counts["contextual_inferences"] = mem["inferences"] or 0
+            counts["contextual_system_notes"] = mem["system_notes"] or 0
+            _memory_latest = mem["latest"]
+            _memory_vec = mconn.execute(
+                "SELECT value FROM clan_memory_index_status WHERE key = 'sqlite_vec_enabled'"
+            ).fetchone()
+        finally:
+            mconn.close()
+    except Exception:
+        counts.setdefault("contextual_memory_count", 0)
+        counts.setdefault("contextual_leader_notes", 0)
+        counts.setdefault("contextual_inferences", 0)
+        counts.setdefault("contextual_system_notes", 0)
+        _memory_latest = None
+        _memory_vec = None
     freshness = {
         "member_state_at": conn.execute(
-            "SELECT MAX(observed_at) AS ts FROM member_current_state"
+            "SELECT MAX(observed_at) AS ts FROM player_current_state"
         ).fetchone()["ts"],
         "player_profile_at": conn.execute(
-            "SELECT MAX(fetched_at) AS ts FROM player_profile_snapshots"
+            "SELECT MAX(observed_at) AS ts FROM state_baselines WHERE entity_kind = 'player'"
         ).fetchone()["ts"],
         "battle_fact_at": conn.execute(
-            "SELECT MAX(battle_time) AS ts FROM member_battle_facts"
+            "SELECT MAX(battle_time) AS ts FROM battle_events"
         ).fetchone()["ts"],
         "war_state_at": conn.execute(
-            "SELECT MAX(observed_at) AS ts FROM war_current_state"
+            "SELECT MAX(observed_at) AS ts FROM state_baselines WHERE entity_kind = 'riverrace'"
         ).fetchone()["ts"],
-        "contextual_memory_at": conn.execute(
-            "SELECT MAX(created_at) AS ts FROM clan_memories"
-        ).fetchone()["ts"],
+        "contextual_memory_at": _memory_latest,
     }
     latest_raw = conn.execute(
         "SELECT endpoint, entity_key, fetched_at FROM raw_api_payloads ORDER BY fetched_at DESC, payload_id DESC LIMIT 1"
@@ -381,7 +410,8 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
     current_season_id = get_current_season_id(conn=conn)
     stale_targets = len(get_player_intel_refresh_targets(limit=500, stale_after_hours=6, conn=conn))
     latest_signal = conn.execute(
-        "SELECT signal_type, signal_date FROM signal_log ORDER BY signal_date DESC, signal_type ASC LIMIT 1"
+        "SELECT recognition_key AS signal_type, claimed_at AS signal_date FROM recognition_ledger "
+        "ORDER BY claimed_at DESC LIMIT 1"
     ).fetchone()
     llm_cost_7d = conn.execute(
         """
@@ -400,17 +430,15 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
     awareness_7d = conn.execute(
         """
         SELECT COUNT(*) AS ticks,
-               COALESCE(SUM(signals_in), 0) AS signals_in,
-               COALESCE(SUM(posts_delivered), 0) AS posts_delivered,
-               COALESCE(SUM(hard_fallback_failed), 0) AS fallback_failed,
-               COALESCE(SUM(CASE WHEN all_ok = 0 THEN 1 ELSE 0 END), 0) AS failed_ticks
-        FROM awareness_ticks
-        WHERE ticked_at >= datetime('now', '-7 days')
+               COUNT(*) AS signals_in,
+               SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END) AS posts_delivered,
+               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS fallback_failed,
+               SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS failed_ticks
+        FROM communication_intents
+        WHERE created_at >= datetime('now', '-7 days')
         """
     ).fetchone()
-    memory_index_status = conn.execute(
-        "SELECT value FROM clan_memory_index_status WHERE key = 'sqlite_vec_enabled'"
-    ).fetchone()
+    memory_index_status = _memory_vec
     roster_summary = get_clan_roster_summary(conn=conn)
     size_bytes = None
     if db_path and os.path.exists(db_path):
@@ -420,7 +448,7 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         "db_size_bytes": size_bytes,
         "schema_version": schema_version,
         "schema_display": schema_display,
-        "counts": dict(counts),
+        "counts": counts,
         "roster_summary": roster_summary,
         "freshness": freshness,
         "latest_raw_payload": dict(latest_raw) if latest_raw else None,
@@ -433,10 +461,10 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
         "contextual_memory": {
             "sqlite_vec_enabled": bool(memory_index_status and str(memory_index_status["value"]) == "1"),
             "latest_memory_at": freshness["contextual_memory_at"],
-            "total": dict(counts).get("contextual_memory_count", 0),
-            "leader_notes": dict(counts).get("contextual_leader_notes", 0),
-            "inferences": dict(counts).get("contextual_inferences", 0),
-            "system_notes": dict(counts).get("contextual_system_notes", 0),
+            "total": counts.get("contextual_memory_count", 0),
+            "leader_notes": counts.get("contextual_leader_notes", 0),
+            "inferences": counts.get("contextual_inferences", 0),
+            "system_notes": counts.get("contextual_system_notes", 0),
         },
     }
 
@@ -539,11 +567,11 @@ def build_memory_context(discord_user_id: Optional[str | int] = None, member_tag
         }
     if include_cross_channel_conversation and member_tag:
         member = conn.execute(
-            "SELECT member_id FROM members WHERE player_tag = ?",
+            "SELECT player_tag FROM players WHERE player_tag = ?",
             (_canon_tag(member_tag),),
         ).fetchone()
         if member:
-            key = str(member["member_id"])
+            key = str(member["player_tag"])
             context["member"] = {
                 "facts": get_memory_facts("member", key, conn=conn),
                 "episodes": get_memory_episodes("member", key, conn=conn),

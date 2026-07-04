@@ -265,7 +265,7 @@ def create_leader_action_recommendation(
     *,
     action_type: str,
     objective: str,
-    prompt_text: str,
+    prompt_text: str | None = None,
     rationale: str | None = None,
     target_channel_key: str | None = None,
     target_channel_id: str | int | None = None,
@@ -287,8 +287,12 @@ def create_leader_action_recommendation(
     action_type = (action_type or "").strip()
     objective = (objective or "").strip()
     prompt_text = " ".join((prompt_text or "").split())
+    if not prompt_text:
+        # v5.1: engine-created recommendations (kick/promote/demote state
+        # machines) carry their case in objective/rationale; derive the prompt.
+        prompt_text = " ".join(f"{objective}. {rationale or ''}".split()).strip(". ") + "."
     if not action_type or not objective or not prompt_text:
-        raise ValueError("action_type, objective, and prompt_text are required")
+        raise ValueError("action_type and objective are required")
     action_key = action_key or _stable_action_key(
         action_type=action_type,
         objective=objective,
@@ -980,34 +984,44 @@ def decide_leader_action(
     updated = get_leader_action_by_id(action["action_id"], conn=conn)
     if updated and updated.get("case_id"):
         try:
-            from storage.decision_cases import (
-                CASE_DISMISSED,
-                CASE_RESOLVED,
-                defer_decision_case,
-                resolve_decision_case,
-            )
-
+            # Inlined at the v5.1 cut (storage.decision_cases retired with Gen B):
+            # the decision_cases table is carried, so the case-sync is two UPDATEs.
+            case_now = _db._utcnow()
             if status == ACTION_DEFERRED and deferred_until:
-                defer_decision_case(
-                    updated["case_id"],
-                    due_at=deferred_until,
-                    resolution=clean_note or f"Deferred for {clean_defer_days} day(s).",
-                    conn=conn,
+                conn.execute(
+                    """UPDATE decision_cases
+                       SET status = 'deferred', due_at = ?,
+                           resolution = COALESCE(?, resolution), updated_at = ?
+                       WHERE case_id = ?""",
+                    (
+                        deferred_until,
+                        clean_note or f"Deferred for {clean_defer_days} day(s).",
+                        case_now,
+                        int(updated["case_id"]),
+                    ),
                 )
-            elif status == ACTION_DONE:
-                resolve_decision_case(
-                    updated["case_id"],
-                    status=CASE_RESOLVED,
-                    resolution=clean_note or "Leader accepted the recommended action.",
-                    conn=conn,
+                conn.commit()
+            elif status in (ACTION_DONE, ACTION_REJECTED):
+                case_status = "resolved" if status == ACTION_DONE else "dismissed"
+                default_note = (
+                    "Leader accepted the recommended action."
+                    if status == ACTION_DONE
+                    else "Leader declined the recommended action."
                 )
-            elif status == ACTION_REJECTED:
-                resolve_decision_case(
-                    updated["case_id"],
-                    status=CASE_DISMISSED,
-                    resolution=clean_note or "Leader declined the recommended action.",
-                    conn=conn,
+                conn.execute(
+                    """UPDATE decision_cases
+                       SET status = ?, resolved_at = ?, resolution = ?,
+                           due_at = NULL, updated_at = ?
+                       WHERE case_id = ?""",
+                    (
+                        case_status,
+                        case_now,
+                        clean_note or default_note,
+                        case_now,
+                        int(updated["case_id"]),
+                    ),
                 )
+                conn.commit()
         except Exception:
             # The card decision is the user action of record; case sync should
             # not make the Discord reaction handler fail.

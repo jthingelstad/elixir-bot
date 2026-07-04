@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Backup the Elixir databases with compression and tiered retention pruning.
 
-The CLI entry point (used by the restart script) snapshots EVERY database: the
-operational elixir.db plus the three v5 event-sourcing stores (events,
-projections, memory). Each database gets its own filename prefix so retention is
-tracked independently. Uses sqlite3.Connection.backup() for a safe online
-snapshot — no need to stop the bot.
+The CLI entry point (used by the restart script) snapshots every live database:
+the operational elixir-v51.db plus the durable memory store (clan_memories).
+Each database gets its own filename prefix so retention is tracked
+independently. Uses sqlite3.Connection.backup() for a safe online snapshot —
+no need to stop the bot.
 
-create_backup() / prune_backups() default to the legacy elixir.db (prefix
-"elixir") so existing callers — e.g. the bot's db-maintenance job — are
-unchanged; pass `prefix=`/`db_path=` to target another store.
+create_backup() / prune_backups() default to the operational DB; pass
+`prefix=`/`db_path=` to target another store.
 
 Retention tiers (weekly backup cadence assumed), applied per prefix:
   0-28 days   keep all snapshots
@@ -18,9 +17,9 @@ Retention tiers (weekly backup cadence assumed), applied per prefix:
   >365 days   delete
 
 Environment variables
-  ELIXIR_DB_PATH    operational database (default: <project>/elixir.db)
-  ELIXIR_BACKUP_DIR destination dir      (default: ~/elixir-backups)
-  v5 store paths come from event_core.config (ELIXIR_V5_* env vars).
+  ELIXIR_DB_PATH       operational database (default: <project>/elixir-v51.db)
+  ELIXIR_BACKUP_DIR    destination dir      (default: ~/elixir-backups)
+  ELIXIR_V5_MEMORY_DB  memory database      (default: <project>/elixir-v5-memory.db)
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-_DEFAULT_DB = _PROJECT_ROOT / "elixir-v5.db"
+_DEFAULT_DB = _PROJECT_ROOT / "elixir-v51.db"
 _DEFAULT_BACKUP_DIR = Path.home() / "elixir-backups"
 
 _TIMESTAMP_FMT = "%Y-%m-%d-%H%M%S"
@@ -60,21 +59,15 @@ def _filename_re(prefix: str) -> re.Pattern:
 
 def _databases() -> list[tuple[str, Path, bool]]:
     """(filename_prefix, source_path, required) for every DB the restart backup
-    covers. Post-consolidation the operational DB IS elixir-v5.db (the "elixir-v5"
-    entry, now required); the v4 elixir.db is retired. The event store and memory
-    DB are required too (they hold non-derivable state). All three are the live
-    stores; absence is a real problem worth surfacing on a restart."""
-    try:
-        from event_core import config
-
-        return [
-            ("elixir-v5", Path(config.PROJECTIONS_DB), True),
-            ("elixir-v5-events", Path(config.EVENTS_DB), True),
-            ("elixir-v5-memory", Path(config.MEMORY_DB), True),
-        ]
-    except Exception as exc:  # pragma: no cover - defensive: config import failure
-        log.warning("v5 config unavailable; falling back to default operational path: %s", exc)
-        return [(_DEFAULT_PREFIX, _db_path(), True)]
+    covers. v5.1: the operational DB is ELIXIR_DB_PATH (elixir-v51.db) and the
+    memory DB holds clan_memories (non-derivable). The Gen C event store
+    (elixir-v5-events.db) retired at the cut — the archive keeps it."""
+    memory_default = _PROJECT_ROOT / "elixir-v5-memory.db"
+    memory_path = Path(os.environ.get("ELIXIR_V5_MEMORY_DB") or memory_default)
+    return [
+        ("elixir-v51", _db_path(), True),
+        ("elixir-v5-memory", memory_path, True),
+    ]
 
 # Retention thresholds in days.
 _KEEP_ALL_DAYS = 28

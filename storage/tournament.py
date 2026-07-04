@@ -95,9 +95,9 @@ def _api_status_to_internal(api_status: str) -> str:
 
 def _member_id_for_tag(conn, tag: str):
     row = conn.execute(
-        "SELECT member_id FROM members WHERE player_tag = ?", (_canon_tag(tag),)
+        "SELECT player_tag FROM players WHERE player_tag = ?", (_canon_tag(tag),)
     ).fetchone()
-    return row["member_id"] if row else None
+    return row["player_tag"] if row else None
 
 
 # ---------------------------------------------------------------------------
@@ -166,17 +166,15 @@ def register_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqli
         p_tag = _canon_tag(m.get("tag") or "")
         if not p_tag:
             continue
-        member_id = _member_id_for_tag(conn, p_tag)
         conn.execute(
             """INSERT OR IGNORE INTO tournament_participants
-               (tournament_id, player_tag, player_name, member_id, clan_tag,
+               (tournament_id, player_tag, player_name, clan_tag,
                 first_seen_at, last_seen_at, final_score, final_rank)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 tournament_id,
                 p_tag,
                 m.get("name"),
-                member_id,
                 (m.get("clan") or {}).get("tag"),
                 now,
                 now,
@@ -256,7 +254,6 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
         p_tag = _canon_tag(m.get("tag") or "")
         if not p_tag:
             continue
-        member_id = _member_id_for_tag(conn, p_tag)
         existing = conn.execute(
             "SELECT participant_id FROM tournament_participants WHERE tournament_id = ? AND player_tag = ?",
             (tournament_id, p_tag),
@@ -265,22 +262,20 @@ def poll_tournament(tournament_tag: str, api_data: dict, conn: Optional[sqlite3.
             conn.execute(
                 """UPDATE tournament_participants SET
                     player_name = ?, last_seen_at = ?,
-                    final_score = ?, final_rank = ?,
-                    member_id = COALESCE(member_id, ?)
+                    final_score = ?, final_rank = ?
                 WHERE participant_id = ?""",
-                (m.get("name"), now, m.get("score"), m.get("rank"), member_id, existing["participant_id"]),
+                (m.get("name"), now, m.get("score"), m.get("rank"), existing["participant_id"]),
             )
         else:
             conn.execute(
                 """INSERT INTO tournament_participants
-                   (tournament_id, player_tag, player_name, member_id, clan_tag,
+                   (tournament_id, player_tag, player_name, clan_tag,
                     first_seen_at, last_seen_at, final_score, final_rank)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     tournament_id,
                     p_tag,
                     m.get("name"),
-                    member_id,
                     (m.get("clan") or {}).get("tag"),
                     now,
                     now,
@@ -448,15 +443,15 @@ def _player_enrichment(conn, player_tag: str) -> dict:
     if not tag:
         return out
     member_row = conn.execute(
-        "SELECT member_id FROM members WHERE player_tag = ?", (tag,),
+        "SELECT player_tag FROM players WHERE player_tag = ?", (tag,),
     ).fetchone()
     if not member_row:
         return out
-    member_id = member_row["member_id"]
+    member_id = member_row["player_tag"]
 
     profile = conn.execute(
-        "SELECT exp_level, trophies, best_trophies FROM player_profile_snapshots "
-        "WHERE member_id = ? ORDER BY fetched_at DESC LIMIT 1",
+        "SELECT exp_level, trophies, best_trophies FROM player_current_state "
+        "WHERE player_tag = ?",
         (member_id,),
     ).fetchone()
     if profile:
@@ -468,7 +463,7 @@ def _player_enrichment(conn, player_tag: str) -> dict:
             out["best_trophies"] = profile["best_trophies"]
 
     meta = conn.execute(
-        "SELECT joined_at, cr_account_age_years FROM member_metadata WHERE member_id = ?",
+        "SELECT joined_at, cr_account_age_years FROM player_metadata WHERE player_tag = ?",
         (member_id,),
     ).fetchone()
     if meta:

@@ -41,23 +41,22 @@ def _resolve_db_path() -> str:
 
 CHICAGO_TZ = ZoneInfo("America/Chicago")
 
-SNAPSHOT_RETENTION_DAYS = 30
-PLAYER_PROFILE_RETENTION_DAYS = 21
-CARD_COLLECTION_RETENTION_DAYS = 14
-WAR_RETENTION_DAYS = 180
+# v5.1 retention (docs/v5.1/schema.md §1). Names kept where semantics carried.
 RAW_PAYLOAD_RETENTION_DAYS = 14
-SIGNAL_OUTCOME_RETENTION_DAYS = 90
-EVENT_STREAM_RETENTION_DAYS = 90
+BATTLE_EVENT_RETENTION_DAYS = 180
+PLAYER_EVENT_RETENTION_DAYS = 180
+CLAN_EVENT_RETENTION_DAYS = 365
+WAR_RETENTION_DAYS = 365
 CONVERSATION_RETENTION_DAYS = 30
 TOURNAMENT_RETENTION_DAYS = 365
 CONVERSATION_MAX_PER_SCOPE = 20
 
-_V2_SCHEMA_CORE = {
-    "members": {
-        "member_id",
+# The v5.1 spine — used only to REFUSE a wrong database, never to rebuild one
+# (docs/v5.1/migration.md: the old truth is archived, not destroyed).
+_V51_SCHEMA_CORE = {
+    "players": {
         "player_tag",
         "current_name",
-        "status",
         "first_seen_at",
         "last_seen_at",
     },
@@ -72,7 +71,7 @@ _V2_SCHEMA_CORE = {
     "discord_links": {
         "discord_link_id",
         "discord_user_id",
-        "member_id",
+        "player_tag",
         "linked_at",
         "source",
         "confidence",
@@ -85,30 +84,8 @@ _V2_SCHEMA_CORE = {
         "first_seen_at",
         "last_seen_at",
     },
-    "conversation_threads": {
-        "thread_id",
-        "scope_type",
-        "scope_key",
-        "channel_id",
-        "discord_user_id",
-        "member_id",
-        "created_at",
-        "last_active_at",
-    },
-    "messages": {
-        "message_id",
-        "thread_id",
-        "channel_id",
-        "discord_user_id",
-        "member_id",
-        "author_type",
-        "workflow",
-        "event_type",
-        "content",
-        "summary",
-        "created_at",
-        "raw_json",
-    },
+    "battle_events": {"dedup_key", "player_tag", "battle_time"},
+    "recognition_ledger": {"recognition_key", "stream", "claimed_at"},
 }
 
 
@@ -300,38 +277,34 @@ def _aggregate_card_usage_from_battle_facts(rows: Iterable[sqlite3.Row]) -> tupl
     return total, summary
 
 
-def _ensure_member(conn: sqlite3.Connection, tag: str, name: Optional[str] = None, status: Optional[str] = "active") -> int:
+def _ensure_member(conn: sqlite3.Connection, tag: str, name: Optional[str] = None, status: Optional[str] = None) -> str:
+    """Upsert the player identity row; returns the canonical tag (§7: the tag
+    IS the key — pre-v5.1 this returned a synthetic member_id). The `status`
+    parameter is accepted-and-ignored: membership is an open clan_memberships
+    row now, not a column."""
     tag = _canon_tag(tag)
     if not tag:
-        raise ValueError("member tag is required")
-    row = conn.execute(
-        "SELECT member_id FROM members WHERE player_tag = ?",
-        (tag,),
-    ).fetchone()
+        raise ValueError("player tag is required")
     now = _utcnow()
-    if row:
-        conn.execute(
-            "UPDATE members SET current_name = COALESCE(?, current_name), status = COALESCE(?, status), last_seen_at = ? WHERE member_id = ?",
-            (name, status, now, row["member_id"]),
-        )
-        if name:
-            conn.execute(
-                "INSERT INTO member_aliases (member_id, alias, source, observed_at) VALUES (?, ?, 'clan_api', ?) ON CONFLICT(member_id, alias) DO UPDATE SET observed_at = excluded.observed_at",
-                (row["member_id"], name, now),
-            )
-        return row["member_id"]
-
-    cur = conn.execute(
-        "INSERT INTO members (player_tag, current_name, status, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
-        (tag, name, status or "observed", now, now),
+    conn.execute(
+        "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+        "VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(player_tag) DO UPDATE SET "
+        "current_name = COALESCE(excluded.current_name, players.current_name), "
+        "last_seen_at = excluded.last_seen_at",
+        (tag, name, now, now),
     )
-    member_id = cur.lastrowid
     if name:
         conn.execute(
-            "INSERT INTO member_aliases (member_id, alias, source, observed_at) VALUES (?, ?, 'clan_api', ?)",
-            (member_id, name, now),
+            "INSERT INTO player_aliases (player_tag, alias, source, observed_at) "
+            "VALUES (?, ?, 'clan_api', ?) "
+            "ON CONFLICT(player_tag, alias) DO UPDATE SET observed_at = excluded.observed_at",
+            (tag, name, now),
         )
-    return member_id
+    return tag
+
+
+_ensure_player = _ensure_member  # v5.1 name; same function
 
 
 def _ensure_thread(conn: sqlite3.Connection, scope: str, channel_id=None, discord_user_id=None, member_id=None) -> int:
@@ -355,10 +328,10 @@ def _ensure_thread(conn: sqlite3.Connection, scope: str, channel_id=None, discor
     return cur.lastrowid
 
 
-def _get_current_membership(conn: sqlite3.Connection, member_id: int):
+def _get_current_membership(conn: sqlite3.Connection, player_tag: str):
     return conn.execute(
         "SELECT membership_id, joined_at, join_source FROM clan_memberships "
-        "WHERE member_id = ? AND left_at IS NULL "
+        "WHERE player_tag = ? AND left_at IS NULL "
         "ORDER BY CASE join_source "
         "WHEN 'manual_record' THEN 1 "
         "WHEN 'observed_join' THEN 2 "
@@ -366,28 +339,28 @@ def _get_current_membership(conn: sqlite3.Connection, member_id: int):
         "WHEN 'backfill' THEN 4 "
         "WHEN 'bootstrap_seed' THEN 5 "
         "ELSE 99 END, joined_at DESC, membership_id DESC LIMIT 1",
-        (member_id,),
+        (_canon_tag(player_tag),),
     ).fetchone()
 
 
-def _trusted_current_joined_at(conn: sqlite3.Connection, member_id: int) -> Optional[str]:
+def _trusted_current_joined_at(conn: sqlite3.Connection, player_tag: str) -> Optional[str]:
     membership = conn.execute(
         "SELECT joined_at FROM clan_memberships "
-        "WHERE member_id = ? AND left_at IS NULL AND join_source IN ('manual_record', 'observed_join', 'clan_api_snapshot') "
+        "WHERE player_tag = ? AND left_at IS NULL AND join_source IN ('manual_record', 'observed_join', 'clan_api_snapshot') "
         "ORDER BY CASE join_source "
         "WHEN 'manual_record' THEN 1 "
         "WHEN 'observed_join' THEN 2 "
         "WHEN 'clan_api_snapshot' THEN 3 "
         "ELSE 99 END, joined_at DESC, membership_id DESC LIMIT 1",
-        (member_id,),
+        (_canon_tag(player_tag),),
     ).fetchone()
     return membership["joined_at"] if membership else None
 
 
-def _current_joined_at(conn: sqlite3.Connection, member_id: int) -> Optional[str]:
+def _current_joined_at(conn: sqlite3.Connection, player_tag: str) -> Optional[str]:
     meta = conn.execute(
-        "SELECT joined_at FROM member_metadata WHERE member_id = ?",
-        (member_id,),
+        "SELECT joined_at FROM player_metadata WHERE player_tag = ?",
+        (_canon_tag(player_tag),),
     ).fetchone()
     if meta and meta["joined_at"]:
         return meta["joined_at"]
@@ -395,7 +368,8 @@ def _current_joined_at(conn: sqlite3.Connection, member_id: int) -> Optional[str
 
 
 _MEMBER_METADATA_COLUMNS = frozenset({
-    "joined_at", "birth_month", "birth_day", "profile_url", "poap_address", "note",
+    # poap_address dropped (Q4: POAP paused; archive keeps historical values)
+    "joined_at", "birth_month", "birth_day", "profile_url", "note",
     "generated_bio", "generated_highlight", "generated_profile_updated_at",
     "cr_account_age_days", "cr_account_age_years", "cr_account_age_updated_at",
     "cr_games_per_day", "cr_games_per_day_window_days", "cr_games_per_day_updated_at",
@@ -405,21 +379,22 @@ _MEMBER_METADATA_COLUMNS = frozenset({
 })
 
 
-def _upsert_member_metadata(conn: sqlite3.Connection, member_id: int, **fields) -> None:
+def _upsert_member_metadata(conn: sqlite3.Connection, player_tag: str, **fields) -> None:
     bad = set(fields) - _MEMBER_METADATA_COLUMNS
     if bad:
-        raise ValueError(f"Invalid member_metadata columns: {bad}")
-    row = conn.execute("SELECT member_id FROM member_metadata WHERE member_id = ?", (member_id,)).fetchone()
+        raise ValueError(f"Invalid player_metadata columns: {bad}")
+    tag = _canon_tag(player_tag)
+    row = conn.execute("SELECT player_tag FROM player_metadata WHERE player_tag = ?", (tag,)).fetchone()
     if not row:
-        conn.execute("INSERT INTO member_metadata (member_id) VALUES (?)", (member_id,))
+        conn.execute("INSERT INTO player_metadata (player_tag) VALUES (?)", (tag,))
     updates = []
     values = []
     for key, value in fields.items():
         updates.append(f"{key} = ?")
         values.append(value)
     if updates:
-        values.append(member_id)
-        conn.execute(f"UPDATE member_metadata SET {', '.join(updates)} WHERE member_id = ?", values)
+        values.append(tag)
+        conn.execute(f"UPDATE player_metadata SET {', '.join(updates)} WHERE player_tag = ?", values)
 
 
 def _parse_optional_int(value: Optional[str], *, field_name: str, minimum: int, maximum: int) -> Optional[int]:
@@ -477,17 +452,16 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
 
 
 def _schema_is_compatible(conn: sqlite3.Connection) -> bool:
-    # Judges ONLY whether this is a pre-v2 legacy schema with no forward
-    # migration path (missing core tables/columns) — that case is safe to back
-    # up and rebuild. A higher-than-expected user_version is handled separately
-    # in get_connection by REFUSING to start, never by rebuilding: a "future"
-    # version means the DB was written by newer code and its data is intact, so
-    # wiping it would be catastrophic (this exact footgun wiped prod once).
+    """True when the DB carries the v5.1 spine (or is empty — tests own their
+    schema). Incompatibility is handled by REFUSING to start, never by
+    rebuilding: the pre-v5.1 move-aside-and-rebuild behavior is gone (the old
+    truth lives in the read-only archive; destroying a mispointed DB is the
+    exact footgun that wiped prod once)."""
     tables = _existing_tables(conn)
     if not tables:
         return True
 
-    for table_name, expected_columns in _V2_SCHEMA_CORE.items():
+    for table_name, expected_columns in _V51_SCHEMA_CORE.items():
         if table_name not in tables:
             return False
         if not expected_columns.issubset(_table_columns(conn, table_name)):
@@ -495,12 +469,9 @@ def _schema_is_compatible(conn: sqlite3.Connection) -> bool:
     return True
 
 
-def _legacy_backup_path(path: str) -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    return f"{path}.legacy-v2-backup-{stamp}"
-
-
-from db._migrations import _MIGRATIONS, _run_migrations  # noqa: E402
+# Legacy migrations (db/_migrations.py) no longer run: the v5.1 baseline is
+# scripts/migrate_v51/schema_v51.py and the connection layer refuses non-v5.1
+# databases instead of migrating in place (docs/v5.1/migration.md Phase 2).
 
 
 def _enable_sqlite_vec(conn: sqlite3.Connection) -> None:
@@ -551,32 +522,24 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     path = os.fspath(db_path or _resolve_db_path())
     conn = sqlite3.connect(path)
     _configure_connection(conn, path)
-    if path != ":memory:":
-        version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version > len(_MIGRATIONS):
-            conn.close()
-            raise RuntimeError(
-                f"Database at {path} is at schema version {version}, but this build only "
-                f"knows {len(_MIGRATIONS)} migrations — it was written by NEWER code. Refusing "
-                f"to start so data is not destroyed. Deploy the newer code (or restore a backup "
-                f"matching this build). Do NOT delete the database."
-            )
-    if path != ":memory:" and not _schema_is_compatible(conn):
-        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if not _schema_is_compatible(conn):
         tables = sorted(_existing_tables(conn))
-        backup_path = _legacy_backup_path(path)
         conn.close()
-        os.replace(path, backup_path)
-        log.warning(
-            "Detected incompatible database schema at %s (user_version=%s, tables=%s); moved it to %s and rebuilding baseline schema",
-            path,
-            version,
-            ", ".join(tables) or "<none>",
-            backup_path,
+        raise RuntimeError(
+            f"Database at {path} does not carry the v5.1 spine (tables: "
+            f"{', '.join(tables[:12]) or '<none>'}…). Refusing to start — this build "
+            f"never rebuilds or migrates a database in place. Point ELIXIR_DB_PATH at "
+            f"the v5.1 database (elixir-v51.db) or restore it from the archive per "
+            f"docs/v5.1/migration.md."
         )
-        conn = sqlite3.connect(path)
-        _configure_connection(conn, path)
-    _run_migrations(conn)
+    if not _existing_tables(conn):
+        # Empty DB (tests, scratch work): lay down the v5.1 engine spine.
+        # Carried-table DDL comes from the archive at migration time; fixtures
+        # that need those tables create them explicitly (Phase 8 convention).
+        from scripts.migrate_v51.schema_v51 import NEW_DDL
+
+        conn.executescript(NEW_DDL)
+        conn.commit()
     _enable_sqlite_vec(conn)
     return conn
 
@@ -624,6 +587,10 @@ def __export_public(module):
 
 
 _STORAGE_FACADE_MODULES = (
+    # v5.1: storage.projects / storage.decision_cases /
+    # storage.communication_intents / storage.clan_voyages retired with
+    # Gens A–C (schema.md §8, C6); storage.cases carries the decision-case
+    # tool writes onto the renamed columns.
     "storage.identity",
     "storage.war",
     "storage.roster",
@@ -632,9 +599,8 @@ _STORAGE_FACADE_MODULES = (
     "storage.player",
     "storage.trends",
     "storage.messages",
-    "storage.projects",
-    "storage.decision_cases",
-    "storage.communication_intents",
+    "storage.cases",
+    "storage.events_read",
     "storage.api_sentinel",
     "storage.game_mode_contexts",
     "storage.metadata",
@@ -647,7 +613,6 @@ _STORAGE_FACADE_MODULES = (
     "storage.improvements",
     "storage.runtime_status",
     "storage.screenshot_observations",
-    "storage.clan_voyages",
 )
 
 _facade_lock = threading.RLock()

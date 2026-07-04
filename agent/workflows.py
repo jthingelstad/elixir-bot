@@ -828,6 +828,12 @@ def analyze_arena_relay_screenshot(question, *, author_name, channel_name,
 
 
 def reconcile_clan_voyage_entries(*, visible_rows: list[dict], roster_choices: list[dict], context: dict | None = None):
+    # C6 (v5.1): Clan Voyages dropped from the system. Retired no-op kept so
+    # the elixir_agent facade import stays stable until the caller is removed.
+    del visible_rows, roster_choices, context
+    return None
+
+def _retired_reconcile_clan_voyage_entries(*, visible_rows, roster_choices, context=None):
     """Reconcile Clan Voyage OCR rows against the active roster."""
     request = {
         "visible_rows": visible_rows or [],
