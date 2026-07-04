@@ -106,6 +106,16 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
 
     clock = _current_clock(conn, now)
 
+    # Heat decays at tick START, before poll planning and before any
+    # update_heat call site (battle ingest in step 2, war decksUsedToday in
+    # step 3) — decaying after re-heats knocked freshly-hot players back to
+    # warm in the same tick, making 'hot' unreachable and quietly adding up
+    # to ~30 min recognition latency (cold review 2026-07-04 #4; matches
+    # polling.decay_all's own docstring).
+    with _guard(counters, "decay"):
+        polling.decay_all(conn, now_iso)
+        conn.commit()
+
     with _guard(counters, "poll"):
         clan_payload = api.get_clan()
         if _riverrace_due(conn, clock, now):
@@ -164,7 +174,6 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
             emitted += emit_calendar(conn, today)
             mark_calendar_ran(conn, today)
         counters["events_emitted"] = emitted
-        polling.decay_all(conn, now_iso)
         conn.commit()
 
     # -- step 4: PROJECT — refresh what the polls touched

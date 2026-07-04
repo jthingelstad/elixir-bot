@@ -197,3 +197,19 @@ def test_promote_grace_then_sustained_slippage_withdraws(engine_conn):
         "SELECT promote_state, state_json FROM member_management "
         "WHERE player_tag='#A'").fetchone()
     assert row["promote_state"] not in ("eligible", "recommended"), row["state_json"]
+
+
+def test_never_battled_member_anchored_on_own_seen_not_epoch(engine_conn):
+    # Cold review 2026-07-04 #10: zero-battle members used the SHARED stream
+    # epoch as their idle reference — every such member marched toward
+    # at_risk in lockstep. Anchor is now max(joined_at, players.last_seen_at).
+    # Seed another member's old battle so the stream epoch is 30d ago...
+    _seed_member(engine_conn, tag="#EPOCH", last_battle_days_ago=30)
+    # ...and a roster-present member (last_seen_at = NOW) with zero battles.
+    _seed_member(engine_conn, tag="#NOBATTLES", joined_days_ago=60,
+                 last_battle_days_ago=None)
+    from engine import management
+    management.run_tick_evaluators(engine_conn, now=NOW)
+    # Old code: idle-since-epoch (30d) -> at_risk/recommended. New: their own
+    # last_seen_at is fresh -> none.
+    assert _kick_state(engine_conn, "#NOBATTLES") == "none"

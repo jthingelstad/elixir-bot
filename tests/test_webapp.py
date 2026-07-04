@@ -305,6 +305,17 @@ def test_ops_routes_same_origin_guard():
             "/ops/tick", headers={**LOGIN, "Origin": "https://evil.example"}
         )
         assert r.status == 403
+        # Cold review 2026-07-04 #6: prefix bypass — https://<host>.evil.com
+        # must be rejected (exact host equality, not startswith).
+        evil = f"https://{client.host}:{client.port}.evil.com"
+        r = await client.post("/ops/tick", headers={**LOGIN, "Origin": evil})
+        assert r.status == 403
+        # and the legitimate same-origin form post still works
+        ok = f"http://{client.host}:{client.port}"
+        r = await client.post("/ops/intent/99999/retry",
+                              headers={**LOGIN, "Origin": ok})
+        # passes the origin gate (redirect followed to the flash page)
+        assert r.status == 200 and "not retryable" in await r.text()
 
     _client_run(body)
 

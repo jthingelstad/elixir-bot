@@ -341,11 +341,15 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
                    {"period_type": new_type, "day_index": wd_open.war_day_index,
                     "war_day_human": wd_open.human})
 
-    # race finished — we crossed the finish line mid-week (§16.4 tone shift)
-    finish_line = 5_000 if new_type == "colosseum" else 10_000
+    # race finished — we crossed the finish line mid-week (§16.4 tone shift).
+    # NEVER in Colosseum: there is no finish line there (clock.py, verified
+    # live 2026-07-03 — 20,600 fame on day 2 with the race still on). The old
+    # 5,000 constant here would have posted a false "race won" every
+    # Colosseum week (cold review 2026-07-04 #3).
+    finish_line = 10_000
     old_fame, new_fame = old.get("our_fame") or 0, new.get("our_fame") or 0
     if (
-        new_type in ("warDay", "colosseum")
+        new_type == "warDay"
         and old_fame < finish_line <= new_fame
         and new_season is not None
     ):

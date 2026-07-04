@@ -221,3 +221,33 @@ def test_build_memory_context_ranked_and_query():
         assert durables and durables[0]["memory_id"] == mine
     finally:
         conn.close()
+
+
+def test_filtered_selection_excludes_wrong_subject_recents():
+    # Cold review 2026-07-04 #5: with a member filter, the recency backstop
+    # must NOT inject fresh memories about OTHER members into the candidates.
+    conn = db.get_connection()
+    try:
+        _seed(conn, title="A old fact", body="member A keeps donating",
+              member_tag="#AAA", confidence=0.7, age_days=40)
+        for i in range(6):
+            _seed(conn, title=f"B hot fact {i}", body=f"member B thing {i}",
+                  member_tag="#BBB", confidence=0.95, age_days=0)
+        got = memory_store.select_memories(
+            member_tag="#AAA", viewer_scope="leadership", limit=5, conn=conn)
+        tags = {m.get("member_tag") for m in got}
+        assert tags == {"#AAA"}, f"wrong-subject memories leaked: {tags}"
+    finally:
+        conn.close()
+
+
+def test_unfiltered_selection_still_has_recency_backstop():
+    conn = db.get_connection()
+    try:
+        _seed(conn, title="fresh clanwide", body="clan won the race",
+              confidence=0.9, age_days=0)
+        got = memory_store.select_memories(viewer_scope="leadership",
+                                           limit=5, conn=conn)
+        assert any(m["title"] == "fresh clanwide" for m in got)
+    finally:
+        conn.close()

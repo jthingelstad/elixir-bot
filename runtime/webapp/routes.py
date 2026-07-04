@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import urlsplit
 
 from aiohttp import web
 
@@ -24,13 +25,21 @@ def _same_origin(request: web.Request) -> bool:
     """Reject cross-origin POSTs. No cookie/session to anchor a CSRF token on
     (the gate is the tailnet + identity header), so an Origin/Referer
     allowlist closes the residual vector. Same-origin form posts (and
-    non-browser clients) typically omit Origin → allowed."""
+    non-browser clients) typically omit Origin → allowed.
+
+    EXACT host equality via URL parsing — the old prefix check accepted
+    https://<host>.evil.com (cold review 2026-07-04 #6)."""
     origin = request.headers.get("Origin") or request.headers.get("Referer") or ""
     if not origin:
         return True
-    return origin.startswith(f"https://{request.host}") or origin.startswith(
-        f"http://{request.host}"
-    )
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("https", "http"):
+        return False
+    # request.host includes the port when non-default; compare the same shape.
+    return (parsed.netloc or "").lower() == (request.host or "").lower()
 
 
 async def healthz(request: web.Request) -> web.Response:
