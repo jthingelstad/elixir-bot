@@ -306,6 +306,7 @@ def test_awareness_write_budget_rejects_fourth_call(memdb):
 # Budget counters flow into record_awareness_tick
 # ---------------------------------------------------------------------------
 
+@pytest.mark.xfail(reason="awareness write-budget audit (awareness_ticks) retired at v5.1; record_awareness_tick is a documented no-op", strict=False)
 def test_record_awareness_tick_persists_write_counts(memdb):
     from storage.messages import record_awareness_tick
 

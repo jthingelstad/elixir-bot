@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Ticks{% endblock %}
+{% block content %}
+<h1>Engine ticks</h1>
+<p class="muted">In-memory history since process start ({{ history | length }} tick{{ '' if history|length == 1 else 's' }});
+latest persisted state below survives restarts.</p>
+
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr>
+      <th>at</th>
+      {% for k in counter_keys %}<th class="num">{{ k | replace('recognize_', 'r:') | replace('deliver_', 'd:') }}</th>{% endfor %}
+    </tr>
+    {% for t in history %}
+      <tr>
+        <td title="{{ t.get('recorded_at','') }}">{{ t.get('recorded_at','') | reltime }}</td>
+        {% for k in counter_keys %}
+          <td class="num {{ 'err' if k.endswith('_error') and t.get(k) else '' }}">{{ t.get(k, '') }}</td>
+        {% endfor %}
+      </tr>
+    {% else %}
+      <tr><td class="muted">No ticks since process start.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Stream cursors</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>consumer</th><th>scope</th><th class="num">position</th><th>updated</th><th>metadata</th></tr>
+    {% for c in cursors %}
+      <tr>
+        <td><code>{{ c.consumer_key }}</code></td>
+        <td>{{ c.scope_key or '' }}</td>
+        <td class="num">{{ c.cursor_int if c.cursor_int is not none else c.cursor_text or '' }}</td>
+        <td>{{ c.updated_at | reltime }}</td>
+        <td class="muted" style="font-size:.8rem;">{{ (c.metadata_json or '') | truncate(80) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">No cursors yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Persisted job status</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>job</th><th>ok</th><th>fail</th><th>running</th><th>last finished</th><th>last error</th></tr>
+    {% for name, s in statuses.items() %}
+      <tr>
+        <td><code>{{ name }}</code></td>
+        <td class="num">{{ s.get('success_count', 0) }}</td>
+        <td class="num {{ 'err' if s.get('failure_count') else '' }}">{{ s.get('failure_count', 0) }}</td>
+        <td>{{ 'yes' if s.get('running') else '' }}</td>
+        <td>{{ s.get('last_finished_at','') | reltime }}</td>
+        <td class="{{ 'err' if s.get('last_error') else '' }}">{{ (s.get('last_error') or '')[:120] }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

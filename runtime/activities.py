@@ -33,77 +33,92 @@ def _attr(name: str, default: Any = None) -> RuntimeAttrRef:
 
 _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ActivityDefinition(
-        activity_key="v5-reactive-tick",
+        activity_key="engine-tick",
         owner_lane="player-highlights",
-        purpose="Event-driven core: ingest CR data, advance the v5 event store + "
-        "projections, and reactively post agent-composed communication intents.",
-        job_id="v5-reactive-tick",
-        job_function="_v5_reactive_tick",
+        purpose="The v5.1 engine tick (runtime.md §2): adaptive-budget poll → "
+        "battle mirror → emit → project → manage → recognize → deliver. "
+        "Replaces v5-reactive-tick, war-poll, player-progression, and "
+        "award-detection's daily scan (awards fire on season_closed).",
+        job_id="engine-tick",
+        job_function="_engine_tick",
         schedule_kind="interval",
         schedule_config={
-            "minutes": _attr("HEARTBEAT_INTERVAL_MINUTES", 30),
+            "minutes": _attr("ENGINE_TICK_MINUTES", 10),
             "max_instances": 1,
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord reactive posts: #player-highlights (public), #leader-actions (leadership)",
+            "Discord reactive posts: #player-highlights, #clan-events, #river-race "
+            "(public); #leader-actions (leadership)",
         ),
         activity_role="observer+communicator",
+        legacy_commands=("v5-reactive-tick",),
     ),
     ActivityDefinition(
-        activity_key="war-poll",
-        owner_lane="river-race",
-        purpose="Poll live war state and persist the hourly River Race snapshot pipeline.",
-        job_id="war-poll",
-        job_function="_war_poll_tick",
+        activity_key="weekly-leadership-review",
+        owner_lane="arena-relay",
+        purpose="Q1's weekly batch half: roll the management week (hysteresis "
+        "counters advance ONLY here), surface promote/demote candidacies as "
+        "leader actions, post one review summary. Monday 7:00 AM America/Chicago "
+        "(ratified 2026-07-03).",
+        job_id="weekly-leadership-review",
+        job_function="_weekly_leadership_review",
         schedule_kind="cron",
         schedule_config={
-            "minute": _attr("WAR_POLL_MINUTE", 0),
+            "day_of_week": _attr("WEEKLY_REVIEW_DAY", "mon"),
+            "hour": _attr("WEEKLY_REVIEW_HOUR", 7),
+            "minute": _attr("WEEKLY_REVIEW_MINUTE", 0),
+            "timezone": "America/Chicago",
             "max_instances": 1,
             "coalesce": True,
         },
         delivery_targets=(
-            "Storage: live war snapshots and river race log",
+            "Discord: #leader-actions weekly review + recommendation cards",
+        ),
+        activity_role="observer+communicator",
+        legacy_commands=("leadership-actions",),
+    ),
+    ActivityDefinition(
+        activity_key="war-attendance-snapshot",
+        owner_lane="river-race",
+        purpose="Finalize war_attendance_days for the just-closed war day "
+        "(evaluators read finalized days only — runtime.md §3). CR war days "
+        "roll at ~09:37–10:00 UTC; this runs just before the boundary.",
+        job_id="war-attendance-snapshot",
+        job_function="_war_attendance_snapshot",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": _attr("WAR_ATTENDANCE_HOUR", 4),
+            "minute": _attr("WAR_ATTENDANCE_MINUTE", 15),
+            "timezone": "America/Chicago",
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Storage: finalized war_attendance_days rows",
         ),
         activity_role="observer",
         manual_trigger_allowed=False,
     ),
     ActivityDefinition(
-        activity_key="player-progression",
-        owner_lane="member-highlights",
-        purpose="Refresh player intelligence and emit curated member highlights.",
-        job_id="player-progression",
-        job_function="_player_intel_refresh",
-        schedule_kind="interval",
-        schedule_config={
-            "minutes": _attr("PLAYER_INTEL_REFRESH_MINUTES", 30),
-            "max_instances": 1,
-            "coalesce": True,
-        },
-        delivery_targets=(
-            "Discord: #player-highlights",
-        ),
-        activity_role="observer+communicator",
-        legacy_commands=("player-intel",),
-    ),
-    ActivityDefinition(
-        activity_key="award-detection",
-        owner_lane="river-race",
-        purpose="Detect and grant season-wide clan awards (idempotent). Runs daily — season close and War Participant accumulation only need a daily pass.",
-        job_id="award-detection",
-        job_function="_award_detection_tick",
+        activity_key="action-outcome-refresh",
+        owner_lane="arena-relay",
+        purpose="Daily leader-action hygiene carried from leadership-action-scan: "
+        "refresh due action outcomes and re-queue feedback synthesis. The scan/"
+        "creation role is retired (the engine tick owns the Q1 reactive path).",
+        job_id="action-outcome-refresh",
+        job_function="_action_outcome_refresh",
         schedule_kind="cron",
         schedule_config={
-            "hour": _attr("AWARD_DETECTION_HOUR", 10),
-            "minute": _attr("AWARD_DETECTION_MINUTE", 10),
+            "hour": _attr("ACTION_OUTCOME_REFRESH_HOUR", 9),
+            "minute": _attr("ACTION_OUTCOME_REFRESH_MINUTE", 30),
             "max_instances": 1,
             "coalesce": True,
         },
         delivery_targets=(
-            "Storage: durable awards rows",
-            "Discord routed outcomes: #clan-events on new grants",
+            "Storage: leader-action outcome/feedback rows",
         ),
-        activity_role="observer+communicator",
+        activity_role="observer",
     ),
     ActivityDefinition(
         activity_key="daily-clan-insight",
@@ -120,25 +135,6 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "Discord: #ask-elixir",
         ),
         activity_role="communicator",
-    ),
-    ActivityDefinition(
-        activity_key="leadership-action-scan",
-        enabled_by_default=True,
-        owner_lane="arena-relay",
-        purpose="Continuously scan for singular leader actions and post crisp action cards when the data warrants one.",
-        job_id="leadership-action-scan",
-        job_function="_leadership_action_scan",
-        schedule_kind="interval",
-        schedule_config={
-            "minutes": _attr("LEADERSHIP_ACTION_SCAN_MINUTES", 240),
-            "max_instances": 1,
-            "coalesce": True,
-        },
-        delivery_targets=(
-            "Discord: #leader-actions singular leader action cards",
-        ),
-        activity_role="observer+communicator",
-        legacy_commands=("leadership-actions",),
     ),
     ActivityDefinition(
         activity_key="weekly-discord-invite-relay",
@@ -245,6 +241,79 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(
             "Storage: api_sentinel_observations",
             "Discord: #leaders on first-seen CR API schema or event drift",
+        ),
+        activity_role="observer+communicator",
+    ),
+    ActivityDefinition(
+        activity_key="db-backup",
+        owner_lane="elixir-log",
+        purpose="Daily compressed snapshot of the operational + memory databases "
+        "to iCloud Drive (offsite via sync).",
+        job_id="db-backup",
+        job_function="_db_backup",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": _attr("DB_BACKUP_HOUR", 3),
+            "minute": 37,
+        },
+        delivery_targets=(),
+        activity_role="observer",
+    ),
+    ActivityDefinition(
+        activity_key="engine-health",
+        owner_lane="elixir-log",
+        purpose="Daily read-only engine audit (tick errors, stuck intents, "
+        "ledger duplicates, poll starvation, memory-write recency, db growth); "
+        "posts to #elixir-log only when something is off.",
+        job_id="engine-health",
+        job_function="_engine_health",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": 8,
+            "minute": 23,
+        },
+        delivery_targets=(
+            "Discord: #elixir-log on failed checks only",
+        ),
+        activity_role="observer",
+    ),
+    ActivityDefinition(
+        activity_key="editorial-sweep",
+        owner_lane="elixir-log",
+        purpose="Daily Editor rubric feeder (editor.md §3): yesterday's 👎/👍 "
+        "prompt feedback becomes anti-pattern/exemplar rubric candidates.",
+        job_id="editorial-sweep",
+        job_function="_editorial_sweep",
+        schedule_kind="cron",
+        schedule_config={
+            "hour": _attr("EDITORIAL_SWEEP_HOUR", 8),
+            "minute": 31,
+        },
+        delivery_targets=(
+            "Storage: editorial rubric candidate memories",
+        ),
+        activity_role="observer",
+    ),
+    ActivityDefinition(
+        activity_key="editorial-review",
+        owner_lane="elixir-log",
+        purpose="The Editor's weekly self-review (editor.md §4): score the "
+        "week's gated output against the rubric, write the synthesis memory, "
+        "post one report with the drift line + proposed rubric additions "
+        "(auto-added at confidence 0.6, Jamie's veto by 👎).",
+        job_id="editorial-review",
+        job_function="_editorial_review",
+        schedule_kind="cron",
+        schedule_config={
+            "day_of_week": _attr("EDITORIAL_REVIEW_DAY", "sun"),
+            "hour": _attr("EDITORIAL_REVIEW_HOUR", 20),
+            "minute": 7,
+            "timezone": "America/Chicago",
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Discord webhook: #elixir-log weekly editorial report",
         ),
         activity_role="observer+communicator",
     ),

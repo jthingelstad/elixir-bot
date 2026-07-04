@@ -1,242 +1,191 @@
+"""memory_store — the v5.1 memory system (docs/reference/v5.1/memory.md).
+
+Rebuilt 2026-07-04 (D1–D5 ratified): memories live in the ENGINE DB
+(`elixir-v51.db`) — `memories` + `memory_tags` + `memory_log` + `memories_fts`
+replace the old two-database, twenty-object sprawl. Content was migrated
+(scripts/migrate_v51/memory_migrate.py); structure was not.
+
+Compatibility surface: the public functions keep their pre-rebuild names and
+signatures. Old source_type values (`elixir_inference`, `elixir_synthesis`)
+are accepted and mapped to v5.1 kinds; returned rows carry BOTH `kind` (new)
+and `source_type`/`is_inference`/`status` (legacy aliases) so existing callers
+keep working. Scope `system_internal` maps to `leadership` (the old data had
+zero such rows; the old code used it as a viewer superset).
+
+Retrieval is deterministic ranked selection (§2.3): match strength +
+confidence + recency decay — constants below. FTS5 serves query search; there
+are deliberately NO embeddings in v1 (D2).
+"""
+
 from __future__ import annotations
 
 import functools
 import json
-import math
-import os
+import logging
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Optional
 
-from db import _canon_tag, _enable_sqlite_vec, _json_or_none, _utcnow
+log = logging.getLogger("memory_store")
 
-# ---------------------------------------------------------------------------
-# Durable-memory connection seam (elixir-v5-memory.db)
-#
-# clan_memories* live in their own DB, separate from the operational store. The
-# memory connection does NOT run the v4 migration chain / schema-compat guard
-# (db.get_connection), which would wipe a memory-only file; it just ensures the
-# clan_memory schema and loads sqlite-vec. foreign_keys stays OFF because the
-# memory DB has no `members` table for clan_memories.member_id to reference.
-#
-# CLAN_MEMORY_SCHEMA_SQL mirrors the CURRENT (post-migration-29) clan_memory
-# schema. If a future migration alters any clan_memory* table, update this too —
-# test_memory_db_schema_matches_operational guards against drift.
-# ---------------------------------------------------------------------------
-CLAN_MEMORY_SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS clan_memories (
-    memory_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    created_by TEXT NOT NULL,
-    updated_by TEXT NOT NULL,
-    source_type TEXT NOT NULL,
-    is_inference INTEGER NOT NULL,
-    confidence REAL NOT NULL,
-    scope TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
-    title TEXT,
+# ---------------------------------------------------------------- constants
+
+# Ranked-selection weights (memory.md §2.3). Tunable, pure code.
+W_MATCH = 0.5      # subject match strength (member 1.0, channel 0.6, fts 0.8)
+W_CONF = 0.3       # stored confidence 0..1
+W_RECENCY = 0.2    # decay(updated_at)
+RECENCY_HALF_LIFE_DAYS = 45.0
+RETIRED_PURGE_GRACE_DAYS = 30
+
+KINDS = {"leader_note", "inference", "system", "synthesis", "conversation_digest"}
+# Old → new kind mapping (accepted on write and in filters).
+_KIND_MAP = {
+    "leader_note": "leader_note",
+    "elixir_inference": "inference",
+    "inference": "inference",
+    "elixir_synthesis": "synthesis",
+    "synthesis": "synthesis",
+    "system": "system",
+    "conversation_digest": "conversation_digest",
+}
+# New → legacy alias for returned rows (compat).
+_LEGACY_SOURCE = {
+    "leader_note": "leader_note",
+    "inference": "elixir_inference",
+    "synthesis": "elixir_synthesis",
+    "system": "system",
+    "conversation_digest": "system",  # closest legacy bucket
+}
+
+SOURCE_TYPES = set(_KIND_MAP)  # legacy export
+SCOPES = {"public", "leadership", "system_internal"}
+STATUSES = {"active", "archived", "deleted"}
+
+MEMORY_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS memories (
+    memory_id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN
+        ('leader_note','inference','system','synthesis','conversation_digest')),
+    title TEXT NOT NULL,
     body TEXT NOT NULL,
     summary TEXT,
-    member_id INTEGER,
+    scope TEXT NOT NULL DEFAULT 'public' CHECK (scope IN ('public','leadership')),
+    confidence REAL NOT NULL DEFAULT 0.9,
     member_tag TEXT,
-    role TEXT,
-    channel_id TEXT,
-    war_season_id TEXT,
-    war_week_id TEXT,
-    event_type TEXT,
-    event_id TEXT,
-    retention_class TEXT NOT NULL DEFAULT 'standard',
+    channel_key TEXT,
+    source_event_key TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
     expires_at TEXT,
-    metadata_json TEXT,
-    embedding_model TEXT,
-    embedding_created_at TEXT,
-    FOREIGN KEY(member_id) REFERENCES members(member_id) ON DELETE SET NULL,
-    CHECK(source_type IN ('leader_note', 'elixir_inference', 'elixir_synthesis', 'system')),
-    CHECK(scope IN ('public', 'leadership', 'system_internal')),
-    CHECK(status IN ('active', 'archived', 'deleted')),
-    CHECK(is_inference IN (0, 1)),
-    CHECK(confidence >= 0.0 AND confidence <= 1.0),
-    CHECK(source_type != 'elixir_inference' OR (is_inference = 1 AND confidence < 1.0))
+    retired_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_memories_member ON memories(member_tag, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memories_event ON memories(source_event_key);
 
-CREATE TABLE IF NOT EXISTS clan_memory_tags (
-    tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tag TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS memory_tags (
+    memory_id INTEGER NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (memory_id, tag)
 );
+CREATE INDEX IF NOT EXISTS idx_memory_tags_tag ON memory_tags(tag);
 
-CREATE TABLE IF NOT EXISTS clan_memory_tag_links (
-    memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
-    tag_id INTEGER NOT NULL REFERENCES clan_memory_tags(tag_id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY(memory_id, tag_id)
-);
-
-CREATE TABLE IF NOT EXISTS clan_memory_member_links (
-    memory_member_link_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
-    member_id INTEGER REFERENCES members(member_id) ON DELETE SET NULL,
-    member_tag TEXT,
-    relation_type TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS clan_memory_event_links (
-    memory_event_link_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
-    event_type TEXT NOT NULL,
-    event_id TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    UNIQUE(memory_id, event_type, event_id)
-);
-
-CREATE TABLE IF NOT EXISTS clan_memory_evidence_refs (
-    evidence_ref_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
-    evidence_type TEXT NOT NULL,
-    evidence_ref TEXT NOT NULL,
-    evidence_label TEXT,
-    evidence_url TEXT,
-    metadata_json TEXT,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS clan_memory_versions (
-    memory_version_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
-    version_number INTEGER NOT NULL,
-    changed_at TEXT NOT NULL,
-    changed_by TEXT NOT NULL,
-    title TEXT,
-    body TEXT,
-    summary TEXT,
-    status TEXT,
-    scope TEXT,
-    metadata_json TEXT,
-    confidence REAL,
-    UNIQUE(memory_id, version_number)
-);
-
-CREATE TABLE IF NOT EXISTS clan_memory_audit_log (
-    audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    memory_id INTEGER NOT NULL REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
-    changed_at TEXT NOT NULL,
-    changed_by TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS memory_log (
+    log_id INTEGER PRIMARY KEY,
+    memory_id INTEGER NOT NULL,
     action TEXT NOT NULL,
-    payload_json TEXT
+    actor TEXT NOT NULL,
+    at TEXT NOT NULL,
+    diff_json TEXT
 );
 
-CREATE TABLE IF NOT EXISTS clan_memory_embeddings (
-    memory_id INTEGER PRIMARY KEY REFERENCES clan_memories(memory_id) ON DELETE CASCADE,
-    embedding_model TEXT NOT NULL,
-    vector_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS clan_memory_index_status (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
-INSERT OR IGNORE INTO clan_memory_index_status (key, value) VALUES ('sqlite_vec_enabled', '0');
-
-CREATE VIRTUAL TABLE IF NOT EXISTS clan_memories_fts USING fts5(
-    title,
-    summary,
-    body,
-    content='clan_memories',
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    title, summary, body,
+    content='memories',
     content_rowid='memory_id'
 );
-
-CREATE TRIGGER IF NOT EXISTS clan_memories_ai AFTER INSERT ON clan_memories BEGIN
-    INSERT INTO clan_memories_fts(rowid, title, summary, body)
+CREATE TRIGGER IF NOT EXISTS memories_fts_ai AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, title, summary, body)
     VALUES (new.memory_id, new.title, new.summary, new.body);
 END;
-
-CREATE TRIGGER IF NOT EXISTS clan_memories_ad AFTER DELETE ON clan_memories BEGIN
-    INSERT INTO clan_memories_fts(clan_memories_fts, rowid, title, summary, body)
+CREATE TRIGGER IF NOT EXISTS memories_fts_ad AFTER DELETE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, title, summary, body)
     VALUES('delete', old.memory_id, old.title, old.summary, old.body);
 END;
-
-CREATE TRIGGER IF NOT EXISTS clan_memories_au AFTER UPDATE ON clan_memories BEGIN
-    INSERT INTO clan_memories_fts(clan_memories_fts, rowid, title, summary, body)
+CREATE TRIGGER IF NOT EXISTS memories_fts_au AFTER UPDATE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, title, summary, body)
     VALUES('delete', old.memory_id, old.title, old.summary, old.body);
-    INSERT INTO clan_memories_fts(rowid, title, summary, body)
+    INSERT INTO memories_fts(rowid, title, summary, body)
     VALUES (new.memory_id, new.title, new.summary, new.body);
 END;
-
-CREATE INDEX IF NOT EXISTS idx_clan_memories_scope_status_created
-    ON clan_memories(scope, status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_clan_memories_member
-    ON clan_memories(member_id, member_tag, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_clan_memories_war
-    ON clan_memories(war_season_id, war_week_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_clan_memories_event
-    ON clan_memories(event_type, event_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_clan_memories_source
-    ON clan_memories(source_type, is_inference, confidence, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_clan_memory_evidence_lookup
-    ON clan_memory_evidence_refs(memory_id, evidence_type, evidence_ref);
-CREATE INDEX IF NOT EXISTS idx_clan_memory_member_links_lookup
-    ON clan_memory_member_links(member_id, member_tag, relation_type);
-CREATE INDEX IF NOT EXISTS idx_clan_memory_event_links_lookup
-    ON clan_memory_event_links(event_type, event_id);
 """
 
 
-def _memory_db_path() -> str:
-    """Resolve the memory DB path per-call so the test conftest's env/config
-    overrides are always honored."""
-    from event_core import config
+def _utcnow() -> str:
+    # Engine Z-convention (cold review #8): the table briefly held three
+    # timestamp formats on day one; scripts/migrate_v51/fix_memories_ts.py
+    # normalized the migrated rows to match.
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    return os.environ.get("ELIXIR_V5_MEMORY_DB") or config.MEMORY_DB
+
+def _canon_tag(tag: Optional[str]) -> str:
+    from db import _canon_tag as canon
+
+    return canon(tag)
 
 
-def _ensure_memory_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(CLAN_MEMORY_SCHEMA_SQL)
-    conn.commit()
+def _json_or_none(data) -> Optional[str]:
+    if data is None:
+        return None
+    return json.dumps(data, default=str, ensure_ascii=False)
 
+
+# ---------------------------------------------------------------- connection
 
 def get_memory_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
-    """Open a connection to the durable-memory DB (clan_memories*).
+    """v5.1: memories live in the ENGINE DB — this returns a normal
+    operational connection (kept for caller compatibility; the separate
+    memory DB is retired). `db_path` override honored for tests."""
+    import db as _db
 
-    Unlike db.get_connection this does NOT run the v4 migration chain or the
-    schema-compat guard — those are for the operational DB and would wipe a
-    memory-only file. It ensures the clan_memory schema and loads sqlite-vec.
-    """
-    path = os.fspath(db_path or _memory_db_path())
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    # foreign_keys intentionally OFF: the memory DB has no `members` table.
-    if path != ":memory:":
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = NORMAL")
-    _ensure_memory_schema(conn)
-    _enable_sqlite_vec(conn)  # loads vec0 + flips clan_memory_index_status
+    conn = _db.get_connection(db_path) if db_path else _db.get_connection()
+    ensure_memory_schema(conn)
     return conn
 
 
+def ensure_memory_schema(conn: sqlite3.Connection) -> None:
+    """Idempotent CREATEs — the live DB gains the tables on first touch;
+    fresh builds get them from schema_v51."""
+    have = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memories'"
+    ).fetchone()
+    have_fts = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='memories_fts'"
+    ).fetchone()
+    if not (have and have_fts):
+        conn.executescript(MEMORY_SCHEMA_SQL)
+        conn.commit()
+
+
 def managed_memory_connection(fn: Callable) -> Callable:
-    """Like db.managed_connection but defaults to the durable-memory DB."""
     @functools.wraps(fn)
     def wrapper(*args, conn=None, **kwargs):
         close = conn is None
         conn = conn or get_memory_connection()
+        if not close:
+            ensure_memory_schema(conn)
         try:
             return fn(*args, conn=conn, **kwargs)
         finally:
             if close:
                 conn.close()
+
     return wrapper
 
 
-SOURCE_TYPES = {"leader_note", "elixir_inference", "elixir_synthesis", "system"}
-SCOPES = {"public", "leadership", "system_internal"}
-STATUSES = {"active", "archived", "deleted"}
-
+# ---------------------------------------------------------------- validation
 
 class MemoryValidationError(ValueError):
     pass
@@ -249,33 +198,35 @@ class MemorySearchResult:
     components: dict
 
 
-def _validate_provenance(source_type: str, is_inference: bool, confidence: float) -> None:
-    if source_type not in SOURCE_TYPES:
-        raise MemoryValidationError(f"invalid source_type: {source_type}")
-    if not (0.0 <= float(confidence) <= 1.0):
-        raise MemoryValidationError("confidence must be between 0.0 and 1.0")
-    if source_type == "leader_note" and is_inference:
-        raise MemoryValidationError("leader_note memories cannot be marked as inference")
-    if source_type == "elixir_inference" and not is_inference:
-        raise MemoryValidationError("elixir_inference memories must set is_inference=true")
-    if source_type == "elixir_inference" and float(confidence) >= 1.0:
-        raise MemoryValidationError("elixir_inference confidence must be less than 1.0")
-    # elixir_synthesis: arc memories written by the weekly synthesis job.
-    # These are canonical, cross-referenced, human-digestible summaries — not
-    # hedged inferences — so they can carry confidence=1.0 and is_inference=0.
+def _norm_kind(source_type: str) -> str:
+    kind = _KIND_MAP.get((source_type or "").strip())
+    if not kind:
+        raise MemoryValidationError(f"invalid source_type/kind: {source_type}")
+    return kind
+
+
+def _norm_scope(scope: str) -> str:
+    if scope not in SCOPES:
+        raise MemoryValidationError(f"invalid scope: {scope}")
+    return "leadership" if scope == "system_internal" else scope
 
 
 def _allowed_scopes(viewer_scope: str, include_system_internal: bool = False) -> tuple[str, ...]:
     if viewer_scope == "public":
         return ("public",)
-    if viewer_scope == "leadership":
-        scopes = ["public", "leadership"]
-        if include_system_internal:
-            scopes.append("system_internal")
-        return tuple(scopes)
-    if viewer_scope == "system_internal":
-        return ("public", "leadership", "system_internal")
+    if viewer_scope in ("leadership", "system_internal"):
+        return ("public", "leadership")
     raise MemoryValidationError(f"invalid viewer scope: {viewer_scope}")
+
+
+def _validate_provenance(source_type: str, is_inference: bool, confidence: float) -> None:
+    kind = _norm_kind(source_type)
+    if not (0.0 <= float(confidence) <= 1.0):
+        raise MemoryValidationError("confidence must be between 0.0 and 1.0")
+    if kind == "leader_note" and is_inference:
+        raise MemoryValidationError("leader_note memories cannot be marked as inference")
+    if kind == "inference" and float(confidence) >= 1.0:
+        raise MemoryValidationError("elixir_inference confidence must be less than 1.0")
 
 
 def _normalize_date(value: Optional[str]) -> Optional[str]:
@@ -297,63 +248,48 @@ def _parse_utc_datetime(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _build_filter_where(filters: Optional[dict], args: list) -> str:
-    filters = filters or {}
-    clauses = []
-    if filters.get("member_id") is not None:
-        clauses.append("m.member_id = ?")
-        args.append(filters["member_id"])
-    if filters.get("member_tag"):
-        clauses.append("m.member_tag = ?")
-        args.append(_canon_tag(filters["member_tag"]))
-    for key in ("role", "war_season_id", "war_week_id", "event_type", "event_id", "scope", "source_type", "status"):
-        value = filters.get(key)
-        if value is not None:
-            clauses.append(f"m.{key} = ?")
-            args.append(value)
-    if filters.get("is_inference") is not None:
-        clauses.append("m.is_inference = ?")
-        args.append(1 if filters.get("is_inference") else 0)
-    created_after = _normalize_date(filters.get("created_after"))
-    created_before = _normalize_date(filters.get("created_before"))
-    if created_after:
-        clauses.append("m.created_at >= ?")
-        args.append(created_after)
-    if created_before:
-        clauses.append("m.created_at <= ?")
-        args.append(created_before)
-    return (" AND " + " AND ".join(clauses)) if clauses else ""
+# ---------------------------------------------------------------- row shape
+
+def _event_key(event_type: Optional[str], event_id: Optional[str]) -> Optional[str]:
+    if event_type and event_id:
+        return f"{event_type}:{event_id}"
+    return event_type or event_id or None
 
 
 def _fetch_memory(conn, memory_id: int) -> Optional[dict]:
-    row = conn.execute(
-        "SELECT * FROM clan_memories WHERE memory_id = ?",
-        (memory_id,),
-    ).fetchone()
+    row = conn.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,)).fetchone()
     if not row:
         return None
     item = dict(row)
-    item["metadata_json"] = json.loads(item["metadata_json"] or "{}")
+    # Legacy aliases so pre-rebuild callers keep working.
+    item["source_type"] = _LEGACY_SOURCE.get(item["kind"], item["kind"])
+    item["is_inference"] = 1 if item["kind"] == "inference" else 0
+    item["status"] = "archived" if item.get("retired_at") else "active"
+    item["metadata_json"] = {}
+    ek = item.get("source_event_key") or ""
+    if ":" in ek:
+        item["event_type"], item["event_id"] = ek.split(":", 1)
+    else:
+        item["event_type"], item["event_id"] = (ek or None), None
+    item["channel_id"] = item.get("channel_key")
     item["tags"] = [
-        r["tag"] for r in conn.execute(
-            "SELECT t.tag FROM clan_memory_tags t JOIN clan_memory_tag_links l ON l.tag_id = t.tag_id WHERE l.memory_id = ? ORDER BY t.tag ASC",
-            (memory_id,),
+        r["tag"]
+        for r in conn.execute(
+            "SELECT tag FROM memory_tags WHERE memory_id = ? ORDER BY tag", (memory_id,)
         ).fetchall()
     ]
-    evidence = conn.execute(
-        "SELECT evidence_type, evidence_ref, evidence_label, evidence_url, metadata_json, created_at "
-        "FROM clan_memory_evidence_refs WHERE memory_id = ? ORDER BY evidence_ref_id ASC",
-        (memory_id,),
-    ).fetchall()
-    item["evidence_refs"] = [
-        {
-            **dict(r),
-            "metadata_json": json.loads(r["metadata_json"] or "{}"),
-        }
-        for r in evidence
-    ]
+    item["evidence_refs"] = []
     return item
 
+
+def _log(conn, memory_id: int, action: str, actor: str, diff: Optional[dict] = None) -> None:
+    conn.execute(
+        "INSERT INTO memory_log (memory_id, action, actor, at, diff_json) VALUES (?, ?, ?, ?, ?)",
+        (memory_id, action, actor, _utcnow(), _json_or_none(diff)),
+    )
+
+
+# ---------------------------------------------------------------- writers
 
 @managed_memory_connection
 def create_memory(*, body: str, source_type: str, is_inference: bool, confidence: float,
@@ -365,48 +301,43 @@ def create_memory(*, body: str, source_type: str, is_inference: bool, confidence
                   event_type: Optional[str] = None, event_id: Optional[str] = None,
                   retention_class: str = "standard", expires_at: Optional[str] = None,
                   metadata: Optional[dict] = None, conn=None) -> dict:
-    if scope not in SCOPES:
-        raise MemoryValidationError(f"invalid scope: {scope}")
+    """Signature preserved from the old store; member_id / role /
+    retention_class / war_* are accepted-and-absorbed (war ids fold into the
+    event key when no event pair is given; the rest are legacy no-ops)."""
+    del member_id, role, retention_class  # legacy params, no v5.1 columns
     if status not in STATUSES:
         raise MemoryValidationError(f"invalid status: {status}")
     _validate_provenance(source_type, is_inference, confidence)
+    kind = _norm_kind(source_type)
     now = _utcnow()
+    ek = _event_key(event_type, event_id) or _event_key(war_season_id, war_week_id)
     cur = conn.execute(
-        "INSERT INTO clan_memories (created_at, updated_at, created_by, updated_by, source_type, is_inference, confidence, "
-        "scope, status, title, body, summary, member_id, member_tag, role, channel_id, war_season_id, war_week_id, event_type, "
-        "event_id, retention_class, expires_at, metadata_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        """INSERT INTO memories (kind, title, body, summary, scope, confidence,
+               member_tag, channel_key, source_event_key, created_by,
+               created_at, updated_at, expires_at, retired_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            now,
-            now,
-            created_by,
-            created_by,
-            source_type,
-            1 if is_inference else 0,
-            float(confidence),
-            scope,
-            status,
-            title,
+            kind,
+            title or (body[:80] if body else "(untitled)"),
             body,
             summary,
-            member_id,
+            _norm_scope(scope),
+            float(confidence),
             _canon_tag(member_tag) if member_tag else None,
-            role,
             str(channel_id) if channel_id else None,
-            war_season_id,
-            war_week_id,
-            event_type,
-            event_id,
-            retention_class,
+            ek,
+            created_by,
+            now,
+            now,
             _normalize_date(expires_at),
-            _json_or_none(metadata or {}),
+            now if status in ("archived", "deleted") else None,
         ),
     )
     memory_id = cur.lastrowid
-    conn.execute(
-        "INSERT INTO clan_memory_audit_log (memory_id, changed_at, changed_by, action, payload_json) VALUES (?, ?, ?, 'create', ?)",
-        (memory_id, now, created_by, _json_or_none({"source_type": source_type, "scope": scope})),
-    )
+    if metadata:
+        _log(conn, memory_id, "created", created_by, {"metadata": metadata, "kind": kind})
+    else:
+        _log(conn, memory_id, "created", created_by, {"kind": kind})
     conn.commit()
     return _fetch_memory(conn, memory_id)
 
@@ -415,16 +346,12 @@ def create_memory(*, body: str, source_type: str, is_inference: bool, confidence
 def attach_tags(memory_id: int, tags: Iterable[str], *, actor: str, conn=None) -> list[str]:
     clean = sorted({t.strip().lower() for t in (tags or []) if t and t.strip()})
     for tag in clean:
-        conn.execute("INSERT OR IGNORE INTO clan_memory_tags (tag, created_at) VALUES (?, ?)", (tag, _utcnow()))
-        tag_row = conn.execute("SELECT tag_id FROM clan_memory_tags WHERE tag = ?", (tag,)).fetchone()
         conn.execute(
-            "INSERT OR IGNORE INTO clan_memory_tag_links (memory_id, tag_id, created_at) VALUES (?, ?, ?)",
-            (memory_id, tag_row["tag_id"], _utcnow()),
+            "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?, ?)",
+            (memory_id, tag),
         )
-    conn.execute(
-        "INSERT INTO clan_memory_audit_log (memory_id, changed_at, changed_by, action, payload_json) VALUES (?, ?, ?, 'attach_tags', ?)",
-        (memory_id, _utcnow(), actor, _json_or_none({"tags": clean})),
-    )
+    if clean:
+        _log(conn, memory_id, "edited", actor, {"tags": clean})
     conn.commit()
     return clean
 
@@ -434,16 +361,18 @@ def attach_evidence_ref(memory_id: int, *, evidence_type: str, evidence_ref: str
                         actor: str, evidence_label: Optional[str] = None,
                         evidence_url: Optional[str] = None, metadata: Optional[dict] = None,
                         conn=None) -> None:
-    conn.execute(
-        "INSERT INTO clan_memory_evidence_refs (memory_id, evidence_type, evidence_ref, evidence_label, evidence_url, metadata_json, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (memory_id, evidence_type, evidence_ref, evidence_label, evidence_url, _json_or_none(metadata or {}), _utcnow()),
-    )
-    conn.execute(
-        "INSERT INTO clan_memory_audit_log (memory_id, changed_at, changed_by, action, payload_json) VALUES (?, ?, ?, 'attach_evidence', ?)",
-        (memory_id, _utcnow(), actor, _json_or_none({"evidence_type": evidence_type, "evidence_ref": evidence_ref})),
-    )
+    """v5.1: the evidence-ref satellite is gone (0 rows ever) — the reference
+    lands in memory_log so provenance is still recorded."""
+    _log(conn, memory_id, "edited", actor, {
+        "evidence": {"type": evidence_type, "ref": evidence_ref,
+                     "label": evidence_label, "url": evidence_url,
+                     "metadata": metadata or {}},
+    })
     conn.commit()
+
+
+_UPDATABLE = {"title", "body", "summary", "scope", "confidence", "member_tag",
+              "channel_id", "event_type", "event_id", "expires_at"}
 
 
 @managed_memory_connection
@@ -451,58 +380,46 @@ def update_memory(memory_id: int, *, actor: str, conn=None, **updates) -> dict:
     current = _fetch_memory(conn, memory_id)
     if not current:
         raise MemoryValidationError(f"memory not found: {memory_id}")
-    merged = dict(current)
-    merged.update({k: v for k, v in updates.items() if v is not None})
-    _validate_provenance(merged["source_type"], bool(merged["is_inference"]), float(merged["confidence"]))
-
-    version = conn.execute(
-        "SELECT COALESCE(MAX(version_number), 0) AS version_no FROM clan_memory_versions WHERE memory_id = ?",
-        (memory_id,),
-    ).fetchone()["version_no"] + 1
-    conn.execute(
-        "INSERT INTO clan_memory_versions (memory_id, version_number, changed_at, changed_by, title, body, summary, status, scope, metadata_json, confidence) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            memory_id,
-            version,
-            _utcnow(),
-            actor,
-            current.get("title"),
-            current.get("body"),
-            current.get("summary"),
-            current.get("status"),
-            current.get("scope"),
-            _json_or_none(current.get("metadata_json") or {}),
-            current.get("confidence"),
-        ),
-    )
-    allowed = {
-        "title", "body", "summary", "status", "scope", "confidence", "source_type", "is_inference", "member_id", "member_tag",
-        "role", "channel_id", "war_season_id", "war_week_id", "event_type", "event_id", "retention_class", "expires_at", "metadata_json",
-    }
-    cols = []
-    args = []
+    cols, args, diff = [], [], {}
+    status = updates.pop("status", None)
     for key, value in updates.items():
-        if key not in allowed:
+        if key not in _UPDATABLE or value is None:
             continue
-        if key == "member_tag" and value:
+        if key == "member_tag":
             value = _canon_tag(value)
-        if key == "is_inference":
-            value = 1 if value else 0
-        if key == "metadata":
-            key = "metadata_json"
-            value = _json_or_none(value)
+        if key == "channel_id":
+            cols.append("channel_key = ?")
+            args.append(str(value))
+            diff[key] = value
+            continue
+        if key in ("event_type", "event_id"):
+            continue  # handled below as a pair
         if key == "expires_at":
             value = _normalize_date(value)
+        if key == "scope":
+            value = _norm_scope(value)
         cols.append(f"{key} = ?")
         args.append(value)
-    cols.extend(["updated_at = ?", "updated_by = ?"])
-    args.extend([_utcnow(), actor, memory_id])
-    conn.execute(f"UPDATE clan_memories SET {', '.join(cols)} WHERE memory_id = ?", args)
-    conn.execute(
-        "INSERT INTO clan_memory_audit_log (memory_id, changed_at, changed_by, action, payload_json) VALUES (?, ?, ?, 'update', ?)",
-        (memory_id, _utcnow(), actor, _json_or_none({"fields": sorted([k for k in updates if k in allowed])})),
-    )
+        diff[key] = value
+    ek = _event_key(updates.get("event_type"), updates.get("event_id"))
+    if ek:
+        cols.append("source_event_key = ?")
+        args.append(ek)
+        diff["source_event_key"] = ek
+    if status in ("archived", "deleted"):
+        cols.append("retired_at = ?")
+        args.append(_utcnow())
+        diff["status"] = status
+    elif status == "active":
+        cols.append("retired_at = NULL")
+        diff["status"] = status
+    if not cols:
+        return current
+    cols.append("updated_at = ?")
+    args.extend([_utcnow(), memory_id])
+    conn.execute(f"UPDATE memories SET {', '.join(cols)} WHERE memory_id = ?", args)
+    _log(conn, memory_id, "retired" if status in ("archived", "deleted") else "edited",
+         actor, diff)
     conn.commit()
     return _fetch_memory(conn, memory_id)
 
@@ -516,17 +433,75 @@ def soft_delete_memory(memory_id: int, *, actor: str, conn: Optional[sqlite3.Con
 
 
 @managed_memory_connection
+def purge_expired_memories(*, conn=None) -> int:
+    """Real expiry (memory.md §2.4): hard-delete rows past expires_at, and
+    retired rows past the grace window. Called from db-maintenance."""
+    now = _utcnow()
+    cur = conn.execute(
+        """DELETE FROM memories WHERE
+             (expires_at IS NOT NULL AND expires_at <= ?)
+             OR (retired_at IS NOT NULL
+                 AND retired_at <= strftime('%Y-%m-%dT%H:%M:%SZ', ?, ?))""",
+        (now, now, f"-{RETIRED_PURGE_GRACE_DAYS} days"),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+def upsert_embedding(memory_id: int, embedding: list, *, model: str = "", conn=None) -> None:
+    """Retired (D2: no embeddings in v1). No-op kept for import compatibility."""
+    log.debug("upsert_embedding is retired in v5.1 (memory %s ignored)", memory_id)
+
+
+# ---------------------------------------------------------------- readers
+
+def _filter_where(filters: Optional[dict], args: list) -> str:
+    filters = filters or {}
+    clauses = []
+    if filters.get("member_tag"):
+        clauses.append("m.member_tag = ?")
+        args.append(_canon_tag(filters["member_tag"]))
+    if filters.get("scope"):
+        clauses.append("m.scope = ?")
+        args.append(_norm_scope(filters["scope"]))
+    if filters.get("source_type"):
+        clauses.append("m.kind = ?")
+        args.append(_norm_kind(filters["source_type"]))
+    if filters.get("kind"):
+        clauses.append("m.kind = ?")
+        args.append(_norm_kind(filters["kind"]))
+    ek = _event_key(filters.get("event_type"), filters.get("event_id"))
+    if ek:
+        if filters.get("event_id"):
+            clauses.append("m.source_event_key = ?")
+            args.append(ek)
+        else:
+            clauses.append("(m.source_event_key = ? OR m.source_event_key LIKE ?)")
+            args.extend([ek, f"{ek}:%"])
+    if filters.get("channel_id"):
+        clauses.append("m.channel_key = ?")
+        args.append(str(filters["channel_id"]))
+    created_after = _normalize_date(filters.get("created_after"))
+    created_before = _normalize_date(filters.get("created_before"))
+    if created_after:
+        clauses.append("m.created_at >= ?")
+        args.append(created_after)
+    if created_before:
+        clauses.append("m.created_at <= ?")
+        args.append(created_before)
+    return (" AND " + " AND ".join(clauses)) if clauses else ""
+
+
+@managed_memory_connection
 def get_memory(memory_id: int, *, viewer_scope: str = "leadership", include_system_internal: bool = False,
                include_archived: bool = False, include_deleted: bool = False, conn=None) -> Optional[dict]:
-    scopes = _allowed_scopes(viewer_scope, include_system_internal=include_system_internal)
+    scopes = _allowed_scopes(viewer_scope, include_system_internal)
     row = _fetch_memory(conn, memory_id)
     if not row:
         return None
     if row["scope"] not in scopes:
         return None
-    if row["status"] == "deleted" and not include_deleted:
-        return None
-    if row["status"] == "archived" and not include_archived:
+    if row.get("retired_at") and not (include_archived or include_deleted):
         return None
     if row.get("expires_at") and row["expires_at"] <= _utcnow():
         return None
@@ -537,135 +512,185 @@ def get_memory(memory_id: int, *, viewer_scope: str = "leadership", include_syst
 def list_memories(*, viewer_scope: str = "leadership", include_system_internal: bool = False,
                   include_archived: bool = False, include_deleted: bool = False,
                   filters: Optional[dict] = None, limit: int = 50, conn=None) -> list[dict]:
-    scopes = _allowed_scopes(viewer_scope, include_system_internal=include_system_internal)
+    scopes = _allowed_scopes(viewer_scope, include_system_internal)
     args: list = list(scopes)
-    sql = (
-        "SELECT m.memory_id FROM clan_memories m WHERE m.scope IN ({}) ".format(",".join("?" for _ in scopes))
+    sql = "SELECT m.memory_id FROM memories m WHERE m.scope IN ({})".format(
+        ",".join("?" for _ in scopes)
     )
-    if not include_archived:
-        sql += " AND m.status != 'archived'"
-    if not include_deleted:
-        sql += " AND m.status != 'deleted'"
+    if not (include_archived or include_deleted):
+        sql += " AND m.retired_at IS NULL"
     sql += " AND (m.expires_at IS NULL OR m.expires_at > ?)"
     args.append(_utcnow())
-    sql += _build_filter_where(filters, args)
-    sql += " ORDER BY m.created_at DESC, m.memory_id DESC LIMIT ?"
-    args.append(limit)
+    sql += _filter_where(filters, args)
+    sql += " ORDER BY m.updated_at DESC, m.memory_id DESC LIMIT ?"
+    args.append(int(limit))
     rows = conn.execute(sql, args).fetchall()
-    return [_fetch_memory(conn, row["memory_id"]) for row in rows]
+    return [_fetch_memory(conn, r["memory_id"]) for r in rows]
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
+def _recency(updated_at: str, now: datetime) -> float:
+    try:
+        age_days = max(0.0, (now - _parse_utc_datetime(updated_at)).total_seconds() / 86400.0)
+    except (TypeError, ValueError):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
+    return 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS)
 
 
 @managed_memory_connection
-def upsert_embedding(memory_id: int, embedding: list[float], *, model: str = "text-embedding-3-small", conn=None) -> None:
-    now = _utcnow()
-    payload = json.dumps(embedding)
-    conn.execute(
-        "INSERT INTO clan_memory_embeddings (memory_id, embedding_model, vector_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?) "
-        "ON CONFLICT(memory_id) DO UPDATE SET embedding_model = excluded.embedding_model, vector_json = excluded.vector_json, updated_at = excluded.updated_at",
-        (memory_id, model, payload, now, now),
-    )
-    conn.execute(
-        "UPDATE clan_memories SET embedding_model = ?, embedding_created_at = ? WHERE memory_id = ?",
-        (model, now, memory_id),
-    )
-    conn.commit()
+def select_memories(*, member_tag: Optional[str] = None, channel_key: Optional[str] = None,
+                    query: Optional[str] = None, tags: Optional[list] = None,
+                    viewer_scope: str = "public",
+                    limit: int = 5, conn=None) -> list[dict]:
+    """Ranked selection for answer-time context (memory.md §2.3):
+    score = W_MATCH·match + W_CONF·confidence + W_RECENCY·decay(updated_at).
+    Deterministic; no embeddings.
+
+    tags: candidates must carry ALL given tags (the Editor's rubric retrieval,
+    editor.md §3 — tag-scoped pools like 'editorial' rank within themselves)."""
+    scopes = _allowed_scopes(viewer_scope)
+    now = datetime.now(timezone.utc)
+    match: dict[int, float] = {}
+    tags = [t.strip().lower() for t in (tags or []) if t and t.strip()]
+
+    def scope_sql(alias="m"):
+        return f"{alias}.scope IN ({','.join('?' for _ in scopes)}) AND {alias}.retired_at IS NULL " \
+               f"AND ({alias}.expires_at IS NULL OR {alias}.expires_at > ?)"
+
+    base_args = [*scopes, _utcnow()]
+    if member_tag:
+        for r in conn.execute(
+            f"SELECT memory_id FROM memories m WHERE {scope_sql()} AND m.member_tag = ? "
+            "ORDER BY m.updated_at DESC LIMIT 40",
+            (*base_args, _canon_tag(member_tag)),
+        ).fetchall():
+            match[r["memory_id"]] = max(match.get(r["memory_id"], 0.0), 1.0)
+    if channel_key:
+        for r in conn.execute(
+            f"SELECT memory_id FROM memories m WHERE {scope_sql()} AND m.channel_key = ? "
+            "ORDER BY m.updated_at DESC LIMIT 40",
+            (*base_args, str(channel_key)),
+        ).fetchall():
+            match[r["memory_id"]] = max(match.get(r["memory_id"], 0.0), 0.6)
+    if query and query.strip():
+        try:
+            for rank, r in enumerate(conn.execute(
+                "SELECT rowid AS memory_id FROM memories_fts WHERE memories_fts MATCH ? "
+                "ORDER BY bm25(memories_fts) LIMIT 40",
+                (_fts_sanitize(query),),
+            ).fetchall(), start=1):
+                strength = 0.8 * (1.0 / (1 + 0.05 * (rank - 1)))
+                match[r["memory_id"]] = max(match.get(r["memory_id"], 0.0), strength)
+        except sqlite3.OperationalError:
+            pass
+    if tags:
+        # Tag pool is its own candidate source: a tag-scoped call must see the
+        # whole pool even when the FTS query matches nothing (base strength is
+        # low — confidence + recency rank within the pool).
+        for r in conn.execute(
+            f"SELECT m.memory_id FROM memories m "
+            f"JOIN memory_tags mt ON mt.memory_id = m.memory_id "
+            f"WHERE {scope_sql()} AND mt.tag = ? "
+            "ORDER BY m.updated_at DESC LIMIT 40",
+            (*base_args, tags[0]),
+        ).fetchall():
+            match[r["memory_id"]] = max(match.get(r["memory_id"], 0.0), 0.4)
+    # Recency backstop ONLY for unfiltered calls (no member/channel/query):
+    # with subject filters given, candidates come from matches alone — the
+    # old unconditional backstop let a fresh high-conf memory about member B
+    # outscore member A's sparse matches and inject wrong-subject facts into
+    # A's answer context (cold review 2026-07-04 #5).
+    if not (member_tag or channel_key or (query and query.strip()) or tags):
+        for r in conn.execute(
+            f"SELECT memory_id FROM memories m WHERE {scope_sql()} "
+            "ORDER BY m.updated_at DESC LIMIT 20",
+            base_args,
+        ).fetchall():
+            match.setdefault(r["memory_id"], 0.0)
+
+    scored = []
+    for memory_id, strength in match.items():
+        row = _fetch_memory(conn, memory_id)
+        if not row or row["scope"] not in scopes:
+            continue
+        if tags and not set(tags) <= set(row.get("tags") or []):
+            continue
+        score = (W_MATCH * strength
+                 + W_CONF * float(row.get("confidence") or 0.0)
+                 + W_RECENCY * _recency(row.get("updated_at") or row.get("created_at"), now))
+        scored.append((score, row))
+    scored.sort(key=lambda x: (-x[0], x[1]["memory_id"]))
+    out = []
+    for score, row in scored[: max(1, int(limit))]:
+        row["rank_score"] = round(score, 4)
+        out.append(row)
+    return out
 
 
-def _rrf_merge(lexical: list[int], vector: list[int], *, k: int = 60) -> dict[int, dict]:
-    scores: dict[int, dict] = {}
-    for rank, memory_id in enumerate(lexical, start=1):
-        item = scores.setdefault(memory_id, {"rrf": 0.0, "lexical_rank": None, "vector_rank": None})
-        item["rrf"] += 1.0 / (k + rank)
-        item["lexical_rank"] = rank
-    for rank, memory_id in enumerate(vector, start=1):
-        item = scores.setdefault(memory_id, {"rrf": 0.0, "lexical_rank": None, "vector_rank": None})
-        item["rrf"] += 1.0 / (k + rank)
-        item["vector_rank"] = rank
-    return scores
+def _fts_sanitize(query: str) -> str:
+    # Bare-word AND query; strips FTS operators so user text can't error the MATCH.
+    words = [w for w in "".join(c if c.isalnum() else " " for c in query).split() if w]
+    return " ".join(words[:12]) or '""'
 
 
 @managed_memory_connection
 def search_memories(query: str, *, viewer_scope: str = "leadership", include_system_internal: bool = False,
                     filters: Optional[dict] = None, limit: int = 10,
-                    embed_query: Optional[Callable[[str], Optional[list[float]]]] = None,
+                    embed_query: Optional[Callable] = None,
                     conn=None) -> list[MemorySearchResult]:
-    candidates = list_memories(
-        viewer_scope=viewer_scope,
-        include_system_internal=include_system_internal,
-        filters=filters,
-        limit=max(200, limit * 10),
-        conn=conn,
+    """FTS-ranked search (embed_query accepted-and-ignored — D2)."""
+    del embed_query
+    scopes = _allowed_scopes(viewer_scope, include_system_internal)
+    args: list = list(scopes)
+    where = "m.scope IN ({}) AND m.retired_at IS NULL AND (m.expires_at IS NULL OR m.expires_at > ?)".format(
+        ",".join("?" for _ in scopes)
     )
-    if not candidates:
-        return []
-    ids = [m["memory_id"] for m in candidates]
-
-    lexical_ranks: list[int] = []
+    args.append(_utcnow())
+    where += _filter_where(filters, args)
     q = (query or "").strip()
+    now = datetime.now(timezone.utc)
+    results: list[MemorySearchResult] = []
     if q:
         try:
-            placeholders = ",".join("?" for _ in ids)
-            fts_rows = conn.execute(
-                "SELECT rowid AS memory_id, bm25(clan_memories_fts) AS score "
-                "FROM clan_memories_fts WHERE clan_memories_fts MATCH ? AND rowid IN ({}) ORDER BY score ASC LIMIT ?".format(placeholders),
-                (q, *ids, limit * 4),
+            rows = conn.execute(
+                f"""SELECT m.memory_id, bm25(memories_fts) AS fts_score
+                    FROM memories_fts JOIN memories m ON m.memory_id = memories_fts.rowid
+                    WHERE memories_fts MATCH ? AND {where}
+                    ORDER BY fts_score LIMIT ?""",
+                (_fts_sanitize(q), *args, limit * 4),
             ).fetchall()
-            lexical_ranks = [r["memory_id"] for r in fts_rows]
         except sqlite3.OperationalError:
-            # FTS fallback (degraded mode)
-            ranked = []
+            rows = []
+        if not rows:  # degraded substring fallback
             low = q.lower()
-            for item in candidates:
-                haystack = f"{item.get('title','')}\n{item.get('summary','')}\n{item.get('body','')}".lower()
-                if low in haystack:
-                    ranked.append((haystack.count(low), item["memory_id"]))
-            ranked.sort(key=lambda x: (-x[0], x[1]))
-            lexical_ranks = [x[1] for x in ranked[: limit * 4]]
+            rows = [
+                {"memory_id": r["memory_id"], "fts_score": 0.0}
+                for r in conn.execute(
+                    f"SELECT m.memory_id, m.title, m.summary, m.body FROM memories m WHERE {where} "
+                    "ORDER BY m.updated_at DESC LIMIT 400",
+                    args,
+                ).fetchall()
+                if low in f"{r['title'] or ''}\n{r['summary'] or ''}\n{r['body'] or ''}".lower()
+            ][: limit * 4]
     else:
-        lexical_ranks = ids[: limit * 4]
-
-    vector_ranks: list[int] = []
-    query_embedding = embed_query(q) if (q and embed_query) else None
-    if query_embedding:
-        emb_rows = conn.execute(
-            "SELECT memory_id, vector_json FROM clan_memory_embeddings WHERE memory_id IN ({})".format(",".join("?" for _ in ids)),
-            ids,
+        rows = conn.execute(
+            f"SELECT m.memory_id, 0.0 AS fts_score FROM memories m WHERE {where} "
+            "ORDER BY m.updated_at DESC LIMIT ?",
+            (*args, limit * 4),
         ).fetchall()
-        scored = []
-        for row in emb_rows:
-            score = _cosine(query_embedding, json.loads(row["vector_json"]))
-            scored.append((score, row["memory_id"]))
-        scored.sort(key=lambda x: (-x[0], x[1]))
-        vector_ranks = [memory_id for _, memory_id in scored[: limit * 4]]
-
-    fused = _rrf_merge(lexical_ranks, vector_ranks)
-    now = datetime.now(timezone.utc)
-    by_id = {m["memory_id"]: m for m in candidates}
-    results = []
-    for memory_id, parts in fused.items():
-        memory = by_id.get(memory_id)
+    for rank, r in enumerate(rows, start=1):
+        memory = _fetch_memory(conn, r["memory_id"])
         if not memory:
             continue
-        score = parts["rrf"]
-        created = _parse_utc_datetime(memory["created_at"])
-        age_days = max(0.0, (now - created).total_seconds() / 86400.0)
-        recency_boost = 1.0 + max(0.0, (30 - age_days) / 300.0)
-        confidence_penalty = 1.0 if not memory["is_inference"] else max(0.4, float(memory["confidence"]))
-        score = score * recency_boost * confidence_penalty
-        results.append(MemorySearchResult(memory=memory, rank_score=score, components=parts))
-    results.sort(key=lambda r: (-r.rank_score, r.memory["created_at"], r.memory["memory_id"]))
-    return results[:limit]
+        strength = 1.0 / (1 + 0.1 * (rank - 1))
+        score = (W_MATCH * strength
+                 + W_CONF * float(memory.get("confidence") or 0.0)
+                 + W_RECENCY * _recency(memory.get("updated_at") or memory.get("created_at"), now))
+        results.append(MemorySearchResult(
+            memory=memory, rank_score=score,
+            components={"fts_rank": rank, "match": strength},
+        ))
+    results.sort(key=lambda x: (-x.rank_score, x.memory["memory_id"]))
+    return results[: max(1, int(limit))]
 
 
 __all__ = [
@@ -679,6 +704,11 @@ __all__ = [
     "attach_evidence_ref",
     "get_memory",
     "list_memories",
-    "upsert_embedding",
+    "select_memories",
     "search_memories",
+    "purge_expired_memories",
+    "upsert_embedding",
+    "get_memory_connection",
+    "managed_memory_connection",
+    "ensure_memory_schema",
 ]

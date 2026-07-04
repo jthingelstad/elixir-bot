@@ -461,7 +461,7 @@ def _format_conversation_episodes(title: str, episodes: list[dict], limit: int) 
 def _get_conversation_memory_totals(conn) -> dict:
     row = conn.execute(
         "SELECT "
-        "(SELECT COUNT(*) FROM memory_facts) AS facts, "
+        "(SELECT COUNT(*) FROM memories) AS facts, "
         "(SELECT COUNT(*) FROM memory_episodes) AS episodes, "
         "(SELECT COUNT(*) FROM channel_state) AS channels"
     ).fetchone()

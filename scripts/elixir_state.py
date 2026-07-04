@@ -13,7 +13,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import db  # noqa: E402
-from event_core.read import event_facades  # noqa: E402
+from runtime.helpers import _stream_facades as event_facades  # noqa: E402
 
 
 DEFAULT_WINDOWS = (7, 28, 56, 90)

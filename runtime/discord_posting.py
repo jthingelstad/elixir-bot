@@ -142,10 +142,23 @@ async def compose_and_post(channel, *, lane: str, context: str, leadership: bool
     except Exception:
         log.exception("compose_and_post: agent failed for lane %s", lane)
         return False
-    from event_core.live.runtime import _extract_copy, _looks_like_meta
+    from engine.recognition.compose import looks_like_meta
+
+    def _extract_copy(res):
+        if isinstance(res, str):
+            return res.strip() or None
+        if isinstance(res, dict):
+            posts = res.get("posts")
+            if posts:
+                p = posts[0]
+                if isinstance(p, dict):
+                    return (p.get("content") or p.get("summary") or "").strip() or None
+                return str(p)
+            return (res.get("content") or res.get("summary") or "").strip() or None
+        return None
 
     copy = _extract_copy(result)
-    if not copy or _looks_like_meta(copy):
+    if not copy or looks_like_meta(copy):
         log.warning("compose_and_post: no usable copy for lane %s", lane)
         return False
     await _post_to_elixir(channel, {"content": copy})

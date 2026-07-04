@@ -1,0 +1,86 @@
+%% Elixir v5 — Domain 2: DURABLE SCOPED CLAN MEMORY
+%% clan_memories is one core entity surrounded by 9 satellite tables plus two
+%% auto-managed search indexes (FTS5 + sqlite-vec, shown dashed/notes).
+%% This is effectively a mini content-management system: versioning, audit,
+%% tags, typed links, evidence, and embeddings.
+erDiagram
+    clan_memories {
+        int memory_id PK
+        text source_type "leader_note|inference|synthesis|system"
+        text scope "public|leadership|system_internal"
+        text status "active|archived|deleted"
+        real confidence
+        text body
+        int member_id FK
+    }
+    clan_memory_tags {
+        int tag_id PK
+        text tag UK
+    }
+    clan_memory_tag_links {
+        int memory_id PK,FK
+        int tag_id PK,FK
+    }
+    clan_memory_member_links {
+        int memory_member_link_id PK
+        int memory_id FK
+        int member_id FK
+        text relation_type
+    }
+    clan_memory_event_links {
+        int memory_event_link_id PK
+        int memory_id FK
+        text event_type
+        text event_id
+    }
+    clan_memory_evidence_refs {
+        int evidence_ref_id PK
+        int memory_id FK
+        text evidence_type
+        text evidence_url
+    }
+    clan_memory_versions {
+        int memory_version_id PK
+        int memory_id FK
+        int version_number
+        text changed_by
+    }
+    clan_memory_audit_log {
+        int audit_id PK
+        int memory_id FK
+        text action
+    }
+    clan_memory_embeddings {
+        int memory_id PK,FK
+        text embedding_model
+        text vector_json
+    }
+    clan_memory_index_status {
+        text key PK
+        text value
+    }
+    members {
+        int member_id PK
+        text player_tag UK
+    }
+    clan_memories_fts {
+        text title "FTS5 shadow"
+        text body "(auto-managed)"
+    }
+    clan_memory_vec {
+        int memory_id PK
+        text embedding "vec0 float[1536]"
+    }
+
+    members ||--o{ clan_memories : "about"
+    clan_memories ||--o{ clan_memory_tag_links : "tagged"
+    clan_memory_tags ||--o{ clan_memory_tag_links : "tags"
+    clan_memories ||--o{ clan_memory_member_links : "links"
+    members ||--o{ clan_memory_member_links : "referenced"
+    clan_memories ||--o{ clan_memory_event_links : "links events"
+    clan_memories ||--o{ clan_memory_evidence_refs : "cites"
+    clan_memories ||--o{ clan_memory_versions : "history"
+    clan_memories ||--o{ clan_memory_audit_log : "audited"
+    clan_memories ||--|| clan_memory_embeddings : "embedding"
+    clan_memories ||..|| clan_memories_fts : "indexed (trigger)"
+    clan_memories ||..|| clan_memory_vec : "indexed"

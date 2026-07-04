@@ -11,19 +11,19 @@ from datetime import datetime, timezone
 
 
 def _parse_cr_time(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        clean = value.split(".")[0]
-        return datetime.strptime(clean, "%Y%m%dT%H%M%S")
-    except (ValueError, TypeError):
-        return None
+    from engine.normalize import parse_cr_time  # the single parser (tz-aware)
+
+    return parse_cr_time(value)
 
 
 def _hours_since(dt: datetime | None, now: datetime | None = None) -> float | None:
     if dt is None:
         return None
-    ref = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    # parse_cr_time is tz-aware; a caller-supplied naive `now` is treated as
+    # UTC (pre-normalizer this compared naive-to-naive with identical math).
+    ref = now or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
     delta = ref - dt
     return max(0.0, delta.total_seconds() / 3600)
 

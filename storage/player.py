@@ -7,17 +7,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from db import (
-    _aggregate_card_usage_from_battle_facts,
     _build_form_label,
     _build_form_summary,
     _canon_tag,
     _card_level,
     _played_as,
     _rowdicts,
-    _ensure_member,
-    _hash_payload,
-    _json_or_none,
-    _upsert_member_metadata,
     _utcnow,
     chicago_today,
     chicago_date_for_cr_timestamp,
@@ -188,7 +183,7 @@ def _games_per_day_metadata_fields(member_id: int, *, computed_at: str, conn) ->
     cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(GAMES_PER_DAY_WINDOW_DAYS - 1, 0))).date().isoformat()
     row = conn.execute(
         "SELECT COALESCE(SUM(battles), 0) AS total_battles "
-        "FROM member_daily_battle_rollups WHERE member_id = ? AND battle_date >= ?",
+        "FROM player_daily_battle_rollups WHERE member_id = ? AND battle_date >= ?",
         (member_id, cutoff),
     ).fetchone()
     total_battles = int((row["total_battles"] or 0) if row else 0)
@@ -200,12 +195,10 @@ def _games_per_day_metadata_fields(member_id: int, *, computed_at: str, conn) ->
 
 
 def _card_display_max_level(card: dict) -> int | None:
-    max_level = card.get("maxLevel")
-    if not isinstance(max_level, int) or max_level <= 0:
-        return None
-    if max_level > 16:
-        return max_level
-    return max_level + max(0, 16 - max_level)
+    """Delegates to the normalizer (engine/normalize.py)."""
+    from engine.normalize import card_display_max_level
+
+    return card_display_max_level(card.get("maxLevel"))
 
 
 def _normalize_cards_for_storage(cards: list[dict] | None) -> list[dict]:
@@ -235,419 +228,47 @@ def _normalize_cards_for_storage(cards: list[dict] | None) -> list[dict]:
 
 @managed_connection
 def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    """v5.1: deep-poll persistence is the engine's job — delegate to its
+    emitters (baseline diff → player_events) and projections. Returns [] (the
+    old signal list is retired; recognition consumes the event streams)."""
+    from engine.db import ensure_player
+    from engine.emitters import emit
+    from engine.emitters.player import project_player_aspects
+    from engine import projections as _projections
+
     tag = _canon_tag(player_data.get("tag"))
-    member_id = _ensure_member(conn, tag, player_data.get("name"), status=None)
-    previous = conn.execute(
-        "SELECT snapshot_id, content_hash, exp_level, wins, best_trophies, challenge_max_wins, "
-        "badges_json, achievements_json, current_path_of_legend_season_result_json "
-        "FROM player_profile_snapshots WHERE member_id = ? "
-        "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
-        (member_id,),
-    ).fetchone()
-    # Card-upgrade signals diff the prior card collection. That collection is
-    # stored (deduped) in member_card_collection_snapshots, so read it here —
-    # before the new collection is written below — instead of duplicating the
-    # full card list into player_profile_snapshots.cards_json.
-    previous_card_row = conn.execute(
-        "SELECT cards_json FROM member_card_collection_snapshots WHERE member_id = ? "
-        "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
-        (member_id,),
-    ).fetchone()
-    fetched_at = _utcnow()
-    current_deck = _normalize_cards_for_storage(player_data.get("currentDeck") or [])
-    current_deck_support_cards = _normalize_cards_for_storage(player_data.get("currentDeckSupportCards") or [])
-    cards = _normalize_cards_for_storage(player_data.get("cards") or [])
-    support_cards = _normalize_cards_for_storage(player_data.get("supportCards") or [])
-    favourite = player_data.get("currentFavouriteCard") or {}
-
-    # Build profile values + content hash. When the hash matches the latest
-    # row, slide fetched_at forward instead of writing a duplicate snapshot —
-    # ~62% of player intel refreshes don't change profile content.
-    profile_values = (
-        player_data.get("expLevel"), player_data.get("expPoints"), player_data.get("totalExpPoints"),
-        player_data.get("starPoints"), player_data.get("trophies"), player_data.get("bestTrophies"),
-        player_data.get("wins"), player_data.get("losses"), player_data.get("battleCount"),
-        player_data.get("totalDonations"), player_data.get("donations"), player_data.get("donationsReceived"),
-        player_data.get("warDayWins"), player_data.get("challengeMaxWins"), player_data.get("challengeCardsWon"),
-        player_data.get("tournamentBattleCount"), player_data.get("tournamentCardsWon"),
-        player_data.get("threeCrownWins"), player_data.get("clanCardsCollected"),
-        favourite.get("id"), favourite.get("name"),
-        _json_or_none(player_data.get("leagueStatistics")),
-        _json_or_none(current_deck), _json_or_none(current_deck_support_cards),
-        _json_or_none(player_data.get("badges") or []),
-        _json_or_none(player_data.get("achievements") or []),
-        _json_or_none(player_data.get("currentPathOfLegendSeasonResult")),
-        _json_or_none(player_data.get("lastPathOfLegendSeasonResult")),
-        _json_or_none(player_data.get("bestPathOfLegendSeasonResult")),
-        player_data.get("legacyTrophyRoadHighScore"),
-        _json_or_none(player_data.get("progress")),
-    )
-    profile_hash = _hash_payload(list(profile_values))
-
-    if previous and previous["content_hash"] == profile_hash:
-        conn.execute(
-            "UPDATE player_profile_snapshots SET fetched_at = ? WHERE snapshot_id = ?",
-            (fetched_at, previous["snapshot_id"]),
-        )
-    else:
-        conn.execute(
-            "INSERT INTO player_profile_snapshots (member_id, fetched_at, content_hash, exp_level, exp_points, total_exp_points, star_points, trophies, best_trophies, wins, losses, battle_count, total_donations, donations, donations_received, war_day_wins, challenge_max_wins, challenge_cards_won, tournament_battle_count, tournament_cards_won, three_crown_wins, clan_cards_collected, current_favourite_card_id, current_favourite_card_name, league_statistics_json, current_deck_json, current_deck_support_cards_json, badges_json, achievements_json, current_path_of_legend_season_result_json, last_path_of_legend_season_result_json, best_path_of_legend_season_result_json, legacy_trophy_road_high_score, progress_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (member_id, fetched_at, profile_hash, *profile_values),
-        )
-
-    cards_json_value = _json_or_none(cards) or "[]"
-    support_cards_json_value = _json_or_none(support_cards) or "[]"
-    cards_hash = _hash_payload([cards_json_value, support_cards_json_value])
-    previous_cards = conn.execute(
-        "SELECT snapshot_id, content_hash FROM member_card_collection_snapshots "
-        "WHERE member_id = ? ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
-        (member_id,),
-    ).fetchone()
-    if previous_cards and previous_cards["content_hash"] == cards_hash:
-        conn.execute(
-            "UPDATE member_card_collection_snapshots SET fetched_at = ? WHERE snapshot_id = ?",
-            (fetched_at, previous_cards["snapshot_id"]),
-        )
-    else:
-        conn.execute(
-            "INSERT INTO member_card_collection_snapshots (member_id, fetched_at, cards_json, support_cards_json, content_hash) VALUES (?, ?, ?, ?, ?)",
-            (member_id, fetched_at, cards_json_value, support_cards_json_value, cards_hash),
-        )
-
-    deck_payload = {
-        "cards": current_deck,
-        "support_cards": current_deck_support_cards,
-    }
-    deck_hash = _hash_payload(deck_payload) if (current_deck or current_deck_support_cards) else None
-    previous_deck = conn.execute(
-        "SELECT snapshot_id, deck_hash FROM member_deck_snapshots "
-        "WHERE member_id = ? AND source = 'player_profile' "
-        "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
-        (member_id,),
-    ).fetchone()
-    if previous_deck and deck_hash is not None and previous_deck["deck_hash"] == deck_hash:
-        conn.execute(
-            "UPDATE member_deck_snapshots SET fetched_at = ? WHERE snapshot_id = ?",
-            (fetched_at, previous_deck["snapshot_id"]),
-        )
-    else:
-        conn.execute(
-            "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, support_cards_json, sample_size) VALUES (?, ?, 'player_profile', 'overall', ?, ?, ?, 1)",
-            (member_id, fetched_at, deck_hash, _json_or_none(current_deck) or "[]", _json_or_none(current_deck_support_cards) or "[]"),
-        )
-    _upsert_member_metadata(
-        conn,
-        member_id,
-        **_years_played_metadata_fields(player_data, fetched_at=fetched_at),
-        **_profile_badge_metadata_fields(player_data, fetched_at=fetched_at),
-    )
-    conn.commit()
-    if previous is None:
+    if not tag:
         return []
-    signals = []
-    old_level = previous["exp_level"] if previous else None
-    new_level = player_data.get("expLevel")
-    if isinstance(old_level, int) and isinstance(new_level, int) and new_level > old_level:
-        if new_level % 5 == 0 or (old_level // 5) < (new_level // 5):
-            signals.append({
-                "type": "player_level_up",
-                "tag": tag,
-                "name": player_data.get("name"),
-                "old_level": old_level,
-                "new_level": new_level,
-            })
-
-    old_wins = previous["wins"] if previous else None
-    new_wins = player_data.get("wins")
-    if isinstance(old_wins, int) and isinstance(new_wins, int) and new_wins > old_wins:
-        first_milestone = ((old_wins // 500) + 1) * 500
-        for milestone in range(first_milestone, new_wins + 1, 500):
-            signals.append({
-                "type": "career_wins_milestone",
-                "tag": tag,
-                "name": player_data.get("name"),
-                "old_wins": old_wins,
-                "new_wins": new_wins,
-                "milestone": milestone,
-            })
-
-    # Per-player 4-week cooldown: active pushers set PBs repeatedly and the
-    # signal becomes noise. Skip if we fired for this tag within 28 days.
-    # Also require crossing a 100-trophy boundary so routine +30/+60 PB ticks
-    # don't reach the LLM — the channel is for durable milestones, not every
-    # incremental ladder bump.
-    old_best = previous["best_trophies"] if previous else None
-    new_best = player_data.get("bestTrophies")
-    if (
-        isinstance(old_best, int)
-        and isinstance(new_best, int)
-        and new_best > old_best
-        and (new_best // 100) > (old_best // 100)
-    ):
-        # Lazy import: storage.player is imported by db/__init__.py, so a
-        # module-level `import db` creates a circular-init failure via
-        # storage.tournament → storage.player.
-        import db as _db
-        now = datetime.now(timezone.utc)
-        cursor = _db.get_signal_detector_cursor(
-            "best_trophies_peak_cooldown", scope_key=tag, conn=conn
-        )
-        last_fire = None
-        if cursor and cursor.get("cursor_text"):
-            try:
-                last_fire = datetime.fromisoformat(cursor["cursor_text"])
-                if last_fire.tzinfo is None:
-                    last_fire = last_fire.replace(tzinfo=timezone.utc)
-            except ValueError:
-                last_fire = None
-        if last_fire is None or (now - last_fire) >= timedelta(days=28):
-            signals.append({
-                "type": "best_trophies_peak",
-                "tag": tag,
-                "name": player_data.get("name"),
-                "old_best": old_best,
-                "new_best": new_best,
-                "current_trophies": player_data.get("trophies"),
-            })
-            _db.upsert_signal_detector_cursor(
-                "best_trophies_peak_cooldown",
-                scope_key=tag,
-                cursor_text=now.isoformat(),
-                conn=conn,
-            )
-
-    # v4.7 #30: Challenge wins milestones. 10+ wins in a Classic or 15+/20 in
-    # a Grand Challenge are tournament-level performances; pre-v4.7 we stored
-    # them silently. Fire on crossing specific thresholds.
-    old_cmw = previous["challenge_max_wins"] if previous else None
-    new_cmw = player_data.get("challengeMaxWins")
-    _CHALLENGE_MILESTONES = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
-    if isinstance(old_cmw, int) and isinstance(new_cmw, int) and new_cmw > old_cmw:
-        crossed = sorted(m for m in _CHALLENGE_MILESTONES if old_cmw < m <= new_cmw)
-        for milestone in crossed:
-            signals.append({
-                "type": "challenge_performance_milestone",
-                "tag": tag,
-                "name": player_data.get("name"),
-                "old_best_wins": old_cmw,
-                "new_best_wins": new_cmw,
-                "milestone": milestone,
-            })
-
-    old_pol = {}
-    if previous and previous["current_path_of_legend_season_result_json"]:
-        old_pol = json.loads(previous["current_path_of_legend_season_result_json"] or "{}")
-    new_pol = player_data.get("currentPathOfLegendSeasonResult") or {}
-    old_league = old_pol.get("leagueNumber")
-    new_league = new_pol.get("leagueNumber")
-    old_rank = old_pol.get("rank")
-    new_rank = new_pol.get("rank")
-    if isinstance(old_league, int) and isinstance(new_league, int) and new_league > old_league:
-        signals.append({
-            "type": "path_of_legend_promotion",
-            "tag": tag,
-            "name": player_data.get("name"),
-            "old_league_number": old_league,
-            "new_league_number": new_league,
-            "trophies": new_pol.get("trophies"),
-            "rank": new_rank,
-            "recent_opponents_summary": _compute_recent_opponents_summary(
-                member_id, "is_ranked = 1", conn,
-            ),
-        })
-        # v4.7 #24: Ultimate Champion (league 10) is a season-long
-        # milestone worth a distinct callout on top of the generic promotion.
-        if new_league == 10 and old_league < 10:
-            signals.append({
-                "type": "ultimate_champion_reached",
-                "tag": tag,
-                "name": player_data.get("name"),
-                "trophies": new_pol.get("trophies"),
-                "rank": new_rank,
-            })
-    # v4.7 #23: parity signal for demotions — leaders often want the
-    # early-warning, and the v4.5 awareness loop can choose silence per tick.
-    if isinstance(old_league, int) and isinstance(new_league, int) and new_league < old_league:
-        signals.append({
-            "type": "path_of_legend_demotion",
-            "tag": tag,
-            "name": player_data.get("name"),
-            "old_league_number": old_league,
-            "new_league_number": new_league,
-            "trophies": new_pol.get("trophies"),
-            "rank": new_rank,
-        })
-    # v4.7 #25: top-1000 global rank is rare and newsworthy. Fires both
-    # when rank first becomes non-null and when it improves (lower is better).
-    if isinstance(new_rank, int) and (old_rank is None or (isinstance(old_rank, int) and new_rank < old_rank)):
-        signals.append({
-            "type": "path_of_legend_global_rank_attained",
-            "tag": tag,
-            "name": player_data.get("name"),
-            "old_rank": old_rank,
-            "new_rank": new_rank,
-            "league_number": new_league,
-            "trophies": new_pol.get("trophies"),
-        })
-
-    previous_cards = {}
-    if previous_card_row and previous_card_row["cards_json"]:
-        for card in json.loads(previous_card_row["cards_json"] or "[]"):
-            if card.get("name"):
-                previous_cards[card["name"]] = {
-                    "level": _card_level(card),
-                    "evolution_level": card.get("evolutionLevel") or 0,
-                }
-    for card in cards:
-        name = card.get("name")
-        if not name:
-            continue
-        prev = previous_cards.get(name)
-        old_card_level = prev["level"] if prev else None
-        old_evo_level = prev["evolution_level"] if prev else 0
-        new_card_level = _card_level(card)
-        new_evo_level = card.get("evolutionLevel") or 0
-        rarity = str(card.get("rarity") or "").strip().lower() or None
-        is_champion = _is_champion_card(card)
-        if new_evo_level > old_evo_level:
-            signals.append({
-                "type": "card_evolution_unlocked",
-                "tag": tag,
-                "name": player_data.get("name"),
-                "card_name": name,
-                "rarity": rarity,
-                "old_evolution_level": old_evo_level,
-                "new_evolution_level": new_evo_level,
-                "evolution_kind": "hero" if new_evo_level >= 2 else "evo",
-            })
-        if old_card_level is None:
-            if rarity in CARD_UNLOCK_SIGNAL_RARITIES or is_champion:
-                signals.append({
-                    "type": "new_card_unlocked",
-                    "tag": tag,
-                    "name": player_data.get("name"),
-                    "card_name": name,
-                    "rarity": rarity,
-                    "is_champion": is_champion,
-                    "new_level": new_card_level,
-                })
-            if is_champion:
-                signals.append({
-                    "type": "new_champion_unlocked",
-                    "tag": tag,
-                    "name": player_data.get("name"),
-                    "card_name": name,
-                    "rarity": rarity,
-                    "is_champion": True,
-                    "new_level": new_card_level,
-                })
-            continue
-        if new_card_level is None or new_card_level <= old_card_level:
-            continue
-        for milestone in range(old_card_level + 1, new_card_level + 1):
-            if milestone < CARD_UPGRADE_SIGNAL_MIN_LEVEL:
-                continue
-            signals.append({
-                "type": "card_level_milestone",
-                "tag": tag,
-                "name": player_data.get("name"),
-                "card_name": name,
-                "old_level": old_card_level,
-                "new_level": new_card_level,
-                "milestone": milestone,
-            })
-
-    previous_badges = _indexed_items(json.loads(previous["badges_json"] or "[]")) if previous and previous["badges_json"] else {}
-    current_badges = _indexed_items(player_data.get("badges") or [])
-    previous_years_played = previous_badges.get("YearsPlayed") or {}
-    current_years_played = current_badges.get("YearsPlayed") or {}
-    old_account_years = previous_years_played.get("level")
-    new_account_years = current_years_played.get("level")
-    if (
-        isinstance(old_account_years, int)
-        and isinstance(new_account_years, int)
-        and new_account_years > old_account_years
-    ):
-        signals.append({
-            "type": "cr_account_anniversary",
-            "tag": tag,
-            "name": player_data.get("name"),
-            "old_years": old_account_years,
-            "new_years": new_account_years,
-            "account_age_days": current_years_played.get("progress"),
-        })
-    for badge_name, badge in current_badges.items():
-        if badge_name == "YearsPlayed":
-            continue
-        previous_badge = previous_badges.get(badge_name)
-        if previous_badge is None:
-            if _badge_category(badge_name) != "mastery":
-                signals.append({
-                    "type": "badge_earned",
-                    "tag": tag,
-                    "name": player_data.get("name"),
-                    **_badge_signal_fields(badge),
-                })
-            continue
-        old_level = previous_badge.get("level")
-        new_level = badge.get("level")
-        if isinstance(old_level, int) and isinstance(new_level, int) and new_level > old_level:
-            if _badge_category(badge_name) == "mastery" and new_level < MASTERY_BADGE_SIGNAL_MIN_LEVEL:
-                continue
-            signals.append({
-                "type": "badge_level_milestone",
-                "tag": tag,
-                "name": player_data.get("name"),
-                "old_level": old_level,
-                "new_level": new_level,
-                **_badge_signal_fields(badge),
-            })
-
-    previous_achievements = _indexed_items(json.loads(previous["achievements_json"] or "[]")) if previous and previous["achievements_json"] else {}
-    current_achievements = _indexed_items(player_data.get("achievements") or [])
-    for achievement_name, achievement in current_achievements.items():
-        previous_achievement = previous_achievements.get(achievement_name) or {}
-        old_stars = previous_achievement.get("stars")
-        new_stars = achievement.get("stars")
-        prior_stars = old_stars if isinstance(old_stars, int) else 0
-        if isinstance(new_stars, int) and new_stars > prior_stars:
-            signals.append({
-                "type": "achievement_star_milestone",
-                "tag": tag,
-                "name": player_data.get("name"),
-                "old_stars": prior_stars,
-                "new_stars": new_stars,
-                "completed": new_stars >= 3,
-                **_achievement_signal_fields(achievement),
-            })
-    return signals
+    now = _utcnow()
+    ensure_player(conn, tag, player_data.get("name"), now)
+    for aspect, aspect_payload in project_player_aspects(player_data).items():
+        emit(conn, "player", tag, aspect, aspect_payload, now)
+    _projections.refresh_player_state(conn, tag, player_data, None, now)
+    if player_data.get("cards"):
+        _projections.refresh_card_collection(conn, tag, player_data.get("cards") or [], now)
+    conn.commit()
+    return []
 
 
 @managed_connection
 def get_player_intel_refresh_targets(limit: int = 12, stale_after_hours: int = 6, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    """v5.1: staleness reads poll_state (the adaptive scheduler's ledger,
+    runtime.md §4) instead of profile-snapshot ages."""
     stale_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=stale_after_hours)).strftime("%Y-%m-%dT%H:%M:%S")
     rows = conn.execute(
-        "WITH latest_profiles AS ("
-        "  SELECT member_id, MAX(fetched_at) AS last_profile_at FROM player_profile_snapshots GROUP BY member_id"
-        "), latest_battles AS ("
-        "  SELECT member_id, MAX(battle_time) AS last_battle_at FROM member_battle_facts GROUP BY member_id"
-        ") "
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.role, cs.clan_rank, "
-        "lp.last_profile_at, lb.last_battle_at "
-        "FROM members m "
-        "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "LEFT JOIN latest_profiles lp ON lp.member_id = m.member_id "
-        "LEFT JOIN latest_battles lb ON lb.member_id = m.member_id "
-        "WHERE m.status = 'active' "
+        "SELECT m.player_tag AS member_id, m.player_tag AS tag, m.current_name AS name, "
+        "cs.role, cs.clan_rank, ps.last_profile_poll AS last_profile_at, "
+        "ps.last_battle_seen AS last_battle_at "
+        "FROM players m "
+        "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
+        "LEFT JOIN poll_state ps ON ps.player_tag = m.player_tag "
+        "WHERE EXISTS (SELECT 1 FROM clan_memberships cm "
+        "  WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL) "
         "ORDER BY "
         "CASE cs.role WHEN 'leader' THEN 0 WHEN 'coLeader' THEN 1 WHEN 'elder' THEN 2 ELSE 3 END, "
-        "CASE WHEN lp.last_profile_at IS NULL OR lp.last_profile_at < ? THEN 0 ELSE 1 END, "
-        "CASE WHEN lb.last_battle_at IS NULL OR lb.last_battle_at < ? THEN 0 ELSE 1 END, "
-        "COALESCE(lp.last_profile_at, '') ASC, "
-        "COALESCE(lb.last_battle_at, '') ASC, "
+        "COALESCE(ps.last_profile_poll, '') ASC, "
         "COALESCE(cs.clan_rank, 999) ASC, "
-        "m.current_name COLLATE NOCASE",
-        (stale_cutoff, stale_cutoff),
+        "m.current_name COLLATE NOCASE"
     ).fetchall()
     targets = []
     for row in rows:
@@ -656,7 +277,7 @@ def get_player_intel_refresh_targets(limit: int = 12, stale_after_hours: int = 6
         item["needs_battle_refresh"] = item["last_battle_at"] is None or item["last_battle_at"] < stale_cutoff
         if not item["needs_profile_refresh"] and not item["needs_battle_refresh"]:
             continue
-        targets.append(_member_reference_fields(conn, row["member_id"], item))
+        targets.append(_member_reference_fields(conn, row["tag"], item))
     return targets[:limit]
 
 
@@ -752,35 +373,20 @@ def _resolve_battle_outcome(battle: dict, team: dict, opp: dict | None) -> str |
 
 
 def _expected_battle_delta_for_day(member_id: int, battle_date: str, conn=None):
-    start_utc, end_utc = chicago_day_bounds_utc(battle_date)
-    before_row = conn.execute(
-        "SELECT battle_count FROM player_profile_snapshots "
-        "WHERE member_id = ? AND fetched_at < ? AND battle_count IS NOT NULL "
-        "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
-        (member_id, start_utc),
-    ).fetchone()
-    end_row = conn.execute(
-        "SELECT battle_count FROM player_profile_snapshots "
-        "WHERE member_id = ? AND fetched_at < ? AND battle_count IS NOT NULL "
-        "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
-        (member_id, end_utc),
-    ).fetchone()
-    if not before_row or not end_row:
-        return None
-    before_count = before_row["battle_count"]
-    end_count = end_row["battle_count"]
-    if before_count is None or end_count is None:
-        return None
-    return max(0, int(end_count) - int(before_count))
+    """Retired source (v5.1): the profile battle_count snapshots are gone;
+    the engine's projections own completeness accounting. NULL semantics
+    carried — callers already tolerate None."""
+    del member_id, battle_date, conn
+    return None
 
 
-def _recompute_member_daily_battle_rollups(member_id: int, battle_dates=None, conn=None):
+def _recompute_player_daily_battle_rollups(member_id: int, battle_dates=None, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
         if battle_dates is None:
             rows = conn.execute(
-                "SELECT DISTINCT battle_time FROM member_battle_facts WHERE member_id = ?",
+                "SELECT DISTINCT battle_time FROM battle_events WHERE player_tag = ?",
                 (member_id,),
             ).fetchall()
             battle_dates = sorted(
@@ -798,13 +404,13 @@ def _recompute_member_daily_battle_rollups(member_id: int, battle_dates=None, co
             rows = conn.execute(
                 "SELECT battle_time, battle_type, game_mode_id, game_mode_name, deck_selection, event_tag, tournament_tag, "
                 "outcome, crowns_for, crowns_against, trophy_change, is_war, is_ladder, is_ranked, is_special_event, is_hosted_match "
-                "FROM member_battle_facts "
+                "FROM battle_events "
                 "WHERE member_id = ? AND REPLACE(REPLACE(battle_time, '.000Z', ''), 'Z', '') >= REPLACE(REPLACE(?, '.000Z', ''), 'Z', '') "
                 "AND REPLACE(REPLACE(battle_time, '.000Z', ''), 'Z', '') < REPLACE(REPLACE(?, '.000Z', ''), 'Z', '')",
                 (member_id, start_utc.replace("-", "").replace(":", "").replace("T", "T"), end_utc.replace("-", "").replace(":", "").replace("T", "T")),
             ).fetchall()
             conn.execute(
-                "DELETE FROM member_daily_battle_rollups WHERE member_id = ? AND battle_date = ?",
+                "DELETE FROM player_daily_battle_rollups WHERE member_id = ? AND battle_date = ?",
                 (member_id, battle_date),
             )
             if not rows:
@@ -870,7 +476,7 @@ def _recompute_member_daily_battle_rollups(member_id: int, battle_dates=None, co
             aggregated_at = _utcnow()
             for bucket in buckets.values():
                 conn.execute(
-                    "INSERT INTO member_daily_battle_rollups (member_id, battle_date, mode_group, game_mode_id, game_mode_name, battles, wins, losses, draws, crowns_for, crowns_against, trophy_change_total, first_battle_at, last_battle_at, captured_battles, expected_battle_delta, completeness_ratio, is_complete, last_aggregated_at) "
+                    "INSERT INTO player_daily_battle_rollups (member_id, battle_date, mode_group, game_mode_id, game_mode_name, battles, wins, losses, draws, crowns_for, crowns_against, trophy_change_total, first_battle_at, last_battle_at, captured_battles, expected_battle_delta, completeness_ratio, is_complete, last_aggregated_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         member_id,
@@ -921,7 +527,7 @@ def _recompute_clan_daily_battle_rollups(battle_dates=None, conn=None):
     try:
         if battle_dates is None:
             rows = conn.execute(
-                "SELECT DISTINCT battle_date FROM member_daily_battle_rollups"
+                "SELECT DISTINCT battle_date FROM player_daily_battle_rollups"
             ).fetchall()
             battle_dates = sorted(row["battle_date"] for row in rows if row["battle_date"])
         else:
@@ -931,7 +537,7 @@ def _recompute_clan_daily_battle_rollups(battle_dates=None, conn=None):
             clan_tag, clan_name = _current_clan_identity_for_rollups(battle_date, conn=conn)
             member_rows = conn.execute(
                 "SELECT member_id, mode_group, game_mode_id, game_mode_name, battles, wins, losses, draws, crowns_for, crowns_against, trophy_change_total, captured_battles, expected_battle_delta, completeness_ratio, is_complete "
-                "FROM member_daily_battle_rollups "
+                "FROM player_daily_battle_rollups "
                 "WHERE battle_date = ?",
                 (battle_date,),
             ).fetchall()
@@ -1082,8 +688,8 @@ def _compute_recent_opponents_summary(member_id, mode_predicate, conn, *, limit=
 
     rows = conn.execute(
         f"SELECT outcome, deck_json, opponent_name, opponent_tag, "
-        f"opponent_deck_json, raw_json "
-        f"FROM member_battle_facts "
+        f"NULL AS opponent_deck_json, NULL AS raw_json "
+        f"FROM battle_events "
         f"WHERE member_id = ? AND {mode_predicate} "
         f"ORDER BY battle_time DESC LIMIT ?",
         (member_id, limit),
@@ -1162,7 +768,7 @@ def _latest_battle_time_for_mode(member_id: int, mode: str, conn=None):
     predicate = _BATTLE_MODE_PREDICATES[mode]
     row = conn.execute(
         f"SELECT MAX(battle_time) AS battle_time "
-        f"FROM member_battle_facts WHERE member_id = ? AND {predicate}",
+        f"FROM battle_events WHERE player_tag = ? AND {predicate}",
         (member_id,),
     ).fetchone()
     return row["battle_time"] if row else None
@@ -1171,7 +777,7 @@ def _latest_battle_time_for_mode(member_id: int, mode: str, conn=None):
 def _current_streak_for_mode(member_id: int, mode: str, conn=None) -> dict:
     predicate = _BATTLE_MODE_PREDICATES[mode]
     rows = conn.execute(
-        f"SELECT outcome FROM member_battle_facts "
+        f"SELECT outcome FROM battle_events "
         f"WHERE member_id = ? AND {predicate} "
         "ORDER BY battle_time DESC LIMIT 20",
         (member_id,),
@@ -1221,7 +827,7 @@ def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, pre
         new_rows = conn.execute(
             f"SELECT battle_time, battle_type, game_mode_name, outcome, "
             f"trophy_change, starting_trophies, is_ranked, is_ladder "
-            f"FROM member_battle_facts "
+            f"FROM battle_events "
             f"WHERE member_id = ? AND {predicate} AND battle_time > ? "
             "ORDER BY battle_time DESC",
             (member_id, previous_latest),
@@ -1289,112 +895,25 @@ def _detect_battle_pulse_signals(member_id: int, tag: str, name: str | None, pre
 
 @managed_connection
 def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    """v5.1: battle persistence is the engine's mirror — delegate to
+    engine.ingest + form/rollup projections. Returns [] (signals retired)."""
+    from datetime import datetime as _dt, timezone as _tz
+
+    from engine.db import ensure_player
+    from engine import ingest as _ingest, projections as _projections
+
     tag = _canon_tag(player_tag)
-    member_id = _ensure_member(conn, tag, status=None)
-    # v4.7 (#22): capture per-mode state (ladder, ranked) so we can emit
-    # mode-specific streak / push signals and let the awareness agent post
-    # Trophy Road vs Ranked moments with the right voice.
-    previous_battle_state = _capture_previous_battle_state(member_id, conn=conn)
-    latest_name = None
-    affected_dates = set()
-    for battle in battle_log or []:
-        team = (battle.get("team") or [{}])[0]
-        opp = (battle.get("opponent") or [{}])[0]
-        if not team:
-            continue
-        latest_name = latest_name or team.get("name")
-        battle_date = chicago_date_for_cr_timestamp(battle.get("battleTime"))
-        if battle_date:
-            affected_dates.add(battle_date)
-        crowns_for = team.get("crowns")
-        crowns_against = opp.get("crowns") if opp else None
-        outcome = _resolve_battle_outcome(battle, team, opp)
-        arena = battle.get("arena") or {}
-        classified = _classify_battle(battle)
-        conn.execute(
-            "INSERT OR IGNORE INTO member_battle_facts (member_id, battle_time, battle_type, game_mode_name, game_mode_id, deck_selection, arena_id, arena_name, crowns_for, crowns_against, outcome, trophy_change, starting_trophies, is_competitive, is_ladder, is_ranked, is_war, is_special_event, deck_json, support_cards_json, opponent_deck_json, opponent_support_cards_json, opponent_name, opponent_tag, opponent_clan_tag, event_tag, league_number, is_hosted_match, modifiers_json, team_rounds_json, opponent_rounds_json, boat_battle_side, boat_battle_won, new_towers_destroyed, prev_towers_destroyed, remaining_towers, tournament_tag, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                member_id,
-                battle.get("battleTime"),
-                battle.get("type"),
-                (battle.get("gameMode") or {}).get("name"),
-                (battle.get("gameMode") or {}).get("id"),
-                battle.get("deckSelection"),
-                arena.get("id") if isinstance(arena, dict) else None,
-                arena.get("name") if isinstance(arena, dict) else str(arena or ""),
-                crowns_for,
-                crowns_against,
-                outcome,
-                team.get("trophyChange"),
-                team.get("startingTrophies"),
-                classified["is_competitive"],
-                classified["is_ladder"],
-                classified["is_ranked"],
-                classified["is_war"],
-                classified["is_special_event"],
-                _json_or_none(_normalize_cards_for_storage(team.get("cards") or [])),
-                _json_or_none(_normalize_cards_for_storage(team.get("supportCards") or [])),
-                _json_or_none(_normalize_cards_for_storage(opp.get("cards") or [])) if opp else None,
-                _json_or_none(_normalize_cards_for_storage(opp.get("supportCards") or [])) if opp else None,
-                opp.get("name") if opp else None,
-                _canon_tag(opp.get("tag")) if opp and opp.get("tag") else None,
-                _canon_tag((opp.get("clan") or {}).get("tag")) if opp else None,
-                battle.get("eventTag"),
-                battle.get("leagueNumber"),
-                int(bool(battle.get("isHostedMatch"))) if battle.get("isHostedMatch") is not None else None,
-                _json_or_none(battle.get("modifiers") or []),
-                _json_or_none(team.get("rounds") or []),
-                _json_or_none(opp.get("rounds") or []),
-                battle.get("boatBattleSide"),
-                int(bool(battle.get("boatBattleWon"))) if battle.get("boatBattleWon") is not None else None,
-                battle.get("newTowersDestroyed"),
-                battle.get("prevTowersDestroyed"),
-                battle.get("remainingTowers"),
-                battle.get("tournamentTag"),
-                _json_or_none(battle),
-            ),
-        )
-        # Battle-grain telemetry now lives in the v5 battle_telemetry projection
-        # (event_core.ingest.battles); the legacy game_event_stream shadow write
-        # was retired with F2.
-    recent_rows = conn.execute(
-        "SELECT deck_json, support_cards_json, battle_time FROM member_battle_facts WHERE member_id = ? AND is_competitive = 1 ORDER BY battle_time DESC LIMIT 30",
-        (member_id,),
-    ).fetchall()
-    sample_battles, card_usage = _aggregate_card_usage_from_battle_facts(recent_rows)
-    conn.execute(
-        "INSERT INTO member_card_usage_snapshots (member_id, fetched_at, source, mode_scope, sample_battles, cards_json) VALUES (?, ?, 'battle_log', 'overall', ?, ?)",
-        (member_id, _utcnow(), sample_battles, _json_or_none(card_usage) or "[]"),
-    )
-    if recent_rows:
-        latest_cards = json.loads(recent_rows[0]["deck_json"] or "[]")
-        latest_support_cards = json.loads(recent_rows[0]["support_cards_json"] or "[]")
-        if latest_cards or latest_support_cards:
-            deck_payload = {
-                "cards": latest_cards,
-                "support_cards": latest_support_cards,
-            }
-            conn.execute(
-                "INSERT INTO member_deck_snapshots (member_id, fetched_at, source, mode_scope, deck_hash, deck_json, support_cards_json, sample_size) VALUES (?, ?, 'battle_log', 'recent', ?, ?, ?, ?)",
-                (member_id, _utcnow(), _hash_payload(deck_payload), _json_or_none(latest_cards) or "[]", _json_or_none(latest_support_cards) or "[]", len(recent_rows)),
-            )
-    _recompute_member_daily_battle_rollups(member_id, affected_dates, conn=conn)
-    _recompute_clan_daily_battle_rollups(affected_dates, conn=conn)
-    _recompute_member_recent_form(member_id, conn=conn)
-    _upsert_member_metadata(conn, member_id, **_games_per_day_metadata_fields(member_id, computed_at=_utcnow(), conn=conn))
-    name = latest_name or conn.execute(
-        "SELECT current_name FROM members WHERE member_id = ?",
-        (member_id,),
-    ).fetchone()["current_name"]
-    signals = _detect_battle_pulse_signals(
-        member_id,
-        tag,
-        name,
-        previous_battle_state,
-        conn=conn,
-    )
+    if not tag:
+        return []
+    now_dt = _dt.now(_tz.utc)
+    now = _utcnow()
+    ensure_player(conn, tag, None, now)
+    inserted = _ingest.mirror_battles(conn, tag, battle_log or [], now, None, now=now_dt)
+    if inserted:
+        _projections.refresh_form(conn, tag, now=now)
+        _projections.refresh_rollups(conn, tag, chicago_today())
     conn.commit()
-    return signals
+    return []
 
 
 _LOSSES_SCOPE_PREDICATES = {
@@ -1428,16 +947,16 @@ def get_member_recent_losses(
     member_tag = _canon_tag(tag)
     predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["competitive_10"])
     member_row = conn.execute(
-        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
         return None
     member_id = member_row["member_id"]
     rows = conn.execute(
-        f"SELECT outcome, crowns_for, crowns_against, opponent_deck_json, battle_time, battle_type, game_mode_name, "
-        f"opponent_tag, opponent_name, opponent_clan_tag "
-        f"FROM member_battle_facts WHERE member_id = ? AND {predicate} "
+        f"SELECT outcome, crowns_for, crowns_against, NULL AS opponent_deck_json, battle_time, battle_type, game_mode_name, "
+        f"opponent_tag, NULL AS opponent_name, NULL AS opponent_clan_tag "
+        f"FROM battle_events WHERE player_tag = ? AND {predicate} "
         f"ORDER BY battle_time DESC LIMIT ?",
         (member_id, limit),
     ).fetchall()
@@ -1541,14 +1060,14 @@ def get_member_recent_battles(
 ) -> Optional[dict]:
     """Chronological list of this member's most recent individual battles.
 
-    Returns per-battle rows from member_battle_facts: outcome, crowns, trophy
+    Returns per-battle rows from battle_events: outcome, crowns, trophy
     change, opponent name/tag/clan, and slim own/opponent deck previews.
     Powers the `battles` include on get_member.
     """
     member_tag = _canon_tag(tag)
     predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["overall_10"])
     member_row = conn.execute(
-        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
@@ -1558,8 +1077,8 @@ def get_member_recent_battles(
     capped_limit = min(requested_limit, cap)
     rows = conn.execute(
         f"SELECT battle_time, battle_type, game_mode_name, outcome, crowns_for, crowns_against, "
-        f"trophy_change, deck_json, opponent_deck_json, opponent_name, opponent_tag, opponent_clan_tag "
-        f"FROM member_battle_facts WHERE member_id = ? AND {predicate} "
+        f"trophy_change, deck_json, NULL AS opponent_deck_json, NULL AS opponent_name, opponent_tag, NULL AS opponent_clan_tag "
+        f"FROM battle_events WHERE player_tag = ? AND {predicate} "
         f"ORDER BY battle_time DESC LIMIT ?",
         (member_row["member_id"], capped_limit),
     ).fetchall()
@@ -1636,25 +1155,35 @@ def _rollup_summary(rows) -> dict:
 def get_member_ranked_status(tag: str, days: int = 30, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     member_tag = _canon_tag(tag)
     member_row = conn.execute(
-        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
         return None
 
-    profile = conn.execute(
-        "SELECT fetched_at, trophies, best_trophies, current_path_of_legend_season_result_json, "
-        "last_path_of_legend_season_result_json, best_path_of_legend_season_result_json "
-        "FROM player_profile_snapshots WHERE member_id = ? "
-        "ORDER BY fetched_at DESC, snapshot_id DESC LIMIT 1",
-        (member_row["member_id"],),
+    # v5.1: PoL detail comes from player_current_state (ranked_* columns);
+    # the season-result JSON blobs retired with the profile snapshots.
+    cs = conn.execute(
+        "SELECT observed_at AS fetched_at, trophies, best_trophies, ranked_league, ranked_trophies "
+        "FROM player_current_state WHERE player_tag = ?",
+        (member_tag,),
     ).fetchone()
+    profile = None
+    if cs:
+        profile = {
+            "fetched_at": cs["fetched_at"], "trophies": cs["trophies"],
+            "best_trophies": cs["best_trophies"],
+            "current_path_of_legend_season_result_json": None,
+            "last_path_of_legend_season_result_json": None,
+            "best_path_of_legend_season_result_json": None,
+            "ranked_league": cs["ranked_league"], "ranked_trophies": cs["ranked_trophies"],
+        }
 
-    rollups = list_member_daily_battle_rollups(member_tag, days=days, mode_group="ranked", conn=conn)
+    rollups = list_player_daily_battle_rollups(member_tag, days=days, mode_group="ranked", conn=conn)
     recent = _rollup_summary(rollups)
     latest_battle = conn.execute(
         "SELECT battle_time, game_mode_id, game_mode_name, league_number, outcome, trophy_change "
-        "FROM member_battle_facts WHERE member_id = ? AND is_ranked = 1 "
+        "FROM battle_events WHERE player_tag = ? AND is_ranked = 1 "
         "ORDER BY battle_time DESC LIMIT 1",
         (member_row["member_id"],),
     ).fetchone()
@@ -1663,9 +1192,10 @@ def get_member_ranked_status(tag: str, days: int = 30, conn: Optional[sqlite3.Co
         "member_tag": member_tag,
         "member_name": member_row["current_name"],
         "window_days": max(1, int(days or 30)),
-        "current": _profile_pol_payload(profile, "current_path_of_legend_season_result_json") if profile else None,
-        "last": _profile_pol_payload(profile, "last_path_of_legend_season_result_json") if profile else None,
-        "best": _profile_pol_payload(profile, "best_path_of_legend_season_result_json") if profile else None,
+        "current": ({"leagueNumber": profile.get("ranked_league"), "trophies": profile.get("ranked_trophies")}
+                    if profile and profile.get("ranked_league") is not None else None),
+        "last": None,
+        "best": None,
         "trophy_road": {
             "trophies": profile["trophies"] if profile else None,
             "best_trophies": profile["best_trophies"] if profile else None,
@@ -1680,18 +1210,17 @@ def get_member_ranked_status(tag: str, days: int = 30, conn: Optional[sqlite3.Co
 
 
 @managed_connection
-def list_member_daily_battle_rollups(tag: str, days: int = 30, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def list_player_daily_battle_rollups(tag: str, days: int = 30, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     member_tag = _canon_tag(tag)
     cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()
-    where = ["m.player_tag = ?", "r.battle_date >= ?"]
+    where = ["r.player_tag = ?", "r.battle_date >= ?"]
     params = [member_tag, cutoff]
     if mode_group:
         where.append("r.mode_group = ?")
         params.append(mode_group)
     rows = conn.execute(
         "SELECT r.battle_date, r.mode_group, r.game_mode_id, r.game_mode_name, r.battles, r.wins, r.losses, r.draws, r.crowns_for, r.crowns_against, r.trophy_change_total, r.first_battle_at, r.last_battle_at, r.captured_battles, r.expected_battle_delta, r.completeness_ratio, r.is_complete "
-        "FROM member_daily_battle_rollups r "
-        "JOIN members m ON m.member_id = r.member_id "
+        "FROM player_daily_battle_rollups r "
         f"WHERE {' AND '.join(where)} "
         "ORDER BY r.battle_date ASC, r.mode_group ASC, COALESCE(r.game_mode_id, 0) ASC",
         tuple(params),
@@ -1703,12 +1232,12 @@ def list_member_daily_battle_rollups(tag: str, days: int = 30, mode_group: Optio
 def get_member_mode_activity(tag: str, days: int = 30, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     member_tag = _canon_tag(tag)
     member_row = conn.execute(
-        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
         return None
-    rows = list_member_daily_battle_rollups(member_tag, days=days, mode_group=mode_group, conn=conn)
+    rows = list_player_daily_battle_rollups(member_tag, days=days, mode_group=mode_group, conn=conn)
     by_group: dict[str, dict] = {}
     by_game_mode: dict[tuple[str, Optional[int]], dict] = {}
     for row in rows:
@@ -1771,14 +1300,14 @@ def get_member_special_event_activity(
 ) -> Optional[dict]:
     member_tag = _canon_tag(tag)
     member_row = conn.execute(
-        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
         return None
     days = max(1, int(days or 14))
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
-    where = ["bf.member_id = ?", "bf.is_special_event = 1", "bf.battle_time >= ?"]
+    where = ["bf.player_tag = ?", "bf.is_special_event = 1", "bf.battle_time >= ?"]
     params: list = [member_row["member_id"], cutoff]
     if game_mode_id is not None:
         where.append("bf.game_mode_id = ?")
@@ -1792,7 +1321,7 @@ def get_member_special_event_activity(
         "SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
         "SUM(CASE WHEN bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
         "MAX(bf.battle_time) AS latest_battle "
-        "FROM member_battle_facts bf "
+        "FROM battle_events bf "
         f"WHERE {' AND '.join(where)} "
         "GROUP BY bf.game_mode_id, bf.game_mode_name, bf.event_tag "
         "ORDER BY battles DESC, latest_battle DESC",
@@ -1845,14 +1374,14 @@ def _special_event_badge_completions(days: int, conn) -> dict[str, list[dict]]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
     placeholders = ",".join("?" for _ in badge_names)
     rows = conn.execute(
-        "SELECT subject_key AS tag, json_extract(payload_json, '$.badge_name') AS badge_name, "
-        "json_extract(payload_json, '$.badge_label') AS badge_label, COUNT(*) AS badge_events, "
+        "SELECT player_tag AS tag, json_extract(payload_json, '$.badge_name') AS badge_name, "
+        "json_extract(payload_json, '$.badge_name') AS badge_label, COUNT(*) AS badge_events, "
         "MAX(observed_at) AS latest_badge_event "
-        "FROM game_event_stream "
-        "WHERE event_type IN ('badge_earned', 'badge_level_milestone') "
+        "FROM player_events "
+        "WHERE event_type = 'badge_earned' "
         f"AND json_extract(payload_json, '$.badge_name') IN ({placeholders}) "
-        "AND observed_at >= ? AND subject_key IS NOT NULL "
-        "GROUP BY subject_key, badge_name, badge_label "
+        "AND observed_at >= ? "
+        "GROUP BY player_tag, badge_name "
         "ORDER BY latest_badge_event DESC",
         (*badge_names, cutoff),
     ).fetchall()
@@ -1928,13 +1457,13 @@ def _special_event_activity(days: int, limit: int, conn) -> list[dict]:
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
         "SELECT bf.game_mode_id, bf.game_mode_name, bf.event_tag, "
-        "COUNT(DISTINCT bf.member_id) AS members_active, COUNT(*) AS battles, "
+        "COUNT(DISTINCT bf.player_tag) AS members_active, COUNT(*) AS battles, "
         "SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
         "SUM(CASE WHEN bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
         "SUM(CASE WHEN bf.outcome = 'D' THEN 1 ELSE 0 END) AS draws, "
         "SUM(COALESCE(bf.trophy_change, 0)) AS trophy_delta, "
         "MAX(bf.battle_time) AS latest_battle "
-        "FROM member_battle_facts bf "
+        "FROM battle_events bf "
         "WHERE bf.is_special_event = 1 AND bf.battle_time >= ? "
         "GROUP BY bf.game_mode_id, bf.game_mode_name, bf.event_tag "
         "ORDER BY battles DESC, latest_battle DESC, COALESCE(bf.game_mode_id, 0) ASC "
@@ -1970,15 +1499,15 @@ def _special_event_participation(
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime("%Y%m%dT%H%M%S.000Z")
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
+        "SELECT m.player_tag AS member_id, m.player_tag AS tag, m.current_name AS name, "
         "bf.game_mode_id, bf.game_mode_name, bf.event_tag, COUNT(*) AS event_battles, "
         "SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
         "SUM(CASE WHEN bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
         "MAX(bf.battle_time) AS latest_event_battle "
-        "FROM member_battle_facts bf "
-        "JOIN members m ON m.member_id = bf.member_id "
+        "FROM battle_events bf "
+        "JOIN players m ON m.player_tag = bf.player_tag "
         "WHERE bf.is_special_event = 1 AND bf.battle_time >= ? "
-        "GROUP BY bf.member_id, bf.game_mode_id, bf.game_mode_name, bf.event_tag "
+        "GROUP BY bf.player_tag, bf.game_mode_id, bf.game_mode_name, bf.event_tag "
         "ORDER BY event_battles DESC, latest_event_battle DESC, m.current_name COLLATE NOCASE "
         "LIMIT ?",
         (cutoff, limit),
@@ -2008,10 +1537,10 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
         where.append("r.mode_group = ?")
         params.append(mode_group)
     rows = conn.execute(
-        "SELECT r.mode_group, r.game_mode_id, r.game_mode_name, COUNT(DISTINCT r.member_id) AS members_active, "
+        "SELECT r.mode_group, r.game_mode_id, r.game_mode_name, COUNT(DISTINCT r.player_tag) AS members_active, "
         "SUM(r.battles) AS battles, SUM(r.wins) AS wins, SUM(r.losses) AS losses, SUM(r.draws) AS draws, "
         "SUM(r.trophy_change_total) AS trophy_delta "
-        "FROM member_daily_battle_rollups r "
+        "FROM player_daily_battle_rollups r "
         f"WHERE {' AND '.join(where)} "
         "GROUP BY r.mode_group, r.game_mode_id, r.game_mode_name "
         "ORDER BY battles DESC, r.mode_group ASC, COALESCE(r.game_mode_id, 0) ASC",
@@ -2055,8 +1584,8 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
         bucket["win_rate"] = round(bucket["wins"] / bucket["battles"], 4) if bucket["battles"] else None
 
     member_count_rows = conn.execute(
-        "SELECT r.mode_group, COUNT(DISTINCT r.member_id) AS members_active "
-        "FROM member_daily_battle_rollups r "
+        "SELECT r.mode_group, COUNT(DISTINCT r.player_tag) AS members_active "
+        "FROM player_daily_battle_rollups r "
         f"WHERE {' AND '.join(where)} "
         "GROUP BY r.mode_group",
         tuple(params),
@@ -2067,15 +1596,15 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
             by_group[group]["members_active"] = int(row["members_active"] or 0)
 
     ranked_members = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, COUNT(*) AS ranked_battles, "
+        "SELECT m.player_tag AS member_id, m.player_tag AS tag, m.current_name AS name, COUNT(*) AS ranked_battles, "
         "SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
         "SUM(CASE WHEN bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
         "SUM(COALESCE(bf.trophy_change, 0)) AS trophy_delta, MAX(bf.league_number) AS max_league_seen, "
         "MAX(bf.battle_time) AS latest_ranked_battle "
-        "FROM member_battle_facts bf "
-        "JOIN members m ON m.member_id = bf.member_id "
+        "FROM battle_events bf "
+        "JOIN players m ON m.player_tag = bf.player_tag "
         "WHERE bf.is_ranked = 1 AND bf.battle_time >= strftime('%Y%m%dT%H%M%S.000Z', 'now', ?) "
-        "GROUP BY bf.member_id "
+        "GROUP BY bf.player_tag "
         "ORDER BY ranked_battles DESC, trophy_delta DESC, m.current_name COLLATE NOCASE "
         "LIMIT ?",
         (f"-{days} day", limit),
@@ -2089,20 +1618,18 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
         ranked_activity.append(_member_reference_fields(conn, item.pop("member_id"), item))
 
     profile_rows = conn.execute(
-        "WITH latest AS ("
-        "  SELECT p.* FROM player_profile_snapshots p "
-        "  JOIN (SELECT member_id, MAX(fetched_at) AS fetched_at FROM player_profile_snapshots GROUP BY member_id) x "
-        "    ON x.member_id = p.member_id AND x.fetched_at = p.fetched_at"
-        ") "
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
-        "latest.current_path_of_legend_season_result_json, latest.progress_json, latest.trophies, latest.best_trophies "
-        "FROM latest JOIN members m ON m.member_id = latest.member_id "
-        "WHERE m.status = 'active'",
+        "SELECT m.player_tag AS member_id, m.player_tag AS tag, m.current_name AS name, "
+        "NULL AS current_path_of_legend_season_result_json, NULL AS progress_json, "
+        "cs.trophies, cs.best_trophies, cs.ranked_league, cs.ranked_trophies "
+        "FROM players m "
+        "JOIN player_current_state cs ON cs.player_tag = m.player_tag "
+        "WHERE EXISTS (SELECT 1 FROM clan_memberships cm "
+        "  WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
     ).fetchall()
     ranked_profiles = []
     progress_keys: dict[str, dict] = {}
     for row in profile_rows:
-        pol = _json_object(row["current_path_of_legend_season_result_json"])
+        pol = {"leagueNumber": row["ranked_league"], "trophies": row["ranked_trophies"], "rank": None}
         if pol.get("leagueNumber") is not None:
             ranked_profiles.append(_member_reference_fields(conn, row["member_id"], {
                 "tag": row["tag"],
@@ -2176,7 +1703,7 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
 def _recompute_member_recent_form(member_id: int, conn=None):
     for scope, predicate in _LOSSES_SCOPE_PREDICATES.items():
         rows = conn.execute(
-            f"SELECT outcome, crowns_for, crowns_against, trophy_change FROM member_battle_facts WHERE member_id = ? AND {predicate} ORDER BY battle_time DESC LIMIT 10",
+            f"SELECT outcome, crowns_for, crowns_against, trophy_change FROM battle_events WHERE player_tag = ? AND {predicate} ORDER BY battle_time DESC LIMIT 10",
             (member_id,),
         ).fetchall()
         sample_size = len(rows)
@@ -2197,8 +1724,8 @@ def _recompute_member_recent_form(member_id: int, conn=None):
         label = _build_form_label(wins, losses, sample_size)
         summary = _build_form_summary(wins, losses, draws, sample_size, label)
         conn.execute(
-            "INSERT INTO member_recent_form (member_id, computed_at, scope, sample_size, wins, losses, draws, current_streak, current_streak_type, win_rate, avg_crown_diff, avg_trophy_change, form_label, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(member_id, scope) DO UPDATE SET computed_at = excluded.computed_at, sample_size = excluded.sample_size, wins = excluded.wins, losses = excluded.losses, draws = excluded.draws, current_streak = excluded.current_streak, current_streak_type = excluded.current_streak_type, win_rate = excluded.win_rate, avg_crown_diff = excluded.avg_crown_diff, avg_trophy_change = excluded.avg_trophy_change, form_label = excluded.form_label, summary = excluded.summary",
+            "INSERT INTO player_recent_form (player_tag, computed_at, scope, sample_size, wins, losses, draws, current_streak, current_streak_type, win_rate, avg_crown_diff, avg_trophy_change, form_label, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(player_tag, scope) DO UPDATE SET computed_at = excluded.computed_at, sample_size = excluded.sample_size, wins = excluded.wins, losses = excluded.losses, draws = excluded.draws, current_streak = excluded.current_streak, current_streak_type = excluded.current_streak_type, win_rate = excluded.win_rate, avg_crown_diff = excluded.avg_crown_diff, avg_trophy_change = excluded.avg_trophy_change, form_label = excluded.form_label, summary = excluded.summary",
             (member_id, _utcnow(), scope, sample_size, wins, losses, draws, current_streak, streak_type, round(wins / sample_size, 4) if sample_size else 0, avg_crown_diff, avg_trophy_change, label, summary),
         )
     conn.commit()

@@ -6,12 +6,11 @@ from typing import Optional
 import sqlite3
 
 from db import (
-    CARD_COLLECTION_RETENTION_DAYS,
+    BATTLE_EVENT_RETENTION_DAYS,
+    CLAN_EVENT_RETENTION_DAYS,
     CONVERSATION_RETENTION_DAYS,
-    PLAYER_PROFILE_RETENTION_DAYS,
+    PLAYER_EVENT_RETENTION_DAYS,
     RAW_PAYLOAD_RETENTION_DAYS,
-    SIGNAL_OUTCOME_RETENTION_DAYS,
-    SNAPSHOT_RETENTION_DAYS,
     TOURNAMENT_RETENTION_DAYS,
     WAR_RETENTION_DAYS,
     _canon_tag,
@@ -35,7 +34,7 @@ def record_join_date(tag: str, name: str, joined_date: str, conn: Optional[sqlit
     current = _get_current_membership(conn, member_id)
     if not current:
         conn.execute(
-            "INSERT INTO clan_memberships (member_id, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, 'observed_join', NULL)",
+            "INSERT INTO clan_memberships (player_tag, joined_at, left_at, join_source, leave_source) VALUES (?, ?, NULL, 'observed_join', NULL)",
             (member_id, normalized_joined_date),
         )
     else:
@@ -56,11 +55,9 @@ def clear_member_tenure(tag: str, conn: Optional[sqlite3.Connection] = None) -> 
             "UPDATE clan_memberships SET left_at = ?, leave_source = 'manual_clear' WHERE membership_id = ?",
             (chicago_today(), current["membership_id"]),
         )
-    conn.execute("UPDATE members SET status = 'left', last_seen_at = ? WHERE member_id = ?", (_utcnow(), member_id))
-    conn.execute(
-        "DELETE FROM cake_day_announcements WHERE target_tag = ? AND announcement_type = 'join_anniversary'",
-        (_canon_tag(tag),),
-    )
+    # v5.1: no status column (membership row closure IS the departure);
+    # cake_day_announcements retired (the recognition ledger owns calendar dedup).
+    conn.execute("UPDATE players SET last_seen_at = ? WHERE player_tag = ?", (_utcnow(), member_id))
     conn.commit()
 
 
@@ -88,8 +85,9 @@ def set_member_profile_url(tag: str, name: str, url: Optional[str], conn: Option
 
 @managed_connection
 def set_member_poap_address(tag: str, name: str, poap_address: Optional[str], conn: Optional[sqlite3.Connection] = None) -> None:
-    member_id = _ensure_member(conn, tag, name=name)
-    _upsert_member_metadata(conn, member_id, poap_address=(poap_address or "").strip() or None)
+    _ensure_member(conn, tag, name=name)
+    # Q4: POAP paused; poap_address column dropped — accepted-and-ignored.
+    del poap_address
     conn.commit()
 
 
@@ -388,29 +386,23 @@ _CR_TIMESTAMP_TABLES = {"member_battle_facts"}
 
 
 # Ordered list of (table, column, retention_days) for all purge targets.
+# v5.1 retention (docs/v5.1/schema.md §1). Durable, never purged: rollups,
+# identity/tenure, awards, war_seasons, recognition_ledger, curated memories.
 _PURGE_TARGETS = [
-    ("member_state_snapshots", "observed_at", SNAPSHOT_RETENTION_DAYS),
-    ("player_profile_snapshots", "fetched_at", PLAYER_PROFILE_RETENTION_DAYS),
-    ("member_card_collection_snapshots", "fetched_at", CARD_COLLECTION_RETENTION_DAYS),
-    ("member_deck_snapshots", "fetched_at", SNAPSHOT_RETENTION_DAYS),
-    ("member_card_usage_snapshots", "fetched_at", SNAPSHOT_RETENTION_DAYS),
-    ("member_battle_facts", "battle_time", SNAPSHOT_RETENTION_DAYS),
-    ("war_races", "COALESCE(created_date, '')", WAR_RETENTION_DAYS),
-    ("war_current_state", "observed_at", WAR_RETENTION_DAYS),
-    ("war_day_status", "observed_at", WAR_RETENTION_DAYS),
-    ("war_period_clan_status", "observed_at", WAR_RETENTION_DAYS),
-    ("war_participant_snapshots", "observed_at", WAR_RETENTION_DAYS),
     ("raw_api_payloads", "fetched_at", RAW_PAYLOAD_RETENTION_DAYS),
+    ("battle_events", "battle_time", BATTLE_EVENT_RETENTION_DAYS),
+    ("player_events", "observed_at", PLAYER_EVENT_RETENTION_DAYS),
+    ("clan_events", "observed_at", CLAN_EVENT_RETENTION_DAYS),
+    ("war_events", "observed_at", WAR_RETENTION_DAYS),
+    ("war_weeks", "COALESCE(created_date, '')", WAR_RETENTION_DAYS),
+    ("war_week_clans", "observed_at", WAR_RETENTION_DAYS),
+    ("war_participation", "observed_at", WAR_RETENTION_DAYS),
+    ("war_attendance_days", "observed_at", WAR_RETENTION_DAYS),
     ("messages", "created_at", CONVERSATION_RETENTION_DAYS),
-    ("signal_outcomes", "created_at", SIGNAL_OUTCOME_RETENTION_DAYS),
-    ("awareness_ticks", "ticked_at", SIGNAL_OUTCOME_RETENTION_DAYS),
     ("tournaments", "watching_started_at", TOURNAMENT_RETENTION_DAYS),
 ]
 
-_PURGE_DATE_TARGETS = [
-    ("cake_day_announcements", "announcement_date", 7),
-    ("signal_log", "signal_date", SNAPSHOT_RETENTION_DAYS),
-]
+_PURGE_DATE_TARGETS = []
 
 
 @managed_connection

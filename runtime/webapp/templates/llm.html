@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}LLM{% endblock %}
+{% block content %}
+<h1>LLM activity</h1>
+
+<h2>Recent calls</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>at</th><th>workflow</th><th>model</th><th>ok</th><th class="num">ms</th>
+        <th class="num">prompt</th><th class="num">completion</th><th class="num">cache read</th></tr>
+    {% for c in calls %}
+      <tr>
+        <td>{{ c.recorded_at | reltime }}</td>
+        <td><code>{{ c.workflow }}</code></td>
+        <td class="muted">{{ (c.model or '') | replace('claude-', '') }}</td>
+        <td>{% if c.ok %}<span class="badge good">ok</span>{% else %}<span class="badge bad" title="{{ c.error or '' }}">err</span>{% endif %}</td>
+        <td class="num">{{ c.duration_ms }}</td>
+        <td class="num">{{ c.prompt_tokens }}</td>
+        <td class="num">{{ c.completion_tokens }}</td>
+        <td class="num">{{ c.cache_read_tokens }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="muted">No LLM calls recorded.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Prompt failures</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>at</th><th>workflow</th><th>type</th><th>stage</th><th>question</th><th>detail</th></tr>
+    {% for f in failures %}
+      <tr>
+        <td>{{ f.recorded_at | reltime }}</td>
+        <td><code>{{ f.workflow }}</code></td>
+        <td>{{ f.failure_type }}</td>
+        <td>{{ f.failure_stage }}</td>
+        <td class="muted">{{ f.question }}</td>
+        <td class="muted">{{ f.detail }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No prompt failures. 🎉</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Member feedback (👍/👎 on posts)</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>at</th><th>workflow</th><th>channel</th><th>value</th><th>question</th><th>response</th></tr>
+    {% for f in feedback %}
+      <tr>
+        <td>{{ f.recorded_at | reltime }}</td>
+        <td><code>{{ f.workflow }}</code></td>
+        <td>{{ f.channel_name }}</td>
+        <td>{% if f.feedback_value == 'up' %}<span class="badge good">👍 up</span>{% elif f.feedback_value == 'down' %}<span class="badge bad">👎 down</span>{% else %}<span class="badge">{{ f.feedback_value }}</span>{% endif %}</td>
+        <td class="muted">{{ f.question }}</td>
+        <td class="muted">{{ f.response_preview }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No feedback recorded.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Improvement suggestions</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>at</th><th>category</th><th>status</th><th>severity</th><th>title</th><th>issue</th></tr>
+    {% for s in suggestions %}
+      <tr>
+        <td>{{ s.created_at | reltime }}</td>
+        <td>{{ s.category }}</td>
+        <td><span class="badge">{{ s.status }}</span></td>
+        <td>{{ s.severity }}</td>
+        <td class="muted">{{ s.title }}</td>
+        <td>{% if s.github_issue_url %}<a href="{{ s.github_issue_url }}">issue</a>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No suggestions recorded.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

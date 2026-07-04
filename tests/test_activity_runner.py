@@ -18,19 +18,19 @@ def test_run_activity_once_calls_registered_async_activity():
 
     async def fake_tick():
         calls.append("tick")
-        return {"posted": 0, "failed": 0}
+        return {"battles_ingested": 0, "events_emitted": 0}
 
     runtime = SimpleNamespace(
-        HEARTBEAT_INTERVAL_MINUTES=60,
-        _v5_reactive_tick=fake_tick,
+        ENGINE_TICK_MINUTES=10,
+        _engine_tick=fake_tick,
     )
 
-    result = asyncio.run(run_activity_once("v5-reactive-tick", runtime_module=runtime))
+    result = asyncio.run(run_activity_once("engine-tick", runtime_module=runtime))
 
     assert calls == ["tick"]
-    assert result.activity_key == "v5-reactive-tick"
-    assert result.job_function == "_v5_reactive_tick"
-    assert result.result == {"posted": 0, "failed": 0}
+    assert result.activity_key == "engine-tick"
+    assert result.job_function == "_engine_tick"
+    assert result.result == {"battles_ingested": 0, "events_emitted": 0}
 
 
 def test_run_activity_once_rejects_unknown_activity():
@@ -38,11 +38,21 @@ def test_run_activity_once_rejects_unknown_activity():
         asyncio.run(run_activity_once("not-real", runtime_module=SimpleNamespace()))
 
 
+def test_retired_activities_are_unknown():
+    # the v5.1 cut retired these registry keys outright (runtime.md §3);
+    # v5-reactive-tick is excluded — it lives on as a legacy alias of engine-tick
+    for retired in ("war-poll", "player-progression",
+                    "award-detection", "leadership-action-scan"):
+        with pytest.raises(UnknownActivityError):
+            asyncio.run(run_activity_once(retired, runtime_module=SimpleNamespace()))
+
+
 def test_run_activity_once_rejects_non_manual_activity_before_calling_job():
-    runtime = SimpleNamespace(_war_poll_tick=lambda: pytest.fail("should not run"))
+    runtime = SimpleNamespace(
+        _war_attendance_snapshot=lambda: pytest.fail("should not run"))
 
     with pytest.raises(ManualActivityNotAllowed):
-        asyncio.run(run_activity_once("war-poll", runtime_module=runtime))
+        asyncio.run(run_activity_once("war-attendance-snapshot", runtime_module=runtime))
 
 
 def test_run_shell_activity_rejects_non_manual_activity_before_rest_setup(monkeypatch):
@@ -52,7 +62,7 @@ def test_run_shell_activity_rejects_non_manual_activity_before_rest_setup(monkey
     monkeypatch.setattr("runtime.activity_runner._build_rest_channel_lookup", fail_rest_setup)
 
     with pytest.raises(ManualActivityNotAllowed):
-        asyncio.run(run_shell_activity("war-poll"))
+        asyncio.run(run_shell_activity("war-attendance-snapshot"))
 
 
 def test_run_shell_activity_rejects_unknown_activity_before_rest_setup(monkeypatch):

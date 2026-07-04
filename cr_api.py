@@ -17,21 +17,17 @@ import db
 import prompts
 from runtime import status as runtime_status
 
-# Map cr_api's per-call endpoint_name onto the label used in raw_api_payloads.
-# Preserves the existing "clan_war_log" rows that storage/war_ingest.py wrote
-# under that name before persistence centralized here.
-_RAW_PAYLOAD_ENDPOINT_LABELS = {
-    "riverracelog": "clan_war_log",
-}
-
-
 def _persist_raw_payload(endpoint_name: str, entity_key: str | None, payload) -> None:
     """Store a successful CR API response in raw_api_payloads (hash-deduped).
+
+    Endpoints store under their TRUE API names — the legacy
+    "riverracelog" → "clan_war_log" alias was removed at the v5.1 cut (C3);
+    the archive keeps the old rows.
 
     Failures here must never break the caller — the raw payload is for audit and
     debugging, not for the API call's correctness.
     """
-    label = _RAW_PAYLOAD_ENDPOINT_LABELS.get(endpoint_name, endpoint_name)
+    label = endpoint_name
     key = entity_key or "global"
     try:
         conn = db.get_connection()

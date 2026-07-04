@@ -1,9 +1,8 @@
-"""Race-log helpers shared by war_status and war_ingest.
+"""Race-log helpers shared by the war read modules.
 
-Both modules need the most recent logged river race and the same
-season-id inference from a live war payload. These used to exist as
-same-named private copies in each module — with different SELECT
-column lists — which made them an easy refactoring trap.
+v5.1: the logged-race source is war_weeks (was war_races); season inference
+matches engine.clock.infer_season_id — a live sectionIndex lower than the
+last logged one means a new season started (§16.1: seasons are contiguous).
 """
 
 from __future__ import annotations
@@ -13,30 +12,27 @@ from typing import Optional
 
 
 def get_latest_logged_race(conn: sqlite3.Connection):
-    """Return the most recent war_races row, or None.
-
-    Selects the full summary column set; callers that only need
-    season_id/section_index just read those fields.
-    """
+    """Return the most recent war_weeks row (summary column set), or None."""
     return conn.execute(
-        "SELECT season_id, section_index, created_date, our_rank, trophy_change, our_fame, total_clans, finish_time "
-        "FROM war_races ORDER BY season_id DESC, section_index DESC, war_race_id DESC LIMIT 1"
+        "SELECT season_id, section_index, created_date, our_rank, trophy_change, our_fame, "
+        "NULL AS total_clans, finish_time "
+        "FROM war_weeks ORDER BY season_id DESC, section_index DESC LIMIT 1"
     ).fetchone()
 
 
 def infer_current_season_id_from_live_state(payload, latest_logged_race) -> Optional[int]:
-    """Infer the current season id from a live war payload.
+    """Infer the current season id from a live race projection or payload.
 
-    Prefers the payload's own seasonId; otherwise reasons from the last
-    logged race — a live sectionIndex lower than the logged one means a
-    new season has started.
+    Accepts both CR-shaped payloads (seasonId/sectionIndex) and the engine's
+    race-aspect projection (season_id/section_index).
     """
-    live_season_id = (payload or {}).get("seasonId")
+    payload = payload or {}
+    live_season_id = payload.get("seasonId", payload.get("season_id"))
     if live_season_id is not None:
         return live_season_id
     if not latest_logged_race:
         return None
-    live_section_index = (payload or {}).get("sectionIndex")
+    live_section_index = payload.get("sectionIndex", payload.get("section_index"))
     logged_section_index = latest_logged_race["section_index"]
     if (
         live_section_index is not None

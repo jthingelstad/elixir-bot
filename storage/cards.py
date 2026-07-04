@@ -68,11 +68,10 @@ def _card_mode_fields(card: dict) -> dict:
 @managed_connection
 def get_member_current_deck(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
-        "SELECT p.current_deck_json, p.current_deck_support_cards_json, p.fetched_at "
-        "FROM player_profile_snapshots p "
-        "JOIN members m ON m.member_id = p.member_id "
-        "WHERE m.player_tag = ? "
-        "ORDER BY p.fetched_at DESC LIMIT 1",
+        "SELECT cs.current_deck_json, NULL AS current_deck_support_cards_json, "
+        "cs.observed_at AS fetched_at "
+        "FROM player_current_state cs "
+        "WHERE cs.player_tag = ? ",
         (_canon_tag(tag),),
     ).fetchone()
     if not row or not row["current_deck_json"]:
@@ -90,6 +89,39 @@ def get_member_current_deck(tag: str, conn: Optional[sqlite3.Connection] = None)
         "cards": cards,
         "support_cards": support_cards,
     }
+
+
+
+
+def _load_collection_cards(conn, tag: str):
+    """v5.1: rebuild CR-shaped card dicts from player_card_collection (row per
+    card) x card_catalog — replaces the cards_json snapshot blobs. Support
+    cards are not tracked in the projection; callers degrade to []."""
+    rows = conn.execute(
+        "SELECT pc.card_id, pc.level, pc.count, pc.star_level, pc.evolution_level, "
+        "pc.observed_at, cc.name, cc.rarity, cc.max_level, cc.elixir_cost, cc.max_evolution_level "
+        "FROM player_card_collection pc "
+        "LEFT JOIN card_catalog cc ON cc.card_id = pc.card_id "
+        "WHERE pc.player_tag = ?",
+        (_canon_tag(tag),),
+    ).fetchall()
+    fetched_at = None
+    cards = []
+    for r in rows:
+        fetched_at = max(fetched_at or "", r["observed_at"] or "")
+        cards.append({
+            "id": r["card_id"],
+            "name": r["name"] or f"card:{r['card_id']}",
+            "level": r["level"],
+            "maxLevel": r["max_level"],
+            "count": r["count"],
+            "rarity": r["rarity"],
+            "starLevel": r["star_level"],
+            "evolutionLevel": r["evolution_level"],
+            "maxEvolutionLevel": r["max_evolution_level"],
+            "elixirCost": r["elixir_cost"],
+        })
+    return fetched_at, cards
 
 
 def _normalize_collection_card(raw_card: dict) -> dict:
@@ -230,27 +262,17 @@ def _collection_summary_from_cards(cards: list[dict], support_cards: list[dict])
 
 @managed_connection
 def get_member_card_collection(tag: str, limit: Optional[int] = None, min_level: Optional[int] = None, include_support: bool = True, rarity: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
-    row = conn.execute(
-        "SELECT ccs.fetched_at, ccs.cards_json, ccs.support_cards_json "
-        "FROM member_card_collection_snapshots ccs "
-        "JOIN members m ON m.member_id = ccs.member_id "
-        "WHERE m.player_tag = ? "
-        "ORDER BY ccs.fetched_at DESC, ccs.snapshot_id DESC LIMIT 1",
-        (_canon_tag(tag),),
-    ).fetchone()
-    if not row:
+    fetched_at, raw_cards = _load_collection_cards(conn, tag)
+    if not raw_cards:
         return None
+    row = {"fetched_at": fetched_at}
 
     cards = [
         _normalize_collection_card(raw_card)
-        for raw_card in json.loads(row["cards_json"] or "[]")
+        for raw_card in raw_cards
         if isinstance(raw_card, dict) and raw_card.get("name")
     ]
-    support_cards = [
-        _normalize_collection_card(raw_card)
-        for raw_card in json.loads(row["support_cards_json"] or "[]")
-        if include_support and isinstance(raw_card, dict) and raw_card.get("name")
-    ]
+    support_cards = []
 
     if isinstance(min_level, int):
         cards = [card for card in cards if (card.get("level") or 0) >= min_level]
@@ -342,19 +364,13 @@ def _load_collection(conn: sqlite3.Connection, member_tag: str) -> Optional[dict
 
     Returns None when the member has no snapshot yet.
     """
-    row = conn.execute(
-        "SELECT ccs.fetched_at, ccs.cards_json, ccs.support_cards_json "
-        "FROM member_card_collection_snapshots ccs "
-        "JOIN members m ON m.member_id = ccs.member_id "
-        "WHERE m.player_tag = ? "
-        "ORDER BY ccs.fetched_at DESC, ccs.snapshot_id DESC LIMIT 1",
-        (_canon_tag(member_tag),),
-    ).fetchone()
-    if not row:
+    fetched_at, raw_cards = _load_collection_cards(conn, member_tag)
+    if not raw_cards:
         return None
+    row = {"fetched_at": fetched_at, "support_cards_json": "[]"}
     cards = [
         _normalize_collection_card(raw_card)
-        for raw_card in json.loads(row["cards_json"] or "[]")
+        for raw_card in raw_cards
         if isinstance(raw_card, dict) and raw_card.get("name")
     ]
     support_cards = [
@@ -387,9 +403,8 @@ def _experience_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int
     not directly the King Tower level — derive king_tower_level from this
     via min(expLevel, KING_TOWER_MAX_LEVEL)."""
     row = conn.execute(
-        "SELECT cs.exp_level FROM member_current_state cs "
-        "JOIN members m ON m.member_id = cs.member_id "
-        "WHERE m.player_tag = ?",
+        "SELECT cs.exp_level FROM player_current_state cs "
+        "WHERE cs.player_tag = ?",
         (_canon_tag(member_tag),),
     ).fetchone()
     if not row:
@@ -660,45 +675,55 @@ def lookup_member_cards(
 
 @managed_connection
 def get_member_signature_cards(tag: str, mode_scope: str = "overall", conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
-    row = conn.execute(
-        "SELECT cards_json, sample_battles, fetched_at FROM member_card_usage_snapshots s "
-        "JOIN members m ON m.member_id = s.member_id "
-        "WHERE m.player_tag = ? AND s.mode_scope = ? "
-        "ORDER BY s.fetched_at DESC LIMIT 1",
-        (_canon_tag(tag), mode_scope),
-    ).fetchone()
-    if not row:
+    # v5.1: usage comes from battle_events deck_json (last 40 battles).
+    rows = conn.execute(
+        "SELECT deck_json, battle_time FROM battle_events "
+        "WHERE player_tag = ? AND deck_json IS NOT NULL "
+        "ORDER BY battle_time DESC LIMIT 40",
+        (_canon_tag(tag),),
+    ).fetchall()
+    if not rows:
         return None
+    counts: dict[str, int] = {}
+    for r in rows:
+        try:
+            deck = json.loads(r["deck_json"] or "[]")
+        except (TypeError, ValueError):
+            continue
+        for card in deck:
+            name = card.get("name") if isinstance(card, dict) else None
+            if name:
+                counts[name] = counts.get(name, 0) + 1
+    cards = [
+        {"name": name, "battles_used": used, "usage_rate": round(used / len(rows), 3)}
+        for name, used in sorted(counts.items(), key=lambda kv: -kv[1])[:16]
+    ]
     return {
         "mode_scope": mode_scope,
-        "sample_battles": row["sample_battles"],
-        "fetched_at": row["fetched_at"],
-        "cards": json.loads(row["cards_json"]),
+        "sample_battles": len(rows),
+        "fetched_at": rows[0]["battle_time"],
+        "cards": cards,
     }
 
 @managed_connection
 def get_members_with_most_level_16_cards(limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    rows = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role, "
-        "ccs.fetched_at, ccs.cards_json, ccs.support_cards_json "
-        "FROM members m "
-        "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "LEFT JOIN member_card_collection_snapshots ccs ON ccs.snapshot_id = ("
-        "  SELECT c2.snapshot_id FROM member_card_collection_snapshots c2 "
-        "  WHERE c2.member_id = m.member_id "
-        "  ORDER BY c2.fetched_at DESC, c2.snapshot_id DESC LIMIT 1"
-        ") "
-        "WHERE m.status = 'active'"
+    member_rows = conn.execute(
+        "SELECT m.player_tag AS member_id, m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role "
+        "FROM players m "
+        "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
+        "WHERE EXISTS (SELECT 1 FROM clan_memberships cm "
+        "  WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
     ).fetchall()
+    rows = []
+    for mr in member_rows:
+        fetched_at, raw_cards = _load_collection_cards(conn, mr["tag"])
+        d = dict(mr)
+        d["fetched_at"] = fetched_at
+        d["_cards"] = raw_cards
+        rows.append(d)
     result = []
     for row in rows:
-        cards = []
-        for raw_card in json.loads(row["cards_json"] or "[]"):
-            if isinstance(raw_card, dict):
-                cards.append(raw_card)
-        for raw_card in json.loads(row["support_cards_json"] or "[]"):
-            if isinstance(raw_card, dict):
-                cards.append(raw_card)
+        cards = row.pop("_cards")
         level_16_cards = sorted(
             {
                 card.get("name")
@@ -730,36 +755,36 @@ def get_members_with_most_level_16_cards(limit: int = 10, conn: Optional[sqlite3
 
 @managed_connection
 def get_clan_favourite_card_counts(limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    rows = conn.execute(
-        "SELECT pps.current_favourite_card_name AS card_name, COUNT(*) AS member_count "
-        "FROM members m "
-        "JOIN player_profile_snapshots pps ON pps.snapshot_id = ("
-        "  SELECT p2.snapshot_id FROM player_profile_snapshots p2 "
-        "  WHERE p2.member_id = m.member_id "
-        "  ORDER BY p2.fetched_at DESC, p2.snapshot_id DESC LIMIT 1"
-        ") "
-        "WHERE m.status = 'active' AND pps.current_favourite_card_name IS NOT NULL "
-        "AND pps.current_favourite_card_name != '' "
-        "GROUP BY pps.current_favourite_card_name "
-        "ORDER BY member_count DESC, pps.current_favourite_card_name COLLATE NOCASE "
-        "LIMIT ?",
-        (limit,),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    # v5.1: favourite card lives in the profile baseline payload.
+    import json as _json
+
+    counts: dict[str, int] = {}
+    for r in conn.execute(
+        "SELECT sb.payload_json FROM state_baselines sb "
+        "WHERE sb.entity_kind = 'player' AND sb.aspect = 'profile' AND EXISTS ("
+        "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = sb.entity_tag AND cm.left_at IS NULL)"
+    ).fetchall():
+        try:
+            payload = _json.loads(r["payload_json"])
+        except (TypeError, ValueError):
+            continue
+        name = payload.get("favourite_card") or payload.get("currentFavouriteCard", {}).get("name") if isinstance(payload.get("currentFavouriteCard"), dict) else payload.get("favourite_card")
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))
+    return [{"card_name": n, "member_count": c} for n, c in ranked[:limit]]
 
 
 @managed_connection
 def get_clan_most_common_maxed_cards(limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    rows = conn.execute(
-        "SELECT ccs.cards_json, ccs.support_cards_json "
-        "FROM members m "
-        "JOIN member_card_collection_snapshots ccs ON ccs.snapshot_id = ("
-        "  SELECT c2.snapshot_id FROM member_card_collection_snapshots c2 "
-        "  WHERE c2.member_id = m.member_id "
-        "  ORDER BY c2.fetched_at DESC, c2.snapshot_id DESC LIMIT 1"
-        ") "
-        "WHERE m.status = 'active'"
-    ).fetchall()
+    member_tags = [r["player_tag"] for r in conn.execute(
+        "SELECT m.player_tag FROM players m WHERE EXISTS ("
+        "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
+    ).fetchall()]
+    rows = []
+    for _tag in member_tags:
+        _fetched, _cards = _load_collection_cards(conn, _tag)
+        rows.append({"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag})
     card_counts: dict[str, int] = {}
     for row in rows:
         for raw in [*json.loads(row["cards_json"] or "[]"), *json.loads(row["support_cards_json"] or "[]")]:
@@ -780,9 +805,9 @@ def get_clan_recently_played_cards(days: int = 14, limit: int = 20, conn: Option
     )
     rows = conn.execute(
         "SELECT bf.deck_json "
-        "FROM member_battle_facts bf "
-        "JOIN members m ON m.member_id = bf.member_id "
-        "WHERE m.status = 'active' AND bf.battle_time >= ?",
+        "FROM battle_events bf "
+        "WHERE bf.battle_time >= ? AND EXISTS ("
+        "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = bf.player_tag AND cm.left_at IS NULL)",
         (cutoff,),
     ).fetchall()
     counts: dict[str, int] = {}
@@ -796,16 +821,14 @@ def get_clan_recently_played_cards(days: int = 14, limit: int = 20, conn: Option
 
 @managed_connection
 def get_clan_rare_maxed_cards(max_owners: int = 2, limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    rows = conn.execute(
-        "SELECT ccs.cards_json, ccs.support_cards_json "
-        "FROM members m "
-        "JOIN member_card_collection_snapshots ccs ON ccs.snapshot_id = ("
-        "  SELECT c2.snapshot_id FROM member_card_collection_snapshots c2 "
-        "  WHERE c2.member_id = m.member_id "
-        "  ORDER BY c2.fetched_at DESC, c2.snapshot_id DESC LIMIT 1"
-        ") "
-        "WHERE m.status = 'active'"
-    ).fetchall()
+    member_tags = [r["player_tag"] for r in conn.execute(
+        "SELECT m.player_tag FROM players m WHERE EXISTS ("
+        "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
+    ).fetchall()]
+    rows = []
+    for _tag in member_tags:
+        _fetched, _cards = _load_collection_cards(conn, _tag)
+        rows.append({"cards_json": json.dumps(_cards), "support_cards_json": "[]", "_tag": _tag})
     card_counts: dict[str, int] = {}
     for row in rows:
         for raw in [*json.loads(row["cards_json"] or "[]"), *json.loads(row["support_cards_json"] or "[]")]:
@@ -823,19 +846,14 @@ def get_clan_rare_maxed_cards(max_owners: int = 2, limit: int = 10, conn: Option
 def get_clan_overlooked_cards(min_owners: int = 3, min_level: int = 14, battle_days: int = 14, limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     """Cards that many members have leveled up but almost nobody actually plays."""
     # Step 1: cards owned at min_level+ across the clan, with owner counts
-    coll_rows = conn.execute(
-        "SELECT m.member_id, ccs.cards_json, ccs.support_cards_json "
-        "FROM members m "
-        "JOIN member_card_collection_snapshots ccs ON ccs.snapshot_id = ("
-        "  SELECT c2.snapshot_id FROM member_card_collection_snapshots c2 "
-        "  WHERE c2.member_id = m.member_id "
-        "  ORDER BY c2.fetched_at DESC, c2.snapshot_id DESC LIMIT 1"
-        ") "
-        "WHERE m.status = 'active'"
-    ).fetchall()
+    member_tags = [r["player_tag"] for r in conn.execute(
+        "SELECT m.player_tag FROM players m WHERE EXISTS ("
+        "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
+    ).fetchall()]
     owned: dict[str, int] = {}
-    for row in coll_rows:
-        for raw in [*json.loads(row["cards_json"] or "[]"), *json.loads(row["support_cards_json"] or "[]")]:
+    for _tag in member_tags:
+        _fetched, _cards = _load_collection_cards(conn, _tag)
+        for raw in _cards:
             if not isinstance(raw, dict) or not raw.get("name"):
                 continue
             level = _card_level(raw)
@@ -848,9 +866,9 @@ def get_clan_overlooked_cards(min_owners: int = 3, min_level: int = 14, battle_d
     )
     battle_rows = conn.execute(
         "SELECT bf.deck_json "
-        "FROM member_battle_facts bf "
-        "JOIN members m ON m.member_id = bf.member_id "
-        "WHERE m.status = 'active' AND bf.battle_time >= ?",
+        "FROM battle_events bf "
+        "WHERE bf.battle_time >= ? AND EXISTS ("
+        "  SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = bf.player_tag AND cm.left_at IS NULL)",
         (cutoff,),
     ).fetchall()
     played: set[str] = set()

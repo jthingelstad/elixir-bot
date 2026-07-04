@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Members{% endblock %}
+{% block content %}
+<h1>Members <span class="muted" style="font-size:.85rem;">{{ rows | length }} open memberships</span></h1>
+<p class="muted">Members with active candidacy states sort first. Evaluators: donor · war · battle
+(<code>holding</code> / <code>building</code> / <code>lapsed</code>, rules in <code>docs/reference/v5.1/management.md</code>).</p>
+
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>member</th><th>role</th><th class="num">trophies</th><th>temp</th>
+        <th>playstyle</th>
+        <th>donor</th><th>war</th><th>battle</th>
+        <th>promote</th><th>demote</th><th>kick</th>
+        <th class="num">tenure</th><th>last battle</th></tr>
+    {% for r in rows %}
+      <tr>
+        <td><a href="/member/{{ r.player_tag[1:] }}">{{ r.current_name or r.player_tag }}</a></td>
+        <td>{{ r.role or '' }}</td>
+        <td class="num">{{ r.trophies if r.trophies is not none else '' }}</td>
+        <td>{% if r.temperature %}<span class="badge">{{ r.temperature }}</span>{% endif %}</td>
+        <td>{% if r.identity and r.identity != 'quiet' %}<span class="badge" title="{{ r.mode_mix or '' }}">{{ r.identity }}</span>{% else %}<span class="muted" title="{{ r.mode_mix or '' }}">–</span>{% endif %}</td>
+        <td>{{ r.sustained_donor or '–' }}</td>
+        <td>{{ r.war_reliable or '–' }}</td>
+        <td>{{ r.battle_active or '–' }}</td>
+        <td>{% if r.promote_state and r.promote_state != 'none' %}<span class="badge good">{{ r.promote_state }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td>{% if r.demote_state and r.demote_state != 'none' %}<span class="badge bad">{{ r.demote_state }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td>{% if r.kick_state and r.kick_state != 'none' %}<span class="badge bad">{{ r.kick_state }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td class="num">{{ r.tenure_days if r.tenure_days is not none else '–' }}</td>
+        <td>{{ r.last_battle_seen | reltime }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="13" class="muted">No open memberships (empty DB?).</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Recent leavers</h2>
+<div class="card">
+  <table>
+    <tr><th>player</th><th>joined</th><th>left</th><th>how</th></tr>
+    {% for l in leavers %}
+      <tr>
+        <td><a href="/member/{{ l.player_tag[1:] }}">{{ l.current_name or l.player_tag }}</a></td>
+        <td>{{ l.joined_at }}</td>
+        <td>{{ l.left_at | reltime }}</td>
+        <td class="muted">{{ l.leave_source or '' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">No closed memberships.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}
