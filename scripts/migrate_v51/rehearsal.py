@@ -92,15 +92,20 @@ def run_census(source_path: str, days: int) -> int:
 
 
 def run_rehearsal(source_path: str, target_path: str, days: int) -> int:
+    import os
+
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     try:
-        from engine.offline import OfflineEngine  # lands in migration Phase 4
-    except ImportError:
-        print(
-            "engine.offline is not built yet (migration Phase 4).\n"
-            "Run with --census to validate the replay stream today.",
-            file=sys.stderr,
-        )
-        return 2
+        from engine.offline import OfflineEngine
+    except ModuleNotFoundError as exc:
+        if exc.name and exc.name.startswith("engine"):
+            print(
+                "engine.offline is not built yet (migration Phase 4).\n"
+                "Run with --census to validate the replay stream today.",
+                file=sys.stderr,
+            )
+            return 2
+        raise
 
     source = _connect_ro(source_path)
     eng = OfflineEngine(target_path)
