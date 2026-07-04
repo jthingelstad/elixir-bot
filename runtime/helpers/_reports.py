@@ -1081,8 +1081,9 @@ async def _load_live_clan_context():
     except Exception:
         await _runtime_app()._maybe_alert_cr_api_failure("live war refresh")
         war = {}
-    if war:
-        await asyncio.to_thread(db.upsert_war_current_state, war)
+    # v5.1: the engine owns war state (state_baselines + war tables); the
+    # legacy upsert_war_current_state side-write died in the read-layer port.
+    # The fetched dict still feeds the insight composer directly.
     return clan, war
 
 
