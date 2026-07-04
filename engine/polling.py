@@ -34,7 +34,10 @@ def _temp(heat: int) -> str:
 def _parse(ts: str | None) -> datetime | None:
     if not ts:
         return None
-    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if dt.tzinfo is None:  # engine convention: suffixless timestamps are UTC
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def update_heat(conn, player_tag, *, new_battles=False, roster_delta=False, now=None):
@@ -113,7 +116,7 @@ def plan(conn, now=None, budget: int = POLL_BUDGET_PER_TICK) -> list[tuple[str, 
     (runtime.md §4): priority = floor-starved first (most overdue), then heat,
     then longest-overdue. Returns ordered [(endpoint, player_tag)]."""
     now = now or utcnow()
-    now_dt = datetime.fromisoformat(now.replace("Z", "+00:00")).astimezone(timezone.utc)
+    now_dt = _parse(now)
     rows = conn.execute(
         """SELECT ps.* FROM poll_state ps
            WHERE EXISTS (SELECT 1 FROM clan_memberships cm

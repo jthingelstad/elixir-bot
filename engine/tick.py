@@ -55,6 +55,8 @@ def _riverrace_due(conn, clock, now: datetime) -> bool:
         return True  # war/colosseum days: every tick
     try:
         last = datetime.fromisoformat(str(row["observed_at"]).replace("Z", "+00:00"))
+        if last.tzinfo is None:  # engine convention: suffixless timestamps are UTC
+            last = last.replace(tzinfo=timezone.utc)
     except ValueError:
         return True
     return (now - last).total_seconds() >= TRAINING_RIVERRACE_POLL_SECONDS
@@ -109,6 +111,10 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
             else:
                 player_payloads[tag] = api.get_player(tag) or {}
                 polling.note_polled(conn, tag, "profile", now_iso)
+            # Commit per call: the poll loop spans minutes (2 s spacing), and
+            # cr_api persists raw payloads on its own connection — holding one
+            # long write transaction here starves it ('database is locked').
+            conn.commit()
 
     # refresh the clock from the fresh race payload before ingest needs it
     if race_payload:

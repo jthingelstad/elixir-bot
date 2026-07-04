@@ -153,7 +153,10 @@ def parse_battle_time(value: str) -> datetime | None:
         return datetime.strptime(raw, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
     except ValueError:
         try:
-            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if dt.tzinfo is None:  # engine convention: suffixless timestamps are UTC
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
         except ValueError:
             return None
 

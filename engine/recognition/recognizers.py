@@ -62,14 +62,25 @@ def _battle_id(row) -> str:
     return row["dedup_key"]
 
 
+# Canonical Trophy Road arenas have stable ids; above this id the "arena" is
+# the seasonal-league zone whose ids/names rotate monthly ("PANCAKES!",
+# "Summit of Heroes", ...) — verified against live battle data 2026-07-03:
+# ids <= 54000016 (Dragon Spa) hold stable names/trophy bands; ids above churn
+# with the season. Seasonal renames + the season trophy reset otherwise read
+# as arena-ups (the go-live tick posted 7 of them). One constant to revisit
+# if Supercell extends the road.
+ARENA_UP_MAX_CANONICAL_ID = 54000016
+
+
 def _arena_up_candidates(conn, tags: set[str]) -> list[Candidate]:
     """Arena Up from battle pairs (§11: battle primary — the deciding battle is
     the moment). No arena-threshold table exists in the repo (verified:
     cr_knowledge.py has no arena data), so the deterministic observable is the
     arena transition between consecutive trophy-road battles: a win with
-    positive trophy change followed by a battle in a higher arena. The
-    profile-side arena_changed event (player stream) backstops poll gaps and
-    claims the same key."""
+    positive trophy change followed by a battle in a higher arena — gated to
+    the canonical road (ARENA_UP_MAX_CANONICAL_ID). The profile-side
+    arena_changed event (player stream) backstops poll gaps and claims the
+    same key."""
     out: list[Candidate] = []
     for tag in sorted(tags):
         rows = conn.execute(
@@ -83,6 +94,7 @@ def _arena_up_candidates(conn, tags: set[str]) -> list[Candidate]:
         for prev, cur in zip(rows, rows[1:]):
             if (
                 cur["arena_id"] > prev["arena_id"]
+                and cur["arena_id"] <= ARENA_UP_MAX_CANONICAL_ID
                 and (cur["arena_name"] or "") != (prev["arena_name"] or "")
                 and prev["outcome"] == "W"
                 and (prev["trophy_change"] or 0) > 0
@@ -245,8 +257,8 @@ def player_candidates(conn) -> tuple[list[Candidate], int]:
                 "timing": r["timing"], "occurred_at": r["observed_at"], **payload}
         if et == "arena_changed":
             arena_id = payload.get("arena_id")
-            if arena_id is None:
-                continue
+            if arena_id is None or arena_id > ARENA_UP_MAX_CANONICAL_ID:
+                continue  # seasonal-league zone: renames are not arena-ups
             out.append(Candidate(
                 key=f"arena_up:{tag}:{arena_id}",
                 event_type="arena_up",
