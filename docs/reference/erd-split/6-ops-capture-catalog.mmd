@@ -1,0 +1,72 @@
+%% Elixir v5 — Domain 6: RAW CAPTURE / OPS / CATALOG (peripheral)
+%% Mostly standalone tables with no FK relationships — ingest buffers, manual
+%% observation capture, reference data, and housekeeping. Low coupling: these
+%% are the easiest to move, version, or split into a side store.
+erDiagram
+    raw_api_payloads {
+        int payload_id PK
+        text endpoint
+        text entity_key
+        text payload_hash
+    }
+    arena_relay_screenshot_observations {
+        int observation_id PK
+        text source_message_id UK
+        text screenshot_type
+        text players_json
+    }
+    clan_voyages {
+        int voyage_id PK
+        text voyage_key UK
+        text clan_tag
+        text status
+    }
+    clan_voyage_entries {
+        int entry_id PK
+        int voyage_id FK
+        int member_id FK
+        int points
+    }
+    api_sentinel_observations {
+        int observation_id PK
+        text sentinel_type
+        text name
+    }
+    game_mode_contexts {
+        int context_id PK
+        text context_type
+        text source_key
+    }
+    card_catalog {
+        int card_id PK
+        text name
+        text rarity
+    }
+    cake_day_announcements {
+        int id PK
+        text announcement_date
+        text target_tag
+    }
+    llm_calls {
+        int call_id PK
+        text workflow
+        text model
+        int total_tokens
+    }
+    runtime_job_status {
+        text job_name PK
+        text status_json
+    }
+    elixir_improvement_suggestions {
+        int suggestion_id PK
+        text category
+        text status
+        int github_issue_number
+    }
+    members {
+        int member_id PK
+        text player_tag UK
+    }
+
+    clan_voyages ||--o{ clan_voyage_entries : "entries"
+    members ||--o{ clan_voyage_entries : "ranked"
