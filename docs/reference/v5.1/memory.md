@@ -1,9 +1,9 @@
 # Elixir v5.1 — Memory System (the deferred pass)
 
-> **Status:** 🟡 Spec'd 2026-07-04 — this executes the pass `architecture.md`
-> §0 deferred ("curated clan_memories, conversational memory, the
-> interactive-conversation UX"). Decisions D1–D5 below need Jamie; build
-> follows. Same conventions as the v5.1 set.
+> **Status:** ✅ **D1–D5 ratified as recommended (Jamie, 2026-07-04)** — build
+> underway. This executes the pass `architecture.md` §0 deferred ("curated
+> clan_memories, conversational memory, the interactive-conversation UX").
+> Same conventions as the v5.1 set.
 > **Owner:** Jamie · **Last worked:** 2026-07-04
 >
 > **The problem (Jamie):** memory "suffered through the same multiple
@@ -127,7 +127,7 @@ Parity: `COUNT(memories) == 3,886 + 1` (M3), per-kind counts match the source
 distribution, per-tag link counts match, every episode row carried, FTS
 returns a known memory by a word in its body.
 
-## 4. Decisions — D1–D5
+## 4. Decisions — D1–D5 ✅ (all ratified as recommended, 2026-07-04)
 
 | # | Question | Recommendation |
 |---|---|---|
