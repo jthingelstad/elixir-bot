@@ -19,7 +19,7 @@ def _cutoff_date(days: int) -> str:
 
 def _member_id_for_tag(conn, tag: str):
     return conn.execute(
-        "SELECT member_id FROM members WHERE player_tag = ?",
+        "SELECT player_tag AS member_id FROM players WHERE player_tag = ?",
         (_canon_tag(tag),),
     ).fetchone()
 
@@ -29,8 +29,8 @@ def get_member_trophy_history(tag: str, days: int = 30, conn: Optional[sqlite3.C
     cutoff = _cutoff_date(days)
     rows = conn.execute(
         "SELECT dm.metric_date, dm.trophies, dm.best_trophies, dm.clan_rank, dm.exp_level "
-        "FROM member_daily_metrics dm "
-        "JOIN members m ON m.member_id = dm.member_id "
+        "FROM player_daily_metrics dm "
+        "JOIN players m ON m.player_tag = dm.player_tag "
         "WHERE m.player_tag = ? AND dm.metric_date >= ? "
         "ORDER BY dm.metric_date ASC",
         (_canon_tag(tag), cutoff),
@@ -49,8 +49,8 @@ def get_member_daily_battle_summary(tag: str, days: int = 30, mode_group: Option
     rows = conn.execute(
         "SELECT r.battle_date, r.mode_group, r.game_mode_id, r.game_mode_name, r.battles, r.wins, r.losses, r.draws, "
         "r.trophy_change_total, r.captured_battles, r.expected_battle_delta, r.completeness_ratio, r.is_complete "
-        "FROM member_daily_battle_rollups r "
-        "JOIN members m ON m.member_id = r.member_id "
+        "FROM player_daily_battle_rollups r "
+        "JOIN players m ON m.player_tag = r.player_tag "
         f"WHERE {' AND '.join(where)} "
         "ORDER BY r.battle_date ASC, r.mode_group ASC, COALESCE(r.game_mode_id, 0) ASC",
         tuple(params),
@@ -187,7 +187,7 @@ def compare_member_trend_windows(tag: str, window_days: int = 7, conn: Optional[
         }
 
     member_row = conn.execute(
-        "SELECT member_id, player_tag AS tag, current_name AS name FROM members WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, player_tag AS tag, current_name AS name FROM players WHERE player_tag = ?",
         (_canon_tag(tag),),
     ).fetchone()
     member = dict(member_row) if member_row else {"tag": _canon_tag(tag), "name": _canon_tag(tag)}

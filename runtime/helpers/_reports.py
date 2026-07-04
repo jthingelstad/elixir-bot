@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import cr_api
 import db
 import elixir_agent
-from event_core.read import event_facades
+from runtime.helpers import _stream_facades as event_facades
 from memory_store import list_memories
 from runtime import status as runtime_status
 

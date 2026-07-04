@@ -188,11 +188,14 @@ CREATE INDEX IF NOT EXISTS idx_clan_memory_event_links_lookup
 
 
 def _memory_db_path() -> str:
-    """Resolve the memory DB path per-call so the test conftest's env/config
-    overrides are always honored."""
-    from event_core import config
-
-    return os.environ.get("ELIXIR_V5_MEMORY_DB") or config.MEMORY_DB
+    """Resolve the memory DB path per-call so the test conftest's env
+    overrides are always honored. (Inlined at the v5.1 cut — was
+    event_core.config.MEMORY_DB, same default.)"""
+    default = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "elixir-v5-memory.db",
+    )
+    return os.environ.get("ELIXIR_V5_MEMORY_DB") or default
 
 
 def _ensure_memory_schema(conn: sqlite3.Connection) -> None:

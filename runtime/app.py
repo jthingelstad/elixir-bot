@@ -7,6 +7,7 @@ import os
 import re
 import logging
 import sys
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
@@ -17,7 +18,6 @@ import pytz
 import cr_api  # re-exported; accessed by runtime submodules
 import db
 import elixir_agent
-import heartbeat  # re-exported; patched in tests
 import prompts
 from runtime.activities import format_scheduler_startup_summary, register_scheduled_activities
 from runtime.admin import admin_command_requires_leader, dispatch_admin_command
@@ -54,7 +54,15 @@ BOT_ROLE_ID = _dc.get("bot_role", 0)
 GUILD_ID = int(_dc.get("guild_id", 0) or 0)
 CHANNEL_CONVERSATION_LIMIT = 20
 
-HEARTBEAT_INTERVAL_MINUTES = int(os.getenv("HEARTBEAT_INTERVAL_MINUTES", "60"))
+# v5.1 engine schedule knobs (runtime.md §3; ratified defaults 2026-07-03)
+ENGINE_TICK_MINUTES = int(os.getenv("ENGINE_TICK_MINUTES", "10"))
+WEEKLY_REVIEW_DAY = os.getenv("WEEKLY_REVIEW_DAY", "mon")
+WEEKLY_REVIEW_HOUR = int(os.getenv("WEEKLY_REVIEW_HOUR", "7"))
+WEEKLY_REVIEW_MINUTE = int(os.getenv("WEEKLY_REVIEW_MINUTE", "0"))
+WAR_ATTENDANCE_HOUR = int(os.getenv("WAR_ATTENDANCE_HOUR", "4"))
+WAR_ATTENDANCE_MINUTE = int(os.getenv("WAR_ATTENDANCE_MINUTE", "15"))
+ACTION_OUTCOME_REFRESH_HOUR = int(os.getenv("ACTION_OUTCOME_REFRESH_HOUR", "9"))
+ACTION_OUTCOME_REFRESH_MINUTE = int(os.getenv("ACTION_OUTCOME_REFRESH_MINUTE", "30"))
 ASK_ELIXIR_DAILY_INSIGHT_HOUR = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_HOUR", "12"))
 ASK_ELIXIR_DAILY_INSIGHT_MINUTE = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_MINUTE", "0"))
 PROMOTION_CONTENT_DAY = os.getenv("PROMOTION_CONTENT_DAY", "fri")
@@ -223,31 +231,19 @@ from runtime.helpers import (  # noqa: E402,F401
     _with_leader_ping,
 )
 from runtime.jobs._core import (  # noqa: E402,F401
-    WAR_AWARENESS_MINUTE,
-    WAR_POLL_MINUTE,
     WEEKLY_DISCORD_INVITE_RELAY_DAY,
     WEEKLY_DISCORD_INVITE_RELAY_HOUR,
     WEEKLY_RECAP_DAY,
     WEEKLY_RECAP_HOUR,
     _ask_elixir_daily_insight,
-    _award_detection_tick,
     _build_ask_elixir_daily_insight_context,
-    _leadership_action_scan,
     _query_or_default,
     _summarize_member_rows,
-    _war_poll_tick,
     _weekly_clan_recap,
     _weekly_discord_invite_relay,
 )
 from runtime.jobs._intel import (  # noqa: E402,F401
-    PLAYER_INTEL_BATCH_SIZE,
-    PLAYER_INTEL_REFRESH_HOURS,
-    PLAYER_INTEL_REFRESH_MINUTES,
-    PLAYER_INTEL_REQUEST_SPACING_SECONDS,
-    PLAYER_INTEL_STALE_HOURS,
     _clan_wars_intel_report,
-    _player_intel_refresh,
-    _player_intel_refresh_minutes,
 )
 from runtime.jobs._maintenance import (  # noqa: E402,F401
     API_SENTINEL_POLL_MINUTES,
@@ -722,17 +718,18 @@ def _v5_event_leader_action_spec(metadata: dict | None) -> dict | None:
 
 
 def _recent_win_facts(player_tag: str | None) -> dict | None:
-    """The player's most recent competitive win (opponent tag, mode, crowns) from the v5
-    projections DB, to seed a celebration relay so it can reference the actual game. The
-    composer enriches opponent name + cards from its CR tools. Best-effort → None on error."""
+    """The player's most recent competitive win (opponent tag, mode, crowns) from
+    battle_events, to seed a celebration relay so it can reference the actual game.
+    Best-effort → None on error."""
     if not player_tag:
         return None
     try:
-        from event_core import db as v5db
-        from event_core.live.runtime import _recent_win_for_subject
-        conn = v5db.connect()
+        from engine import db as engine_db
+        from engine.recognition.compose import _recent_win
+
+        conn = engine_db.connect()
         try:
-            return _recent_win_for_subject(conn, player_tag)
+            return _recent_win(conn, player_tag)
         finally:
             conn.close()
     except Exception:
@@ -892,54 +889,8 @@ async def _post_v5_event_leader_action(metadata: dict | None, sent_messages=None
     return True
 
 
-def _recent_delivered_v5_event_metadata(limit: int = 50) -> list[dict]:
-    rows: list[dict] = []
-    conn = db.get_connection()
-    try:
-        for row in conn.execute(
-            """
-            SELECT intent_key, intent_type, source_signal_key, source_signal_type,
-                   target_channel_key, target_channel_id, payload_json, delivered_at
-            FROM communication_intents
-            WHERE workflow = 'v5-reactive'
-              AND status = 'delivered'
-              AND delivered_at >= datetime('now', '-7 days')
-            ORDER BY delivered_at DESC
-            LIMIT ?
-            """,
-            (int(limit),),
-        ):
-            try:
-                payload = json.loads(row["payload_json"] or "{}")
-            except (TypeError, ValueError):
-                payload = {}
-            metadata = dict(payload)
-            metadata.setdefault("intent_type", row["intent_type"])
-            metadata.setdefault("source_signal_key", row["source_signal_key"])
-            metadata.setdefault("source_signal_type", row["source_signal_type"])
-            metadata.setdefault("target_channel_key", row["target_channel_key"])
-            metadata.setdefault("target_channel_id", row["target_channel_id"])
-            metadata.setdefault("operational_intent_key", row["intent_key"])
-            metadata.setdefault("delivered_at", row["delivered_at"])
-            if _v5_event_detection_type(metadata) in _V5_EVENT_LEADER_ACTION_TYPES:
-                rows.append(metadata)
-    finally:
-        conn.close()
-    return rows
 
 
-async def _post_missing_v5_event_leader_actions(limit: int = 50) -> int:
-    count = 0
-    for metadata in await asyncio.to_thread(_recent_delivered_v5_event_metadata, limit):
-        try:
-            if await _post_v5_event_leader_action(metadata):
-                count += 1
-        except Exception:
-            log.exception(
-                "v5 event leader-action backfill failed source=%s",
-                _v5_event_source_key(metadata),
-            )
-    return count
 
 
 def _upsert_v5_operational_intent(
@@ -1067,21 +1018,350 @@ async def _v5_post(channel_id, text, *, metadata: dict | None = None) -> bool:
     return True
 
 
-async def _v5_reactive_tick():
-    """Event-driven tick: ingest CR data -> advance Followers -> reactively post new
-    communication intents (agent-composed). Replaces the v4 scheduled-awareness loop."""
-    from event_core.live import service
+def _engine_compose_copy(intent) -> str | None:
+    """Compose voice for an engine intent (recognition.md §7): subject history
+    context + the same agent path as before. Meta-guard + deterministic
+    fallback live in engine.delivery.consume."""
+    from engine import db as engine_db
+    from engine.recognition import compose as engine_compose
 
-    loop = asyncio.get_running_loop()
-    result = await service.reactive_tick(loop, _v5_post)
+    lanes = engine_compose.channels()
+    ch = lanes.get(intent["lane"]) or {}
+    conn = engine_db.connect()
     try:
-        leader_actions_posted = await _post_missing_v5_event_leader_actions()
-        if leader_actions_posted:
-            result = {**result, "leader_actions_posted": leader_actions_posted}
+        context = engine_compose.intent_context(conn, intent)
+    finally:
+        conn.close()
+    result = elixir_agent.generate_channel_update(
+        ch.get("channel_name") or intent["lane"],
+        intent["lane"],
+        context,
+        leadership=bool(ch.get("leadership")),
+    )
+    if isinstance(result, str):
+        return result.strip() or None
+    if isinstance(result, dict):
+        posts = result.get("posts")
+        if posts:
+            p = posts[0]
+            if isinstance(p, dict):
+                return (p.get("content") or p.get("summary") or "").strip() or None
+            return str(p)
+        return (result.get("content") or result.get("summary") or "").strip() or None
+    return None
+
+
+async def _engine_send(channel_id: int, text: str):
+    """Async Discord send for the engine; returns the first message id or None."""
+    channel = bot.get_channel(int(channel_id))
+    if channel is None:
+        log.warning("engine: channel %s not found; send failed", channel_id)
+        return None
+    sent_messages = await _post_to_elixir(channel, {"content": text})
+    if not sent_messages:
+        return None
+    return getattr(sent_messages[0], "id", None)
+
+
+def _engine_startup_cursors() -> int:
+    """runtime.md §6: a missing consumer cursor initializes at the current
+    stream head — replay is safe (durable ledger) but wasteful, so skip it."""
+    from engine import db as engine_db
+
+    consumers = {
+        "recognize:battle": "battle_events",
+        "recognize:player": "player_events",
+        "recognize:clan": "clan_events",
+        "recognize:war": "war_events",
+    }
+    conn = engine_db.connect()
+    initialized = 0
+    try:
+        for consumer_key, table in consumers.items():
+            row = conn.execute(
+                "SELECT 1 FROM stream_cursors WHERE consumer_key = ? AND scope_key = ''",
+                (consumer_key,),
+            ).fetchone()
+            if row is None:
+                engine_db.cursor_set(conn, consumer_key, engine_db.stream_head(conn, table))
+                initialized += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return initialized
+
+
+async def _post_pending_leader_action_cards(limit: int = 4) -> int:
+    """Post interactive cards for engine-created leader actions that have no
+    Discord message yet (kick recs from the tick, promote/demote from the
+    weekly review). Gated by the existing post policy."""
+    rows = await asyncio.to_thread(db.list_leader_actions, status="proposed", limit=25)
+    pending = [a for a in rows if not a.get("source_message_id")]
+    if not pending:
+        return 0
+    allowed, reason = await asyncio.to_thread(can_post_leader_action, critical=False)
+    if not allowed:
+        log.info("engine leader-action cards deferred by policy: %s", reason)
+        return 0
+    try:
+        channel_config = _channel_config_by_key("arena-relay")
     except Exception:
-        log.exception("v5 event leader-action backfill scan failed")
-    log.info("v5 reactive tick: %s", result)
+        log.warning("engine leader-action cards skipped: arena-relay unavailable")
+        return 0
+    relay_channel = bot.get_channel(int(channel_config["id"]))
+    if relay_channel is None:
+        return 0
+    posted = 0
+    for action in pending[:limit]:
+        try:
+            card_messages = await post_leader_action_card(relay_channel, action)
+            first_id = getattr(card_messages[0], "id", None) if card_messages else None
+            if first_id is not None:
+                await asyncio.to_thread(
+                    lambda a=action, m=first_id: db.update_leader_action_message(
+                        a["action_id"], source_message_id=str(m)
+                    )
+                )
+            posted += 1
+        except Exception:
+            log.exception("engine leader-action card post failed for %s", action.get("action_id"))
+    return posted
+
+
+async def _relay_engine_clan_chat_actions(fulfilled_intents: list) -> int:
+    """Carry the clan-chat relay tradition: certain public moments (joins, cake
+    days, career/collection milestones) also get an in-game copy card for
+    leaders (at most half the players use Discord — Q7 context)."""
+    posted = 0
+    for intent in fulfilled_intents:
+        try:
+            payload = json.loads(intent["payload_json"] or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        event_type = payload.get("event_type") or (intent["intent_type"] or "").split(":", 1)[-1]
+        if event_type not in _V5_EVENT_LEADER_ACTION_TYPES:
+            continue
+        summary = dict(payload)
+        summary.setdefault("detection_type", event_type)
+        metadata = {
+            "intent_type": intent["intent_type"],
+            "subject_tag": payload.get("subject_tag") or payload.get("tag"),
+            "summary": summary,
+            "event_core_dedup_key": intent["recognition_key"],
+            "source_signal_key": intent["recognition_key"],
+            "source_signal_type": event_type,
+        }
+        try:
+            if await _post_v5_event_leader_action(metadata):
+                posted += 1
+        except Exception:
+            log.exception("clan-chat relay failed for intent %s", intent["intent_id"])
+    return posted
+
+
+async def _engine_tick():
+    """The v5.1 engine tick (runtime.md §2): poll → mirror → emit → project →
+    manage → recognize → deliver, then leader-action cards + telemetry."""
+    import cr_api as _cr_api
+
+    from engine import db as engine_db
+    from engine import tick as engine_tick_mod
+    from engine.recognition import compose as engine_compose
+
+    runtime_status.mark_job_start("engine_tick")
+    loop = asyncio.get_running_loop()
+
+    def send_fn(lane: str, copy: str):
+        lanes = engine_compose.channels()
+        ch = lanes.get(lane) or lanes.get("arena-relay")
+        if not ch:
+            raise RuntimeError(f"engine send: lane {lane!r} unresolved and no fail-closed lane")
+        future = asyncio.run_coroutine_threadsafe(
+            _engine_send(ch["channel_id"], copy), loop
+        )
+        message_id = future.result(timeout=120)
+        if message_id is None:
+            raise RuntimeError(f"engine send: post to lane {lane!r} failed")
+        return message_id
+
+    def _run():
+        conn = engine_db.connect()
+        try:
+            counters = engine_tick_mod.run_tick(
+                conn, api=_cr_api, send_fn=send_fn, compose_fn=_engine_compose_copy
+            )
+            fulfilled = conn.execute(
+                """SELECT * FROM communication_intents
+                   WHERE status = 'fulfilled' AND fulfilled_at >= datetime('now', '-15 minutes')"""
+            ).fetchall()
+            return counters, fulfilled
+        finally:
+            conn.close()
+
+    try:
+        counters, fulfilled = await asyncio.to_thread(_run)
+    except Exception as exc:
+        runtime_status.mark_job_failure("engine_tick", str(exc))
+        log.exception("engine tick failed")
+        return
+    try:
+        cards = await _post_pending_leader_action_cards()
+        if cards:
+            counters["leader_action_cards"] = cards
+        relayed = await _relay_engine_clan_chat_actions(fulfilled)
+        if relayed:
+            counters["clan_chat_relays"] = relayed
+    except Exception:
+        log.exception("engine tick post-steps failed")
+    log.info("engine tick: %s", counters)
+    runtime_status.mark_job_success("engine_tick", json.dumps(counters, default=str)[:900])
+    return counters
+
+
+async def _weekly_leadership_review():
+    """Q1's weekly batch half (Monday 7:00 AM America/Chicago, ratified):
+    roll the management week, raise promote/demote leader actions, post one
+    review summary to the leadership lane."""
+    from engine import db as engine_db
+    from engine import management as engine_management
+
+    runtime_status.mark_job_start("weekly_leadership_review")
+
+    def _run():
+        import pytz as _pytz
+
+        conn = engine_db.connect()
+        try:
+            chicago_now = datetime.now(_pytz.timezone("America/Chicago"))
+            monday = chicago_now.date() - timedelta(days=chicago_now.weekday())
+            result = engine_management.run_weekly_review(conn, monday.isoformat())
+            from storage.leader_actions import create_leader_action_recommendation
+
+            for kind, action_type in (
+                ("promote_eligible", "promotion_recommendation"),
+                ("demote_eligible", "demotion_recommendation"),
+            ):
+                for row in result.get(kind) or []:
+                    tag = row.get("player_tag")
+                    create_leader_action_recommendation(
+                        action_type=action_type,
+                        objective=f"{action_type.replace('_', ' ')} for {row.get('player_name') or tag}",
+                        prompt_text=(
+                            f"Weekly review: {tag} is {kind.replace('_', ' ')} "
+                            f"per the management evaluators. Evidence: {json.dumps(row, default=str)[:600]}"
+                        ),
+                        rationale=row.get("rationale") or "Weekly management review candidacy.",
+                        target_player_tag=tag,
+                        target_player_name=row.get("player_name"),
+                        source_signal_key=f"engine:weekly-review:{monday.isoformat()}:{tag}:{action_type}",
+                        source_signal_type="engine_weekly_review",
+                        conn=conn,
+                    )
+            conn.commit()
+            return result
+        finally:
+            conn.close()
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except Exception as exc:
+        runtime_status.mark_job_failure("weekly_leadership_review", str(exc))
+        log.exception("weekly leadership review failed")
+        return
+    try:
+        await _post_pending_leader_action_cards(limit=6)
+        channel_id = _get_singleton_channel_id("arena-relay")
+        channel = bot.get_channel(channel_id) if channel_id else None
+        if channel is not None:
+            promote_n = len(result.get("promote_eligible") or [])
+            demote_n = len(result.get("demote_eligible") or [])
+            withdrawn_n = len(result.get("withdrawn") or [])
+            context = (
+                f"Weekly leadership review for week starting {result.get('week_anchor')}: "
+                f"{promote_n} promotion candidacies, {demote_n} demotion candidacies, "
+                f"{withdrawn_n} auto-withdrawn. Member states: "
+                f"{json.dumps((result.get('rows') or [])[:20], default=str)[:1500]}. "
+                "Summarize the week for leadership: who is eligible and why (evidence, "
+                "not judgment), who is at risk, and note that candidacy cards follow separately."
+            )
+            await compose_and_post(channel, lane="arena-relay", context=context, leadership=True)
+    except Exception:
+        log.exception("weekly review summary post failed")
+    runtime_status.mark_job_success(
+        "weekly_leadership_review",
+        f"promote={len(result.get('promote_eligible') or [])} "
+        f"demote={len(result.get('demote_eligible') or [])}",
+    )
     return result
+
+
+async def _war_attendance_snapshot():
+    """Finalize war_attendance_days for the just-closing war day (runtime.md §3).
+    fame_delta stays NULL when no intra-day participation history exists — the
+    evaluators read decks_used, which is always present."""
+    from engine import baselines as engine_baselines
+    from engine import db as engine_db
+    from engine.clock import war_clock
+    from engine.emitters.war import finalize_attendance_day
+
+    runtime_status.mark_job_start("war_attendance_snapshot")
+
+    def _run():
+        conn = engine_db.connect()
+        try:
+            row = engine_baselines.get_baseline(conn, "riverrace", "#J2RGCRVG", "race")
+            if row is None:
+                return {"skipped": "no riverrace baseline"}
+            payload = json.loads(row["payload_json"])
+            raw = payload.get("_raw") or payload
+            clock = war_clock(raw, datetime.now(timezone.utc), season_id=payload.get("season_id"))
+            if clock.phase == "training" or clock.season_id is None:
+                return {"skipped": f"phase={clock.phase}"}
+            finalized = finalize_attendance_day(
+                conn, clock.season_id, clock.section_index, clock.war_day_index
+            )
+            conn.commit()
+            return {
+                "finalized": finalized,
+                "season": clock.season_id,
+                "section": clock.section_index,
+                "day": clock.war_day_index,
+            }
+        finally:
+            conn.close()
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except Exception as exc:
+        runtime_status.mark_job_failure("war_attendance_snapshot", str(exc))
+        log.exception("war attendance snapshot failed")
+        return
+    runtime_status.mark_job_success("war_attendance_snapshot", json.dumps(result, default=str))
+    return result
+
+
+async def _action_outcome_refresh():
+    """Daily leader-action hygiene carried from leadership-action-scan
+    (runtime.md §3): refresh due outcomes, re-queue feedback synthesis. The
+    scan/creation role retired — the engine owns the Q1 reactive path."""
+    runtime_status.mark_job_start("action_outcome_refresh")
+    try:
+        refreshed = await asyncio.to_thread(db.refresh_due_leader_action_outcomes)
+        if refreshed:
+            log.info("action outcome refresh: %s due outcome(s)", len(refreshed))
+            from runtime.leader_action_feedback import queue_leader_action_feedback_refresh
+
+            for action_type in sorted(
+                {a.get("action_type") for a in refreshed if a.get("action_type")}
+            ):
+                queue_leader_action_feedback_refresh(action_type)
+    except Exception as exc:
+        runtime_status.mark_job_failure("action_outcome_refresh", str(exc))
+        log.warning("action outcome refresh failed: %s", exc, exc_info=True)
+        return
+    runtime_status.mark_job_success(
+        "action_outcome_refresh", f"refreshed {len(refreshed) if refreshed else 0}"
+    )
 
 
 @bot.event
@@ -1136,16 +1416,14 @@ async def on_ready():
             create_task=lambda job_callable: job_callable,
         )
         scheduler.start()
-        # v5 go-live: ingest current state + drain ALL intents (backlog + downtime
-        # catch-up) once, WITHOUT posting, so reactive posting starts clean from the
-        # next tick and never floods Discord with historical events.
+        # v5.1 startup (runtime.md §6): missing consumer cursors initialize at
+        # the current stream head — replay is safe (durable ledger) but wasteful.
         try:
-            from event_core.live import service as _v5_service
-
-            caught_up = await asyncio.to_thread(_v5_service.catch_up)
-            log.info("v5 go-live catch-up: %s", caught_up)
+            initialized = await asyncio.to_thread(_engine_startup_cursors)
+            if initialized:
+                log.info("engine startup: %s cursor(s) initialized at head", initialized)
         except Exception:
-            log.exception("v5 catch-up failed (reactive posting may flood or lag)")
+            log.exception("engine startup cursor init failed")
         startup_posted = await _post_startup_message()
         if not startup_posted:
             log.warning("Startup announcement was not posted to leadership")
@@ -1181,11 +1459,11 @@ async def on_ready():
         except Exception as exc:
             log.warning("Leader action view restore failed: %s", exc)
         try:
-            posted_event_actions = await _post_missing_v5_event_leader_actions()
-            if posted_event_actions:
-                log.info("Posted %s missing v5 event leader-action card(s)", posted_event_actions)
+            cards = await _post_pending_leader_action_cards()
+            if cards:
+                log.info("Posted %s pending leader-action card(s) at startup", cards)
         except Exception:
-            log.exception("Startup v5 event leader-action backfill failed")
+            log.exception("Startup leader-action card backfill failed")
     else:
         log.info("Reconnected — scheduler already running, skipping re-init")
 

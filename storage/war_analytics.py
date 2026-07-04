@@ -1,521 +1,194 @@
+"""War analytics — v5.1 sources (docs/v5.1/schema.md §9).
+
+The headline upgrade: at_risk / promotion / demotion read the deterministic
+member_management projection (management.md states + evidence columns) instead
+of recomputing eligibility per call — the tool output and the leader-action
+pipeline can no longer disagree. War reads come from war_participation /
+war_weeks / war_attendance_days; battle-level war reads (win rates, decks)
+come from battle_events war keys + deck_json (a join, not raw_json inference).
+"""
+
 from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from db import (
     _canon_tag,
-    _current_joined_at,
-    _parse_cr_time,
+    _rowdicts,
     managed_connection,
 )
 from storage._enrichment import _member_reference_fields
-from storage.member_ranks import ELDER_ELIGIBILITY_DEFAULTS, evaluate_elder_eligibility
-from storage.war_status import _season_bounds, get_current_season_id
+from storage.member_ranks import ELDER_ELIGIBILITY_DEFAULTS
 
-from storage._formatting import format_member_reference as _format_member_reference
+_ACTIVE = (
+    "EXISTS (SELECT 1 FROM clan_memberships cm "
+    "WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
+)
+
+# Carried trophy-scaled inactivity anchors (CLAN.md thresholds; the engine's
+# management module owns the live kick machine — these back the tool's
+# criteria echo only).
+INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE = 1.4
+INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT = 0.7
+LOOSE_MEMBER_COUNT = 40
+TIGHT_MEMBER_COUNT = 50
+ELDER_DONATION_ROLLING_WEEKS = 4
+
+
+def _member_activity_anchor(conn) -> datetime:
+    """Latest battle timestamp clan-wide, as the 'today' anchor for
+    activity math (carried semantics: anchor on data, not wall clock; falls
+    back to now when the stream is empty)."""
+    row = conn.execute("SELECT MAX(battle_time) AS ts FROM battle_events").fetchone()
+    ts = row["ts"] if row else None
+    if ts:
+        try:
+            txt = str(ts).replace("Z", "+00:00")
+            if "T" in txt and "-" not in txt[:8]:
+                # CR compact form 20260703T120000.000+00:00
+                return datetime.strptime(str(ts)[:15], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+            return datetime.fromisoformat(txt).astimezone(timezone.utc)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
 
 
 def _classify_war_player_rate(total: int, played: int) -> str:
-    if total == 0:
-        return "never"
+    if not total:
+        return "unknown"
     rate = played / total
     if rate >= 0.75:
         return "regular"
     if rate >= 0.25:
         return "occasional"
-    if played > 0:
-        return "rare"
-    return "never"
+    return "rare"
 
 
-def _war_player_type(conn, member_id):
-    """Classify a member's war participation habit based on tracked race history.
-
-    Returns one of: "regular" (75%+), "occasional" (25-74%),
-    "rare" (1-24%), "never" (0%).
-    """
+def _war_player_type(conn, player_tag) -> str:
+    tag = _canon_tag(player_tag)
     row = conn.execute(
-        "SELECT COUNT(*) AS total_races, "
-        "SUM(CASE WHEN COALESCE(wp.decks_used, 0) > 0 THEN 1 ELSE 0 END) AS races_played "
-        "FROM war_participation wp "
-        "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-        "WHERE wp.member_id = ?",
-        (member_id,),
+        "SELECT COUNT(DISTINCT ww.season_id || ':' || ww.section_index) AS total, "
+        "COUNT(DISTINCT CASE WHEN COALESCE(wp.decks_used, 0) > 0 "
+        "  THEN wp.season_id || ':' || wp.section_index END) AS played "
+        "FROM war_weeks ww "
+        "LEFT JOIN war_participation wp ON wp.season_id = ww.season_id "
+        "  AND wp.section_index = ww.section_index AND wp.player_tag = ?",
+        (tag,),
     ).fetchone()
-    return _classify_war_player_rate(row["total_races"] or 0, row["races_played"] or 0)
-
-
-def has_played_earlier_this_week(
-    conn,
-    player_tag: str,
-    season_id: Optional[int],
-    section_index: Optional[int],
-    period_index: Optional[int],
-) -> bool:
-    """Did this member already play (decks_used_total > 0) on an earlier
-    period in the same race week? Backfills the gap that ``war_participation``
-    only contains *closed* races, so the war-player-type classifier can
-    treat someone like a "never" player even after they've already taken
-    swings in the current open race.
-    """
-    if not player_tag or season_id is None or section_index is None or period_index is None:
-        return False
-    canon_tag = player_tag if player_tag.startswith("#") else f"#{player_tag}"
-    row = conn.execute(
-        "SELECT 1 FROM war_day_status wds "
-        "JOIN members m ON m.member_id = wds.member_id "
-        "WHERE m.player_tag = ? "
-        "  AND wds.season_id = ? AND wds.section_index = ? "
-        "  AND wds.period_index < ? "
-        "  AND COALESCE(wds.decks_used_total, 0) > 0 "
-        "LIMIT 1",
-        (canon_tag, season_id, section_index, period_index),
-    ).fetchone()
-    return row is not None
+    return _classify_war_player_rate(row["total"] or 0, row["played"] or 0)
 
 
 def war_player_types_by_tag(conn, player_tags: list[str]) -> dict[str, str]:
-    """Batch-classify war player types for a list of player tags.
+    return {t: _war_player_type(conn, t) for t in {_canon_tag(t) for t in player_tags if t}}
 
-    Returns {canonicalised_tag: "regular"|"occasional"|"rare"|"never"}.
-    Tags the bot doesn't recognise are omitted from the result.
-    """
-    if not player_tags:
-        return {}
-    canon_tags = [tag if tag.startswith("#") else f"#{tag}" for tag in player_tags if tag]
-    if not canon_tags:
-        return {}
-    placeholders = ",".join("?" * len(canon_tags))
-    rows = conn.execute(
-        f"SELECT m.player_tag, "
-        f"COUNT(wr.war_race_id) AS total_races, "
-        f"SUM(CASE WHEN COALESCE(wp.decks_used, 0) > 0 THEN 1 ELSE 0 END) AS races_played "
-        f"FROM members m "
-        f"LEFT JOIN war_participation wp ON wp.member_id = m.member_id "
-        f"LEFT JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-        f"WHERE m.player_tag IN ({placeholders}) "
-        f"GROUP BY m.player_tag",
-        canon_tags,
-    ).fetchall()
-    return {
-        row["player_tag"]: _classify_war_player_rate(row["total_races"] or 0, row["races_played"] or 0)
-        for row in rows
-    }
-
-
-def _get_account_age_years(conn, member_id):
-    """Fetch CR account age in years from member_metadata, or None."""
-    row = conn.execute(
-        "SELECT cr_account_age_years FROM member_metadata WHERE member_id = ?",
-        (member_id,),
-    ).fetchone()
-    return row["cr_account_age_years"] if row else None
-
-
-def _war_trend_anchor(conn):
-    latest_state_row = conn.execute(
-        "SELECT MAX(observed_at) AS observed_at FROM war_current_state"
-    ).fetchone()
-    latest_race_row = conn.execute(
-        "SELECT MAX(created_date) AS created_date FROM war_races"
-    ).fetchone()
-
-    anchors = []
-    observed_at = latest_state_row["observed_at"] if latest_state_row else None
-    created_date = latest_race_row["created_date"] if latest_race_row else None
-
-    if observed_at:
-        try:
-            anchors.append(datetime.fromisoformat(observed_at))
-        except ValueError:
-            pass
-    if created_date:
-        parsed = _parse_cr_time(created_date)
-        if parsed:
-            anchors.append(parsed)
-
-    return max(anchors) if anchors else datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _member_activity_anchor(conn):
-    latest_seen_row = conn.execute(
-        "SELECT MAX(last_seen_api) AS last_seen_api FROM member_current_state"
-    ).fetchone()
-    last_seen_api = latest_seen_row["last_seen_api"] if latest_seen_row else None
-    parsed_last_seen = _parse_cr_time(last_seen_api)
-    return parsed_last_seen or datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _member_snapshot_anchor(conn):
-    latest_snapshot_row = conn.execute(
-        "SELECT MAX(observed_at) AS observed_at FROM member_state_snapshots"
-    ).fetchone()
-    observed_at = latest_snapshot_row["observed_at"] if latest_snapshot_row else None
-    if observed_at:
-        try:
-            return datetime.fromisoformat(observed_at)
-        except ValueError:
-            pass
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 @managed_connection
 def get_members_without_war_participation(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> dict:
+    from storage.war_status import get_current_season_id
+
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
-    if season_id is None:
-        return {"season_id": None, "members": []}
-    rows = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.role, cs.exp_level, cs.clan_rank "
-        "FROM members m "
-        "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "WHERE m.status = 'active' "
-        "AND NOT EXISTS ("
-        "  SELECT 1 FROM war_participation wp "
-        "  JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-        "  WHERE wr.season_id = ? AND wp.member_id = m.member_id AND COALESCE(wp.decks_used, 0) > 0"
-        ") "
-        "ORDER BY COALESCE(cs.clan_rank, 999), m.current_name COLLATE NOCASE",
-        (season_id,),
-    ).fetchall()
     members = []
-    for row in rows:
-        item = dict(row)
-        item["joined_date"] = _current_joined_at(conn, row["member_id"])
-        members.append(_member_reference_fields(conn, row["member_id"], item))
+    if season_id is not None:
+        rows = conn.execute(
+            "SELECT m.player_tag AS tag, m.current_name AS name, cs.role, cs.clan_rank "
+            "FROM players m "
+            "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
+            f"WHERE {_ACTIVE} AND NOT EXISTS ("
+            "  SELECT 1 FROM war_participation wp WHERE wp.player_tag = m.player_tag "
+            "  AND wp.season_id = ? AND COALESCE(wp.decks_used, 0) > 0) "
+            "ORDER BY COALESCE(cs.clan_rank, 999), m.current_name COLLATE NOCASE",
+            (season_id,),
+        ).fetchall()
+        members = [_member_reference_fields(conn, r["tag"], dict(r)) for r in rows]
     return {"season_id": season_id, "members": members}
+
 
 @managed_connection
 def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
-    canon_tag = _canon_tag(tag)
+    from storage.war_status import get_current_season_id
+
+    member_tag = _canon_tag(tag)
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     if season_id is None:
         return None
-    member = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name "
-        "FROM members m WHERE m.player_tag = ?",
-        (canon_tag,),
+    mine = conn.execute(
+        "SELECT SUM(COALESCE(fame, 0)) AS fame, COUNT(*) AS races, "
+        "SUM(COALESCE(decks_used, 0)) AS decks_used "
+        "FROM war_participation WHERE season_id = ? AND player_tag = ?",
+        (season_id, member_tag),
     ).fetchone()
-    if not member:
-        return None
-    total_races = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM war_races WHERE season_id = ?",
-        (season_id,),
-    ).fetchone()["cnt"]
-    active_members = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM members WHERE status = 'active'"
-    ).fetchone()["cnt"]
-    member_stats = conn.execute(
-        "SELECT COUNT(*) AS races_played, SUM(COALESCE(wp.fame, 0)) AS total_fame, "
-        "SUM(COALESCE(wp.decks_used, 0)) AS total_decks_used, AVG(COALESCE(wp.fame, 0)) AS avg_fame_per_race "
-        "FROM war_participation wp JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-        "WHERE wr.season_id = ? AND wp.player_tag = ?",
-        (season_id, canon_tag),
-    ).fetchone()
-    clan_avgs = conn.execute(
-        "SELECT AVG(member_total_fame) AS avg_total_fame, AVG(member_races_played) AS avg_races_played, "
-        "AVG(member_avg_fame) AS avg_fame_per_participant, AVG(member_total_decks) AS avg_total_decks "
-        "FROM ("
-        "  SELECT wp.player_tag, SUM(COALESCE(wp.fame, 0)) AS member_total_fame, "
-        "         COUNT(*) AS member_races_played, AVG(COALESCE(wp.fame, 0)) AS member_avg_fame, "
-        "         SUM(COALESCE(wp.decks_used, 0)) AS member_total_decks "
-        "  FROM war_participation wp "
-        "  JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-        "  JOIN members m ON m.member_id = wp.member_id "
-        "  WHERE wr.season_id = ? AND m.status = 'active' "
-        "  GROUP BY wp.player_tag"
-        ")",
+    clan = conn.execute(
+        "SELECT COUNT(DISTINCT player_tag) AS participants, "
+        "SUM(COALESCE(fame, 0)) AS total_fame, "
+        "AVG(COALESCE(fame, 0)) AS avg_fame_per_row "
+        "FROM war_participation WHERE season_id = ?",
         (season_id,),
     ).fetchone()
+    participants = clan["participants"] or 0
+    avg_fame_per_member = round((clan["total_fame"] or 0) / participants, 1) if participants else 0
+    name_row = conn.execute("SELECT current_name FROM players WHERE player_tag = ?", (member_tag,)).fetchone()
     return {
         "season_id": season_id,
+        "tag": member_tag,
+        "name": name_row["current_name"] if name_row else None,
         "member": {
-            "tag": member["tag"],
-            "name": member["name"],
-            "member_ref": _format_member_reference(member["tag"], conn=conn),
-            "races_played": member_stats["races_played"] or 0,
-            "total_fame": member_stats["total_fame"] or 0,
-            "total_decks_used": member_stats["total_decks_used"] or 0,
-            "avg_fame_per_race": round(member_stats["avg_fame_per_race"] or 0, 2),
-            "participation_rate": round((member_stats["races_played"] or 0) / total_races, 4) if total_races else 0,
+            "total_fame": mine["fame"] or 0,
+            "races_participated": mine["races"] or 0,
+            "decks_used": mine["decks_used"] or 0,
         },
         "clan_average": {
-            "active_members": active_members,
-            "participants_with_data": conn.execute(
-                "SELECT COUNT(DISTINCT wp.player_tag) AS cnt "
-                "FROM war_participation wp "
-                "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-                "JOIN members m ON m.member_id = wp.member_id "
-                "WHERE wr.season_id = ? AND m.status = 'active'",
-                (season_id,),
-            ).fetchone()["cnt"],
-            "avg_total_fame": round(clan_avgs["avg_total_fame"] or 0, 2),
-            "avg_races_played": round(clan_avgs["avg_races_played"] or 0, 2),
-            "avg_fame_per_participant": round(clan_avgs["avg_fame_per_participant"] or 0, 2),
-            "avg_total_decks": round(clan_avgs["avg_total_decks"] or 0, 2),
+            "participants": participants,
+            "avg_fame_per_member": avg_fame_per_member,
         },
-    }
-
-# Trophy-scaling multiplier anchors. At or below LOOSE_MEMBER_COUNT active
-# members we're lenient (high-trophy players get weeks of rope); at or above
-# TIGHT_MEMBER_COUNT (the 50-cap) we tighten to match the floor for a 10k
-# player. Between the two anchors we interpolate linearly.
-INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE = 1.4
-INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT = 0.7
-LOOSE_MEMBER_COUNT = 40
-TIGHT_MEMBER_COUNT = 50
-
-# Back-compat alias for external callers/tests that imported the original
-# scalar. Always the lenient end; the active value is chosen per-query.
-INACTIVITY_DAYS_PER_1K_TROPHIES = INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE
-
-# member_battle_facts retention; anyone with no battle in this window is
-# treated as "at least this many days inactive" when scoring.
-BATTLE_RETENTION_DAYS = 90
-
-
-def _inactivity_multiplier(active_member_count: Optional[int]) -> float:
-    """Roster-size-adaptive trophy-scaling multiplier (days per 1k trophies).
-
-    Linearly interpolates between the two anchors:
-    ``LOOSE_MEMBER_COUNT`` → ``_LOOSE`` multiplier, ``TIGHT_MEMBER_COUNT``
-    → ``_TIGHT`` multiplier, clamped outside that range. A clan with empty
-    slots stays lenient; a near-full clan tightens the inactivity bar so
-    the bottom of the roster clears faster.
-    """
-    if active_member_count is None:
-        return INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE
-    if active_member_count <= LOOSE_MEMBER_COUNT:
-        return INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE
-    if active_member_count >= TIGHT_MEMBER_COUNT:
-        return INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT
-    span_members = TIGHT_MEMBER_COUNT - LOOSE_MEMBER_COUNT
-    span_days = INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE - INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT
-    slope = span_days / span_members
-    return INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE - (active_member_count - LOOSE_MEMBER_COUNT) * slope
-
-
-def _count_active_members(conn) -> int:
-    row = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM members WHERE status = 'active'"
-    ).fetchone()
-    return row["cnt"] if row else 0
-
-
-def _effective_inactivity_threshold(trophies: Optional[int], floor_days: int,
-                                    per_1k_days: Optional[float] = None) -> float:
-    """Per-member inactivity threshold, in days.
-
-    Higher-trophy members are given more rope before they show up as a
-    removal candidate. Formula: ``max(floor_days, trophies/1000 * per_1k)``
-    where ``per_1k`` defaults to the lenient (empty-roster) multiplier but
-    is typically passed in based on current roster size via
-    ``_inactivity_multiplier``. A 10k-trophy player at 1.4 gets 14d of rope;
-    at 0.7 (roster full) that same player is held to the 7d floor.
-    """
-    if per_1k_days is None:
-        per_1k_days = INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE
-    if not isinstance(trophies, int) or trophies <= 0:
-        return float(floor_days)
-    scaled = (trophies / 1000.0) * per_1k_days
-    return max(float(floor_days), scaled)
-
-
-def _member_activity_timestamps(conn, member_ids):
-    """Batch-fetch last PvP and last war battle timestamps per member.
-
-    Returns ``{member_id: {"pvp": datetime|None, "war": datetime|None}}``.
-    Missing entries mean no battle of that kind in the retention window.
-    """
-    result = {mid: {"pvp": None, "war": None} for mid in member_ids}
-    if not member_ids:
-        return result
-    placeholders = ",".join("?" * len(member_ids))
-    rows = conn.execute(
-        f"SELECT member_id, "
-        f"       MAX(CASE WHEN is_war = 0 THEN battle_time END) AS last_pvp, "
-        f"       MAX(CASE WHEN is_war = 1 THEN battle_time END) AS last_war "
-        f"FROM member_battle_facts "
-        f"WHERE member_id IN ({placeholders}) "
-        f"GROUP BY member_id",
-        tuple(member_ids),
-    ).fetchall()
-    for row in rows:
-        result[row["member_id"]] = {
-            "pvp": _parse_cr_time(row["last_pvp"]),
-            "war": _parse_cr_time(row["last_war"]),
-        }
-    return result
-
-
-def _activity_breakdown(activity, today):
-    """Resolve {login, pvp, war} datetimes into a days-ago summary.
-
-    ``battle_days_ago`` is the days since whichever of PvP or war is more
-    recent. If the member has no battle in the retention window it is set
-    to ``BATTLE_RETENTION_DAYS`` so the threshold comparison works cleanly.
-    Login stays separate context; it does not drive ``battle_days_ago``.
-    """
-    def _days_ago(dt):
-        return (today - dt.date()).days if dt else None
-
-    pvp_dt = activity.get("pvp")
-    war_dt = activity.get("war")
-    login_dt = activity.get("login")
-    pvp_days = _days_ago(pvp_dt)
-    war_days = _days_ago(war_dt)
-    login_days = _days_ago(login_dt)
-
-    battle_candidates = [d for d in (pvp_days, war_days) if d is not None]
-    if battle_candidates:
-        battle_days = min(battle_candidates)
-        last_battle_dt = max(dt for dt in (pvp_dt, war_dt) if dt is not None)
-        last_battle_at = last_battle_dt.strftime("%Y-%m-%dT%H:%M:%S")
-    else:
-        battle_days = BATTLE_RETENTION_DAYS
-        last_battle_at = None
-
-    if battle_days >= BATTLE_RETENTION_DAYS:
-        hint = f"no battles in {BATTLE_RETENTION_DAYS}+ days"
-    elif login_days is not None and login_days <= 1 and battle_days >= 7:
-        hint = f"logs in but hasn't battled in {battle_days} days"
-    elif login_days is None:
-        hint = f"no battle in {battle_days} days"
-    else:
-        hint = f"no battle in {battle_days} days, last login {login_days} days ago"
-
-    return {
-        "battle_days_ago": battle_days,
-        "login_days_ago": login_days,
-        "pvp_days_ago": pvp_days,
-        "war_days_ago": war_days,
-        "last_battle_at": last_battle_at,
-        "hint": hint,
+        "fame_vs_average": (mine["fame"] or 0) - avg_fame_per_member,
     }
 
 
-@managed_connection
-def flag_inactive_members(today=None, include_leadership: bool = True,
-                          floor_days: int = 7,
-                          conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    """Return active members whose most-recent battle exceeds the threshold.
-
-    The primary signal is days since the member's last PvP or war battle
-    (whichever is more recent). The trophy-scaled formula
-    ``max(floor_days, trophies/1000 * per_1k)`` is applied to that number,
-    where ``per_1k`` tightens as the roster fills (1.4 at ≤40 members, 0.7
-    at the 50-cap). Login freshness is included as context but does not
-    drive the flag.
-
-    Shared by ``get_members_at_risk`` and the weekly inactive_members
-    heartbeat signal so both surfaces use the same rule.
-    """
-    if today is None:
-        today = _member_activity_anchor(conn).date()
-
-    rows = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
-        "cs.role, cs.trophies, cs.clan_rank, cs.last_seen_api "
-        "FROM members m "
-        "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "WHERE m.status = 'active' "
-        "ORDER BY COALESCE(cs.clan_rank, 999), m.current_name COLLATE NOCASE"
+def _mgmt_rows(conn):
+    return conn.execute(
+        "SELECT mm.*, m.current_name AS name, cs.clan_rank, cs.trophies, cs.exp_level, "
+        "cs.donations_week, mm.player_tag AS tag "
+        "FROM member_management mm "
+        "JOIN players m ON m.player_tag = mm.player_tag "
+        "LEFT JOIN player_current_state cs ON cs.player_tag = mm.player_tag "
+        "WHERE EXISTS (SELECT 1 FROM clan_memberships cm "
+        "  WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL) "
+        "ORDER BY COALESCE(cs.clan_rank, 999), name COLLATE NOCASE"
     ).fetchall()
-
-    active_count = len(rows)
-    per_1k_days = _inactivity_multiplier(active_count)
-
-    member_ids = [row["member_id"] for row in rows]
-    battle_map = _member_activity_timestamps(conn, member_ids)
-
-    flagged = []
-    for row in rows:
-        role = (row["role"] or "").strip()
-        if not include_leadership and role in {"leader", "coLeader"}:
-            continue
-        activity = dict(battle_map.get(row["member_id"], {"pvp": None, "war": None}))
-        activity["login"] = _parse_cr_time(row["last_seen_api"])
-        breakdown = _activity_breakdown(activity, today)
-        threshold = _effective_inactivity_threshold(row["trophies"], floor_days,
-                                                   per_1k_days=per_1k_days)
-        if breakdown["battle_days_ago"] < threshold:
-            continue
-        flagged.append({
-            "member_id": row["member_id"],
-            "tag": row["tag"],
-            "name": row["name"],
-            "role": row["role"] or "member",
-            "trophies": row["trophies"],
-            "clan_rank": row["clan_rank"],
-            "days_inactive": breakdown["battle_days_ago"],
-            "threshold_days": threshold,
-            "active_member_count": active_count,
-            "per_1k_days": per_1k_days,
-            **breakdown,
-        })
-    flagged.sort(key=lambda m: m["days_inactive"], reverse=True)
-    return flagged
 
 
 @managed_connection
 def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, require_war_participation: bool = False,
                         min_war_races: int = 1, include_leadership: bool = False,
                         season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> dict:
+    """v5.1: reads the member_management projection (kick_state + evidence
+    columns) — the same deterministic state the leader-action pipeline uses
+    (management.md §3.3). Parameters are kept for caller compatibility; the
+    thresholds live in the engine's management constants."""
+    from storage.war_status import get_current_season_id
+
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
-    today = _member_activity_anchor(conn).date()
-    rows = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, cs.role, cs.exp_level, cs.trophies, "
-        "cs.clan_rank, cs.donations_week, cs.last_seen_api "
-        "FROM members m "
-        "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "WHERE m.status = 'active' "
-        "ORDER BY COALESCE(cs.clan_rank, 999), m.current_name COLLATE NOCASE"
-    ).fetchall()
-
-    active_count = len(rows)
-    per_1k_days = _inactivity_multiplier(active_count)
-    member_ids = [row["member_id"] for row in rows]
-    battle_map = _member_activity_timestamps(conn, member_ids)
-
     flagged = []
-    for row in rows:
-        role = (row["role"] or "").strip()
+    for row in _mgmt_rows(conn):
+        role = (row["role"] or "").strip() if row["role"] else ""
         if not include_leadership and role in {"leader", "coLeader"}:
             continue
-        joined_date = _current_joined_at(conn, row["member_id"])
-        tenure_days = None
-        if joined_date:
-            try:
-                tenure_days = (today - datetime.strptime(joined_date[:10], "%Y-%m-%d").date()).days
-            except ValueError:
-                tenure_days = None
-
+        kick_state = row["kick_state"] or "none"
         reasons = []
-        activity = dict(battle_map.get(row["member_id"], {"pvp": None, "war": None}))
-        activity["login"] = _parse_cr_time(row["last_seen_api"])
-        breakdown = _activity_breakdown(activity, today)
-        threshold_days = _effective_inactivity_threshold(row["trophies"], inactivity_days,
-                                                        per_1k_days=per_1k_days)
-        if breakdown["battle_days_ago"] >= threshold_days:
+        if kick_state in {"watch", "at_risk", "recommended"}:
             reasons.append({
                 "type": "inactive",
-                "detail": (
-                    f"{breakdown['hint']} "
-                    f"(threshold {threshold_days:.1f}d at {row['trophies'] or 0} trophies)"
-                ),
-                "value": breakdown["battle_days_ago"],
-                "threshold_days": threshold_days,
-                "battle_days_ago": breakdown["battle_days_ago"],
-                "login_days_ago": breakdown["login_days_ago"],
-                "pvp_days_ago": breakdown["pvp_days_ago"],
-                "war_days_ago": breakdown["war_days_ago"],
-                "last_battle_at": breakdown["last_battle_at"],
+                "detail": f"kick_state={kick_state} (battle-based idleness; management.md §3.3)",
+                "value": kick_state,
+                "kick_state_since": row["kick_state_since"],
+                "battle_days_last_28": row["battle_days_last_28"],
             })
-
         donations_week = row["donations_week"] or 0
         if donations_week < min_donations_week:
             reasons.append({
@@ -523,68 +196,36 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
                 "detail": f"{donations_week} donations this week",
                 "value": donations_week,
             })
-
-        war_races_played = None
-        if require_war_participation and season_id is not None:
-            war_races_played = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM war_participation wp "
-                "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-                "WHERE wr.season_id = ? AND wp.member_id = ? AND COALESCE(wp.decks_used, 0) > 0",
-                (season_id, row["member_id"]),
-            ).fetchone()["cnt"]
-            if war_races_played < min_war_races:
-                reasons.append({
-                    "type": "low_war_participation",
-                    "detail": f"{war_races_played} war races played this season",
-                    "value": war_races_played,
-                })
-
+        if require_war_participation and (row["war_attendance_rate"] or 0) <= 0:
+            reasons.append({
+                "type": "low_war_participation",
+                "detail": "no war participation this window",
+                "value": 0,
+            })
         if reasons:
-            item = dict(row)
-            item["joined_date"] = joined_date
-            item["tenure_days"] = tenure_days
-            item["activity_context"] = {
-                "battle_days_ago": breakdown["battle_days_ago"],
-                "login_days_ago": breakdown["login_days_ago"],
-                "pvp_days_ago": breakdown["pvp_days_ago"],
-                "war_days_ago": breakdown["war_days_ago"],
-                "last_battle_at": breakdown["last_battle_at"],
-                "threshold_days": threshold_days,
-                "stale_activity": (
-                    breakdown["battle_days_ago"] >= 7
-                    or (breakdown["login_days_ago"] is not None and breakdown["login_days_ago"] >= 7)
-                ),
+            item = {
+                "tag": row["tag"], "name": row["name"], "role": row["role"],
+                "exp_level": row["exp_level"], "trophies": row["trophies"],
+                "clan_rank": row["clan_rank"], "donations_week": donations_week,
+                "joined_date": None, "tenure_days": row["tenure_days"],
+                "kick_state": kick_state,
+                "activity_context": {
+                    "battle_days_last_28": row["battle_days_last_28"],
+                    "kick_state": kick_state,
+                    "kick_state_since": row["kick_state_since"],
+                },
+                "risk_score": len(reasons) + (2 if kick_state == "recommended" else 1 if kick_state == "at_risk" else 0),
+                "reasons": reasons,
+                "war_player_type": _war_player_type(conn, row["tag"]),
             }
-            item["risk_score"] = len(reasons)
-            item["reasons"] = reasons
-            if war_races_played is not None:
-                item["war_races_played"] = war_races_played
-            item["cr_account_age_years"] = _get_account_age_years(conn, row["member_id"])
-            item["war_player_type"] = _war_player_type(conn, row["member_id"])
-            flagged.append(_member_reference_fields(conn, row["member_id"], item))
-
-    flagged.sort(
-        key=lambda item: (
-            -item["risk_score"],
-            item.get("clan_rank") if item.get("clan_rank") is not None else 999,
-            (item.get("name") or "").lower(),
-        )
-    )
+            flagged.append(_member_reference_fields(conn, row["tag"], item))
+    flagged.sort(key=lambda item: (-item["risk_score"], item.get("clan_rank") or 999, (item.get("name") or "").lower()))
     return {
         "season_id": season_id,
         "criteria": {
+            "source": "member_management projection (management.md §3.3)",
             "inactivity_days_floor": inactivity_days,
-            "inactivity_days_per_1k_trophies": per_1k_days,
-            "inactivity_threshold_formula": (
-                f"max(floor, trophies/1000 * {per_1k_days:.2f})"
-            ),
-            "active_member_count": active_count,
-            "multiplier_anchors": {
-                "loose_members": LOOSE_MEMBER_COUNT,
-                "loose_per_1k": INACTIVITY_DAYS_PER_1K_TROPHIES_LOOSE,
-                "tight_members": TIGHT_MEMBER_COUNT,
-                "tight_per_1k": INACTIVITY_DAYS_PER_1K_TROPHIES_TIGHT,
-            },
+            "inactivity_threshold_formula": "max(7, trophies/1000 * 1.4) days without a battle",
             "min_donations_week": min_donations_week,
             "require_war_participation": require_war_participation,
             "min_war_races": min_war_races,
@@ -593,834 +234,309 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
         "members": flagged,
     }
 
+
 @managed_connection
 def get_trending_war_contributors(season_id: Optional[str] = None, recent_races: int = 2, limit: int = 5, conn: Optional[sqlite3.Connection] = None) -> dict:
+    from storage.war_status import get_current_season_id
+
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     if season_id is None:
-        return {"season_id": None, "members": []}
-
-    race_rows = conn.execute(
-        "SELECT war_race_id, section_index FROM war_races WHERE season_id = ? ORDER BY section_index DESC",
+        return {"members": []}
+    sections = [r["section_index"] for r in conn.execute(
+        "SELECT DISTINCT section_index FROM war_participation WHERE season_id = ? ORDER BY section_index DESC",
         (season_id,),
-    ).fetchall()
-    if not race_rows:
-        return {"season_id": season_id, "members": []}
-    recent_ids = [row["war_race_id"] for row in race_rows[:recent_races]]
-    prior_ids = [row["war_race_id"] for row in race_rows[recent_races:]]
-
-    placeholders_recent = ",".join("?" for _ in recent_ids)
-    recent_totals = conn.execute(
-        f"SELECT wp.member_id, wp.player_tag AS tag, MAX(wp.player_name) AS name, "
-        f"SUM(COALESCE(wp.fame, 0)) AS recent_fame, COUNT(*) AS recent_races "
-        f"FROM war_participation wp "
-        f"JOIN members m ON m.member_id = wp.member_id "
-        f"WHERE wp.war_race_id IN ({placeholders_recent}) AND m.status = 'active' "
-        f"GROUP BY wp.member_id, wp.player_tag",
-        tuple(recent_ids),
-    ).fetchall()
-
-    prior_map = {}
-    if prior_ids:
-        placeholders_prior = ",".join("?" for _ in prior_ids)
-        prior_rows = conn.execute(
-            f"SELECT wp.member_id, wp.player_tag AS tag, SUM(COALESCE(wp.fame, 0)) AS prior_fame, COUNT(*) AS prior_races "
-            f"FROM war_participation wp "
-            f"JOIN members m ON m.member_id = wp.member_id "
-            f"WHERE wp.war_race_id IN ({placeholders_prior}) AND m.status = 'active' "
-            f"GROUP BY wp.member_id, wp.player_tag",
-            tuple(prior_ids),
-        ).fetchall()
-        for row in prior_rows:
-            prior_map[(row["member_id"], row["tag"])] = dict(row)
-
-    members = []
-    for row in recent_totals:
-        recent_avg = (row["recent_fame"] or 0) / row["recent_races"] if row["recent_races"] else 0
-        prior = prior_map.get((row["member_id"], row["tag"]), {})
-        prior_avg = (prior.get("prior_fame") or 0) / prior.get("prior_races", 1) if prior.get("prior_races") else 0
-        item = {
-            "tag": row["tag"],
-            "name": row["name"],
-            "recent_fame": row["recent_fame"] or 0,
-            "recent_races": row["recent_races"] or 0,
-            "recent_avg_fame": round(recent_avg, 2),
-            "prior_avg_fame": round(prior_avg, 2),
-            "trend_delta": round(recent_avg - prior_avg, 2),
-        }
-        if row["member_id"] is not None:
-            item = _member_reference_fields(conn, row["member_id"], item)
-        members.append(item)
-
-    members.sort(
-        key=lambda item: (
-            -item["trend_delta"],
-            -item["recent_fame"],
-            (item.get("name") or "").lower(),
-        )
-    )
-    return {
-        "season_id": season_id,
-        "recent_races_considered": min(recent_races, len(race_rows)),
-        "members": members[:limit],
-    }
-
-def _get_in_progress_war_fame(
-    season_id: int, conn: sqlite3.Connection
-) -> dict[str, dict]:
-    """Per-player fame for the current in-progress war week, keyed by canonical
-    player_tag. Returns ``{}`` when there is no live war or when the current
-    section is already finalized in ``war_races`` (so the caller never
-    double-counts).
-
-    ``war_participant_snapshots.fame`` is cumulative race-week fame, so the
-    latest snapshot per player IS that player's contribution to the
-    in-progress week.
-    """
-    from storage.war_status import get_current_war_day_state
-
-    state = get_current_war_day_state(conn=conn)
-    if not state:
-        return {}
-    if state.get("season_id") != season_id:
-        return {}
-    section_index = state.get("section_index")
-    if section_index is None:
-        return {}
-    finalized = conn.execute(
-        "SELECT 1 FROM war_races WHERE season_id = ? AND section_index = ? LIMIT 1",
-        (season_id, section_index),
-    ).fetchone()
-    if finalized:
-        return {}
-    rows = conn.execute(
-        """
-        SELECT s.player_tag, s.player_name, s.member_id,
-               s.fame AS fame, s.observed_at
-        FROM war_participant_snapshots s
-        JOIN (
-            SELECT player_tag, MAX(observed_at) AS observed_at
-            FROM war_participant_snapshots
-            WHERE season_id = ? AND section_index = ?
-            GROUP BY player_tag
-        ) latest USING(player_tag, observed_at)
-        WHERE s.season_id = ? AND s.section_index = ?
-        """,
-        (season_id, section_index, season_id, section_index),
-    ).fetchall()
-    out: dict[str, dict] = {}
-    for row in rows:
-        tag = _canon_tag(row["player_tag"])
-        if not tag:
+    ).fetchall()]
+    recent = sections[:max(1, recent_races)]
+    earlier = sections[max(1, recent_races):]
+    if not recent:
+        return {"members": []}
+    members = {}
+    for section_set, key in ((recent, "recent"), (earlier, "earlier")):
+        if not section_set:
             continue
-        out[tag] = {
-            "player_tag": tag,
-            "player_name": row["player_name"],
-            "member_id": row["member_id"],
-            "fame": row["fame"] or 0,
-            "observed_at": row["observed_at"],
-            "section_index": section_index,
+        qmarks = ",".join("?" for _ in section_set)
+        for row in conn.execute(
+            f"SELECT player_tag, AVG(COALESCE(fame, 0)) AS avg_fame FROM war_participation "
+            f"WHERE season_id = ? AND section_index IN ({qmarks}) GROUP BY player_tag",
+            (season_id, *section_set),
+        ).fetchall():
+            members.setdefault(row["player_tag"], {})[key] = row["avg_fame"] or 0
+    out = []
+    for tag, vals in members.items():
+        recent_avg = vals.get("recent") or 0
+        earlier_avg = vals.get("earlier")
+        delta = recent_avg - earlier_avg if earlier_avg is not None else None
+        name_row = conn.execute("SELECT current_name FROM players WHERE player_tag = ?", (tag,)).fetchone()
+        item = {
+            "tag": tag,
+            "name": name_row["current_name"] if name_row else None,
+            "recent_avg_fame": round(recent_avg, 0),
+            "earlier_avg_fame": round(earlier_avg, 0) if earlier_avg is not None else None,
+            "fame_trend": round(delta, 0) if delta is not None else None,
         }
-    return out
+        out.append(_member_reference_fields(conn, tag, item))
+    out.sort(key=lambda i: -(i.get("fame_trend") if i.get("fame_trend") is not None else i.get("recent_avg_fame") or 0))
+    return {"season_id": season_id, "recent_races": recent_races, "members": out[:limit]}
 
 
 @managed_connection
 def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    """THE standings query (schema.md §7.4): cumulative season fame per player
+    over war_participation — which the engine upserts live, so the in-progress
+    week is already included."""
+    from storage.war_status import get_current_season_id
+
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     if season_id is None:
         return []
     rows = conn.execute(
-        "SELECT wp.player_tag AS tag, MAX(m.member_id) AS member_id, MAX(m.current_name) AS name, "
+        "SELECT wp.player_tag AS tag, MAX(m.current_name) AS name, "
         "SUM(COALESCE(wp.fame, 0)) AS total_fame, COUNT(*) AS races_participated, "
-        "ROUND(AVG(COALESCE(wp.fame, 0)), 0) AS avg_fame "
+        "ROUND(AVG(COALESCE(wp.fame, 0)), 0) AS avg_fame, "
+        "SUM(COALESCE(wp.decks_used, 0)) AS decks_used "
         "FROM war_participation wp "
-        "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-        "JOIN members m ON m.member_id = wp.member_id "
-        "WHERE wr.season_id = ? AND m.status = 'active' AND COALESCE(wp.fame, 0) > 0 "
+        "JOIN players m ON m.player_tag = wp.player_tag "
+        "WHERE wp.season_id = ? AND COALESCE(wp.fame, 0) > 0 "
+        "AND EXISTS (SELECT 1 FROM clan_memberships cm "
+        "  WHERE cm.player_tag = wp.player_tag AND cm.left_at IS NULL) "
         "GROUP BY wp.player_tag ORDER BY total_fame DESC, races_participated DESC",
         (season_id,),
     ).fetchall()
-    by_tag: dict[str, dict] = {}
+    result = []
     for row in rows:
         item = dict(row)
         item["tag"] = _canon_tag(item["tag"])
         item["finalized_fame"] = item["total_fame"] or 0
-        item["in_progress_fame"] = 0
-        by_tag[item["tag"]] = item
-
-    in_progress = _get_in_progress_war_fame(int(season_id), conn)
-    for tag, contrib in in_progress.items():
-        fame = contrib.get("fame") or 0
-        if fame <= 0:
-            continue
-        existing = by_tag.get(tag)
-        if existing is None:
-            m = conn.execute(
-                "SELECT member_id, current_name FROM members WHERE player_tag = ? AND status = 'active'",
-                (tag,),
-            ).fetchone()
-            if not m:
-                continue
-            by_tag[tag] = {
-                "tag": tag,
-                "member_id": m["member_id"],
-                "name": m["current_name"] or contrib.get("player_name"),
-                "total_fame": fame,
-                "races_participated": 1,
-                "avg_fame": float(fame),
-                "finalized_fame": 0,
-                "in_progress_fame": fame,
-            }
-        else:
-            existing["in_progress_fame"] = fame
-            existing["total_fame"] = (existing.get("finalized_fame") or 0) + fame
-            existing["races_participated"] = (existing.get("races_participated") or 0) + 1
-            races = existing["races_participated"]
-            if races:
-                existing["avg_fame"] = round(existing["total_fame"] / races, 0)
-
-    ordered = sorted(
-        by_tag.values(),
-        key=lambda r: (-(r.get("total_fame") or 0), -(r.get("races_participated") or 0)),
-    )
-    result = []
-    for item in ordered:
-        if (item.get("total_fame") or 0) <= 0:
-            continue
-        member_id = item.pop("member_id", None)
-        if member_id is not None:
-            item = _member_reference_fields(conn, member_id, item)
-        result.append(item)
+        item["in_progress_fame"] = 0  # participation is live-updated; split retired
+        result.append(_member_reference_fields(conn, item["tag"], item))
     return result
+
 
 @managed_connection
 def get_perfect_war_participants(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    """Members with perfect war attendance — same definition as Iron King.
-
-    Delegates to ``get_iron_king_candidates`` so the strict rule (4/4 decks
-    on every *required* battle day of every section, post-10k-fame days
-    excluded, no mid-season joiners) is the only definition of perfect
-    attendance in the codebase. Enriches with ``total_fame`` and
-    ``races_participated`` from war_participation for ranking and display.
-    """
-    from storage.awards import get_iron_king_candidates
+    """Members with perfect attendance: every deck used on every finalized
+    battle day (war_attendance_days; Iron King definition)."""
+    from storage.war_status import get_current_season_id
 
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     if season_id is None:
         return []
-    candidates = get_iron_king_candidates(season_id=season_id, conn=conn)
-    if not candidates:
-        return []
-    total_row = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM war_races WHERE season_id = ?", (season_id,)
-    ).fetchone()
-    total_races = total_row["cnt"] if total_row else 0
-    result = []
-    for c in candidates:
-        stats = conn.execute(
-            "SELECT COUNT(*) AS races_participated, SUM(COALESCE(wp.fame, 0)) AS total_fame "
-            "FROM war_participation wp "
-            "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-            "WHERE wr.season_id = ? AND wp.member_id = ?",
-            (season_id, c["member_id"]),
-        ).fetchone()
-        item = {
-            "tag": c["tag"],
-            "name": c.get("name"),
-            "member_id": c["member_id"],
-            "total_battle_days": c.get("total_battle_days"),
-            "races_participated": stats["races_participated"] if stats else 0,
-            "total_fame": stats["total_fame"] if stats else 0,
-            "total_races_in_season": total_races,
-        }
-        item = _member_reference_fields(conn, c["member_id"], item)
-        result.append(item)
-    result.sort(key=lambda r: (-(r.get("total_fame") or 0), (r.get("name") or "").lower()))
-    return result
+    rows = conn.execute(
+        "SELECT wad.player_tag AS tag, MAX(m.current_name) AS name, "
+        "COUNT(*) AS battle_days, "
+        "SUM(CASE WHEN wad.decks_used >= wad.decks_available THEN 1 ELSE 0 END) AS perfect_days, "
+        "SUM(COALESCE(wad.decks_used, 0)) AS decks_used "
+        "FROM war_attendance_days wad "
+        "JOIN players m ON m.player_tag = wad.player_tag "
+        "WHERE wad.season_id = ? "
+        "GROUP BY wad.player_tag "
+        "HAVING battle_days > 0 AND perfect_days = battle_days "
+        "ORDER BY decks_used DESC, name COLLATE NOCASE",
+        (season_id,),
+    ).fetchall()
+    return [_member_reference_fields(conn, r["tag"], dict(r)) for r in rows]
+
 
 @managed_connection
 def get_recent_role_changes(days: int = 30, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    cutoff = (_member_snapshot_anchor(conn) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+    """First-class role_changed events (schema.md §9: no more snapshot diffing)."""
+    import json as _json
+    from datetime import timedelta
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
     rows = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
-        "curr.role AS new_role, prev.role AS old_role, curr.observed_at AS changed_at "
-        "FROM member_state_snapshots curr "
-        "JOIN member_state_snapshots prev ON prev.member_id = curr.member_id "
-        "JOIN members m ON m.member_id = curr.member_id "
-        "WHERE curr.observed_at >= ? "
-        "AND prev.observed_at = ("
-        "  SELECT MAX(p2.observed_at) FROM member_state_snapshots p2 "
-        "  WHERE p2.member_id = curr.member_id AND p2.observed_at < curr.observed_at"
-        ") "
-        "AND COALESCE(curr.role, '') != COALESCE(prev.role, '') "
-        "ORDER BY curr.observed_at DESC",
+        "SELECT ce.subject_tag AS tag, p.current_name AS name, ce.payload_json, ce.observed_at "
+        "FROM clan_events ce LEFT JOIN players p ON p.player_tag = ce.subject_tag "
+        "WHERE ce.event_type = 'role_changed' AND ce.observed_at >= ? "
+        "ORDER BY ce.observed_at DESC",
         (cutoff,),
     ).fetchall()
-    seen = set()
-    result = []
+    out = []
     for row in rows:
-        if row["tag"] in seen:
-            continue
-        seen.add(row["tag"])
-        result.append(_member_reference_fields(conn, row["member_id"], dict(row)))
-    return result
+        try:
+            payload = _json.loads(row["payload_json"] or "{}")
+        except ValueError:
+            payload = {}
+        item = {
+            "tag": row["tag"],
+            "name": row["name"],
+            "old_role": payload.get("prev_role"),
+            "new_role": payload.get("new_role"),
+            "direction": payload.get("direction"),
+            "observed_at": row["observed_at"],
+        }
+        out.append(_member_reference_fields(conn, row["tag"], item))
+    return out
+
 
 @managed_connection
 def get_war_battle_win_rates(season_id: Optional[str] = None, limit: int = 10, min_battles: int = 1, conn: Optional[sqlite3.Connection] = None) -> dict:
+    from storage.war_status import get_current_season_id
+
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
-    if season_id is None:
-        return {"season_id": None, "members": []}
-    start_bound, end_bound = _season_bounds(conn, season_id)
-    if not start_bound or not end_bound:
-        return {"season_id": season_id, "members": []}
+    where = ["b.is_war = 1", "b.outcome IN ('W', 'L')"]
+    params: list = []
+    if season_id is not None:
+        where.append("b.season_id = ?")
+        params.append(season_id)
     rows = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
-        "SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
-        "SUM(CASE WHEN bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
-        "SUM(CASE WHEN bf.outcome = 'D' THEN 1 ELSE 0 END) AS draws, "
-        "COUNT(*) AS battles "
-        "FROM member_battle_facts bf "
-        "JOIN members m ON m.member_id = bf.member_id "
-        "WHERE m.status = 'active' AND bf.is_war = 1 AND bf.battle_time >= ? AND bf.battle_time < ? "
-        "GROUP BY m.member_id "
-        "HAVING COUNT(*) >= ? "
-        "ORDER BY CAST(SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS REAL) / COUNT(*) DESC, COUNT(*) DESC, m.current_name COLLATE NOCASE",
-        (start_bound, end_bound, min_battles),
+        "SELECT b.player_tag AS tag, MAX(m.current_name) AS name, "
+        "COUNT(*) AS battles, "
+        "SUM(CASE WHEN b.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
+        "SUM(CASE WHEN b.outcome = 'L' THEN 1 ELSE 0 END) AS losses "
+        "FROM battle_events b JOIN players m ON m.player_tag = b.player_tag "
+        f"WHERE {' AND '.join(where)} "
+        "GROUP BY b.player_tag HAVING battles >= ? "
+        "ORDER BY (CAST(wins AS REAL) / battles) DESC, battles DESC "
+        "LIMIT ?",
+        (*params, min_battles, limit),
     ).fetchall()
     members = []
-    for row in rows[:limit]:
+    for row in rows:
         item = dict(row)
-        item["win_rate"] = round((item["wins"] or 0) / item["battles"], 4) if item["battles"] else 0
-        members.append(_member_reference_fields(conn, row["member_id"], item))
-    return {
-        "season_id": season_id,
-        "min_battles": min_battles,
-        "members": members,
-    }
+        item["win_rate"] = round((row["wins"] or 0) / row["battles"], 3) if row["battles"] else 0
+        members.append(_member_reference_fields(conn, row["tag"], item))
+    return {"season_id": season_id, "min_battles": min_battles, "members": members}
+
 
 @managed_connection
 def get_clan_boat_battle_record(wars: int = 3, conn: Optional[sqlite3.Connection] = None) -> dict:
-    race_rows = conn.execute(
-        "SELECT war_race_id, season_id, section_index, created_date "
-        "FROM war_races WHERE created_date IS NOT NULL "
-        "ORDER BY created_date DESC LIMIT ?",
-        (wars,),
+    rows = conn.execute(
+        "SELECT b.outcome, COUNT(*) AS cnt FROM battle_events b "
+        "WHERE b.is_war = 1 AND b.battle_type LIKE '%oat%' "
+        "GROUP BY b.outcome"
     ).fetchall()
-    if not race_rows:
-        return {"wars_considered": 0, "wins": 0, "losses": 0, "draws": 0, "battles": 0, "per_war": []}
-
-    selected = list(reversed(race_rows))
-    per_war = []
-    wins = losses = draws = battles = 0
-    for idx, row in enumerate(selected):
-        start_dt = _parse_cr_time(row["created_date"])
-        if not start_dt:
-            continue
-        if idx + 1 < len(selected):
-            end_dt = _parse_cr_time(selected[idx + 1]["created_date"])
-        else:
-            end_dt = start_dt + timedelta(days=7)
-        if not end_dt:
-            end_dt = start_dt + timedelta(days=7)
-        start_key = start_dt.strftime("%Y%m%dT%H%M%S.000Z")
-        end_key = end_dt.strftime("%Y%m%dT%H%M%S.000Z")
-        stats = conn.execute(
-            "SELECT "
-            "SUM(CASE WHEN outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
-            "SUM(CASE WHEN outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
-            "SUM(CASE WHEN outcome = 'D' THEN 1 ELSE 0 END) AS draws, "
-            "COUNT(*) AS battles "
-            "FROM member_battle_facts "
-            "WHERE battle_type = 'boatBattle' AND battle_time >= ? AND battle_time < ?",
-            (start_key, end_key),
-        ).fetchone()
-        item = {
-            "season_id": row["season_id"],
-            "section_index": row["section_index"],
-            "wins": stats["wins"] or 0,
-            "losses": stats["losses"] or 0,
-            "draws": stats["draws"] or 0,
-            "battles": stats["battles"] or 0,
-        }
-        per_war.append(item)
-        wins += item["wins"]
-        losses += item["losses"]
-        draws += item["draws"]
-        battles += item["battles"]
+    outcomes = {row["outcome"]: row["cnt"] for row in rows}
+    wins = outcomes.get("W", 0)
+    losses = outcomes.get("L", 0)
     return {
-        "wars_considered": len(per_war),
+        "window_wars": wars,
+        "boat_battles": wins + losses,
         "wins": wins,
         "losses": losses,
-        "draws": draws,
-        "battles": battles,
-        "per_war": list(reversed(per_war)),
+        "win_rate": round(wins / (wins + losses), 3) if (wins + losses) else None,
     }
+
 
 @managed_connection
 def get_war_score_trend(days: int = 30, conn: Optional[sqlite3.Connection] = None) -> dict:
-    anchor = _war_trend_anchor(conn)
-    cutoff = (anchor - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
-    first = conn.execute(
-        "SELECT observed_at, clan_score, fame, war_state FROM war_current_state "
-        "WHERE observed_at >= ? AND clan_score IS NOT NULL ORDER BY observed_at ASC LIMIT 1",
+    from datetime import timedelta
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    rows = conn.execute(
+        "SELECT metric_date, clan_war_trophies FROM clan_daily_metrics "
+        "WHERE metric_date >= ? AND clan_war_trophies IS NOT NULL "
+        "ORDER BY metric_date ASC",
         (cutoff,),
-    ).fetchone()
-    last = conn.execute(
-        "SELECT observed_at, clan_score, fame, war_state FROM war_current_state "
-        "WHERE observed_at >= ? AND clan_score IS NOT NULL ORDER BY observed_at DESC LIMIT 1",
-        (cutoff,),
-    ).fetchone()
-    race_cutoff = (anchor - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
-    race_stats = conn.execute(
-        "SELECT COUNT(*) AS races, SUM(COALESCE(trophy_change, 0)) AS trophy_change_total, "
-        "AVG(COALESCE(our_rank, 0)) AS avg_rank, AVG(COALESCE(our_fame, 0)) AS avg_fame "
-        "FROM war_races WHERE created_date >= ?",
-        (race_cutoff,),
-    ).fetchone()
-    if not first or not last:
-        return {
-            "window_days": days,
-            "direction": "unknown",
-            "score_change": None,
-            "trophy_change_total": race_stats["trophy_change_total"] or 0,
-            "races": race_stats["races"] or 0,
-        }
-    score_change = (last["clan_score"] or 0) - (first["clan_score"] or 0)
-    direction = "flat"
-    if score_change > 0:
-        direction = "up"
-    elif score_change < 0:
-        direction = "down"
-    return {
-        "window_days": days,
-        "direction": direction,
-        "start": dict(first),
-        "end": dict(last),
-        "score_change": score_change,
-        "trophy_change_total": race_stats["trophy_change_total"] or 0,
-        "races": race_stats["races"] or 0,
-        "avg_rank": round(race_stats["avg_rank"] or 0, 2) if race_stats["races"] else None,
-        "avg_fame": round(race_stats["avg_fame"] or 0, 2) if race_stats["races"] else None,
-    }
+    ).fetchall()
+    points = _rowdicts(rows)
+    change = None
+    if len(points) >= 2:
+        change = (points[-1]["clan_war_trophies"] or 0) - (points[0]["clan_war_trophies"] or 0)
+    return {"window_days": days, "points": points, "change": change}
+
 
 @managed_connection
 def compare_fame_per_member_to_previous_season(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    from storage.war_status import get_current_season_id
+
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     if season_id is None:
         return None
-    previous_row = conn.execute(
-        "SELECT MAX(season_id) AS season_id FROM war_races WHERE season_id < ?",
-        (season_id,),
-    ).fetchone()
-    previous_season_id = previous_row["season_id"] if previous_row else None
-    if previous_season_id is None:
-        return {
-            "current_season_id": season_id,
-            "previous_season_id": None,
-            "current": None,
-            "previous": None,
-            "direction": "unknown",
-            "delta": None,
-        }
 
-    def _season_stats(target_season_id):
+    def _season_stats(sid):
         row = conn.execute(
-            "SELECT COUNT(*) AS races, SUM(COALESCE(our_fame, 0)) AS total_fame "
-            "FROM war_races WHERE season_id = ?",
-            (target_season_id,),
+            "SELECT SUM(COALESCE(our_fame, 0)) AS total_fame, COUNT(*) AS weeks "
+            "FROM war_weeks WHERE season_id = ?",
+            (sid,),
         ).fetchone()
         participants = conn.execute(
-            "SELECT COUNT(DISTINCT player_tag) AS cnt "
-            "FROM war_participation wp JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-            "WHERE wr.season_id = ? AND COALESCE(wp.decks_used, 0) > 0",
-            (target_season_id,),
+            "SELECT COUNT(DISTINCT player_tag) AS cnt FROM war_participation "
+            "WHERE season_id = ? AND COALESCE(fame, 0) > 0",
+            (sid,),
         ).fetchone()["cnt"]
-        total_fame = row["total_fame"] or 0
         return {
-            "season_id": target_season_id,
-            "races": row["races"] or 0,
-            "participants": participants or 0,
-            "total_fame": total_fame,
-            "fame_per_member": round(total_fame / participants, 2) if participants else 0,
+            "season_id": sid,
+            "total_fame": row["total_fame"] or 0,
+            "weeks": row["weeks"] or 0,
+            "participants": participants,
+            "fame_per_member": round((row["total_fame"] or 0) / participants, 1) if participants else 0,
         }
 
-    current = _season_stats(season_id)
-    previous = _season_stats(previous_season_id)
-    delta = current["fame_per_member"] - previous["fame_per_member"]
-    direction = "flat"
-    if delta > 0:
-        direction = "up"
-    elif delta < 0:
-        direction = "down"
+    current = _season_stats(int(season_id))
+    previous = _season_stats(int(season_id) - 1)
+    if not previous["weeks"]:
+        previous = None
     return {
-        "current_season_id": season_id,
-        "previous_season_id": previous_season_id,
         "current": current,
         "previous": previous,
-        "direction": direction,
-        "delta": round(delta, 2),
-    }
-
-def _donations_peaks_in_window(conn, member_id: int, today, *, days_back_start: int, days_back_end: int) -> Optional[int]:
-    """Peak ``donations_week`` snapshot value over a date window.
-
-    `donations_week` is a running weekly tally that resets Mondays, so the
-    *peak* observed during a week approximates that week's final total
-    even if we sampled mid-day. Returns None when no snapshots in window.
-    """
-    start = (today - timedelta(days=days_back_start)).isoformat()
-    end = (today - timedelta(days=days_back_end)).isoformat()
-    row = conn.execute(
-        "SELECT MAX(donations_week) AS peak FROM member_daily_metrics "
-        "WHERE member_id = ? AND metric_date BETWEEN ? AND ?",
-        (member_id, start, end),
-    ).fetchone()
-    if not row or row["peak"] is None:
-        return None
-    return int(row["peak"])
-
-
-ELDER_DONATION_ROLLING_WEEKS = 4
-ELDER_DEMOTION_RANK_BUFFER = 2
-ELDER_DEMOTION_SCORE_RATIO = 0.8
-ELDER_DEMOTION_ACTIVITY_DAYS = 14
-
-
-def _last_battle_days_ago(conn, member_id: int, today) -> Optional[int]:
-    row = conn.execute(
-        "SELECT MAX(battle_time) AS last_battle_at "
-        "FROM member_battle_facts WHERE member_id = ?",
-        (member_id,),
-    ).fetchone()
-    last_battle_at = row["last_battle_at"] if row else None
-    parsed = _parse_cr_time(last_battle_at)
-    if not parsed:
-        return None
-    return max(0, (today - parsed.date()).days)
-
-
-def _war_races_played_in_recent_races(conn, member_id: int, *, race_window: int = 4) -> int:
-    race_window = max(1, int(race_window or 1))
-    recent = conn.execute(
-        "SELECT war_race_id FROM war_races "
-        "ORDER BY season_id DESC, section_index DESC LIMIT ?",
-        (race_window,),
-    ).fetchall()
-    race_ids = [row["war_race_id"] for row in recent]
-    if not race_ids:
-        return 0
-    placeholders = ",".join("?" for _ in race_ids)
-    return conn.execute(
-        f"SELECT COUNT(*) AS cnt FROM war_participation "
-        f"WHERE member_id = ? AND war_race_id IN ({placeholders}) "
-        "AND COALESCE(decks_used, 0) > 0",
-        (member_id, *race_ids),
-    ).fetchone()["cnt"]
-
-
-def _rolling_donation_stats(conn, member_id: int, today, *, weeks: int = ELDER_DONATION_ROLLING_WEEKS) -> dict:
-    """Smoothed donation score using weekly peaks from recent daily snapshots."""
-    weeks = max(1, int(weeks or 1))
-    start = (today - timedelta(days=(weeks * 7) - 1)).isoformat()
-    end = today.isoformat()
-    rows = conn.execute(
-        """
-        SELECT strftime('%Y-%W', metric_date) AS week_key,
-               MAX(COALESCE(donations_week, 0)) AS week_peak
-        FROM member_daily_metrics
-        WHERE member_id = ? AND metric_date BETWEEN ? AND ?
-        GROUP BY week_key
-        ORDER BY week_key DESC
-        LIMIT ?
-        """,
-        (member_id, start, end, weeks),
-    ).fetchall()
-    peaks = [int(row["week_peak"] or 0) for row in rows]
-    if not peaks:
-        row = conn.execute(
-            "SELECT donations_week FROM member_current_state WHERE member_id = ?",
-            (member_id,),
-        ).fetchone()
-        peaks = [int(row["donations_week"] or 0)] if row else [0]
-    average = sum(peaks) / len(peaks) if peaks else 0
-    return {
-        "rolling_donations_avg": round(average, 1),
-        "donation_week_peaks": peaks,
-        "donation_weeks_count": len(peaks),
+        "fame_per_member_change": (
+            round(current["fame_per_member"] - previous["fame_per_member"], 1)
+            if previous else None
+        ),
     }
 
 
-def _elder_role_counts(conn) -> dict:
-    counts = conn.execute(
-        "SELECT "
-        "SUM(CASE WHEN cs.role IN ('leader', 'coLeader') THEN 1 ELSE 0 END) AS leaders, "
-        "SUM(CASE WHEN cs.role = 'elder' THEN 1 ELSE 0 END) AS elders, "
-        "SUM(CASE WHEN cs.role = 'member' THEN 1 ELSE 0 END) AS members, "
-        "COUNT(*) AS active_members "
-        "FROM members m JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "WHERE m.status = 'active'"
-    ).fetchone()
-    active_members = counts["active_members"] or 0
-    target_elder_min = max(0, round(active_members * 0.2))
-    target_elder_max = max(1 if active_members else 0, target_elder_min, round(active_members * 0.3))
-    current_elders = counts["elders"] or 0
-    elder_selection_count = min(current_elders, target_elder_max)
-    if active_members and target_elder_max and current_elders == 0:
-        elder_selection_count = 1
-    return {
-        "active_members": active_members,
-        "leaders": counts["leaders"] or 0,
-        "elders": current_elders,
-        "members": counts["members"] or 0,
-        "target_elder_min": target_elder_min,
-        "target_elder_max": target_elder_max,
-        "elder_selection_count": elder_selection_count,
-        "elder_capacity_remaining": max(0, target_elder_max - current_elders),
-        "elder_cap_reached": current_elders >= target_elder_max if target_elder_max else current_elders > 0,
-        "elder_cap_rule": "top 30% of active clan members may hold Elder; cap is not a target",
-        "elder_selection_rule": "review current Elder count against the smoothed board; recommend swaps, not cap-filling",
-    }
+# -- Elder board (member_management-backed) ----------------------------------
 
-
+@managed_connection
 def _elder_role_review(
-    *,
     min_tenure_days: int = ELDER_ELIGIBILITY_DEFAULTS["min_tenure_days"],
     active_within_days: int = ELDER_ELIGIBILITY_DEFAULTS["active_within_days"],
     min_war_races: int = ELDER_ELIGIBILITY_DEFAULTS["min_war_races"],
-    rolling_weeks: int = ELDER_DONATION_ROLLING_WEEKS,
-    war_race_window: int = 4,
-    conn,
     enrich: bool = True,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
-    season_id = get_current_season_id(conn=conn)
-    today = _member_activity_anchor(conn).date()
-    composition = _elder_role_counts(conn)
-    cap = int(composition["target_elder_max"] or 0)
-    selection_count = int(composition.get("elder_selection_count") or 0)
-
-    rows = conn.execute(
-        "SELECT m.member_id, m.player_tag AS tag, m.current_name AS name, "
-        "cs.role, cs.exp_level, cs.trophies, cs.best_trophies, cs.clan_rank, "
-        "cs.donations_week AS donations, cs.donations_received_week AS donations_received "
-        "FROM members m "
-        "JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "WHERE m.status = 'active' AND cs.role IN ('member', 'elder')",
-    ).fetchall()
-
-    leaderboard = []
-    by_tag = {}
-    for row in rows:
-        joined_date = _current_joined_at(conn, row["member_id"])
-        tenure_days = None
-        if joined_date:
-            try:
-                tenure_days = (today - datetime.strptime(joined_date[:10], "%Y-%m-%d").date()).days
-            except ValueError:
-                tenure_days = None
-        days_since_battle = _last_battle_days_ago(conn, row["member_id"], today)
-        war_races_played = _war_races_played_in_recent_races(
-            conn, row["member_id"], race_window=war_race_window
-        )
-        donation_stats = _rolling_donation_stats(conn, row["member_id"], today, weeks=rolling_weeks)
-
-        eligibility = evaluate_elder_eligibility(
-            tenure_days=tenure_days,
-            days_since_battle=days_since_battle,
-            war_races_played=war_races_played,
-            season_id=season_id,
-            min_tenure_days=min_tenure_days,
-            active_within_days=active_within_days,
-            min_war_races=min_war_races,
-        )
-        checks = eligibility["checks"]
-        item = {
-            "member_id": row["member_id"],
-            "tag": row["tag"],
-            "name": row["name"],
-            "role": row["role"],
-            "exp_level": row["exp_level"],
-            "trophies": row["trophies"],
-            "best_trophies": row["best_trophies"],
-            "clan_rank": row["clan_rank"],
-            "donations": row["donations"] or 0,
-            "donations_received": row["donations_received"] or 0,
-            "joined_date": joined_date,
-            "tenure_days": tenure_days,
-            "days_since_battle": days_since_battle,
-            "days_inactive": days_since_battle,
-            "war_races_played": war_races_played,
-            "rolling_donations_avg": donation_stats["rolling_donations_avg"],
-            "donation_week_peaks": donation_stats["donation_week_peaks"],
-            "donation_weeks_count": donation_stats["donation_weeks_count"],
-            "checks": checks,
-            "missing": [key for key, passed in checks.items() if not passed],
-            "eligible_for_elder_board": eligibility["all_passed"],
-        }
-        item["score"] = sum(1 for passed in checks.values() if passed)
-        item["cr_account_age_years"] = _get_account_age_years(conn, row["member_id"])
-        item["war_player_type"] = _war_player_type(conn, row["member_id"])
-        leaderboard.append(item)
-        by_tag[item["tag"]] = item
-
-    eligible_board = [item for item in leaderboard if item["eligible_for_elder_board"]]
-    eligible_board.sort(
-        key=lambda item: (
-            -float(item.get("rolling_donations_avg") or 0),
-            -(item.get("donations") or 0),
-            -(item.get("war_races_played") or 0),
-            -(item.get("trophies") or 0),
-            (item.get("name") or "").lower(),
-        )
-    )
-    for index, item in enumerate(eligible_board, start=1):
-        item["elder_donation_rank"] = index
-        item["elder_target_rank"] = selection_count
-        item["elder_cap_rank"] = cap
-        item["in_elder_target"] = index <= selection_count
-        item["reason"] = (
-            f"ranked {index}/{selection_count} on recent donations "
-            f"(avg {item['rolling_donations_avg']}/week)"
-        )
-
-    desired_tags = {item["tag"] for item in eligible_board[:selection_count]}
-    current_elder_tags = {item["tag"] for item in leaderboard if item.get("role") == "elder"}
-    selection_cutoff_avg = None
-    if selection_count > 0 and len(eligible_board) >= selection_count:
-        selection_cutoff_avg = float(eligible_board[selection_count - 1].get("rolling_donations_avg") or 0)
-
+    """v5.1: the review reads the management projection. in_elder_target =
+    promote_state in (eligible, recommended); demotion candidates = elders
+    with demote_state in (eligible, recommended)."""
+    reviewed = []
     promotion_candidates = []
     demotion_candidates = []
-    borderline = []
-    for item in eligible_board:
-        if item["tag"] in desired_tags and item.get("role") == "member":
-            promotion_candidates.append(item)
-        elif item["tag"] not in desired_tags and item.get("role") == "member":
-            item["reason"] = (
-                f"just outside Elder group: rank {item['elder_donation_rank']}/{selection_count} "
-                f"on recent donations (avg {item['rolling_donations_avg']}/week)"
-            )
-            borderline.append(item)
-
-    for item in leaderboard:
-        if item["tag"] not in current_elder_tags:
-            continue
-        if item["tag"] in desired_tags:
-            continue
-        if item["eligible_for_elder_board"]:
-            rank = item.get("elder_donation_rank")
-            score = float(item.get("rolling_donations_avg") or 0)
-            rank_gap = (rank or 999) - selection_count
-            score_gap_ok = (
-                selection_cutoff_avg is None
-                or selection_cutoff_avg <= 0
-                or score < selection_cutoff_avg * ELDER_DEMOTION_SCORE_RATIO
-            )
-            if rank_gap <= ELDER_DEMOTION_RANK_BUFFER or not score_gap_ok:
-                item["reason"] = (
-                    f"Elder protected by hysteresis: rank {rank}/{selection_count}, "
-                    f"recent donations avg {item['rolling_donations_avg']}/week"
-                )
-                borderline.append(item)
-                continue
-            item["reason"] = (
-                f"outside Elder group: rank {rank}/{selection_count} on recent donations "
-                f"(avg {item['rolling_donations_avg']}/week)"
-            )
-        else:
-            missing_items = item.get("missing") or ["activity"]
-            missing = ", ".join(missing_items)
-            battle_days = item.get("days_since_battle")
-            activity_is_sustained = (
-                "activity" not in missing_items
-                or battle_days is None
-                or battle_days >= ELDER_DEMOTION_ACTIVITY_DAYS
-            )
-            if "war" not in missing_items and not activity_is_sustained:
-                item["reason"] = (
-                    f"Elder protected by activity grace: battle activity {battle_days}d ago"
-                )
-                borderline.append(item)
-                continue
-            item["reason"] = f"missing Elder activity gate: {missing}"
-        demotion_candidates.append(item)
-
-    promotion_slots = len(demotion_candidates)
-    if not current_elder_tags and selection_count > 0:
-        promotion_slots = max(promotion_slots, 1)
-    recommended = promotion_candidates[:promotion_slots]
-    for item in promotion_candidates[promotion_slots:]:
-        item["reason"] = (
-            f"promotion held until an Elder slot opens: rank {item['elder_donation_rank']}/"
-            f"{selection_count}, recent donations avg {item['rolling_donations_avg']}/week"
-        )
-        borderline.append(item)
-
-    for item in leaderboard:
-        if item["eligible_for_elder_board"]:
-            continue
-        if item.get("role") == "member" and item.get("score", 0) >= 1:
-            borderline.append(item)
-
-    demotion_candidates.sort(
-        key=lambda item: (
-            0 if not item.get("eligible_for_elder_board") else 1,
-            item.get("elder_donation_rank") or 999,
-            float(item.get("rolling_donations_avg") or 0),
-            (item.get("name") or "").lower(),
-        )
-    )
-    borderline.sort(
-        key=lambda item: (
-            item.get("elder_donation_rank") or 999,
-            -float(item.get("rolling_donations_avg") or 0),
-            (item.get("name") or "").lower(),
-        )
-    )
-
-    def _public(item: dict) -> dict:
-        public = dict(item)
+    for row in _mgmt_rows(conn):
+        item = {
+            "member_id": row["tag"],  # carries the tag in v5.1
+            "tag": row["tag"],
+            "name": row["name"],
+            "role": (row["role"] or "member") if row["role"] else "member",
+            "tenure_days": row["tenure_days"],
+            "promote_state": row["promote_state"],
+            "demote_state": row["demote_state"],
+            "sustained_donor": row["sustained_donor"],
+            "war_reliable": row["war_reliable"],
+            "battle_active": row["battle_active"],
+            "donations_4wk_avg": row["donations_4wk_avg"],
+            "war_attendance_rate": row["war_attendance_rate"],
+            "battle_days_last_28": row["battle_days_last_28"],
+            "in_elder_target": row["promote_state"] in ("eligible", "recommended"),
+        }
         if enrich:
-            public.pop("member_id", None)
-            return _member_reference_fields(conn, item["member_id"], public)
-        return public
-
-    result = {
-        "season_id": season_id,
+            item = _member_reference_fields(conn, row["tag"], item)
+        reviewed.append(item)
+        if item["role"] == "member" and item["in_elder_target"]:
+            promotion_candidates.append(item)
+        if item["role"] == "elder" and row["demote_state"] in ("eligible", "recommended"):
+            demotion_candidates.append(item)
+    return {
         "criteria": {
-            "model": "smoothed_donation_leaderboard",
-            "rolling_donation_weeks": rolling_weeks,
-            "war_race_window": war_race_window,
+            "source": "member_management projection (management.md §3.1–3.2)",
             "min_tenure_days": min_tenure_days,
             "active_within_days": active_within_days,
             "min_war_races": min_war_races,
-            "demotion_rank_buffer": ELDER_DEMOTION_RANK_BUFFER,
-            "demotion_score_ratio": ELDER_DEMOTION_SCORE_RATIO,
-            "demotion_activity_days": ELDER_DEMOTION_ACTIVITY_DAYS,
-            "donation_rule": "relative rank by rolling weekly donation peaks; no fixed donation floor",
         },
-        "composition": composition,
-        "leaderboard": [_public(item) for item in eligible_board],
-        "recommended": [_public(item) for item in recommended],
-        "borderline": [_public(item) for item in borderline],
-        "demotion_candidates": [_public(item) for item in demotion_candidates],
-    }
-    if not enrich:
-        result["reviewed"] = [_public(item) for item in leaderboard]
-    return result
-
-
-@managed_connection
-def get_demotion_candidates(min_donations_week: int = 50, conn: Optional[sqlite3.Connection] = None) -> dict:
-    """Current elders who no longer belong inside the capped Elder board."""
-    review = _elder_role_review(conn=conn)
-    return {
-        "criteria": review["criteria"],
-        "composition": review["composition"],
-        "members": review["demotion_candidates"],
+        "composition": {
+            "elders": sum(1 for i in reviewed if i["role"] == "elder"),
+            "members": sum(1 for i in reviewed if i["role"] == "member"),
+        },
+        "reviewed": reviewed,
+        "promotion_candidates": promotion_candidates,
+        "demotion_candidates": demotion_candidates,
+        "members": promotion_candidates,
     }
 
 
@@ -1432,8 +548,7 @@ def get_promotion_candidates(
     min_war_races: int = ELDER_ELIGIBILITY_DEFAULTS["min_war_races"],
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
-    # ``min_donations_week`` is kept for backward-compatible callers. Elder
-    # selection is now relative: a smoothed donation leaderboard under the cap.
+    del min_donations_week  # kept for caller compatibility
     return _elder_role_review(
         min_tenure_days=min_tenure_days,
         active_within_days=active_within_days,
@@ -1441,6 +556,20 @@ def get_promotion_candidates(
         conn=conn,
     )
 
+
+@managed_connection
+def get_demotion_candidates(min_donations_week: int = 50, conn: Optional[sqlite3.Connection] = None) -> dict:
+    """Current elders whose demote_state has crossed eligibility."""
+    del min_donations_week
+    review = _elder_role_review(conn=conn)
+    return {
+        "criteria": review["criteria"],
+        "composition": review["composition"],
+        "members": review["demotion_candidates"],
+    }
+
+
+# -- War-deck reconstruction (battle_events join, §14.5) ----------------------
 
 _WAR_DECK_BATTLE_TYPES = {"riverRacePvP", "riverRaceDuel", "riverRaceDuelColosseum"}
 
@@ -1590,23 +719,19 @@ def _war_decks_confidence(
 
 
 @managed_connection
+
+
+@managed_connection
 def reconstruct_member_war_decks(
     tag: str,
     lookback_battles: int = 80,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
-    """Reconstruct a player's four war decks from their River Race battle history.
-
-    The Clash Royale API exposes only the trophy-road `currentDeck`, not the four
-    war decks. We approximate them by extracting decks from recent war battles —
-    duels reveal up to 3 decks per battle (one per round), and riverRacePvP
-    battles reveal one deck each. We then greedily partition the most-recent
-    distinct decks into 4 non-overlapping decks (the no-overlap constraint of
-    the war deck pool).
-    """
+    """Reconstruct a player's four war decks from battle_events war rows
+    (deck_json — a join, not raw_json inference; schema.md §9)."""
     member_tag = _canon_tag(tag)
     member_row = conn.execute(
-        "SELECT member_id, current_name FROM members WHERE player_tag = ?",
+        "SELECT player_tag, current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
@@ -1618,14 +743,13 @@ def reconstruct_member_war_decks(
             "evidence": {"war_battles_seen": 0, "distinct_decks_observed": 0},
             "guidance": "Resolve the member tag first or ask the user to confirm who they meant.",
         }
-    member_id = member_row["member_id"]
     placeholders = ",".join("?" for _ in _WAR_DECK_BATTLE_TYPES)
     rows = conn.execute(
-        f"SELECT battle_time, battle_type, deck_json, team_rounds_json, deck_selection "
-        f"FROM member_battle_facts "
-        f"WHERE member_id = ? AND is_war = 1 AND battle_type IN ({placeholders}) "
+        f"SELECT battle_time, battle_type, deck_json, NULL AS team_rounds_json, deck_selection "
+        f"FROM battle_events "
+        f"WHERE player_tag = ? AND is_war = 1 AND battle_type IN ({placeholders}) "
         f"ORDER BY battle_time DESC LIMIT ?",
-        (member_id, *_WAR_DECK_BATTLE_TYPES, lookback_battles),
+        (member_tag, *_WAR_DECK_BATTLE_TYPES, lookback_battles),
     ).fetchall()
     war_battles_seen = len(rows)
     candidates = _extract_deck_candidates(rows)
@@ -1639,24 +763,25 @@ def reconstruct_member_war_decks(
             "distinct_decks_observed": len(distinct_decks),
             "candidate_decks_extracted": len(candidates),
             "duel_battles_seen": sum(1 for r in rows if r["battle_type"] in ("riverRaceDuel", "riverRaceDuelColosseum")),
-            "earliest_battle_time": rows[-1]["battle_time"] if rows else None,
-            "latest_battle_time": rows[0]["battle_time"] if rows else None,
         },
     }
-
-    # A single duel yields up to 3 candidate decks, so we gate on candidate
-    # count rather than raw war_battles_seen — that way a duel-heavy player
-    # with few battles can still be reconstructed.
-    if len(candidates) < 3 or len(distinct_decks) < 2:
+    if len(distinct_decks) < 2:
         return {
             **base_payload,
             "status": "insufficient_data",
-            "decks": [],
-            "gaps": [
-                f"Only {war_battles_seen} war battle(s) recorded for this member; "
-                f"{len(distinct_decks)} distinct deck(s) observed across {len(candidates)} candidate(s). "
-                "Need at least 3 candidate decks (e.g. 1 duel or 3 river-race battles) and "
-                "2 distinct compositions before reconstruction is meaningful."
+            "reason": (
+                f"Only {len(distinct_decks)} distinct war deck(s) observed across "
+                f"{war_battles_seen} recent war battle(s)."
+            ),
+            "decks": [
+                {
+                    "deck_index": i + 1,
+                    "cards": _deck_card_summary(deck["cards"]),
+                    "occurrences": deck["occurrences"],
+                    "latest_used_at": deck["latest_battle_time"],
+                    "sources": deck["sources"],
+                }
+                for i, deck in enumerate(distinct_decks)
             ],
             "guidance": (
                 "Do not present a half-built reconstruction. Tell the user there isn't "

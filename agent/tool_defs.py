@@ -4,7 +4,6 @@
 #   Member domain:  resolve_member, get_member, get_member_war_detail
 #   River Race:     get_river_race, get_war_season
 #   Clan domain:    get_clan_roster, get_clan_health, get_clan_game_modes,
-#                   get_clan_voyage
 #   Cards:          lookup_cards (catalog), get_member_card_profile (digest),
 #                   lookup_member_cards (filtered slice)
 #   Elixir state:   get_elixir_state
@@ -406,37 +405,6 @@ TOOLS = [
                     "type": "integer",
                     "description": "Maximum rows per ranked/top list. Default 10.",
                     "default": 10,
-                },
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "get_clan_voyage",
-        "description": (
-            "Read manually captured Clan Voyage screenshot history. Clan Voyage is not exposed "
-            "by the Clash Royale API, so this data comes from leader-submitted #leader-actions "
-            "screenshots and should be treated as source-linked manual evidence. Use it for "
-            "positive clan activity context, recaps, and recognition. Do not use missing or low "
-            "Voyage participation as discipline evidence because captures may be partial."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "aspect": {
-                    "type": "string",
-                    "description": "latest, history, or member. Default: latest.",
-                    "default": "latest",
-                    "enum": ["latest", "history", "member"],
-                },
-                "member_tag": {
-                    "type": "string",
-                    "description": "Player tag, in-game name, alias, or Discord handle. Required for aspect='member'.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum voyages or member entries to return. Default 5.",
-                    "default": 5,
                 },
             },
             "required": [],

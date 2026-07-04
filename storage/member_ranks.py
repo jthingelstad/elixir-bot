@@ -87,9 +87,9 @@ def compute_member_ranks(conn: Optional[sqlite3.Connection] = None) -> dict[int,
     from storage.war_status import get_current_season_id
 
     active_ids = [
-        row["member_id"]
+        row["player_tag"]
         for row in conn.execute(
-            "SELECT member_id FROM members WHERE status = 'active'"
+            "SELECT m.player_tag FROM players m WHERE EXISTS (SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)"
         ).fetchall()
     ]
     if not active_ids:
@@ -120,10 +120,10 @@ def _populate_donation_rank_week(conn, ranks):
     Members without a current_state row get ``None``.
     """
     rows = conn.execute(
-        "SELECT m.member_id, cs.donations_week, cs.clan_rank, m.current_name "
-        "FROM members m "
-        "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "WHERE m.status = 'active' AND cs.donations_week IS NOT NULL "
+        "SELECT m.player_tag AS member_id, cs.donations_week, cs.clan_rank, m.current_name "
+        "FROM players m "
+        "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
+        "WHERE EXISTS (SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL) AND cs.donations_week IS NOT NULL "
         "ORDER BY cs.donations_week DESC, cs.clan_rank ASC, m.current_name COLLATE NOCASE"
     ).fetchall()
     for i, row in enumerate(rows):
@@ -149,16 +149,16 @@ def _populate_donation_rank_season(conn, ranks, season_id):
 
 
 def _current_war_race_id(conn, season_id):
-    """Most recent race in the current season — in-progress if one exists,
-    else the latest completed race. None when no season."""
+    """Most recent week in the current season as (season_id, section_index) —
+    in-progress if one exists, else the latest completed. None when no season."""
     if season_id is None:
         return None
     row = conn.execute(
-        "SELECT war_race_id FROM war_races WHERE season_id = ? "
+        "SELECT season_id, section_index FROM war_weeks WHERE season_id = ? "
         "ORDER BY section_index DESC LIMIT 1",
         (season_id,),
     ).fetchone()
-    return row["war_race_id"] if row else None
+    return (row["season_id"], row["section_index"]) if row else None
 
 
 def _populate_war_fame_rank_current_race(conn, ranks, war_race_id):
@@ -169,14 +169,15 @@ def _populate_war_fame_rank_current_race(conn, ranks, war_race_id):
     """
     if war_race_id is None:
         return
+    season_id, section_index = war_race_id
     rows = conn.execute(
-        "SELECT wp.member_id, wp.fame, wp.decks_used, m.current_name "
+        "SELECT wp.player_tag AS member_id, wp.fame, wp.decks_used, m.current_name "
         "FROM war_participation wp "
-        "JOIN members m ON m.member_id = wp.member_id "
-        "WHERE wp.war_race_id = ? AND m.status = 'active' "
+        "JOIN players m ON m.player_tag = wp.player_tag "
+        "WHERE wp.season_id = ? AND wp.section_index = ? AND EXISTS (SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL) "
         "AND COALESCE(wp.fame, 0) > 0 "
         "ORDER BY wp.fame DESC, COALESCE(wp.decks_used, 0) DESC, m.current_name COLLATE NOCASE",
-        (war_race_id,),
+        (season_id, section_index),
     ).fetchall()
     for i, row in enumerate(rows):
         if row["member_id"] in ranks:
@@ -192,14 +193,13 @@ def _populate_war_fame_rank_season(conn, ranks, season_id):
     if season_id is None:
         return
     rows = conn.execute(
-        "SELECT wp.member_id, SUM(COALESCE(wp.fame, 0)) AS total_fame, "
+        "SELECT wp.player_tag AS member_id, SUM(COALESCE(wp.fame, 0)) AS total_fame, "
         "       COUNT(*) AS races_participated, m.current_name "
         "FROM war_participation wp "
-        "JOIN war_races wr ON wr.war_race_id = wp.war_race_id "
-        "JOIN members m ON m.member_id = wp.member_id "
-        "WHERE wr.season_id = ? AND m.status = 'active' "
+        "JOIN players m ON m.player_tag = wp.player_tag "
+        "WHERE wp.season_id = ? AND EXISTS (SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL) "
         "AND COALESCE(wp.fame, 0) > 0 "
-        "GROUP BY wp.member_id "
+        "GROUP BY wp.player_tag "
         "ORDER BY total_fame DESC, races_participated DESC, m.current_name COLLATE NOCASE",
         (season_id,),
     ).fetchall()

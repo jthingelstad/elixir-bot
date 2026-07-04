@@ -61,12 +61,21 @@ def _riverrace_due(conn, clock, now: datetime) -> bool:
 
 
 def _current_clock(conn, now: datetime):
+    """Rebuild the clock from the stored race *projection* (snake_case,
+    engine.emitters.war.project_race_aspect) by adapting it back to the
+    CR payload keys war_clock reads. Fresh polls this tick recompute the
+    clock from the raw payload anyway; this covers startup/gap ticks."""
     row = baselines.get_baseline(conn, "riverrace", HOME_CLAN, "race")
     if row is None:
         return None
-    payload = json.loads(row["payload_json"])
-    raw = payload.get("_raw") or payload
-    return war_clock(raw, now, season_id=payload.get("season_id"))
+    p = json.loads(row["payload_json"])
+    cr_shaped = {
+        "periodType": p.get("period_type"),
+        "periodIndex": p.get("period_index"),
+        "sectionIndex": p.get("section_index"),
+        "clan": {"tag": p.get("our_tag"), "fame": p.get("our_fame")},
+    }
+    return war_clock(cr_shaped, now, season_id=p.get("season_id"))
 
 
 def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> dict:
@@ -151,7 +160,7 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
                 conn, tag, profile, roster_by_tag.get(tag), now_iso
             )
             if profile and profile.get("cards"):
-                projections.refresh_card_collection(conn, tag, profile, now_iso)
+                projections.refresh_card_collection(conn, tag, profile.get("cards") or [], now_iso)
             if tag in battlelogs:
                 projections.refresh_form(conn, tag, now=now_iso)
                 projections.refresh_rollups(conn, tag, today)

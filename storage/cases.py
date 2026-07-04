@@ -1,4 +1,11 @@
-"""Durable decision cases for operational recommendations."""
+"""Decision-case + communication-intent reads/writes — v5.1 (schema.md §7.3).
+
+Ported from the retired storage/decision_cases.py (Gen B) onto the carried
+decision_cases table: source_event_key/source_event_type became
+source_event_key/source_event_type; the Gen A game_event_stream lookup is
+gone. The communication-intent readers moved here from the retired
+storage/communication_intents.py onto the engine's single intents table.
+"""
 
 from __future__ import annotations
 
@@ -57,6 +64,8 @@ __all__ = [
     "upsert_decision_cases_from_signals",
     "upsert_member_review_case",
     "decision_case_snapshot",
+    "list_recent_communication_intents",
+    "get_communication_trace_for_message",
 ]
 
 
@@ -141,9 +150,8 @@ def upsert_decision_case(
     target_player_tag: str | None = None,
     target_player_name: str | None = None,
     priority: int = 0,
-    source_signal_key: str | None = None,
-    source_signal_type: str | None = None,
     source_event_key: str | None = None,
+    source_event_type: str | None = None,
     due_at: str | None = None,
     status: str = CASE_OPEN,
     state: Optional[dict] = None,
@@ -171,9 +179,9 @@ def upsert_decision_case(
         INSERT INTO decision_cases (
             case_key, case_type, status, subject_type, subject_key,
             target_player_tag, target_player_name, title, recommendation,
-            rationale, priority, source_signal_key, source_signal_type,
-            source_event_key, opened_at, due_at, state_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            rationale, priority, source_event_key, source_event_type,
+            opened_at, due_at, state_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(case_key) DO UPDATE SET
             status = CASE
                 WHEN decision_cases.status IN ('resolved', 'dismissed') THEN excluded.status
@@ -188,9 +196,8 @@ def upsert_decision_case(
             recommendation = COALESCE(excluded.recommendation, decision_cases.recommendation),
             rationale = COALESCE(excluded.rationale, decision_cases.rationale),
             priority = MAX(decision_cases.priority, excluded.priority),
-            source_signal_key = COALESCE(excluded.source_signal_key, decision_cases.source_signal_key),
-            source_signal_type = COALESCE(excluded.source_signal_type, decision_cases.source_signal_type),
             source_event_key = COALESCE(excluded.source_event_key, decision_cases.source_event_key),
+            source_event_type = COALESCE(excluded.source_event_type, decision_cases.source_event_type),
             due_at = CASE
                 WHEN decision_cases.status = 'deferred' AND decision_cases.due_at IS NOT NULL AND decision_cases.due_at > excluded.updated_at THEN decision_cases.due_at
                 ELSE COALESCE(excluded.due_at, decision_cases.due_at)
@@ -212,9 +219,8 @@ def upsert_decision_case(
             _clean_text(recommendation),
             _clean_text(rationale),
             int(priority or 0),
-            _clean_text(source_signal_key),
-            _clean_text(source_signal_type),
             _clean_text(source_event_key),
+            _clean_text(source_event_type),
             now,
             _clean_text(due_at),
             _json_dumps(state or {}),
@@ -413,12 +419,12 @@ def _leader_action_case_state(action: dict, *, outcome: str, backfilled_at: str)
     }
 
 
-def _source_event_key_for_signal(source_signal_key: str | None, *, conn: sqlite3.Connection) -> str | None:
-    signal_key = _clean_text(source_signal_key)
+def _source_event_key_for_signal(source_event_key: str | None, *, conn: sqlite3.Connection) -> str | None:
+    signal_key = _clean_text(source_event_key)
     if not signal_key:
         return None
     row = conn.execute(
-        "SELECT event_key FROM game_event_stream WHERE source_signal_key = ? ORDER BY observed_at DESC LIMIT 1",
+        "SELECT NULL AS event_key WHERE 0",  # Gen A game_event_stream retired
         (signal_key,),
     ).fetchone()
     return row["event_key"] if row else None
@@ -491,9 +497,8 @@ def backfill_decision_cases_from_leader_actions(
             target_player_tag=tag,
             target_player_name=name,
             priority=int(config.get("priority") or 0),
-            source_signal_key=action.get("source_signal_key"),
-            source_signal_type=action.get("source_signal_type"),
-            source_event_key=_source_event_key_for_signal(action.get("source_signal_key"), conn=conn),
+            source_event_key=action.get("source_event_key"),
+            source_event_type=action.get("source_event_type"),
             due_at=due_at,
             status=case_status if case_status in {CASE_OPEN, CASE_DEFERRED} else CASE_OPEN,
             state=_leader_action_case_state(action, outcome=outcome, backfilled_at=backfilled_at),
@@ -589,9 +594,8 @@ def upsert_member_review_case(
     title: str | None = None,
     recommendation: str | None = None,
     rationale: str | None = None,
-    source_signal_key: str | None = None,
-    source_signal_type: str | None = None,
     source_event_key: str | None = None,
+    source_event_type: str | None = None,
     due_at: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict | None:
@@ -618,9 +622,8 @@ def upsert_member_review_case(
         target_player_tag=canon_tag,
         target_player_name=name,
         priority=_member_case_priority(member),
-        source_signal_key=source_signal_key,
-        source_signal_type=source_signal_type,
         source_event_key=source_event_key,
+        source_event_type=source_event_type,
         due_at=due_at,
         state={"member": dict(member)},
         conn=conn,
@@ -647,9 +650,8 @@ def upsert_decision_cases_from_signals(
                 case = upsert_member_review_case(
                     case_type="inactivity_review",
                     member=member,
-                    source_signal_key=signal_key,
-                    source_signal_type=signal_type,
-                    source_event_key=signal.get("event_key"),
+                    source_event_key=signal_key,
+                    source_event_type=signal_type,
                     conn=conn,
                 )
                 if case:
@@ -686,3 +688,63 @@ def decision_case_snapshot(
         "due": [_compact_case(case) for case in list_due_decision_cases(limit=due_limit, conn=conn)],
         "open": [_compact_case(case) for case in list_decision_cases(limit=open_limit, conn=conn)],
     }
+
+
+
+# -- communication-intent reads (engine table; schema.md §7.2) ---------------
+
+@managed_connection
+def list_recent_communication_intents(
+    *,
+    status: str | None = None,
+    workflow: str | None = None,
+    project_id: int | None = None,
+    case_id: int | None = None,
+    target_channel_key: str | None = None,
+    limit: int = 25,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Recent intents from the v5.1 engine table. workflow/project_id/case_id
+    are Gen-B-era filters kept for caller compatibility (ignored — intents
+    are recognition-keyed now); target_channel_key filters on lane."""
+    del workflow, project_id, case_id
+    where = ["1=1"]
+    params: list = []
+    if status:
+        where.append("status = ?")
+        params.append(status)
+    if target_channel_key:
+        where.append("lane = ?")
+        params.append(target_channel_key)
+    rows = conn.execute(
+        "SELECT intent_id, recognition_key, intent_type, lane, scope, payload_json, "
+        "status, attempts, created_at, expires_at, fulfilled_at, discord_message_id, last_error "
+        "FROM communication_intents "
+        f"WHERE {' AND '.join(where)} "
+        "ORDER BY intent_id DESC LIMIT ?",
+        (*params, max(1, int(limit))),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@managed_connection
+def get_communication_trace_for_message(
+    discord_message_id: str | int,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict | None:
+    """Trace a delivered Discord message back to its intent + ledger claim."""
+    intent = conn.execute(
+        "SELECT * FROM communication_intents WHERE discord_message_id = ?",
+        (str(discord_message_id),),
+    ).fetchone()
+    if not intent:
+        return None
+    trace: dict = {"intent": dict(intent)}
+    if intent["recognition_key"]:
+        claim = conn.execute(
+            "SELECT * FROM recognition_ledger WHERE recognition_key = ?",
+            (intent["recognition_key"],),
+        ).fetchone()
+        if claim:
+            trace["recognition"] = dict(claim)
+    return trace
