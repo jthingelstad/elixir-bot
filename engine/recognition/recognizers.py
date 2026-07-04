@@ -129,8 +129,13 @@ def _trophy_push_candidates(conn, tags: set[str], now: str) -> list[Candidate]:
         delta = sum(r["trophy_change"] for r in run)
         if len(run) >= PUSH_MIN_BATTLES and delta >= PUSH_MIN_DELTA:
             last = run[-1]
+            # Keyed on the run's FIRST battle: stable as the run extends.
+            # The carried last-battle keying re-claimed the same climb under a
+            # new key every time it grew (live finding 2026-07-04: one player,
+            # one climb, multiple ledger claims — pure ledger noise since the
+            # scorer suppressed them all). One push run = one claim.
             out.append(Candidate(
-                key=f"trophy_push:{tag}:{last['dedup_key']}",
+                key=f"trophy_push:{tag}:{run[0]['battle_time']}",
                 event_type="trophy_push",
                 subject_tag=tag,
                 occurred_at=last["battle_time"],
