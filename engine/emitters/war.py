@@ -154,6 +154,23 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
     war_day = wd.war_day_index if wd is not None else None
     for tag, p in (state.get("participants") or {}).items():
         p = p or {}
+        # War-day heat (live tuning 2026-07-04): war battles move neither
+        # trophies nor donations, so the roster heartbeat never warms war
+        # players and their battlelogs lag up to the cold cadence (2h) on
+        # battle days. decksUsedToday moving in the race payload IS the cheap
+        # war-activity heartbeat — heat them so the scheduler follows.
+        prev = conn.execute(
+            """SELECT decks_used_today FROM war_participation
+               WHERE season_id = ? AND section_index = ? AND player_tag = ?""",
+            (season_id, section, tag),
+        ).fetchone()
+        if (
+            prev is not None
+            and (p.get("decks_used_today") or 0) > (prev["decks_used_today"] or 0)
+        ):
+            from engine import polling
+
+            polling.update_heat(conn, tag, new_battles=True, now=observed_at)
         conn.execute(
             """INSERT INTO war_participation (season_id, section_index, player_tag,
                    fame, repair_points, boat_attacks, decks_used, decks_used_today, observed_at)

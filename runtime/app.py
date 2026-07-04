@@ -1301,6 +1301,43 @@ async def _weekly_leadership_review():
     return result
 
 
+async def _db_backup():
+    """Daily compressed snapshots of the operational + memory DBs to
+    ELIXIR_BACKUP_DIR (iCloud Drive — offsite via sync). Uses the online
+    backup API; no downtime. Added 2026-07-04 (Jamie: offsite backup)."""
+    from scripts.backup_db import create_backup, prune_backups
+
+    runtime_status.mark_job_start("db_backup")
+
+    def _run():
+        results = {}
+        op = create_backup()  # defaults: ELIXIR_DB_PATH → ELIXIR_BACKUP_DIR
+        results["operational"] = {k: op.get(k) for k in ("path", "ok", "error")}
+        mem_path = os.environ.get("ELIXIR_V5_MEMORY_DB") or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "elixir-v5-memory.db"
+        )
+        from pathlib import Path
+
+        mem = create_backup(db_path=Path(mem_path), prefix="elixir-v5-memory")
+        results["memory"] = {k: mem.get(k) for k in ("path", "ok", "error")}
+        prune_backups()
+        prune_backups(prefix="elixir-v5-memory")
+        return results
+
+    try:
+        results = await asyncio.to_thread(_run)
+    except Exception as exc:
+        runtime_status.mark_job_failure("db_backup", str(exc))
+        log.exception("db backup failed")
+        return
+    ok = all(v.get("ok") for v in results.values())
+    (runtime_status.mark_job_success if ok else runtime_status.mark_job_failure)(
+        "db_backup", json.dumps(results, default=str)[:400]
+    )
+    log.info("db backup: %s", results)
+    return results
+
+
 async def _war_attendance_snapshot():
     """Finalize war_attendance_days for the just-closing war day (runtime.md §3).
     fame_delta stays NULL when no intra-day participation history exists — the

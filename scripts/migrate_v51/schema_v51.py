@@ -11,7 +11,7 @@ Usage:
     ./venv/bin/python scripts/migrate_v51/schema_v51.py \
         --db elixir-v51.db --archive elixir-v5-archive-2026H2.db
 
-Expected table count: 53 designed tables (49 engine + 4 conversation set;
+Expected table count: 54 designed tables (50 engine incl. tick_history + 4 conversation set;
 clan_memories live in elixir-v5-memory.db, untouched — migration.md T12).
 """
 
@@ -469,6 +469,14 @@ CREATE TABLE tournament_participants (
     UNIQUE(tournament_id, player_tag)
 );
 CREATE INDEX idx_tournament_participants_tournament ON tournament_participants(tournament_id);
+
+-- tick_history: Observatory-persisted engine tick counters (added 2026-07-04;
+-- 30-day self-pruning — see runtime/webapp/ticks.py)
+CREATE TABLE tick_history (
+    tick_id INTEGER PRIMARY KEY,
+    recorded_at TEXT NOT NULL,
+    counters_json TEXT NOT NULL
+);
 """
 
 # Tables whose DDL exports verbatim from the archive (schema.md: "carried
@@ -501,7 +509,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 53  # 49 engine + 4 conversation set
+EXPECTED_TABLE_COUNT = 54  # 49 engine + 4 conversation set
 
 
 _DEAD_MEMBERS_FK = re.compile(
