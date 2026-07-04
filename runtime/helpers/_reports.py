@@ -186,14 +186,11 @@ def _build_schedule_report():
 
 _DB_STATUS_MEMORY_TABLES = {
     "channel_state",
-    "clan_memories",
-    "clan_memory_audit",
-    "clan_memory_embeddings",
-    "clan_memory_index_status",
-    "clan_memory_links",
-    "clan_memory_tag_links",
-    "clan_memory_tags",
-    "clan_memory_versions",
+    # v5.1 memory pass (memory.md): one store in the engine DB.
+    "memories",
+    "memory_tags",
+    "memory_log",
+    "memories_fts",
     "conversation_threads",
     "memory_episodes",
     "memory_facts",

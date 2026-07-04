@@ -46,8 +46,17 @@ def _save(author_type: str, content: str) -> None:
 
 
 def _run_agent(question: str, login: str, prior: list[dict]) -> str:
+    import db
     import elixir_agent
 
+    try:  # ranked, query-aware memory context (memory.md §2.3)
+        memory_context = db.build_memory_context(
+            channel_id=CHANNEL_NAME,
+            viewer_scope="leadership",
+            query=question,
+        )
+    except Exception:
+        memory_context = None
     result = elixir_agent.respond_in_channel(
         question=question,
         author_name=login or "Jamie (web)",
@@ -56,6 +65,7 @@ def _run_agent(question: str, login: str, prior: list[dict]) -> str:
         clan_data={},
         war_data=None,
         conversation_history=prior,
+        memory_context=memory_context,
     )
     if isinstance(result, dict):
         return result.get("content", result.get("summary", "")) or "(no reply)"

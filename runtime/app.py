@@ -1139,16 +1139,12 @@ async def _db_backup():
     runtime_status.mark_job_start("db_backup")
 
     def _run():
+        # v5.1 memory pass (memory.md D1/M6): memories live in the engine DB,
+        # so ONE database covers everything — the separate memory-DB snapshot
+        # is retired (its history stays prunable under its old prefix).
         results = {}
         op = create_backup()  # defaults: ELIXIR_DB_PATH → ELIXIR_BACKUP_DIR
         results["operational"] = {k: op.get(k) for k in ("path", "ok", "error")}
-        mem_path = os.environ.get("ELIXIR_V5_MEMORY_DB") or os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "elixir-v5-memory.db"
-        )
-        from pathlib import Path
-
-        mem = create_backup(db_path=Path(mem_path), prefix="elixir-v5-memory")
-        results["memory"] = {k: mem.get(k) for k in ("path", "ok", "error")}
         prune_backups()
         prune_backups(prefix="elixir-v5-memory")
         return results

@@ -1143,6 +1143,7 @@ async def _handle_arena_relay_screenshot_observation(
             discord_user_id=message.author.id,
             channel_id=message.channel.id,
             viewer_scope=channel_config.get("memory_scope") or "leadership",
+            query=question,
         )
         result = await asyncio.to_thread(
             elixir_agent.analyze_arena_relay_screenshot,
@@ -1343,6 +1344,7 @@ async def _perform_deck_review(app, message, ctx, *, mode, subject):
                 discord_user_id=message.author.id,
                 channel_id=message.channel.id,
                 viewer_scope=channel_config.get("memory_scope") or "public",
+                query=ctx.get("raw_question"),
             )
 
             ch = app._channel_msg_kwargs(message.channel)
@@ -1449,6 +1451,7 @@ async def _dispatch_intent(app, message, ctx, intent) -> bool:
             discord_user_id=message.author.id,
             channel_id=message.channel.id,
             viewer_scope=channel_config.get("memory_scope") or "public",
+            query=ctx.get("raw_question"),
         )
         result = await asyncio.to_thread(
             elixir_agent.respond_to_help_request,
