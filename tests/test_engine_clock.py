@@ -15,12 +15,15 @@ def _race(period_type="warDay", period_index=24, section_index=3, fame=4000):
 
 
 def test_colosseum_detection_and_finish_line():
+    # Colosseum has NO finish line — fame accrues across all four battle days
+    # (verified live 2026-07-03: 20,600 fame on day 2, race still on). The
+    # spec's 5,000 constant was wrong; race_finished must never fire here.
     clock = war_clock(_race("colosseum", 31, 4, fame=4800), NOW, season_id=133)
     assert clock.is_colosseum_week is True
-    assert clock.finish_line == 5000
+    assert clock.finish_line is None
     assert clock.race_finished is False
-    won = war_clock(_race("colosseum", 31, 4, fame=5200), NOW, season_id=133)
-    assert won.race_finished is True and won.pace_status == "won"
+    deep = war_clock(_race("colosseum", 31, 4, fame=20600), NOW, season_id=133)
+    assert deep.race_finished is False and deep.pace_status == "colosseum"
 
 
 def test_normal_week_finish_line_10000():
