@@ -1641,46 +1641,51 @@ def test_v5_post_creates_leader_action_for_required_event():
     assert mock_card.await_args.kwargs["copy_messages"] == [action["copy_current_text"]]
 
 
-def test_v5_member_joined_leader_action_spec_uses_raw_profile_facts():
-    _store_v5_member_joined_raw_profile()
+def test_v5_member_joined_leader_action_spec_is_payload_only():
+    # Single-pipeline rule (2026-07-04): the spec no longer gathers its own
+    # profile facts — the Discord composition is the sole authoring step and
+    # the relay redrafts its posted copy. The spec's deterministic fallback
+    # derives from the intent payload alone.
+    _store_v5_member_joined_raw_profile()  # present in DB, must NOT be consulted
 
     spec = elixir._v5_event_leader_action_spec(_v5_member_joined_metadata())
 
     assert spec["action_type"] == "welcome_relay"
     assert spec["objective"] == "member_joined"
     assert spec["target_player_name"] == "p2w_gtr0410"
-    assert spec["profile_facts"]["battle_wins"] == 394
-    assert spec["profile_facts"]["collection_level"] == 935
-    assert spec["profile_facts"]["trophies"] == 5589
-    assert "394 wins" in spec["copy"]
-    assert "collection level 935" in spec["copy"]
-    assert "5,589 trophies" in spec["copy"]
-    assert "394" in spec["profile_fact_markers"]
-    assert spec["baseline"]["profile_facts"]["battle_wins"] == 394
+    assert "profile_facts" not in spec
+    assert "profile_fact_markers" not in spec
+    assert "p2w_gtr0410" in spec["copy"]
+    assert "394" not in spec["copy"]  # raw-profile fact must not leak in
 
 
-def test_v5_member_joined_clan_chat_copy_falls_back_when_generated_copy_is_generic():
-    _store_v5_member_joined_raw_profile()
+def test_v5_member_joined_clan_chat_copy_redrafts_discord_post():
     spec = elixir._v5_event_leader_action_spec(_v5_member_joined_metadata())
+    discord_copy = (
+        "Welcome to POAP KINGS, p2w_gtr0410 — arriving with 5,589 trophies "
+        "and a king tower ready for war days."
+    )
 
     with patch(
         "elixir.generate_clan_chat_copy",
         new=AsyncMock(return_value=ClanChatCopyResult(
-            messages=["Welcome to POAP KINGS, p2w_gtr0410! Glad you found us. - E"],
+            messages=["Welcome p2w_gtr0410 — 5,589 trophies strong. Glad you're here. - E"],
         )),
     ) as mock_copy:
-        copy, metadata = asyncio.run(elixir._v5_event_clan_chat_copy(spec, _v5_member_joined_metadata()))
+        copy, metadata = asyncio.run(
+            elixir._v5_event_clan_chat_copy(spec, _v5_member_joined_metadata(), discord_copy)
+        )
 
     mock_copy.assert_awaited_once()
     context = mock_copy.await_args.kwargs["context"]
-    assert "Player profile facts JSON" in context
-    assert "394" in context
-    assert "935" in context
+    # The posted Discord copy is the redraft source, verbatim…
+    assert discord_copy in context
+    assert "introduce nothing new" in context
+    # …and the old independent enrichment is gone from the prompt.
+    assert "Player profile facts JSON" not in context
+    assert "CR READ TOOLS" not in context
     assert copy.endswith(" - E")
-    assert "394 wins" in copy
-    assert "collection level 935" in copy
-    assert metadata["used_fallback"] is True
-    assert metadata["reason"] == "missing_profile_fact"
+    assert metadata["used_fallback"] is False
 
 
 def test_v5_event_leader_action_spec_includes_collection_levels():
