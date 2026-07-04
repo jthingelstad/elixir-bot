@@ -1305,22 +1305,22 @@ async def _war_attendance_snapshot():
     """Finalize war_attendance_days for the just-closing war day (runtime.md §3).
     fame_delta stays NULL when no intra-day participation history exists — the
     evaluators read decks_used, which is always present."""
-    from engine import baselines as engine_baselines
     from engine import db as engine_db
-    from engine.clock import war_clock
     from engine.emitters.war import finalize_attendance_day
+    from engine.tick import _current_clock
 
     runtime_status.mark_job_start("war_attendance_snapshot")
 
     def _run():
         conn = engine_db.connect()
         try:
-            row = engine_baselines.get_baseline(conn, "riverrace", "#J2RGCRVG", "race")
-            if row is None:
+            # _current_clock adapts the stored snake_case race projection back
+            # to the CR-shaped keys war_clock reads. Feeding the projection in
+            # directly reads as permanent "training" (live incident 2026-07-04:
+            # the 04:15 snapshot skipped on a Colosseum battle day).
+            clock = _current_clock(conn, datetime.now(timezone.utc))
+            if clock is None:
                 return {"skipped": "no riverrace baseline"}
-            payload = json.loads(row["payload_json"])
-            raw = payload.get("_raw") or payload
-            clock = war_clock(raw, datetime.now(timezone.utc), season_id=payload.get("season_id"))
             if clock.phase == "training" or clock.season_id is None:
                 return {"skipped": f"phase={clock.phase}"}
             finalized = finalize_attendance_day(
