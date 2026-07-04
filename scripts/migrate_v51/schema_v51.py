@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sqlite3
 import sys
 
@@ -453,6 +454,21 @@ CREATE TABLE tournament_battles (
     UNIQUE(tournament_id, battle_time, player1_tag, player2_tag)
 );
 CREATE INDEX idx_tournament_battles_tournament ON tournament_battles(tournament_id);
+
+-- tournament_participants: carried minus member_id (player_tag already present) --
+CREATE TABLE tournament_participants (
+    participant_id INTEGER PRIMARY KEY,
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(tournament_id) ON DELETE CASCADE,
+    player_tag TEXT NOT NULL,
+    player_name TEXT,
+    clan_tag TEXT,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    final_score INTEGER,
+    final_rank INTEGER,
+    UNIQUE(tournament_id, player_tag)
+);
+CREATE INDEX idx_tournament_participants_tournament ON tournament_participants(tournament_id);
 """
 
 # Tables whose DDL exports verbatim from the archive (schema.md: "carried
@@ -475,8 +491,10 @@ CARRIED_VERBATIM = [
     "elixir_improvement_suggestions",
     "runtime_job_status",
     "tournaments",
-    "tournament_participants",
-    # conversation set (T12; clan_memories live in elixir-v5-memory.db)
+    # conversation set (T12; clan_memories live in elixir-v5-memory.db).
+    # conversation_threads/messages carry a member_id column whose FK target
+    # (members) no longer exists — the export strips the dead FK clause and the
+    # column becomes a soft ref for the deferred memory/conversation pass.
     "conversation_threads",
     "messages",
     "memory_facts",
@@ -484,6 +502,11 @@ CARRIED_VERBATIM = [
 ]
 
 EXPECTED_TABLE_COUNT = 53  # 49 engine + 4 conversation set
+
+
+_DEAD_MEMBERS_FK = re.compile(
+    r"\s+REFERENCES members\(member_id\)(\s+ON DELETE (SET NULL|CASCADE))?"
+)
 
 
 def export_carried_ddl(archive: sqlite3.Connection) -> list[str]:
@@ -496,7 +519,9 @@ def export_carried_ddl(archive: sqlite3.Connection) -> list[str]:
         ).fetchall()
         if not rows:
             raise SystemExit(f"carried table missing from archive: {table}")
-        stmts.extend(r[0] for r in rows)
+        # Strip FK clauses that point at the dropped members table (§7 re-key):
+        # the member_id columns stay as soft refs for the deferred pass.
+        stmts.extend(_DEAD_MEMBERS_FK.sub("", r[0]) for r in rows)
     return stmts
 
 

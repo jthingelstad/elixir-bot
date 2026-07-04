@@ -82,7 +82,7 @@ def old_tenure(old):
         old,
         """SELECT m.player_tag, cm.joined_at, cm.left_at
            FROM clan_memberships cm JOIN members m ON m.member_id = cm.member_id
-           ORDER BY m.player_tag, cm.joined_at""",
+           ORDER BY m.player_tag, cm.joined_at, cm.left_at""",
     )
     return {"count": len(rows), "spans": [tuple(r) for r in rows]}
 
@@ -105,12 +105,15 @@ def old_awards(old):
 
 
 def old_war_history(old):
+    # Mirrors T9's open-season rule: the max season_id is in progress, so its
+    # final_rank is NULL (the new engine closes it at the real season_closed).
     rows = _rows(
         old,
         """SELECT season_id, COUNT(*) AS weeks,
-                  (SELECT our_rank FROM war_races r2
-                   WHERE r2.season_id = r.season_id
-                   ORDER BY section_index DESC LIMIT 1) AS final_rank
+                  CASE WHEN season_id < (SELECT MAX(season_id) FROM war_races)
+                       THEN (SELECT our_rank FROM war_races r2
+                             WHERE r2.season_id = r.season_id
+                             ORDER BY section_index DESC LIMIT 1) END AS final_rank
            FROM war_races r GROUP BY season_id ORDER BY season_id""",
     )
     return {"seasons": [tuple(r) for r in rows], "season_count": len(rows)}
@@ -185,7 +188,7 @@ def new_tenure(new):
     rows = _rows(
         new,
         """SELECT player_tag, joined_at, left_at FROM clan_memberships
-           ORDER BY player_tag, joined_at""",
+           ORDER BY player_tag, joined_at, left_at""",
     )
     return {"count": len(rows), "spans": [tuple(r) for r in rows]}
 
