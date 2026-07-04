@@ -41,6 +41,33 @@
   "Master 1" placement suggests the mid-2025 rename also reshuffled league
   display names — verify the leagueNumber→name map against current game
   data before any copy uses league names.
+- **League map (researched + live-confirmed 2026-07-04):** the 2025 rework
+  replaced the 10-league Path of Legends ladder with SEVEN leagues:
+  `1=Master 1, 2=Master 2, 3=Master 3, 4=Champion, 5=Grand Champion,
+  6=Royal Champion, 7=Ultimate Champion`. Live battle data shows league
+  numbers 1–4 and 7 only (max 7; league-7 players carry UC-band ratings) —
+  consistent with this scheme. Old Challenger leagues are gone; Master 1 is
+  the entry league.
+  **⚠️ Epoch quirk (normalizer catalog):** `best*SeasonResult` values
+  predating the rework use the OLD 10-league scale — Fullboat/Vijay
+  `best=10` IS old-scheme Ultimate Champion. Any display of `best` league
+  must pick the map by era; safest copy says "Ultimate Champion (Path of
+  Legends era)".
+- **Progression mechanics (researched):** each league is climbed in steps;
+  the bottom step of each league is a *Golden Step* — it cannot be lost, so
+  leagues have floors and cross-league demotion is impossible within a
+  season. Entry to Ranked requires 15,000 trophies this season OR Champion
+  League last season. At reset everyone returns to Master 1 with a *step
+  multiplier* sized by last season's finish (UC finishers climb back fast).
+  UC uses a rating: starting 1,200–2,000 seeded by prior win rate; top
+  10,000 get a profile rank; top 1,000 = the Hall of Fame (the renamed
+  global leaderboard).
+  Recognition implications: (a) league PROMOTIONS are the meaningful
+  in-season moments (floors make them durable achievements, not noise);
+  (b) early-season climbing is multiplier-boosted — the recognizers should
+  not treat a day-1 sprint through Master leagues like a mid-season grind
+  (score promotions by league reached, not speed); (c) "entered Ranked" is
+  itself a gate-crossing worth noting for first-timers.
 - A rollover is **observed**, war-style: `current` league/rating drop-reset
   while `last` swaps to the just-ended values. §16.1's discovered-lifecycle
   philosophy applies cleanly.
