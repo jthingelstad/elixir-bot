@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}{{ player.current_name or tag }}{% endblock %}
+{% block content %}
+<h1>{{ player.current_name or tag }} <span class="muted">{{ tag }}</span></h1>
+
+<div class="cards">
+  <div class="card">
+    <h2 style="margin-top:0;">Identity & state</h2>
+    <dl class="kv">
+      <dt>first seen</dt><dd>{{ player.first_seen_at | reltime }}</dd>
+      <dt>last seen</dt><dd>{{ player.last_seen_at | reltime }}</dd>
+      {% if membership %}
+        <dt>membership</dt><dd>{{ 'open (joined ' + membership.joined_at + ')' if not membership.left_at else 'left ' + membership.left_at }}</dd>
+      {% endif %}
+      {% if state %}
+        <dt>role</dt><dd>{{ state.role or '–' }}</dd>
+        <dt>trophies</dt><dd>{{ state.trophies }} (best {{ state.best_trophies }})</dd>
+        <dt>arena</dt><dd>{{ state.arena_name or '–' }}</dd>
+        <dt>donations wk</dt><dd>{{ state.donations_week }}</dd>
+        <dt>observed</dt><dd>{{ state.observed_at | reltime }}</dd>
+      {% endif %}
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Polling</h2>
+    {% if poll %}
+      <dl class="kv">
+        <dt>temperature</dt><dd><span class="badge">{{ poll.temperature }}</span> (heat {{ poll.heat }})</dd>
+        <dt>last battlelog</dt><dd>{{ poll.last_battlelog_poll | reltime }}</dd>
+        <dt>last profile</dt><dd>{{ poll.last_profile_poll | reltime }}</dd>
+        <dt>last battle seen</dt><dd>{{ poll.last_battle_seen | reltime }}</dd>
+      </dl>
+    {% else %}<p class="muted">No poll state.</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Management</h2>
+    {% if management %}
+      <dl class="kv">
+        <dt>evaluators</dt><dd>donor: {{ management.sustained_donor or '–' }} · war: {{ management.war_reliable or '–' }} · battle: {{ management.battle_active or '–' }}</dd>
+        <dt>promote</dt><dd>{{ management.promote_state }} ({{ management.promote_qualifying_weeks }} wks)</dd>
+        <dt>demote</dt><dd>{{ management.demote_state }}</dd>
+        <dt>kick</dt><dd>{{ management.kick_state }}{% if management.kick_state_since %} since {{ management.kick_state_since | reltime }}{% endif %}</dd>
+        <dt>evidence</dt><dd>don {{ management.donations_4wk_avg }} · att {{ management.war_attendance_rate }} · battle-days {{ management.battle_days_last_28 }}</dd>
+      </dl>
+    {% else %}<p class="muted">No management row.</p>{% endif %}
+  </div>
+</div>
+
+<h2>Decision trail — claims & posts</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>claimed</th><th>key</th><th class="num">score</th><th>outcome</th></tr>
+    {% for c in claims %}
+      <tr>
+        <td>{{ c.claimed_at | reltime }}</td>
+        <td><a href="/recognition/{{ c.recognition_key | urlencode }}"><code>{{ c.recognition_key | truncate(60) }}</code></a></td>
+        <td class="num">{{ c.score }}</td>
+        <td>
+          {% if c.suppressed_reason %}<span class="badge bad">{{ c.suppressed_reason | truncate(36) }}</span>
+          {% elif c.intent_status %}<span class="badge {{ 'good' if c.intent_status == 'fulfilled' else '' }}">{{ c.intent_status }} → {{ c.lane }}</span>
+          {% else %}<span class="muted">claimed</span>{% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">No recognized moments yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Recent events</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>observed</th><th>stream</th><th>type</th></tr>
+    {% for e in events %}
+      <tr>
+        <td>{{ e.get('observed_at','') | reltime }}</td>
+        <td><span class="badge">{{ e.get('stream','') }}</span></td>
+        <td><code>{{ e.get('event_type','') }}</code></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="muted">No events in window.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Recent battles</h2>
+<div class="card" style="overflow-x:auto;">
+  <table>
+    <tr><th>time</th><th>mode</th><th>outcome</th><th class="num">trophies</th><th>arena</th><th>war</th></tr>
+    {% for b in battles %}
+      <tr>
+        <td>{{ b.battle_time | reltime }}</td>
+        <td>{{ b.game_mode_name }}</td>
+        <td>{{ b.outcome }}</td>
+        <td class="num">{{ b.trophy_change if b.trophy_change is not none else '' }}</td>
+        <td>{{ b.arena_name or '' }}</td>
+        <td>{{ 'w' + (b.season_id|string) + ':' + (b.section_index|string) if b.is_war and b.season_id is not none else '' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No battles in the stream.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if attendance %}
+<h2>War attendance</h2>
+<div class="card">
+  <table>
+    <tr><th>season</th><th>week</th><th>day</th><th class="num">decks</th><th class="num">fame Δ</th></tr>
+    {% for a in attendance %}
+      <tr>
+        <td>{{ a.season_id }}</td><td>{{ a.section_index }}</td><td>{{ a.war_day_index }}</td>
+        <td class="num">{{ a.decks_used }}/{{ a.decks_available }}</td>
+        <td class="num">{{ a.fame_delta if a.fame_delta is not none else '–' }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+{% endblock %}

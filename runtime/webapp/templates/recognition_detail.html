@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ key }}{% endblock %}
+{% block content %}
+<h1><code>{{ key }}</code></h1>
+
+<div class="card">
+  <dl class="kv">
+    <dt>stream</dt><dd><span class="badge">{{ claim.stream }}</span></dd>
+    <dt>score</dt><dd>{{ claim.score }}</dd>
+    <dt>claimed</dt><dd>{{ claim.claimed_at }} ({{ claim.claimed_at | reltime }})</dd>
+    <dt>intent</dt><dd>{{ claim.intent_id if claim.intent_id is not none else 'none (claim without post)' }}</dd>
+  </dl>
+</div>
+
+<h2>Evidence & trace</h2>
+<pre>{{ claim.refs | tojson_pretty }}</pre>
+
+{% if intent %}
+<h2>Intent lifecycle</h2>
+<div class="card">
+  <dl class="kv">
+    <dt>status</dt><dd><span class="badge {{ 'good' if intent.status == 'fulfilled' else ('bad' if intent.status in ('failed','expired') else '') }}">{{ intent.status }}</span></dd>
+    <dt>type → lane</dt><dd><code>{{ intent.intent_type }}</code> → {{ intent.lane }} ({{ intent.scope }})</dd>
+    <dt>created</dt><dd>{{ intent.created_at }} ({{ intent.created_at | reltime }})</dd>
+    <dt>expires</dt><dd>{{ intent.expires_at }}</dd>
+    <dt>fulfilled</dt><dd>{{ intent.fulfilled_at or '–' }}</dd>
+    <dt>attempts</dt><dd>{{ intent.attempts }}</dd>
+    <dt>last error</dt><dd class="{{ 'err' if intent.last_error else '' }}">{{ intent.last_error or '–' }}</dd>
+    <dt>discord message</dt><dd>{{ intent.discord_message_id or '–' }}</dd>
+  </dl>
+  {% if intent.status in ('failed', 'expired') %}
+    <form class="inline" method="post" action="/ops/intent/{{ intent.intent_id }}/retry" style="margin-top:.6rem;">
+      <button class="btn ghost" type="submit">Retry delivery</button>
+    </form>
+  {% endif %}
+</div>
+<h2>Intent payload (presentation-free facts)</h2>
+<pre>{{ intent.payload | tojson_pretty }}</pre>
+{% endif %}
+
+<p><a href="/recognition">← recognition</a></p>
+{% endblock %}

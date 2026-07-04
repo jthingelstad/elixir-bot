@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Raw payload {{ row.payload_id }}{% endblock %}
+{% block content %}
+<h1>Raw payload {{ row.payload_id }}</h1>
+<dl class="kv">
+  <dt>endpoint</dt><dd><code>{{ row.endpoint }}</code></dd>
+  <dt>entity</dt><dd>{{ row.entity_key }}</dd>
+  <dt>fetched</dt><dd>{{ row.fetched_at }} ({{ row.fetched_at | reltime }})</dd>
+  <dt>hash</dt><dd><code>{{ row.payload_hash[:16] }}…</code></dd>
+</dl>
+<pre>{{ row.payload_json | tojson_pretty }}</pre>
+<p><a href="/streams">← streams</a></p>
+{% endblock %}
