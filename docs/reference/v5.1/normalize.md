@@ -44,6 +44,7 @@
 | Tag canonicalization | `#`-prefixed, uppercase, O→0 | `db._canon_tag` (correct home; catalog it) | re-export as `canon_tag` |
 | CR-compact timestamps leak into OUR OWN tables | migration/seed paths copied '20260628T…' into columns where live code writes ISO-Z — compact sorts ABOVE ISO, mis-bucketing time-ordered queries | recognition_ledger.claimed_at T14 seeds (found 2026-07-04 live audit; one-time fix scripts/migrate_v51/fix_ledger_seed_ts.py) | write-side convention: always `parse_cr_time(...).strftime(ISO)` before persisting |
 | SQLite `datetime('now')` is space-separated | stored timestamps are ISO-T; `'T' > ' '` so `>=` cutoffs match EVERYTHING and `<` cutoffs match NOTHING | 12 sites (live incident 2026-07-04: the clan-chat relay's 15-min freshness filter never filtered — R108–R114 spam) — all fixed to `strftime('%Y-%m-%dT%H:%M:%S','now',…)` | SQL convention, catalogued; grep gate candidate |
+| Ranked `leagueNumber` spans two epochs | pre-mid-2025 values use the 10-league Path of Legends scale (10=UC); post-rework uses 7 leagues (7=UC) | `best*SeasonResult` fields carry old-scale values forever (live: best=10 beside current max 7) | catalogued 2026-07-04; display maps by era |
 | Colosseum has no finish line | fame accrues all 4 days (live: 20,600 on day 2); spec's 5,000 was wrong | fixed in clock.py 2026-07-04 | cataloged, stays in clock |
 
 ## 3. Build plan (executed 2026-07-04)
