@@ -45,14 +45,11 @@ def _member_activity_anchor(conn) -> datetime:
     row = conn.execute("SELECT MAX(battle_time) AS ts FROM battle_events").fetchone()
     ts = row["ts"] if row else None
     if ts:
-        try:
-            txt = str(ts).replace("Z", "+00:00")
-            if "T" in txt and "-" not in txt[:8]:
-                # CR compact form 20260703T120000.000+00:00
-                return datetime.strptime(str(ts)[:15], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
-            return datetime.fromisoformat(txt).astimezone(timezone.utc)
-        except ValueError:
-            pass
+        from engine.normalize import parse_cr_time  # the single parser
+
+        parsed = parse_cr_time(ts)
+        if parsed is not None:
+            return parsed
     return datetime.now(timezone.utc)
 
 

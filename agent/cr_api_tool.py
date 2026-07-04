@@ -369,7 +369,22 @@ def _filter_cr_leaderboard(payload, *, limit):
 
 
 def _execute_cr_api(arguments):
-    """Unified CR API bridge. One aspect per call; returns a filtered payload."""
+    """Unified CR API bridge. One aspect per call; returns a filtered payload,
+    annotated by the normalizer (engine/normalize.py): derived fields
+    (display_level, day_human) attached ALONGSIDE raw API values — never
+    replacing them — so the LLM sees both the true API value and the human
+    meaning (docs/reference/v5.1/normalize.md principle 3)."""
+    result = _execute_cr_api_inner(arguments)
+    try:
+        from engine.normalize import annotate
+
+        return annotate(result, arguments.get("aspect"))
+    except Exception:  # annotation must never break the tool
+        return result
+
+
+def _execute_cr_api_inner(arguments):
+    """The un-annotated dispatch (see _execute_cr_api)."""
     aspect = arguments.get("aspect")
     if not aspect:
         return {"error": "aspect is required"}

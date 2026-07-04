@@ -31,14 +31,11 @@ def _milestones(old, new, step) -> list[int]:
 
 
 def _card_level(card: dict) -> int | None:
-    """Legacy display-level normalization (event_core/ingest/collections.py:25)."""
-    level = card.get("level")
-    if not isinstance(level, int):
-        return None
-    max_level = card.get("maxLevel")
-    if not isinstance(max_level, int) or max_level <= 0 or max_level > 16:
-        return level
-    return level + max(0, 16 - max_level)
+    """Display-level normalization — delegates to the normalizer
+    (engine/normalize.py), the single home for the rarity-relative math."""
+    from engine.normalize import card_display_level
+
+    return card_display_level(card.get("level"), card.get("maxLevel"))
 
 
 def project_player_aspects(payload: dict) -> dict[str, dict]:
@@ -168,7 +165,9 @@ def emit_ranked(conn, tag, old, new, observed_at, window_start) -> int:
                        {"league": nl})
     # pol_global_rank_attained — rank attained or improved (lower = better);
     # key = to_rank (events.md §3: key prefix = event_type, rank attained)
-    if isinstance(nrank, int) and (orank is None or (isinstance(orank, int) and nrank < orank)):
+    from engine.normalize import pol_rank_improved
+
+    if pol_rank_improved(orank, nrank):
         n += _emit(conn, tag, observed_at, window_start, "pol_global_rank_attained", nrank,
                    {"from_rank": orank, "to_rank": nrank, "league": nl})
     return n

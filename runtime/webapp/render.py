@@ -32,15 +32,10 @@ def _reltime(value) -> str:
     if not value:
         return ""
     text = str(value)
-    try:
-        v = text.replace(".000Z", "Z")
-        if "T" in v and "-" not in v[:10]:  # CR compact 20260703T210000Z
-            dt = datetime.strptime(v, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-        else:
-            dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-    except ValueError:
+    from engine.normalize import parse_cr_time  # the single parser
+
+    dt = parse_cr_time(text)
+    if dt is None:
         return text
     seconds = (datetime.now(timezone.utc) - dt).total_seconds()
     if seconds < 0:

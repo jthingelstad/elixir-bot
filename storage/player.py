@@ -195,12 +195,10 @@ def _games_per_day_metadata_fields(member_id: int, *, computed_at: str, conn) ->
 
 
 def _card_display_max_level(card: dict) -> int | None:
-    max_level = card.get("maxLevel")
-    if not isinstance(max_level, int) or max_level <= 0:
-        return None
-    if max_level > 16:
-        return max_level
-    return max_level + max(0, 16 - max_level)
+    """Delegates to the normalizer (engine/normalize.py)."""
+    from engine.normalize import card_display_max_level
+
+    return card_display_max_level(card.get("maxLevel"))
 
 
 def _normalize_cards_for_storage(cards: list[dict] | None) -> list[dict]:

@@ -8,6 +8,14 @@
   <dt>fetched</dt><dd>{{ row.fetched_at }} ({{ row.fetched_at | reltime }})</dd>
   <dt>hash</dt><dd><code>{{ row.payload_hash[:16] }}…</code></dd>
 </dl>
-<pre>{{ row.payload_json | tojson_pretty }}</pre>
+<p>
+  {% if annotated %}
+    <span class="badge good">annotated view</span> — derived fields (display_level, day_human) shown alongside raw API values ·
+    <a href="/raw/{{ row.payload_id }}">raw only</a>
+  {% else %}
+    <a href="/raw/{{ row.payload_id }}?annotated=1">show annotated view</a> (derived fields alongside raw)
+  {% endif %}
+</p>
+<pre>{{ body | tojson_pretty }}</pre>
 <p><a href="/streams">← streams</a></p>
 {% endblock %}

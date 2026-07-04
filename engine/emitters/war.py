@@ -20,8 +20,7 @@ from __future__ import annotations
 
 from engine.db import canon_tag, utcnow
 from engine.emitters import insert_stream_event
-
-TRAINING_DAYS = 3
+from engine.normalize import war_day as normalize_war_day
 
 
 def project_race_aspect(payload: dict, season_id: int | None) -> dict:
@@ -151,8 +150,8 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
     season_id, section = state.get("season_id"), state.get("section_index")
     if season_id is None or section is None:
         return
-    day = state.get("period_index")
-    war_day = (day % 7) - TRAINING_DAYS if isinstance(day, int) and (day % 7) >= TRAINING_DAYS else None
+    wd = normalize_war_day(state.get("period_index"))
+    war_day = wd.war_day_index if wd is not None else None
     for tag, p in (state.get("participants") or {}).items():
         p = p or {}
         conn.execute(
@@ -288,14 +287,15 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
         isinstance(new_period, int)
         and new_period != old_period
         and new_type in ("warDay", "colosseum")
-        and (new_period % 7) >= TRAINING_DAYS
+        and (wd_open := normalize_war_day(new_period)) is not None
+        and wd_open.war_day_index is not None
         and new_season is not None
     ):
-        day_index = (new_period % 7) - TRAINING_DAYS
         n += _emit(conn, new_season, new_section, observed_at, window_start,
                    "war_day_opened",
-                   f"war_day_opened:{new_season}:{new_section}:{day_index}",
-                   {"period_type": new_type, "day_index": day_index})
+                   f"war_day_opened:{new_season}:{new_section}:{wd_open.war_day_index}",
+                   {"period_type": new_type, "day_index": wd_open.war_day_index,
+                    "war_day_human": wd_open.human})
 
     # race finished — we crossed the finish line mid-week (§16.4 tone shift)
     finish_line = 5_000 if new_type == "colosseum" else 10_000

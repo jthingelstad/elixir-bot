@@ -252,8 +252,12 @@ class TestFilters:
         assert r["currentFavouriteCard"] == "Mega Knight"
         assert "cards" not in r
         assert "badges" not in r
-        # Deck trimmed to name/level/maxLevel/elixirCost only.
-        assert set(r["currentDeck"][0].keys()) == {"name", "level", "maxLevel", "elixirCost"}
+        # Deck trimmed to name/level/maxLevel/elixirCost — plus display_level,
+        # the normalizer annotation attached alongside raw values
+        # (engine/normalize.annotate, docs/reference/v5.1/normalize.md).
+        assert set(r["currentDeck"][0].keys()) == {
+            "name", "level", "maxLevel", "elixirCost", "display_level",
+        }
 
     def test_player_battles_filter_respects_limit(self, execute_cr_api):
         battles = [

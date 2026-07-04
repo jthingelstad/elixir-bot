@@ -27,7 +27,7 @@ __all__ = [
 ]
 
 from runtime.helpers._common import (
-    _canon_tag,
+    _bare_tag,
     _chicago,
     _fmt_bytes,
     _fmt_iso_short,
@@ -1023,12 +1023,12 @@ async def _load_live_clan_context():
     member_list = clan.get("memberList") or []
     if member_list:
         previous_roster = await asyncio.to_thread(db.get_active_roster_map)
-        previous_tags = {_canon_tag(tag) for tag in (previous_roster or {})}
+        previous_tags = {_bare_tag(tag) for tag in (previous_roster or {})}
         if previous_tags:
             today = datetime.now(_chicago()).date().isoformat()
             live_recent_joins = []
             for member in member_list:
-                tag = _canon_tag(member.get("tag"))
+                tag = _bare_tag(member.get("tag"))
                 if not tag or tag in previous_tags:
                     continue
                 live_recent_joins.append({
