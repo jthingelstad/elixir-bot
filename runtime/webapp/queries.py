@@ -168,6 +168,22 @@ def members_page() -> dict:
                      (COALESCE(mm.demote_state,'none') != 'none') DESC,
                      p.current_name COLLATE NOCASE
             LIMIT 200""")
+        # Playstyle identity chip + mode mix (ranked-and-profiles.md §2.3) —
+        # a computed read over rollups per member; profile failures are blank
+        # chips, never a broken page.
+        from engine.profiles import player_mode_profile
+
+        for r in rows:
+            try:
+                p = player_mode_profile(conn, r["player_tag"])
+                r["identity"] = p["identity"]
+                r["mode_mix"] = ", ".join(
+                    f"{m} {v['battles']}" for m, v in sorted(
+                        p["modes"].items(), key=lambda kv: -kv[1]["battles"])
+                ) or None
+            except Exception:
+                r["identity"] = None
+                r["mode_mix"] = None
         leavers = _rows(conn, """
             SELECT p.player_tag, p.current_name, cm.joined_at, cm.left_at,
                    cm.leave_source
