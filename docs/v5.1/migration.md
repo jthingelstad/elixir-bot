@@ -30,10 +30,18 @@
 3. Sweep the repo dir of DB sediment in the same pass: `elixir.db`,
    `elixir.db.bak-20260620`, `elixir.db.legacy`,
    `elixir.db.legacy-v2-backup-*`, `elixir-v5.db.premerge`,
-   `elixir-v5-events.db`, `elixir-v5-memory.db`, `.migration-rollback/` (all
-   verified present, 2026-07-02) → move into a single `archive/` directory
-   outside the working tree. The working dir after the cut contains **one**
-   live DB and **one** archive.
+   `.migration-rollback/` → move into a single archive directory
+   outside the working tree.
+   **Corrected at execution (2026-07-03; the 07-02 scan misclassified two
+   files):** `elixir-v5-memory.db` is **live, not sediment** — it is the
+   authoritative `clan_memories` store (`memory_store/__init__.py`,
+   `ELIXIR_V5_MEMORY_DB`; the main DB's copy is stale). It stays in place; the
+   deferred memory pass owns it (see the T12 correction). `elixir-v5-events.db`
+   is the Gen C eventsourcing write store — live until the cut; it and
+   `elixir-v5.db` stay in the working dir untouched until Phase 7 go-live
+   succeeds (fastest rollback: flip `.env`, reload plist), then retire at
+   Phase 9. The working dir after close-out contains the live DB, the memory
+   DB, and the archive.
 
 **Rollback plan (whole migration):** the old code is a git ref; the old data is
 the archive. Restore = check out pre-cut ref, copy archive back to
@@ -71,7 +79,7 @@ joins through the archive's `members` table.
 | T9 | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation` | `war_races`, `war_participation`, `war_period_clan_status` | seasons synthesized per distinct `season_id` (rank/weeks from its `war_races` rows; `war_champ_tag`/`free_pass_tag` from T6); participation re-keyed to `(season, section, tag)`. `war_attendance_days` starts **empty** — per-day history isn't reliably reconstructable; the evaluators tolerate a warm-up season |
 | T10 | tournaments star | same | drop `player*_member_id` columns |
 | T11 | `leader_action_recommendations`, `decision_cases`, `revisits` | same | rename `source_signal_*` → `source_event_*`, `signal_key` → `revisit_key`; keep full feedback history (C1 needs the kick records) |
-| T12 | memory/conversation set (`clan_memories` + satellites + FTS/vec, `conversation_threads`, `messages`, `memory_facts`, `memory_episodes`) | same | **verbatim copy** (deferred pass owns redesign). `clan_memory_event_links.event_id` values that referenced Gen A/C ids become dangling-by-design (soft refs, no FK — verified) — the memory pass reconciles them; the archive resolves them meanwhile |
+| T12 | conversation set (`conversation_threads`, `messages`, `memory_facts`, `memory_episodes`) | same | **verbatim copy** (deferred pass owns redesign). **Corrected at execution:** `clan_memories` + satellites + FTS/vec do **not** transform — they live in the separate `elixir-v5-memory.db` (the main DB's copy is stale by 23 rows) and that file simply stays in place; the memory tools keep reading it through the `memory_store` seam. `clan_memory_event_links.event_id` dangling refs remain the memory pass's to reconcile |
 | T13 | ops singletons (`llm_calls`, `prompt_failures`, `prompt_feedback`, `system_signals`, `api_sentinel_observations`, `arena_relay_screenshot_observations`, `discord_channels`, `channel_state`, `game_mode_contexts`, `card_catalog`, `elixir_improvement_suggestions`, `runtime_job_status`) | same | verbatim copy (schema.md §2's ops singletons plus `runtime_job_status`, which §2 groups under engine control). `cake_day_announcements` is **not** carried — it is empty with a 7-day purge and its dedup role belongs to the ledger (schema.md §2 note); T14 owns cross-cut calendar protection |
 | T14 | `recognition_ledger` (calendar seed rows only) | archive `detections` | insert a ledger claim for every archived detection of type `member_birthday`, `clan_birthday`, `join_anniversary`, `weekly_donation_leader` with `occurred_at` in the trailing **14 days** before the cut. Old dedup keys are format-identical to the new event keys (events.md §4/§6: "unchanged names"), so keys copy verbatim; `stream='clan'`, `event_refs_json=[archived dedup_key]`, `score=0` (seed, not scored), `claimed_at=occurred_at`, `intent_id=NULL`. Blocks day-of-cut birthday/anniversary/donation-leader re-posts — the one moment class whose dedup key can recur across the cut (milestones are protected by first-sight baselines instead) |
 
