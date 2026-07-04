@@ -96,6 +96,17 @@ regenerate it after any deliberate dependency upgrade.
 - Tests use temp-file/in-memory SQLite and mocked external services (no API keys needed). The suite runs green in ~8 s.
 - `tests/conftest.py` builds the v5.1 schema from `scripts/migrate_v51/schema_v51.py` (plus the archive's DDL export for carried tables) into a session template, copied per test.
 - Test fixtures handle DB connection lifecycle — use `pytest.fixture` instead of manual try/finally.
+- The pre-commit hook runs `ruff check .` then the full suite (both match CI); `git commit --no-verify` bypasses in an emergency.
+
+### Reality-based testing (the three levers beyond the suite)
+
+Unit tests target one delta with minimal dicts; these three run the engine against reality and catch what hand-built fixtures can't. Run the first two before deploying engine changes:
+
+1. **Replay gate** — `./venv/bin/python scripts/replay_gate.py`. Snapshots the live DB, clears baselines, replays the real raw-payload window through the offline engine. A correct engine re-derives its own history to ~zero new rows (dedup absorbs everything); new events mean current code disagrees with what live did. Ends with the season-close rehearsal + global invariants. All gates must PASS.
+2. **Time-travel simulator** — `./venv/bin/python scripts/simulate.py`. A deterministic synthetic war week (skewed 09:37Z reset, a join, a leave, a level-up, war battles, section rollover) through the REAL `run_tick` at ~2 s/simulated-week. Its gates encode the live incident classes: intent floods, raw-index day labels, drift anchoring, poll starvation. Its first run found three real engine bugs (cold-start FK failures, missing step rollback re-emitting joins every tick, membership-less players never polled).
+3. **Real-payload fixtures** — `tests/fixtures/cr/*.json`, loaded via `load_cr_fixture` (tests/conftest.py) and asserted by `tests/test_cr_fixture_shapes.py`. When Supercell drifts a payload shape, these fail with a clear diff. Refresh stale fixtures by re-exporting from `raw_api_payloads` — never hand-edit them.
+
+`assert_db_invariants` (tests/conftest.py) is the shared floor under all of it — an autouse sweep after every test, plus a gate inside both scripts: unique open memberships, one ledger claim per key, FTS mirror in sync, no space-format timestamps, known lanes/statuses only.
 
 ### Review discipline
 
