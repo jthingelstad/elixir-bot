@@ -134,16 +134,12 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
 
 @pytest.fixture(scope="session")
 def v51_schema_template(tmp_path_factory):
-    """Build the v5.1 schema once; tests copy this template."""
-    if not os.path.exists(_ARCHIVE):
-        pytest.exit(
-            f"v5.1 test schema needs the read-only archive at {_ARCHIVE} "
-            "(carried-table DDL exports from it — migration.md Phase 2)."
-        )
+    """Build the v5.1 schema once; tests copy this template. Uses the local
+    archive when present, else the frozen carried_ddl.sql (CI has no archive)."""
     from scripts.migrate_v51.schema_v51 import build
 
     template = str(tmp_path_factory.mktemp("schema") / "v51-template.db")
-    build(template, _ARCHIVE)
+    build(template, _ARCHIVE if os.path.exists(_ARCHIVE) else None)
     # build() leaves the DB in WAL mode with the schema in the -wal sidecar;
     # checkpoint so a plain file copy carries the full schema.
     conn = sqlite3.connect(template)
