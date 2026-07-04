@@ -1,0 +1,93 @@
+%% Elixir v5 — Domain 1: CORE IDENTITY + CONVERSATION
+%% The "who, and what was said" spine. These are the true core entities;
+%% almost everything else in the database hangs off members + messages.
+erDiagram
+    members {
+        int member_id PK
+        text player_tag UK
+        text current_name
+        text status
+    }
+    member_metadata {
+        int member_id PK,FK
+        text joined_at
+        text generated_bio
+        int cr_account_age_days
+    }
+    member_aliases {
+        int alias_id PK
+        int member_id FK
+        text alias
+    }
+    discord_users {
+        text discord_user_id PK
+        text username
+        text display_name
+    }
+    discord_links {
+        int discord_link_id PK
+        text discord_user_id FK
+        int member_id FK
+        real confidence
+    }
+    discord_channels {
+        text channel_id PK
+        text channel_name
+    }
+    conversation_threads {
+        int thread_id PK
+        text scope_type
+        text scope_key UK
+        text channel_id FK
+        text discord_user_id FK
+        int member_id FK
+    }
+    messages {
+        int message_id PK
+        text discord_message_id UK
+        int thread_id FK
+        text channel_id FK
+        int member_id FK
+        int intent_id "soft FK"
+        text author_type
+        text content
+    }
+    memory_facts {
+        int fact_id PK
+        text subject_type
+        text subject_key
+        int source_message_id FK
+    }
+    memory_episodes {
+        int episode_id PK
+        text subject_type
+        text subject_key
+    }
+    channel_state {
+        text channel_id PK,FK
+        text last_summary
+    }
+    prompt_feedback {
+        int prompt_feedback_id PK
+        int assistant_message_id FK
+        text feedback_value
+    }
+    prompt_failures {
+        int failure_id PK
+        text workflow
+        text failure_type
+    }
+
+    members ||--|| member_metadata : "profile"
+    members ||--o{ member_aliases : "has"
+    members ||--o{ discord_links : "identity"
+    discord_users ||--o{ discord_links : "identity"
+    discord_channels ||--o{ conversation_threads : "scoped"
+    discord_users ||--o{ conversation_threads : "user"
+    members ||--o{ conversation_threads : "member"
+    conversation_threads ||--o{ messages : "contains"
+    discord_channels ||--o{ messages : "channel"
+    members ||--o{ messages : "author"
+    messages ||--o{ memory_facts : "sourced"
+    messages ||--o{ prompt_feedback : "rated"
+    discord_channels ||--|| channel_state : "state"

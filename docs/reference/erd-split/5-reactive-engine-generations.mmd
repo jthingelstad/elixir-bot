@@ -1,0 +1,124 @@
+%% Elixir v5 — Domain 5: THE PROACTIVE / DECISION ENGINE (3 GENERATIONS)
+%% This is the heart of the sprawl-confusion. THREE generations of the
+%% "observe -> decide -> communicate" pipeline coexist in one database:
+%%   GEN A (LEGACY v4, dormant): game_event_stream -> event_rollups
+%%   GEN B (v4 signal layer):    signal_log / signal_outcomes / awareness_ticks
+%%   GEN C (v5 Event Core, LIVE): detections -> projects/cases -> intents -> delivery
+%% The v5 link tables STILL FK back to the legacy game_event_stream (event_id),
+%% which is why the dead generation can't simply be dropped yet.
+erDiagram
+    %% ---- GEN C: Event Core v5 (the live path) ----
+    detections {
+        text dedup_key PK
+        text detection_type
+        text detector
+        text subject_tag
+    }
+    elixir_projects {
+        int project_id PK
+        text project_key UK
+        text project_type
+        text status
+    }
+    decision_cases {
+        int case_id PK
+        text case_key UK
+        text case_type
+        text status
+        text target_player_tag
+    }
+    communication_intents {
+        int intent_id PK
+        text intent_key UK
+        text workflow
+        text status
+        int project_id FK
+        int case_id FK
+    }
+    project_event_links {
+        int link_id PK
+        int project_id FK
+        int event_id FK "-> legacy stream"
+    }
+    communication_intent_event_links {
+        int link_id PK
+        int intent_id FK
+        int event_id FK "-> legacy stream"
+    }
+    ingest_cursor {
+        text source PK
+        int last_payload_id
+    }
+    signal_detector_cursors {
+        text detector_key PK
+        text scope_key PK
+    }
+    projection_tracking {
+        text projection_name PK
+        int last_global_position
+    }
+
+    %% ---- GEN B: v4 signal/awareness layer ----
+    signal_log {
+        text signal_date PK
+        text signal_type PK
+    }
+    signal_outcomes {
+        int outcome_id PK
+        text source_signal_key
+        text target_channel_key
+        text delivery_status
+        int intent_id "soft -> v5 intents"
+    }
+    awareness_ticks {
+        int tick_id PK
+        text ticked_at
+        int posts_delivered
+    }
+    revisits {
+        int revisit_id PK
+        text signal_key
+        text due_at
+    }
+
+    %% ---- GEN A: legacy v4 event stream (dormant) ----
+    game_event_stream {
+        int event_id PK
+        text event_key UK
+        text event_type
+        text payload_json "DORMANT"
+    }
+    event_rollups {
+        int rollup_id PK
+        text rollup_key UK
+        text rollup_type "DORMANT"
+    }
+
+    %% ---- leadership-facing decisions (spans gens) ----
+    leader_action_recommendations {
+        int action_id PK
+        text action_key UK
+        text action_type
+        text status
+        int case_id "soft -> decision_cases"
+    }
+    system_signals {
+        int system_signal_id PK
+        text signal_key UK
+        text signal_type
+    }
+    messages {
+        int message_id PK
+        int intent_id "soft FK"
+    }
+
+    elixir_projects ||--o{ communication_intents : "drives"
+    decision_cases ||--o{ communication_intents : "drives"
+    elixir_projects ||--o{ project_event_links : "evidence"
+    communication_intents ||--o{ communication_intent_event_links : "evidence"
+    communication_intents ||--o{ signal_outcomes : "fans out (soft)"
+    communication_intents ||--o{ messages : "delivered as (soft)"
+    decision_cases ||--o{ leader_action_recommendations : "raises (soft)"
+    game_event_stream ||--o{ project_event_links : "legacy FK"
+    game_event_stream ||--o{ communication_intent_event_links : "legacy FK"
+    game_event_stream ||--o{ event_rollups : "rolled up (gen A)"
