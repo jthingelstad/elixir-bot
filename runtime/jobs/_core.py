@@ -153,10 +153,10 @@ def _build_ask_elixir_daily_insight_context(clan, war):
             rows = conn.execute(
                 """SELECT event_type, observed_at, payload_json FROM (
                        SELECT event_type, observed_at, payload_json FROM player_events
-                       WHERE scope = 'public' AND observed_at >= datetime('now', ?)
+                       WHERE scope = 'public' AND observed_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)
                        UNION ALL
                        SELECT event_type, observed_at, payload_json FROM clan_events
-                       WHERE scope = 'public' AND observed_at >= datetime('now', ?)
+                       WHERE scope = 'public' AND observed_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)
                    ) ORDER BY observed_at DESC LIMIT ?""",
                 (f"-{days} days", f"-{days} days", limit),
             ).fetchall()

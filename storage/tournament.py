@@ -657,7 +657,7 @@ def list_pending_tournament_recaps(conn: Optional[sqlite3.Connection] = None) ->
         """SELECT * FROM tournaments
            WHERE status = 'ended'
              AND recap_posted_at IS NULL
-             AND watching_ended_at >= datetime('now', '-1 day')
+             AND watching_ended_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-1 day')
            ORDER BY watching_ended_at DESC"""
     ).fetchall()
     return [dict(r) for r in rows]

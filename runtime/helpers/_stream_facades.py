@@ -32,7 +32,7 @@ def summarize_event_windows(
         for days in windows:
             counts: dict[str, int] = {}
             for table in _STREAM_TABLES:
-                where = "observed_at >= datetime('now', ?)"
+                where = "observed_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)"
                 params: list = [f"-{days} days"]
                 if scope:
                     where += " AND scope = ?"
@@ -62,7 +62,7 @@ def list_recent_events(
         selects = []
         params: list = []
         for table in _STREAM_TABLES:
-            where = "observed_at >= datetime('now', ?)"
+            where = "observed_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)"
             table_params = [f"-{days} days"]
             if scope:
                 where += " AND scope = ?"

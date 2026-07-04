@@ -364,11 +364,12 @@ def _v5_message_payloads(sent_messages, fallback_text: str) -> list[dict]:
 
 
 # Which recognized moments ALSO reach in-game clan chat (as a redraft of the
-# posted Discord copy — the single-pipeline rule). Widened 2026-07-04 (Jamie:
-# "should be for most clan chat communications, not only member joins") from
-# the carried six-type tradition set. At most half the players use Discord
-# (Q7), so the big moments must reach the in-game channel too. Per-type
-# guards (promoted-only, champion-only) live in the relay loop.
+# posted Discord copy — the single-pipeline rule). Volume principle (Jamie,
+# 2026-07-04, after the R108–R114 spam): Discord is high-volume by design;
+# in-game clan chat is scarce, leader-voiced space. Only marquee moments
+# relay — celebrate-volume types (arena_up, level_up) stay Discord-only, and
+# _CLAN_CHAT_RELAY_DAILY_CAP bounds the worst day. Per-type guards
+# (promoted-only, champion-only) live in the relay loop.
 _V5_EVENT_LEADER_ACTION_TYPES = {
     "member_joined",
     "member_birthday",
@@ -376,14 +377,13 @@ _V5_EVENT_LEADER_ACTION_TYPES = {
     "clan_birthday",
     "career_wins_milestone",
     "collection_level_milestone",
-    "arena_up",
-    "level_up",
     "card_unlocked",          # champion rarity only (guard in relay)
     "role_changed",           # promoted only (guard in relay)
     "weekly_donation_leader",
     "week_finished",
     "season_closed",
 }
+_CLAN_CHAT_RELAY_DAILY_CAP = 3
 
 
 def _v5_event_detection_type(metadata: dict | None) -> str | None:
@@ -943,8 +943,25 @@ async def _relay_engine_clan_chat_actions(fulfilled_intents: list) -> int:
     clan-chat line is a redraft of it — same facts, in-game voice."""
     from engine.recognition import compose as engine_compose
 
+    # Daily cap — the in-game channel is scarce space (volume principle).
+    def _relays_today() -> int:
+        conn = db.get_connection()
+        try:
+            return conn.execute(
+                """SELECT COUNT(*) FROM leader_action_recommendations
+                   WHERE action_key LIKE 'v5_event_leader_action:%'
+                     AND created_at >= strftime('%Y-%m-%dT00:00:00', 'now')""",
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
     posted = 0
+    already_today = await asyncio.to_thread(_relays_today)
     for intent in fulfilled_intents:
+        if already_today + posted >= _CLAN_CHAT_RELAY_DAILY_CAP:
+            log.info("clan-chat relay daily cap reached (%s) — skipping remainder",
+                     _CLAN_CHAT_RELAY_DAILY_CAP)
+            break
         try:
             payload = json.loads(intent["payload_json"] or "{}")
         except (TypeError, ValueError):
@@ -1021,7 +1038,7 @@ async def _engine_tick():
             )
             fulfilled = conn.execute(
                 """SELECT * FROM communication_intents
-                   WHERE status = 'fulfilled' AND fulfilled_at >= datetime('now', '-15 minutes')"""
+                   WHERE status = 'fulfilled' AND fulfilled_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-15 minutes')"""
             ).fetchall()
             return counters, fulfilled
         finally:

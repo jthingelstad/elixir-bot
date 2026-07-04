@@ -425,7 +425,7 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
                     THEN COALESCE(prompt_tokens, 0)*1 + COALESCE(cache_read_tokens, 0)*0.1 + COALESCE(cache_creation_tokens, 0)*1.25 + COALESCE(completion_tokens, 0)*5
                     ELSE 0 END), 0) / 1000000.0, 4) AS cost_usd
         FROM llm_calls
-        WHERE recorded_at >= datetime('now', '-7 days')
+        WHERE recorded_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-7 days')
         """
     ).fetchone()
     awareness_7d = conn.execute(
@@ -436,7 +436,7 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS fallback_failed,
                SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS failed_ticks
         FROM communication_intents
-        WHERE created_at >= datetime('now', '-7 days')
+        WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-7 days')
         """
     ).fetchone()
     memory_index_status = _memory_vec

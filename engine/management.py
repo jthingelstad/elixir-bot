@@ -207,7 +207,7 @@ def _has_leadership_hold(tag: str) -> bool:
             """SELECT 1 FROM memories m
                WHERE m.member_tag = ? AND m.title LIKE 'Watch:%'
                  AND m.retired_at IS NULL
-                 AND (m.expires_at IS NULL OR m.expires_at > datetime('now'))
+                 AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%S', 'now'))
                LIMIT 1""",
             (tag,),
         ).fetchone()
