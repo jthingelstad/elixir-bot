@@ -14,7 +14,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 
 from engine import baselines, delivery, ingest, management, polling, projections, recognition
-from engine.clock import infer_season_id, war_clock
+from engine.clock import infer_season_id, period_anchor_from_events, war_clock
 from engine.db import canon_tag, chicago_today, ensure_player, utcnow
 from engine.emitters import emit
 from engine.emitters.clan import (
@@ -62,6 +62,19 @@ def _riverrace_due(conn, clock, now: datetime) -> bool:
     return (now - last).total_seconds() >= TRAINING_RIVERRACE_POLL_SECONDS
 
 
+def _anchored_clock(conn, cr_shaped: dict, now: datetime, season_id):
+    """Two-pass clock: compute once to locate the current period, then again
+    with the drift-adaptive anchor (the war_day_opened event's observed_at —
+    carried learning: CR's reset hour skews per season)."""
+    prelim = war_clock(cr_shaped, now, season_id=season_id)
+    anchor = period_anchor_from_events(
+        conn, prelim.season_id, prelim.section_index, prelim.war_day_index
+    )
+    if anchor is None:
+        return prelim
+    return war_clock(cr_shaped, now, season_id=season_id, period_anchor=anchor)
+
+
 def _current_clock(conn, now: datetime):
     """Rebuild the clock from the stored race *projection* (snake_case,
     engine.emitters.war.project_race_aspect) by adapting it back to the
@@ -77,7 +90,7 @@ def _current_clock(conn, now: datetime):
         "sectionIndex": p.get("section_index"),
         "clan": {"tag": p.get("our_tag"), "fame": p.get("our_fame")},
     }
-    return war_clock(cr_shaped, now, season_id=p.get("season_id"))
+    return _anchored_clock(conn, cr_shaped, now, p.get("season_id"))
 
 
 def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> dict:
@@ -121,7 +134,7 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn) -> 
     # refresh the clock from the fresh race payload before ingest needs it
     if race_payload:
         season_id = infer_season_id(conn, race_payload)
-        clock = war_clock(race_payload, now, season_id=season_id)
+        clock = _anchored_clock(conn, race_payload, now, season_id)
 
     # -- step 2: INGEST — battle mirror (war keys from the battle's own time)
     with _guard(counters, "ingest"):

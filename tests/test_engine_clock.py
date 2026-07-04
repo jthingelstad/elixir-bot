@@ -81,3 +81,21 @@ def test_resolve_war_keys_no_clock():
 def test_parse_battle_time_cr_compact():
     dt = parse_battle_time("20260701T110000.000Z")
     assert dt is not None and dt.hour == 11 and dt.tzinfo is not None
+
+
+def test_period_anchor_beats_fixed_boundary():
+    # Carried learning (pre-v5.1 issue #20): CR's reset hour skews per season;
+    # the observed period-start anchors the 24h day. Anchor at 09:37Z means
+    # 2h later there are ~22h left — not the fixed-10:00Z reading.
+    from datetime import datetime, timedelta, timezone
+
+    anchor = datetime(2026, 7, 4, 9, 37, tzinfo=timezone.utc)
+    now = anchor + timedelta(hours=2)
+    clock = war_clock(_race("warDay", 24, 3, fame=500), now, season_id=133,
+                      period_anchor=anchor)
+    assert 21.5 <= clock.hours_left_in_period <= 22.5
+    # Stale anchor (past its day) falls back to the nominal boundary
+    stale = war_clock(_race("warDay", 24, 3, fame=500),
+                      anchor + timedelta(hours=30), season_id=133,
+                      period_anchor=anchor)
+    assert stale.hours_left_in_period > 0

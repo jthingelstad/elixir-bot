@@ -83,6 +83,11 @@ the stream (new guard; today a bad notification can wedge a follower).
 
 **The war clock** (§16.2) is computed in step 4 from the `riverrace` baseline —
 pure function, no table — and handed to the war recognizer and composer.
+**Day-boundary anchoring (carried learning, pre-v5.1 issue #20; restored
+2026-07-04):** CR's reset hour skews off the nominal 10:00Z and drifts per
+season — the clock anchors each 24h period on the `war_day_opened` event's
+`observed_at` (`engine/clock.py:period_anchor_from_events`); the fixed hour
+is only the no-anchor fallback.
 
 ## 3. Scheduled activities (the non-tick remainder)
 
