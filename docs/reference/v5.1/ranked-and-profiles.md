@@ -1,7 +1,9 @@
 # Elixir v5.1 — Ranked Seasons & Playstyle Profiles
 
 > **Status:** 🟡 Spec'd 2026-07-04 (grounded exploration same day) — build not
-> yet authorized. Decisions D1–D6 below need Jamie.
+> **All decisions ratified as recommended (Jamie, 2026-07-04)** — build
+> authorized, targeting deploy before the 2026-07-06 (first-Monday) ranked
+> reset so the tracker's first live rollover is observed on day one.
 > **Owner:** Jamie · **Last worked:** 2026-07-04
 >
 > **The problem (Jamie):** "Ranked is super important activity that we are
@@ -202,3 +204,17 @@ no new intent type until we see real volume).
 **Not in scope:** any new polling (profiles/battlelogs already flow — the
 seasons endpoint is opportunistic verification only); building before D1–D6
 are ratified.
+
+## D7 — Season chronicles (added + ratified 2026-07-04)
+
+At every season close (war AND ranked — one shared `write_season_chronicle()`),
+Elixir writes one durable **chronicle memory**: the season's arc in grounded
+prose (standings, awards, notable runs, joins/departures), tagged `chronicle`
++ season id, kind `synthesis`, high confidence. The structured tables remain
+the queryable skeleton; the chronicle is the narrative layer that ranked
+retrieval + FTS surface naturally when anyone asks about past seasons or the
+composer writes a kickoff. Grounded from the season's actual rows; the Editor
+gate does NOT apply (it is a memory, not a post) but the same no-invention
+rule is in its writing prompt. Hooked beside the awards consumer at close;
+guarded so chronicle failure can never lose a season close. War season 133
+(closing 2026-07-05) writes the first one.
