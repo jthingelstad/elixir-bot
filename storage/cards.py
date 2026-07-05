@@ -385,23 +385,18 @@ def _load_collection(conn: sqlite3.Connection, member_tag: str) -> Optional[dict
     }
 
 
-# King Tower currently caps at this level in Clash Royale. The CR API does
-# not expose King Tower separately from expLevel — they used to be the same
-# number, but King Tower stopped advancing at this cap while expLevel keeps
-# climbing into the 60s/70s. Reading expLevel raw as "King Tower" produced
-# nonsense gaps like "card L7 vs King Tower 34, 27-level gap" when in
-# reality the tower caps and the real gap is much smaller.
-#
-# Sourced from Tower Troop maxLevel in /v1/players/<tag> (e.g. Tower Princess
-# reports maxLevel: 16). Tower Troops scale with the King Tower so this is
-# the same ceiling. Update if Supercell raises it.
+# King Tower Level caps at 16. Clash Royale removed Experience Level (2026
+# Collection Level update): King Tower Level is now EARNED by upgrading a
+# required count of cards to a required level, and we compute it from the card
+# collection (engine.king_tower) rather than reading the deprecated `expLevel`.
+# See memory cr-progression-model-2026.
 KING_TOWER_MAX_LEVEL = 16
 
 
 def _experience_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int]:
-    """Account-wide experience level (CR API `expLevel`). Caps in the 60s+;
-    not directly the King Tower level — derive king_tower_level from this
-    via min(expLevel, KING_TOWER_MAX_LEVEL)."""
+    """DEPRECATED — Clash Royale eliminated Experience Level (`expLevel`). The
+    API still returns a legacy value and Elixir's ingest often stores 0; do not
+    treat this as a live stat. Retained only until callers are migrated."""
     row = conn.execute(
         "SELECT cs.exp_level FROM player_current_state cs "
         "WHERE cs.player_tag = ?",
@@ -413,15 +408,36 @@ def _experience_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int
     return value if isinstance(value, int) else None
 
 
+def _card_display_levels(conn: sqlite3.Connection, member_tag: str) -> list[int]:
+    """The player's main-collection card levels on the display/unified scale.
+    Tower troops are excluded — they do not count toward King Tower Level."""
+    from engine.normalize import card_display_level
+
+    rows = conn.execute(
+        "SELECT pc.level, c.max_level FROM player_card_collection pc "
+        "JOIN card_catalog c ON c.card_id = pc.card_id "
+        "WHERE pc.player_tag = ? AND c.card_type != 'tower_troop'",
+        (_canon_tag(member_tag),),
+    ).fetchall()
+    out = []
+    for row in rows:
+        display = card_display_level(row["level"], row["max_level"])
+        if display is not None:
+            out.append(display)
+    return out
+
+
 def _king_tower_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int]:
-    """King Tower level = expLevel clamped at KING_TOWER_MAX_LEVEL. This is
-    the number that's meaningful for card-level comparisons; cards top out
-    around the same range, so this is the right reference for "is this
-    card underleveled vs my tower"."""
-    exp = _experience_level(conn, member_tag)
-    if exp is None:
+    """King Tower Level (1–16), computed from the card collection per the CR
+    2026 requirements table (engine.king_tower.king_tower_level) — NOT the
+    deprecated `min(expLevel, 16)`. Validated against King Thing → 16. This is
+    the right reference for "is this card underleveled vs my tower"."""
+    from engine.king_tower import king_tower_level
+
+    levels = _card_display_levels(conn, member_tag)
+    if not levels:
         return None
-    return min(exp, KING_TOWER_MAX_LEVEL)
+    return king_tower_level(levels)
 
 
 @managed_connection
