@@ -245,7 +245,19 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
         ).fetchall():
             day_rows[row["player_tag"]] = dict(row)
 
-    participants, used_all, used_some, used_none = [], [], [], []
+    # Riverrace participants persist for the whole week even after a player
+    # leaves the clan — without a membership filter, departed players landed
+    # in used_none and chat said "49 haven't started" against a 47-member
+    # roster (rehearsal finding 2026-07-04). Deck buckets are current-members
+    # only; departed fame still counts in the fame lists. Empty set =
+    # fixture/cold-start → treat everyone as a member.
+    open_tags = {
+        r["player_tag"]
+        for r in conn.execute(
+            "SELECT player_tag FROM clan_memberships WHERE left_at IS NULL"
+        ).fetchall()
+    }
+    participants, used_all, used_some, used_none, departed = [], [], [], [], []
     for tag, info in participants_map.items():
         info = info or {}
         day = day_rows.get(tag) or {}
@@ -260,7 +272,11 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
             "fame_today": _coerce_int(day.get("fame_delta")),
         }
         item = _member_reference_fields(conn, tag, item)
+        item["is_current_member"] = (not open_tags) or tag in open_tags
         participants.append(item)
+        if not item["is_current_member"]:
+            departed.append(item)
+            continue
         decks_today = item["decks_used_today"]
         if decks_today >= 4:
             used_all.append(item)
@@ -308,7 +324,12 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
         "period_ends_at": format_utc_iso(ends_at) if ends_at else None,
         "time_left_seconds": time_left_seconds,
         "time_left_text": _format_duration_short(time_left_seconds),
-        "total_participants": len(participants),
+        # Member-scoped counts (bucket sums stay internally consistent for
+        # downstream decks-left math); the raw week-long participant total
+        # keeps its own key.
+        "total_participants": len(used_all) + len(used_some) + len(used_none),
+        "all_participant_count": len(participants),
+        "departed_participant_count": len(departed),
         "engaged_count": len(used_all) + len(used_some),
         "finished_count": len(used_all),
         "untouched_count": len(used_none),

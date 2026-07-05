@@ -333,7 +333,14 @@ def build_clan_trend_summary_context(days: int = 30, window_days: int = 7, clan_
             f"current_{window_days}d_vs_previous_{window_days}d: "
             f"member_count {comparison['current']['member_count'].get('delta')} vs {comparison['previous']['member_count'].get('delta')} | "
             f"clan_score {comparison['current']['clan_score'].get('delta')} vs {comparison['previous']['clan_score'].get('delta')} | "
-            f"total_member_trophies {comparison['current']['total_member_trophies'].get('delta')} vs {comparison['previous']['total_member_trophies'].get('delta')} | "
+            # Labeled precisely: the roster-total delta swallows each joiner's
+            # entire trophy count (a 43→47 week read as "pushed 39,865
+            # trophies" — live incident 2026-07-04). battle_trophy_delta is
+            # the real pushed/lost number.
+            f"roster_total_trophies_change {comparison['current']['total_member_trophies'].get('delta')} vs {comparison['previous']['total_member_trophies'].get('delta')} "
+            f"(roster sum — includes joins/leaves; NOT trophies pushed) | "
+            f"battle_trophy_delta {current_battles.get('trophy_change_total')} vs {previous_battles.get('trophy_change_total')} "
+            f"(trophies actually won/lost in battles) | "
             f"battles {current_battles.get('battles')} vs {previous_battles.get('battles')} | "
             f"record {current_battles.get('wins')}-{current_battles.get('losses')}-{current_battles.get('draws')} "
             f"vs {previous_battles.get('wins')}-{previous_battles.get('losses')}-{previous_battles.get('draws')}"
