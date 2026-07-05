@@ -495,6 +495,19 @@ CREATE TABLE runtime_incidents (
 CREATE INDEX idx_incidents_open ON runtime_incidents(resolved_at, at DESC);
 CREATE INDEX idx_incidents_component ON runtime_incidents(component, at DESC);
 
+-- post_quality_runs: retrospective post-quality scorecard history (confidence
+-- plan §3; added 2026-07-05 — lazily created live by scripts/eval_post_quality.py)
+CREATE TABLE post_quality_runs (
+    run_id INTEGER PRIMARY KEY,
+    run_at TEXT NOT NULL,
+    days INTEGER NOT NULL,
+    sampled INTEGER NOT NULL,
+    game_accuracy_rate REAL,
+    avg_depth REAL,
+    flagged_count INTEGER NOT NULL,
+    detail_json TEXT
+);
+
 -- editor_verdicts: the Editor's inline-gate trace (editor.md §5; added
 -- 2026-07-04 — lazily created live by engine/editor.py ensure_editor_schema)
 CREATE TABLE editor_verdicts (
@@ -629,7 +642,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 61  # 54 engine (+ runtime_incidents) + 3 conversation + 3 memory + 1 fts-excluded
+EXPECTED_TABLE_COUNT = 62  # 55 engine (+ runtime_incidents + post_quality_runs) + 3 conversation + 3 memory + 1 fts-excluded
 
 
 _DEAD_MEMBERS_FK = re.compile(
