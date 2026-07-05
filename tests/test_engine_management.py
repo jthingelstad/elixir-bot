@@ -13,7 +13,7 @@ NOW = "2026-07-01T12:00:00Z"
 
 
 def test_ratified_constants():
-    assert management.DONOR_WEEK_MIN == 50
+    assert not hasattr(management, "DONOR_WEEK_MIN")  # removed: donor is median-relative
     assert management.WAR_QUALIFY_RATE == 0.75
     assert management.BATTLE_DAYS_MIN == 8
     assert management.PROMOTE_TENURE_MIN == 28
@@ -49,6 +49,34 @@ def test_lapsed_reenters_on_next_qualifying():
 def test_skipped_weeks_excluded_from_window():
     # training-only war weeks are None — not failures
     assert advance_layer1("holding", [None, True, True, None, False, True]) == "holding"
+
+
+def test_sustained_donor_is_roster_median_relative():
+    import db
+
+    conn = db.get_connection()
+    try:
+        conn.execute("INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, "
+                     "last_seen_at, is_home) VALUES ('#J2RGCRVG','POAP KINGS','2026-02-04',?,1)", (NOW,))
+        # Roster donations for the closed Sunday: 0, 100, 200, 300, 400 → median 200.
+        for i, don in enumerate((0, 100, 200, 300, 400)):
+            tag = f"#D{i}"
+            conn.execute("INSERT INTO players (player_tag, current_name, first_seen_at, "
+                         "last_seen_at) VALUES (?,?,?,?)", (tag, f"D{i}", NOW, NOW))
+            conn.execute("INSERT INTO clan_memberships (player_tag, clan_tag, joined_at, "
+                         "join_source) VALUES (?, '#J2RGCRVG', '2026-06-01', 'test')", (tag,))
+            conn.execute("INSERT INTO player_daily_metrics (player_tag, metric_date, "
+                         "donations_week) VALUES (?, '2026-06-28', ?)", (tag, don))
+        conn.commit()
+        anchor = "2026-06-29"
+        # below median (100) → not sustained; at median (200) and above (400) → sustained
+        assert management._week_qualifies_donor(conn, "#D1", anchor) is False
+        assert management._week_qualifies_donor(conn, "#D2", anchor) is True
+        assert management._week_qualifies_donor(conn, "#D4", anchor) is True
+        # a zero-donor never qualifies even though the freeloaders drag the median down
+        assert management._week_qualifies_donor(conn, "#D0", anchor) is False
+    finally:
+        conn.close()
 
 
 def _seed_member(conn, tag="#A", role="member", trophies=5000, joined_days_ago=60,
@@ -125,6 +153,38 @@ def test_any_battle_resets_to_none(engine_conn):
     assert _kick_state(engine_conn) == "none"
 
 
+def test_kick_reset_auto_withdraws_open_action(engine_conn):
+    from storage.leader_actions import (
+        ACTION_REJECTED,
+        create_leader_action_recommendation,
+    )
+
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=15)
+    management.run_tick_evaluators(engine_conn, now=NOW)
+    create_leader_action_recommendation(
+        action_type="kick_recommendation",
+        target_player_tag="#A",
+        objective="Review kick candidacy for #A",
+        rationale="Test kick candidate.",
+        conn=engine_conn,
+    )
+    bt = (NOW_DT - timedelta(hours=1)).strftime("%Y%m%dT%H%M%S.000Z")
+    engine_conn.execute(
+        "INSERT INTO battle_events (dedup_key, player_tag, battle_time, observed_at) "
+        "VALUES (?, '#A', ?, ?)", (f"#A:{bt}:#OPP2", bt, NOW))
+    engine_conn.commit()
+    management.run_tick_evaluators(engine_conn, now=NOW)
+
+    withdrawn = management.withdraw_stale_actions(engine_conn, now=NOW)
+    assert any(w["player_tag"] == "#A" and w["kind"] == "kick" for w in withdrawn)
+    row = engine_conn.execute(
+        "SELECT status, decision_note FROM leader_action_recommendations "
+        "WHERE target_player_tag = '#A' AND action_type = 'kick_recommendation'"
+    ).fetchone()
+    assert row["status"] == ACTION_REJECTED
+    assert "Auto-withdrawn" in row["decision_note"]
+
+
 def test_new_member_grace_never_past_watch(engine_conn):
     _seed_member(engine_conn, joined_days_ago=10, last_battle_days_ago=10)
     management.run_tick_evaluators(engine_conn, now=NOW)
@@ -179,6 +239,13 @@ def test_promote_path_four_qualifying_weeks(engine_conn):
     assert row["promote_state"] in ("eligible", "recommended")
     assert row["promote_qualifying_weeks"] >= 4
     assert any("#A" in json.dumps(r.get("promote_eligible", [])) for r in results)
+    candidate = next(
+        item
+        for result in results
+        for item in result.get("promote_eligible", [])
+    )
+    assert candidate["player_tag"] == "#A"
+    assert candidate.get("rationale")
 
 
 def test_promote_grace_then_sustained_slippage_withdraws(engine_conn):

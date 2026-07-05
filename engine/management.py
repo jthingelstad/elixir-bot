@@ -19,7 +19,8 @@ from datetime import datetime, timedelta
 from engine.db import utcnow
 
 # management.md §5 — ratified defaults (move into CLAN.md at the cut).
-DONOR_WEEK_MIN = 50
+# DONOR_WEEK_MIN removed 2026-07-05 — sustained_donor is now median-relative
+# (_week_qualifies_donor); the clan is the bar, not a static number.
 WAR_QUALIFY_RATE = 0.75
 BATTLE_DAYS_MIN = 8
 PROMOTE_TENURE_MIN = 28
@@ -49,6 +50,23 @@ def _state(row) -> dict:
         return {}
 
 
+def _row_name(row) -> str | None:
+    try:
+        return row["player_name"] or row["current_name"]
+    except (KeyError, IndexError):
+        return None
+
+
+def _eligibility_row(row, *, kind: str, rationale: str) -> dict:
+    return {
+        "player_tag": row["player_tag"],
+        "player_name": _row_name(row),
+        "kind": kind,
+        "role": row["role"] or "member",
+        "rationale": rationale,
+    }
+
+
 # --------------------------------------------------------- Layer 1 (§2)
 
 def advance_layer1(current: str, history: list) -> str:
@@ -73,8 +91,8 @@ def advance_layer1(current: str, history: list) -> str:
     return current
 
 
-def _week_qualifies_donor(conn, tag, week_anchor: str):
-    """Donations of the closed week: the frozen Sunday row before week_anchor."""
+def _closed_week_donations(conn, tag, week_anchor: str):
+    """This member's donations for the closed week (frozen Sunday row)."""
     row = conn.execute(
         """SELECT donations_week FROM player_daily_metrics
            WHERE player_tag = ? AND metric_date < ?
@@ -82,9 +100,44 @@ def _week_qualifies_donor(conn, tag, week_anchor: str):
            ORDER BY metric_date DESC LIMIT 1""",
         (tag, week_anchor),
     ).fetchone()
-    if row is None:
+    return None if row is None else (row["donations_week"] or 0)
+
+
+def _roster_donor_median(conn, week_anchor: str) -> float | None:
+    """Median closed-week donations across the ACTIVE roster. The bar is the
+    clan itself, not a static number (Jamie 2026-07-05: "remove the static
+    filter, let the math do the work") — self-calibrating as the clan's
+    donation culture shifts (the old DONOR_WEEK_MIN=50 was calibrated on a
+    long-gone distribution and had drifted to select ~78% of the roster)."""
+    vals = sorted(
+        v for (v,) in conn.execute(
+            """SELECT donations_week FROM player_daily_metrics pm
+               WHERE metric_date = (
+                   SELECT MAX(metric_date) FROM player_daily_metrics
+                   WHERE metric_date < ? AND strftime('%w', metric_date) = '0')
+                 AND donations_week IS NOT NULL
+                 AND EXISTS (SELECT 1 FROM clan_memberships cm
+                             WHERE cm.player_tag = pm.player_tag AND cm.left_at IS NULL)""",
+            (week_anchor,),
+        ).fetchall()
+    )
+    if not vals:
+        return None
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2
+
+
+def _week_qualifies_donor(conn, tag, week_anchor: str):
+    """Sustained donor = donated something AND at/above the active roster's
+    median for the closed week. Relative, self-calibrating; a freeloader
+    (0 donations) never qualifies even in a low-donation week."""
+    mine = _closed_week_donations(conn, tag, week_anchor)
+    if mine is None:
         return None  # no data — skip, don't fail
-    return (row["donations_week"] or 0) >= DONOR_WEEK_MIN
+    median = _roster_donor_median(conn, week_anchor)
+    if median is None:
+        return None
+    return mine > 0 and mine >= median
 
 
 def _week_qualifies_war(conn, tag, week_anchor: str):
@@ -212,6 +265,73 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
     return fired
 
 
+def withdraw_stale_actions(conn, now: str | None = None) -> list[dict]:
+    """Close proposed leader-action cards whose backing management state has
+    already withdrawn. This is the enacted half of the management.md
+    auto-withdraw rule; the state machines own judgment, storage owns the
+    action-board transition.
+    """
+    rows = conn.execute(
+        """SELECT lar.action_type, lar.target_player_tag,
+                  mm.kick_state, mm.promote_state, mm.demote_state
+           FROM leader_action_recommendations lar
+           LEFT JOIN member_management mm ON mm.player_tag = lar.target_player_tag
+           WHERE lar.status = 'proposed'
+             AND COALESCE(lar.is_test, 0) = 0
+             AND lar.action_type IN (
+                'kick_recommendation',
+                'promotion_recommendation',
+                'demotion_recommendation'
+             )"""
+    ).fetchall()
+    if not rows:
+        return []
+    from storage.leader_actions import auto_withdraw_leader_actions
+
+    withdrawn: list[dict] = []
+    rules = {
+        "kick_recommendation": (
+            "kick_state",
+            {"recommended"},
+            "kick",
+            "Auto-withdrawn: kick candidacy cleared by recent battle activity or management guard.",
+        ),
+        "promotion_recommendation": (
+            "promote_state",
+            {"eligible", "recommended"},
+            "promote",
+            "Auto-withdrawn: promotion candidacy no longer meets sustained weekly gates.",
+        ),
+        "demotion_recommendation": (
+            "demote_state",
+            {"eligible", "recommended"},
+            "demote",
+            "Auto-withdrawn: demotion candidacy no longer meets sustained weekly gates.",
+        ),
+    }
+    for row in rows:
+        action_type = row["action_type"]
+        state_col, active_states, kind, reason = rules[action_type]
+        current_state = row[state_col] if row[state_col] is not None else "none"
+        if current_state in active_states:
+            continue
+        count = auto_withdraw_leader_actions(
+            action_type=action_type,
+            target_player_tag=row["target_player_tag"],
+            reason=reason,
+            conn=conn,
+        )
+        if count:
+            withdrawn.append({
+                "player_tag": row["target_player_tag"],
+                "kind": kind,
+                "action_type": action_type,
+                "count": count,
+                "reason": reason,
+            })
+    return withdrawn
+
+
 def _has_leadership_hold(tag: str) -> bool:
     """Open flag_member_watch hold: an active leadership watch memory for the
     tag. v5.1 memory pass: memories live in the engine DB (memory.md D1), so
@@ -243,13 +363,15 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
     Layer-2 machines. week_anchor = ISO date of the Monday running the review.
     Returns eligibles + withdrawals + per-member summary for the review post."""
     now = now or utcnow()
-    promote_eligible: list[str] = []
-    demote_eligible: list[str] = []
+    promote_eligible: list[dict] = []
+    demote_eligible: list[dict] = []
     withdrawn: list[dict] = []
     rows_out: list[dict] = []
 
     members = conn.execute(
-        """SELECT * FROM member_management mm
+        """SELECT mm.*, p.current_name AS player_name
+           FROM member_management mm
+           LEFT JOIN players p ON p.player_tag = mm.player_tag
            WHERE EXISTS (SELECT 1 FROM clan_memberships cm
                          WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL)"""
     ).fetchall()
@@ -304,7 +426,14 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
                     p_state, p_weeks, p_miss = "building", max(0, p_weeks // 2), 0
         st["promote_misses"] = p_miss
         if p_state == "eligible":
-            promote_eligible.append(tag)
+            promote_eligible.append(_eligibility_row(
+                m,
+                kind="promote",
+                rationale=(
+                    f"Promotion gate held: role={role}, tenure_days={m['tenure_days'] or 0}, "
+                    f"holding_signals={holding}, qualifying_weeks={p_weeks}."
+                ),
+            ))
 
         # Layer 2 — demote (elder → member, §3.2)
         d_state = m["demote_state"] or "none"
@@ -319,7 +448,14 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
             d_state, d_weeks = "none", 0
         st["demote_weeks"] = d_weeks
         if d_state == "eligible":
-            demote_eligible.append(tag)
+            demote_eligible.append(_eligibility_row(
+                m,
+                kind="demote",
+                rationale=(
+                    f"Demotion gate held: donor={donor}, war={war}, "
+                    f"demote_weeks={d_weeks}."
+                ),
+            ))
 
         st["week_anchor"] = week_anchor
         conn.execute(
