@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import discord
 from discord import app_commands
@@ -126,6 +127,61 @@ def register_elixir_app_commands(bot) -> None:
             return
         content = render_admin_help()
         await send_interaction_text(interaction, content, ephemeral=True)
+
+    @elixir_commands.command(
+        name="release",
+        description="Draft or publish Elixir release notes (leader).",
+    )
+    @app_commands.describe(
+        version='Release version, e.g. "v5.1"',
+        name="Optional: use this release name instead of coining one",
+        publish="Actually cut & announce (default: preview only)",
+    )
+    async def slash_release(
+        interaction: discord.Interaction,
+        version: str,
+        name: str | None = None,
+        publish: bool = False,
+    ):
+        # Oliver's /oliver release-notes, adapted: preview by default
+        # (Oliver's to=me), publish runs the full cut_release flow —
+        # RELEASES.md, tag, GitHub release, #announcements post.
+        if not await validate_admin_interaction(
+            interaction, command_name="release", write=publish
+        ):
+            return
+        if not app._has_leader_role(interaction.user):
+            await send_interaction_text(
+                interaction, "Leader role required for this command.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        import sys as _sys
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cmd = [_sys.executable, os.path.join("scripts", "cut_release.py"),
+               "--version", version]
+        if name:
+            cmd += ["--name", name]
+        if not publish:
+            cmd.append("--dry-run")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=repo_root,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=600)
+            text = out.decode("utf-8", errors="replace").strip() or "(no output)"
+            if proc.returncode != 0:
+                text = f"release script exited {proc.returncode}:\n{text[-1500:]}"
+        except asyncio.TimeoutError:
+            text = "Release script timed out after 10 minutes — check the host."
+        except Exception as exc:  # the command must always answer the interaction
+            app.log.exception("slash release failed")
+            text = f"Release command failed: {exc}"
+        await send_interaction_text(interaction, text[-3800:], ephemeral=True)
 
     @system_commands.command(name="status", description=COMMAND_SPECS["system.status"].description)
     async def slash_system_status(interaction: discord.Interaction):
