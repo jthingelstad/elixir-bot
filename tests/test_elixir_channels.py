@@ -3543,7 +3543,7 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
     with (
         patch("elixir.db.get_clan_roster_summary", return_value={
             "active_members": 21,
-            "avg_exp_level": 60.5,
+            "avg_collection_level": 1577,
             "avg_trophies": 7523.4,
             "donations_week_total": 1340,
         }),
@@ -3771,7 +3771,7 @@ def test_build_db_status_report_lists_table_counts_and_sizes_for_group():
 
 def test_build_clan_status_report_uses_non_war_risk_watchlist():
     with (
-        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_exp_level": 60.5, "avg_trophies": 7523.4}),
+        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_collection_level": 1577, "avg_trophies": 7523.4}),
         patch("elixir.db.list_members", return_value=[]),
         patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
         patch("elixir.db.get_war_season_summary", return_value=None),
@@ -3788,7 +3788,7 @@ def test_build_clan_status_report_uses_non_war_risk_watchlist():
 def test_build_clan_status_report_formats_recent_joins_as_relative_days():
     joined_date = (datetime.now(elixir.CHICAGO).date() - timedelta(days=3)).isoformat()
     with (
-        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_exp_level": 60.5, "avg_trophies": 7523.4}),
+        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_collection_level": 1577, "avg_trophies": 7523.4}),
         patch("elixir.db.list_members", return_value=[]),
         patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
         patch("elixir.db.get_war_season_summary", return_value=None),
@@ -3805,7 +3805,7 @@ def test_build_clan_status_report_formats_recent_joins_as_relative_days():
 def test_build_clan_status_report_prefers_live_recent_join_delta():
     today = datetime.now(elixir.CHICAGO).date().isoformat()
     with (
-        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_exp_level": 60.5, "avg_trophies": 7523.4}),
+        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_collection_level": 1577, "avg_trophies": 7523.4}),
         patch("elixir.db.list_members", return_value=[]),
         patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
         patch("elixir.db.get_war_season_summary", return_value={
@@ -3969,7 +3969,7 @@ def test_build_clan_status_short_report_is_compact():
     with (
         patch("elixir.db.get_clan_roster_summary", return_value={
             "active_members": 21,
-            "avg_exp_level": 60.5,
+            "avg_collection_level": 1577,
             "avg_trophies": 7523.4,
         }),
         patch("elixir.db.get_current_war_status", return_value={
@@ -4000,7 +4000,7 @@ def test_build_clan_status_short_report_is_compact():
 
 def test_build_clan_status_short_report_uses_non_war_risk_watchlist():
     with (
-        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_exp_level": 60.5, "avg_trophies": 7523.4}),
+        patch("elixir.db.get_clan_roster_summary", return_value={"active_members": 21, "avg_collection_level": 1577, "avg_trophies": 7523.4}),
         patch("elixir.db.get_current_war_status", return_value={"clan_name": "POAP KINGS"}),
         patch("elixir.db.get_war_season_summary", return_value=None),
         patch("elixir.db.get_members_at_risk", return_value={"members": []}) as mock_risk,
@@ -4060,7 +4060,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
         patch("memory_store.list_memories", return_value=[]),
         patch("elixir.db.get_weekly_digest_summary", return_value={
             "window_days": 7,
-            "roster": {"active_members": 21, "open_slots": 29, "avg_exp_level": 60.5, "avg_trophies": 7523.4, "donations_week_total": 1400},
+            "roster": {"active_members": 21, "open_slots": 29, "avg_collection_level": 1577, "avg_trophies": 7523.4, "donations_week_total": 1400},
             "war_score_trend": {"direction": "up", "score_change": 120, "trophy_change_total": 40, "races": 1, "avg_rank": 1.0, "avg_fame": 12345},
             "war_season_summary": {"season_id": 77, "races": 3, "total_clan_fame": 50234, "fame_per_active_member": 2392.1, "top_contributors": [{"member_ref": "King Levy", "total_fame": 3200}]},
             "recent_war_races": [{

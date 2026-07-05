@@ -377,13 +377,16 @@ def list_members(status: str = "active", conn: Optional[sqlite3.Connection] = No
 def get_clan_roster_summary(conn: Optional[sqlite3.Connection] = None) -> dict:
     from storage.war import get_current_war_status
     row = conn.execute(
+        # Collection Level is the CR 2026 progression metric (expLevel is dead).
+        # AVG ignores NULLs — averages only members whose collection level is synced.
         "SELECT COUNT(*) AS active_members, "
-        "ROUND(AVG(COALESCE(cs.exp_level, 0)), 2) AS avg_exp_level, "
+        "ROUND(AVG(md.cr_collection_level), 0) AS avg_collection_level, "
         "ROUND(AVG(COALESCE(cs.trophies, 0)), 2) AS avg_trophies, "
         "SUM(COALESCE(cs.donations_week, 0)) AS donations_week_total, "
         "MAX(COALESCE(cs.trophies, 0)) AS top_trophies "
         "FROM players m "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
+        "LEFT JOIN player_metadata md ON md.player_tag = m.player_tag "
         f"WHERE {_ACTIVE}"
     ).fetchone()
     war = get_current_war_status(conn=conn)

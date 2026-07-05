@@ -316,7 +316,7 @@ def _build_clan_status_report(clan=None, war=None):
     lines = [
         f"**{clan_name} Status**",
         (
-            f"- Roster: {member_count}/50 members | {open_slots} open | avg King Level {_fmt_num(roster.get('avg_exp_level'), 2)} "
+            f"- Roster: {member_count}/50 members | {open_slots} open | avg Collection Level {_fmt_num(roster.get('avg_collection_level'), 0)} "
             f"| avg trophies {_fmt_num(roster.get('avg_trophies'), 2)}"
         ),
         (
@@ -536,7 +536,7 @@ def _build_clan_status_short_report(clan=None, war=None):
     lines = [
         f"**{clan_name} Status (Short)**",
         (
-            f"- Roster: {member_count}/50 | open {open_slots} | avg level {_fmt_num(roster.get('avg_exp_level'), 1)} "
+            f"- Roster: {member_count}/50 | open {open_slots} | avg Collection Lvl {_fmt_num(roster.get('avg_collection_level'), 0)} "
             f"| avg trophies {_fmt_num(roster.get('avg_trophies'), 0)}"
         ),
     ]
@@ -943,7 +943,7 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
 
     lines.append(
         f"roster_now: {roster.get('active_members', 0)}/50 active | open_slots {roster.get('open_slots', 0)} | "
-        f"avg_level {_fmt_num(roster.get('avg_exp_level'), 2)} | avg_trophies {_fmt_num(roster.get('avg_trophies'), 0)} | "
+        f"avg_collection {_fmt_num(roster.get('avg_collection_level'), 0)} | avg_trophies {_fmt_num(roster.get('avg_trophies'), 0)} | "
         f"weekly_donations {_fmt_num(roster.get('donations_week_total'), 0)}"
     )
 
