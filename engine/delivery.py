@@ -32,19 +32,32 @@ MAX_INTENT_AGE_HOURS = 6   # carried from discord_consumer.py:36
 
 
 def raise_intent(conn, recognition_key: str | None, intent_type: str, lane: str,
-                 scope: str, payload: dict, now: str) -> int:
-    """Insert a pending intent; expires 6h from raise (runtime.md §5)."""
+                 scope: str, payload: dict, now: str, *, thread_id: int | None = None) -> int:
+    """Insert a pending intent; expires 6h from raise (runtime.md §5).
+    thread_id (channels.md §2) is a delivery ADDRESS, not a lane — when set,
+    the send targets that thread; the lane still owns permissions/voice."""
     anchor = parse_utc(now)
     expires = (anchor + timedelta(hours=MAX_INTENT_AGE_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     cur = conn.execute(
         """INSERT INTO communication_intents
                (recognition_key, intent_type, lane, scope, payload_json,
-                status, created_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                status, created_at, expires_at, thread_id)
+           VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)""",
         (recognition_key, intent_type, lane, scope,
-         json.dumps(payload, default=str), now, expires),
+         json.dumps(payload, default=str), now, expires, thread_id),
     )
     return cur.lastrowid
+
+
+def _accepts_thread(send_fn) -> bool:
+    """Two-arg send_fn stubs (offline, sim, tests) stay valid; the live
+    runtime's send_fn takes (lane, copy, thread_id)."""
+    import inspect
+
+    try:
+        return len(inspect.signature(send_fn).parameters) >= 3
+    except (TypeError, ValueError):
+        return False
 
 
 def consume(conn, send_fn, compose_fn, now: str, *, editor_gate=None) -> dict:
@@ -98,7 +111,11 @@ def consume(conn, send_fn, compose_fn, now: str, *, editor_gate=None) -> dict:
                     log.exception("editor gate raised for intent %s; sending original",
                                   intent["intent_id"])
             try:
-                message_id = send_fn(intent["lane"], copy)
+                thread_id = intent["thread_id"] if "thread_id" in intent.keys() else None
+                if thread_id is not None and _accepts_thread(send_fn):
+                    message_id = send_fn(intent["lane"], copy, thread_id)
+                else:
+                    message_id = send_fn(intent["lane"], copy)
             except Exception as exc:
                 # Fail-stop THIS lane; other lanes proceed. Retry next tick.
                 conn.execute(
