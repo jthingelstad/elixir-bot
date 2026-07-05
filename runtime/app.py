@@ -965,11 +965,11 @@ async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
     which set copy at creation). LLM-composed from the rationale with a
     deterministic role-action fallback; never blocks the card."""
     from runtime.clan_chat_copy import (
-        CLASH_COPY_MAX_LENGTH,
         ROLE_ACTION_TYPES,
         generate_clan_chat_copy,
         role_action_clan_chat_copy,
     )
+    from runtime.leader_action_ui import CLASH_COPY_MAX_LENGTH
 
     atype = action.get("action_type")
     if atype not in ROLE_ACTION_TYPES:
