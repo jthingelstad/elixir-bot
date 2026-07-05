@@ -64,11 +64,17 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
         opp = b.get("opponent") or [{}]
         t0 = team[0] if team else {}
         o0 = opp[0] if opp else {}
-        # D3 (ranked-and-profiles.md): 2v2 carries the duo partner in team[1];
-        # without this the who-plays-with-whom graph evaporates with the
-        # 14-day raw buffer.
-        t1 = team[1] if len(team) > 1 and isinstance(team[1], dict) else None
-        teammate = canon_tag(t1["tag"]) if t1 and t1.get("tag") else None
+        # D3 (ranked-and-profiles.md): 2v2 carries the duo partner in the team
+        # array — but CR does NOT guarantee the polled player is team[0]; the
+        # partner is whichever member isn't the subject (live bug 2026-07-05:
+        # team[1] recorded players as their own teammate).
+        teammate = None
+        if len(team) > 1:
+            for tm in team:
+                tm_tag = canon_tag(tm.get("tag")) if isinstance(tm, dict) and tm.get("tag") else None
+                if tm_tag and tm_tag != tag:
+                    teammate = tm_tag
+                    break
         gm = b.get("gameMode") or {}
         arena = b.get("arena") or {}
         mode_group = classify_battle_mode(
