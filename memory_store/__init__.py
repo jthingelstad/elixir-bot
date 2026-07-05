@@ -478,6 +478,22 @@ def _filter_where(filters: Optional[dict], args: list) -> str:
         else:
             clauses.append("(m.source_event_key = ? OR m.source_event_key LIKE ?)")
             args.extend([ek, f"{ek}:%"])
+    # War-scoped filters (lane contexts pass war_week_id "SEASON:WEEK" /
+    # war_season_id "SEASON"). The rebuild folded these into source_event_key
+    # (e.g. "war_battle_day_recap:130:2:4"); the read side silently ignored
+    # both filters until 2026-07-04 — every lane got the same unscoped rows.
+    if filters.get("war_week_id"):
+        wk = str(filters["war_week_id"])
+        clauses.append(
+            "(m.source_event_key = ? OR m.source_event_key LIKE ? OR m.source_event_key LIKE ?)"
+        )
+        args.extend([wk, f"%:{wk}", f"%:{wk}:%"])
+    if filters.get("war_season_id"):
+        season = str(filters["war_season_id"])
+        clauses.append(
+            "(m.source_event_key = ? OR m.source_event_key LIKE ? OR m.source_event_key LIKE ?)"
+        )
+        args.extend([season, f"{season}:%", f"%:{season}:%"])
     if filters.get("channel_id"):
         clauses.append("m.channel_key = ?")
         args.append(str(filters["channel_id"]))
