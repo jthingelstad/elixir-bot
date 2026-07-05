@@ -149,6 +149,10 @@ _WORKFLOW_SPECS = (
     WorkflowSpec("editorial", tools=[], max_tool_rounds=1, tools_allowed=False),
     WorkflowSpec("weekly_digest", model_family="chat"),
     WorkflowSpec("site_promote_content", model_family="promotion"),
+    # Release-notes announcement (agent/release_notes.py, ported from Oliver):
+    # Elixir's first-person "what I can do now" post — chat-tier, no tools.
+    WorkflowSpec("release_notes", tools=[], max_tool_rounds=1, tools_allowed=False,
+                 model_family="chat"),
 )
 
 WORKFLOW_SPECS = {spec.name: spec for spec in _WORKFLOW_SPECS}
