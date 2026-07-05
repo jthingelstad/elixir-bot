@@ -975,6 +975,7 @@ async def _relay_engine_clan_chat_actions(fulfilled_intents: list) -> int:
             return conn.execute(
                 """SELECT COUNT(*) FROM leader_action_recommendations
                    WHERE action_key LIKE 'v5_event_leader_action:%'
+                     AND status != 'rejected'
                      AND created_at >= ?""",
                 (day_start_utc,),
             ).fetchone()[0]
