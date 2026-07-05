@@ -49,6 +49,10 @@ Derived battle moments (recognition candidates; keys claimed in the ledger):
 | `hot_streak` | — | — | **Not computed in v5.1.** Matches today exactly: the detector exists but is intentionally not registered (`detectors.py` `ALL_DETECTORS` comment) — redundant with `trophy_push` (`communication.py:26–31`). It therefore contributes nothing to accrual evidence either. Listed only so the concept's disposition is recorded (C2 mapping §6). |
 | `ranked_pulse` | `ranked_pulse:{tag}:{chicago_day}` | ≥N Path-of-Legend battles in a day | Carries `ranked_activity_pulse` (`detectors.py:495`). |
 
+The player Pulse (`pulse.md`) is a **reader, not a stream**: it narrates 8h
+windows of battle/player rows and emits no events — its only writes are a
+`pulse:player:{window_end}` ledger claim and one battle-feed intent.
+
 War battles are battle rows with war keys set (`schema.md` §5.1); the war stream
 consumes them, it does not duplicate them (§12).
 

@@ -21,6 +21,7 @@ PREFIX_LANE = {
     "cohort": "clan-events",
     "war": "river-race",
     "welcome": "reception",
+    "pulse": "battle-feed",
     "leadership": "arena-relay",
 }
 FAIL_CLOSED_LANE = "arena-relay"   # unknown never leaks public
@@ -197,6 +198,22 @@ def intent_context(conn, intent_row) -> str:
             "these war facts. Match the moment: momentum while the race is live, "
             "closure and recognition once it's won or finished. Never guilt."
         )
+    elif prefix == "pulse":
+        ask = (
+            "You've been watching the clan's battles for the last eight hours. "
+            "Write ONE #battle-feed post — 'what I noticed lately', as a clan "
+            "member who's been watching, not a report. 3-6 sentences; on a "
+            "quiet window (quiet_window=true) two honest sentences beat "
+            "manufactured excitement. Name at most 2-4 players, preferring "
+            "players NOT listed in recently_featured. " + naming +
+            "If battle_spotlight is present, tell it as the window's coolest "
+            "battle. off_peak_carrier is the member with the most battles in "
+            "the window's quiet hours — say it that way; do not claim they "
+            "were alone. player_moments are quiet achievements nobody has "
+            "posted about yet. Every number and name must come from these "
+            "facts; mention war at most in passing; never mention management "
+            "or windows/anchors mechanics."
+        )
     elif prefix == "celebrate":
         win = _recent_win(conn, tag) if tag else None
         if win:
@@ -339,6 +356,18 @@ def render_intent(intent_row) -> str:
         if fp.get("name") and fp.get("rotation_applied"):
             line += f"; Free Pass rotates to {fp['name']}"
         return line + ". Full podium in the books!"
+    if et == "player_pulse":
+        total = p.get("battles_total") or 0
+        actives = p.get("active_players") or 0
+        line = f"📊 The last eight hours: {total} battles from {actives} members."
+        standouts = p.get("standouts") or []
+        if standouts:
+            s = standouts[0]
+            line += f" {s.get('name')} led the way with {s.get('wins')} wins."
+        spot = p.get("battle_spotlight")
+        if spot and spot.get("name"):
+            line += f" Battle of the window: {spot['name']} — {spot.get('why', 'a beauty')}."
+        return line
     if et.startswith("cohort_wave"):
         return "🎉 Multiple members hit the same milestone today — a clan wave!"
     return f"📣 {subj}: {et.replace('_', ' ')}."

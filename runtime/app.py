@@ -1286,6 +1286,34 @@ async def _editorial_review():
     return result
 
 
+async def _player_pulse():
+    """The player Pulse's 30-minute check (pulse.md §4): when an 8h window is
+    complete, build its facts and raise ONE battle-feed intent; the engine
+    tick composes/gates/delivers it. The anchor rides in this job's own
+    persisted last_summary (`anchor=<iso>`) — restart-proof tiling."""
+    from runtime.jobs import player_pulse
+
+    runtime_status.mark_job_start(player_pulse.JOB_NAME)
+
+    def _run():
+        conn = db.get_connection()
+        try:
+            return player_pulse.run_check(conn)
+        finally:
+            conn.close()
+
+    try:
+        summary = await asyncio.to_thread(_run)
+    except Exception as exc:
+        runtime_status.mark_job_failure(player_pulse.JOB_NAME, str(exc))
+        log.exception("player pulse check failed")
+        return
+    runtime_status.mark_job_success(player_pulse.JOB_NAME, summary)
+    if not summary.startswith("waiting"):
+        log.info("player pulse: %s", summary)
+    return summary
+
+
 async def _db_backup():
     """Daily compressed snapshots of the operational + memory DBs to
     ELIXIR_BACKUP_DIR (iCloud Drive — offsite via sync). Uses the online

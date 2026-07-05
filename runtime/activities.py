@@ -260,6 +260,27 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         activity_role="observer",
     ),
     ActivityDefinition(
+        activity_key="player-pulse",
+        owner_lane="battle-feed",
+        purpose="The Pulse (pulse.md): 8-hour player-stream windows, three a "
+        "day sweeping the globe's active hours — battles, modes, overnight "
+        "carriers, quiet achievements, and each window's coolest battle. "
+        "Cheap 30-min check; posts ride the standard intent pipeline "
+        "(Sonnet 5 compose + Editor gate) into #battle-feed.",
+        job_id="player-pulse",
+        job_function="_player_pulse",
+        schedule_kind="interval",
+        schedule_config={
+            "minutes": 30,
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Discord: #battle-feed (via communication_intents)",
+        ),
+        activity_role="observer+communicator",
+    ),
+    ActivityDefinition(
         activity_key="engine-health",
         owner_lane="elixir-log",
         purpose="Daily read-only engine audit (tick errors, stuck intents, "
