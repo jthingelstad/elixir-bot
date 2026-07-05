@@ -46,6 +46,18 @@ for _discord_logger in ("discord", "discord.client", "discord.gateway", "discord
     _dl.propagate = True
 log = logging.getLogger("elixir")
 
+
+def _record_incident(component, error, context=None, severity="error"):
+    """Fail-soft-but-visible: record a swallowed failure to the incident ledger
+    (confidence plan §1). Never raises — an observability call must not crash
+    the path it observes."""
+    try:
+        from storage.incidents import record_incident
+        record_incident(component, error, context=context, severity=severity)
+    except Exception:
+        pass
+
+
 CHICAGO = pytz.timezone("America/Chicago")
 TOKEN = os.getenv("DISCORD_TOKEN")
 _dc = prompts.discord_config()
@@ -820,12 +832,14 @@ async def _v5_post(channel_id, text, *, metadata: dict | None = None) -> bool:
         return False
     try:
         await asyncio.to_thread(_record_v5_delivery_success, channel, text, sent_messages, metadata)
-    except Exception:
+    except Exception as exc:
         log.exception("v5 delivery audit failed for channel %s", channel_id)
+        _record_incident("delivery.audit", exc, {"channel_id": channel_id})
     try:
         await _post_v5_event_leader_action(metadata, sent_messages=sent_messages)
-    except Exception:
+    except Exception as exc:
         log.exception("v5 event leader-action failed for channel %s", channel_id)
+        _record_incident("delivery.leader_action_relay", exc, {"channel_id": channel_id})
     return True
 
 

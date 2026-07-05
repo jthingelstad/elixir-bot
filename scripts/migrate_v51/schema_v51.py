@@ -480,6 +480,21 @@ CREATE TABLE tick_history (
     counters_json TEXT NOT NULL
 );
 
+-- runtime_incidents: the fail-soft-but-visible ledger (confidence plan §1;
+-- added 2026-07-05 — lazily created live by storage/incidents.py)
+CREATE TABLE runtime_incidents (
+    incident_id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL,
+    component TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'error' CHECK (severity IN ('warn','error')),
+    summary TEXT NOT NULL,
+    detail TEXT,
+    context_json TEXT,
+    resolved_at TEXT
+);
+CREATE INDEX idx_incidents_open ON runtime_incidents(resolved_at, at DESC);
+CREATE INDEX idx_incidents_component ON runtime_incidents(component, at DESC);
+
 -- editor_verdicts: the Editor's inline-gate trace (editor.md §5; added
 -- 2026-07-04 — lazily created live by engine/editor.py ensure_editor_schema)
 CREATE TABLE editor_verdicts (
@@ -614,7 +629,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 60  # 53 engine (incl. editor_verdicts, pol_seasons ×2, event_threads) + 3 conversation + 3 memory
+EXPECTED_TABLE_COUNT = 61  # 54 engine (+ runtime_incidents) + 3 conversation + 3 memory + 1 fts-excluded
 
 
 _DEAD_MEMBERS_FK = re.compile(

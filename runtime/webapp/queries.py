@@ -591,6 +591,28 @@ def memories_page(kind: str | None, member: str | None, q: str | None, limit: in
         conn.close()
 
 
+def incidents_page(limit: int = 200) -> dict:
+    """The incident ledger (confidence plan §1): fail-soft failures captured
+    with tracebacks, unresolved first."""
+    conn = db.get_connection()
+    try:
+        from storage.incidents import ensure_incidents_schema
+        ensure_incidents_schema(conn)
+        rows = _rows(conn, """
+            SELECT incident_id, at, component, severity, summary, detail,
+                   context_json, resolved_at
+            FROM runtime_incidents ORDER BY (resolved_at IS NOT NULL), at DESC
+            LIMIT ?""", (limit,))
+        open_count = conn.execute(
+            "SELECT COUNT(*) FROM runtime_incidents WHERE resolved_at IS NULL").fetchone()[0]
+        by_component = _rows(conn, """
+            SELECT component, COUNT(*) n FROM runtime_incidents
+            WHERE resolved_at IS NULL GROUP BY component ORDER BY n DESC""")
+        return {"incidents": rows, "open_count": open_count, "by_component": by_component}
+    finally:
+        conn.close()
+
+
 def editorial_page(limit: int = 50) -> dict:
     """The Editor's Observatory surface (editor.md): rubric browser (editorial
     memories with tags + provenance), recent gate verdicts, weekly reports."""

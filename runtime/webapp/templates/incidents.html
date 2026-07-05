@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Incidents <span class="muted">({{ open_count }} open)</span></h1>
+<p class="muted">Fail-soft failures captured with tracebacks (confidence plan §1).
+Query directly: <code>sqlite3 elixir-v51.db "SELECT at, component, summary FROM
+runtime_incidents WHERE resolved_at IS NULL ORDER BY at DESC LIMIT 50"</code></p>
+
+{% if by_component %}
+<div class="card">
+  <strong>Open by component:</strong>
+  {% for c in by_component %}<span class="pill">{{ c.component }} · {{ c.n }}</span>{% endfor %}
+</div>
+{% endif %}
+
+{% if not incidents %}
+<div class="card ok">No incidents recorded. 🎉</div>
+{% else %}
+<table>
+  <thead><tr><th>When</th><th>Component</th><th>Sev</th><th>Summary</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for i in incidents %}
+    <tr class="{{ 'resolved' if i.resolved_at else 'open' }}">
+      <td class="muted">{{ i.at[5:16] }}</td>
+      <td><code>{{ i.component }}</code></td>
+      <td>{{ i.severity }}</td>
+      <td>
+        {{ i.summary }}
+        {% if i.detail %}<details><summary class="muted">traceback</summary><pre>{{ i.detail }}</pre>
+          {% if i.context_json %}<pre class="muted">context: {{ i.context_json }}</pre>{% endif %}
+        </details>{% endif %}
+      </td>
+      <td>{{ 'resolved ' + i.resolved_at[5:16] if i.resolved_at else 'OPEN' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
