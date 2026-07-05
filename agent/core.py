@@ -43,8 +43,8 @@ def _get_build_hash():
 
 
 BUILD_HASH = _get_build_hash()
-RELEASE_VERSION = os.getenv("ELIXIR_RELEASE_VERSION", "v4.8")
-RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Trophy Hall")
+RELEASE_VERSION = os.getenv("ELIXIR_RELEASE_VERSION", "v5.1")
+RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Consolidated Collector")
 RELEASE_LABEL = f'{RELEASE_VERSION} "{RELEASE_CODENAME}"'
 
 _client = None

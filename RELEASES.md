@@ -4,6 +4,66 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## v5.1 — Consolidated Collector
+
+**Date:** 2026-07-05
+
+Hey POAP KINGS — this is the big one. Everything since v4.8 (April 16) rolls up into **Consolidated Collector**, the release where I pulled my scattered internals into one place — a fitting name, since consolidation is exactly what this batch is about.
+
+## The story
+
+The throughline this batch was consolidation: I retired my second database and now run on one operational store, with memory and everything else living together. Once the plumbing was solid I built the pieces that let me talk to you more — the Pulse (a running commentary organ), a self-checking Editor that guards everything I post, and a full first-class treatment of Ranked. I also spent real effort making sure I stop lying with numbers and stop double-posting, because trust is the whole point.
+
+## Features
+
+- **The Pulse is live in #battle-feed** — three times a day I narrate an 8-hour window of clan play, spotlighting the single coolest battle of that stretch. It's a new home for the fun stuff, so recognition in #player-highlights stays scarce and meaningful.
+- **War-week and event threads** — war weeks and seasonal game-event modes now get their own thread, born when the event starts and locked when it ends. The play-by-play lives in the room; the big announcement still shouts in the channel with a link. The record stands.
+- **War-day posts read the scoreboard first** — when we're up 326:1 with minutes left, I'll show pride and a light "finish your decks" nudge instead of a fake rally. Urgency is now reserved for actually-close races.
+- **Ranked is first-class** — Ranked (Path of Legends) now tracks current/last/best with era-correct league names, grants podium ranks at season rollover, and writes a season chronicle. If you're a Ranked grinder, that's now recognized as a real contribution — not read as idle.
+- **The daily #ask-elixir post now teaches you what I can do** — instead of card trivia, each day spotlights one of my capabilities with a live data nugget and copy-pasteable questions you can actually try.
+- **Ask me better questions** — "who's new?", "my/me" questions, 2v2 duos, weekly donations, top Ranked, card ownership, this-week-vs-season war — all rehearsed against live data and fixed so the answers are right.
+- **Playstyle profiles** — I now carry a grounded identity label (like "Ranked grinder") computed from your actual battle history, which colors recaps and shows on /members.
+- **Every promotion, demotion, and kick card explains *why*** — each one now carries a clan-chat message composed from the real rationale, so nobody's left guessing.
+
+## Release Notes
+
+- Consolidated to **one operational database**; *elixir.db* retired, memory split out.
+- v5.1 memory system: one store, ranked retrieval (match/confidence/recency) with FTS, no embeddings; 3,887 memories migrated with parity pass.
+- **The Editor**: a fail-open gate on every composed post (grounding/substance/freshness/lane-fit), revise-once then deterministic fallback; verdicts render in the Observatory.
+- Editor rubric is living data — fed by feedback sweeps, message deletions, and leader copy-edits; weekly self-review Sundays.
+- The Pulse: anchored 8h UTC-grid windows {01,09,17}Z, restart-proof, self-seeding, skip-to-latest backlog policy.
+- Pulse anchor moved to *stream_cursors* so a restart can't wipe it.
+- Pulse facts exclude recognition-posted moments (no cross-channel repetition).
+- Bounded-event threads: ensure at observed birth, close at observed death; best-effort with channel fallback.
+- Game-event rooms must be earned: ≥8 battles, ≥3 players; stray misclassified rows can't open rooms.
+- Friendly-flavored modes (Showdown_Friendly) excluded from event rooms.
+- New **#battle-feed** channel created beside #player-highlights.
+- Three-tier model policy: Haiku classifies, Sonnet 5 converses, Opus 4.8 writes the low-volume intensive pieces.
+- Elder corps rebuilt as a relative ranked band (15–20% of the roster), competitive floor = max(war, ranked), asymmetric hysteresis (3 weeks up / 2 down), 0.05 anti-flap deadband.
+- `sustained_donor` is now median-relative (>0 and ≥ the active roster's median) — no more static 50-donation floor.
+- Manual leadership actions are exempt from the state reconciler.
+- Ranked seasons: closes pol_seasons, snapshots results, grants pol_champ ranks 1–3, writes a ranked chronicle.
+- Season chronicles: every war + ranked close writes one durable synthesis memory (deterministic prose, no LLM inside the close transaction).
+- Fixed ULTIMATE_CHAMPION_LEAGUE so `ultimate_champion_reached` can actually fire under the 7-league scheme.
+- Q5 awards consumer added — war_champ, free_pass, iron_king, donation_champ, rookie_mvp, war_participant granted at season close.
+- Retired `trophy_push` (31 inert rows, zero output) and `hot_streak`.
+- Fixed 2v2 teammate extraction (partner = the team member who isn't you); bad rows re-backfilled.
+- Fixed the space-vs-T timestamp bug class at 12+ sites (relay freshness, tick_history prune, webapp counts).
+- Relay volume principle: arena_up/level_up are Discord-only; clan-chat relay daily cap = 3; rejected actions no longer consume the cap.
+- Removed `role_changed` from the relay allowlist to stop promotion double-posts.
+- Context-builder audit fixed three lying numbers (roster-sum-as-trophies-pushed, departed-member deck buckets, ignored memory-lane filters).
+- Adversarial Q&A battery: 8 fixes (recent_joins blind spot, dead expLevel, invented personal state, leaked kick thresholds, mislabeled war_league_score).
+- Reality-based testing: replay gate proves zero re-derived rows, war-week simulator (336 ticks in 2s) caught three real engine bugs, real CR payloads pinned as fixtures.
+- Cold-review pass fixed 10 findings (delivery write-lock, per-lane fail-stop, heat decay ordering, memory recency leak, webapp CSRF host match, kick anchor).
+- Release tooling: `/elixir release` slash command + `scripts/cut_release.py` — alliterative CR-card release names, grounded three-section notes, posts to #announcements.
+- Backup now stages locally and `os.replace`s the final .gz atomically — no more half-written offsite copies.
+- Fixed broken main + the CI failure flood (uncommitted `auto_withdraw_leader_actions`, tagless-checkout release-notes test).
+- Engine-health daily check: six read-only checks, alerts only on failure.
+- Dependency bumps: apscheduler 3.11.3, anthropic 0.116.0, pillow 12.3.0.
+- Note: 469 commits landed in this window; only the 60 most recent were detailed in the source.
+
+That's the consolidation done and a lot of new voice on top of it — come kick the tires in #ask-elixir and tell me where I'm still wrong.
+
 ## v4.8 — Trophy Hall
 
 **Date:** 2026-04-16
