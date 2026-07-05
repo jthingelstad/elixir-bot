@@ -170,12 +170,23 @@ def test_game_event_watcher_born_then_locked(monkeypatch):
     monkeypatch.setattr(app, "bot", bot)
     conn = db.get_connection()
     try:
+        # Sub-threshold stray (one battle, one player) must NOT earn a room —
+        # the classifier leaks misclassified rows (live 2026-07-05: 'Ladder').
         conn.execute(
             """INSERT INTO battle_events (dedup_key, player_tag, battle_time, mode_group,
                                           game_mode_name, outcome, observed_at)
-               VALUES ('t1', '#X', strftime('%Y%m%dT%H%M%S', 'now', '-1 hour'),
-                       'special_event', 'Event_TestFest', 'W',
+               VALUES ('stray', '#S', strftime('%Y%m%dT%H%M%S', 'now', '-1 hour'),
+                       'special_event', 'Event_StrayMode', 'W',
                        strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))""")
+        # Earned room: 8 battles across 3 players.
+        for i in range(8):
+            conn.execute(
+                """INSERT INTO battle_events (dedup_key, player_tag, battle_time, mode_group,
+                                              game_mode_name, outcome, observed_at)
+                   VALUES (?, ?, strftime('%Y%m%dT%H%M%S', 'now', '-1 hour'),
+                           'special_event', 'Event_TestFest', 'W',
+                           strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))""",
+                (f"t{i}", f"#P{i % 3}"))
         conn.commit()
     finally:
         conn.close()
@@ -184,9 +195,11 @@ def test_game_event_watcher_born_then_locked(monkeypatch):
     try:
         row = conn.execute("SELECT * FROM event_threads WHERE mode_name='Event_TestFest'").fetchone()
         assert row is not None and row["locked_at"] is None and row["thread_id"] is not None
+        stray = conn.execute("SELECT 1 FROM event_threads WHERE mode_name='Event_StrayMode'").fetchone()
+        assert stray is None  # sub-threshold modes never earn rooms
         thread_id = row["thread_id"]
         # age the sighting out past 3 days -> watcher locks the room
-        conn.execute("UPDATE battle_events SET battle_time = strftime('%Y%m%dT%H%M%S','now','-4 days') WHERE dedup_key='t1'")
+        conn.execute("UPDATE battle_events SET battle_time = strftime('%Y%m%dT%H%M%S','now','-4 days') WHERE dedup_key LIKE 't%'")
         conn.commit()
     finally:
         conn.close()
