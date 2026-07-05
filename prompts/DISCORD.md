@@ -88,6 +88,22 @@ Elixir's leader action board.
 - Any action card still showing buttons is open. Completed, declined, or deferred cards should have controls removed and function as the record of what happened.
 - Broader reasoning, debate, and exploratory leadership questions belong in #leaders; this channel is the crisp action queue.
 
+## #battle-feed
+
+ID: 1523195660856459387
+Lane: battle-feed
+Workflow: channel_update
+ToolPolicy: read_only
+MemoryScope: public
+DurableMemory: false
+
+The entertainment lane — distinct from #player-highlights (the trophy case,
+scarce earned recognition). Home of the Pulse (docs/reference/v5.1/pulse.md):
+one post per 8-hour window, three a day, narrating the shape of the clan's
+last stretch — battles, modes, overnight carriers, quiet achievements — plus
+each window's coolest battle. Fun, grounded, brief on quiet windows. Nothing
+here is a milestone announcement; those belong in #player-highlights.
+
 ## #player-highlights
 
 ID: 1482352147029950474
