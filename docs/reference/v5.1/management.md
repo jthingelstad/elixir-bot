@@ -50,44 +50,84 @@ week"), and one weak week never breaks it.
 | `war_reliable` | decks used / decks available ≥ **`WAR_QUALIFY_RATE` (0.75)** across the week's battle days (finalized `war_attendance_days` only, `runtime.md` §3) | bounded war stream (§16.5). Training-only weeks (no battle days observed): the week is **skipped**, not failed |
 | `battle_active` | battle-days in the trailing 28 days ≥ **`BATTLE_DAYS_MIN` (8)** (≈2/week) | `battle_events` (`member_management.battle_days_last_28`) |
 
-## 3. Layer 2 — candidacy state machines
+## 3. Layer 2 — the elder band (ratified 2026-07-05, Jamie)
 
-### 3.1 `promote_state` — member → elder (weekly path, Q1)
+> **This replaces the absolute-threshold model** (independent 2-of-3 signal
+> qualification). Elder is a *scarce, relative* status: "are you among the
+> most deserving, given limited slots" — not "did you clear a fixed bar."
+> Elixir manages member↔elder ONLY; co-leader and above are pure leadership
+> judgment (the review shows metrics, never a state).
 
-Higher promotions (elder → co-leader) are **never automated** — they stay pure
-leadership judgment; the weekly review shows the metrics, nothing more.
+The pipeline: **filters gate who's rankable → a score ranks them → the band
+sizes the corps → hysteresis paces the moves.**
+
+### 3.1 Filters (hard gates — fail any and you are not rankable for elder)
+
+- **Tenure:** `tenure_days ≥ PROMOTE_TENURE_MIN (28)`. Four weeks in the clan
+  or you are not considered, period.
+- **War participation (mandatory floor):** played war on **≥1 finalized battle
+  day in the last 14 days** (`WAR_FLOOR_DAYS = 1`, `WAR_FLOOR_WINDOW = 14`).
+  Elders must participate in wars at *some* level; zero participation is
+  disqualifying regardless of donations.
+
+Members failing a filter are simply absent from the ranking (neither promotable
+nor — if already an elder — protected: an elder who fails the war floor becomes
+a demotion candidate directly, §3.4).
+
+### 3.2 The score (rank order among filtered members)
+
+A war-weighted blend of the member's standing *within the current roster*:
 
 ```
-none ──(gate)──▶ building ──(4 qualifying weeks)──▶ eligible ──(review)──▶ recommended
+score = 0.65 · war_rate_percentile + 0.35 · donation_percentile
 ```
 
-- **Gate (none → building):** `tenure_days ≥ PROMOTE_TENURE_MIN (28)` AND
-  ≥2 of the 3 evaluators `holding`, AND current role = member.
-- **building:** each weekly review where the gate still holds increments
-  `promote_qualifying_weeks`. A week where it doesn't hold is a **miss**; two
-  consecutive misses reset the counter to 0 and the state to `none` (one miss
-  is grace — the counter simply doesn't move).
-- **building → eligible:** `promote_qualifying_weeks ≥ PROMOTE_QUALIFYING_WEEKS (4)`.
-- **eligible → recommended:** the weekly review raises a
-  `promotion_recommendation` leader action through the policy gate. Leaders
-  execute in game; the clan stream's `role_changed(promoted)` resolves the
-  action (§13.5) and the state returns to `none` (at the new role).
-- **Auto-withdraw:** from `eligible`/`recommended`, two consecutive miss-weeks
-  → back to `building` (counter halved, floor 0) and any open action is pulled.
+- **war_rate** = decks used ÷ decks available over the trailing war weeks
+  (continuous — "more is better", the core elder duty, weighted highest).
+- **donations** = the closed-week donation volume ("lead by example").
+- Percentiles are computed over the active non-leadership roster each weekly
+  review, so the bar is the clan itself and self-calibrates. Weights
+  `SCORE_W_WAR = 0.65`, `SCORE_W_DONATION = 0.35`.
+- **Battle/laddering is NOT in the elder score** (Jamie 2026-07-05) — general
+  activity belongs to the kick path (§3.5), not elder-worthiness.
 
-### 3.2 `demote_state` — elder → member (weekly path, protective of the role's meaning)
+### 3.3 The band (how many elders)
 
-Same shape, inverted inputs:
+Target elder count for a non-leadership roster of `N` (roster minus leaders and
+co-leaders by role):
 
-- **Gate (none → building):** role = elder AND `sustained_donor` **and**
-  `war_reliable` both `lapsed` (battle_active alone never demotes — someone can
-  battle daily and still not contribute to the clan).
-- **building → eligible:** gate holds for **`DEMOTE_WEEKS` (4)** consecutive
-  weekly reviews (no grace week — the gate is already two-signals-lapsed, which
-  §2's hysteresis makes slow to enter).
-- **eligible → recommended:** `demotion_recommendation` at the weekly review.
-- **Auto-withdraw:** either evaluator leaving `lapsed` resets to `none`, pulls
-  any open action.
+```
+floor   = round(0.15 · N)     ceiling = round(0.20 · N)
+```
+
+A **range to maintain, not a quota to fill** (Jamie):
+
+- **Below floor** (too few elders): the top-ranked *filtered members* become
+  promotion candidates — **but only if they clear the worthiness floor**: score
+  ≥ the roster-median score (`WORTHINESS_MIN_PERCENTILE = 0.50`). A thin or weak
+  clan promotes *nobody* rather than elevating the undeserving to hit 15%.
+- **Above ceiling** (too many elders): the lowest-ranked *elders* become
+  demotion candidates.
+- **Inside the band:** no forced moves. Churn only from filter failures (§3.4).
+
+### 3.4 Hysteresis — demotion is deliberately easier than promotion
+
+Candidacy still smooths over weeks (no single-week flip promotes or demotes):
+
+- **Promotion:** a member must sit in the promotable set (below-floor room AND
+  worthiness-clearing AND top-ranked) for **`PROMOTE_QUALIFYING_WEEKS (3)`**
+  consecutive weekly reviews → `eligible` → `promotion_recommendation`. One
+  miss is grace (counter holds); two consecutive misses reset to `none`.
+- **Demotion:** an elder in the demotable set (over-ceiling-lowest OR failing
+  the war floor OR ranked below the band) for **`DEMOTE_WEEKS (2)`** reviews →
+  `eligible` → `demotion_recommendation`. Fewer weeks, no grace — easier to
+  fall out than to climb in, by design.
+- **eligible → recommended → resolved:** the review raises the leader action;
+  the clan stream's `role_changed` resolves it and the state returns to `none`
+  at the new role. Auto-withdraw: leaving the candidate set two weeks (promote)
+  or one week (demote) pulls any open action.
+
+### 3.5 `kick_state` — the reactive path (Q1), unchanged by the band
 
 ### 3.3 `kick_state` — the reactive path (Q1)
 
@@ -132,13 +172,18 @@ re-deriving anything. `state_json` holds each machine's internals
 
 | Constant | Default | Basis |
 |---|---|---|
-| ~~`DONOR_WEEK_MIN`~~ | *removed 2026-07-05* | replaced by the active-roster median (self-calibrating); no static donation floor |
-| `WAR_QUALIFY_RATE` | 0.75 | 12 of 16 decks over a 4-battle-day week |
+| ~~`DONOR_WEEK_MIN`~~ | *removed 2026-07-05* | donations are now a ranking input (percentile), not a filter |
+| **Elder band** (2026-07-05) | | |
+| `PROMOTE_TENURE_MIN` | 28 days | four-week hard filter before elder consideration |
+| `WAR_FLOOR_DAYS` / `WAR_FLOOR_WINDOW` | 1 / 14 | mandatory war participation floor (≥1 finalized day in 14) |
+| `SCORE_W_WAR` / `SCORE_W_DONATION` | 0.65 / 0.35 | war-weighted rank blend; war is the core elder duty |
+| `ELDER_BAND_FLOOR` / `ELDER_BAND_CEIL` | 0.15 / 0.20 | elder share of the non-leadership roster (range, not quota) |
+| `WORTHINESS_MIN_PERCENTILE` | 0.50 | below-floor promotions still require ≥ roster-median score |
+| `PROMOTE_QUALIFYING_WEEKS` | 3 | sustained weeks in the promotable set |
+| `DEMOTE_WEEKS` | 2 | deliberately fewer — demotion is easier than promotion |
+| **Kick path (unchanged)** | | |
+| `WAR_QUALIFY_RATE` | 0.75 | (legacy signal; retained for evidence rendering) |
 | `BATTLE_DAYS_MIN` | 8 (of 28) | ≈2 battle-days/week floor |
-| Layer-1 hold/lapse rule | 3-of-4 / 1-of-4 | hysteresis asymmetry (§2) |
-| `PROMOTE_TENURE_MIN` | 28 days | one full month before elder consideration |
-| `PROMOTE_QUALIFYING_WEEKS` | 4 | §13.3 "earned over N qualifying weeks" |
-| `DEMOTE_WEEKS` | 4 | symmetric with promotion |
 | `KICK_CONFIRM_DAYS` | 7 | week of silence past the trophy-scaled threshold |
 | `NEW_MEMBER_GRACE` | 14 days | reception period; kick path suspended |
 
