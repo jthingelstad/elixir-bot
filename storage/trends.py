@@ -28,7 +28,7 @@ def _member_id_for_tag(conn, tag: str):
 def get_member_trophy_history(tag: str, days: int = 30, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     cutoff = _cutoff_date(days)
     rows = conn.execute(
-        "SELECT dm.metric_date, dm.trophies, dm.best_trophies, dm.clan_rank, dm.exp_level "
+        "SELECT dm.metric_date, dm.trophies, dm.best_trophies, dm.clan_rank "
         "FROM player_daily_metrics dm "
         "JOIN players m ON m.player_tag = dm.player_tag "
         "WHERE m.player_tag = ? AND dm.metric_date >= ? "

@@ -752,7 +752,7 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
     ).fetchall()
     for row in active_members:
         metrics = conn.execute(
-            "SELECT metric_date, exp_level, trophies, best_trophies "
+            "SELECT metric_date, trophies, best_trophies "
             "FROM player_daily_metrics WHERE player_tag = ? AND metric_date >= ? "
             "ORDER BY metric_date ASC",
             (row["tag"], cutoff_ts[:10]),
@@ -763,7 +763,6 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
         item = {
             "tag": row["tag"],
             "name": row["name"],
-            "level_gain": (latest["exp_level"] or 0) - (first["exp_level"] or 0),
             "wins_gain": 0,
             "trophies_change": (latest["trophies"] or 0) - (first["trophies"] or 0),
             "best_trophies_gain": (latest["best_trophies"] or 0) - (first["best_trophies"] or 0),
@@ -771,11 +770,10 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
             "pol_trophies_change": 0,
             "favorite_card": None,
         }
-        if any(item[key] for key in ("level_gain", "trophies_change", "best_trophies_gain")):
+        if any(item[key] for key in ("trophies_change", "best_trophies_gain")):
             progression.append(_member_reference_fields(conn, row["tag"], item))
     progression.sort(
         key=lambda item: (
-            -(item.get("level_gain") or 0),
             -(item.get("best_trophies_gain") or 0),
             -(item.get("trophies_change") or 0),
             (item.get("name") or "").lower(),
