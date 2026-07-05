@@ -80,23 +80,31 @@ def seed_anchor(now: datetime) -> datetime:
 
 
 def read_anchor(conn) -> datetime | None:
-    """The persisted anchor, from the job's own status row (restart-proof)."""
+    """The persisted anchor. Lives in stream_cursors (the engine's consumer-
+    position store - the pulse IS a stream consumer). The original design
+    piggybacked runtime_job_status.last_summary, but the harness re-creates
+    that row on restart (live 2026-07-05: a restart wiped the anchor and the
+    re-seed silently skipped the first-ever window)."""
     row = conn.execute(
-        "SELECT status_json FROM runtime_job_status WHERE job_name = ?", (JOB_NAME,)
+        "SELECT cursor_text FROM stream_cursors WHERE consumer_key = ? AND scope_key = ?",
+        (JOB_NAME, "anchor"),
     ).fetchone()
-    if not row:
+    if not row or not row[0]:
         return None
     try:
-        summary = (json.loads(row[0] or "{}") or {}).get("last_summary") or ""
-    except (TypeError, ValueError):
-        return None
-    if ANCHOR_MARKER not in summary:
-        return None
-    token = summary.split(ANCHOR_MARKER, 1)[1].split()[0].strip()
-    try:
-        return _parse_iso(token)
+        return _parse_iso(row[0])
     except ValueError:
         return None
+
+
+def write_anchor(conn, anchor: datetime) -> None:
+    conn.execute(
+        """INSERT INTO stream_cursors (consumer_key, scope_key, cursor_text, updated_at)
+           VALUES (?, 'anchor', ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+           ON CONFLICT(consumer_key, scope_key) DO UPDATE SET
+               cursor_text = excluded.cursor_text, updated_at = excluded.updated_at""",
+        (JOB_NAME, _iso(anchor)),
+    )
 
 
 # ------------------------------------------------------------- facts builders
@@ -381,6 +389,8 @@ def run_check(conn, now: datetime | None = None) -> str:
     anchor = read_anchor(conn)
     if anchor is None:
         anchor = seed_anchor(now)
+        write_anchor(conn, anchor)
+        conn.commit()
         log.info("player pulse anchor seeded at %s", _iso(anchor))
         return f"seeded {ANCHOR_MARKER}{_iso(anchor)}"
 
@@ -404,7 +414,8 @@ def run_check(conn, now: datetime | None = None) -> str:
         )
         ledger.attach_intent(conn, key, intent_id)
         posted = f"intent {intent_id} ({facts.get('battles_total', 0)} battles)"
-    conn.commit()
     anchor = window_end
+    write_anchor(conn, anchor)
+    conn.commit()
     note = f" skipped={skipped}" if skipped else ""
     return f"window {_iso(window_end)} {posted}{note} {ANCHOR_MARKER}{_iso(anchor)}"
