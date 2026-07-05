@@ -149,7 +149,13 @@ def _battle_aggregates(conn, members: dict, start_c: str, end_c: str) -> dict:
 def _standouts(conn, members: dict, per_player: dict, limit: int = 3) -> list[dict]:
     ranked = sorted(
         (
-            {"tag": t, "name": members[t], **s}
+            # Explicit wins/losses/record so neither composer nor critic has
+            # to interpret notation (live 2026-07-05: the critic misread a
+            # correct "5-4" W-L as contradicting "5 wins of 9 battles" and
+            # coerced worse copy into fallback).
+            {"tag": t, "name": members[t], **s,
+             "losses": s["battles"] - s["wins"],
+             "record": f"{s['wins']}W-{s['battles'] - s['wins']}L in {s['battles']} battles"}
             for t, s in per_player.items()
             if s["battles"] >= STANDOUT_MIN_BATTLES
         ),

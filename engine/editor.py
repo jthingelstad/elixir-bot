@@ -62,7 +62,10 @@ out. Judge it against four dimensions:
 
 - grounding: every specific claim in the copy (numbers, possessions, events, \
 achievements) must trace to the facts JSON. An invented detail — however \
-plausible — is a hard failure.
+plausible — is a hard failure. Do NOT fail equivalent restatements: W-L \
+notation ("5-4" = five wins, four losses), arithmetic the facts support, and \
+reasonable paraphrase of internal names (mode CW_Battle_1v1 said as "war \
+1v1") are all grounded.
 - substance: would a human who actually looked at this member/moment write \
 this? Copy that could have come from a blank template fails.
 - freshness: no stock phrases recycled from Elixir's recent posts (compare \
