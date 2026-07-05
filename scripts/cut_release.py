@@ -78,11 +78,22 @@ def main() -> int:
     parser.add_argument("--name", help="skip coining and use this release name")
     parser.add_argument("--dry-run", action="store_true", help="print everything, touch nothing")
     parser.add_argument("--no-announce", action="store_true", help="cut without the Discord post")
+    parser.add_argument("--announce-only", action="store_true",
+                        help="retry ONLY the Discord announcement for an already-cut "
+                             "release (e.g. after granting #announcements permission)")
     args = parser.parse_args()
 
     if not re.fullmatch(r"v\d+\.\d+(\.\d+)?", args.version):
         print(f"version {args.version!r} doesn't look like v5.1 — refusing")
         return 2
+
+    # Retry path: the release is already cut (tag + RELEASES.md + GitHub
+    # release exist); only the Discord post failed (locked #announcements, a
+    # transient 403). Regenerate the announcement from the shipped notes and
+    # post it — no re-cut, no new commit.
+    if args.announce_only:
+        return _announce_only(args.version)
+
     if rn._git(["tag", "-l", args.version]).strip() and not args.dry_run:
         print(f"tag {args.version} already exists — refusing")
         return 2
@@ -143,15 +154,53 @@ def main() -> int:
     url = rn.create_github_release(version=args.version, name=name, commit=head, body=body)
     print(f"GitHub release: {url or '(failed — see log; announcement continues)'}")
 
-    # 6. Discord announcement
+    # 6. Discord announcement — BEST-EFFORT. The release is already cut (commit,
+    # tag, GitHub release); a Discord failure (locked #announcements, a 403)
+    # must NOT abort the script and leave a scary partial state. Warn, and tell
+    # the operator how to retry once the channel permission is fixed.
     if args.no_announce:
         print("Skipping announcement (--no-announce).")
         return 0
     chunks = rn.announcement_messages(subject=subject, body=body, release_url=url,
                                       version=args.version, name=name)
-    sent = rn.post_announcement(chunks)
-    print(f"Announced in #announcements ({sent} message(s)).")
+    try:
+        sent = rn.post_announcement(chunks)
+        print(f"Announced in #announcements ({sent} message(s)).")
+    except Exception as exc:
+        print(f"\n⚠️  Release {args.version} IS cut (commit + tag + GitHub release) — "
+              f"but the #announcements post failed: {exc}\n"
+              f"Grant Elixir SEND permission in #announcements, then retry just the post:\n"
+              f"    ./venv/bin/python scripts/cut_release.py --version {args.version} --announce-only")
     return 0
+
+
+def _releases_section(version: str) -> str:
+    """The version's section from RELEASES.md (its shipped notes)."""
+    text = open(rn.RELEASES_MD).read()
+    m = re.search(rf'(## {re.escape(version)}\b.*?)(?=\n## v|\Z)', text, re.S)
+    return m.group(1).strip() if m else ""
+
+
+def _announce_only(version: str) -> int:
+    """Post (or re-post) the Discord announcement for an already-cut release."""
+    entry = next((h for h in rn.release_history() if h.get("version") == version), None)
+    if not entry:
+        print(f"{version} not found in RELEASES.md — cut the release first.")
+        return 2
+    name = entry.get("name") or ""
+    body = _releases_section(version)
+    url = f"https://github.com/jthingelstad/elixir-bot/releases/tag/{version}"
+    subject = f'{version} "{name}"' if name else version
+    chunks = rn.announcement_messages(subject=subject, body=body, release_url=url,
+                                      version=version, name=name)
+    try:
+        sent = rn.post_announcement(chunks)
+        print(f"Announced {version} in #announcements ({sent} message(s)).")
+        return 0
+    except Exception as exc:
+        print(f"Announcement still failing: {exc}\n"
+              f"Confirm Elixir has SEND permission in #announcements.")
+        return 1
 
 
 if __name__ == "__main__":

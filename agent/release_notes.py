@@ -344,7 +344,15 @@ def announcement_messages(*, subject: str, body: str, release_url: str | None,
     from runtime.helpers import DISCORD_CHUNK_SIZE, _chunk_for_discord
 
     title = f'**{version} "{name}"**' if name else f"**{version}**"
-    text = f"{title} — {subject}\n\n{body}"
+    # Dedup: drop the subject when it just restates the title (e.g. the
+    # --announce-only fallback subject), and drop the body's own leading
+    # "## {version}" header so the post doesn't triple the release name.
+    subj = (subject or "").strip()
+    head = title if (not subj or subj.strip('"') in title or version in subj) else f"{title} — {subj}"
+    body_lines = body.splitlines()
+    if body_lines and body_lines[0].lstrip("# ").startswith(version):
+        body = "\n".join(body_lines[1:]).lstrip()
+    text = f"{head}\n\n{body}"
     if release_url:
         text += f"\n\n-# Full release on GitHub: {release_url}"
     return _chunk_for_discord(text, size=DISCORD_CHUNK_SIZE)
@@ -361,7 +369,14 @@ def post_announcement(messages: list[str]) -> int:
         req = urllib.request.Request(
             f"https://discord.com/api/v10/channels/{ANNOUNCEMENTS_CHANNEL_ID}/messages",
             data=json.dumps({"content": content}).encode(),
-            headers={"Authorization": f"Bot {token}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bot {token}",
+                "Content-Type": "application/json",
+                # Discord REQUIRES a bot User-Agent; without it Cloudflare (in
+                # front of the API) blocks urllib's default UA with a 1010/403
+                # (live 2026-07-05: the first real release never announced).
+                "User-Agent": "DiscordBot (https://github.com/jthingelstad/elixir-bot, 5.1)",
+            },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=30) as r:
