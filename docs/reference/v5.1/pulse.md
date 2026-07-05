@@ -6,8 +6,8 @@
 > **Owner:** Jamie · **Last worked:** 2026-07-05
 >
 > **The gap it fills:** recognition speaks one moment at a time (threshold
-> 80); the weekly recap speaks once a week. Between them, ~700 battles and
-> dozens of events per 88h window flow unnarrated. The Pulse is the organ
+> 80); the weekly recap speaks once a week. Between them, ~100 battles and
+> a handful of events per 8h window flow unnarrated. The Pulse is the organ
 > that looks at the *shape of a window* and says something human about it.
 
 ## 1. The pattern
