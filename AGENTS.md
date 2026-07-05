@@ -108,6 +108,26 @@ Unit tests target one delta with minimal dicts; these three run the engine again
 
 `assert_db_invariants` (tests/conftest.py) is the shared floor under all of it — an autouse sweep after every test, plus a gate inside both scripts: unique open memberships, one ledger claim per key, FTS mirror in sync, no space-format timestamps, known lanes/statuses only.
 
+### Confidence layer (where failures go; how to know Elixir is healthy)
+
+The bugs that keep biting are seam/first-use failures that fail *silently*. Three
+tools make them visible:
+
+1. **Incident ledger** — every best-effort/swallowing `except` records to
+   `runtime_incidents` (`storage/incidents.py:record_incident`) before it passes.
+   An external agent finds all open failures in one query:
+   `sqlite3 elixir-v51.db "SELECT at, component, summary, detail FROM runtime_incidents WHERE resolved_at IS NULL ORDER BY at DESC LIMIT 50"`.
+   Also on Observatory `/incidents`, and the daily `engine-health` job names them
+   to #elixir-log. Resolve one with `UPDATE runtime_incidents SET resolved_at = ...`.
+2. **Entrypoint smoke** (`tests/test_entrypoints_smoke.py`) — static + dynamic
+   check that every function's names resolve and every compose/card/tool
+   entrypoint is invocable. Catches the NameError/lazy-import class at test time.
+3. **`scripts/confidence_report.py`** — one command (`--json`, non-zero exit on
+   findings) that unifies open incidents + smoke/integration test status + the
+   latest post-quality scorecard. "Is Elixir healthy?" in one answer. Run it
+   before/after any change; it's what the unattended `confidence-monitor` routine
+   executes.
+
 ### Review discipline
 
 A green suite is necessary, not sufficient. Before deploying a substantive change, do a **cold adversarial review** of the diff — read it as a skeptic hunting for what breaks, not as the author confirming what works. After deploying, do a **live behavioral audit**: watch what the running system actually does (Observatory, tick counters, posted messages) rather than what the code says it should do. The 2026-07-04 end-to-end review is the reference case: the suite was green, yet the live audit found a season-breaking gap (the awards consumer was never built — two work streams each assumed the other owned it) and the cold review found ten more real defects (delivery commit ordering, per-lane fail-stop, timestamp-format mismatches, CSRF host matching). The `engine-health` daily activity (`runtime/health.py`) institutionalizes the live audit's checks, but it covers only known failure classes — new changes need fresh adversarial eyes. Never mark a cross-stream feature done without verifying the consumer end-to-end.

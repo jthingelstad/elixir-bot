@@ -109,6 +109,18 @@ def check_db_size(conn, previous_bytes: int | None) -> tuple[list[str], int]:
     return problems, size
 
 
+def check_new_incidents(conn) -> list[str]:
+    """Unresolved error-severity incidents in the last 24h (confidence plan §1)
+    — surfaces the silent failures the ledger now captures, so the daily digest
+    to #elixir-log names them."""
+    try:
+        from storage.incidents import count_open_since
+        n = count_open_since(conn, hours=24)
+    except Exception as exc:  # noqa: BLE001
+        return [f"incident check failed: {exc!r}"]
+    return [f"{n} unresolved incident(s) in the last 24h — see /incidents"] if n else []
+
+
 def _cutoff_iso(conn, offset: str) -> str:
     return conn.execute(
         "SELECT strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)", (offset,)
@@ -119,7 +131,7 @@ def run_all(conn, previous_size: int | None = None) -> tuple[list[str], int]:
     problems: list[str] = []
     for check in (check_tick_errors, check_stuck_intents,
                   check_ledger_duplicates, check_poll_starvation,
-                  check_memory_writes):
+                  check_memory_writes, check_new_incidents):
         try:
             problems.extend(check(conn))
         except Exception as exc:  # a broken check is itself a finding
