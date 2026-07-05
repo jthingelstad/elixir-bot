@@ -379,7 +379,11 @@ _V5_EVENT_LEADER_ACTION_TYPES = {
     "career_wins_milestone",
     "collection_level_milestone",
     "card_unlocked",          # champion rarity only (guard in relay)
-    "role_changed",           # promoted only (guard in relay)
+    # role_changed is NOT relayed (removed 2026-07-05): a promotion is already
+    # communicated by its promotion_recommendation card + clan-chat copy, and
+    # the public #clan-events post (enriched with the elder rationale). A
+    # celebration relay here just double-posts the same event Elixir asked
+    # leadership to do — Jamie: "makes no sense."
     "weekly_donation_leader",
     "week_finished",
     "season_closed",
