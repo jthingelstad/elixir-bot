@@ -126,9 +126,11 @@ A **range to maintain, not a quota to fill** (Jamie):
   promotion candidates — **but only if they clear the worthiness floor**: score
   ≥ the roster-median score (`WORTHINESS_MIN_PERCENTILE = 0.50`). A thin or weak
   clan promotes *nobody* rather than elevating the undeserving to hit 15%.
-- **Above ceiling** (too many elders): the lowest-ranked *elders* become
-  demotion candidates.
-- **Inside the band:** no forced moves. Churn only from filter failures (§3.4).
+- **Above ceiling** (too many elders): the lowest-ranked *participating*
+  elders needed to return to the ceiling become demotion candidates.
+- **Inside the band:** no forced moves — a participating elder is never churned
+  for merely ranking low ("a range to maintain, not a quota to fill" cuts both
+  ways). Only a filter failure (war-floor abandonment) moves an in-band elder.
 
 ### 3.4 Hysteresis — demotion is deliberately easier than promotion
 
