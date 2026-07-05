@@ -1365,12 +1365,17 @@ async def _watch_game_event_threads(battle_feed_channel_id: int, conn_factory):
             # window. The classifier leaks single-digit misclassified rows
             # (live 2026-07-05: 3 stray 'Ladder' rows carried special_event and
             # birthed a public thread); volume+breadth thresholds make stray
-            # rows structurally unable to open rooms.
+            # rows structurally unable to open rooms. Friendly-flavored
+            # modes are excluded outright: they're evergreen casual play, not
+            # bounded events - their rooms would never earn a lock (live
+            # 2026-07-05: Showdown_Friendly, 47 battles of ordinary friendlies
+            # classified special_event).
             fresh = conn.execute(
                 f"""SELECT game_mode_name, MAX(battle_time) last_seen
                     FROM battle_events
                     WHERE mode_group = 'special_event'
                       AND battle_time >= {cutoff}
+                      AND game_mode_name NOT LIKE '%Friendly%'
                     GROUP BY game_mode_name
                     HAVING COUNT(*) >= 8 AND COUNT(DISTINCT player_tag) >= 3"""
             ).fetchall()
