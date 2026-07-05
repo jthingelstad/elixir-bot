@@ -45,7 +45,7 @@ latest persisted state below survives restarts.</p>
 <h2>Persisted job status</h2>
 <div class="card" style="overflow-x:auto;">
   <table>
-    <tr><th>job</th><th>ok</th><th>fail</th><th>running</th><th>last finished</th><th>last error</th></tr>
+    <tr><th>job</th><th>ok</th><th>fail</th><th>running</th><th>last finished</th><th>last summary</th><th>last error</th></tr>
     {% for name, s in statuses.items() %}
       <tr>
         <td><code>{{ name }}</code></td>
@@ -53,6 +53,7 @@ latest persisted state below survives restarts.</p>
         <td class="num {{ 'err' if s.get('failure_count') else '' }}">{{ s.get('failure_count', 0) }}</td>
         <td>{{ 'yes' if s.get('running') else '' }}</td>
         <td>{{ s.get('last_finished_at','') | reltime }}</td>
+        <td class="muted">{{ (s.get('last_summary') or '')[:90] }}</td>
         <td class="{{ 'err' if s.get('last_error') else '' }}">{{ (s.get('last_error') or '')[:120] }}</td>
       </tr>
     {% endfor %}

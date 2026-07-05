@@ -21,7 +21,8 @@ before they name their channel.
 
 **Ops note (learned the hard way, 2026-07-05):** adding a channel touches
 TWO registration points — the DISCORD.md section AND
-`prompts.CHANNEL_LANE_CONFIG` — and the startup validator hard-fails on
+`prompts.CHANNEL_LANE_CONFIG` — plus a THIRD found during the Pulse build:
+`prompts/lanes/<lane>.md` (compose falls back without it) — and the startup validator hard-fails on
 unknown lanes (a miss = on_ready crash; cost a 4-minute partial outage).
 Threads bypass all of this — one reason they won.
 
