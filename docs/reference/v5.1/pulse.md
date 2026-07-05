@@ -66,7 +66,7 @@ ever narrated twice (chronicle discipline applied to short windows).
 **Composition — the standard pipeline, not a side channel** (the
 single-pipeline rule): the activity computes the facts JSON and raises a
 `communication_intent` (`pulse:player_stream`, ledger key
-`pulse:player:{window_end}`, lane `member-highlights`); the next engine
+`pulse:player:{window_end}`, lane = the new dedicated channel per P2); the next engine
 tick composes (channel_update → Sonnet 5), **Editor-gates**, and delivers
 it like any other post. At-least-once, 6h expiry, verdict trace — all
 inherited. Not in the clan-chat relay allowlist (v1).
