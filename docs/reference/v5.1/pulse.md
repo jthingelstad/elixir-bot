@@ -49,6 +49,14 @@ ever narrated twice (chronicle discipline applied to short windows).
 - Timezone texture: which regions' hours this window covered (derivable
   from the window's UTC span — name the handoff, e.g. "the overnight shift")
 - Ranked movement in-window (rating deltas for the UC cohort)
+- **Battle spotlight** (Jamie: "highlight cool battles"): the window's single
+  coolest battle by deterministic scoring — 3-crown sweeps, |trophy swing|
+  ≥40, arena-up deciders, event-mode dominance, clan-duo 2v2 wins
+  (`teammate_tag`, extraction fixed 2026-07-05); crowns/decks/mode all in
+  `battle_events`. One spotlight per window — fun, volume-safe. Related but
+  separate: arena_up posts in #player-highlights gain their deciding-battle
+  facts (the moment plus the movie of it) — small compose-payload
+  enrichment, not part of the Pulse.
 - Suppressed-accrual highlights: claims banked but unposted in-window —
   "quietly building" material (peaks, anniversaries)
 - Explicit exclusions: war-stream content (war has its own posts; one
@@ -89,7 +97,7 @@ excitement. The P4 review after week one is the checkpoint on whether
 | # | Question | Recommendation |
 |---|---|---|
 | P1 | Always-post vs story-gate | **Always**, with brevity licensed on quiet windows (fixed cadence per Jamie; Editor substance gate is the floor; revisit at P4 if 3/day reads as noise) |
-| P2 | Lane | **member-highlights** (it's player-stream celebration) |
+| P2 | Lane | **A NEW dedicated channel** (Jamie, 2026-07-05: "I think this may need a new channel") — the trophy-case/entertainment split: #player-highlights stays scarce earned recognition; the Pulse's 3/day rhythm + battle fun get their own home (#battle-feed or similar). Jamie creates it; wiring = DISCORD.md + compose lane + routing. This also resolves P1's volume concern. |
 | P3 | Spotlight rotation memory | **Yes** — carry last-2-pulses' named players in context, prefer fresh names |
 | P4 | Extend pattern to war/clan streams | **Not yet** — run the player pulse one full week (21 posts), review volume + voice in the editorial report, then decide |
 
