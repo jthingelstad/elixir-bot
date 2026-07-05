@@ -191,7 +191,7 @@ _INTENT_CASES = [
     ("war:week_finished", {"our_rank": 1, "our_fame": 10000}),
     ("war:season_closed", {"war_champ_tag": "#A", "free_pass_tag": "#A"}),
     ("pulse:player_stream", {"battles_total": 10, "quiet_window": False, "standouts": []}),
-    ("celebrate:level_up", {"subject_tag": "#A", "level": 45, "prev_level": 44}),
+    ("celebrate:collection_level_milestone", {"subject_tag": "#A", "milestone": 1700, "collection_level": 1712}),
     ("celebrate:card_level_milestone", {"subject_tag": "#A", "card_name": "Balloon", "milestone": 16}),
     ("cohort:arena_wave", {"members": [{"name": "A"}]}),
     ("clan:member_joined", {"subject_tag": "#A", "name": "A", "trophies": 5000}),

@@ -27,7 +27,6 @@ BASE_SCORES = {
     "card_level_milestone": 95,
     "career_wins_milestone": 85,
     "collection_level_milestone": 80,
-    "level_up": 80,
     "badge_earned": 55,
     "pol_promotion": 45,
     "best_trophies_peak": 40,
@@ -40,7 +39,6 @@ BYPASS_TYPES = {
     "card_level_milestone",
     "career_wins_milestone",
     "collection_level_milestone",
-    "level_up",
     "arena_up",                               # new — ratified 85/bypass
 }
 
@@ -54,7 +52,6 @@ CELEBRATE_PRIORITY = {
     "badge_earned": 70,
     "collection_level_milestone": 65,
     "career_wins_milestone": 60,
-    "level_up": 55,
     "pol_promotion": 50,
     "best_trophies_peak": 40,
     "ranked_pulse": 15,

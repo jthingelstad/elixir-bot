@@ -153,14 +153,14 @@ def _seed_claim_and_intent():
         conn.execute(
             """INSERT INTO recognition_ledger
                (recognition_key, stream, event_refs_json, score, claimed_at, intent_id)
-               VALUES ('level_up:#SEED1:45', 'player',
+               VALUES ('collection_level_milestone:#SEED1:1700', 'player',
                        '{"refs": [], "suppressed": null}', 85, '2026-07-04T00:00:00Z', 7)"""
         )
         conn.execute(
             """INSERT INTO communication_intents
                (intent_id, recognition_key, intent_type, lane, scope, payload_json,
                 status, attempts, created_at, expires_at, last_error)
-               VALUES (7, 'level_up:#SEED1:45', 'celebrate:level_up', 'member-highlights',
+               VALUES (7, 'collection_level_milestone:#SEED1:1700', 'celebrate:collection_level_milestone', 'member-highlights',
                        'public', '{"subject_tag": "#SEED1"}', 'failed', 2,
                        '2026-07-04T00:00:00Z', '2026-07-04T06:00:00Z', 'boom')"""
         )

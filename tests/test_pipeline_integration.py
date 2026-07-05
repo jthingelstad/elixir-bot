@@ -28,9 +28,9 @@ def _stub_critic(monkeypatch, responses):
 
 def _raise(conn):
     intent_id = delivery.raise_intent(
-        conn, None, "celebrate:level_up", "member-highlights", "public",
-        {"subject_tag": "#A", "event_type": "level_up", "player_name": "Alice",
-         "level": 45, "prev_level": 44},
+        conn, None, "celebrate:collection_level_milestone", "member-highlights", "public",
+        {"subject_tag": "#A", "event_type": "collection_level_milestone",
+         "player_name": "Alice", "milestone": 1700, "collection_level": 1712},
         NOW,
     )
     conn.commit()

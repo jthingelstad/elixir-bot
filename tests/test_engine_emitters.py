@@ -44,12 +44,15 @@ def test_first_sight_emits_nothing(engine_conn):
     assert row["observed_at"] == NOW and row["prev_observed_at"] is None
 
 
-def test_level_up_and_career_wins_golden_pair(engine_conn):
+def test_career_wins_golden_pair(engine_conn):
+    # expLevel is retired (no level_up); career_wins_milestone is the profile-
+    # aspect ladder event. Account progression now rides collection_level_
+    # milestone (cards aspect) — see test_collection_level_milestone.py.
     _emit_profile(engine_conn, _profile(level=44, wins=4990), NOW)
     n = _emit_profile(engine_conn, _profile(level=45, wins=5100), LATER)
     events = _events(engine_conn)
-    assert ("level_up", f"level_up:{TAG}:45") in events
     assert ("career_wins_milestone", f"career_wins_milestone:{TAG}:5000") in events
+    assert all(e[0] != "level_up" for e in events)
     assert n == len(events)
     # timing honesty: estimated, window bounded by prev observation
     row = engine_conn.execute(
@@ -61,12 +64,6 @@ def test_unchanged_payload_emits_nothing(engine_conn):
     _emit_profile(engine_conn, _profile(), NOW)
     assert _emit_profile(engine_conn, _profile(), LATER) == 0
     assert _events(engine_conn) == []
-
-
-def test_level_44_to_44_no_ladder_event(engine_conn):
-    _emit_profile(engine_conn, _profile(level=44, wins=100), NOW)
-    _emit_profile(engine_conn, _profile(level=44, wins=101), LATER)
-    assert all(e[0] != "level_up" for e in _events(engine_conn))
 
 
 def test_best_trophies_peak_every_100(engine_conn):

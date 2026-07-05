@@ -381,7 +381,7 @@ def _v5_message_payloads(sent_messages, fallback_text: str) -> list[dict]:
 # posted Discord copy — the single-pipeline rule). Volume principle (Jamie,
 # 2026-07-04, after the R108–R114 spam): Discord is high-volume by design;
 # in-game clan chat is scarce, leader-voiced space. Only marquee moments
-# relay — celebrate-volume types (arena_up, level_up) stay Discord-only, and
+# relay — celebrate-volume types (e.g. arena_up) stay Discord-only, and
 # _CLAN_CHAT_RELAY_DAILY_CAP bounds the worst day. Per-type guards
 # (promoted-only, champion-only) live in the relay loop.
 _V5_EVENT_LEADER_ACTION_TYPES = {

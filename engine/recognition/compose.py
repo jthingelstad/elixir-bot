@@ -298,9 +298,6 @@ def render_intent(intent_row) -> str:
     if et == "arena_up":
         arena = p.get("arena_name") or "a new arena"
         return f"🏟️ {subj} advanced to {arena}!"
-    if et == "level_up":
-        lvl = p.get("level")
-        return f"⬆️ {subj} reached King level {lvl}." if lvl else f"⬆️ {subj} leveled up."
     if et == "card_unlocked":
         card = p.get("card_name") or "a new card"
         if str(p.get("rarity", "")).lower() == "champion":

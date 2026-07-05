@@ -17,7 +17,6 @@ def test_base_scores_verbatim():
         "card_level_milestone": (95, True),
         "career_wins_milestone": (85, True),
         "collection_level_milestone": (80, True),
-        "level_up": (80, True),
         "badge_earned": (55, False),
         "pol_promotion": (45, False),
         "best_trophies_peak": (40, False),
@@ -61,7 +60,6 @@ def test_celebrate_priority_table_verbatim():
     assert p["badge_earned"] == 70
     assert p["collection_level_milestone"] == 65
     assert p["career_wins_milestone"] == 60
-    assert p["level_up"] == 55
     assert p["pol_promotion"] == 50
     assert p["best_trophies_peak"] == 40
     assert p["ranked_pulse"] == 15
@@ -77,13 +75,13 @@ def _cand(event_type, key=None, tag="#A", at=NOW, payload=None, arrival=0):
 def test_same_tick_coalescing_picks_by_priority():
     group = [_cand("best_trophies_peak", arrival=0),
              _cand("card_level_milestone", arrival=1),
-             _cand("level_up", arrival=2)]
+             _cand("collection_level_milestone", arrival=2)]
     selected = max(group, key=sort_key)
     assert selected.event_type == "card_level_milestone"
 
 
 def test_decide_bypass_posts_regardless(engine_conn):
-    selected = _cand("level_up")  # 80, bypass
+    selected = _cand("collection_level_milestone")  # 80, bypass
     post, score, trace = decide(engine_conn, "#A", selected, [selected], None)
     assert post is True and score >= 80
     assert isinstance(trace, dict)
@@ -153,4 +151,4 @@ def test_cohort_wave_three_members_same_day():
 def test_no_cohort_below_three_or_wrong_type():
     assert cohort_waves([_cand("badge_earned", tag="#A"),
                          _cand("badge_earned", tag="#B")]) == {}
-    assert cohort_waves([_cand("level_up", tag=f"#{i}") for i in "ABC"]) == {}
+    assert cohort_waves([_cand("collection_level_milestone", tag=f"#{i}") for i in "ABC"]) == {}
