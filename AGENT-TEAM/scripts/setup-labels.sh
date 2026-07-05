@@ -61,7 +61,7 @@ upsert "meta"        "5319E7" "Change to the team itself (role/workflow/labels/s
 
 echo "==> CORE: concurrency + provenance"
 upsert "wip"          "FBCA04" "Claimed — an agent is working this now; others skip it (released if the agent stops)"
-upsert "needs-deploy" "E36209" "Committed but NOT live until deployed (e.g. a DB migration) — Operations Manager deploys promptly & atomically"
+upsert "needs-deploy" "E36209" "Committed but NOT live until deployed — Operations Manager deploys promptly & atomically"
 upsert "generated"    "FEF2C0" "Filed by an automated agent (not a human)"
 
 # Kept as-is on purpose (useful GitHub defaults):

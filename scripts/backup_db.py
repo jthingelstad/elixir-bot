@@ -27,6 +27,7 @@ from __future__ import annotations
 import gzip
 import logging
 import os
+import shutil
 import re
 import sqlite3
 import sys
@@ -119,11 +120,18 @@ def create_backup(
     result: dict = {"path": str(dest), "size_original": 0, "size_compressed": 0, "ok": False, "error": None}
 
     try:
-        # Online backup into a temp file, then compress.
+        # Stage EVERYTHING in a LOCAL temp dir, then atomically move the final
+        # .gz into dest_dir. dest_dir is often iCloud/a network mount: writing
+        # temps there (old bug) meant a hard restart mid-backup left 0-byte
+        # tmp*.db turds in the backup folder AND a stale offsite copy (live
+        # 2026-07-05). Local staging + os.replace means the destination only
+        # ever sees a complete file, and any interruption strands temps locally
+        # (auto-reaped), never in iCloud.
+        stage = Path(tempfile.mkdtemp(prefix="elixir-backup-"))
+        tmp_path = str(stage / "snapshot.db")
+        stage_gz = stage / filename
         src_conn = sqlite3.connect(str(src))
         try:
-            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db", dir=str(dest_dir))
-            os.close(tmp_fd)
             try:
                 dst_conn = sqlite3.connect(tmp_path)
                 try:
@@ -143,22 +151,20 @@ def create_backup(
                 finally:
                     check_conn.close()
 
-                # Compress.
-                with open(tmp_path, "rb") as f_in, gzip.open(dest, "wb", compresslevel=6) as f_out:
+                # Compress locally, then atomically publish to the backup dir.
+                with open(tmp_path, "rb") as f_in, gzip.open(stage_gz, "wb", compresslevel=6) as f_out:
                     while True:
                         chunk = f_in.read(1_048_576)  # 1 MB
                         if not chunk:
                             break
                         f_out.write(chunk)
+                os.replace(stage_gz, dest)  # atomic move into (possibly iCloud) dest_dir
 
                 result["size_compressed"] = os.path.getsize(dest)
                 result["ok"] = True
             finally:
-                # Always clean up the uncompressed temp file.
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+                # Reap the whole local staging dir (temps never touch dest_dir).
+                shutil.rmtree(stage, ignore_errors=True)
         finally:
             src_conn.close()
     except Exception as exc:
