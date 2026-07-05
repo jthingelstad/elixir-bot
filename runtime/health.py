@@ -121,6 +121,42 @@ def check_new_incidents(conn) -> list[str]:
     return [f"{n} unresolved incident(s) in the last 24h — see /incidents"] if n else []
 
 
+SILENCE_HOURS = 14  # no Discord output at all in this window → investigate
+LEADER_ACTION_STALE_HOURS = 2  # a proposed card unposted this long → posting broken
+
+
+def check_output_silence(conn) -> list[str]:
+    """Silence is itself an alarm (Jamie, 2026-07-05). The `can_post_leader_action`
+    NameError killed ALL card posting with no symptom but quiet. This catches two
+    silence signatures: no Discord output at all, and leader-action cards that were
+    recommended but never posted."""
+    problems = []
+    # (a) total output silence — the Pulse alone posts every ~8h, so 14h dark is wrong.
+    row = conn.execute(
+        "SELECT MAX(fulfilled_at) FROM communication_intents WHERE status='fulfilled'"
+    ).fetchone()
+    last = row[0] if row else None
+    if last:
+        hrs = conn.execute(
+            "SELECT ROUND((julianday('now') - julianday(?)) * 24, 1)", (last,)
+        ).fetchone()[0]
+        if hrs is not None and hrs > SILENCE_HOURS:
+            problems.append(
+                f"no Discord output in {hrs}h (last post {last}) — Elixir may be silently stuck")
+    # (b) the can_post_leader_action signature: proposed but never posted.
+    stuck = conn.execute(
+        "SELECT COUNT(*) FROM leader_action_recommendations "
+        "WHERE status = 'proposed' AND copy_message_id IS NULL "
+        "AND COALESCE(is_test, 0) = 0 AND proposed_at < ?",
+        (_cutoff_iso(conn, f"-{LEADER_ACTION_STALE_HOURS} hours"),),
+    ).fetchone()[0]
+    if stuck:
+        problems.append(
+            f"{stuck} leader-action(s) proposed >{LEADER_ACTION_STALE_HOURS}h ago but never "
+            f"posted — card posting may be broken")
+    return problems
+
+
 def _cutoff_iso(conn, offset: str) -> str:
     return conn.execute(
         "SELECT strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)", (offset,)
@@ -131,7 +167,7 @@ def run_all(conn, previous_size: int | None = None) -> tuple[list[str], int]:
     problems: list[str] = []
     for check in (check_tick_errors, check_stuck_intents,
                   check_ledger_duplicates, check_poll_starvation,
-                  check_memory_writes, check_new_incidents):
+                  check_memory_writes, check_new_incidents, check_output_silence):
         try:
             problems.extend(check(conn))
         except Exception as exc:  # a broken check is itself a finding

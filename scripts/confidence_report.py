@@ -52,6 +52,22 @@ def _incidents() -> list[dict]:
         conn.close()
 
 
+def _liveness() -> list[str]:
+    """Silence signals — no output, or leader-actions recommended-but-never-posted.
+    Silence is an alarm, not the absence of one (Jamie, 2026-07-05)."""
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(REPO, ".env"))
+    import db
+    from runtime.health import check_output_silence
+    conn = db.get_connection()
+    try:
+        return check_output_silence(conn)
+    except Exception as exc:  # noqa: BLE001
+        return [f"liveness check failed: {exc!r}"]
+    finally:
+        conn.close()
+
+
 def _run_tests() -> dict:
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", *_CONFIDENCE_TESTS],
@@ -82,17 +98,20 @@ def main() -> int:
     args = ap.parse_args()
 
     incidents = _incidents()
+    liveness = _liveness()
     tests = _run_tests()
     quality = _quality(args.days, args.quick)
 
     findings = (
         len(incidents)
+        + len(liveness)
         + (0 if tests["ok"] else 1)
         + len(quality.get("flagged", []) if quality.get("available") else [])
     )
     report = {
         "healthy": findings == 0,
         "incidents": incidents,
+        "liveness": liveness,
         "tests": tests,
         "quality": quality,
     }
@@ -101,6 +120,11 @@ def main() -> int:
         print(json.dumps(report, indent=2, default=str))
     else:
         print(f"{'✅ HEALTHY' if report['healthy'] else '⚠️  FINDINGS'}\n")
+        if liveness:
+            print("Liveness / silence:")
+            for s in liveness:
+                print(f"  ⚠️  {s}")
+            print()
         print(f"Open incidents: {len(incidents)}")
         for i in incidents[:15]:
             print(f"  [{i['at'][5:16]}] {i['severity']:5} {i['component']}: {i['summary'][:80]}")
