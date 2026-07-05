@@ -31,7 +31,13 @@ autonomous fix + deploy (2026-07-05) for the unattended window.
    ./venv/bin/python scripts/confidence_report.py --quick --json
    ```
    Exit 0 = healthy, stop after a one-line note. Non-zero = findings; the JSON
-   has `incidents`, `tests`, `quality`.
+   has `incidents`, `liveness`, `tests`, `quality`.
+   - **`liveness` is the silence alarm (treat as high-signal).** Quiet is not
+     calm — the `can_post_leader_action` bug killed ALL card posting with no
+     symptom but silence. "no Discord output in Nh" or "leader-action(s)
+     proposed but never posted" means something is silently stuck: investigate
+     the posting path NOW (tail the log, check the tick, check
+     `_post_pending_leader_action_cards`), fix per step 3, don't wait it out.
 3. **Incidents** (`runtime_incidents`, the fail-soft ledger) and **failing
    confidence tests** (`tests.ok=false`) — a NameError, a bad key, a missing
    lane registration, an FK regression. For each, read the traceback / the
