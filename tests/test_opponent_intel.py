@@ -91,7 +91,9 @@ class TestAnalyzeClanRoster:
         assert result["member_count"] == 3
         assert result["avg_trophies"] == 6000
         assert result["max_trophies"] == 7000
-        assert result["avg_exp_level"] == 13.0
+        # expLevel is deprecated (dead at the CR API — always 0 in memberList);
+        # opponent intel no longer surfaces it. See memory cr-progression-model-2026.
+        assert "avg_exp_level" not in result
         assert result["role_breakdown"]["leader"] == 1
         assert result["role_breakdown"]["coLeader"] == 1
         assert result["role_breakdown"]["member"] == 1

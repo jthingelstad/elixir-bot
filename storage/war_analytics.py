@@ -148,7 +148,7 @@ def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None
 
 def _mgmt_rows(conn):
     return conn.execute(
-        "SELECT mm.*, m.current_name AS name, cs.clan_rank, cs.trophies, cs.exp_level, "
+        "SELECT mm.*, m.current_name AS name, cs.clan_rank, cs.trophies, "
         "cs.donations_week, mm.player_tag AS tag "
         "FROM member_management mm "
         "JOIN players m ON m.player_tag = mm.player_tag "
@@ -202,7 +202,7 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
         if reasons:
             item = {
                 "tag": row["tag"], "name": row["name"], "role": row["role"],
-                "exp_level": row["exp_level"], "trophies": row["trophies"],
+                "trophies": row["trophies"],
                 "clan_rank": row["clan_rank"], "donations_week": donations_week,
                 "joined_date": None, "tenure_days": row["tenure_days"],
                 "kick_state": kick_state,

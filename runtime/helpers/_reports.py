@@ -892,8 +892,6 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         lines.append("=== PLAYER PROGRESSION HIGHLIGHTS ===")
         for member in progression[:8]:
             bits = []
-            if member.get("level_gain"):
-                bits.append(f"King Level +{member['level_gain']}")
             if member.get("pol_league_gain"):
                 bits.append(f"Ranked +{member['pol_league_gain']} league(s)")
             if member.get("best_trophies_gain"):

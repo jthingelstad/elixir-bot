@@ -37,7 +37,6 @@ def analyze_clan_roster(clan_profile: dict, *, now: datetime | None = None) -> d
     member_count = len(members)
 
     trophies = [m.get("trophies", 0) for m in members]
-    exp_levels = [m.get("expLevel", 0) for m in members]
 
     role_counts: dict[str, int] = {}
     recently_active = 0
@@ -61,7 +60,6 @@ def analyze_clan_roster(clan_profile: dict, *, now: datetime | None = None) -> d
                 "name": m.get("name", "?"),
                 "trophies": m.get("trophies", 0),
                 "role": role,
-                "exp_level": m.get("expLevel", 0),
             })
 
     return {
@@ -77,7 +75,6 @@ def analyze_clan_roster(clan_profile: dict, *, now: datetime | None = None) -> d
         "avg_trophies": round(statistics.mean(trophies), 0) if trophies else 0,
         "median_trophies": round(statistics.median(trophies), 0) if trophies else 0,
         "max_trophies": max(trophies) if trophies else 0,
-        "avg_exp_level": round(statistics.mean(exp_levels), 1) if exp_levels else 0,
         "role_breakdown": role_counts,
         "recently_active_count": recently_active,
         "active_within_week_count": active_within_week,

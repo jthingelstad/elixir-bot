@@ -259,7 +259,7 @@ def _build_member_profile_report(member_query: str, *, conn=None) -> str:
         f"profile {_fmt_optional(profile.get('profile_url'))} | POAP {_fmt_optional(profile.get('poap_address'))}"
     )
     lines.append(
-        f"- Clan state: level {_fmt_optional(profile.get('exp_level'))} | trophies {_fmt_optional(trophies)} | "
+        f"- Clan state: Collection Level {_fmt_optional(profile.get('cr_collection_level'))} | trophies {_fmt_optional(trophies)} | "
         f"best {_fmt_optional(best_trophies)} | donations {_fmt_optional(profile.get('donations_week'))} | received {_fmt_optional(profile.get('donations_received_week'))}"
     )
     lines.append(
