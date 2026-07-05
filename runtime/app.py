@@ -932,6 +932,7 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
                 )
             )
             post_attempted = True
+            action = await _ensure_role_action_clan_chat_copy(action)
             card_messages = await post_leader_action_card(relay_channel, action)
             first_id = getattr(card_messages[0], "id", None) if card_messages else None
             if first_id is not None:
@@ -954,6 +955,71 @@ async def _post_pending_leader_action_cards(limit: int = 4) -> int:
                     log.debug("sentinel clear failed for %s", action.get("action_id"),
                               exc_info=True)
     return posted
+
+
+async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
+    """Every promotion/demotion/kick card carries an in-game clan-chat message
+    explaining the WHY (Jamie 2026-07-05: the clan must know why these actions
+    happen). Generated at post time so it covers ALL sources — the weekly
+    review, the reactive kick path, and manual leadership cards alike (none of
+    which set copy at creation). LLM-composed from the rationale with a
+    deterministic role-action fallback; never blocks the card."""
+    from runtime.clan_chat_copy import (
+        CLASH_COPY_MAX_LENGTH,
+        ROLE_ACTION_TYPES,
+        generate_clan_chat_copy,
+        role_action_clan_chat_copy,
+    )
+
+    atype = action.get("action_type")
+    if atype not in ROLE_ACTION_TYPES:
+        return action
+    if action.get("copy_current_text") or action.get("copy_original_text"):
+        return action  # already has copy (e.g. a re-post)
+
+    name = action.get("target_player_name") or action.get("target_player_tag") or "this member"
+    rationale = action.get("rationale") or ""
+    fallback = role_action_clan_chat_copy(
+        action_type=atype, target_player_name=name, rationale=rationale,
+        max_chars=CLASH_COPY_MAX_LENGTH,
+    )
+    copy_text = fallback
+    try:
+        context = (
+            f"Tell the POAP KINGS clan, in in-game clan chat, WHY this is happening — "
+            f"so the reason is clear to everyone. Action: {atype.replace('_', ' ')} for "
+            f"{name}. Summarize this reasoning warmly and briefly; introduce nothing not "
+            f"present here: {rationale}"
+        )
+        result = await generate_clan_chat_copy(
+            intent=f"role_action_{atype}",
+            context=context,
+            max_messages=1,
+            max_chars=CLASH_COPY_MAX_LENGTH,
+            forbidden_terms=("http://", "https://", "www.", "Discord"),
+            fallback_messages=[fallback] if fallback else None,
+        )
+        if result and getattr(result, "messages", None):
+            copy_text = result.messages[0]
+    except Exception:
+        log.warning("role-action clan-chat copy generation failed for %s",
+                    action.get("action_id"), exc_info=True)
+
+    if copy_text:
+        def _persist(a_id=action["action_id"], text=copy_text):
+            conn = db.get_connection()
+            try:
+                conn.execute(
+                    "UPDATE leader_action_recommendations "
+                    "SET copy_original_text = ?, copy_current_text = ? WHERE action_id = ?",
+                    (text, text, a_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        await asyncio.to_thread(_persist)
+        action = {**action, "copy_original_text": copy_text, "copy_current_text": copy_text}
+    return action
 
 
 async def _relay_engine_clan_chat_actions(fulfilled_intents: list) -> int:
