@@ -65,7 +65,12 @@ def _chat_model_name():
 
 
 def _promotion_model_name():
-    return os.getenv("ELIXIR_PROMOTION_MODEL", "claude-sonnet-5")
+    return os.getenv("ELIXIR_PROMOTION_MODEL", "claude-opus-4-8")
+
+
+def _intensive_model_name():
+    # Low-volume intensive writing: release notes, weekly recap, scouting.
+    return os.getenv("ELIXIR_INTENSIVE_MODEL", "claude-opus-4-8")
 
 
 def _lightweight_model_name():
@@ -80,6 +85,8 @@ def _model_for_workflow(workflow, model=None):
         return _promotion_model_name()
     if model_family == "chat":
         return _chat_model_name()
+    if model_family == "intensive":
+        return _intensive_model_name()
     return _lightweight_model_name()
 
 

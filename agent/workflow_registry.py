@@ -7,7 +7,7 @@ from typing import Literal
 
 from agent.tool_defs import TOOLS
 
-ModelFamily = Literal["chat", "promotion", "lightweight"]
+ModelFamily = Literal["chat", "promotion", "lightweight", "intensive"]
 
 
 @dataclass(frozen=True)
@@ -83,15 +83,16 @@ _WORKFLOW_SPECS = (
         tools=READ_TOOLS_NO_EXTERNAL,
         max_tool_rounds=3,
     ),
-    WorkflowSpec("channel_update", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=6),
-    WorkflowSpec("channel_update_leadership", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=6),
-    WorkflowSpec("interactive", response_schema=_CHANNEL_SCHEMA, tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=4),
+    WorkflowSpec("channel_update", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=6, model_family="chat"),
+    WorkflowSpec("channel_update_leadership", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=6, model_family="chat"),
+    WorkflowSpec("interactive", response_schema=_CHANNEL_SCHEMA, tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=4, model_family="chat"),
     WorkflowSpec(
         "clanops",
         response_schema=_CHANNEL_SCHEMA,
         tools=ALL_TOOLS,
         max_tool_rounds=5,
         write_tools_allowed=True,
+        model_family="chat",
     ),
     WorkflowSpec(
         "reception",
@@ -99,6 +100,7 @@ _WORKFLOW_SPECS = (
         tools=[],
         max_tool_rounds=0,
         tools_allowed=False,
+        model_family="chat",
     ),
     WorkflowSpec(
         "roster_bios",
@@ -106,13 +108,13 @@ _WORKFLOW_SPECS = (
         tools=READ_TOOLS_NO_EXTERNAL,
         max_tool_rounds=3,
     ),
-    WorkflowSpec("deck_review", response_schema=_CHANNEL_SCHEMA, tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=10),
+    WorkflowSpec("deck_review", response_schema=_CHANNEL_SCHEMA, tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=10, model_family="chat"),
     WorkflowSpec("arena_relay_observation", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=4),
-    WorkflowSpec("intel_report", response_schema=_CHANNEL_SCHEMA, tools=INTEL_REPORT_TOOLS, max_tool_rounds=15, model_family="chat"),
-    WorkflowSpec("tournament_recap", response_schema={"required": ["content"]}, tools=TOURNAMENT_RECAP_TOOLS, max_tool_rounds=8, model_family="chat"),
+    WorkflowSpec("intel_report", response_schema=_CHANNEL_SCHEMA, tools=INTEL_REPORT_TOOLS, max_tool_rounds=15, model_family="intensive"),
+    WorkflowSpec("tournament_recap", response_schema={"required": ["content"]}, tools=TOURNAMENT_RECAP_TOOLS, max_tool_rounds=8, model_family="intensive"),
     WorkflowSpec("tournament_update", response_schema=_CHANNEL_SCHEMA, tools=TOURNAMENT_UPDATE_TOOLS, max_tool_rounds=4),
-    WorkflowSpec("war_recap", response_schema=_CHANNEL_SCHEMA, tools=[], max_tool_rounds=1, tools_allowed=False),
-    WorkflowSpec("season_awards", response_schema=_CHANNEL_SCHEMA, tools=[], max_tool_rounds=1, tools_allowed=False),
+    WorkflowSpec("war_recap", response_schema=_CHANNEL_SCHEMA, tools=[], max_tool_rounds=1, tools_allowed=False, model_family="chat"),
+    WorkflowSpec("season_awards", response_schema=_CHANNEL_SCHEMA, tools=[], max_tool_rounds=1, tools_allowed=False, model_family="chat"),
     WorkflowSpec(
         "awareness",
         response_schema={"required": ["posts"]},
@@ -125,7 +127,7 @@ _WORKFLOW_SPECS = (
         response_schema={"required": ["arc_memories", "stale_memory_ids", "contradictions", "digest"]},
         tools=[],
         max_tool_rounds=2,
-        model_family="chat",
+        model_family="intensive",
         tools_allowed=False,
     ),
     WorkflowSpec(
@@ -133,7 +135,7 @@ _WORKFLOW_SPECS = (
         response_schema={"required": ["action_type", "sample_count", "summary", "guidance", "evidence"]},
         tools=[],
         max_tool_rounds=1,
-        model_family="chat",
+        model_family="intensive",
         tools_allowed=False,
     ),
     WorkflowSpec(
@@ -147,12 +149,12 @@ _WORKFLOW_SPECS = (
     # The Editor's critic + weekly self-review (editor.md §2/§4): one strict-
     # JSON call, no tools, lightweight family (haiku-class — ~10-20 posts/day).
     WorkflowSpec("editorial", tools=[], max_tool_rounds=1, tools_allowed=False),
-    WorkflowSpec("weekly_digest", model_family="chat"),
+    WorkflowSpec("weekly_digest", model_family="intensive"),
     WorkflowSpec("site_promote_content", model_family="promotion"),
     # Release-notes announcement (agent/release_notes.py, ported from Oliver):
     # Elixir's first-person "what I can do now" post — chat-tier, no tools.
     WorkflowSpec("release_notes", tools=[], max_tool_rounds=1, tools_allowed=False,
-                 model_family="chat"),
+                 model_family="intensive"),
 )
 
 WORKFLOW_SPECS = {spec.name: spec for spec in _WORKFLOW_SPECS}
