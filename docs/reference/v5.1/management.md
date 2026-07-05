@@ -65,29 +65,49 @@ sizes the corps → hysteresis paces the moves.**
 
 - **Tenure:** `tenure_days ≥ PROMOTE_TENURE_MIN (28)`. Four weeks in the clan
   or you are not considered, period.
-- **War participation (mandatory floor):** played war on **≥1 finalized battle
-  day in the last 14 days** (`WAR_FLOOR_DAYS = 1`, `WAR_FLOOR_WINDOW = 14`).
-  Elders must participate in wars at *some* level; zero participation is
-  disqualifying regardless of donations.
+- **Competitive-contribution floor (war OR ranked):** you must compete for the
+  clan's prestige in *some* arena — **either** played war on ≥1 finalized
+  battle day (decks used) in the last 14 days (`WAR_FLOOR_DAYS = 1`,
+  `WAR_FLOOR_WINDOW = 14`), **or** hold a meaningful Ranked standing:
+  **Champion league (4) or above** (`RANKED_FLOOR_LEAGUE = 4`), using the
+  **better of current and last-season league** so the monthly reset never
+  strips credit. Ratified 2026-07-05 (Jamie): "it is a point of pride to have
+  ranked players" — a Ultimate Champion who grinds Ranked instead of wars is
+  contributing to the clan's prestige, not shirking. A member who does neither
+  meaningful wars nor meaningful ranked is not elder material.
 
-Members failing a filter are simply absent from the ranking (neither promotable
-nor — if already an elder — protected: an elder who fails the war floor becomes
-a demotion candidate directly, §3.4).
+Members failing a filter are absent from the ranking. An elder who fails the
+competitive floor **entirely** (no wars AND no ranked standing) becomes a
+demotion candidate directly (§3.4) — but ranked standing alone satisfies it, so
+the UC grinder is protected.
 
 ### 3.2 The score (rank order among filtered members)
 
-A war-weighted blend of the member's standing *within the current roster*:
+A blend of the member's **competitive contribution** and generosity, *within
+the current roster*:
 
 ```
-score = 0.65 · war_rate_percentile + 0.35 · donation_percentile
+competitive = max(war_rate_percentile, ranked_prestige)
+score       = 0.65 · competitive + 0.35 · donation_percentile
 ```
 
 - **war_rate** = decks used ÷ decks available over the trailing war weeks
-  (continuous — "more is better", the core elder duty, weighted highest).
-- **donations** = the closed-week donation volume ("lead by example").
-- Percentiles are computed over the active non-leadership roster each weekly
-  review, so the bar is the clan itself and self-calibrates. Weights
-  `SCORE_W_WAR = 0.65`, `SCORE_W_DONATION = 0.35`.
+  (continuous — "more is better", a core way to compete for the clan).
+- **ranked_prestige** = an **absolute** 0–1 from the member's best-of
+  (current, last-season) Ranked league + rating — "reached Ultimate Champion"
+  is an achievement in absolute terms, not relative-to-clan. League map:
+  Champion (4) ≈ 0.5, Grand Champion (5) ≈ 0.65, Royal Champion (6) ≈ 0.8,
+  Ultimate Champion (7) ≈ 0.9–1.0 scaled by rating; below Champion → 0.
+- `competitive = max(...)`: you get credit for your **best** arena — a war
+  stalwart with no ranked and a UC grinder with no wars both land high; nobody
+  is punished for specializing. Ratified 2026-07-05 (Jamie's two knobs:
+  Champion floor + UC-weighted absolute prestige).
+- **donations** = the closed-week donation volume ("lead by example"),
+  percentile within the roster.
+- Percentiles compute over the active non-leadership roster each weekly review,
+  so the bar self-calibrates. Weights `SCORE_W_WAR = 0.65`,
+  `SCORE_W_DONATION = 0.35` (the war weight now names the whole competitive
+  term).
 - **Battle/laddering is NOT in the elder score** (Jamie 2026-07-05) — general
   activity belongs to the kick path (§3.5), not elder-worthiness.
 
@@ -175,7 +195,8 @@ re-deriving anything. `state_json` holds each machine's internals
 | ~~`DONOR_WEEK_MIN`~~ | *removed 2026-07-05* | donations are now a ranking input (percentile), not a filter |
 | **Elder band** (2026-07-05) | | |
 | `PROMOTE_TENURE_MIN` | 28 days | four-week hard filter before elder consideration |
-| `WAR_FLOOR_DAYS` / `WAR_FLOOR_WINDOW` | 1 / 14 | mandatory war participation floor (≥1 finalized day in 14) |
+| `WAR_FLOOR_DAYS` / `WAR_FLOOR_WINDOW` | 1 / 14 | war half of the competitive floor (≥1 finalized day in 14) |
+| `RANKED_FLOOR_LEAGUE` | 4 (Champion) | ranked half of the competitive floor; best-of current/last season |
 | `SCORE_W_WAR` / `SCORE_W_DONATION` | 0.65 / 0.35 | war-weighted rank blend; war is the core elder duty |
 | `ELDER_BAND_FLOOR` / `ELDER_BAND_CEIL` | 0.15 / 0.20 | elder share of the non-leadership roster (range, not quota) |
 | `WORTHINESS_MIN_PERCENTILE` | 0.50 | below-floor promotions still require ≥ roster-median score |
