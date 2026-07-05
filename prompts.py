@@ -40,6 +40,14 @@ CHANNEL_LANE_CONFIG = {
         "memory_scope": "public",
         "durable_memory_enabled": True,
     },
+    "battle-feed": {
+        "workflow": "channel_update",
+        "tool_policy": "read_only",
+        "reply_policy": "disabled",
+        "singleton": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": False,
+    },
     "arena-relay": {
         "workflow": "channel_update",
         "tool_policy": "read_only",
