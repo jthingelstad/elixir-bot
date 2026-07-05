@@ -177,3 +177,78 @@ def test_job_routes_copy_through_editor_gate():
         assert rows[0]["final_copy"] == revised["content"]
     finally:
         conn.close()
+
+
+# --- rehearsal-driven tool fixes (2026-07-04) -------------------------------
+
+def test_list_card_owners_display_level_math():
+    import db as _db
+    from storage.cards import list_card_owners
+
+    conn = _db.get_connection()
+    try:
+        conn.execute("INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
+                     "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', '2026-07-04', 1)")
+        conn.execute("INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+                     "VALUES ('#OWN1', 'Owner', '2026-06-01', '2026-07-04')")
+        conn.execute("INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
+                     "VALUES ('#OWN1', '2026-06-01', 'test')")
+        conn.execute("INSERT INTO card_catalog (card_id, name, max_level, rarity, card_type, synced_at) "
+                     "VALUES (99001, 'Testloon', 14, 'legendary', 'troop', '2026-07-04')")
+        # level 14 of maxLevel 14 => display 16 (maxed)
+        conn.execute("INSERT INTO player_card_collection (player_tag, card_id, level, observed_at) "
+                     "VALUES ('#OWN1', 99001, 14, '2026-07-04')")
+        conn.commit()
+        result = list_card_owners('Testloon', conn=conn)
+        assert result["count"] == 1
+        assert result["owners"][0]["member"] == "Owner"
+        assert result["owners"][0]["display_level"] == 16
+        # case-insensitive lookup
+        assert list_card_owners('testloon', conn=conn)["count"] == 1
+    finally:
+        conn.close()
+
+
+def test_donations_aspect_compact_and_labeled():
+    import db as _db
+    from agent.tool_exec import _execute_get_clan_roster
+
+    conn = _db.get_connection()
+    try:
+        conn.execute("INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
+                     "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', '2026-07-04', 1)")
+        conn.execute("INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+                     "VALUES ('#DON1', 'Giver', '2026-06-01', '2026-07-04')")
+        conn.execute("INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
+                     "VALUES ('#DON1', '2026-06-01', 'test')")
+        conn.execute("INSERT INTO player_current_state (player_tag, observed_at, donations_week) "
+                     "VALUES ('#DON1', '2026-07-04', 456)")
+        conn.commit()
+    finally:
+        conn.close()
+    result = _execute_get_clan_roster({"aspect": "donations"})
+    assert result["top_donors_this_week"][0] == {"name": "Giver", "donated": 456, "received": 0}
+    assert "THIS WEEK" in result["note"]
+
+
+def test_respond_in_channel_author_identity_line():
+    from unittest.mock import patch
+
+    import elixir_agent
+
+    captured = {}
+
+    def fake_chat(system_prompt, user_msg, **kwargs):
+        captured["user_msg"] = user_msg
+        return {"content": "ok"}
+
+    with patch("elixir_agent._chat_with_tools", side_effect=fake_chat):
+        elixir_agent.respond_in_channel(
+            question="When did I join?", author_name="Vijay",
+            channel_name="#ask-elixir", workflow="interactive",
+            clan_data={}, war_data={},
+            author_identity={"member_name": "Vijay", "player_tag": "#C920YGLC2"},
+        )
+    msg = captured["user_msg"]
+    text = msg if isinstance(msg, str) else str(msg)
+    assert "#C920YGLC2" in text and "do not ask who they are" in text

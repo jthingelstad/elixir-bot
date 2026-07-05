@@ -268,6 +268,11 @@ TOOLS = [
             "- longest_tenure: longest-tenured active members\n"
             "- role_changes: recent promotions or demotions\n"
             "- max_cards: members ranked by level 16 card count\n"
+            "- card_owners: clan-wide owners of ONE card (args: card_name, "
+            "maxed_only default true) — use for 'who has X maxed?' instead of "
+            "per-member lookups\n"
+            "- donations: top donors THIS WEEK (compact; use for any weekly "
+            "donation question — the full list may truncate)\n"
             "- trends: compare clan metrics (member count, clan score, total trophies, "
             "battle activity) across recent window vs prior same-length window. Uses "
             "`window_days` (default 7) for the comparison window and `days` (default 30) "
@@ -283,8 +288,18 @@ TOOLS = [
                     "default": "list",
                     "enum": [
                         "list", "summary", "recent_joins", "longest_tenure",
-                        "role_changes", "max_cards", "trends",
+                        "role_changes", "max_cards", "card_owners", "donations",
+                        "trends",
                     ],
+                },
+                "card_name": {
+                    "type": "string",
+                    "description": "For card_owners: the card to look up (e.g. 'Balloon').",
+                },
+                "maxed_only": {
+                    "type": "boolean",
+                    "description": "For card_owners: only owners at display level 16. Default true.",
+                    "default": True,
                 },
                 "days": {
                     "type": "integer",

@@ -67,10 +67,12 @@ def refresh_player_state(conn, player_tag, profile_payload, roster_entry, observ
     p = profile_payload or {}
     r = roster_entry or {}
     arena = p.get("arena") or {}
-    lsp = p.get("leagueStatistics") or {}
-    current = (lsp.get("currentSeason") or {}) if isinstance(lsp, dict) else {}
-    ranked_league = (p.get("currentPathOfLegendSeasonResult") or {}).get("leagueNumber")
-    ranked_trophies = current.get("trophies")
+    _ranked_now = p.get("currentPathOfLegendSeasonResult") or {}
+    ranked_league = _ranked_now.get("leagueNumber")
+    # Rating comes from the RANKED result, not leagueStatistics.currentSeason
+    # (that's trophy-road trophies — rehearsal 2026-07-04 found 14,000 stored
+    # as a "rating" while the real UC rating was 1,867).
+    ranked_trophies = _ranked_now.get("trophies")
     deck = p.get("currentDeck")
     # NOTE: `r` is the PROJECTED roster entry (engine/emitters/clan.py
     # project_clan_aspects — snake_case keys), not a raw CR memberList item.

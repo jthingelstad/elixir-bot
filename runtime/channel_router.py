@@ -1429,6 +1429,15 @@ async def route_message(message):
                     discord_message_id=message.id,
                 )
 
+                author_identity = None
+                try:
+                    from storage.identity import get_linked_member_for_discord_user
+
+                    author_identity = await asyncio.to_thread(
+                        get_linked_member_for_discord_user, message.author.id
+                    )
+                except Exception:
+                    app.log.debug("asker link lookup failed", exc_info=True)
                 result = await asyncio.to_thread(
                     elixir_agent.respond_in_channel,
                     question=question,
@@ -1440,6 +1449,7 @@ async def route_message(message):
                     conversation_history=conversation_history,
                     memory_context=memory_context,
                     image_blocks=ctx.get("image_blocks"),
+                    author_identity=author_identity,
                 )
                 failure = _classify_agent_result(result)
                 if failure:
