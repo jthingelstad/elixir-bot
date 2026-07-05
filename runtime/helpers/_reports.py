@@ -344,7 +344,7 @@ def _build_clan_status_report(clan=None, war=None):
             f"rank {war_status.get('race_rank')}" if war_status.get("race_rank") is not None else None,
             f"fame {_fmt_num(war_status.get('fame'))}",
             f"repair {_fmt_num(war_status.get('repair_points'))}",
-            f"score {_fmt_num(war_status.get('clan_score'))}",
+            f"score {_fmt_num(war_status.get('war_league_score'))}",
         ]
         lines.append(f"- War now: {' | '.join(bit for bit in war_bits if bit)}")
 
@@ -432,7 +432,7 @@ def _build_war_status_report(clan=None, war=None):
             war_status.get("phase_display"),
             f"rank {war_status.get('race_rank')}" if war_status.get("race_rank") is not None else None,
             f"fame {_fmt_num(war_status.get('fame'))}",
-            f"score {_fmt_num(war_status.get('clan_score'))}",
+            f"score {_fmt_num(war_status.get('war_league_score'))}",
             f"period {_fmt_num(war_status.get('period_points'))}" if war_status.get("period_points") is not None else None,
             "finished yes" if war_status.get("race_completed") else None,
             f"finish {war_status.get('finish_time')}" if war_status.get("finish_time") else None,

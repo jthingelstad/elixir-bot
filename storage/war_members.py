@@ -90,7 +90,14 @@ def get_member_war_stats(tag, conn=None):
         "WHERE wp.player_tag = ? ORDER BY wp.season_id DESC, wp.section_index DESC",
         (canon,),
     ).fetchall()
-    return [_member_reference_fields(conn, canon, dict(row)) for row in rows]
+    out = []
+    for row in rows:
+        d = _member_reference_fields(conn, canon, dict(row))
+        # One row per RACE WEEK — "fame 0" here means this week, not the
+        # season (battery case 53: the model read the top row as a season).
+        d["scope"] = "single_race_week"
+        out.append(d)
+    return out
 
 
 @managed_connection

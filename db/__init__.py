@@ -342,11 +342,16 @@ def _get_current_membership(conn: sqlite3.Connection, player_tag: str):
 
 def _trusted_current_joined_at(conn: sqlite3.Connection, player_tag: str) -> Optional[str]:
     membership = conn.execute(
+        # roster_diff = the v5.1 engine OBSERVED the join (most direct evidence
+        # there is); its absence here made recent_joins blind to every
+        # post-migration member (battery finding 2026-07-04, case 22).
         "SELECT joined_at FROM clan_memberships "
-        "WHERE player_tag = ? AND left_at IS NULL AND join_source IN ('manual_record', 'observed_join', 'clan_api_snapshot') "
+        "WHERE player_tag = ? AND left_at IS NULL AND join_source IN "
+        "('manual_record', 'observed_join', 'roster_diff', 'clan_api_snapshot') "
         "ORDER BY CASE join_source "
         "WHEN 'manual_record' THEN 1 "
         "WHEN 'observed_join' THEN 2 "
+        "WHEN 'roster_diff' THEN 2 "
         "WHEN 'clan_api_snapshot' THEN 3 "
         "ELSE 99 END, joined_at DESC, membership_id DESC LIMIT 1",
         (_canon_tag(player_tag),),
@@ -361,7 +366,15 @@ def _current_joined_at(conn: sqlite3.Connection, player_tag: str) -> Optional[st
     ).fetchone()
     if meta and meta["joined_at"]:
         return meta["joined_at"]
-    return None
+    # No curated date -> the engine's membership row is the truth (new joiners
+    # have no metadata row until a leader writes one; they must still count).
+    membership = conn.execute(
+        "SELECT joined_at FROM clan_memberships "
+        "WHERE player_tag = ? AND left_at IS NULL "
+        "ORDER BY joined_at DESC, membership_id DESC LIMIT 1",
+        (_canon_tag(player_tag),),
+    ).fetchone()
+    return membership["joined_at"] if membership else None
 
 
 _MEMBER_METADATA_COLUMNS = frozenset({
