@@ -340,3 +340,50 @@ def test_raw_payload_page():
         assert "POAP KINGS" in await r.text()
 
     _client_run(body)
+
+
+def test_role_action_card_gets_clan_chat_copy(monkeypatch):
+    """Every promotion/demotion/kick card must carry a clan-chat 'why' message.
+    Guards the lazy-import path in _ensure_role_action_clan_chat_copy (a bad
+    import there silently killed card posting, live 2026-07-05)."""
+    import asyncio
+    import runtime.app as app
+    import db
+
+    from storage.leader_actions import create_leader_action_recommendation
+
+    conn = db.get_connection()
+    try:
+        created = create_leader_action_recommendation(
+            action_type="promotion_recommendation",
+            objective="Promote X",
+            rationale="Ultimate Champion and strong war contributor.",
+            target_player_tag="#X",
+            target_player_name="Xavier",
+            source_signal_key="test:role-copy",
+            source_signal_type="leadership_manual",
+            conn=conn,
+        )
+        aid = created["action_id"]
+        action = dict(conn.execute(
+            "SELECT * FROM leader_action_recommendations WHERE action_id=?", (aid,)).fetchone())
+    finally:
+        conn.close()
+
+    # Force the deterministic fallback (no live LLM in tests).
+    async def _boom(*a, **k):
+        raise RuntimeError("no LLM in tests")
+    monkeypatch.setattr("runtime.clan_chat_copy.generate_clan_chat_copy", _boom)
+
+    out = asyncio.run(app._ensure_role_action_clan_chat_copy(action))
+    assert out.get("copy_current_text")  # copy attached via deterministic fallback
+    assert "Xavier" in out["copy_current_text"]
+
+    conn = db.get_connection()
+    try:
+        persisted = conn.execute(
+            "SELECT copy_current_text FROM leader_action_recommendations WHERE action_id=?", (aid,)
+        ).fetchone()[0]
+        assert persisted and "Xavier" in persisted  # persisted, not just in-memory
+    finally:
+        conn.close()
