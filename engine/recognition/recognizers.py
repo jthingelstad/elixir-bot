@@ -448,8 +448,10 @@ def clan_recognizer(conn, now: str) -> dict:
                 ev = management.elder_evidence(conn, tag, now)
                 if ev:
                     payload["elder_evidence"] = ev
-            except Exception:
-                pass
+            except Exception as exc:
+                from storage.incidents import record_incident
+                record_incident("recognition.elder_evidence_enrich", exc,
+                                context={"tag": tag}, severity="warn", conn=conn)
         intent_id = delivery.raise_intent(
             conn, r["dedup_key"], f"clan:{et}", compose.route("clan:x", r["scope"]),
             r["scope"], payload, now,
@@ -529,8 +531,10 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
                                 else "close_race" if abs(_ours - _rival) <= 2000
                                 else "behind"),
                         }
-                except Exception:
-                    pass
+                except Exception as exc:
+                    from storage.incidents import record_incident
+                    record_incident("recognition.war_standings_enrich", exc,
+                                    severity="warn", conn=conn)
         if et == "season_closed":
             champ, fp = payload.get("war_champ_tag"), payload.get("free_pass_tag")
             payload["war_champ_name"] = compose.resolve_name(conn, champ)

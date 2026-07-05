@@ -168,8 +168,10 @@ def _standouts(conn, members: dict, per_player: dict, limit: int = 3) -> list[di
             identity = player_mode_profile(conn, r["tag"]).get("identity")
             if identity and identity not in ("quiet",):
                 r["identity"] = identity
-        except Exception:
-            pass
+        except Exception as exc:
+            from storage.incidents import record_incident
+            record_incident("pulse.identity_enrich", exc,
+                            context={"tag": r.get("tag")}, severity="warn", conn=conn)
         r.pop("tag", None)
     return ranked
 
