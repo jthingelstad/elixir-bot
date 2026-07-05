@@ -39,10 +39,6 @@ RANKED_MIN_DECIDED = 12
 RANKED_MIN_WINS = 9
 RANKED_MIN_WIN_RATE = 0.70
 
-# trophy_push thresholds (detectors.py:334–335, verbatim)
-PUSH_MIN_BATTLES = 3
-PUSH_MIN_DELTA = 100
-_PUSH_SCAN_DAYS = 3   # window for run re-assembly across cursor boundaries
 
 
 def _payload(row) -> dict:
@@ -112,60 +108,6 @@ def _arena_up_candidates(conn, tags: set[str]) -> list[Candidate]:
     return out
 
 
-def _trophy_push_candidates(conn, tags: set[str], now: str) -> list[Candidate]:
-    """Run accumulation ported from BattleTrophyPushDetector (detectors.py
-    ~322–390): consecutive positive trophy-change competitive battles; a run
-    ends at a non-positive battle or end-of-stream; keyed on the run's LAST
-    battle."""
-    cutoff = _cr_compact((parse_utc(now) or datetime.now(timezone.utc))
-                         - timedelta(days=_PUSH_SCAN_DAYS))
-    out: list[Candidate] = []
-
-    def flush(tag, run):
-        delta = sum(r["trophy_change"] for r in run)
-        if len(run) >= PUSH_MIN_BATTLES and delta >= PUSH_MIN_DELTA:
-            last = run[-1]
-            # Keyed on the run's FIRST battle: stable as the run extends.
-            # The carried last-battle keying re-claimed the same climb under a
-            # new key every time it grew (live finding 2026-07-04: one player,
-            # one climb, multiple ledger claims — pure ledger noise since the
-            # scorer suppressed them all). One push run = one claim.
-            out.append(Candidate(
-                key=f"trophy_push:{tag}:{run[0]['battle_time']}",
-                event_type="trophy_push",
-                subject_tag=tag,
-                occurred_at=last["battle_time"],
-                payload={
-                    "subject_tag": tag, "event_type": "trophy_push",
-                    "battle_count": len(run), "trophy_delta": delta,
-                    "from_trophies": run[0]["starting_trophies"],
-                    "to_trophies": last["starting_trophies"] + last["trophy_change"],
-                    "timing": "exact", "occurred_at": last["battle_time"],
-                },
-                event_refs=[r["dedup_key"] for r in run],
-            ))
-
-    for tag in sorted(tags):
-        rows = conn.execute(
-            """SELECT dedup_key, battle_time, trophy_change, starting_trophies
-               FROM battle_events
-               WHERE player_tag = ? AND is_competitive = 1
-                 AND trophy_change IS NOT NULL AND starting_trophies IS NOT NULL
-                 AND battle_time >= ?
-               ORDER BY battle_time ASC, dedup_key ASC""",
-            (tag, cutoff),
-        ).fetchall()
-        run: list = []
-        for r in rows:
-            if r["trophy_change"] > 0:
-                run.append(r)
-            else:
-                flush(tag, run)
-                run = []
-        flush(tag, run)
-    return out
-
-
 def _ranked_pulse_candidate(conn, now: str) -> list[Candidate]:
     """Port of RankedActivityPulseDetector: one clan-wide candidate per day,
     only when volume + record are both strong. Membership = open
@@ -231,7 +173,11 @@ def battle_candidates(conn, now: str) -> tuple[list[Candidate], int]:
     new_pos = rows[-1]["rowid"]
     tags = {r["player_tag"] for r in rows}
     out = _arena_up_candidates(conn, tags)
-    out += _trophy_push_candidates(conn, tags, now)
+    # trophy_push retired 2026-07-05 (Jamie): 31 claims / 0 posts / 0 accrual
+    # citations since go-live - max score 50 vs threshold 80, structurally
+    # unable to post. A climb is a TREND (daily battle rollups own it), not a
+    # moment; the ledger claims moments. Joins hot_streak in the retired-
+    # concept ledger (events.md battle-moments table).
     out += _ranked_pulse_candidate(conn, now)
     return out, new_pos
 
