@@ -169,6 +169,13 @@ def create_backup(
             src_conn.close()
     except Exception as exc:
         result["error"] = str(exc)
+        # A failed backup that goes unnoticed is how the offsite copy went stale
+        # for weeks — make it visible in the ledger, not just the return value.
+        try:
+            from storage.incidents import record_incident
+            record_incident("backup.create", exc, context={"dest": str(dest)})
+        except Exception:
+            pass
         # Clean up partial output on failure.
         try:
             dest.unlink(missing_ok=True)
