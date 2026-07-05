@@ -21,3 +21,6 @@ elixir-v5*.db*
 # AGENT-TEAM per-run scratch (roles' notes; noisy). Role defs, scripts, and the
 # Manager's summaries/ ARE committed — only the raw run notes are ignored.
 AGENT-TEAM/notes/
+
+# Pre-v5.1 .env backup (secrets — never commit)
+.env.pre-v51
