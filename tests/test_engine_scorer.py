@@ -107,6 +107,27 @@ def test_decide_sums_stored_evidence(engine_conn):
     assert post is True and score == 85
 
 
+def test_decide_accrues_suppressed_ranked_pulse_ledger(engine_conn):
+    for day in ("20260629", "20260630"):
+        engine_conn.execute(
+            """INSERT INTO recognition_ledger
+                 (recognition_key, stream, event_refs_json, score, claimed_at)
+               VALUES (?, 'battle', ?, 30, ?)""",
+            (
+                f"ranked_pulse:#A:{day}",
+                json.dumps({"refs": [f"battle_events:#A:{day}"]}),
+                f"{day[:4]}-{day[4:6]}-{day[6:8]}T12:00:00Z",
+            ),
+        )
+    engine_conn.commit()
+
+    selected = _cand("ranked_pulse", key="ranked_pulse:#A:20260701")
+    post, score, trace = decide(engine_conn, "#A", selected, [selected], None)
+    assert post is True
+    assert score == 90
+    assert len(trace["recognition_evidence"]) == 3
+
+
 def test_decide_cutoff_at_last_highlight(engine_conn):
     engine_conn.execute(
         "INSERT INTO player_events (dedup_key, event_type, player_tag, observed_at,"

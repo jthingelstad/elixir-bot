@@ -188,6 +188,7 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn,
             if n:
                 polling.update_heat(conn, tag, new_battles=True, now=now_iso)
         counters["battles_ingested"] = new_battles_total
+        conn.commit()
 
     # -- step 3: EMIT — diff baselines → events; calendar once per Chicago day
     with _guard(counters, "emit", conn):
@@ -237,6 +238,8 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn,
     with _guard(counters, "manage", conn):
         transitions = management.run_tick_evaluators(conn, now=now_iso)
         counters["kick_transitions"] = len(transitions)
+        withdrawals = management.withdraw_stale_actions(conn, now=now_iso)
+        counters["management_withdrawals"] = sum(int(w.get("count", 1)) for w in withdrawals)
         if transitions:
             from storage.leader_actions import create_leader_action_recommendation
 
