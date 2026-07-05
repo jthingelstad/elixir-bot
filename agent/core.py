@@ -61,11 +61,11 @@ def _get_client():
 
 
 def _chat_model_name():
-    return os.getenv("ELIXIR_CHAT_MODEL", "claude-sonnet-4-6")
+    return os.getenv("ELIXIR_CHAT_MODEL", "claude-sonnet-5")
 
 
 def _promotion_model_name():
-    return os.getenv("ELIXIR_PROMOTION_MODEL", "claude-sonnet-4-6")
+    return os.getenv("ELIXIR_PROMOTION_MODEL", "claude-sonnet-5")
 
 
 def _lightweight_model_name():

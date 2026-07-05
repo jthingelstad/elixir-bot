@@ -123,7 +123,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ActivityDefinition(
         activity_key="daily-clan-insight",
         owner_lane="ask-elixir",
-        purpose="Share one playful, data-driven hidden fact in the dedicated Elixir conversation channel.",
+        purpose="Capability-discovery spotlight: one thing Elixir can do, one real data nugget, copy-pasteable next questions.",
         job_id="daily-clan-insight",
         job_function="_ask_elixir_daily_insight",
         schedule_kind="cron",
