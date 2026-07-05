@@ -440,6 +440,16 @@ def clan_recognizer(conn, now: str) -> dict:
         name = compose.resolve_name(conn, tag)
         if name:
             payload["player_name"] = name
+        # A promotion post should carry Elixir's OWN reasoning for why they
+        # earned Elder (the elder-band evidence), not a bare "🎉 promoted!".
+        if et == "role_changed" and payload.get("direction") == "promoted" and tag:
+            try:
+                from engine import management
+                ev = management.elder_evidence(conn, tag, now)
+                if ev:
+                    payload["elder_evidence"] = ev
+            except Exception:
+                pass
         intent_id = delivery.raise_intent(
             conn, r["dedup_key"], f"clan:{et}", compose.route("clan:x", r["scope"]),
             r["scope"], payload, now,

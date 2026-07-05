@@ -32,7 +32,12 @@ ELDER_BAND_FLOOR = 0.15      # elder share of the non-leadership roster ...
 ELDER_BAND_CEIL = 0.20       # ... a range to maintain, NOT a quota to fill
 WORTHINESS_MIN_PERCENTILE = 0.50   # below-floor promotions still need ≥ median score
 PROMOTE_QUALIFYING_WEEKS = 3  # sustained weeks in the promotable set
-DEMOTE_WEEKS = 2             # deliberately fewer — demotion is easier than promotion
+DEMOTE_WEEKS = 2             # abandonment demotion cadence (easier than promotion)
+# Anti-flap deadband (§3.4): a member displaces an elder only when they out-score
+# them by ≥ SWAP_MARGIN, so near-boundary jitter never swaps the seat. 0.05 of the
+# 0–1 blend ≈ a clear one-tier gap on the dominant (competitive×0.65) term — big
+# enough that a hair-lead is ignored, small enough that a real overtake lands.
+SWAP_MARGIN = 0.05
 
 # --- Kick path + Layer-1 evidence signals (unchanged by the band)
 WAR_QUALIFY_RATE = 0.75      # legacy war_reliable signal — evidence rendering only
@@ -316,9 +321,11 @@ def _elder_scores(conn, now: str, week_anchor: str) -> dict:
 
 
 def _elder_band(conn, scores: dict, now: str) -> dict:
-    """Size the corps to 15–20% of the ranked roster and select the promotable
-    / demotable sets (§3.3–3.4). Deterministic ranking: score desc, then tenure
-    desc, then tag asc."""
+    """The elder corps TRACKS THE RANKING (§3.3–3.4, ratified 2026-07-05): the
+    Elders should be the top-K of the eligible roster, K sized to the 15–20%
+    band. An elder loses the seat by being outranked (a swap) or by abandoning
+    the competitive floor. Swaps are guarded by SWAP_MARGIN + sustained weeks so
+    they never flap. Deterministic ranking: score desc, tenure desc, tag asc."""
     n = len(scores)
     order = sorted(scores.items(), key=lambda kv: (-kv[1]["score"], -kv[1]["tenure"], kv[0]))
     rank = {tag: i + 1 for i, (tag, _) in enumerate(order)}
@@ -329,46 +336,102 @@ def _elder_band(conn, scores: dict, now: str) -> dict:
     median = score_vals[n // 2] if n and n % 2 else (
         (score_vals[n // 2 - 1] + score_vals[n // 2]) / 2 if n else 0.0)
 
-    # Promotable: only when below floor, only filter-passing members, top-ranked,
-    # and only those clearing the worthiness floor (≥ median score). "Range, not
-    # quota" — a thin/weak clan promotes nobody rather than the undeserving.
-    promotable: set[str] = set()
-    if current_elders < floor:
-        need = floor - current_elders
-        candidates = [
-            tag for tag, _ in order
-            if scores[tag]["role"] == "member"
-            and (scores[tag]["tenure"] or 0) >= PROMOTE_TENURE_MIN
-            and _passes_competitive_floor(conn, tag, now)
-            and scores[tag]["score"] >= median
-        ]
-        promotable = set(candidates[:need])
-
-    # Demotable (§3.4): an elder who abandoned the war duty (direct, any rank —
-    # even below floor: not doing the job outranks slot math), PLUS, only when
-    # OVER the ceiling, the lowest-ranked participating elders needed to get
-    # back to the ceiling. A participating elder inside the band is never
-    # churned — "a range to maintain, not a quota to fill" cuts both ways.
-    demotable: set[str] = set()
-    participating_elders = []
-    for tag, r in scores.items():
-        if r["role"] != "elder":
-            continue
-        # Auto-demote only when BOTH floors fail — a UC Ranked grinder who
-        # skips clan war is doing a core duty, just a different one (§3.4).
+    # Eligibility to HOLD elder: pass the competitive floor (war OR ranked).
+    # A member additionally needs the tenure filter to be promotable IN; an
+    # elder who fails the floor entirely has ABANDONED the duty (fast demote).
+    def _eligible(tag: str) -> bool:
+        r = scores[tag]
         if not _passes_competitive_floor(conn, tag, now):
-            demotable.add(tag)
-        else:
-            participating_elders.append(tag)
-    overflow = len(participating_elders) - ceil
-    if overflow > 0:
-        # lowest-ranked (highest rank number) participating elders first
-        for tag in sorted(participating_elders, key=lambda t: -rank[t])[:overflow]:
-            demotable.add(tag)
+            return False
+        if r["role"] == "elder":
+            return True
+        return (r["tenure"] or 0) >= PROMOTE_TENURE_MIN
+
+    abandoned = {
+        tag for tag, r in scores.items()
+        if r["role"] == "elder" and not _passes_competitive_floor(conn, tag, now)
+    }
+    eligible_order = [tag for tag, _ in order if _eligible(tag)]
+
+    # K = the target corps size, clamped into the band around the current count
+    # (grow toward the floor, shrink toward the ceiling, otherwise hold + swap).
+    k = min(max(current_elders, floor), ceil)
+    should_be = set(eligible_order[:k])
+    # Below-floor growth still requires worthiness (≥ median) so a thin/weak
+    # clan promotes nobody rather than elevating the undeserving to hit 15%.
+    if current_elders < floor:
+        should_be = {
+            t for t in should_be
+            if scores[t]["role"] == "elder" or scores[t]["score"] >= median
+        }
+
+    want_promote = [t for t in should_be if scores[t]["role"] == "member"]
+    outranked = [
+        t for t, r in scores.items()
+        if r["role"] == "elder" and t not in should_be and t not in abandoned
+    ]
+
+    # Displacement swaps carry the anti-flap deadband: pair the boundary member
+    # with the boundary elder (both closest to the K line) and only swap when the
+    # member clears SWAP_MARGIN. A near-tie holds the incumbent.
+    demote_reasons = {t: "abandoned" for t in abandoned}
+    promotable: set[str] = set()
+    demotable: set[str] = set(abandoned)
+    prom_by_rank = sorted(want_promote, key=lambda t: rank[t])
+    out_by_rank = sorted(outranked, key=lambda t: rank[t])
+    paired = min(len(prom_by_rank), len(out_by_rank))
+    for i in range(paired):
+        m, e = prom_by_rank[i], out_by_rank[i]
+        if scores[m]["score"] - scores[e]["score"] >= SWAP_MARGIN:
+            promotable.add(m)
+            demotable.add(e)
+            demote_reasons[e] = "outranked"
+        # else: deadband — the seat holds, the challenge is cancelled this week
+    # Unpaired promotes = genuine empty slots (below-floor growth): promote.
+    for m in prom_by_rank[paired:]:
+        promotable.add(m)
+    # Unpaired outranked = over-ceiling overflow: demote to return to the band.
+    for e in out_by_rank[paired:]:
+        demotable.add(e)
+        demote_reasons[e] = "outranked"
 
     return {
         "n": n, "floor": floor, "ceil": ceil, "current_elders": current_elders,
-        "rank": rank, "median": median, "promotable": promotable, "demotable": demotable,
+        "rank": rank, "median": median, "promotable": promotable,
+        "demotable": demotable, "demote_reasons": demote_reasons,
+        "should_be": should_be,
+    }
+
+
+def elder_evidence(conn, tag: str, now: str | None = None) -> dict | None:
+    """The 'why this member is Elder-worthy' facts, for composing a grounded
+    promotion post (§3.2). Elixir's OWN reasoning — score, rank, and the
+    strongest components — so #clan-events explains the promotion instead of a
+    bare '🎉 promoted!'. Returns None if the member isn't rankable (leadership)."""
+    from engine.normalize import ranked_league_name
+
+    now = now or utcnow()
+    week_anchor = now[:10]
+    try:
+        scores = _elder_scores(conn, now, week_anchor)
+    except Exception:
+        return None
+    me = scores.get(tag)
+    if not me:
+        return None
+    order = sorted(scores.items(), key=lambda kv: (-kv[1]["score"], -kv[1]["tenure"], kv[0]))
+    rank = next((i + 1 for i, (t, _) in enumerate(order) if t == tag), None)
+    league = me.get("ranked_league") or 0
+    return {
+        "elder_score": round(me["score"], 3),
+        "rank": rank,
+        "roster_size": len(scores),
+        "war_deck_rate": round(me.get("war_rate") or 0.0, 2),
+        "ranked_league": league,
+        "ranked_league_name": ranked_league_name(league) if league >= RANKED_FLOOR_LEAGUE else None,
+        "ranked_prestige": round(me.get("ranked_prestige") or 0.0, 2),
+        "donations_week": me.get("donations") or 0,
+        "competitive": round(me.get("competitive") or 0.0, 2),
     }
 
 
@@ -650,22 +713,26 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
                 rationale=f"Below-band elder slot: {band_evidence}; held {p_weeks} wk.",
             ))
 
-        # Demote (elder → member) — 2 weeks, no grace (easier than promotion)
+        # Demote (elder → member). Cadence depends on WHY (§3.4): abandonment
+        # of the competitive floor is fast (DEMOTE_WEEKS=2); being outranked
+        # matches the challenger's promotion cadence (PROMOTE_QUALIFYING_WEEKS=3)
+        # so the swap lands together and the count never dips mid-swap.
         d_state = m["demote_state"] or "none"
         d_gate = tag in band["demotable"]
+        d_reason = band.get("demote_reasons", {}).get(tag)
+        d_threshold = DEMOTE_WEEKS if d_reason == "abandoned" else PROMOTE_QUALIFYING_WEEKS
         d_weeks = st.get("demote_weeks", 0)
         if d_gate:
             d_weeks += 1
-            d_state = "eligible" if d_weeks >= DEMOTE_WEEKS else "building"
+            d_state = "eligible" if d_weeks >= d_threshold else "building"
         else:
             if d_state in ("eligible", "recommended"):
                 withdrawn.append({"player_tag": tag, "kind": "demote"})
             d_state, d_weeks = "none", 0
         st["demote_weeks"] = d_weeks
         if d_state == "eligible":
-            floor_ok = sc and _passes_competitive_floor(conn, tag, now)
-            reason = ("abandoned both war and ranked duty" if not floor_ok
-                      else "ranked below the elder band (over ceiling)")
+            reason = ("abandoned both war and ranked duty" if d_reason == "abandoned"
+                      else "outranked — the elder seat goes to a higher-ranked member")
             demote_eligible.append(_eligibility_row(
                 m, kind="demote",
                 rationale=f"{reason}: {band_evidence}; held {d_weeks} wk.",

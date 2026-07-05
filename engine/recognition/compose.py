@@ -261,6 +261,15 @@ def intent_context(conn, intent_row) -> str:
             "If tenure_days is present, acknowledge their time with us "
             "concretely. Never speculate about why they left."
         )
+    elif payload.get("event_type") == "role_changed" and payload.get("direction") == "promoted":
+        ask = (
+            "A member was just promoted to Elder. Compose a short, warm "
+            "#clan-events celebration that EXPLAINS why they earned it, using "
+            "the elder_evidence facts (their Ranked standing, war deck rate, "
+            "donations — whichever are their strength). " + naming +
+            "A bare '<name> was promoted' with no reason is a failure; so is "
+            "inventing anything not in elder_evidence."
+        )
     else:
         history = _subject_history(conn, tag, lane_leadership) if tag else []
         if history:
@@ -318,7 +327,15 @@ def render_intent(intent_row) -> str:
     if et == "member_left":
         return f"👋 {subj} has left the clan. Wishing them well."
     if et == "role_changed":
-        return f"🎉 {subj} was promoted to {p.get('new_role')}!"
+        ev = p.get("elder_evidence") or {}
+        reasons = []
+        if ev.get("ranked_league_name"):
+            reasons.append(ev["ranked_league_name"])
+        if (ev.get("war_deck_rate") or 0) >= 0.5:
+            reasons.append("a war regular")
+        why = f" — {' and '.join(reasons)}" if reasons else ""
+        role = p.get("new_role") or "elder"
+        return f"🎉 {subj} earned {role.capitalize()}{why}. Well deserved!"
     if et in ("member_birthday", "clan_birthday", "join_anniversary"):
         return f"🎂 Celebrating {subj} today!"
     if et == "weekly_donation_leader":
