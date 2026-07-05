@@ -207,6 +207,21 @@ def main() -> int:
                 print(proc.stderr[-2000:])
 
     conn.close()
+
+    # Confidence tests: the static/seam/cold-start guards run every gate so a
+    # bad import, a missing lane registration, or a cold-start FK regression is
+    # caught here as well as in the suite (confidence plan Phases 1 & 3).
+    print("\nconfidence tests (entrypoints, lanes, pipeline, cold-start)...")
+    ct = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q",
+         "tests/test_entrypoints_smoke.py", "tests/test_lane_registration.py",
+         "tests/test_pipeline_integration.py", "tests/test_cold_start_tick.py"],
+        capture_output=True, text=True, cwd=_REPO,
+    )
+    gates["confidence tests"] = ct.returncode == 0
+    if ct.returncode != 0:
+        print(ct.stdout[-1500:])
+
     print("\n=== GATES ===")
     ok = True
     for k, v in gates.items():

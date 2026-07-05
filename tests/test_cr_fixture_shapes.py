@@ -151,3 +151,36 @@ def test_annotate_never_throws_on_real_payloads(fixture, endpoint):
     payload = load_cr_fixture(fixture)
     out = annotate(payload, endpoint)
     assert out is not None
+
+
+# --- bidirectional seam contract: emitter WRITES → projection READS ----------
+# The camelCase-vs-snake_case regression (2026-07-04): the roster projection
+# writes snake_case, but refresh_player_state read camelCase off it, so
+# exp_level / clan_rank / donations_received came back NULL for weeks ("average
+# level 16"). This asserts a real roster member round-trips through the
+# projection into player_current_state with its values intact.
+
+def test_roster_projection_round_trips_into_player_state(engine_conn):
+    from engine.db import canon_tag, ensure_player
+    from engine.emitters.clan import project_clan_aspects
+    from engine.projections import refresh_player_state
+
+    clan = load_cr_fixture("clan")
+    roster = project_clan_aspects(clan)["roster"]["members"]
+    # pick a member with a real, non-zero clan_rank + donations
+    tag, member = next(iter(roster.items()))
+    raw = next(m for m in clan["memberList"] if canon_tag(m["tag"]) == tag)
+
+    ensure_player(engine_conn, tag, member.get("name"), "2026-07-05T00:00:00Z")
+    refresh_player_state(engine_conn, tag, None, member, "2026-07-05T00:00:00Z")
+    engine_conn.commit()
+
+    row = dict(engine_conn.execute(
+        "SELECT clan_rank, donations_week, donations_received_week "
+        "FROM player_current_state WHERE player_tag = ?", (tag,)).fetchone())
+    # These are the exact fields the camelCase bug NULL'd — they must carry the
+    # raw CR values through the snake_case projection.
+    assert row["clan_rank"] == raw["clanRank"], "clan_rank lost across the seam"
+    assert row["donations_week"] == raw["donations"], "donations lost across the seam"
+    assert row["donations_received_week"] == raw["donationsReceived"], \
+        "donations_received lost across the seam"
