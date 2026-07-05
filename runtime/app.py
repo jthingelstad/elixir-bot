@@ -23,6 +23,7 @@ from runtime.activities import format_scheduler_startup_summary, register_schedu
 from runtime.admin import admin_command_requires_leader, dispatch_admin_command
 from runtime.channel_router import route_message
 from runtime.discord_commands import register_elixir_app_commands
+from runtime.leader_action_policy import can_post_leader_action
 from runtime import onboarding
 from runtime import process as _process_service
 from runtime import prompt_feedback
@@ -1143,14 +1144,21 @@ async def _weekly_leadership_review():
             chicago_now = datetime.now(_pytz.timezone("America/Chicago"))
             monday = chicago_now.date() - timedelta(days=chicago_now.weekday())
             result = engine_management.run_weekly_review(conn, monday.isoformat())
-            from storage.leader_actions import create_leader_action_recommendation
+            from storage.leader_actions import (
+                auto_withdraw_leader_actions,
+                create_leader_action_recommendation,
+            )
 
             for kind, action_type in (
                 ("promote_eligible", "promotion_recommendation"),
                 ("demote_eligible", "demotion_recommendation"),
             ):
                 for row in result.get(kind) or []:
+                    if isinstance(row, str):
+                        row = {"player_tag": row}
                     tag = row.get("player_tag")
+                    if not tag:
+                        continue
                     create_leader_action_recommendation(
                         action_type=action_type,
                         objective=f"{action_type.replace('_', ' ')} for {row.get('player_name') or tag}",
@@ -1165,6 +1173,27 @@ async def _weekly_leadership_review():
                         source_signal_type="engine_weekly_review",
                         conn=conn,
                     )
+            withdrawn_actions = 0
+            for item in result.get("withdrawn") or []:
+                if not isinstance(item, dict):
+                    continue
+                action_type = {
+                    "promote": "promotion_recommendation",
+                    "demote": "demotion_recommendation",
+                    "kick": "kick_recommendation",
+                }.get(item.get("kind"))
+                if not action_type or not item.get("player_tag"):
+                    continue
+                withdrawn_actions += auto_withdraw_leader_actions(
+                    action_type=action_type,
+                    target_player_tag=item.get("player_tag"),
+                    reason=(
+                        f"Auto-withdrawn by weekly leadership review: "
+                        f"{item.get('kind')} candidacy no longer meets its gate."
+                    ),
+                    conn=conn,
+                )
+            result["withdrawn_actions"] = withdrawn_actions
             conn.commit()
             return result
         finally:
