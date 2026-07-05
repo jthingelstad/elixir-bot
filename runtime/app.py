@@ -314,6 +314,7 @@ from runtime.discord_posting import (  # noqa: E402,F401
     _normalize_entry_posts,
     _post_to_elixir,
     _resolve_custom_emoji,
+    compose_and_post,
 )
 from runtime.clan_chat_copy import (  # noqa: E402,F401
     generate_clan_chat_copy,
