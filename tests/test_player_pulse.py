@@ -42,11 +42,9 @@ def _seed_battle(conn, tag: str, when: str, *, outcome="W", cf=3, ca=0,
 
 
 def _set_anchor(conn, iso: str):
-    conn.execute(
-        """INSERT INTO runtime_job_status (job_name, status_json, updated_at)
-           VALUES ('player_pulse', ?, '2026-07-05T00:00:00Z')
-           ON CONFLICT(job_name) DO UPDATE SET status_json = excluded.status_json""",
-        (json.dumps({"last_summary": f"waiting anchor={iso}"}),))
+    # The anchor lives in stream_cursors (the restart-proof home; the
+    # runtime_job_status row is re-created on restart — live 2026-07-05).
+    pp.write_anchor(conn, pp._parse_iso(iso))
     conn.commit()
 
 
