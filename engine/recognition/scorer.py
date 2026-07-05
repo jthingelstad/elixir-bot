@@ -8,6 +8,7 @@ arena_up (85, bypass; same-tick priority 90) — ratified 2026-07-03.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -158,6 +159,45 @@ def _evidence_rows(conn, subject_tag: str, anchor: datetime, cutoff_at: str | No
     return out
 
 
+def _derived_ledger_evidence(conn, subject_tag: str, anchor: datetime, cutoff_at: str | None):
+    """Suppressed derived battle moments do not have player_events rows, but
+    they still claimed the ledger. Count their base moment score for accrual;
+    never reuse the ledger's `score` column here because suppressed rows may
+    store the accumulated decision score, not the single event score.
+    """
+    window_start = anchor - ACCRUAL_WINDOW
+    cutoff_dt = parse_utc(cutoff_at)
+    rows = conn.execute(
+        """SELECT recognition_key, event_refs_json, claimed_at
+           FROM recognition_ledger
+           WHERE stream = 'battle'
+             AND intent_id IS NULL
+             AND recognition_key LIKE ?
+           ORDER BY claimed_at""",
+        (f"ranked_pulse:{subject_tag}:%",),
+    ).fetchall()
+    out = []
+    for r in rows:
+        occurred_at = r["claimed_at"]
+        try:
+            blob = json.loads(r["event_refs_json"] or "{}")
+        except (TypeError, ValueError):
+            blob = {}
+        for item in (blob.get("suppressed") or {}).get("recognition_evidence") or []:
+            if item.get("dedup_key") == r["recognition_key"] and item.get("occurred_at"):
+                occurred_at = item["occurred_at"]
+                break
+        t = parse_utc(occurred_at)
+        if t is None or t < window_start or t > anchor:
+            continue
+        if cutoff_dt is not None and t <= cutoff_dt:
+            continue
+        score, _ = base_score("ranked_pulse", {})
+        if score > 0:
+            out.append((r["recognition_key"], "ranked_pulse", score, occurred_at))
+    return out
+
+
 def decide(conn, subject_tag: str, selected: Candidate, group: list[Candidate],
            last_highlight: str | None) -> tuple[bool, int, dict]:
     """The accrual decision (recognition.md §3 steps 3–5).
@@ -179,6 +219,10 @@ def decide(conn, subject_tag: str, selected: Candidate, group: list[Candidate],
         score, _ = base_score(r["event_type"], payload)
         if score > 0:
             evidence[r["dedup_key"]] = (r["event_type"], score, r["observed_at"])
+    for key, event_type, score, occurred_at in _derived_ledger_evidence(
+        conn, subject_tag, anchor, last_highlight
+    ):
+        evidence[key] = (event_type, score, occurred_at)
     for cand in group:
         score, _ = base_score(cand.event_type, cand.payload)
         if score > 0:

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 from engine.offline import OfflineEngine
+from engine.tick import run_tick
 
 
 def _clan(members):
@@ -102,3 +104,43 @@ def test_offline_replay_idempotent(tmp_path, v51_schema_template):
     assert eng.conn.execute(
         "SELECT COUNT(*) FROM player_events WHERE event_type='level_up'"
     ).fetchone()[0] == 1
+
+
+def test_tick_ingest_commit_survives_later_emit_failure(tmp_path, v51_schema_template, monkeypatch):
+    import shutil
+
+    db_path = str(tmp_path / "tick-ingest.db")
+    shutil.copy(v51_schema_template, db_path)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+
+    class Api:
+        def get_clan(self):
+            return json.loads(_clan([("#A", "Al", 10)]))
+
+        def get_current_war(self):
+            return None
+
+        def get_player_battle_log(self, tag):
+            return json.loads(_battlelog())
+
+        def get_player(self, tag):
+            return json.loads(_profile(tag, "Al", 44, 4990))
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("emit failed after ingest")
+
+    monkeypatch.setattr("engine.tick.emit", boom)
+
+    try:
+        counters = run_tick(
+            conn,
+            api=Api(),
+            send_fn=lambda *a, **k: None,
+            compose_fn=lambda *a, **k: "",
+        )
+        assert "emit_error" in counters
+        assert conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 1
+    finally:
+        conn.close()
