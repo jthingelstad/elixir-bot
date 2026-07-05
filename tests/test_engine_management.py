@@ -439,3 +439,24 @@ def test_never_battled_member_anchored_on_own_seen_not_epoch(engine_conn):
     # Old code: idle-since-epoch (30d) -> at_risk/recommended. New: their own
     # last_seen_at is fresh -> none.
     assert _kick_state(engine_conn, "#NOBATTLES") == "none"
+
+
+def test_manual_leadership_action_survives_reconciliation(engine_conn):
+    # A leadership-initiated manual promotion must NOT be auto-withdrawn just
+    # because the evaluator state is 'none' (off-cycle override — live 2026-07-05).
+    from storage.leader_actions import create_leader_action_recommendation
+    _seed_member(engine_conn, tag="#MANUAL", role="member")
+    create_leader_action_recommendation(
+        action_type="promotion_recommendation",
+        objective="Promote #MANUAL",
+        rationale="Leadership override.",
+        target_player_tag="#MANUAL",
+        source_signal_key="manual:promote:test",
+        source_signal_type="leadership_manual",
+        conn=engine_conn,
+    )
+    management.withdraw_stale_actions(engine_conn, now=NOW)
+    status = engine_conn.execute(
+        "SELECT status FROM leader_action_recommendations WHERE target_player_tag='#MANUAL'"
+    ).fetchone()["status"]
+    assert status == "proposed"  # not auto-withdrawn
