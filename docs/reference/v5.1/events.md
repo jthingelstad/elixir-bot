@@ -45,7 +45,7 @@ Derived battle moments (recognition candidates; keys claimed in the ledger):
 | Moment | Ledger key | Computed from | Notes |
 |---|---|---|---|
 | `arena_up` | `arena_up:{tag}:{arena_id}` | a battle whose `starting_trophies + trophy_change` crosses an arena boundary | **New** (§11: battle primary). Arena thresholds are game knowledge (`cr_knowledge.py`); Path-of-Legend excluded. |
-| `trophy_push` | `trophy_push:{tag}:{first_battle_time}` | a run of ≥3 consecutive positive-trophy competitive battles totaling ≥100; **anchored on the run's *first* battle** (revised 2026-07-04: the carried last-battle anchor re-claimed the same climb under a new key each time it extended — pure ledger noise, found live via the Observatory; one push run = one claim) | Carries `battle_trophy_push`; delta-scaled score in recognition.md. |
+| `trophy_push` | — | — | **Retired 2026-07-05** (Jamie: ancient-version artifact — confirmed: 31 claims / 0 posts / 0 accrual citations since go-live; max score 50 vs threshold 80, structurally unable to post). A climb is a trend — `player_daily_battle_rollups` owns it; the ledger claims moments. Joins `hot_streak` in the retired-concept ledger. |
 | `hot_streak` | — | — | **Not computed in v5.1.** Matches today exactly: the detector exists but is intentionally not registered (`detectors.py` `ALL_DETECTORS` comment) — redundant with `trophy_push` (`communication.py:26–31`). It therefore contributes nothing to accrual evidence either. Listed only so the concept's disposition is recorded (C2 mapping §6). |
 | `ranked_pulse` | `ranked_pulse:{tag}:{chicago_day}` | ≥N Path-of-Legend battles in a day | Carries `ranked_activity_pulse` (`detectors.py:495`). |
 
