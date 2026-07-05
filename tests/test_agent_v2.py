@@ -14,7 +14,10 @@ def test_execute_tool_get_clan_roster_list():
     with patch("elixir_agent.db") as mock_db:
         mock_db.list_members.return_value = [{"player_tag": "#ABC123", "member_name": "King Levy"}]
         result = json.loads(elixir_agent._execute_tool("get_clan_roster", {"aspect": "list"}))
-        assert result == [{"player_tag": "#ABC123", "member_name": "King Levy"}]
+        # 2026-07-04 rehearsal: list is wrapped with an in-band semantics note
+        # (the model misread donations_week as lifetime and refused an answer).
+        assert result["members"] == [{"player_tag": "#ABC123", "member_name": "King Levy"}]
+        assert "THIS WEEK" in result["note"]
         mock_db.list_members.assert_called_once_with()
 
 
@@ -419,7 +422,10 @@ def test_execute_tool_get_war_season_summary_uses_db():
     with patch("elixir_agent.db") as mock_db:
         mock_db.get_war_season_summary.return_value = {"season_id": 129, "races": 4}
         result = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "summary"}))
-        assert result == {"season_id": 129, "races": 4}
+        # current_week_top rides along for no-season-id summaries (fail-open
+        # [] under this mocked db) — the this-week contributors fix.
+        assert result["season_id"] == 129 and result["races"] == 4
+        assert result["current_week_top"] == []
         mock_db.get_war_season_summary.assert_called_once_with(season_id=None, top_n=10)
 
 

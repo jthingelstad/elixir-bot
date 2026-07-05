@@ -827,8 +827,14 @@ def analyze_arena_relay_screenshot(question, *, author_name, channel_name,
 
 
 def respond_in_channel(question, author_name, channel_name, workflow, clan_data, war_data,
-                       conversation_history=None, memory_context=None, image_blocks=None):
-    """Channel Q&A for interactive/clanops workflows."""
+                       conversation_history=None, memory_context=None, image_blocks=None,
+                       author_identity=None):
+    """Channel Q&A for interactive/clanops workflows.
+
+    author_identity: the asker's linked clan member ({member_name, member_tag})
+    when a Discord link exists — "my stats"-style questions resolve to the
+    right player instead of a display-name guess (rehearsal 2026-07-04: every
+    'my' question dead-ended in "who are you?" without it)."""
     if workflow not in {"interactive", "clanops"}:
         raise ValueError(f"unsupported channel workflow: {workflow}")
     lightweight_turn = workflow == "interactive" and _is_lightweight_ask_elixir_turn(channel_name, question)
@@ -856,6 +862,13 @@ def respond_in_channel(question, author_name, channel_name, workflow, clan_data,
         user_msg = (
             f"Latest user message to answer from '{author_name}' in {channel_name}: {question}\n\n"
             f"{context}"
+        )
+    if author_identity and (author_identity.get("member_name") or author_identity.get("player_tag")):
+        user_msg += (
+            f"\n\n(Asker identity: '{author_name}' is linked to clan member "
+            f"{author_identity.get('member_name')} {author_identity.get('player_tag') or ''} — "
+            "questions about 'me'/'my' refer to that member; use the tag directly, "
+            "do not ask who they are.)"
         )
     if trend_context:
         user_msg += f"\n\n{trend_context}"

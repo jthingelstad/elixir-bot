@@ -595,6 +595,38 @@ def _war_card_names(conn: sqlite3.Connection, member_tag: str) -> set[str]:
 
 
 @managed_connection
+def list_card_owners(
+    card_name: str,
+    maxed_only: bool = True,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """Clan-wide owners of one card — the 'who has X maxed?' question in ONE
+    query (rehearsal 2026-07-04: the per-member tool answered it via 30
+    sequential calls and still missed owners past the call budget)."""
+    name = (card_name or "").strip()
+    if not name:
+        return {"error": "card_name required"}
+    rows = conn.execute(
+        """SELECT p.current_name AS member, cc.name AS card,
+                  pcc.level + MAX(0, 16 - cc.max_level) AS display_level,
+                  pcc.evolution_level
+           FROM player_card_collection pcc
+           JOIN card_catalog cc ON cc.card_id = pcc.card_id
+           JOIN players p ON p.player_tag = pcc.player_tag
+           JOIN clan_memberships cm ON cm.player_tag = pcc.player_tag
+                AND cm.left_at IS NULL
+           WHERE cc.name = ? COLLATE NOCASE
+           ORDER BY display_level DESC, p.current_name COLLATE NOCASE""",
+        (name,),
+    ).fetchall()
+    owners = [dict(r) for r in rows]
+    if maxed_only:
+        owners = [o for o in owners if (o["display_level"] or 0) >= 16]
+    return {"card": name, "maxed_only": maxed_only, "count": len(owners),
+            "owners": owners}
+
+
+@managed_connection
 def lookup_member_cards(
     tag: str,
     filter: Optional[dict] = None,

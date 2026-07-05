@@ -603,6 +603,38 @@ def _war_standings_freshness(season_id=None):
     }
 
 
+def _current_week_war_top(limit: int = 10) -> list[dict]:
+    """Per-member fame for the CURRENT war section (this week), active members.
+    Fail-open: any error returns [] (the summary is still useful without it)."""
+    try:
+        conn = _facade_db().get_connection()
+    except Exception:
+        return []
+    try:
+        row = conn.execute(
+            "SELECT season_id, MAX(section_index) AS section FROM war_participation "
+            "WHERE season_id = (SELECT MAX(season_id) FROM war_participation) "
+            "GROUP BY season_id"
+        ).fetchone()
+        if not row:
+            return []
+        rows = conn.execute(
+            """SELECT p.current_name AS name, wp.fame, wp.decks_used
+               FROM war_participation wp
+               JOIN players p ON p.player_tag = wp.player_tag
+               JOIN clan_memberships cm ON cm.player_tag = wp.player_tag
+                    AND cm.left_at IS NULL
+               WHERE wp.season_id = ? AND wp.section_index = ?
+               ORDER BY wp.fame DESC LIMIT ?""",
+            (row["season_id"], row["section"], limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
 def _execute_get_war_season(arguments):
     """Execute the consolidated get_war_season tool."""
     aspect = arguments.get("aspect", "summary")
@@ -610,7 +642,13 @@ def _execute_get_war_season(arguments):
     limit = arguments.get("limit", 10)
 
     if aspect == "summary":
-        return db.get_war_season_summary(season_id=season_id, top_n=limit)
+        result = db.get_war_season_summary(season_id=season_id, top_n=limit)
+        # "top contributors THIS WEEK" needs the current section's per-member
+        # fame, not season cumulative (rehearsal 2026-07-04: the model answered
+        # season totals to a this-week question because only those existed).
+        if isinstance(result, dict) and not season_id:
+            result["current_week_top"] = _current_week_war_top(limit)
+        return result
     elif aspect == "standings":
         metric = arguments.get("metric", "fame")
         if metric == "fame":
@@ -662,6 +700,34 @@ def _execute_get_war_season(arguments):
 
 # ── Clan domain execution ─────────────────────────────────────────────────
 
+def _donations_this_week(limit: int = 10) -> dict:
+    """Top donors this week (CR resets the counter Monday). Fail-open."""
+    try:
+        conn = _facade_db().get_connection()
+    except Exception:
+        return {"note": "donation data unavailable", "top_donors_this_week": []}
+    try:
+        rows = conn.execute(
+            """SELECT p.current_name AS name,
+                      COALESCE(pcs.donations_week, 0) AS donated,
+                      COALESCE(pcs.donations_received_week, 0) AS received
+               FROM player_current_state pcs
+               JOIN players p ON p.player_tag = pcs.player_tag
+               JOIN clan_memberships cm ON cm.player_tag = pcs.player_tag
+                    AND cm.left_at IS NULL
+               ORDER BY donated DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return {
+            "note": "donations reset Monday; these are THIS WEEK's counts",
+            "top_donors_this_week": [dict(r) for r in rows],
+        }
+    except Exception:
+        return {"note": "donation data unavailable", "top_donors_this_week": []}
+    finally:
+        conn.close()
+
+
 def _execute_get_clan_roster(arguments):
     """Execute the consolidated get_clan_roster tool."""
     aspect = arguments.get("aspect", "list")
@@ -669,7 +735,26 @@ def _execute_get_clan_roster(arguments):
     limit = arguments.get("limit", 10)
 
     if aspect == "list":
-        return db.list_members()
+        # Rehearsal 2026-07-04: the model read donations_week as "lifetime"
+        # and refused the question — spell the semantics out in-band.
+        return {
+            "note": ("donations_week / donations_received_week are THIS WEEK's "
+                     "counts (CR resets them Monday); they are fully answerable "
+                     "for any asker — not leadership-restricted."),
+            "members": db.list_members(),
+        }
+    elif aspect == "card_owners":
+        from storage import cards as _cards_storage
+
+        return _cards_storage.list_card_owners(
+            arguments.get("card_name") or "",
+            maxed_only=bool(arguments.get("maxed_only", True)),
+        )
+    elif aspect == "donations":
+        # Compact this-week leaderboard — the full list truncates past the
+        # tool char limit and the members block gets dropped (rehearsal
+        # 2026-07-04: the model could never see weekly donation counts).
+        return _donations_this_week(limit)
     elif aspect == "summary":
         return db.get_clan_roster_summary()
     elif aspect == "recent_joins":
@@ -733,6 +818,42 @@ def _execute_get_clan_health(arguments, workflow=None):
         return {"error": f"Unknown aspect: {aspect}"}
 
 
+def _ranked_current_standings(limit: int = 10) -> list[dict]:
+    """Current Ranked standings for active members: league desc, rating desc.
+    Reads player_current_state (rating source fixed 2026-07-04 — it was
+    trophy-road trophies)."""
+    from engine.normalize import ranked_league_name
+
+    try:
+        conn = _facade_db().get_connection()
+    except Exception:
+        return []
+    try:
+        rows = conn.execute(
+            """SELECT p.current_name AS name, pcs.ranked_league AS league,
+                      pcs.ranked_trophies AS rating
+               FROM player_current_state pcs
+               JOIN players p ON p.player_tag = pcs.player_tag
+               JOIN clan_memberships cm ON cm.player_tag = pcs.player_tag
+                    AND cm.left_at IS NULL
+               WHERE pcs.ranked_league IS NOT NULL
+               ORDER BY pcs.ranked_league DESC,
+                        COALESCE(pcs.ranked_trophies, 0) DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [
+            {"name": r["name"], "league": r["league"],
+             "league_name": ranked_league_name(r["league"]),
+             "rating": r["rating"]}
+            for r in rows
+        ]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
 def _execute_get_clan_game_modes(arguments):
     aspect = arguments.get("aspect", "summary")
     days = arguments.get("days", 30)
@@ -750,6 +871,10 @@ def _execute_get_clan_game_modes(arguments):
             "mode_mix": summary["by_group"],
             "ranked_activity": summary["ranked_activity"],
             "ranked_profiles": summary["ranked_profiles"],
+            # "Top Ranked player" = standings (league, then rating) — NOT
+            # battle volume; rehearsal 2026-07-04: the volume framing crowned
+            # the wrong player. Era-correct names from the normalizer.
+            "current_standings": _ranked_current_standings(),
         }
     if aspect == "side_modes":
         return {
