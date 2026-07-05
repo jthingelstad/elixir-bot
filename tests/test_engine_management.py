@@ -2,6 +2,7 @@
 promote path, kick path with guards."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 from engine import management
@@ -460,3 +461,101 @@ def test_manual_leadership_action_survives_reconciliation(engine_conn):
         "SELECT status FROM leader_action_recommendations WHERE target_player_tag='#MANUAL'"
     ).fetchone()["status"]
     assert status == "proposed"  # not auto-withdrawn
+
+
+def test_swap_member_outranks_elder_by_margin(engine_conn):
+    # 13 members, 2 elders (in band 2-3). A strong member clearly out-scores a
+    # weak elder by > SWAP_MARGIN → the member is promotable, the elder demotable
+    # with reason 'outranked' (a swap, count-neutral).
+    for i in range(11):
+        _seed_ranked(engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100)
+    # strong member: UC ranked + high war → top of the roster
+    _seed_ranked(engine_conn, "#STRONG", ranked_league=7, ranked_rating=1980,
+                 war_used=15, war_avail=16, war_days=3, donations=500)
+    _seed_ranked(engine_conn, "#E_STRONG", role="elder", war_used=14, war_avail=16,
+                 war_days=3, donations=450)
+    _seed_ranked(engine_conn, "#E_WEAK", role="elder", war_used=3, war_avail=16,
+                 war_days=1, donations=60)
+    scores, band = _band(engine_conn)
+    assert band["floor"] <= band["current_elders"] <= band["ceil"]
+    assert "#STRONG" in band["promotable"]
+    assert "#E_WEAK" in band["demotable"]
+    assert band["demote_reasons"]["#E_WEAK"] == "outranked"
+    assert "#E_STRONG" not in band["demotable"]      # the strong elder holds
+
+
+def test_swap_deadband_blocks_hair_lead(engine_conn):
+    # A member out-scores an elder by LESS than SWAP_MARGIN → no swap (anti-flap).
+    for i in range(11):
+        _seed_ranked(engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100)
+    # near-tie: member and elder with almost identical output
+    _seed_ranked(engine_conn, "#NEAR_M", war_used=12, war_avail=16, war_days=3, donations=300)
+    _seed_ranked(engine_conn, "#NEAR_E", role="elder", war_used=12, war_avail=16,
+                 war_days=3, donations=295)
+    _seed_ranked(engine_conn, "#E2", role="elder", war_used=13, war_avail=16,
+                 war_days=3, donations=350)
+    scores, band = _band(engine_conn)
+    gap = scores["#NEAR_M"]["score"] - scores["#NEAR_E"]["score"]
+    assert abs(gap) < management.SWAP_MARGIN            # within the deadband
+    assert band["promotable"] == set()                 # no flap
+    assert band["demotable"] == set()
+
+
+def test_outranked_demotion_uses_three_week_cadence(engine_conn):
+    # An outranked elder demotes on the 3-week promote cadence (not the 2-week
+    # abandonment cadence) so the swap lands with the challenger's promotion.
+    for i in range(11):
+        _seed_ranked(engine_conn, f"#P{i}", war_used=4, war_avail=16, war_days=2, donations=100)
+    _seed_ranked(engine_conn, "#CHALLENGER", ranked_league=7, ranked_rating=1980,
+                 war_used=15, war_avail=16, war_days=3, donations=500)
+    _seed_ranked(engine_conn, "#E_HELD", role="elder", war_used=14, war_avail=16,
+                 war_days=3, donations=450)
+    _seed_ranked(engine_conn, "#E_OUT", role="elder", war_used=3, war_avail=16,
+                 war_days=1, donations=60)
+    # two reviews: not yet eligible (needs 3 for outranked)
+    for wk in ("2026-06-29", "2026-07-06"):
+        management.run_weekly_review(engine_conn, wk, now=NOW)
+    row = engine_conn.execute(
+        "SELECT demote_state FROM member_management WHERE player_tag='#E_OUT'").fetchone()
+    assert row["demote_state"] == "building"           # 2 weeks < 3 → not eligible yet
+
+
+def test_elder_evidence_shape_and_none(engine_conn):
+    _seed_ranked(engine_conn, "#EV", ranked_league=7, ranked_rating=1980,
+                 war_used=15, war_avail=16, war_days=3, donations=226)
+    ev = management.elder_evidence(engine_conn, "#EV", now=NOW)
+    assert ev and ev["ranked_league_name"] == "Ultimate Champion"
+    assert ev["war_deck_rate"] >= 0.9 and ev["donations_week"] == 226
+    assert ev["rank"] and ev["elder_score"] > 0
+    assert management.elder_evidence(engine_conn, "#GHOST", now=NOW) is None
+
+
+def test_promotion_fallback_carries_the_why():
+    # The deterministic #clan-events promotion copy must explain WHY, drawn
+    # from elder_evidence — not a bare "🎉 promoted!" (Jamie 2026-07-05).
+    from engine.recognition import compose
+    row = {
+        "intent_type": "clan:role_changed",
+        "payload_json": json.dumps({
+            "event_type": "role_changed", "direction": "promoted",
+            "new_role": "elder", "player_name": "Atternam",
+            "elder_evidence": {"ranked_league_name": "Ultimate Champion",
+                               "war_deck_rate": 0.96, "donations_week": 226},
+        }),
+    }
+    out = compose.render_intent(row)
+    assert "Atternam" in out and "Elder" in out
+    assert "Ultimate Champion" in out          # the why is present
+    assert out != "🎉 Atternam was promoted to elder!"   # not the old bare line
+
+
+def test_promotion_fallback_sane_without_evidence():
+    from engine.recognition import compose
+    row = {
+        "intent_type": "clan:role_changed",
+        "payload_json": json.dumps({
+            "event_type": "role_changed", "direction": "promoted",
+            "new_role": "elder", "player_name": "Newbie"}),
+    }
+    out = compose.render_intent(row)
+    assert "Newbie" in out and "Elder" in out   # graceful with no evidence

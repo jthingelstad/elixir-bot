@@ -120,30 +120,45 @@ co-leaders by role):
 floor   = round(0.15 · N)     ceiling = round(0.20 · N)
 ```
 
-A **range to maintain, not a quota to fill** (Jamie):
+**The corps TRACKS THE RANKING** (Jamie, 2026-07-05 — reverses the earlier
+"never churn an in-band elder" reading): *"it is entirely appropriate for an
+elder to lose because he was outranked — that is by design. Elder isn't held
+if you don't do the things."* The Elders should be the **top-K** of the
+eligible roster, where `K = clamp(current_elders, floor, ceiling)`:
 
-- **Below floor** (too few elders): the top-ranked *filtered members* become
-  promotion candidates — **but only if they clear the worthiness floor**: score
-  ≥ the roster-median score (`WORTHINESS_MIN_PERCENTILE = 0.50`). A thin or weak
-  clan promotes *nobody* rather than elevating the undeserving to hit 15%.
-- **Above ceiling** (too many elders): the lowest-ranked *participating*
-  elders needed to return to the ceiling become demotion candidates.
-- **Inside the band:** no forced moves — a participating elder is never churned
-  for merely ranking low ("a range to maintain, not a quota to fill" cuts both
-  ways). Only a filter failure (war-floor abandonment) moves an in-band elder.
+```
+should_be_elders = top-K by score, among those eligible to hold Elder
+                   (pass the competitive floor; members also need tenure ≥ 28)
+promote_set  = members in should_be_elders who aren't Elders
+demote_set   = Elders NOT in should_be_elders  (outranked OR abandoned)
+```
 
-### 3.4 Hysteresis — demotion is deliberately easier than promotion
+This **unifies** the two ways to lose the seat: *abandonment* (an elder fails
+the competitive floor entirely — removed from the ranking) and *outranked* (a
+member overtakes them past the K line). Below-floor growth still requires the
+**worthiness floor** (score ≥ median, `WORTHINESS_MIN_PERCENTILE = 0.50`) so a
+thin/weak clan promotes nobody rather than the undeserving. "Range, not quota"
+now means the *count* floats in [floor, ceiling] while the *composition* always
+tracks the ranking.
 
-Candidacy still smooths over weeks (no single-week flip promotes or demotes):
+### 3.4 Anti-flap + hysteresis — demotion easier, swaps never oscillate
 
-- **Promotion:** a member must sit in the promotable set (below-floor room AND
-  worthiness-clearing AND top-ranked) for **`PROMOTE_QUALIFYING_WEEKS (3)`**
-  consecutive weekly reviews → `eligible` → `promotion_recommendation`. One
-  miss is grace (counter holds); two consecutive misses reset to `none`.
-- **Demotion:** an elder in the demotable set (over-ceiling-lowest OR failing
-  the war floor OR ranked below the band) for **`DEMOTE_WEEKS (2)`** reviews →
-  `eligible` → `demotion_recommendation`. Fewer weeks, no grace — easier to
-  fall out than to climb in, by design.
+A swap must be *earned and durable*, never a jitter at the boundary:
+
+- **`SWAP_MARGIN = 0.05` deadband:** a member displaces an elder only when they
+  out-score them by ≥ the margin. A near-tie holds the incumbent — so two
+  players trading a hair-lead week to week never swap the seat.
+- **Sustained weeks** (the state machines): a member holds the promotable set
+  for **`PROMOTE_QUALIFYING_WEEKS (3)`** reviews → `eligible`; one miss is
+  grace, two consecutive misses reset.
+- **Reason-specific demotion cadence:**
+  - *outranked* → **3 weeks** (matches the challenger's promotion cadence, so
+    the swap lands together and the count never dips mid-swap);
+  - *abandonment* (failed competitive floor) → **`DEMOTE_WEEKS (2)`**, faster —
+    abandoning the duty shouldn't linger.
+
+Margin + weeks together make oscillation impossible: a swapped-out elder must
+re-clear the margin *and* sustain 3 weeks to swap back.
 - **eligible → recommended → resolved:** the review raises the leader action;
   the clan stream's `role_changed` resolves it and the state returns to `none`
   at the new role. Auto-withdraw: leaving the candidate set two weeks (promote)
@@ -202,8 +217,9 @@ re-deriving anything. `state_json` holds each machine's internals
 | `SCORE_W_WAR` / `SCORE_W_DONATION` | 0.65 / 0.35 | war-weighted rank blend; war is the core elder duty |
 | `ELDER_BAND_FLOOR` / `ELDER_BAND_CEIL` | 0.15 / 0.20 | elder share of the non-leadership roster (range, not quota) |
 | `WORTHINESS_MIN_PERCENTILE` | 0.50 | below-floor promotions still require ≥ roster-median score |
-| `PROMOTE_QUALIFYING_WEEKS` | 3 | sustained weeks in the promotable set |
-| `DEMOTE_WEEKS` | 2 | deliberately fewer — demotion is easier than promotion |
+| `SWAP_MARGIN` | 0.05 | anti-flap deadband — a member displaces an elder only by out-scoring them this much |
+| `PROMOTE_QUALIFYING_WEEKS` | 3 | sustained weeks to promote / to swap out an outranked elder |
+| `DEMOTE_WEEKS` | 2 | abandonment demotion (faster); outranked demotion uses the 3-week promote cadence |
 | **Kick path (unchanged)** | | |
 | `WAR_QUALIFY_RATE` | 0.75 | (legacy signal; retained for evidence rendering) |
 | `BATTLE_DAYS_MIN` | 8 (of 28) | ≈2 battle-days/week floor |
