@@ -32,8 +32,13 @@ def test_git_output_empty_on_bad_command():
 
 
 def test_latest_release_tag_is_versioned():
+    # Environment-independent: a tagless checkout (shallow clone) must not fail
+    # the suite — None is valid. CI now fetches tags; when present, assert shape.
     tag = rn.latest_release_tag()
-    assert tag and tag.startswith("v")
+    if tag is None:
+        import pytest
+        pytest.skip("no v* tags in this checkout")
+    assert tag.startswith("v")
 
 
 def test_release_history_parses_releases_md():

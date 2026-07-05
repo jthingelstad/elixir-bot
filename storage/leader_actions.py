@@ -358,6 +358,74 @@ def create_leader_action_recommendation(
 
 
 @managed_connection
+def auto_withdraw_leader_actions(
+    *,
+    action_type: str,
+    target_player_tag: str | None,
+    reason: str,
+    actor: str = "system:auto-withdraw",
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    """Close open system recommendations when the deterministic state machine
+    no longer supports them.
+
+    v5.1 management calls this an auto-withdraw; the action board's existing
+    terminal status for a non-actioned recommendation is `rejected`, with the
+    note explaining that the system withdrew it rather than a leader declining
+    it manually.
+    """
+    clean_type = (action_type or "").strip()
+    clean_tag = _db._canon_tag(target_player_tag) if target_player_tag else None
+    clean_reason = " ".join((reason or "Auto-withdrawn by the management evaluator.").split())
+    if not clean_type or not clean_tag:
+        return 0
+    rows = conn.execute(
+        """SELECT action_id, case_id
+           FROM leader_action_recommendations
+           WHERE action_type = ? AND target_player_tag = ?
+             AND status = ? AND COALESCE(is_test, 0) = 0""",
+        (clean_type, clean_tag, ACTION_PROPOSED),
+    ).fetchall()
+    if not rows:
+        return 0
+    action_ids = [int(row["action_id"]) for row in rows]
+    now = _db._utcnow()
+    placeholders = ",".join("?" for _ in action_ids)
+    conn.execute(
+        f"""UPDATE leader_action_recommendations
+            SET status = ?, decided_at = ?, decided_by_discord_user_id = ?,
+                decision_emoji = ?, decision_note = ?,
+                decision_note_at = ?, decision_note_by_discord_user_id = ?,
+                updated_at = ?
+            WHERE action_id IN ({placeholders})""",
+        (
+            ACTION_REJECTED,
+            now,
+            actor,
+            "auto-withdraw",
+            clean_reason,
+            now,
+            actor,
+            now,
+            *action_ids,
+        ),
+    )
+    case_ids = sorted({int(row["case_id"]) for row in rows if row["case_id"] is not None})
+    if case_ids:
+        case_placeholders = ",".join("?" for _ in case_ids)
+        conn.execute(
+            f"""UPDATE decision_cases
+                SET status = 'dismissed', resolved_at = ?, resolution = ?,
+                    due_at = NULL, updated_at = ?
+                WHERE case_id IN ({case_placeholders})
+                  AND status NOT IN ('resolved', 'dismissed')""",
+            (now, clean_reason, now, *case_ids),
+        )
+    conn.commit()
+    return len(action_ids)
+
+
+@managed_connection
 def update_leader_action_message(
     action_id: int,
     *,
@@ -1182,6 +1250,7 @@ __all__ = [
     "LEADER_ACTION_FEEDBACK_EVENT_TYPE",
     "build_leader_action_feedback_synthesis_context",
     "build_leader_action_baseline",
+    "auto_withdraw_leader_actions",
     "clear_leader_action_decision_by_message",
     "create_leader_action_recommendation",
     "decide_leader_action",
