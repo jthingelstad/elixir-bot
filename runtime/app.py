@@ -1361,12 +1361,18 @@ async def _watch_game_event_threads(battle_feed_channel_id: int, conn_factory):
         conn = conn_factory()
         try:
             cutoff = "strftime('%Y%m%dT%H%M%S', 'now', '-3 days')"
+            # A room must be EARNED: >=8 battles by >=3 distinct players in the
+            # window. The classifier leaks single-digit misclassified rows
+            # (live 2026-07-05: 3 stray 'Ladder' rows carried special_event and
+            # birthed a public thread); volume+breadth thresholds make stray
+            # rows structurally unable to open rooms.
             fresh = conn.execute(
                 f"""SELECT game_mode_name, MAX(battle_time) last_seen
                     FROM battle_events
                     WHERE mode_group = 'special_event'
                       AND battle_time >= {cutoff}
-                    GROUP BY game_mode_name"""
+                    GROUP BY game_mode_name
+                    HAVING COUNT(*) >= 8 AND COUNT(DISTINCT player_tag) >= 3"""
             ).fetchall()
             rows = conn.execute(
                 "SELECT * FROM event_threads WHERE locked_at IS NULL"
