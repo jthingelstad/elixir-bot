@@ -107,10 +107,29 @@ def _enrich_member_profile(result):
     ranked_last = _parse_json_object("last_path_of_legend_season_result_json")
     ranked_best = _parse_json_object("best_path_of_legend_season_result_json")
     if ranked_current or ranked_last or ranked_best:
+        from engine.normalize import ranked_league_name
+
+        def _name_league(block, *, legacy_ok=True):
+            if not block:
+                return block
+            league = block.get("leagueNumber")
+            if league is None:
+                return block
+            block = dict(block)
+            # best/last can predate the 2025 rework: values above the current
+            # 7-league scheme use the old 10-league Path of Legends scale.
+            if legacy_ok and league > 7:
+                block["league_name"] = (
+                    f"{ranked_league_name(league, legacy=True)} (Path of Legends era)"
+                )
+            else:
+                block["league_name"] = ranked_league_name(league)
+            return block
+
         enriched["ranked_status"] = {
-            "current": ranked_current,
-            "last": ranked_last,
-            "best": ranked_best,
+            "current": _name_league(ranked_current, legacy_ok=False),
+            "last": _name_league(ranked_last),
+            "best": _name_league(ranked_best),
             "wording": "Say Ranked to players; API fields use Path of Legend/pathOfLegend.",
         }
         if ranked_current:
@@ -300,6 +319,21 @@ def _execute_get_member(arguments, workflow=None):
 
     if "form" in include:
         result["form"] = db.get_member_recent_form(member_tag, scope=scope)
+
+    if "profile" in include or "form" in include:
+        # Deterministic mode-mix identity (engine/profiles) — grounded
+        # personality facts; the battery showed member answers never
+        # mentioned Ranked identities without this (cases 26/30).
+        try:
+            from engine import profiles as _profiles
+
+            conn = db.get_connection()
+            try:
+                result["playstyle"] = _profiles.player_mode_profile(conn, member_tag)
+            finally:
+                conn.close()
+        except Exception:
+            pass
 
     if "war" in include:
         result["war"] = db.get_member_war_status(member_tag, season_id=None)
@@ -875,6 +909,33 @@ def _execute_get_clan_game_modes(arguments):
             # battle volume; rehearsal 2026-07-04: the volume framing crowned
             # the wrong player. Era-correct names from the normalizer.
             "current_standings": _ranked_current_standings(),
+        }
+    if aspect == "duos":
+        # 2v2 teammate pairs from battle_events.teammate_tag (battery case 31:
+        # the data existed but no tool exposed pair aggregation).
+        conn = db.get_connection()
+        try:
+            rows = conn.execute(
+                """SELECT p1.current_name AS player, p2.current_name AS teammate,
+                          COUNT(*) AS battles, SUM(b.outcome = 'W') AS wins
+                   FROM battle_events b
+                   JOIN players p1 ON p1.player_tag = b.player_tag
+                   JOIN players p2 ON p2.player_tag = b.teammate_tag
+                   WHERE b.teammate_tag IS NOT NULL
+                     AND b.battle_time >= strftime('%Y%m%dT%H%M%S', 'now', ?)
+                   GROUP BY b.player_tag, b.teammate_tag
+                   HAVING battles >= 2
+                   ORDER BY battles DESC LIMIT ?""",
+                (f"-{days} days", limit),
+            ).fetchall()
+        finally:
+            conn.close()
+        return {
+            "aspect": aspect,
+            "window_days": days,
+            "note": "pairs are directional (player's own logged battles); "
+                    "teammates outside the clan don't appear",
+            "duos": [dict(r) for r in rows],
         }
     if aspect == "side_modes":
         return {

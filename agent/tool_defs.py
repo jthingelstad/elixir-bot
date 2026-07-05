@@ -401,7 +401,7 @@ TOOLS = [
                     "type": "string",
                     "description": "Which view to retrieve. Default: summary.",
                     "default": "summary",
-                    "enum": ["summary", "ranked", "side_modes", "events"],
+                    "enum": ["summary", "ranked", "side_modes", "events", "duos"],
                 },
                 "days": {
                     "type": "integer",

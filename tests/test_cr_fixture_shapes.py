@@ -79,11 +79,13 @@ def test_clan_projection_shape():
     for tag, m in members.items():
         assert tag.startswith("#")
         assert set(m) == ROSTER_MEMBER_KEYS
-    # the camelCase-read regression: these came back NULL for weeks because
-    # the projector read snake_case off a CR payload
-    populated = [m for m in members.values() if m["exp_level"] is not None]
-    assert len(populated) == len(members)
+    # the camelCase-read regression: donations_received came back NULL for
+    # weeks because the projector read snake_case off a CR payload
     assert any(m["donations_received"] for m in members.values())
+    # memberList.expLevel is DEAD at the CR API (always 0 — normalize.md
+    # catalog, battery 2026-07-04): the projection maps it to None so the
+    # profile-sourced value in player_current_state is never clobbered.
+    assert all(m["exp_level"] is None for m in members.values())
 
 
 @pytest.mark.parametrize(

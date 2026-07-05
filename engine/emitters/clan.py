@@ -50,7 +50,9 @@ def project_clan_aspects(payload: dict) -> dict[str, dict]:
             "trophies": m.get("trophies"),
             "donations": m.get("donations"),
             "donations_received": m.get("donationsReceived"),
-            "exp_level": m.get("expLevel"),
+            # memberList.expLevel is 0 for every member (dead at the CR API;
+            # normalize.md catalog). None keeps profile-sourced truth intact.
+            "exp_level": m.get("expLevel") or None,
             "clan_rank": m.get("clanRank"),
             "previous_clan_rank": m.get("previousClanRank"),
         }
