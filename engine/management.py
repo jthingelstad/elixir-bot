@@ -19,13 +19,24 @@ from datetime import datetime, timedelta
 from engine.db import utcnow
 
 # management.md §5 — ratified defaults (move into CLAN.md at the cut).
-# DONOR_WEEK_MIN removed 2026-07-05 — sustained_donor is now median-relative
-# (_week_qualifies_donor); the clan is the bar, not a static number.
-WAR_QUALIFY_RATE = 0.75
+
+# --- Elder band (§3, ratified 2026-07-05): filters → score → band → hysteresis
+PROMOTE_TENURE_MIN = 28       # four-week hard filter before elder consideration
+WAR_FLOOR_DAYS = 1           # mandatory war participation: ≥N played days ...
+WAR_FLOOR_WINDOW = 14        # ... in the last WAR_FLOOR_WINDOW days
+WAR_RATE_WINDOW = 28         # war_rate score window (decks used ÷ available)
+RANKED_FLOOR_LEAGUE = 4      # Champion — the ranked alternative to the war floor
+SCORE_W_WAR = 0.65           # war-weighted rank blend (core elder duty)
+SCORE_W_DONATION = 0.35      # "lead by example" — the lighter half
+ELDER_BAND_FLOOR = 0.15      # elder share of the non-leadership roster ...
+ELDER_BAND_CEIL = 0.20       # ... a range to maintain, NOT a quota to fill
+WORTHINESS_MIN_PERCENTILE = 0.50   # below-floor promotions still need ≥ median score
+PROMOTE_QUALIFYING_WEEKS = 3  # sustained weeks in the promotable set
+DEMOTE_WEEKS = 2             # deliberately fewer — demotion is easier than promotion
+
+# --- Kick path + Layer-1 evidence signals (unchanged by the band)
+WAR_QUALIFY_RATE = 0.75      # legacy war_reliable signal — evidence rendering only
 BATTLE_DAYS_MIN = 8
-PROMOTE_TENURE_MIN = 28
-PROMOTE_QUALIFYING_WEEKS = 4
-DEMOTE_WEEKS = 4
 KICK_CONFIRM_DAYS = 7
 NEW_MEMBER_GRACE = 14
 KICK_WATCH_DAYS = 3          # CLAN.md inactivity_days
@@ -34,6 +45,7 @@ HOLD_NEED = 3
 LAPSE_MAX = 1
 
 ELDER_PLUS = ("elder", "coLeader", "leader")
+LEADERSHIP_ROLES = ("coLeader", "leader")   # excluded from the elder ranking
 
 
 def _parse_ts(value: str) -> datetime:
@@ -172,6 +184,192 @@ def _week_qualifies_battle(conn, tag, week_anchor: str):
     if row is None or row["battle_days_last_28"] is None:
         return None
     return row["battle_days_last_28"] >= BATTLE_DAYS_MIN
+
+
+# ------------------------------------------------ elder band (§3.1–3.4)
+
+def _passes_war_floor(conn, tag, now: str) -> bool:
+    """Mandatory war participation: ≥ WAR_FLOOR_DAYS finalized war days with an
+    actual deck played in the last WAR_FLOOR_WINDOW days (§3.1)."""
+    n = conn.execute(
+        """SELECT COUNT(*) FROM war_attendance_days
+           WHERE player_tag = ? AND decks_used > 0
+             AND julianday(observed_at) >= julianday(?) - ?""",
+        (tag, now, WAR_FLOOR_WINDOW),
+    ).fetchone()[0]
+    return n >= WAR_FLOOR_DAYS
+
+
+def _ranked_standing(conn, tag) -> tuple[int, int]:
+    """Best-of (current, last-season) Ranked league + its rating. Uses only
+    current and last (both post-rework 7-league scale) — never the all-time
+    `best` field, which can carry old 10-league values (normalize.md epoch
+    quirk). Returns (league, rating); (0, 0) when no ranked data."""
+    row = conn.execute(
+        "SELECT ranked_league, ranked_trophies FROM player_current_state WHERE player_tag = ?",
+        (tag,),
+    ).fetchone()
+    cur_lg = (row["ranked_league"] if row else None) or 0
+    cur_rt = (row["ranked_trophies"] if row else None) or 0
+    last_lg, last_rt = 0, 0
+    bl = conn.execute(
+        """SELECT payload_json FROM state_baselines
+           WHERE entity_kind = 'player' AND entity_tag = ? AND aspect = 'ranked'""",
+        (tag,),
+    ).fetchone()
+    if bl:
+        try:
+            last = (json.loads(bl["payload_json"]) or {}).get("last") or {}
+            last_lg = last.get("league") or 0
+            last_rt = last.get("trophies") or 0
+        except (TypeError, ValueError):
+            pass
+    league = max(cur_lg, last_lg)
+    rating = max([rt for lg, rt in ((cur_lg, cur_rt), (last_lg, last_rt)) if lg == league] or [0])
+    return league, rating
+
+
+def _passes_ranked_floor(conn, tag) -> bool:
+    """Champion (league ≥ 4) on the best-of current/last season."""
+    league, _ = _ranked_standing(conn, tag)
+    return league >= RANKED_FLOOR_LEAGUE
+
+
+def _ranked_prestige(league: int, rating: int) -> float:
+    """ABSOLUTE 0–1 prestige from best-of league (not a percentile). Below
+    Champion → 0; UC scales the rating band 1200–2000 into the top +0.1."""
+    base = {4: 0.5, 5: 0.65, 6: 0.8, 7: 0.9}.get(league, 0.0)
+    if league >= 7:
+        base += min(0.1, max(0.0, (rating - 1200) / 800.0 * 0.1))
+    return base
+
+
+def _passes_competitive_floor(conn, tag, now: str) -> bool:
+    """The mandatory floor: war OR ranked. An elder is only auto-demoted for
+    abandonment when BOTH fail (§3.1, §3.4)."""
+    return _passes_war_floor(conn, tag, now) or _passes_ranked_floor(conn, tag)
+
+
+def _war_rate(conn, tag, now: str) -> float:
+    """Decks used ÷ available over the trailing war window (§3.2). 0.0 when the
+    member has no finalized war days — non-participation ranks at the bottom."""
+    row = conn.execute(
+        """SELECT SUM(decks_used) AS used, SUM(decks_available) AS avail
+           FROM war_attendance_days
+           WHERE player_tag = ? AND julianday(observed_at) >= julianday(?) - ?""",
+        (tag, now, WAR_RATE_WINDOW),
+    ).fetchone()
+    if not row or not row["avail"]:
+        return 0.0
+    return (row["used"] or 0) / row["avail"]
+
+
+def _percentile(value: float, values: list[float]) -> float:
+    """Mid-rank percentile of `value` within `values` (ties share the midpoint):
+    (count below + 0.5·count equal) / N. Range (0, 1); robust to ties."""
+    n = len(values)
+    if n == 0:
+        return 0.0
+    below = sum(1 for v in values if v < value)
+    equal = sum(1 for v in values if v == value)
+    return (below + 0.5 * equal) / n
+
+
+def _elder_scores(conn, now: str, week_anchor: str) -> dict:
+    """Rank the active NON-LEADERSHIP roster (members + elders) by a
+    war-weighted percentile blend (§3.2). Leaders/co-leaders are excluded from
+    the ranking entirely. Percentiles are over the whole ranked roster so the
+    bar is the clan itself; filter failures affect candidacy (§3.1), not the
+    distribution."""
+    members = conn.execute(
+        """SELECT mm.player_tag, mm.role, mm.tenure_days, p.current_name
+           FROM member_management mm
+           LEFT JOIN players p ON p.player_tag = mm.player_tag
+           WHERE EXISTS (SELECT 1 FROM clan_memberships cm
+                         WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL)"""
+    ).fetchall()
+    ranked = [m for m in members if (m["role"] or "member") not in LEADERSHIP_ROLES]
+    raw = {}
+    for m in ranked:
+        tag = m["player_tag"]
+        league, rating = _ranked_standing(conn, tag)
+        raw[tag] = {
+            "role": m["role"] or "member",
+            "tenure": m["tenure_days"] or 0,
+            "name": m["current_name"],
+            "war_rate": _war_rate(conn, tag, now),
+            "ranked_league": league,
+            "ranked_prestige": _ranked_prestige(league, rating),
+            "donations": _closed_week_donations(conn, tag, week_anchor) or 0,
+        }
+    war_vals = [r["war_rate"] for r in raw.values()]
+    don_vals = [r["donations"] for r in raw.values()]
+    for r in raw.values():
+        r["war_pct"] = _percentile(r["war_rate"], war_vals)
+        r["donation_pct"] = _percentile(r["donations"], don_vals)
+        # competitive = the better of war-participation percentile and ABSOLUTE
+        # ranked prestige (§3.2): a Ranked specialist who skips clan war ranks
+        # on that specialism, not penalized for it.
+        r["competitive"] = max(r["war_pct"], r["ranked_prestige"])
+        r["score"] = SCORE_W_WAR * r["competitive"] + SCORE_W_DONATION * r["donation_pct"]
+    return raw
+
+
+def _elder_band(conn, scores: dict, now: str) -> dict:
+    """Size the corps to 15–20% of the ranked roster and select the promotable
+    / demotable sets (§3.3–3.4). Deterministic ranking: score desc, then tenure
+    desc, then tag asc."""
+    n = len(scores)
+    order = sorted(scores.items(), key=lambda kv: (-kv[1]["score"], -kv[1]["tenure"], kv[0]))
+    rank = {tag: i + 1 for i, (tag, _) in enumerate(order)}
+    floor = round(ELDER_BAND_FLOOR * n)
+    ceil = round(ELDER_BAND_CEIL * n)
+    current_elders = sum(1 for r in scores.values() if r["role"] == "elder")
+    score_vals = sorted(r["score"] for r in scores.values())
+    median = score_vals[n // 2] if n and n % 2 else (
+        (score_vals[n // 2 - 1] + score_vals[n // 2]) / 2 if n else 0.0)
+
+    # Promotable: only when below floor, only filter-passing members, top-ranked,
+    # and only those clearing the worthiness floor (≥ median score). "Range, not
+    # quota" — a thin/weak clan promotes nobody rather than the undeserving.
+    promotable: set[str] = set()
+    if current_elders < floor:
+        need = floor - current_elders
+        candidates = [
+            tag for tag, _ in order
+            if scores[tag]["role"] == "member"
+            and (scores[tag]["tenure"] or 0) >= PROMOTE_TENURE_MIN
+            and _passes_competitive_floor(conn, tag, now)
+            and scores[tag]["score"] >= median
+        ]
+        promotable = set(candidates[:need])
+
+    # Demotable (§3.4): an elder who abandoned the war duty (direct, any rank —
+    # even below floor: not doing the job outranks slot math), PLUS, only when
+    # OVER the ceiling, the lowest-ranked participating elders needed to get
+    # back to the ceiling. A participating elder inside the band is never
+    # churned — "a range to maintain, not a quota to fill" cuts both ways.
+    demotable: set[str] = set()
+    participating_elders = []
+    for tag, r in scores.items():
+        if r["role"] != "elder":
+            continue
+        # Auto-demote only when BOTH floors fail — a UC Ranked grinder who
+        # skips clan war is doing a core duty, just a different one (§3.4).
+        if not _passes_competitive_floor(conn, tag, now):
+            demotable.add(tag)
+        else:
+            participating_elders.append(tag)
+    overflow = len(participating_elders) - ceil
+    if overflow > 0:
+        # lowest-ranked (highest rank number) participating elders first
+        for tag in sorted(participating_elders, key=lambda t: -rank[t])[:overflow]:
+            demotable.add(tag)
+
+    return {
+        "n": n, "floor": floor, "ceil": ceil, "current_elders": current_elders,
+        "rank": rank, "median": median, "promotable": promotable, "demotable": demotable,
+    }
 
 
 # ------------------------------------------------------ kick path (§3.3)
@@ -375,6 +573,12 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
            WHERE EXISTS (SELECT 1 FROM clan_memberships cm
                          WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL)"""
     ).fetchall()
+
+    # The elder band (§3): score the roster once, size the corps, pick the
+    # promotable/demotable sets. The per-member loop only advances hysteresis.
+    scores = _elder_scores(conn, now, week_anchor)
+    band = _elder_band(conn, scores, now)
+
     for m in members:
         tag = m["player_tag"]
         st = _state(m)
@@ -392,14 +596,22 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
         war = advance_layer1(m["war_reliable"], weeks["war"])
         battle = advance_layer1(m["battle_active"], weeks["battle"])
 
-        # Layer 2 — promote (member → elder only, §3.1)
+        # Layer 2 — the elder band (§3.3–3.4). The band already applied the
+        # filters, worthiness floor, and slot math; here we only pace the move.
         role = m["role"] or "member"
-        holding = sum(1 for s in (donor, war, battle) if s == "holding")
-        gate = (
-            role == "member"
-            and (m["tenure_days"] or 0) >= PROMOTE_TENURE_MIN
-            and holding >= 2
+        sc = scores.get(tag)
+        rank = band["rank"].get(tag)
+        band_evidence = (
+            "not ranked (leadership)" if not sc else
+            f"score {sc['score']:.2f} [competitive {sc['competitive']:.2f} "
+            f"(war {sc['war_pct']:.2f} / ranked {sc['ranked_prestige']:.2f}, "
+            f"league {sc['ranked_league']}), donations {sc['donation_pct']:.2f}], "
+            f"rank {rank} of {band['n']}, band {band['floor']}-{band['ceil']}, "
+            f"elders {band['current_elders']}"
         )
+
+        # Promote (member → elder)
+        gate = tag in band["promotable"]
         p_state = m["promote_state"] or "none"
         p_weeks = m["promote_qualifying_weeks"] or 0
         p_miss = st.get("promote_misses", 0)
@@ -427,17 +639,13 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
         st["promote_misses"] = p_miss
         if p_state == "eligible":
             promote_eligible.append(_eligibility_row(
-                m,
-                kind="promote",
-                rationale=(
-                    f"Promotion gate held: role={role}, tenure_days={m['tenure_days'] or 0}, "
-                    f"holding_signals={holding}, qualifying_weeks={p_weeks}."
-                ),
+                m, kind="promote",
+                rationale=f"Below-band elder slot: {band_evidence}; held {p_weeks} wk.",
             ))
 
-        # Layer 2 — demote (elder → member, §3.2)
+        # Demote (elder → member) — 2 weeks, no grace (easier than promotion)
         d_state = m["demote_state"] or "none"
-        d_gate = role == "elder" and donor == "lapsed" and war == "lapsed"
+        d_gate = tag in band["demotable"]
         d_weeks = st.get("demote_weeks", 0)
         if d_gate:
             d_weeks += 1
@@ -448,13 +656,12 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
             d_state, d_weeks = "none", 0
         st["demote_weeks"] = d_weeks
         if d_state == "eligible":
+            floor_ok = sc and _passes_competitive_floor(conn, tag, now)
+            reason = ("abandoned both war and ranked duty" if not floor_ok
+                      else "ranked below the elder band (over ceiling)")
             demote_eligible.append(_eligibility_row(
-                m,
-                kind="demote",
-                rationale=(
-                    f"Demotion gate held: donor={donor}, war={war}, "
-                    f"demote_weeks={d_weeks}."
-                ),
+                m, kind="demote",
+                rationale=f"{reason}: {band_evidence}; held {d_weeks} wk.",
             ))
 
         st["week_anchor"] = week_anchor

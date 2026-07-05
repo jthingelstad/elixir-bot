@@ -2,7 +2,6 @@
 promote path, kick path with guards."""
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 
 from engine import management
@@ -17,8 +16,8 @@ def test_ratified_constants():
     assert management.WAR_QUALIFY_RATE == 0.75
     assert management.BATTLE_DAYS_MIN == 8
     assert management.PROMOTE_TENURE_MIN == 28
-    assert management.PROMOTE_QUALIFYING_WEEKS == 4
-    assert management.DEMOTE_WEEKS == 4
+    assert management.PROMOTE_QUALIFYING_WEEKS == 3  # elder band (2026-07-05)
+    assert management.DEMOTE_WEEKS == 2               # demotion easier than promotion
     assert management.KICK_CONFIRM_DAYS == 7
     assert management.NEW_MEMBER_GRACE == 14
 
@@ -198,72 +197,232 @@ def test_elder_never_reactive_recommended(engine_conn):
     assert _kick_state(engine_conn) != "recommended"
 
 
-def _run_weeks(conn, tag, qualifying_weeks):
-    """Drive run_weekly_review over consecutive week anchors with the donor
-    metric qualifying (or not) each week."""
-    results = []
-    for i, qualifies in enumerate(qualifying_weeks):
-        anchor_dt = datetime(2026, 5, 4, tzinfo=timezone.utc) + timedelta(weeks=i)
-        anchor = anchor_dt.strftime("%Y-%m-%d")
-        # donor input: the closed week's Sunday metric row
-        sunday = (anchor_dt - timedelta(days=1)).strftime("%Y-%m-%d")
-        conn.execute(
-            "INSERT OR REPLACE INTO player_daily_metrics (player_tag, metric_date, "
-            "donations_week) VALUES (?, ?, ?)",
-            (tag, sunday, 100 if qualifies else 0))
-        # battle-active input: battles spread over the trailing window
-        if qualifies:
-            for d in range(0, 28, 3):
-                bt = (anchor_dt - timedelta(days=d + 1, hours=2)).strftime(
-                    "%Y%m%dT%H%M%S.000Z")
-                conn.execute(
-                    "INSERT OR IGNORE INTO battle_events (dedup_key, player_tag, "
-                    "battle_time, observed_at) VALUES (?, ?, ?, ?)",
-                    (f"{tag}:{bt}:#O{d}", tag, bt, bt))
-        conn.commit()
-        # the tick refreshes management inputs (step 4) before reviews run
-        from engine import projections
-        anchor_iso = anchor_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-        projections.refresh_management_inputs(conn, tag, now=anchor_iso)
-        conn.commit()
-        results.append(management.run_weekly_review(conn, anchor, now=anchor_iso))
-    return results
+def _seed_ranked(conn, tag, *, role="member", tenure=120, donations=0,
+                 war_used=0, war_avail=16, war_days=0, name=None,
+                 ranked_league=0, ranked_rating=0, last_league=0, last_rating=0):
+    """A rankable roster member for elder-band tests: role, tenure, closed-week
+    donations (Sun 2026-06-28), and recent war attendance (used/avail split over
+    `war_days` days inside the 14-day floor window; anchored ~2026-06-25)."""
+    conn.execute("INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, "
+                 "last_seen_at, is_home) VALUES ('#J2RGCRVG','POAP KINGS','2026-02-04',?,1)", (NOW,))
+    joined = (NOW_DT - timedelta(days=tenure)).strftime("%Y-%m-%d")
+    conn.execute("INSERT INTO players (player_tag, current_name, first_seen_at, "
+                 "last_seen_at) VALUES (?,?,?,?)", (tag, name or tag, joined, NOW))
+    conn.execute("INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
+                 "VALUES (?,?, 'test')", (tag, joined))
+    conn.execute("INSERT INTO player_current_state (player_tag, observed_at, role, "
+                 "trophies, ranked_league, ranked_trophies) VALUES (?,?,?,5000,?,?)",
+                 (tag, NOW, role, ranked_league or None, ranked_rating or None))
+    if last_league:
+        import json as _json
+        conn.execute("INSERT INTO state_baselines (entity_kind, entity_tag, aspect, "
+                     "payload_json, payload_hash, observed_at) VALUES "
+                     "('player', ?, 'ranked', ?, 'h', ?)",
+                     (tag, _json.dumps({"league": ranked_league, "trophies": ranked_rating,
+                      "last": {"league": last_league, "trophies": last_rating}}), NOW))
+    conn.execute("INSERT INTO member_management (player_tag, computed_at, week_anchor, "
+                 "tenure_days, role) VALUES (?,?, '2026-06-22', ?, ?)", (tag, NOW, tenure, role))
+    if donations:
+        conn.execute("INSERT INTO player_daily_metrics (player_tag, metric_date, "
+                     "donations_week) VALUES (?, '2026-06-28', ?)", (tag, donations))
+    for d in range(war_days):
+        obs = (NOW_DT - timedelta(days=6 + d)).strftime("%Y-%m-%dT12:00:00Z")
+        conn.execute("INSERT OR IGNORE INTO war_attendance_days (season_id, section_index, "
+                     "war_day_index, player_tag, decks_used, decks_available, observed_at) "
+                     "VALUES (133, 0, ?, ?, ?, ?, ?)",
+                     (d, tag, war_used // max(war_days, 1), war_avail // max(war_days, 1), obs))
+    conn.commit()
 
 
-def test_promote_path_four_qualifying_weeks(engine_conn):
-    _seed_member(engine_conn, joined_days_ago=120)
-    results = _run_weeks(engine_conn, "#A", [True] * 8)
-    row = engine_conn.execute(
-        "SELECT promote_state, promote_qualifying_weeks FROM member_management "
-        "WHERE player_tag='#A'").fetchone()
-    assert row["promote_state"] in ("eligible", "recommended")
-    assert row["promote_qualifying_weeks"] >= 4
-    assert any("#A" in json.dumps(r.get("promote_eligible", [])) for r in results)
-    candidate = next(
-        item
-        for result in results
-        for item in result.get("promote_eligible", [])
-    )
-    assert candidate["player_tag"] == "#A"
-    assert candidate.get("rationale")
+ANCHOR = "2026-06-29"          # Monday review anchor
+ANCHOR_NOW = "2026-06-29T07:00:00Z"
 
 
-def test_promote_grace_then_sustained_slippage_withdraws(engine_conn):
-    _seed_member(engine_conn, joined_days_ago=240)
-    # Build to eligible, survive an isolated miss (hysteresis: Layer-1 holds
-    # through one bad week and the battle window spans ~4 weeks), then slip
-    # for 5 straight weeks — evaluators lapse, the gate fails twice in a row,
-    # and §3.1's auto-withdraw pulls the candidacy.
-    results = _run_weeks(engine_conn, "#A",
-                         [True] * 6 + [False, True] + [False] * 5)
-    assert any(r.get("promote_eligible") for r in results[:8]), \
-        "should have reached eligible before the slippage"
-    assert any(w.get("kind") == "promote" for r in results
-               for w in r.get("withdrawn", [])), "sustained slippage must withdraw"
-    row = engine_conn.execute(
-        "SELECT promote_state, state_json FROM member_management "
-        "WHERE player_tag='#A'").fetchone()
-    assert row["promote_state"] not in ("eligible", "recommended"), row["state_json"]
+def test_war_floor_and_scores(engine_conn):
+    _seed_ranked(engine_conn, "#W", war_used=12, war_avail=16, war_days=3, donations=300)
+    _seed_ranked(engine_conn, "#N", war_used=0, war_avail=0, war_days=0, donations=900)
+    assert management._passes_war_floor(engine_conn, "#W", ANCHOR_NOW) is True
+    assert management._passes_war_floor(engine_conn, "#N", ANCHOR_NOW) is False
+    scores = management._elder_scores(engine_conn, ANCHOR_NOW, ANCHOR)
+    # #W plays war (rate .75) so despite fewer donations it out-scores the
+    # war-absent #N (war weighted 0.65).
+    assert scores["#W"]["war_rate"] > 0
+    assert scores["#N"]["war_rate"] == 0
+    assert scores["#W"]["score"] > scores["#N"]["score"]
+
+
+def test_ranked_floor_and_prestige(engine_conn):
+    # UC member with zero wars passes the competitive floor via ranked;
+    # a Master-tier member with zero wars fails both.
+    _seed_ranked(engine_conn, "#UC", war_days=0, ranked_league=7, ranked_rating=1867)
+    _seed_ranked(engine_conn, "#MAS", war_days=0, ranked_league=2, ranked_rating=600)
+    assert management._passes_ranked_floor(engine_conn, "#UC") is True
+    assert management._passes_ranked_floor(engine_conn, "#MAS") is False
+    assert management._passes_competitive_floor(engine_conn, "#UC", ANCHOR_NOW) is True
+    assert management._passes_competitive_floor(engine_conn, "#MAS", ANCHOR_NOW) is False
+    assert management._ranked_prestige(7, 1867) > 0.9
+    assert management._ranked_prestige(4, 0) == 0.5
+    assert management._ranked_prestige(2, 800) == 0.0
+
+
+def test_competitive_is_max_of_war_and_ranked(engine_conn):
+    # A UC grinder with no clan wars is top-tier on the competitive term (via
+    # ranked prestige), just like a full-attendance war stalwart (via war
+    # percentile) — competitive = max(war_pct, ranked_prestige).
+    for i in range(8):                             # filler so percentiles mean something
+        _seed_ranked(engine_conn, f"#F{i}", war_used=2, war_avail=16, war_days=1, donations=50)
+    _seed_ranked(engine_conn, "#WARDOG", war_used=16, war_avail=16, war_days=4, donations=200)
+    _seed_ranked(engine_conn, "#UCGRIND", war_days=0, ranked_league=7, ranked_rating=1900, donations=200)
+    scores = management._elder_scores(engine_conn, ANCHOR_NOW, ANCHOR)
+    assert scores["#UCGRIND"]["war_rate"] == 0
+    # max picked ranked prestige, not the near-zero war percentile
+    assert scores["#UCGRIND"]["competitive"] >= 0.9
+    assert scores["#UCGRIND"]["competitive"] > scores["#UCGRIND"]["war_pct"]
+    # the war stalwart is also top-tier on the competitive term
+    assert scores["#WARDOG"]["competitive"] >= 0.85
+
+
+def test_uc_elder_no_wars_is_protected(engine_conn):
+    # The OllieTurtle case: UC elder, zero clan-war decks → passes competitive
+    # floor via ranked → NOT demotable. A no-war no-ranked elder IS.
+    for i in range(11):
+        _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
+    _seed_ranked(engine_conn, "#OLLIE", role="elder", war_days=0,
+                 ranked_league=7, ranked_rating=1867, donations=193)
+    _seed_ranked(engine_conn, "#DEADBEAT", role="elder", war_days=0,
+                 ranked_league=0, donations=100)
+    scores, band = _band(engine_conn)
+    assert "#OLLIE" not in band["demotable"]       # UC protects the ranked grinder
+    assert "#DEADBEAT" in band["demotable"]         # both floors failed
+
+
+def _band(conn):
+    scores = management._elder_scores(conn, ANCHOR_NOW, ANCHOR)
+    return scores, management._elder_band(conn, scores, ANCHOR_NOW)
+
+
+def test_below_floor_promotes_top_worthy_only(engine_conn):
+    # 7-member roster, 0 elders → floor round(.15*7)=1. Top worthy member is
+    # promotable; a war-absent member never is (fails the floor).
+    _seed_ranked(engine_conn, "#TOP", war_used=16, war_avail=16, war_days=4, donations=800)
+    for i in range(5):
+        _seed_ranked(engine_conn, f"#M{i}", war_used=4, war_avail=16, war_days=2, donations=100)
+    _seed_ranked(engine_conn, "#NOWAR", war_used=0, war_avail=0, war_days=0, donations=999)
+    scores, band = _band(engine_conn)
+    assert band["floor"] == 1 and band["current_elders"] == 0
+    assert "#TOP" in band["promotable"]
+    assert "#NOWAR" not in band["promotable"]      # war floor filter
+    assert len(band["promotable"]) == 1            # only need floor-0 = 1
+
+
+def test_worthiness_floor_blocks_weak_promotion(engine_conn):
+    # Below floor, but the only tenure-eligible members rank below the roster
+    # median (young high-war stars, still inside the 28-day tenure filter,
+    # dominate the top and lift the median). Nobody worthy → promote no one.
+    for i in range(5):                             # young stars: fail tenure filter
+        _seed_ranked(engine_conn, f"#Y{i}", tenure=10, war_used=15, war_avail=16,
+                     war_days=3, donations=700 + i)
+    for i in range(2):                             # eligible veterans, weak output
+        _seed_ranked(engine_conn, f"#V{i}", tenure=200, war_used=2, war_avail=16,
+                     war_days=1, donations=20)
+    scores, band = _band(engine_conn)
+    assert band["current_elders"] < band["floor"]
+    # veterans pass filters but score below median → worthiness blocks them
+    assert all(scores[t]["score"] < band["median"] for t in ("#V0", "#V1"))
+    assert band["promotable"] == set()
+
+
+def test_inside_band_no_moves(engine_conn):
+    # 13 members, 2 elders → floor round(1.95)=2, ceil round(2.6)=3: in band.
+    for i in range(11):
+        _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
+    _seed_ranked(engine_conn, "#E0", role="elder", war_used=14, war_avail=16, war_days=3, donations=400)
+    _seed_ranked(engine_conn, "#E1", role="elder", war_used=13, war_avail=16, war_days=3, donations=380)
+    scores, band = _band(engine_conn)
+    assert band["floor"] <= band["current_elders"] <= band["ceil"]
+    assert band["promotable"] == set()
+    assert band["demotable"] == set()
+
+
+def test_elder_failing_war_floor_is_demotable(engine_conn):
+    for i in range(11):
+        _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
+    _seed_ranked(engine_conn, "#EGOOD", role="elder", war_used=14, war_avail=16, war_days=3, donations=400)
+    _seed_ranked(engine_conn, "#EDEAD", role="elder", war_used=0, war_avail=0, war_days=0, donations=900)
+    scores, band = _band(engine_conn)
+    assert "#EDEAD" in band["demotable"]           # abandoned war duty, any rank
+    assert "#EGOOD" not in band["demotable"]
+
+
+def _topup_week(conn, tag, anchor_dt, war_used, war_avail, donations):
+    """Fresh war days (inside the 14-day floor) + closed-Sunday donations for a
+    review at anchor_dt, so filters keep passing as the anchor advances."""
+    for d in range(3):
+        obs = (anchor_dt - timedelta(days=2 + d)).strftime("%Y-%m-%dT12:00:00Z")
+        conn.execute("INSERT OR IGNORE INTO war_attendance_days (season_id, section_index, "
+                     "war_day_index, player_tag, decks_used, decks_available, observed_at) "
+                     "VALUES (140, ?, ?, ?, ?, ?, ?)",
+                     (anchor_dt.isocalendar()[1], d, tag, war_used // 3, war_avail // 3, obs))
+    sunday = (anchor_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+    conn.execute("INSERT OR REPLACE INTO player_daily_metrics (player_tag, metric_date, "
+                 "donations_week) VALUES (?, ?, ?)", (tag, sunday, donations))
+    conn.commit()
+
+
+def test_above_ceiling_demotes_lowest_participating(engine_conn):
+    # 10 members + 3 elders → N=13, ceiling round(2.6)=3. Four participating
+    # elders is one over the ceiling → the single lowest-ranked one is demotable.
+    for i in range(10):
+        _seed_ranked(engine_conn, f"#P{i}", war_used=6, war_avail=16, war_days=2, donations=150)
+    _seed_ranked(engine_conn, "#EA", role="elder", war_used=16, war_avail=16, war_days=4, donations=500)
+    _seed_ranked(engine_conn, "#EB", role="elder", war_used=15, war_avail=16, war_days=4, donations=480)
+    _seed_ranked(engine_conn, "#EC", role="elder", war_used=14, war_avail=16, war_days=4, donations=460)
+    _seed_ranked(engine_conn, "#ED", role="elder", war_used=9, war_avail=16, war_days=3, donations=120)
+    scores, band = _band(engine_conn)
+    assert band["ceil"] == 3 and band["current_elders"] == 4
+    assert band["demotable"] == {"#ED"}           # exactly the lowest, back to ceiling
+
+
+def test_promote_hysteresis_three_weeks(engine_conn):
+    _seed_ranked(engine_conn, "#TOP", war_used=16, war_avail=16, war_days=4, donations=800)
+    for i in range(5):
+        _seed_ranked(engine_conn, f"#M{i}", war_used=4, war_avail=16, war_days=2, donations=100)
+    saw_eligible = None
+    for wk in range(4):
+        anchor_dt = datetime(2026, 6, 29, tzinfo=timezone.utc) + timedelta(weeks=wk)
+        _topup_week(engine_conn, "#TOP", anchor_dt, 16, 16, 800)
+        for i in range(5):
+            _topup_week(engine_conn, f"#M{i}", anchor_dt, 4, 16, 100)
+        res = management.run_weekly_review(
+            engine_conn, anchor_dt.strftime("%Y-%m-%d"),
+            now=anchor_dt.strftime("%Y-%m-%dT07:00:00Z"))
+        if any(r["player_tag"] == "#TOP" for r in res["promote_eligible"]):
+            saw_eligible = wk
+            break
+    assert saw_eligible == 2, f"eligible on the 3rd sustained week, got {saw_eligible}"
+    cand = next(r for r in res["promote_eligible"] if r["player_tag"] == "#TOP")
+    assert "rank" in cand["rationale"] and "band" in cand["rationale"]
+
+
+def test_demote_hysteresis_two_weeks_no_grace(engine_conn):
+    for i in range(11):
+        _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
+    _seed_ranked(engine_conn, "#EGOOD", role="elder", war_used=14, war_avail=16, war_days=3, donations=400)
+    _seed_ranked(engine_conn, "#EDEAD", role="elder", war_used=0, war_avail=0, war_days=0, donations=900)
+    saw = None
+    for wk in range(3):
+        anchor_dt = datetime(2026, 6, 29, tzinfo=timezone.utc) + timedelta(weeks=wk)
+        for i in range(11):
+            _topup_week(engine_conn, f"#P{i}", anchor_dt, 8, 16, 200)
+        _topup_week(engine_conn, "#EGOOD", anchor_dt, 14, 16, 400)
+        # #EDEAD gets NO fresh war days → stays below the war floor every week
+        res = management.run_weekly_review(
+            engine_conn, anchor_dt.strftime("%Y-%m-%d"),
+            now=anchor_dt.strftime("%Y-%m-%dT07:00:00Z"))
+        if any(r["player_tag"] == "#EDEAD" for r in res["demote_eligible"]):
+            saw = wk
+            break
+    assert saw == 1, f"demote-eligible on the 2nd week, got {saw}"
 
 
 def test_never_battled_member_anchored_on_own_seen_not_epoch(engine_conn):
