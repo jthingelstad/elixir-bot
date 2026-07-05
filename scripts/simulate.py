@@ -12,7 +12,7 @@ The world it simulates (deterministic; no randomness):
     4 battle days — with the daily reset at a SKEWED hour (default 09:37Z,
     the carried drift learning: CR's reset is never clean 10:00Z)
   - a member joining on day 2 and one leaving on day 5
-  - a player crossing a level_up milestone (5-level grain) on day 3
+  - a player crossing a collection_level_milestone (x100 grain) on day 3
   - two players fighting war battles on battle days (battlelog + race
     participants stay consistent)
   - donations accruing across the week
@@ -107,9 +107,17 @@ class SimWorld:
         return rate * (self.day_index() + 1)
 
     def exp_level(self, tag):
-        if tag == LEVELER and self.now >= self.period_start(3) + timedelta(hours=6):
-            return 45  # crosses the 5-level milestone mid-day-3
+        # expLevel is deprecated (dead at the CR API); kept only to shape the
+        # legacy payload field. Progression celebration rides collection_level.
         return 44 if tag == LEVELER else 40
+
+    def collection_level(self, tag):
+        # LEVELER crosses a x100 Collection Level boundary (1699 -> 1705) mid-
+        # day-3, firing collection_level_milestone (the CR 2026 progression
+        # signal that replaced level_up). Everyone else holds steady.
+        if tag == LEVELER and self.now >= self.period_start(3) + timedelta(hours=6):
+            return 1705
+        return 1699 if tag == LEVELER else 1500
 
     def _decks_by(self, tag, d) -> int:
         """War decks a fighter has played in period d, as of sim-now.
@@ -177,6 +185,13 @@ class SimWorld:
             "trophies": 5000 + 10 * self.day_index(), "bestTrophies": 5400,
             "wins": 900 + self.day_index(), "donations": self.donations(tag),
         })
+        # Override the CollectionLevel badge progress so LEVELER's day-3 crossing
+        # drives collection_level_milestone (the cards aspect reads this badge).
+        p["badges"] = [
+            {**b, "progress": self.collection_level(tag)}
+            if b.get("name") == "CollectionLevel" else b
+            for b in (p.get("badges") or [])
+        ]
         return p
 
     def get_player_battle_log(self, tag):
@@ -306,9 +321,9 @@ def main() -> int:
     g["exactly one welcome intent for the joiner"] = welcome == 1
 
     lev = conn.execute(
-        "SELECT COUNT(*) FROM player_events WHERE event_type='level_up' AND player_tag=?",
+        "SELECT COUNT(*) FROM player_events WHERE event_type='collection_level_milestone' AND player_tag=?",
         (LEVELER,)).fetchone()[0]
-    g["one level_up (44->45 crossing)"] = lev == 1
+    g["one collection_level_milestone (1700 crossing)"] = lev == 1
 
     fam = dict(conn.execute(
         "SELECT player_tag, SUM(fame) FROM war_participation WHERE season_id=? "

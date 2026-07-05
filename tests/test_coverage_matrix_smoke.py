@@ -56,8 +56,8 @@ def seeded_db(engine_conn, _isolate_default_sqlite_db):
     c.execute("INSERT INTO awards (award_type, season_id, player_tag, rank, awarded_at)"
               " VALUES ('free_pass', 132, '#A', 1, ?)", (NOW,))
     c.execute("INSERT INTO player_events (dedup_key, event_type, player_tag, observed_at,"
-              " payload_json, created_at) VALUES ('level_up:#A:45', 'level_up', '#A', ?,"
-              " '{}', ?)", (NOW, NOW))
+              " payload_json, created_at) VALUES ('collection_level_milestone:#A:1700',"
+              " 'collection_level_milestone', '#A', ?, '{}', ?)", (NOW, NOW))
     c.execute("INSERT INTO state_baselines (entity_kind, entity_tag, aspect, payload_json,"
               " payload_hash, observed_at) VALUES ('riverrace', '#J2RGCRVG', 'race',"
               " ?, 'h', ?)",

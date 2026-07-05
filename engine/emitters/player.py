@@ -16,7 +16,6 @@ CARD_UNLOCK_RARITIES = {"legendary", "champion"}  # detectors.py:239 UNLOCK_RARI
 CARD_LEVEL_MIN = 16          # detectors.py:187 MIN_LEVEL
 COLLECTION_LEVEL_STEP = 100  # detectors.py:297 STEP
 CAREER_WINS_STEP = 1000      # detectors.py:67 STEP
-LEVEL_UP_STEP = 5            # detectors.py:35 _milestones(step=5)
 BEST_TROPHIES_STEP = 100     # detectors.py:53
 # detectors.py:91 said 10 — the OLD Path of Legends scale. The mid-2025 rework
 # has seven leagues (7 = Ultimate Champion), so the carried constant meant
@@ -106,10 +105,10 @@ def _emit(conn, tag, observed_at, window_start, event_type, dedup_suffix, payloa
 
 def emit_profile(conn, tag, old, new, observed_at, window_start) -> int:
     n = 0
-    # level_up — every 5 levels (PlayerLevelUpDetector)
-    for level in _milestones(old.get("exp_level"), new.get("exp_level"), LEVEL_UP_STEP):
-        n += _emit(conn, tag, observed_at, window_start, "level_up", level,
-                   {"level": level, "prev_level": old.get("exp_level")})
+    # NOTE: the old level_up ladder (exp_level, step 5) is retired — expLevel is
+    # dead at the CR API (2026 Collection Level update). Account progression is
+    # now celebrated via collection_level_milestone (emit_cards, step 100). See
+    # #164 + memory cr-progression-model-2026.
     # career_wins_milestone — every 1000 (CareerWinsMilestoneDetector)
     for m in _milestones(old.get("wins"), new.get("wins"), CAREER_WINS_STEP):
         n += _emit(conn, tag, observed_at, window_start, "career_wins_milestone", m,

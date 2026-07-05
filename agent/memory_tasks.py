@@ -220,22 +220,6 @@ def _card_level_fact(signal: dict) -> dict | None:
     }
 
 
-def _player_level_fact(signal: dict) -> dict | None:
-    name = signal.get("name", "Unknown")
-    new_level = signal.get("new_level")
-    tag = signal.get("tag")
-    if new_level is None or not tag:
-        return None
-    return {
-        "title": f"{name}: exp lv{new_level}",
-        "body": f"{name} reached experience level {new_level}",
-        "event_type": "player_level_up",
-        "event_id": f"player_level:{tag}",
-        "scope": "public",
-        "tags": ["level-up", "observation"],
-    }
-
-
 def _pol_promotion_fact(signal: dict) -> dict | None:
     name = signal.get("name", "Unknown")
     new_league = signal.get("new_league_number")
@@ -410,7 +394,6 @@ def _award_earned_fact(signal: dict) -> dict | None:
 # signal_type → fact mapper
 _SIGNAL_FACT_MAP = {
     "card_level_milestone": _card_level_fact,
-    "player_level_up": _player_level_fact,
     "path_of_legend_promotion": _pol_promotion_fact,
     "new_card_unlocked": _card_unlocked_fact,
     "new_champion_unlocked": _card_unlocked_fact,
