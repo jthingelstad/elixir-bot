@@ -450,17 +450,21 @@ def _player_enrichment(conn, player_tag: str) -> dict:
     member_id = member_row["player_tag"]
 
     profile = conn.execute(
-        "SELECT exp_level, trophies, best_trophies FROM player_current_state "
+        "SELECT trophies, best_trophies FROM player_current_state "
         "WHERE player_tag = ?",
         (member_id,),
     ).fetchone()
     if profile:
-        if profile["exp_level"] is not None:
-            out["king_level"] = profile["exp_level"]
         if profile["trophies"] is not None:
             out["trophies"] = profile["trophies"]
         if profile["best_trophies"] is not None:
             out["best_trophies"] = profile["best_trophies"]
+    # King Tower Level computed from the card collection (expLevel is dead).
+    from storage.cards import _king_tower_level
+
+    king_tower = _king_tower_level(conn, tag)
+    if king_tower is not None:
+        out["king_level"] = king_tower
 
     meta = conn.execute(
         "SELECT joined_at, cr_account_age_years FROM player_metadata WHERE player_tag = ?",
