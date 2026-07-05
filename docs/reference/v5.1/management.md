@@ -46,7 +46,7 @@ week"), and one weak week never breaks it.
 
 | Evaluator | A week qualifies when | Source |
 |---|---|---|
-| `sustained_donor` | donations that week ≥ **`DONOR_WEEK_MIN` (50)** | clan-stream roster state (frozen at the weekly reset). Grounding: live 8-week distribution — half the roster donates 0/week, top quartile starts ~32; 50 selects the genuinely generous ~fifth |
+| `sustained_donor` | donations that week **> 0 AND ≥ the active roster's median** | clan-stream roster state (frozen at the weekly reset). Relative/self-calibrating (Jamie 2026-07-05: "remove the static filter, let the math do the work") — the static `DONOR_WEEK_MIN=50` had drifted to select ~78% of the roster as its grounding distribution changed. Median = "above-typical donor"; the >0 guard keeps freeloaders out even in a low-donation week. |
 | `war_reliable` | decks used / decks available ≥ **`WAR_QUALIFY_RATE` (0.75)** across the week's battle days (finalized `war_attendance_days` only, `runtime.md` §3) | bounded war stream (§16.5). Training-only weeks (no battle days observed): the week is **skipped**, not failed |
 | `battle_active` | battle-days in the trailing 28 days ≥ **`BATTLE_DAYS_MIN` (8)** (≈2/week) | `battle_events` (`member_management.battle_days_last_28`) |
 
@@ -132,7 +132,7 @@ re-deriving anything. `state_json` holds each machine's internals
 
 | Constant | Default | Basis |
 |---|---|---|
-| `DONOR_WEEK_MIN` | 50 | live distribution (half the roster donates 0; top quartile starts ~32) |
+| ~~`DONOR_WEEK_MIN`~~ | *removed 2026-07-05* | replaced by the active-roster median (self-calibrating); no static donation floor |
 | `WAR_QUALIFY_RATE` | 0.75 | 12 of 16 decks over a 4-battle-day week |
 | `BATTLE_DAYS_MIN` | 8 (of 28) | ≈2 battle-days/week floor |
 | Layer-1 hold/lapse rule | 3-of-4 / 1-of-4 | hysteresis asymmetry (§2) |
