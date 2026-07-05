@@ -476,6 +476,13 @@ def withdraw_stale_actions(conn, now: str | None = None) -> list[dict]:
            LEFT JOIN member_management mm ON mm.player_tag = lar.target_player_tag
            WHERE lar.status = 'proposed'
              AND COALESCE(lar.is_test, 0) = 0
+             -- Leadership-initiated manual actions are NOT reconciled against
+             -- the evaluator states: a human deliberately raised them (e.g. an
+             -- off-cycle promotion), so the state machine has no standing to
+             -- auto-withdraw them (live 2026-07-05: a manual Atternam promotion
+             -- was killed by this reconciler because his promote_state was
+             -- still 'none' pre-accrual).
+             AND COALESCE(lar.source_signal_type, '') != 'leadership_manual'
              AND lar.action_type IN (
                 'kick_recommendation',
                 'promotion_recommendation',
