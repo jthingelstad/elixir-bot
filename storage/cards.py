@@ -393,21 +393,6 @@ def _load_collection(conn: sqlite3.Connection, member_tag: str) -> Optional[dict
 KING_TOWER_MAX_LEVEL = 16
 
 
-def _experience_level(conn: sqlite3.Connection, member_tag: str) -> Optional[int]:
-    """DEPRECATED — Clash Royale eliminated Experience Level (`expLevel`). The
-    API still returns a legacy value and Elixir's ingest often stores 0; do not
-    treat this as a live stat. Retained only until callers are migrated."""
-    row = conn.execute(
-        "SELECT cs.exp_level FROM player_current_state cs "
-        "WHERE cs.player_tag = ?",
-        (_canon_tag(member_tag),),
-    ).fetchone()
-    if not row:
-        return None
-    value = row["exp_level"]
-    return value if isinstance(value, int) else None
-
-
 def _card_display_levels(conn: sqlite3.Connection, member_tag: str) -> list[int]:
     """The player's main-collection card levels on the display/unified scale.
     Tower troops are excluded — they do not count toward King Tower Level."""
@@ -455,7 +440,6 @@ def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None)
     if snapshot is None:
         return None
     king_tower = _king_tower_level(conn, tag)
-    experience = _experience_level(conn, tag)
     all_cards = [c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")]
 
     # Aggregate counts.
@@ -514,7 +498,6 @@ def get_member_card_profile(tag: str, conn: Optional[sqlite3.Connection] = None)
         "fetched_at": snapshot["fetched_at"],
         "king_tower_level": king_tower,
         "king_tower_max": KING_TOWER_MAX_LEVEL,
-        "experience_level": experience,
         "totals": totals,
         "by_rarity": by_rarity,
         "modes": modes,
