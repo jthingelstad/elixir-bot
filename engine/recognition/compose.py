@@ -196,7 +196,13 @@ def intent_context(conn, intent_row) -> str:
         ask = (
             "Write ONE short post for the #river-race channel in your own voice from "
             "these war facts. Match the moment: momentum while the race is live, "
-            "closure and recognition once it's won or finished. Never guilt."
+            "closure and recognition once it's won or finished. Never guilt. "
+            "CRITICAL — read the standings before choosing a tone: a 'battle "
+            "cry' when standings.race_state is 'runaway_lead' reads as if you "
+            "never looked at the scoreboard. On a runaway_lead, the honest note "
+            "is pride + a light nudge to finish decks for personal rewards, NOT "
+            "urgency. Scale intensity to standings.lead; only a close_race or "
+            "behind state earns a real rally."
         )
     elif prefix == "pulse":
         ask = (

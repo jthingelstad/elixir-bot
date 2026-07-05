@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from engine import delivery
+from engine.emitters.clan import HOME_CLAN
 from engine.db import cursor_get, cursor_set
 from engine.recognition import compose, ledger
 from engine.recognition.scorer import (
@@ -21,6 +22,7 @@ from engine.recognition.scorer import (
     REASON_COHORT,
     Candidate,
     base_score,
+    chicago_day,
     cohort_waves,
     decide,
     parse_utc,
@@ -230,6 +232,80 @@ def player_candidates(conn) -> tuple[list[Candidate], int]:
 
 # --------------------------------------------------------- celebrate pipeline
 
+def _candidate_from_player_event(row) -> Candidate | None:
+    payload = _payload(row)
+    score, _ = base_score(row["event_type"], payload)
+    if score <= 0:
+        return None
+    tag = row["player_tag"]
+    base = {
+        "subject_tag": tag,
+        "event_type": row["event_type"],
+        "timing": row["timing"],
+        "occurred_at": row["observed_at"],
+        **payload,
+    }
+    return Candidate(
+        key=row["dedup_key"],
+        event_type=row["event_type"],
+        subject_tag=tag,
+        occurred_at=row["observed_at"],
+        payload=base,
+        event_refs=[row["dedup_key"]],
+        arrival=row["event_id"],
+    )
+
+
+def _same_day_wave_candidates(conn, candidates: list[Candidate]) -> list[Candidate]:
+    """Cohort waves are same-day, not same-tick. Bring in stored player events
+    for matching event types on the same Chicago day, so a third member later
+    in the day can form the wave with earlier suppressed moments.
+    """
+    keys: dict[str, Candidate] = {c.key: c for c in candidates}
+    targets = {
+        (c.event_type, chicago_day(c.occurred_at))
+        for c in candidates
+        if c.event_type in {"badge_earned", "card_level_milestone", "card_unlocked"}
+    }
+    targets = {(event_type, day) for event_type, day in targets if day}
+    if not targets:
+        return candidates
+    for event_type, day in sorted(targets):
+        rows = conn.execute(
+            "SELECT * FROM player_events WHERE event_type = ? ORDER BY event_id",
+            (event_type,),
+        ).fetchall()
+        for row in rows:
+            if chicago_day(row["observed_at"]) != day:
+                continue
+            cand = _candidate_from_player_event(row)
+            if cand is not None and cand.key not in keys:
+                keys[cand.key] = cand
+    return list(keys.values())
+
+
+def _available_for_cohort(conn, candidate: Candidate) -> bool:
+    row = conn.execute(
+        "SELECT intent_id FROM recognition_ledger WHERE recognition_key = ?",
+        (candidate.key,),
+    ).fetchone()
+    return row is None or row["intent_id"] is None
+
+
+def _mark_cohort_member(conn, candidate: Candidate, wave_key: str) -> None:
+    if ledger.claim(conn, candidate.key, "player", candidate.event_refs, 0):
+        ledger.record_suppression(conn, candidate.key, REASON_COHORT,
+                                  {"wave_key": wave_key})
+        return
+    row = conn.execute(
+        "SELECT intent_id FROM recognition_ledger WHERE recognition_key = ?",
+        (candidate.key,),
+    ).fetchone()
+    if row is not None and row["intent_id"] is None:
+        ledger.record_suppression(conn, candidate.key, REASON_COHORT,
+                                  {"wave_key": wave_key})
+
+
 def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
     """Coalesce → cohort → accrue → claim → intent (recognition.md §3)."""
     counters = {"celebrate_posted": 0, "celebrate_suppressed": 0, "cohort_posted": 0}
@@ -239,8 +315,19 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
     # Cohort waves consume the accruing (non-bypass) members of a wave; bypass
     # moments already strong enough to post individually stay individual.
     consumed: set[str] = set()
-    for wave_key, members in sorted(cohort_waves(candidates).items()):
-        wave_members = [m for m in members if not base_score(m.event_type, m.payload)[1]]
+    wave_candidates = _same_day_wave_candidates(conn, candidates)
+    for wave_key, members in sorted(cohort_waves(wave_candidates).items()):
+        wave_members = []
+        seen_tags = set()
+        for member in members:
+            if member.subject_tag in seen_tags:
+                continue
+            seen_tags.add(member.subject_tag)
+            if base_score(member.event_type, member.payload)[1]:
+                continue
+            if not _available_for_cohort(conn, member):
+                continue
+            wave_members.append(member)
         if len({m.subject_tag for m in wave_members}) < 3:
             continue
         refs = [m.key for m in wave_members]
@@ -260,9 +347,7 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
             ledger.attach_intent(conn, wave_key, intent_id)
             counters["cohort_posted"] += 1
         for m in wave_members:
-            if ledger.claim(conn, m.key, "player", m.event_refs, 0):
-                ledger.record_suppression(conn, m.key, REASON_COHORT,
-                                          {"wave_key": wave_key})
+            _mark_cohort_member(conn, m, wave_key)
             consumed.add(m.key)
 
     remaining = [c for c in candidates if c.key not in consumed]
@@ -411,6 +496,31 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
                 if isinstance(hours, (int, float)) and hours < 12:
                     payload["war_clock"]["hours_left_in_period"] = hours + 24.0
                 payload["day_just_opened"] = True
+                # Read the scoreboard before choosing a voice (Jamie,
+                # 2026-07-05: a battle cry with a 326:1 lead - the post
+                # could have been written without looking). Standings from
+                # the race baseline feed a race_state the ask keys tone on.
+                try:
+                    from engine import baselines as _bl
+                    _row = _bl.get_baseline(conn, "riverrace", HOME_CLAN, "race")
+                    if _row is not None:
+                        _p = json.loads(_row["payload_json"])
+                        _clans = sorted(
+                            ((c.get("fame") or 0, t) for t, c in (_p.get("clans") or {}).items()),
+                            reverse=True)
+                        _ours = _p.get("our_fame") or 0
+                        _rival = next((f for f, t in _clans if t != _p.get("our_tag")), 0)
+                        payload["standings"] = {
+                            "our_fame": _ours, "nearest_rival_fame": _rival,
+                            "lead": _ours - _rival,
+                            "race_state": (
+                                "runaway_lead" if _ours > 4 * max(_rival, 1) and _ours - _rival > 5000
+                                else "comfortable_lead" if _ours - _rival > 2000
+                                else "close_race" if abs(_ours - _rival) <= 2000
+                                else "behind"),
+                        }
+                except Exception:
+                    pass
         if et == "season_closed":
             champ, fp = payload.get("war_champ_tag"), payload.get("free_pass_tag")
             payload["war_champ_name"] = compose.resolve_name(conn, champ)
