@@ -1161,7 +1161,7 @@ def test_create_chat_completion_records_llm_telemetry():
     assert mock_record.call_args.args[0] == "interactive"
     assert mock_record.call_args.kwargs["ok"] is True
     assert mock_record.call_args.kwargs["total_tokens"] == 30
-    assert create.call_args.kwargs["model"] == "claude-haiku-4-5-20251001"
+    assert create.call_args.kwargs["model"] == "claude-sonnet-5"  # interactive is chat-tier
 
 
 def test_create_chat_completion_drops_blank_anthropic_messages():
@@ -1257,6 +1257,8 @@ def test_create_chat_completion_caches_other_workflows():
 
 
 def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
+    # Three-tier policy (Jamie 2026-07-04): sonnet-5 = interactive +
+    # communication; opus = low-volume intensive writing; haiku = the rest.
     response = _mock_anthropic_response()
     create = Mock(return_value=response)
     mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
@@ -1264,12 +1266,18 @@ def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
         patch("agent.core._get_client", return_value=mock_client),
         patch("elixir_agent.runtime_status.record_llm_call"),
     ):
-        for workflow in ("weekly_digest", "tournament_recap", "intel_report", "memory_synthesis", "leader_action_feedback", "clan_chat_copy"):
+        for workflow in ("clan_chat_copy", "interactive", "channel_update", "clanops", "season_awards"):
             elixir_agent._create_chat_completion(
                 workflow=workflow,
                 messages=[{"role": "user", "content": "status"}],
             )
             assert create.call_args.kwargs["model"] == "claude-sonnet-5", workflow
+        for workflow in ("weekly_digest", "tournament_recap", "intel_report", "memory_synthesis", "leader_action_feedback", "release_notes"):
+            elixir_agent._create_chat_completion(
+                workflow=workflow,
+                messages=[{"role": "user", "content": "status"}],
+            )
+            assert create.call_args.kwargs["model"] == "claude-opus-4-8", workflow
 
 
 def test_synthesize_leader_action_feedback_uses_strict_profile_schema():
@@ -1382,16 +1390,22 @@ def test_create_chat_completion_respects_model_env_overrides():
     with (
         patch("agent.core._get_client", return_value=mock_client),
         patch("elixir_agent.runtime_status.record_llm_call"),
-        patch.dict(os.environ, {"ELIXIR_CHAT_MODEL": "claude-test-chat", "ELIXIR_LIGHTWEIGHT_MODEL": "claude-test-lightweight"}),
+        patch.dict(os.environ, {"ELIXIR_CHAT_MODEL": "claude-test-chat", "ELIXIR_LIGHTWEIGHT_MODEL": "claude-test-lightweight", "ELIXIR_INTENSIVE_MODEL": "claude-test-intensive"}),
     ):
         elixir_agent._create_chat_completion(
             workflow="weekly_digest",
             messages=[{"role": "user", "content": "status"}],
         )
-        assert create.call_args.kwargs["model"] == "claude-test-chat"
+        assert create.call_args.kwargs["model"] == "claude-test-intensive"
 
         elixir_agent._create_chat_completion(
             workflow="clanops",
+            messages=[{"role": "user", "content": "status"}],
+        )
+        assert create.call_args.kwargs["model"] == "claude-test-chat"  # clanops is chat-tier
+
+        elixir_agent._create_chat_completion(
+            workflow="editorial",
             messages=[{"role": "user", "content": "status"}],
         )
         assert create.call_args.kwargs["model"] == "claude-test-lightweight"
