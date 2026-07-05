@@ -1043,11 +1043,21 @@ async def _engine_tick():
     runtime_status.mark_job_start("engine_tick")
     loop = asyncio.get_running_loop()
 
-    def send_fn(lane: str, copy: str):
+    def send_fn(lane: str, copy: str, thread_id: int | None = None):
         lanes = engine_compose.channels()
         ch = lanes.get(lane) or lanes.get("arena-relay")
         if not ch:
             raise RuntimeError(f"engine send: lane {lane!r} unresolved and no fail-closed lane")
+        # Thread routing (channels.md §2): the thread is a delivery ADDRESS —
+        # try it first, fall back to the lane channel (never block on a room).
+        if thread_id:
+            future = asyncio.run_coroutine_threadsafe(
+                _engine_send(int(thread_id), copy), loop
+            )
+            message_id = future.result(timeout=120)
+            if message_id is not None:
+                return message_id
+            log.warning("engine send: thread %s failed; falling back to lane %s", thread_id, lane)
         future = asyncio.run_coroutine_threadsafe(
             _engine_send(ch["channel_id"], copy), loop
         )
@@ -1086,6 +1096,22 @@ async def _engine_tick():
         relayed = await _relay_engine_clan_chat_actions(fulfilled)
         if relayed:
             counters["clan_chat_relays"] = relayed
+        # Bounded-event thread lifecycle (channels.md §2) — best-effort by
+        # contract; a room failure never touches the ceremony.
+        from engine import db as _engine_db
+        from runtime import threads as _threads
+
+        lanes = engine_compose.channels()
+        rr = lanes.get("river-race") or {}
+        if rr.get("channel_id"):
+            born = await _threads.ensure_war_week_thread(
+                bot, _engine_db.connect, rr["channel_id"]
+            )
+            if born:
+                counters["war_week_thread_born"] = born
+        closed = await _threads.close_war_week_threads(bot, _engine_db.connect, fulfilled)
+        if closed:
+            counters["war_week_threads_closed"] = closed
     except Exception:
         log.exception("engine tick post-steps failed")
     log.info("engine tick: %s", counters)
@@ -1311,7 +1337,107 @@ async def _player_pulse():
     runtime_status.mark_job_success(player_pulse.JOB_NAME, summary)
     if not summary.startswith("waiting"):
         log.info("player pulse: %s", summary)
+    # Game-event thread watcher (channels.md §2, v1 thread kind #2) — rides
+    # the pulse's cadence; best-effort, never fails the job.
+    try:
+        from engine import db as _engine_db
+        from engine.recognition import compose as engine_compose
+        from runtime import threads as _threads
+
+        bf = (engine_compose.channels().get("battle-feed") or {}).get("channel_id")
+        if bf:
+            await _watch_game_event_threads(bf, _engine_db.connect)
+    except Exception:
+        log.debug("game-event thread watcher failed", exc_info=True)
     return summary
+
+
+async def _watch_game_event_threads(battle_feed_channel_id: int, conn_factory):
+    """New special_event mode seen in the last 3 days → born (thread + row);
+    a mode absent 3 days → locked. One open room per mode."""
+    from runtime import threads as _threads
+
+    def _scan():
+        conn = conn_factory()
+        try:
+            cutoff = "strftime('%Y%m%dT%H%M%S', 'now', '-3 days')"
+            fresh = conn.execute(
+                f"""SELECT game_mode_name, MAX(battle_time) last_seen
+                    FROM battle_events
+                    WHERE mode_group = 'special_event'
+                      AND battle_time >= {cutoff}
+                    GROUP BY game_mode_name"""
+            ).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM event_threads WHERE locked_at IS NULL"
+            ).fetchall()
+            return (
+                {r["game_mode_name"]: r["last_seen"] for r in fresh},
+                [dict(r) for r in rows],
+            )
+        finally:
+            conn.close()
+
+    fresh, open_rows = await asyncio.to_thread(_scan)
+    open_modes = {r["mode_name"] for r in open_rows}
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    for mode, last_seen in fresh.items():
+        if mode in open_modes:
+            continue
+        thread = await _threads.create_thread(bot, battle_feed_channel_id, mode.replace("_", " "))
+        if thread is None:
+            continue
+
+        def _record(m=mode, tid=thread.id, seen=last_seen):
+            conn = conn_factory()
+            try:
+                conn.execute(
+                    """INSERT INTO event_threads (mode_name, thread_id, born_at, last_seen_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (m, tid, now_iso, seen),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_record)
+        try:
+            await thread.send(
+                f"🎪 **{mode.replace('_', ' ')}** is live in the clan — this room "
+                "follows it while it runs. It locks itself when the event fades."
+            )
+        except Exception:
+            log.debug("event thread opener failed", exc_info=True)
+        log.info("game-event thread born: %s (%s)", mode, thread.id)
+
+    for row in open_rows:
+        if row["mode_name"] in fresh:
+            def _touch(rid=row["event_thread_id"], seen=fresh[row["mode_name"]]):
+                conn = conn_factory()
+                try:
+                    conn.execute(
+                        "UPDATE event_threads SET last_seen_at = ? WHERE event_thread_id = ?",
+                        (seen, rid))
+                    conn.commit()
+                finally:
+                    conn.close()
+            await asyncio.to_thread(_touch)
+            continue
+        if row["thread_id"] and await _threads.lock_thread(
+            bot, row["thread_id"],
+            closing_text="🎪 The event has moved on — the record stands."):
+            def _lock(rid=row["event_thread_id"]):
+                conn = conn_factory()
+                try:
+                    conn.execute(
+                        "UPDATE event_threads SET locked_at = ? WHERE event_thread_id = ?",
+                        (now_iso, rid))
+                    conn.commit()
+                finally:
+                    conn.close()
+            await asyncio.to_thread(_lock)
+            log.info("game-event thread locked: %s", row["mode_name"])
 
 
 async def _db_backup():

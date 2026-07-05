@@ -308,7 +308,8 @@ CREATE TABLE communication_intents (
         CHECK (status IN ('pending','fulfilled','failed','expired')),
     attempts INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL, expires_at TEXT NOT NULL,
-    fulfilled_at TEXT, discord_message_id TEXT, last_error TEXT
+    fulfilled_at TEXT, discord_message_id TEXT, last_error TEXT,
+    thread_id INTEGER
 );
 CREATE INDEX idx_intents_pending ON communication_intents(status, expires_at)
     WHERE status IN ('pending','failed');
@@ -372,6 +373,7 @@ CREATE TABLE war_weeks (
     period_type TEXT,
     created_date TEXT, finish_time TEXT,
     our_rank INTEGER, our_fame INTEGER, trophy_change INTEGER, our_clan_score INTEGER,
+    thread_id INTEGER,
     PRIMARY KEY (season_id, section_index)
 );
 
@@ -493,6 +495,20 @@ CREATE INDEX idx_editor_verdicts_intent ON editor_verdicts(intent_id);
 -- Ranked season lifecycle (ranked-and-profiles.md §2.1; D1–D7 ratified
 -- 2026-07-04). Ids are canonical 'YYYY-MM' (the month the season starts in;
 -- first-Monday to first-Monday). Discovered lifecycle, war-tracker style.
+-- event_threads: bounded-event thread rooms (channels.md §2, 2026-07-05) —
+-- game-event threads under #battle-feed; war-week threads ride
+-- war_weeks.thread_id. Born at observed birth, locked at observed death.
+CREATE TABLE event_threads (
+    event_thread_id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL DEFAULT 'game_mode',
+    mode_name TEXT NOT NULL,
+    thread_id INTEGER,
+    born_at TEXT NOT NULL,
+    last_seen_at TEXT,
+    locked_at TEXT
+);
+CREATE INDEX idx_event_threads_mode ON event_threads(mode_name, locked_at);
+
 CREATE TABLE pol_seasons (
     pol_season_id TEXT PRIMARY KEY,
     started_at TEXT,
@@ -598,7 +614,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 59  # 53 engine (incl. editor_verdicts, pol_seasons ×2) + 3 conversation + 3 memory
+EXPECTED_TABLE_COUNT = 60  # 53 engine (incl. editor_verdicts, pol_seasons ×2, event_threads) + 3 conversation + 3 memory
 
 
 _DEAD_MEMBERS_FK = re.compile(

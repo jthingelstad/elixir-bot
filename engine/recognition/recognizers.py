@@ -416,9 +416,26 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
             payload["war_champ_name"] = compose.resolve_name(conn, champ)
             payload["free_pass_name"] = compose.resolve_name(conn, fp)
             payload["honor_reward_diverged"] = bool(champ and fp and champ != fp)
+        # Bounded-event threads (channels.md §2): day-level posts go to the
+        # week's thread when one exists (best-effort address; NULL on day 1 —
+        # the thread is born runtime-side after this tick, so the opening day
+        # shouts in the channel and days 2+ live in the room). week_finished
+        # stays in-channel but carries the room link.
+        week_thread = None
+        try:
+            wk = conn.execute(
+                "SELECT thread_id FROM war_weeks WHERE season_id = ? AND section_index = ?",
+                (r["season_id"], r["section_index"]),
+            ).fetchone()
+            week_thread = wk["thread_id"] if wk else None
+        except Exception:
+            week_thread = None
+        if et in ("week_finished", "season_closed") and week_thread:
+            payload["week_thread_id"] = week_thread
         intent_id = delivery.raise_intent(
             conn, r["dedup_key"], f"war:{et}", compose.route("war:x", r["scope"]),
             r["scope"], payload, now,
+            thread_id=week_thread if et == "war_day_opened" else None,
         )
         ledger.attach_intent(conn, r["dedup_key"], intent_id)
         counters["war_posted"] += 1

@@ -326,7 +326,10 @@ def render_intent(intent_row) -> str:
     if et == "race_finished":
         return "🏁 We crossed the finish line — race won! Decks still count for personal rewards."
     if et == "week_finished":
-        return f"🏁 War week finished — we placed #{p.get('our_rank')} with {p.get('our_fame')} fame."
+        line = f"🏁 War week finished — we placed #{p.get('our_rank')} with {p.get('our_fame')} fame."
+        if p.get("week_thread_id"):  # the week's room (channels.md §2)
+            line += f"\nThe week's room: <#{p['week_thread_id']}>"
+        return line
     if et == "season_closed":
         champ = p.get("war_champ_name") or p.get("war_champ_tag") or "our top contributor"
         return f"🏆 War season closed — {champ} is the War Champ!"
