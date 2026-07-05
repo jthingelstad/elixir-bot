@@ -7,7 +7,7 @@ import subprocess
 import threading
 import time
 
-from anthropic import Anthropic, APIError, APIConnectionError
+from anthropic import Anthropic, APIError, APIConnectionError, BadRequestError
 
 import db
 from agent.workflow_registry import workflow_model_family
@@ -209,7 +209,17 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
             kwargs["tool_choice"] = translated_tc
 
     try:
-        resp = _get_client().messages.create(**kwargs)
+        try:
+            resp = _get_client().messages.create(**kwargs)
+        except BadRequestError as e:
+            # Sonnet 5 rejects the temperature param outright ("`temperature`
+            # is deprecated for this model"). Retry once without it so one
+            # model family's API change can't 400 every chat-tier call.
+            if "temperature" in str(e) and "temperature" in kwargs:
+                kwargs.pop("temperature")
+                resp = _get_client().messages.create(**kwargs)
+            else:
+                raise
         usage = getattr(resp, "usage", None)
         prompt_tokens = getattr(usage, "input_tokens", None)
         completion_tokens = getattr(usage, "output_tokens", None)
