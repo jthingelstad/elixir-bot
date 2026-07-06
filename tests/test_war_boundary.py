@@ -97,6 +97,40 @@ def test_reset_then_rollover_finalizes_from_peak(engine_conn):
     assert season["final_rank"] == 1, "season recorded a bogus finish rank"
 
 
+def _race_day(section, period_index, period_type, our_fame, decks_today):
+    return {
+        "season_id": 140, "section_index": section, "period_index": period_index,
+        "period_type": period_type, "our_tag": TAG, "our_fame": our_fame,
+        "clans": {TAG: {"name": "POAP KINGS", "fame": our_fame}},
+        "participants": {"#AAA": {"name": "Al", "fame": our_fame, "repair_points": 0,
+                                  "boat_attacks": 0, "decks_used": decks_today,
+                                  "decks_used_today": decks_today}},
+    }
+
+
+def test_battle_day_one_index_zero_fires_and_records(engine_conn):
+    """war_day_index 0 (battle day 1) must open its event and write an
+    attendance row — the 0-based index must never be dropped by a falsy check.
+    v5.1 launched mid-Colosseum and had not exercised day 0 until Season 134."""
+    c = engine_conn
+    # training day 3 (period 16 -> war_day None): first sight, silent
+    emit(c, "riverrace", TAG, "race", _race_day(0, 16, "training", 0, 0), "2026-08-01T09:00:00Z")
+    # battle day 1 opens (period 17 -> war_day_index 0)
+    emit(c, "riverrace", TAG, "race", _race_day(0, 17, "warDay", 300, 3), "2026-08-01T11:00:00Z")
+    ev = c.execute(
+        "SELECT payload_json FROM war_events WHERE event_type='war_day_opened'").fetchone()
+    assert ev is not None, "battle day 1 (index 0) did not open an event"
+    import json
+    assert json.loads(ev["payload_json"])["day_index"] == 0
+    att = c.execute(
+        "SELECT decks_used FROM war_attendance_days "
+        "WHERE season_id=140 AND section_index=0 AND war_day_index=0 AND player_tag='#AAA'"
+    ).fetchone()
+    assert att is not None and att["decks_used"] == 3, "day-0 attendance row missing"
+    from engine.emitters.war import finalize_attendance_day
+    assert finalize_attendance_day(c, 140, 0, 0) == 1, "day-0 finalize matched no rows"
+
+
 def test_monotonic_participation_never_decreases(engine_conn):
     c = engine_conn
     _emit(c, _race(133, 4, 20000), "2026-07-06T03:00:00Z")  # first sight (silent)
