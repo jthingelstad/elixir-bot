@@ -59,6 +59,21 @@ CREATE TABLE player_aliases (
     UNIQUE(player_tag, alias)
 );
 
+-- Evergreen housekeeping nudges (Discord, FAQ, website). Elixir surfaces one
+-- as an in-game-relay leader-action card during a quiet period, infrequently
+-- and rotated. Inventory + per-item send-state live together.
+CREATE TABLE evergreen_nudges (
+    nudge_key      TEXT PRIMARY KEY,
+    topic          TEXT NOT NULL,
+    context        TEXT NOT NULL,          -- prompt Elixir composes clan-chat copy from
+    forbidden_terms_json TEXT,             -- extra terms to keep OUT of the copy
+    cooldown_days  INTEGER NOT NULL DEFAULT 30,
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    last_sent_at   TEXT,
+    send_count     INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL
+);
+
 CREATE TABLE clans (
     clan_tag   TEXT PRIMARY KEY,
     name TEXT, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
@@ -643,7 +658,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 62  # 55 engine (+ runtime_incidents + post_quality_runs) + 3 conversation + 3 memory + 1 fts-excluded
+EXPECTED_TABLE_COUNT = 63  # 55 engine (+ runtime_incidents + post_quality_runs + evergreen_nudges) + 3 conversation + 3 memory + 1 fts-excluded
 
 
 _DEAD_MEMBERS_FK = re.compile(
