@@ -138,7 +138,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="weekly-discord-invite-relay",
-        owner_lane="arena-relay",
+        owner_lane="leader-lounge",
         purpose="Post a weekly no-link Clash Royale clan-chat prompt that helps members find the Discord via POAPKINGS . COM > Members.",
         job_id="weekly-discord-invite-relay",
         job_function="_weekly_discord_invite_relay",

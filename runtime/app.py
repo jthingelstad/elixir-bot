@@ -326,7 +326,6 @@ from runtime.discord_posting import (  # noqa: E402,F401
     _normalize_entry_posts,
     _post_to_elixir,
     _resolve_custom_emoji,
-    compose_and_post,
 )
 from runtime.clan_chat_copy import (  # noqa: E402,F401
     generate_clan_chat_copy,
@@ -1290,25 +1289,14 @@ async def _weekly_leadership_review():
         runtime_status.mark_job_failure("weekly_leadership_review", str(exc))
         log.exception("weekly leadership review failed")
         return
+    # The weekly review now speaks only through action cards — the promote/
+    # demote candidacy cards raised above and posted here. The old narrative
+    # "Weekly Leadership Review" digest was retired (Jamie, 2026-07-06):
+    # #leader-actions is cards-only; Elixir sends suggestions, not data dumps.
     try:
         await _post_pending_leader_action_cards(limit=6)
-        channel_id = _get_singleton_channel_id("arena-relay")
-        channel = bot.get_channel(channel_id) if channel_id else None
-        if channel is not None:
-            promote_n = len(result.get("promote_eligible") or [])
-            demote_n = len(result.get("demote_eligible") or [])
-            withdrawn_n = len(result.get("withdrawn") or [])
-            context = (
-                f"Weekly leadership review for week starting {result.get('week_anchor')}: "
-                f"{promote_n} promotion candidacies, {demote_n} demotion candidacies, "
-                f"{withdrawn_n} auto-withdrawn. Member states: "
-                f"{json.dumps((result.get('rows') or [])[:20], default=str)[:1500]}. "
-                "Summarize the week for leadership: who is eligible and why (evidence, "
-                "not judgment), who is at risk, and note that candidacy cards follow separately."
-            )
-            await compose_and_post(channel, lane="arena-relay", context=context, leadership=True)
     except Exception:
-        log.exception("weekly review summary post failed")
+        log.exception("weekly review card posting failed")
     runtime_status.mark_job_success(
         "weekly_leadership_review",
         f"promote={len(result.get('promote_eligible') or [])} "
