@@ -138,20 +138,22 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="weekly-discord-invite-relay",
-        owner_lane="leader-lounge",
-        purpose="Post a weekly no-link Clash Royale clan-chat prompt that helps members find the Discord via POAPKINGS . COM > Members.",
+        owner_lane="arena-relay",
+        purpose="Evergreen housekeeping nudges (Discord, POAP KINGS FAQ, website): "
+        "rotate the evergreen_nudges inventory and, ONLY during a quiet period and "
+        "within a strict rate cap, offer ONE as an in-game-relay leader-action card "
+        "in #leader-actions. Runs daily; self-gates so it emits rarely.",
         job_id="weekly-discord-invite-relay",
         job_function="_weekly_discord_invite_relay",
         schedule_kind="cron",
         schedule_config={
-            "day_of_week": _attr("WEEKLY_DISCORD_INVITE_RELAY_DAY", "sat"),
-            "hour": _attr("WEEKLY_DISCORD_INVITE_RELAY_HOUR", 11),
+            "hour": _attr("EVERGREEN_NUDGE_HOUR", 13),
             "minute": 0,
             "max_instances": 1,
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord: #leader-actions weekly no-link Discord invite copy",
+            "Discord: #leader-actions in-game-relay nudge card (quiet periods only)",
         ),
         activity_role="communicator",
         legacy_commands=("discord-invite-relay",),

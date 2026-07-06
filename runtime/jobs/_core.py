@@ -34,7 +34,6 @@ from runtime.helpers import (
     build_lane_memory_context,
 )
 from runtime.helpers._common import _load_live_clan_context, _post_to_elixir
-from runtime.discord_posting import compose_and_post
 from runtime import status as runtime_status
 from runtime.jobs._intel import _clan_wars_intel_report
 
@@ -434,32 +433,139 @@ LEADER_ACTION_CASE_ORDER = (
 
 
 async def _weekly_discord_invite_relay():
+    """Evergreen housekeeping-nudge emitter (Jamie, 2026-07-06).
+
+    Keeps its original job name for stable scheduling, but no longer posts a
+    fixed weekly Discord reminder. It now rotates through the evergreen_nudges
+    inventory (Discord, FAQ, website) and — ONLY during a quiet period and within
+    a strict rate cap — offers ONE as an in-game-relay leader-action card in
+    #leader-actions for a leader to paste. Runs daily; self-gates so it emits
+    rarely and fills lulls instead of adding noise. The Discord invite is now
+    just inventory item #1.
+    """
+    from engine import db as engine_db
+    from storage import evergreen_nudges as nudges
+
     runtime_status.mark_job_start("weekly_discord_invite_relay")
+
+    def _pick():
+        conn = engine_db.connect()
+        try:
+            if not nudges.is_quiet_period(conn):
+                return None, "not a quiet period"
+            item = nudges.due_nudge(conn)
+            return (item, None) if item else (None, "no nudge due (cap/cooldown/pending)")
+        finally:
+            conn.close()
+
     try:
-        # Narrative leadership nudge → #leaders (leader-lounge). It used to post
-        # to #leader-actions (arena-relay), but that channel is now cards-only
-        # (Jamie, 2026-07-06); a reminder is narrative, not an action card.
-        channel_id = _get_singleton_channel_id("leader-lounge")
-        channel = _bot().get_channel(channel_id) if channel_id else None
-        if channel is None:
-            runtime_status.mark_job_failure("weekly_discord_invite_relay", "leader-lounge channel not found")
+        item, skip = await asyncio.to_thread(_pick)
+        if item is None:
+            runtime_status.mark_job_success("weekly_discord_invite_relay", f"skipped: {skip}")
             return
-        context = (
-            "Weekly reminder for the leadership channel: nudge leaders to share the "
-            "clan's Discord invite with active members who aren't in the server yet. "
-            "Keep it short and friendly, in your own voice."
-        )
-        ok = await compose_and_post(channel, lane="leader-lounge", context=context, leadership=True)
+        ok = await _emit_evergreen_nudge_card(item)
         if not ok:
-            runtime_status.mark_job_failure("weekly_discord_invite_relay", "invite relay post failed")
+            runtime_status.mark_job_failure("weekly_discord_invite_relay", "nudge card emit failed")
             return
     except Exception as exc:
         runtime_status.mark_job_failure("weekly_discord_invite_relay", str(exc))
-        log.warning("weekly Discord invite relay failed: %s", exc, exc_info=True)
+        log.warning("evergreen nudge failed: %s", exc, exc_info=True)
         return
     runtime_status.mark_job_success(
-        "weekly_discord_invite_relay", "posted weekly invite reminder",
+        "weekly_discord_invite_relay", f"posted nudge: {item['nudge_key']}",
     )
+
+
+async def _emit_evergreen_nudge_card(item: dict) -> bool:
+    """Compose one clan-chat nudge from an inventory item and offer it as an
+    in-game-relay leader-action card (mirrors the weekly story relay)."""
+    from engine import db as engine_db
+    from storage import evergreen_nudges as nudges
+
+    try:
+        channel_config = _channel_config_by_key("arena-relay")
+    except Exception:
+        log.info("evergreen nudge skipped: arena-relay unavailable")
+        return False
+    relay_channel = _bot().get_channel(channel_config["id"])
+    if not relay_channel:
+        log.info("evergreen nudge skipped: arena-relay channel not found")
+        return False
+    allowed, reason = await asyncio.to_thread(can_post_leader_action, action_type="in_game_relay")
+    if not allowed:
+        log.info("evergreen nudge skipped by policy: %s", reason)
+        return False
+
+    context = (
+        "Evergreen clan-chat nudge task:\n"
+        "Write ONE short Clash Royale clan-chat message from the note below.\n"
+        f"- Plain text only: no markdown, no links, no Discord emoji shortcodes, under {CLAN_CHAT_ACTION_COPY_LIMIT} characters.\n"
+        "- Warm and natural, the way a leader would actually say it in clan chat.\n"
+        "=== NUDGE ===\n"
+        f"{item['context']}"
+    )
+    forbidden = tuple(item.get("forbidden_terms") or ()) or ("http://", "https://", "www.")
+    generated = await generate_clan_chat_copy(
+        intent="evergreen_nudge",
+        context=context,
+        max_messages=1,
+        max_chars=CLAN_CHAT_ACTION_COPY_LIMIT,
+        forbidden_terms=forbidden,
+        metadata={"channel": channel_config["name"], "nudge": item["nudge_key"]},
+    )
+    copy = generated.messages[0] if generated and generated.messages else ""
+    if not copy:
+        log.info("evergreen nudge skipped: no usable clan-chat copy")
+        return False
+
+    day_key = datetime.now(CHICAGO).strftime("%G-%m-%d")
+    baseline = await asyncio.to_thread(
+        db.build_leader_action_baseline, action_type="in_game_relay", target_player_tag=None,
+    )
+    action = await asyncio.to_thread(
+        db.create_leader_action_recommendation,
+        action_type="in_game_relay",
+        objective="clan_nudge",
+        prompt_text=f"Relay into clan chat ({item['topic']}): {copy}",
+        rationale=f"Evergreen {item['topic']} nudge, surfaced during a quiet stretch so it fills a lull.",
+        target_channel_key="arena-relay",
+        target_channel_id=channel_config["id"],
+        source_signal_key=f"evergreen_nudge:{item['nudge_key']}:{day_key}",
+        source_signal_type="evergreen_nudge",
+        copy_original_text=copy,
+        copy_current_text=copy,
+        ui_version=LEADER_ACTION_UI_VERSION,
+        baseline=baseline,
+    )
+    if not action or action.get("source_message_id"):
+        return False
+
+    # Mark the item sent NOW (on proposal): the rate cap + rotation count from
+    # when it was offered, so we never re-nag even if the leader ignores it.
+    def _mark():
+        conn = engine_db.connect()
+        try:
+            nudges.mark_nudge_sent(conn, item["nudge_key"])
+            conn.commit()
+        finally:
+            conn.close()
+
+    await asyncio.to_thread(_mark)
+
+    sent_messages = await post_leader_action_card(relay_channel, action, copy_messages=[copy])
+    first_message = (sent_messages[0] if isinstance(sent_messages, list) and sent_messages else None)
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(relay_channel), "assistant", copy,
+        summary=f"Leader action R{action.get('action_id')}: evergreen {item['nudge_key']}",
+        channel_id=channel_config["id"],
+        channel_name=getattr(relay_channel, "name", "arena-relay"),
+        channel_kind=str(getattr(relay_channel, "type", "text")),
+        workflow="arena-relay",
+        event_type="evergreen_nudge",
+        discord_message_id=getattr(first_message, "id", None),
+    )
+    return True
 
 
 
