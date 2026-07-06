@@ -238,8 +238,13 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
                        war_day_index, player_tag, decks_used, observed_at)
                    VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(season_id, section_index, war_day_index, player_tag)
-                   DO UPDATE SET decks_used = excluded.decks_used,
-                                 observed_at = excluded.observed_at""",
+                   DO UPDATE SET
+                       -- Monotonic (#166 sibling): decks_used_today only accrues
+                       -- within a war day; a post-battle reset re-observation
+                       -- must not zero a finished day's attendance.
+                       decks_used = MAX(COALESCE(war_attendance_days.decks_used, 0),
+                                        COALESCE(excluded.decks_used, 0)),
+                       observed_at = excluded.observed_at""",
                 (season_id, section, war_day, tag, p.get("decks_used_today") or 0,
                  observed_at),
             )
