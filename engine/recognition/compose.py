@@ -97,15 +97,15 @@ def _payload(intent_row) -> dict:
 
 
 def resolve_name(conn, tag: str | None) -> str | None:
-    """Naming guard (recognition.md §7): current name via identity, never
-    stale payload copy."""
+    """Naming guard (recognition.md §7): the preferred readable name via
+    identity — stored nickname if any, else the deterministically-cleaned
+    current name — never the raw literal or a stale payload copy."""
     if not tag:
         return None
-    row = conn.execute(
-        "SELECT current_name FROM players WHERE player_tag = ?", (tag,)
-    ).fetchone()
-    name = row[0] if row else None
-    return name if name and str(name).strip() else None
+    from storage._formatting import preferred_display_name
+
+    name = preferred_display_name(conn, tag)
+    return name if name and str(name).strip() and name != tag else None
 
 
 def _subject_history(conn, tag: str, lane_leadership: bool, limit: int = 12) -> list[dict]:

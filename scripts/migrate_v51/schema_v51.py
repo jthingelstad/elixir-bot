@@ -48,7 +48,8 @@ CREATE TABLE player_metadata (
     cr_collection_level INTEGER, cr_collection_level_badge_tier INTEGER,
     cr_collection_level_badge_max_tier INTEGER, cr_collection_level_updated_at TEXT,
     cr_clan_war_wins INTEGER, cr_battle_wins INTEGER, cr_clan_donations INTEGER,
-    cr_banner_count INTEGER, cr_emote_count INTEGER, cr_profile_badges_updated_at TEXT
+    cr_banner_count INTEGER, cr_emote_count INTEGER, cr_profile_badges_updated_at TEXT,
+    preferred_nickname TEXT, nickname_source TEXT, nickname_updated_at TEXT
 );
 
 CREATE TABLE player_aliases (

@@ -37,6 +37,52 @@ def callable_name(value: str | None) -> str:
     return cleaned or value
 
 
+def stored_nickname(conn, tag: str | None) -> str | None:
+    """The bot's stored preferred nickname for a player, or None.
+
+    Populated only for the exceptions callable_name can't resolve (residual
+    symbol-only names, LLM-named) and leader-assigned overrides — NOT a copy
+    of every member's name. See engine/nicknames.py.
+    """
+    if conn is None or not tag:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT preferred_nickname FROM player_metadata WHERE player_tag = ?",
+            (tag,),
+        ).fetchone()
+    except Exception:
+        return None  # column absent on a not-yet-migrated DB — fall through
+    if not row:
+        return None
+    nick = row[0] if not hasattr(row, "keys") else row["preferred_nickname"]
+    return nick if nick and str(nick).strip() else None
+
+
+def preferred_display_name(conn, tag: str | None, raw_name: str | None = None) -> str:
+    """The one readable name to address a player by, everywhere in text.
+
+    Resolution order (recognition.md §7):
+      1. stored preferred nickname (leader override or LLM-named residual);
+      2. else callable_name(current_name) — the live deterministic cleaner;
+      3. else the raw literal / tag.
+    For the vast majority of members step 1 is empty and step 2 handles it
+    live — nothing is stored and nothing can go stale.
+    """
+    nick = stored_nickname(conn, tag)
+    if nick:
+        return nick
+    if raw_name is None and conn is not None and tag:
+        row = conn.execute(
+            "SELECT current_name FROM players WHERE player_tag = ?", (tag,)
+        ).fetchone()
+        if row:
+            raw_name = row[0] if not hasattr(row, "keys") else row["current_name"]
+    if raw_name:
+        return callable_name(raw_name)
+    return tag or ""
+
+
 def format_member_reference(*args, **kwargs):
     """Format a member reference — delegates to storage.identity."""
     from storage.identity import format_member_reference as _impl

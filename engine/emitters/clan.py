@@ -15,11 +15,13 @@ runtime.md §2 step 3) — port of CakeDayDetector (detectors.py:920–995).
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
 
 from engine.db import canon_tag, utcnow
 from engine.emitters import insert_stream_event
 
+_log = logging.getLogger("engine.emitters.clan")
 HOME_CLAN = "#J2RGCRVG"
 _ROLE_RANK = {"member": 0, "elder": 1, "coleader": 2, "leader": 3}  # detectors.py:611
 DONATION_LEADER_TOP_N = 3          # detectors.py:1000 TOP_N
@@ -78,6 +80,14 @@ def _emit(conn, clan_tag, subject_tag, observed_at, window_start, event_type, de
     )
 
 
+def _display_name(conn, tag: str, raw_name: str | None) -> str | None:
+    """The preferred readable name for event payloads (so render_intent's
+    deterministic fallback copy uses the nickname/cleaned form, not the raw)."""
+    from storage._formatting import preferred_display_name
+
+    return preferred_display_name(conn, tag, raw_name) or raw_name
+
+
 def _upsert_identity(conn, tag: str, name: str | None, observed_at: str) -> None:
     conn.execute(
         """INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at)
@@ -93,6 +103,16 @@ def _upsert_identity(conn, tag: str, name: str | None, observed_at: str) -> None
             "VALUES (?, ?, 'roster', ?)",
             (tag, name, observed_at),
         )
+    # First-sight / rename hook: guarantee a readable nickname exists for a
+    # residual name (e.g. "...") before any reference is composed downstream,
+    # and drop a stale generated one on a rename-to-readable. Fail-soft — a
+    # nickname hiccup must never break roster ingest.
+    try:
+        from engine.nicknames import ensure_nickname
+
+        ensure_nickname(conn, tag, name, observed_at)
+    except Exception:
+        _log.exception("ensure_nickname failed for %s (%r)", tag, name)
 
 
 def emit_roster(conn, clan_tag, old, new, observed_at, window_start) -> int:
@@ -110,7 +130,8 @@ def emit_roster(conn, clan_tag, old, new, observed_at, window_start) -> int:
         info = info or {}
         n += _emit(conn, clan_tag, tag, observed_at, window_start, "member_joined",
                    f"member_joined:{tag}:{observed_at}",
-                   {"name": info.get("name"), "trophies": info.get("trophies"),
+                   {"name": _display_name(conn, tag, info.get("name")),
+                    "trophies": info.get("trophies"),
                     "role": info.get("role"), "exp_level": info.get("exp_level")})
         open_row = conn.execute(
             "SELECT 1 FROM clan_memberships WHERE player_tag = ? AND left_at IS NULL",
@@ -136,7 +157,8 @@ def emit_roster(conn, clan_tag, old, new, observed_at, window_start) -> int:
         ).fetchone()
         n += _emit(conn, clan_tag, tag, observed_at, window_start, "member_left",
                    f"member_left:{tag}:{observed_at}",
-                   {"name": info.get("name"), "role": info.get("role"),
+                   {"name": _display_name(conn, tag, info.get("name")),
+                    "role": info.get("role"),
                     "trophies": info.get("trophies"),
                     "tenure_days": tenure[0] if tenure and tenure[0] is not None else None})
         conn.execute(

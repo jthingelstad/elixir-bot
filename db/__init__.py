@@ -386,6 +386,7 @@ _MEMBER_METADATA_COLUMNS = frozenset({
     "cr_collection_level", "cr_collection_level_badge_tier", "cr_collection_level_badge_max_tier",
     "cr_collection_level_updated_at", "cr_clan_war_wins", "cr_battle_wins",
     "cr_clan_donations", "cr_banner_count", "cr_emote_count", "cr_profile_badges_updated_at",
+    "preferred_nickname", "nickname_source", "nickname_updated_at",
 })
 
 
@@ -405,6 +406,32 @@ def _upsert_member_metadata(conn: sqlite3.Connection, player_tag: str, **fields)
     if updates:
         values.append(tag)
         conn.execute(f"UPDATE player_metadata SET {', '.join(updates)} WHERE player_tag = ?", values)
+
+
+def set_member_nickname(player_tag: str, nickname: Optional[str], *,
+                        source: Optional[str] = "leader",
+                        observed_at: Optional[str] = None,
+                        conn: Optional[sqlite3.Connection] = None) -> None:
+    """Set (or clear, when nickname is None) a player's stored preferred
+    nickname. `source` is 'leader' (hand-picked) or 'generated'/'placeholder'
+    (engine/nicknames.py). Commits only when it owns the connection, so it is
+    safe to call inside the engine tick with an external conn (no mid-tick
+    commit of the caller's transaction)."""
+    owns = conn is None
+    conn = conn or get_connection()
+    try:
+        clean = (nickname or "").strip() or None
+        _upsert_member_metadata(
+            conn, player_tag,
+            preferred_nickname=clean,
+            nickname_source=(source if clean else None),
+            nickname_updated_at=(observed_at or _utcnow()),
+        )
+        if owns:
+            conn.commit()
+    finally:
+        if owns:
+            conn.close()
 
 
 def _parse_optional_int(value: Optional[str], *, field_name: str, minimum: int, maximum: int) -> Optional[int]:
