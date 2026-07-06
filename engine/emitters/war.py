@@ -93,6 +93,30 @@ def _our_rank(state: dict) -> int | None:
     return None
 
 
+def merge_baseline(old: dict, new: dict) -> dict:
+    """Root guard for #166: the river-race API emits a post-battle 'reset'
+    snapshot at a section's end — same season/section, but our (and every
+    clan's) fame collapses to 0 before the next season/section appears.
+    Persisting it as the baseline lets the eventual rollover finalize a
+    finished week from zeros. When we detect that regression, keep the peak
+    baseline so the rollover reads the real final standings.
+
+    Only fires within the SAME (season, section): a genuine new week/season
+    legitimately starts at 0 fame and is a different section, so it is never
+    suppressed. Called by the emit() dispatcher for the race aspect.
+    """
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return new
+    same_period = (
+        old.get("season_id") == new.get("season_id")
+        and old.get("section_index") == new.get("section_index")
+        and old.get("section_index") is not None
+    )
+    if same_period and (old.get("our_fame") or 0) > 0 and (new.get("our_fame") or 0) == 0:
+        return old
+    return new
+
+
 def _ensure_season(conn, season_id: int, observed_at: str) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO war_seasons (season_id, started_at) VALUES (?, ?)",
@@ -115,17 +139,35 @@ def _finalize_week(conn, state: dict, observed_at: str) -> None:
     season_id, section = state.get("season_id"), state.get("section_index")
     if season_id is None or section is None:
         return
+    # Defense-in-depth (#166): the finalize snapshot can be the API's
+    # post-battle 'reset' (our fame collapsed to 0) even though real fame
+    # accrued. Derive our_fame from the peak of {snapshot, participation sum,
+    # already-stored} so a degenerate snapshot can never lower a finished
+    # week's fame. If the snapshot is degenerate, don't trust its rank/standings
+    # either — keep whatever is already recorded.
+    part_fame = conn.execute(
+        "SELECT SUM(COALESCE(fame, 0)) FROM war_participation "
+        "WHERE season_id = ? AND section_index = ?",
+        (season_id, section),
+    ).fetchone()[0] or 0
+    snap_fame = state.get("our_fame") or 0
+    our_fame = max(part_fame, snap_fame)
+    degenerate = snap_fame == 0 and our_fame > 0
+    our_rank = None if degenerate else _our_rank(state)
     conn.execute(
         """INSERT INTO war_weeks (season_id, section_index, period_type,
                                   finish_time, our_rank, our_fame)
            VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(season_id, section_index) DO UPDATE SET
                finish_time = excluded.finish_time,
-               our_rank = excluded.our_rank,
-               our_fame = excluded.our_fame""",
+               our_rank = COALESCE(excluded.our_rank, war_weeks.our_rank),
+               our_fame = MAX(COALESCE(war_weeks.our_fame, 0), COALESCE(excluded.our_fame, 0))""",
         (season_id, section, state.get("period_type"), observed_at,
-         _our_rank(state), state.get("our_fame")),
+         our_rank, our_fame),
     )
+    if degenerate:
+        # nothing trustworthy to write to the per-clan standings; keep prior
+        return
     for row in _standings(state):
         conn.execute(
             """INSERT INTO clans (clan_tag, name, first_seen_at, last_seen_at)
@@ -176,8 +218,14 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
                    fame, repair_points, boat_attacks, decks_used, decks_used_today, observed_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(season_id, section_index, player_tag) DO UPDATE SET
-                   fame = excluded.fame, repair_points = excluded.repair_points,
-                   boat_attacks = excluded.boat_attacks, decks_used = excluded.decks_used,
+                   -- Monotonic (#166): war fame/decks only ever accrue within a
+                   -- section. The river-race API emits a post-battle 'reset'
+                   -- snapshot (fame→0) at a section's end; MAX keeps the peak so
+                   -- that reset can't wipe a finished week's participation.
+                   fame = MAX(COALESCE(war_participation.fame, 0), COALESCE(excluded.fame, 0)),
+                   repair_points = MAX(COALESCE(war_participation.repair_points, 0), COALESCE(excluded.repair_points, 0)),
+                   boat_attacks = MAX(COALESCE(war_participation.boat_attacks, 0), COALESCE(excluded.boat_attacks, 0)),
+                   decks_used = MAX(COALESCE(war_participation.decks_used, 0), COALESCE(excluded.decks_used, 0)),
                    decks_used_today = excluded.decks_used_today,
                    observed_at = excluded.observed_at""",
             (season_id, section, tag, p.get("fame"), p.get("repair_points"),
@@ -229,7 +277,17 @@ def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> i
     free_pass = champ
     if champ and _last_free_pass_tag(conn, season_id) == champ and len(standings) > 1:
         free_pass = standings[1]["player_tag"]  # rotation: falls to rank 2 (Q2)
-    final_rank = _our_rank(final_state)
+    # #166: take final_rank from the finished last week's stored rank
+    # (_finalize_week ran first in the same rollover). The snapshot handed to
+    # close_season can be the degenerate post-battle reset — trusting it is
+    # what recorded Season 133 as a 3rd-place finish. Fall back to the snapshot
+    # only if no week rank was recorded.
+    wk = conn.execute(
+        "SELECT our_rank FROM war_weeks WHERE season_id = ? AND our_rank IS NOT NULL "
+        "ORDER BY section_index DESC LIMIT 1",
+        (season_id,),
+    ).fetchone()
+    final_rank = wk["our_rank"] if wk else _our_rank(final_state)
     weeks = conn.execute(
         "SELECT COUNT(*) FROM war_weeks WHERE season_id = ?", (season_id,)
     ).fetchone()[0]
