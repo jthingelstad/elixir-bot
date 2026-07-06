@@ -82,5 +82,10 @@ def emit(conn, entity_kind: str, entity_tag: str, aspect: str, new_payload: dict
     old_payload = baseline_payload(row)
     window_start = row["observed_at"]
     emitted = fn(conn, entity_tag, old_payload, new_payload, observed_at, window_start)
-    set_baseline(conn, entity_kind, entity_tag, aspect, new_payload, observed_at)
+    to_store = new_payload
+    if (entity_kind, aspect) == ("riverrace", "race"):
+        # #166: don't let the API's post-battle reset snapshot overwrite the
+        # peak race baseline, or the season/week rollover finalizes from zeros.
+        to_store = war.merge_baseline(old_payload, new_payload)
+    set_baseline(conn, entity_kind, entity_tag, aspect, to_store, observed_at)
     return emitted
