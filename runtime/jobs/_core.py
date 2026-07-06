@@ -436,19 +436,20 @@ LEADER_ACTION_CASE_ORDER = (
 async def _weekly_discord_invite_relay():
     runtime_status.mark_job_start("weekly_discord_invite_relay")
     try:
-        # Direct leadership post (v5-style), replacing the v4 arena-relay sidecar
-        # awareness machinery (item 7). The weekly cron is itself the dedup.
-        channel_id = _get_singleton_channel_id("arena-relay")
+        # Narrative leadership nudge → #leaders (leader-lounge). It used to post
+        # to #leader-actions (arena-relay), but that channel is now cards-only
+        # (Jamie, 2026-07-06); a reminder is narrative, not an action card.
+        channel_id = _get_singleton_channel_id("leader-lounge")
         channel = _bot().get_channel(channel_id) if channel_id else None
         if channel is None:
-            runtime_status.mark_job_failure("weekly_discord_invite_relay", "arena-relay channel not found")
+            runtime_status.mark_job_failure("weekly_discord_invite_relay", "leader-lounge channel not found")
             return
         context = (
             "Weekly reminder for the leadership channel: nudge leaders to share the "
             "clan's Discord invite with active members who aren't in the server yet. "
             "Keep it short and friendly, in your own voice."
         )
-        ok = await compose_and_post(channel, lane="arena-relay", context=context, leadership=True)
+        ok = await compose_and_post(channel, lane="leader-lounge", context=context, leadership=True)
         if not ok:
             runtime_status.mark_job_failure("weekly_discord_invite_relay", "invite relay post failed")
             return
