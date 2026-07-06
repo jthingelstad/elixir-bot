@@ -131,6 +131,24 @@ def test_battle_day_one_index_zero_fires_and_records(engine_conn):
     assert finalize_attendance_day(c, 140, 0, 0) == 1, "day-0 finalize matched no rows"
 
 
+def test_attendance_day_never_zeroed_by_reset(engine_conn):
+    """#166 sibling: a post-battle reset re-observation of the same war day
+    must not lower an already-recorded day's decks_used in war_attendance_days."""
+    c = engine_conn
+    emit(c, "riverrace", TAG, "race", _race_day(0, 17, "warDay", 0, 0), "2026-08-01T09:00:00Z")  # first sight
+    emit(c, "riverrace", TAG, "race", _race_day(0, 17, "warDay", 300, 4), "2026-08-01T13:00:00Z")  # 4 decks in
+    before = c.execute(
+        "SELECT decks_used FROM war_attendance_days WHERE season_id=140 AND "
+        "section_index=0 AND war_day_index=0 AND player_tag='#AAA'").fetchone()["decks_used"]
+    assert before == 4
+    # reset snapshot (decks_used_today back to 0) still tagged the same war day
+    emit(c, "riverrace", TAG, "race", _race_day(0, 17, "warDay", 0, 0), "2026-08-01T14:00:00Z")
+    after = c.execute(
+        "SELECT decks_used FROM war_attendance_days WHERE season_id=140 AND "
+        "section_index=0 AND war_day_index=0 AND player_tag='#AAA'").fetchone()["decks_used"]
+    assert after == 4, "reset re-observation zeroed a finished day's attendance"
+
+
 def test_monotonic_participation_never_decreases(engine_conn):
     c = engine_conn
     _emit(c, _race(133, 4, 20000), "2026-07-06T03:00:00Z")  # first sight (silent)
