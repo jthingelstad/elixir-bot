@@ -1165,6 +1165,11 @@ def _execute_update_member(arguments):
         db.set_member_profile_url(member_tag, name=None, url=str(value))
     elif field == "note":
         db.set_member_note(member_tag, name=None, note=str(value))
+    elif field == "nickname":
+        # Leader override — pins a readable name Elixir prefers over the game
+        # name everywhere. Empty value clears it (back to the auto-cleaned name).
+        nickname = str(value).strip() or None
+        db.set_member_nickname(member_tag, nickname, source="leader")
     else:
         return {"error": f"Unknown field: {field}"}
 

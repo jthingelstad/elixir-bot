@@ -758,7 +758,9 @@ TOOLS = [
             "- birthday: set birth month and day (value: {\"month\": 3, \"day\": 15})\n"
             "- join_date: set or override join date (value: \"2024-01-15\")\n"
             "- profile_url: set profile URL (value: \"https://...\")\n"
-            "- note: set a short note or title (value: \"War Machine\")"
+            "- note: set a short note or title (value: \"War Machine\")\n"
+            "- nickname: pin a readable name Elixir prefers over the game name "
+            "everywhere (value: \"Ellipsis\"; empty value clears it)"
         ),
         "input_schema": {
             "type": "object",
@@ -770,10 +772,10 @@ TOOLS = [
                 "field": {
                     "type": "string",
                     "description": "Which metadata field to set.",
-                    "enum": ["birthday", "join_date", "profile_url", "note"],
+                    "enum": ["birthday", "join_date", "profile_url", "note", "nickname"],
                 },
                 "value": {
-                    "description": "The value to set. For birthday: {\"month\": M, \"day\": D}. For join_date: \"YYYY-MM-DD\". For profile_url: \"https://...\". For note: short text.",
+                    "description": "The value to set. For birthday: {\"month\": M, \"day\": D}. For join_date: \"YYYY-MM-DD\". For profile_url: \"https://...\". For note: short text. For nickname: a short readable name (e.g. \"Ellipsis\").",
                 },
             },
             "required": ["member_tag", "field", "value"],

@@ -9,7 +9,11 @@ connection/schema layer with no upward imports.
 
 import sqlite3
 
-from storage._formatting import callable_name, format_member_reference
+from storage._formatting import (
+    callable_name,
+    format_member_reference,
+    preferred_display_name,
+)
 from storage.member_ranks import RANK_FIELDS, compute_member_ranks
 
 
@@ -20,13 +24,15 @@ def _member_reference_fields(conn: sqlite3.Connection, member_id, item: dict) ->
     if not tag:
         return item
     item["member_ref"] = format_member_reference(tag, conn=conn)
-    # Substitute readable forms for every name field surfaced to the LLM so
-    # ²⁸/Ｓｈａｆｉｔｈ-style names get narrated as "28" / "Shafith Nihal" instead
-    # of the literal unicode. The DB columns stay literal — only the dict
-    # passed to callers (and the LLM) is transformed.
+    # Substitute the preferred readable name for every name field surfaced to
+    # the LLM: a stored nickname (leader/LLM-named residual like "..."→"Ellipsis")
+    # wins, else callable_name folds ²⁸/Ｓｈａｆｉｔｈ-style names to "28"/"Shafith
+    # Nihal". The DB columns stay literal — only the dict passed to callers
+    # (and the LLM) is transformed.
+    preferred = preferred_display_name(conn, tag)
     for name_field in ("current_name", "name", "player_name", "member_name"):
         if item.get(name_field):
-            item[name_field] = callable_name(item[name_field])
+            item[name_field] = preferred or callable_name(item[name_field])
     item.update(_member_ranks_for(conn, tag))
     return item
 
