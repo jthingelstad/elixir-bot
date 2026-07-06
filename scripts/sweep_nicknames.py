@@ -34,21 +34,21 @@ def main() -> None:
                ORDER BY p.current_name"""
         ).fetchall()
 
+        # Show every member whose displayed name differs from the raw game
+        # name — the deterministic (live) folds AND the residuals we store — so
+        # leaders can review all of them before finalizing.
         flagged = []
         for r in rows:
-            name = r["current_name"]
-            if not needs_nickname(name):
-                continue
-            residual = not (callable_name(name) and any(
-                c.isascii() and c.isalnum() for c in callable_name(name)))
-            if residual:
+            name = r["current_name"] or ""
+            if needs_nickname(name):  # residual → stored nickname (LLM/deterministic)
                 nick, source = generate_nickname(name)
-                how, store = f"stored ({source})", (nick, source)
-            else:  # callable_name resolves it live — nothing to store
-                nick, how, store = callable_name(name), "callable_name (live)", None
-            flagged.append((r, name, nick, how, store))
+                flagged.append((r, name, nick, f"stored ({source})", (nick, source)))
+            else:
+                cleaned = callable_name(name)
+                if cleaned != name:  # callable_name resolves it live — no storage
+                    flagged.append((r, name, cleaned, "callable_name (live)", None))
 
-        print(f"current members: {len(rows)} | flagged: {len(flagged)}\n")
+        print(f"current members: {len(rows)} | need cleaning: {len(flagged)}\n")
         print(f"{'player_tag':13} {'current_name':22} {'->':2} {'display':16} how")
         for r, name, nick, how, _ in flagged:
             existing = f"  [have: {r['preferred_nickname']!r} {r['nickname_source']}]" if r["preferred_nickname"] else ""
