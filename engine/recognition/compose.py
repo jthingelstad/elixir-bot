@@ -496,7 +496,7 @@ def _cohort_wave_line(p: dict) -> str:
     details = [m.get("detail") for m in members]
     if all(details) and len(details) == len(names):
         listing = _oxford([f"{n} ({d})" for n, d in zip(names, details)])
-        return f"🎉 {title} in POAP KINGS <:elixir_trophy:1481449222976045086> — {listing} today. 👑"
+        return f"🎉 {title} in POAP KINGS :elixir_trophy: — {listing} today. 👑"
     verb = _WAVE_VERB.get(wave, "hit a milestone")
-    return (f"🎉 {title} in POAP KINGS <:elixir_trophy:1481449222976045086> — "
+    return (f"🎉 {title} in POAP KINGS :elixir_trophy: — "
             f"{_oxford(names)} each {verb} today. 👑")
