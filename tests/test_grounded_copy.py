@@ -100,6 +100,17 @@ def test_cohort_fallback_specific_or_silent_never_bare_count():
     assert "Multiple members hit the same milestone" not in out
 
 
+def test_cohort_fallback_uses_bare_emoji_shortcode_not_full_form():
+    # The send-path resolver re-wraps an already-<:name:id> literal into a
+    # broken <<:name:id>id>. The fallback must emit the BARE :shortcode: so it
+    # resolves exactly once, like LLM-composed posts do.
+    out = render_intent(_wave("card_unlocked", [
+        {"tag": "#A", "name": "sniperhendo"}, {"tag": "#B", "name": "Sandeep"},
+        {"tag": "#C", "name": "shimmeringhost"}]))
+    assert ":elixir_trophy:" in out
+    assert "<:elixir_trophy:" not in out
+
+
 # --- game-mode humanizer (arena/mode keys) -----------------------------------
 
 # The full live inventory of raw `game_mode_name` values (battle_events).
