@@ -84,7 +84,8 @@ def _plan(conn) -> list[dict]:
             continue
         s = _sample(b)
         badge = s.get("badge") or {}
-        entity = b["entity_key"]
+        entity = (b["first_entity_key"] if "first_entity_key" in b.keys()
+                  and b["first_entity_key"] else b["entity_key"])
         subject_tag = f"#{entity.lstrip('#')}" if entity else None
         member_name = preferred_display_name(conn, subject_tag) if subject_tag else None
         if member_name in (None, "", subject_tag):

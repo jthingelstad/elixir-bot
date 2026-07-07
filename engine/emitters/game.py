@@ -53,7 +53,11 @@ def _event_badge(conn, obs, now: str) -> int:
     sample = _sample(obs)
     badge = sample.get("badge") or {}
     image_url = (badge.get("iconUrls") or {}).get("large")
-    entity_key = obs["entity_key"]
+    # Attribute to the FIRST member seen wearing it — first_entity_key is
+    # preserved across touches; entity_key drifts to the latest observer.
+    keys = obs.keys()
+    entity_key = (obs["first_entity_key"] if "first_entity_key" in keys
+                  and obs["first_entity_key"] else obs["entity_key"])
     subject_tag = f"#{entity_key.lstrip('#')}" if entity_key else None
     # Attribution is best-effort: preferred_display_name falls back to the raw
     # tag when the member has left / isn't resolvable — treat that as unattributed.
