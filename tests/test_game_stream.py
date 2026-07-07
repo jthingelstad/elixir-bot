@@ -96,6 +96,39 @@ def test_emitter_skips_mastery_attributes_novel_badge_and_reads_events():
     conn.close()
 
 
+def test_badge_attributed_to_first_observer_not_latest():
+    # The sentinel overwrites entity_key with the LATEST observer on every touch,
+    # so attribution must ride first_entity_key (preserved on insert). Real case:
+    # Chaos_S2 first seen on Aaqib, later touched by Vijay.
+    from storage.api_sentinel import _ensure_first_entity_key, _insert_or_touch_observation
+    conn = _mem()
+    conn.execute("INSERT OR IGNORE INTO players (player_tag,current_name,first_seen_at,"
+                 "last_seen_at) VALUES ('#AAA','Aaqib','2026-03-01','2026-07-07')")
+    conn.execute("INSERT OR IGNORE INTO players (player_tag,current_name,first_seen_at,"
+                 "last_seen_at) VALUES ('#BBB','Vijay','2026-03-01','2026-07-07')")
+    _ensure_first_entity_key(conn)
+    # filler so Chaos_S2 lands at observation_id >= 2 (a 0 cursor hits the
+    # go-live seed path instead of emitting)
+    _insert_or_touch_observation(conn, {"sentinel_type": "badge_name", "scope": "player.badges",
+                                        "name": "Filler", "endpoint": "player",
+                                        "entity_key": "AAA", "sample": {}}, "2026-06-01T00:00:00")
+    badge = {"name": "Chaos_S2", "iconUrls": {"large": "http://x/c.png"}}
+    base = {"sentinel_type": "badge_name", "scope": "player.badges", "name": "Chaos_S2",
+            "endpoint": "player", "sample": {"badge": badge}}
+    _insert_or_touch_observation(conn, {**base, "entity_key": "AAA"}, "2026-07-06T21:30:43")
+    _insert_or_touch_observation(conn, {**base, "entity_key": "BBB"}, "2026-07-07T02:00:00")
+    row = conn.execute("SELECT observation_id, entity_key, first_entity_key "
+                       "FROM api_sentinel_observations WHERE name='Chaos_S2'").fetchone()
+    assert row["entity_key"] == "BBB" and row["first_entity_key"] == "AAA"  # drift vs preserved
+    conn.commit()
+    # emit the (existing) obs by placing the cursor just behind it
+    cursor_set(conn, "emit:game", row["observation_id"] - 1)
+    emit_game_from_sentinel(conn, "2026-07-07T03:00:00Z")
+    ev = [r for r in ge.new_events_since(conn, 0) if r["event_type"] == "event_badge_earned"][0]
+    assert json.loads(ev["payload_json"])["member_name"] == "Aaqib"  # first, not latest
+    conn.close()
+
+
 def test_emitter_unattributed_when_member_unresolvable():
     conn = _mem()
     cursor_set(conn, "emit:game", 0)  # allow the seed path to run

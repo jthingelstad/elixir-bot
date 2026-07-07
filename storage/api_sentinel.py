@@ -181,6 +181,20 @@ def build_api_sentinel_observations(endpoint: str, entity_key: str | None, paylo
     return list(observations.values())
 
 
+def _ensure_first_entity_key(conn: sqlite3.Connection) -> None:
+    """Lazily add api_sentinel_observations.first_entity_key (the v5.1 lazy-column
+    pattern). Set on insert, never overwritten on touch — it records who was
+    FIRST seen with a first-seen key, which entity_key alone doesn't preserve.
+    Existing rows seed from entity_key (best-effort; historical rows may already
+    have drifted, but those are never announced)."""
+    from db import _table_columns
+
+    if "first_entity_key" not in _table_columns(conn, "api_sentinel_observations"):
+        conn.execute("ALTER TABLE api_sentinel_observations ADD COLUMN first_entity_key TEXT")
+        conn.execute("UPDATE api_sentinel_observations SET first_entity_key = entity_key "
+                     "WHERE first_entity_key IS NULL")
+
+
 def _insert_or_touch_observation(conn: sqlite3.Connection, observation: dict, now: str) -> dict | None:
     row = conn.execute(
         """
@@ -196,6 +210,10 @@ def _insert_or_touch_observation(conn: sqlite3.Connection, observation: dict, no
     ).fetchone()
     sample_json = _json_or_none(observation.get("sample") or {})
     if row:
+        # Touch: entity_key/sample_json track the LATEST observer (by design).
+        # first_entity_key is deliberately NOT updated — it preserves who was
+        # first seen wearing this (the game-level stream attributes a new event
+        # badge to that member; entity_key alone drifts to whoever polled last).
         conn.execute(
             """
             UPDATE api_sentinel_observations
@@ -216,16 +234,17 @@ def _insert_or_touch_observation(conn: sqlite3.Connection, observation: dict, no
     conn.execute(
         """
         INSERT INTO api_sentinel_observations (
-            sentinel_type, scope, name, endpoint, entity_key, first_seen_at,
-            last_seen_at, sample_json, created_at, updated_at
+            sentinel_type, scope, name, endpoint, entity_key, first_entity_key,
+            first_seen_at, last_seen_at, sample_json, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             observation["sentinel_type"],
             observation["scope"],
             observation["name"],
             observation.get("endpoint"),
+            observation.get("entity_key"),
             observation.get("entity_key"),
             now,
             now,
@@ -417,6 +436,7 @@ def _record_api_sentinel_observations(
     announce: bool,
 ) -> list[dict]:
     now = _utcnow()
+    _ensure_first_entity_key(conn)
     new_observations = []
     for observation in build_api_sentinel_observations(endpoint, entity_key, payload):
         inserted = _insert_or_touch_observation(conn, observation, now)
