@@ -46,11 +46,23 @@ def sync_card_catalog(api_response: dict, conn=None) -> int:
 
     api_response should have 'items' and optionally 'supportItems'.
     Returns the number of cards synced.
+
+    Genuinely-new cards (a card_id not previously in the catalog) also raise a
+    `card_added` game_event so the game-level stream can announce them clan-wide
+    with the card image — the Ronin case. The very first population of an empty
+    catalog is a bootstrap, not news, so it emits nothing.
     """
+    from storage import game_events as ge
+
     now = _utcnow()
     count = 0
     all_cards = list(api_response.get("items") or [])
     all_cards.extend(api_response.get("supportItems") or [])
+
+    ge.ensure_schema(conn)  # lazily adds card_catalog.first_seen_at + game_events
+    existing = {r[0] for r in conn.execute("SELECT card_id FROM card_catalog").fetchall()}
+    bootstrap = not existing
+    new_cards: list[dict] = []
 
     for card in all_cards:
         card_id = card.get("id")
@@ -71,8 +83,8 @@ def sync_card_catalog(api_response: dict, conn=None) -> int:
             """INSERT INTO card_catalog
                    (card_id, name, elixir_cost, rarity, max_level,
                     max_evolution_level, card_type, icon_url,
-                    hero_icon_url, evolution_icon_url, synced_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    hero_icon_url, evolution_icon_url, synced_at, first_seen_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(card_id) DO UPDATE SET
                    name = excluded.name,
                    elixir_cost = excluded.elixir_cost,
@@ -87,10 +99,26 @@ def sync_card_catalog(api_response: dict, conn=None) -> int:
             (
                 card_id, name, elixir_cost, rarity, max_level,
                 max_evolution_level, card_type, icon_url,
-                hero_icon_url, evolution_icon_url, now,
+                hero_icon_url, evolution_icon_url, now, now,
             ),
         )
         count += 1
+        if card_id not in existing and not bootstrap:
+            new_cards.append({
+                "card_id": card_id, "name": name, "rarity": rarity,
+                "elixir_cost": elixir_cost, "card_type": card_type,
+                "icon_url": icon_url,
+            })
+
+    for c in new_cards:
+        ge.insert_game_event(
+            conn,
+            dedup_key=f"card_added:{c['card_id']}",
+            event_type="card_added",
+            change_key=f"card:{c['card_id']}",
+            observed_at=now,
+            payload=c,
+        )
 
     conn.commit()
     return count

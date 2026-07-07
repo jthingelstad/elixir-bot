@@ -875,12 +875,29 @@ def _engine_compose_copy(intent) -> str | None:
     return None
 
 
-async def _engine_send(channel_id: int, text: str):
-    """Async Discord send for the engine; returns the first message id or None."""
+async def _engine_send(channel_id: int, text: str, image_url: str | None = None):
+    """Async Discord send for the engine; returns the first message id or None.
+    When image_url is set (game-level card/badge announcements), post the copy
+    with the art as an embed image in one message."""
     channel = bot.get_channel(int(channel_id))
     if channel is None:
         log.warning("engine: channel %s not found; send failed", channel_id)
         return None
+    if image_url:
+        import discord
+
+        from runtime.discord_posting import _resolve_custom_emoji
+
+        guild = getattr(channel, "guild", None)
+        content = _resolve_custom_emoji(text, guild)
+        embed = discord.Embed()
+        embed.set_image(url=image_url)
+        try:
+            msg = await channel.send(content=content, embed=embed)
+            return getattr(msg, "id", None)
+        except Exception:
+            log.exception("engine: embed send failed for channel %s; text-only fallback", channel_id)
+            # fall through to a plain text post so the announcement still lands
     sent_messages = await _post_to_elixir(channel, {"content": text})
     if not sent_messages:
         return None
@@ -897,6 +914,7 @@ def _engine_startup_cursors() -> int:
         "recognize:player": "player_events",
         "recognize:clan": "clan_events",
         "recognize:war": "war_events",
+        "recognize:game": "game_events",
     }
     conn = engine_db.connect()
     initialized = 0
@@ -1129,7 +1147,8 @@ async def _engine_tick():
     runtime_status.mark_job_start("engine_tick")
     loop = asyncio.get_running_loop()
 
-    def send_fn(lane: str, copy: str, thread_id: int | None = None):
+    def send_fn(lane: str, copy: str, thread_id: int | None = None,
+                image_url: str | None = None):
         lanes = engine_compose.channels()
         ch = lanes.get(lane) or lanes.get("arena-relay")
         if not ch:
@@ -1138,14 +1157,14 @@ async def _engine_tick():
         # try it first, fall back to the lane channel (never block on a room).
         if thread_id:
             future = asyncio.run_coroutine_threadsafe(
-                _engine_send(int(thread_id), copy), loop
+                _engine_send(int(thread_id), copy, image_url), loop
             )
             message_id = future.result(timeout=120)
             if message_id is not None:
                 return message_id
             log.warning("engine send: thread %s failed; falling back to lane %s", thread_id, lane)
         future = asyncio.run_coroutine_threadsafe(
-            _engine_send(ch["channel_id"], copy), loop
+            _engine_send(ch["channel_id"], copy, image_url), loop
         )
         message_id = future.result(timeout=120)
         if message_id is None:

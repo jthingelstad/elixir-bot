@@ -180,6 +180,21 @@ CREATE TABLE war_events (
 CREATE INDEX idx_war_events_season ON war_events(season_id, section_index, observed_at);
 CREATE INDEX idx_war_events_type ON war_events(event_type, observed_at DESC);
 
+CREATE TABLE game_events (
+    event_id     INTEGER PRIMARY KEY,
+    dedup_key    TEXT NOT NULL UNIQUE,
+    event_type   TEXT NOT NULL,
+    change_key   TEXT NOT NULL,
+    subject_tag  TEXT,
+    observed_at  TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'public' CHECK (scope IN ('public','leadership')),
+    backfilled   INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX idx_game_events_change ON game_events(change_key, observed_at);
+CREATE INDEX idx_game_events_type ON game_events(event_type, observed_at DESC);
+
 -- §6.1 Rollups (L4, durable) — archive shapes re-keyed to tags ---------------
 CREATE TABLE player_daily_metrics (
     metric_id INTEGER PRIMARY KEY,
@@ -658,7 +673,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 63  # 55 engine (+ runtime_incidents + post_quality_runs + evergreen_nudges) + 3 conversation + 3 memory + 1 fts-excluded
+EXPECTED_TABLE_COUNT = 64  # 55 engine (+ runtime_incidents + post_quality_runs + evergreen_nudges + game_events) + 3 conversation + 3 memory + 1 fts-excluded
 
 
 _DEAD_MEMBERS_FK = re.compile(

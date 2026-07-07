@@ -35,6 +35,18 @@ def test_humanize_badge_never_leaks_raw_key():
         assert " " in humanize_badge(v) or ":" in humanize_badge(v)
 
 
+def test_humanize_badge_event_badges_underscores_and_versions():
+    # Event badges carry underscores + season/version/date suffixes; none may
+    # leak an underscore (the Chaos_S2 / Aaqib case that motivated this).
+    assert humanize_badge("Chaos_S2") == "Chaos S2"
+    assert humanize_badge("RoyalTournamentRank_v2") == "Royal Tournament Rank v2"
+    assert humanize_badge("SeasonalBadge_202509") == "Seasonal Badge 2025-09"
+    assert humanize_badge("SeasonalBadge_202507_v2") == "Seasonal Badge 2025-07 v2"
+    for v in ("Chaos_S2", "RoyalTournamentRank_v2", "SeasonalBadge_202509",
+              "AnarchyLeagueCompletion", "SuddenDeathTrailRank"):
+        assert "_" not in humanize_badge(v)
+
+
 # --- badge_earned deterministic fallback (#167) ------------------------------
 
 def test_badge_earned_fallback_reads_as_mastery_milestone():

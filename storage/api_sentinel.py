@@ -422,8 +422,12 @@ def _record_api_sentinel_observations(
         inserted = _insert_or_touch_observation(conn, observation, now)
         if inserted:
             new_observations.append(inserted)
-    if announce and new_observations:
-        _queue_api_sentinel_signals(conn, new_observations, now)
+    # Record-only: the sentinel is the product team's data source (they read
+    # api_sentinel_observations directly) and the feed for the clan-facing
+    # game-level stream (engine.emitters.game). It no longer posts drift to
+    # #leader-lounge, so no signals are queued. `announce` is retained for
+    # call-site compatibility; queueing was dropped when the leader path retired.
+    _ = announce
     return new_observations
 
 

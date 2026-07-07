@@ -130,4 +130,10 @@ def run_recognizers(conn, clock: dict | None, now: str) -> dict:
     )
     if war_result:
         counters.update(war_result)
+    game_result = _guard_cursor_section(
+        conn, counters, "recognize:game", "game_events",
+        lambda: R.game_recognizer(conn, now),
+    )
+    if game_result:
+        counters.update(game_result)
     return counters
