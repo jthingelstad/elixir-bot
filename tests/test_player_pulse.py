@@ -195,3 +195,16 @@ def test_compose_ask_renders_for_pulse_intents():
         assert "quiet window" in ctx or "quiet_window" in ctx
     finally:
         conn.close()
+
+
+def test_member_names_are_cleaned_not_raw():
+    # #168 — battle-feed leaked raw names because _member_names read current_name.
+    conn = db.get_connection()
+    try:
+        _seed_member(conn, "#EMOJI", "L-Drxgo⚡")
+        _seed_member(conn, "#SUP", "²⁸")
+        names = pp._member_names(conn)
+        assert names["#EMOJI"] == "L-Drxgo"  # ⚡ stripped by callable_name
+        assert names["#SUP"] == "28"          # superscript folded
+    finally:
+        conn.close()
