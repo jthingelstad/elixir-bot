@@ -24,6 +24,9 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
+from engine.normalize import humanize_game_mode
+from storage.game_modes import mode_group_label
+
 log = logging.getLogger("elixir.player_pulse")
 
 JOB_NAME = "player_pulse"
@@ -295,7 +298,8 @@ def spotlight_battle(members: dict, battles: list[dict], decider_refs: set[str])
             why.append("the battle that clinched a new arena")
         if win and b["mode_group"] == "special_event":
             score += 2
-            why.append(f"event-mode win ({b.get('game_mode_name')})")
+            mode = humanize_game_mode(b.get("game_mode_name"))
+            why.append(f"event-mode win ({mode})" if mode else "event-mode win")
         if win and b.get("teammate_tag") in members:
             score += 3
             why.append(f"2v2 win alongside {members[b['teammate_tag']]}")
@@ -306,7 +310,8 @@ def spotlight_battle(members: dict, battles: list[dict], decider_refs: set[str])
             best_key = key
             best = {
                 "name": members[b["player_tag"]],
-                "mode": b.get("game_mode_name") or b["mode_group"],
+                "mode": (humanize_game_mode(b.get("game_mode_name"))
+                         or mode_group_label(b["mode_group"])),
                 "crowns": f"{cf}-{ca}",
                 "trophy_change": b.get("trophy_change"),
                 "why": ", ".join(why),
