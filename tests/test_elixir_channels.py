@@ -3209,20 +3209,12 @@ def test_activity_registry_registers_scheduler_jobs_from_one_source():
     assert "war-awareness" not in job_ids
 
 
-def test_api_sentinel_tick_polls_events_and_publishes_only_sentinel_signals():
+def test_api_sentinel_tick_is_record_only_no_leader_posts():
+    # The sentinel now RECORDS drift into api_sentinel_observations (the product
+    # team's data source + the game-level stream's feed) and no longer posts to
+    # #leader-lounge — the clan-facing news moved to the #announcements stream.
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
-
-    sentinel_signal = {
-        "type": "api_event_sentinel",
-        "signal_type": "api_event_sentinel",
-        "signal_key": "api_event_sentinel:202606130101:abc123",
-    }
-    other_signal = {
-        "type": "capability_unlock",
-        "signal_type": "capability_unlock",
-        "signal_key": "capability_unrelated_v1",
-    }
 
     with (
         patch("runtime.jobs._maintenance.asyncio.to_thread", side_effect=fake_to_thread),
@@ -3232,16 +3224,15 @@ def test_api_sentinel_tick_polls_events_and_publishes_only_sentinel_signals():
             "observations": 9,
         }),
         patch("runtime.jobs._maintenance.cr_api.get_events", return_value=[{"eventTag": "#E", "title": "Event"}]),
-        patch("runtime.jobs._maintenance.db.list_pending_system_signals", return_value=[sentinel_signal, other_signal]),
-        patch("runtime.jobs._maintenance._post_system_signal_updates", new=AsyncMock()) as mock_post,
         patch("runtime.jobs._maintenance.runtime_status.mark_job_start") as mock_start,
         patch("runtime.jobs._maintenance.runtime_status.mark_job_success") as mock_success,
         patch("runtime.jobs._maintenance.runtime_status.mark_job_failure") as mock_failure,
     ):
+        # No pending-signal listing and no signal posting happen anymore; if the
+        # tick tried, these attributes wouldn't even be patched here.
         asyncio.run(elixir._api_sentinel_tick())
 
     mock_start.assert_called_once_with("api_sentinel")
-    mock_post.assert_awaited_once_with([sentinel_signal], {}, {})
     mock_success.assert_called_once()
     mock_failure.assert_not_called()
 

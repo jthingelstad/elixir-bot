@@ -183,10 +183,27 @@ def mastery_card(badge_name) -> str | None:
     return None
 
 
+def _humanize_badge_token(tok: str) -> str:
+    """One underscore-delimited badge segment → clean text. Version/season/date
+    tokens stay compact (`v2`, `S2`, `2024`, `202509`→`2025-09`) rather than
+    being split into `v 2` / `2025 09`; everything else is camelCase-split."""
+    if re.fullmatch(r"[vV]\d+", tok):
+        return tok.lower()
+    if re.fullmatch(r"[A-Z]\d+", tok):
+        return tok
+    if re.fullmatch(r"\d{4}", tok):
+        return tok
+    if re.fullmatch(r"\d{6}", tok):
+        return f"{tok[:4]}-{tok[4:]}"
+    return _split_camel(tok)
+
+
 def humanize_badge(badge_name) -> str:
     """Raw API badge key → member-facing label (#167). `MasteryRonin` →
-    `Card Mastery: Ronin`; known one-offs via the label map; anything else
-    camelCase-split so a raw key never surfaces."""
+    `Card Mastery: Ronin`; known one-offs via the label map; event badges carry
+    underscores and version/season suffixes (`Chaos_S2` → `Chaos S2`,
+    `RoyalTournamentRank_v2` → `Royal Tournament Rank v2`), so split on `_` and
+    humanize each token — a raw key never surfaces."""
     if not isinstance(badge_name, str) or not badge_name:
         return "a new badge"
     card = mastery_card(badge_name)
@@ -194,7 +211,8 @@ def humanize_badge(badge_name) -> str:
         return f"Card Mastery: {card}"
     if badge_name in _BADGE_LABELS:
         return _BADGE_LABELS[badge_name]
-    return _split_camel(badge_name) or badge_name
+    label = " ".join(_humanize_badge_token(t) for t in badge_name.split("_") if t).strip()
+    return label or badge_name
 
 
 # Game-mode keys the CR API returns as raw snake/camelCase identifiers

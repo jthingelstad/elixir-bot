@@ -207,6 +207,15 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn,
         if not calendar_already_ran(conn, today):
             emitted += emit_calendar(conn, today)
             mark_calendar_ran(conn, today)
+        # Game-level stream: new /events + event badges from the sentinel store
+        # (new cards emit from the daily catalog sync). Fail-soft — a sentinel
+        # read must never sink the player/clan/war emit above; the emit:game
+        # cursor + dedup keys make a retry next tick safe.
+        try:
+            from engine.emitters.game import emit_game_from_sentinel
+            emitted += emit_game_from_sentinel(conn, now_iso)
+        except Exception:
+            log.exception("game emit from sentinel failed; retrying next tick")
         counters["events_emitted"] = emitted
         conn.commit()
 

@@ -22,6 +22,7 @@ PREFIX_LANE = {
     "war": "river-race",
     "welcome": "reception",
     "pulse": "battle-feed",
+    "game": "announcements",
     "leadership": "arena-relay",
 }
 FAIL_CLOSED_LANE = "arena-relay"   # unknown never leaks public
@@ -281,6 +282,22 @@ def intent_context(conn, intent_row) -> str:
             "A bare '<name> was promoted' with no reason is a failure; so is "
             "inventing anything not in elder_evidence."
         )
+    elif prefix == "game":
+        ask = (
+            "Something changed in Clash Royale itself — write ONE short "
+            "#announcements post sharing it with the whole clan, in your own "
+            "voice, as clan news everyone will care about. event_type tells you "
+            "which: 'card_added' is a brand-new card (a big deal — name it, its "
+            "rarity and elixir cost; the card art is attached to your post, so "
+            "don't describe the image, just hype the card); 'event_started' is a "
+            "new live event/game-mode (name it and what it is from title/"
+            "description); 'event_badge_earned' is a genuinely-new badge where "
+            "member_name, when present, is the FIRST member in POAP KINGS to earn "
+            "it — celebrate them by name (the badge art is attached). Always use "
+            "badge_label, never the raw badge_name. Ground every specific in "
+            "these facts; do not invent stats or lore. One or two lively "
+            "sentences."
+        )
     else:
         history = _subject_history(conn, tag, lane_leadership) if tag else []
         if history:
@@ -409,6 +426,29 @@ def render_intent(intent_row) -> str:
         return line
     if et.startswith("cohort_wave"):
         return _cohort_wave_line(p)
+    if et == "card_added":
+        name = p.get("name") or "a new card"
+        rarity = str(p.get("rarity") or "").strip()
+        elixir = p.get("elixir_cost")
+        bits = []
+        if rarity:
+            bits.append(rarity.capitalize())
+        if elixir is not None:
+            bits.append(f"{elixir} elixir")
+        tail = f" — {', '.join(bits)}" if bits else ""
+        return f"🆕 A new card just dropped in Clash Royale: **{name}**{tail}. Give it a try!"
+    if et == "event_started":
+        title = p.get("title") or "a new event"
+        desc = p.get("description")
+        line = f"🎉 New in Clash Royale: **{title}** is live"
+        return f"{line} — {desc}" if desc else f"{line}!"
+    if et == "event_badge_earned":
+        label = p.get("badge_label") or "a new badge"
+        who = p.get("member_name")
+        if who:
+            return (f"🎖️ New badge in the game: **{label}** — and **{who}** is the "
+                    f"first in POAP KINGS to earn it! 👑")
+        return f"🎖️ A new badge just appeared in Clash Royale: **{label}**."
     return f"📣 {subj}: {et.replace('_', ' ')}."
 
 

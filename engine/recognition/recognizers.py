@@ -586,3 +586,58 @@ def war_recognizer(conn, clock: dict | None, now: str) -> dict:
     if rows:
         cursor_set(conn, "recognize:war", rows[-1]["event_id"])
     return counters
+
+
+# --------------------------------------------------------------- game stream
+
+def _game_group_payload(change_key: str, members: list) -> dict:
+    """One #announcements payload for a change. The head event carries the
+    story; any same-change_key siblings ride along under `grouped`. Normalizes
+    the image to `image_url` so delivery has one key regardless of source."""
+    head = members[0]
+    payload = {"event_type": head["event_type"], "change_key": change_key,
+               **_payload(head)}
+    if head["event_type"] == "card_added" and payload.get("icon_url"):
+        payload.setdefault("image_url", payload["icon_url"])
+    if len(members) > 1:
+        payload["grouped"] = [
+            {"event_type": m["event_type"], **_payload(m)} for m in members[1:]
+        ]
+    return payload
+
+
+def game_recognizer(conn, now: str) -> dict:
+    """Direct-post path for the game-level stream (new cards / events / event
+    badges) → #announcements. Groups same-`change_key` detections so one real
+    change posts once; the ledger claim (`game:{change_key}`) makes re-detection
+    across ticks idempotent. Backfilled rows are the record only and never reach
+    here (new_events_since filters them)."""
+    from storage import game_events as ge
+
+    counters = {"game_posted": 0}
+    pos = cursor_get(conn, "recognize:game")
+    rows = ge.new_events_since(conn, pos)
+    if not rows:
+        return counters
+    groups: dict[str, list] = {}
+    order: list[str] = []
+    for r in rows:
+        ck = r["change_key"]
+        if ck not in groups:
+            groups[ck] = []
+            order.append(ck)
+        groups[ck].append(r)
+    for ck in order:
+        members = groups[ck]
+        refs = [m["dedup_key"] for m in members]
+        if not ledger.claim(conn, f"game:{ck}", "game", refs, 0):
+            continue
+        payload = _game_group_payload(ck, members)
+        intent_id = delivery.raise_intent(
+            conn, f"game:{ck}", f"game:{payload['event_type']}",
+            compose.route("game:x", "public"), "public", payload, now,
+        )
+        ledger.attach_intent(conn, f"game:{ck}", intent_id)
+        counters["game_posted"] += 1
+    cursor_set(conn, "recognize:game", rows[-1]["event_id"])
+    return counters

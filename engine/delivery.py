@@ -60,6 +60,28 @@ def _accepts_thread(send_fn) -> bool:
         return False
 
 
+def _accepts_image(send_fn) -> bool:
+    """The live send_fn takes a 4th `image_url` — a game-level card/badge
+    announcement posts as an embed with the art. Text-only stubs (<4 params)
+    never see it and keep sending plain text."""
+    import inspect
+
+    try:
+        return len(inspect.signature(send_fn).parameters) >= 4
+    except (TypeError, ValueError):
+        return False
+
+
+def _intent_image_url(intent) -> str | None:
+    """The optional image an intent wants embedded (game stream: card icon or
+    badge art), pulled from its payload — None for every text-only post."""
+    try:
+        pj = intent["payload_json"] if "payload_json" in intent.keys() else None
+        return (json.loads(pj) or {}).get("image_url") if pj else None
+    except (TypeError, ValueError):
+        return None
+
+
 def consume(conn, send_fn, compose_fn, now: str, *, editor_gate=None) -> dict:
     """Deliver pending/failed intents oldest-first, per lane. Returns counters.
 
@@ -112,10 +134,14 @@ def consume(conn, send_fn, compose_fn, now: str, *, editor_gate=None) -> dict:
                                   intent["intent_id"])
             try:
                 thread_id = intent["thread_id"] if "thread_id" in intent.keys() else None
+                kwargs = {}
                 if thread_id is not None and _accepts_thread(send_fn):
-                    message_id = send_fn(intent["lane"], copy, thread_id)
-                else:
-                    message_id = send_fn(intent["lane"], copy)
+                    kwargs["thread_id"] = thread_id
+                if _accepts_image(send_fn):
+                    image_url = _intent_image_url(intent)
+                    if image_url:
+                        kwargs["image_url"] = image_url
+                message_id = send_fn(intent["lane"], copy, **kwargs)
             except Exception as exc:
                 # Fail-stop THIS lane; other lanes proceed. Retry next tick.
                 conn.execute(
