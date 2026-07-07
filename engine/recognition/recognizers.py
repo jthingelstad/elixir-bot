@@ -18,6 +18,7 @@ from engine.db import cursor_get, cursor_set
 from engine.recognition import compose, ledger
 from engine.recognition.scorer import (
     REASON_ACCRUING,
+    REASON_BACKGROUND,
     REASON_COALESCED,
     REASON_COHORT,
     Candidate,
@@ -325,6 +326,22 @@ def _mark_cohort_member(conn, candidate: Candidate, wave_key: str) -> None:
                                   {"wave_key": wave_key})
 
 
+def _celebrate_stream(event_type: str) -> str:
+    return "battle" if event_type in ("arena_up", "trophy_push", "ranked_pulse") else "player"
+
+
+def _is_card_grind_background(event_type: str, payload: dict | None) -> bool:
+    """Card-grind moments are background context, never a standalone highlight
+    (clan policy): card unlocks, card level-ups, and Card Mastery badges. Other
+    badges, collection-level, arena-up, trophy peaks, etc. still post."""
+    if event_type in ("card_unlocked", "card_level_milestone"):
+        return True
+    if event_type == "badge_earned":
+        from engine.normalize import mastery_card
+        return mastery_card((payload or {}).get("badge_name")) is not None
+    return False
+
+
 def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
     """Coalesce → cohort → accrue → claim → intent (recognition.md §3)."""
     counters = {"celebrate_posted": 0, "celebrate_suppressed": 0, "cohort_posted": 0}
@@ -377,15 +394,29 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
 
     for subject in sorted(by_subject):
         group = by_subject[subject]
-        selected = max(group, key=sort_key)
-        stream = "battle" if selected.event_type in (
-            "arena_up", "trophy_push", "ranked_pulse") else "player"
+        # Card-grind moments never become a standalone highlight — claim +
+        # suppress them (they persist as events and still feed the cohort waves
+        # above) and keep them OUT of the individual-post selection, so a
+        # card level-up (score 95) can't outrank and coalesce away a real
+        # moment like a badge or trophy peak sharing the window.
+        postable: list[Candidate] = []
+        for c in group:
+            if _is_card_grind_background(c.event_type, c.payload):
+                if ledger.claim(conn, c.key, _celebrate_stream(c.event_type), c.event_refs, 0):
+                    ledger.record_suppression(conn, c.key, REASON_BACKGROUND, {})
+                    counters["celebrate_suppressed"] += 1
+            else:
+                postable.append(c)
+        if not postable:
+            continue
+        selected = max(postable, key=sort_key)
+        stream = _celebrate_stream(selected.event_type)
         if not ledger.claim(conn, selected.key, stream, selected.event_refs, 0):
             # Another stream already recognized this moment (e.g. the battle
             # claimed the arena-up the profile is now confirming). Back off.
             continue
         last = ledger.last_highlight_at(conn, subject)
-        post, score, trace = decide(conn, subject, selected, group, last)
+        post, score, trace = decide(conn, subject, selected, postable, last)
         conn.execute(
             "UPDATE recognition_ledger SET score = ? WHERE recognition_key = ?",
             (score, selected.key),
@@ -403,7 +434,7 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
         else:
             ledger.record_suppression(conn, selected.key, REASON_ACCRUING, trace)
             counters["celebrate_suppressed"] += 1
-        for other in group:
+        for other in postable:
             if other is selected:
                 continue
             if ledger.claim(conn, other.key, stream, other.event_refs, 0):

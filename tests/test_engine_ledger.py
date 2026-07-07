@@ -7,7 +7,7 @@ from engine import recognition
 from engine.db import cursor_get, cursor_set
 from engine.recognition import ledger
 from engine.recognition.recognizers import player_candidates, run_celebrate_pipeline
-from engine.recognition.scorer import REASON_ACCRUING, REASON_COHORT
+from engine.recognition.scorer import REASON_ACCRUING, REASON_BACKGROUND, REASON_COHORT
 
 KEY = "arena_up:#A:54000013"
 NOW = "2026-07-01T12:00:00Z"
@@ -85,6 +85,84 @@ def test_cohort_wave_uses_same_day_suppressed_events_across_ticks(engine_conn):
             (key,),
         ).fetchone()[0])
         assert blob["suppressed"]["reason"] == REASON_COHORT
+
+
+def _seed_player(conn, tag, name):
+    conn.execute("INSERT OR IGNORE INTO players (player_tag, current_name, first_seen_at, "
+                 "last_seen_at) VALUES (?, ?, ?, ?)", (tag, name, NOW, NOW))
+
+
+def _seed_event(conn, tag, etype, payload, key):
+    conn.execute("""INSERT INTO player_events
+                      (dedup_key, event_type, player_tag, observed_at, payload_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                 (key, etype, tag, NOW, json.dumps(payload), NOW))
+
+
+def _run(conn):
+    cursor_set(conn, "recognize:player", 0)
+    cands, _ = player_candidates(conn)
+    return run_celebrate_pipeline(conn, cands, NOW)
+
+
+def test_card_grind_is_background_not_posted(engine_conn):
+    # Clan policy (2026-07-07): card level-ups are context, not a highlight.
+    _seed_player(engine_conn, "#A", "Al")
+    _seed_event(engine_conn, "#A", "card_level_milestone",
+                {"card_name": "Prince", "milestone": 16}, key="cl:#A")
+    engine_conn.commit()
+    counters = _run(engine_conn)
+    assert counters["celebrate_posted"] == 0
+    assert engine_conn.execute(
+        "SELECT COUNT(*) FROM communication_intents WHERE lane = 'member-highlights'"
+    ).fetchone()[0] == 0
+    # the event still exists as context, and the suppression reason is recorded
+    assert engine_conn.execute(
+        "SELECT COUNT(*) FROM player_events WHERE event_type = 'card_level_milestone'"
+    ).fetchone()[0] == 1
+    blob = json.loads(engine_conn.execute(
+        "SELECT event_refs_json FROM recognition_ledger WHERE recognition_key = 'cl:#A'"
+    ).fetchone()[0])
+    assert blob["suppressed"]["reason"] == REASON_BACKGROUND
+
+
+def test_mastery_badge_background_but_real_badge_posts_via_bypass_peer(engine_conn):
+    # A card level-up (score 95, prio 80) must NOT coalesce away a real moment
+    # sharing the window — the collection milestone (bypass) still posts.
+    _seed_player(engine_conn, "#A", "Al")
+    _seed_event(engine_conn, "#A", "card_level_milestone",
+                {"card_name": "Prince", "milestone": 16}, key="cl:#A")
+    _seed_event(engine_conn, "#A", "collection_level_milestone",
+                {"milestone": 42}, key="col:#A")
+    _seed_event(engine_conn, "#A", "badge_earned",
+                {"badge_name": "MasteryRonin"}, key="mb:#A")
+    engine_conn.commit()
+    _run(engine_conn)
+    posted = engine_conn.execute(
+        "SELECT intent_type FROM communication_intents WHERE lane = 'member-highlights'"
+    ).fetchall()
+    assert [r["intent_type"] for r in posted] == ["celebrate:collection_level_milestone"]
+    # both card-grind moments suppressed as background
+    for key in ("cl:#A", "mb:#A"):
+        blob = json.loads(engine_conn.execute(
+            "SELECT event_refs_json FROM recognition_ledger WHERE recognition_key = ?",
+            (key,)).fetchone()[0])
+        assert blob["suppressed"]["reason"] == REASON_BACKGROUND
+
+
+def test_card_unlock_wave_still_posts(engine_conn):
+    # Card-grind is background individually but STILL forms cohort waves (kept).
+    for tag, name in (("#A", "Al"), ("#B", "Bo"), ("#C", "Cy")):
+        _seed_player(engine_conn, tag, name)
+        _seed_event(engine_conn, tag, "card_unlocked",
+                    {"card_name": "Ronin", "rarity": "legendary"}, key=f"cu:{tag}")
+    engine_conn.commit()
+    counters = _run(engine_conn)
+    assert counters["cohort_posted"] == 1
+    assert counters["celebrate_posted"] == 0
+    assert engine_conn.execute(
+        "SELECT COUNT(*) FROM communication_intents WHERE intent_type = 'cohort:cohort_wave'"
+    ).fetchone()[0] == 1
 
 
 def test_poison_event_skips_after_three_repeated_failures(engine_conn, monkeypatch):

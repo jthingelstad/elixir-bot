@@ -18,6 +18,10 @@ ACCRUAL_WINDOW = timedelta(days=14)           # communication.py:70
 REASON_ACCRUING = "player_highlight_accruing"
 REASON_COALESCED = "player_highlight_coalesced:same_tick"
 REASON_COHORT = "cohort_wave"
+# Card-grind (unlocks, level-ups, Card Mastery) is background context — recorded
+# as events (and feeds cohort waves) but never a standalone #player-highlights
+# post (clan policy 2026-07-07: it enriches other updates, it isn't news itself).
+REASON_BACKGROUND = "card_grind_background"
 POLICY_ID = "player_highlight_score:v1"
 
 # recognition.md §2 — base scores (v5.1 names; scores unchanged)
