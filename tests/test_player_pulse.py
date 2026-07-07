@@ -165,6 +165,20 @@ def test_spotlight_scoring_prefers_duo_decider_over_plain_sweep():
     assert spot2["name"] == "Ace" and "clinched" in spot2["why"]
 
 
+def test_spotlight_humanizes_raw_game_mode_key():
+    # Jamie saw `Crazy_Arena` in a post — the spotlight's why/mode must read clean.
+    members = {"#A": "Ace"}
+    event_win = {"player_tag": "#A", "battle_time": "20260705T020000.000Z",
+                 "mode_group": "special_event", "game_mode_name": "Crazy_Arena",
+                 "outcome": "W", "crowns_for": 3, "crowns_against": 0,
+                 "trophy_change": 0, "teammate_tag": None, "dedup_key": "e1",
+                 "is_competitive": 1}
+    spot = pp.spotlight_battle(members, [event_win], set())
+    assert "Crazy Arena" in spot["why"]
+    assert "Crazy_Arena" not in spot["why"]
+    assert "_" not in spot["mode"]
+
+
 def test_rotation_fairness_carries_prior_featured_names():
     conn = db.get_connection()
     try:

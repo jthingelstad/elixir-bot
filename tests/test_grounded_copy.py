@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 
-from engine.normalize import humanize_badge, mastery_card
+from engine.normalize import humanize_badge, humanize_game_mode, mastery_card
 from engine.recognition.compose import render_intent
 
 
@@ -86,3 +86,39 @@ def test_cohort_fallback_specific_or_silent_never_bare_count():
     out = render_intent(_wave("badge_earned", [{"tag": "#A"}, {"tag": "#B"}, {"tag": "#C"}]))
     assert "Badge wave" in out
     assert "Multiple members hit the same milestone" not in out
+
+
+# --- game-mode humanizer (arena/mode keys) -----------------------------------
+
+# The full live inventory of raw `game_mode_name` values (battle_events).
+_LIVE_MODE_KEYS = [
+    "Ladder", "Crazy_Arena", "Ranked1v1_NewArena", "TeamVsTeam",
+    "Challenge_AllCards_EventDeck_NoSet", "CW_Battle_1v1", "7xElixir_Ladder",
+    "ClanWar_BoatBattle", "Showdown_Friendly", "CW_Duel_1v1", "Friendly",
+    "Ranked1v1_NewArena2", "Draft_Competitive", "Event_RestlessDead", "PickMode",
+    "DraftMode", "Touchdown_Draft", "Touchdown_ClanWar", "TeamVsTeam_Touchdown_Draft",
+    "RampUpElixir_Ladder", "ClassicDecks_Friendly", "TripleElixir_Ladder",
+    "DraftMode_Princess",
+]
+
+
+def test_humanize_game_mode_never_leaks_underscore_key():
+    # Jamie saw `Crazy_Arena` in a post — no raw key (with `_`) may survive.
+    for key in _LIVE_MODE_KEYS:
+        out = humanize_game_mode(key)
+        assert out and "_" not in out, f"{key!r} -> {out!r} leaked a raw key"
+
+
+def test_humanize_game_mode_reads_cleanly():
+    assert humanize_game_mode("Crazy_Arena") == "Crazy Arena"
+    assert humanize_game_mode("CW_Battle_1v1") == "Clan War"
+    assert humanize_game_mode("7xElixir_Ladder") == "7x Elixir"
+    assert humanize_game_mode("Event_RestlessDead") == "Restless Dead"
+    assert humanize_game_mode("TeamVsTeam") == "2v2"
+    assert humanize_game_mode("Showdown_Friendly") == "Showdown"
+
+
+def test_humanize_game_mode_empty_is_none():
+    assert humanize_game_mode(None) is None
+    assert humanize_game_mode("") is None
+    assert humanize_game_mode(123) is None

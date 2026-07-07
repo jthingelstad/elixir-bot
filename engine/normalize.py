@@ -197,6 +197,46 @@ def humanize_badge(badge_name) -> str:
     return _split_camel(badge_name) or badge_name
 
 
+# Game-mode keys the CR API returns as raw snake/camelCase identifiers
+# (`Crazy_Arena`, `CW_Battle_1v1`, `7xElixir_Ladder`). Same class of leak as
+# badges (#167): the API never sends a member-facing label, so a raw key like
+# `Crazy_Arena` must never surface. Curated labels cover the abbreviations and
+# compounds a generic split mangles (CW→Clan War, TeamVsTeam→2v2); everything
+# else falls through to a structural cleaner.
+_GAME_MODE_LABELS = {
+    "Crazy_Arena": "Crazy Arena",
+    "Challenge_AllCards_EventDeck_NoSet": "All-Cards Challenge",
+    "TeamVsTeam": "2v2",
+    "CW_Battle_1v1": "Clan War",
+    "CW_Duel_1v1": "Clan War Duel",
+    "ClanWar_BoatBattle": "Boat Battle",
+    "Ranked1v1_NewArena": "Ranked",
+    "Ranked1v1_NewArena2": "Ranked",
+    "TeamVsTeam_Touchdown_Draft": "2v2 Touchdown",
+}
+
+# Structural tokens that describe the ruleset plumbing, not the mode a member
+# would name — dropped from the generic fallback so `Showdown_Friendly` reads
+# "Showdown" and `Event_RestlessDead` reads "Restless Dead".
+_MODE_NOISE = {"Ladder", "Friendly", "NoSet", "EventDeck", "AllCards", "Mode",
+               "NewArena", "NewArena2", "Event", "Competitive"}
+
+
+def humanize_game_mode(mode_name) -> str | None:
+    """Raw API game-mode key → member-facing label, else None for empty input.
+    Curated map first; otherwise drop structural noise tokens and camelCase-split
+    what remains so a raw key like `Crazy_Arena` never reaches a post."""
+    if not isinstance(mode_name, str) or not mode_name:
+        return None
+    if mode_name in _GAME_MODE_LABELS:
+        return _GAME_MODE_LABELS[mode_name]
+    parts = [p for p in mode_name.split("_") if p and p not in _MODE_NOISE]
+    if not parts:                       # all-noise key — keep something legible
+        parts = mode_name.split("_")
+    label = " ".join(_split_camel(p) for p in parts).strip()
+    return label or None
+
+
 def pol_rank_improved(old_rank, new_rank) -> bool:
     """Path of Legends global ranks are lower-is-better (rank 1 beats 100) —
     docs/cr-api-docs/leaderboards.md. Newly attained (old None) counts."""
