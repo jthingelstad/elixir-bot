@@ -187,6 +187,11 @@ def intent_context(conn, intent_row) -> str:
     name = resolve_name(conn, tag)
     if name:
         facts["player_name"] = name
+    if payload.get("event_type") == "badge_earned":
+        # Hand the composer a clean label so it never quotes the raw key (#167).
+        from engine.normalize import humanize_badge
+
+        facts["badge_label"] = humanize_badge(payload.get("badge_name"))
 
     lane_leadership = intent_row["scope"] == "leadership"
     naming = (
@@ -235,7 +240,9 @@ def intent_context(conn, intent_row) -> str:
             "milestone, in your own voice. " + naming +
             "Feature a concrete recent moment if recent_win is present; "
             "recent_history is their recent run for color. Ground every specific "
-            "in these facts — do not invent details. A line or two. Vary your "
+            "in these facts — do not invent details. If badge_label is present, "
+            "refer to the badge by that clean label — never the raw badge_name. "
+            "A line or two. Vary your "
             "phrasing — avoid stock lines (e.g. 'momentum is real') that repeat "
             "across posts."
         )
@@ -243,7 +250,11 @@ def intent_context(conn, intent_row) -> str:
         ask = (
             "Several members hit the same milestone today. Compose ONE short "
             "#clan-events post naming them together. " + naming +
-            "Name what the milestone actually was — never a generic 'hit milestones'."
+            "Each entry in members has name and, when known, a detail (the "
+            "specific card, badge, or level) — use those specifics. Name what "
+            "the milestone actually was (wave_type), never a generic 'hit "
+            "milestones'. If members carry no detail, still name the members and "
+            "the shared milestone — never post only a count."
         )
     elif payload.get("event_type") == "member_joined":
         ask = (
@@ -314,7 +325,12 @@ def render_intent(intent_row) -> str:
     if et == "trophy_push":
         return f"📈 {subj} pushed +{p.get('trophy_delta')} trophies over {p.get('battle_count')} battles."
     if et == "badge_earned":
-        return f"🎖️ {subj} earned the {p.get('badge_name')} badge."
+        from engine.normalize import humanize_badge, mastery_card
+
+        card = mastery_card(p.get("badge_name"))
+        if card:  # the common family reads best as a Card Mastery milestone (#167)
+            return f"🎖️ {subj} hit a new Card Mastery milestone on {card}."
+        return f"🎖️ {subj} earned the {humanize_badge(p.get('badge_name'))} badge."
     if et == "ranked_pulse":
         return f"⚔️ {subj} is on a ranked tear — {p.get('wins')}W/{p.get('losses')}L this week."
     if et in ("pol_promotion", "ultimate_champion_reached", "pol_global_rank_attained"):
@@ -392,5 +408,55 @@ def render_intent(intent_row) -> str:
             line += f" Battle of the window: {spot['name']} — {spot.get('why', 'a beauty')}."
         return line
     if et.startswith("cohort_wave"):
-        return "🎉 Multiple members hit the same milestone today — a clan wave!"
+        return _cohort_wave_line(p)
     return f"📣 {subj}: {et.replace('_', ' ')}."
+
+
+# Cohort-wave copy: name the members and the concrete milestone, or say nothing
+# beyond a warm line — never a content-free count (#139, #169).
+_WAVE_TITLE = {
+    "card_unlocked": "Card-unlock wave",
+    "card_level_milestone": "Card-level wave",
+    "badge_earned": "Badge wave",
+    "collection_level_milestone": "Collection-level wave",
+    "career_wins_milestone": "Career-wins wave",
+    "best_trophies_peak": "Trophy-peak wave",
+}
+_WAVE_VERB = {
+    "card_unlocked": "unlocked a new card",
+    "card_level_milestone": "leveled up a card",
+    "badge_earned": "earned a new badge",
+    "collection_level_milestone": "hit a collection milestone",
+    "career_wins_milestone": "crossed a career-wins milestone",
+    "best_trophies_peak": "set a new trophy peak",
+}
+
+
+def _oxford(items: list[str]) -> str:
+    items = [i for i in items if i]
+    if len(items) <= 1:
+        return items[0] if items else ""
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
+
+
+def _cohort_wave_line(p: dict) -> str:
+    """Deterministic cohort-wave copy grounded in the payload: members + the
+    milestone. Members carry per-member `detail` (card/badge/level) when the
+    recognizer had it; when they do, name each specific, else name the shared
+    milestone type."""
+    members = [m for m in (p.get("members") or []) if isinstance(m, dict)]
+    names = [m.get("name") or m.get("tag") for m in members]
+    names = [n for n in names if n]
+    wave = p.get("wave_type") or (p.get("event_type") or "").split(":")[-1]
+    title = _WAVE_TITLE.get(wave, f"{wave.replace('_', ' ')} wave".strip().capitalize())
+    if not names:  # no specifics beyond a count — keep it warm, not a bare tally
+        return f"🎉 {title} in POAP KINGS today — nicely done, all. 👑"
+    details = [m.get("detail") for m in members]
+    if all(details) and len(details) == len(names):
+        listing = _oxford([f"{n} ({d})" for n, d in zip(names, details)])
+        return f"🎉 {title} in POAP KINGS <:elixir_trophy:1481449222976045086> — {listing} today. 👑"
+    verb = _WAVE_VERB.get(wave, "hit a milestone")
+    return (f"🎉 {title} in POAP KINGS <:elixir_trophy:1481449222976045086> — "
+            f"{_oxford(names)} each {verb} today. 👑")

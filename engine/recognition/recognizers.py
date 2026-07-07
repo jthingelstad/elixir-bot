@@ -292,6 +292,25 @@ def _available_for_cohort(conn, candidate: Candidate) -> bool:
     return row is None or row["intent_id"] is None
 
 
+def _cohort_member_detail(event_type: str, payload: dict) -> str | None:
+    """The concrete milestone for one cohort member — the card, badge, or level
+    that makes the wave post recognition instead of a count (#139). None when
+    there's nothing specific to add."""
+    payload = payload or {}
+    if event_type == "card_unlocked":
+        return payload.get("card_name")
+    if event_type == "card_level_milestone":
+        card, lvl = payload.get("card_name"), payload.get("milestone")
+        if card and lvl:
+            return f"{card} → {lvl}"
+        return card
+    if event_type == "badge_earned":
+        from engine.normalize import humanize_badge
+
+        return humanize_badge(payload.get("badge_name"))
+    return None
+
+
 def _mark_cohort_member(conn, candidate: Candidate, wave_key: str) -> None:
     if ledger.claim(conn, candidate.key, "player", candidate.event_refs, 0):
         ledger.record_suppression(conn, candidate.key, REASON_COHORT,
@@ -336,7 +355,8 @@ def run_celebrate_pipeline(conn, candidates: list[Candidate], now: str) -> dict:
             names = []
             for m in wave_members:
                 names.append({"tag": m.subject_tag,
-                              "name": compose.resolve_name(conn, m.subject_tag)})
+                              "name": compose.resolve_name(conn, m.subject_tag),
+                              "detail": _cohort_member_detail(m.event_type, m.payload)})
             intent_id = delivery.raise_intent(
                 conn, wave_key, "cohort:cohort_wave", compose.route("cohort:x", "public"),
                 "public",

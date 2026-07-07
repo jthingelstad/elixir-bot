@@ -12,6 +12,7 @@ Pure functions only. No DB, no I/O.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -151,6 +152,49 @@ def ranked_league_name(league, *, legacy: bool = False) -> str | None:
         name = LEGACY_POL_LEAGUES.get(league)
         return f"{name} (Path of Legends era)" if name else None
     return RANKED_LEAGUES.get(league)
+
+
+# Badge keys the CR API returns as raw camelCase identifiers (#167). Two live
+# families: `Mastery<Card>` (a Card Mastery badge, the common one) and one-off
+# challenge/league badges. The API never sends a human label, so we build one —
+# nothing should ever render a raw key like `MasteryRonin` to members.
+_BADGE_LABELS = {
+    "Classic12Wins": "Classic Challenge 12 wins",
+    "Grand12Wins": "Grand Challenge 12 wins",
+    "TopLeague": "Top League",
+}
+
+
+def _split_camel(s: str) -> str:
+    """`SuspiciousBush` → `Suspicious Bush`, `CrazyArenaBadge1` → `Crazy Arena
+    Badge 1`. Splits lower/digit→upper and letter→digit boundaries."""
+    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", s)
+    s = re.sub(r"(?<=[A-Za-z])(?=[0-9])", " ", s)
+    return s.strip()
+
+
+def mastery_card(badge_name) -> str | None:
+    """The card name behind a `Mastery<Card>` badge key, else None. Pure
+    camelCase split — `MasteryRonin` → `Ronin`, `MasterySuspiciousBush` →
+    `Suspicious Bush`. Catalog canonicalization is the caller's job (this module
+    stays DB-free); the split alone is human-readable for every current value."""
+    if isinstance(badge_name, str) and badge_name.startswith("Mastery") and len(badge_name) > 7:
+        return _split_camel(badge_name[7:]) or None
+    return None
+
+
+def humanize_badge(badge_name) -> str:
+    """Raw API badge key → member-facing label (#167). `MasteryRonin` →
+    `Card Mastery: Ronin`; known one-offs via the label map; anything else
+    camelCase-split so a raw key never surfaces."""
+    if not isinstance(badge_name, str) or not badge_name:
+        return "a new badge"
+    card = mastery_card(badge_name)
+    if card:
+        return f"Card Mastery: {card}"
+    if badge_name in _BADGE_LABELS:
+        return _BADGE_LABELS[badge_name]
+    return _split_camel(badge_name) or badge_name
 
 
 def pol_rank_improved(old_rank, new_rank) -> bool:

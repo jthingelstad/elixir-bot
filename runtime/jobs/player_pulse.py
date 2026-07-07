@@ -114,8 +114,13 @@ def _rows(conn, sql, params=()):
 
 
 def _member_names(conn) -> dict[str, str]:
+    # Every battle-feed fact draws names from this map, so it must go through the
+    # nickname/callable_name layer like resolve_name and _member_reference_fields
+    # do — otherwise raw names (²⁸, L-Drxgo⚡, fullwidth, "...") leak to posts (#168).
+    from storage._formatting import preferred_display_name
+
     return {
-        r["player_tag"]: r["current_name"]
+        r["player_tag"]: preferred_display_name(conn, r["player_tag"], r["current_name"])
         for r in conn.execute(
             """SELECT p.player_tag, p.current_name
                FROM clan_memberships cm JOIN players p USING (player_tag)
