@@ -367,6 +367,8 @@ def test_role_action_card_gets_clan_chat_copy(monkeypatch):
         aid = created["action_id"]
         action = dict(conn.execute(
             "SELECT * FROM leader_action_recommendations WHERE action_id=?", (aid,)).fetchone())
+        conn.commit()   # the test owns this conn, so it commits it (writers no
+                        # longer commit a borrowed connection — that was the bug)
     finally:
         conn.close()
 

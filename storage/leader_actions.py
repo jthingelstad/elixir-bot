@@ -353,7 +353,9 @@ def create_leader_action_recommendation(
             now,
         ),
     )
-    conn.commit()
+    # No conn.commit() here: @managed_connection commits when it owns the conn;
+    # when the engine tick passes its conn, committing mid-step would defeat the
+    # tick's per-step rollback guard.
     return get_leader_action_by_key(action_key, conn=conn) or {}
 
 
@@ -421,7 +423,8 @@ def auto_withdraw_leader_actions(
                   AND status NOT IN ('resolved', 'dismissed')""",
             (now, clean_reason, now, *case_ids),
         )
-    conn.commit()
+    # No conn.commit(): see create_leader_action_recommendation — the decorator
+    # commits when it owns the conn; a mid-tick commit would break step atomicity.
     return len(action_ids)
 
 
