@@ -274,26 +274,30 @@ def refresh_rollups(conn, player_tag, date_chicago, expected_battle_delta=None):
 
 def _refresh_daily_metrics(conn, tag, date_chicago):
     """Upsert the day's player_daily_metrics row from player_current_state.
-    last_seen_api stays NULL — §13.6: we deliberately don't use lastSeen."""
+    last_seen_api carries the in-game lastSeen for roster-badge awareness — it
+    is recorded, NOT used as an engagement signal (battling stays the kick
+    clock; architecture §13.6)."""
     state = conn.execute(
         "SELECT * FROM player_current_state WHERE player_tag = ?", (tag,)
     ).fetchone()
     if not state:
         return
+    last_seen_api = state["last_seen_api"] if "last_seen_api" in state.keys() else None
     conn.execute(
         """INSERT INTO player_daily_metrics (player_tag, metric_date, exp_level,
                trophies, best_trophies, clan_rank, donations_week,
                donations_received_week, last_seen_api)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(player_tag, metric_date) DO UPDATE SET
                exp_level = excluded.exp_level, trophies = excluded.trophies,
                best_trophies = excluded.best_trophies, clan_rank = excluded.clan_rank,
                donations_week = excluded.donations_week,
-               donations_received_week = excluded.donations_received_week""",
+               donations_received_week = excluded.donations_received_week,
+               last_seen_api = COALESCE(excluded.last_seen_api, player_daily_metrics.last_seen_api)""",
         (
             tag, date_chicago, state["exp_level"], state["trophies"],
             state["best_trophies"], state["clan_rank"], state["donations_week"],
-            state["donations_received_week"],
+            state["donations_received_week"], last_seen_api,
         ),
     )
 

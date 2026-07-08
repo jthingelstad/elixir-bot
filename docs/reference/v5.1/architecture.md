@@ -524,9 +524,17 @@ the v5.1 streams, not a new invention.
 
 - **Battle logs are the engagement signal.** Contribution is battling — war battles
   weighted highest — not presence.
-- **We deliberately ignore `lastSeen` and login counts.** `lastSeen` moves when
-  someone merely opens the game to claim rewards; that is not contribution, so we
-  don't use it. Not being able to count logins is fine.
+- **`lastSeen` is ingested for roster-badge awareness, never as an engagement
+  signal.** We record `lastSeen` (`player_current_state.last_seen_api`) so Elixir
+  knows when a member is wearing the in-game "idle" roster badge — useful context
+  for leadership optics — but it does **not** feed the kick clock. `lastSeen` moves
+  when someone merely opens the game to claim rewards; that is not contribution.
+  Engagement and idleness stay measured from battle logs, not logins.
+- **Durable war contributors get a longer confirmation before a kick card.** A
+  member whose 3-season war fame or sustained attendance clears the bar earns
+  extra idle days before the reactive path proposes a `kick_recommendation`
+  (`management.py` `WAR_CONTRIB_*`) — they still surface as watch/at_risk, the card
+  is only delayed. War contribution is meaningful; the ladder reflects it.
 - **Donations reset weekly**; **war participation (decks used, fame)** is the
   strongest sustained-contribution signal. The projection is built around what battle
   and war data actually tell us.

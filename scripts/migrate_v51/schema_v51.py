@@ -278,7 +278,8 @@ CREATE TABLE player_current_state (
     donations_week INTEGER, donations_received_week INTEGER,
     arena_id INTEGER, arena_name TEXT,
     ranked_league INTEGER, ranked_trophies INTEGER,
-    current_deck_json TEXT
+    current_deck_json TEXT,
+    last_seen_api TEXT
 );
 
 CREATE TABLE player_card_collection (
