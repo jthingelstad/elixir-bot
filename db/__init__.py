@@ -594,18 +594,34 @@ def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
 def managed_connection(fn: Callable) -> Callable:
     """Decorator that manages the conn=None lifecycle pattern.
 
-    If the caller passes conn=None (the default), a new connection is opened
-    and closed after the call. If a connection is provided, it is passed
-    through and left open for the caller to manage.
+    If the caller passes conn=None (the default), a new connection is opened,
+    COMMITTED on success (rolled back on error), and closed after the call.
+    If a connection is provided, it is passed through untouched and left open
+    for the caller to commit/close — the decorator never commits a borrowed
+    connection.
+
+    This is why a decorated writer must NOT call conn.commit() itself: when it
+    owns the connection the decorator commits for it, and when it is handed the
+    engine tick's connection an internal commit would prematurely persist that
+    step's partial work and defeat the tick's per-step rollback guard. Owning
+    the commit here removes that whole footgun class (the old decorator only
+    opened/closed, forcing every writer to commit unconditionally).
     """
     @functools.wraps(fn)
     def wrapper(*args, conn=None, **kwargs):
-        close = conn is None
+        owns = conn is None
         conn = conn or get_connection()
         try:
-            return fn(*args, conn=conn, **kwargs)
+            result = fn(*args, conn=conn, **kwargs)
+            if owns:
+                conn.commit()
+            return result
+        except Exception:
+            if owns:
+                conn.rollback()
+            raise
         finally:
-            if close:
+            if owns:
                 conn.close()
     return wrapper
 
