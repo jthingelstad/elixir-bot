@@ -45,8 +45,8 @@ def _get_build_hash():
 BUILD_HASH = _get_build_hash()
 # Releases are identified by coined name + date + build hash (no version number).
 # cut_release.py rewrites these defaults; BUILD_HASH is read live from git at boot.
-RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Consolidated Collector")
-RELEASE_STAMP = os.getenv("ELIXIR_RELEASE_STAMP", "2026-07-05")
+RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Verified Valkyrie")
+RELEASE_STAMP = os.getenv("ELIXIR_RELEASE_STAMP", "2026-07-08")
 RELEASE_LABEL = (
     f"{RELEASE_CODENAME} ({RELEASE_STAMP})" if RELEASE_CODENAME and RELEASE_STAMP
     else (RELEASE_CODENAME or RELEASE_STAMP or "unversioned")
