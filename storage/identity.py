@@ -398,27 +398,6 @@ def format_member_reference(member_or_tag: str | dict, conn: Optional[sqlite3.Co
 
 
 @managed_connection
-def save_memory_fact(subject_type: str, subject_key: str, fact_type: str, fact_value: str, confidence: float = 1.0,
-                     source_message_id: Optional[int] = None, expires_at: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> None:
-    now = _utcnow()
-    row = conn.execute(
-        "SELECT fact_id FROM memory_facts WHERE subject_type = ? AND subject_key = ? AND fact_type = ?",
-        (subject_type, subject_key, fact_type),
-    ).fetchone()
-    if row:
-        conn.execute(
-            "UPDATE memory_facts SET fact_value = ?, confidence = ?, source_message_id = ?, updated_at = ?, expires_at = ? WHERE fact_id = ?",
-            (fact_value, confidence, source_message_id, now, expires_at, row["fact_id"]),
-        )
-    else:
-        conn.execute(
-            "INSERT INTO memory_facts (subject_type, subject_key, fact_type, fact_value, confidence, source_message_id, created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (subject_type, subject_key, fact_type, fact_value, confidence, source_message_id, now, now, expires_at),
-        )
-    conn.commit()
-
-
-@managed_connection
 def save_memory_episode(subject_type: str, subject_key: str, episode_type: str, summary: str, importance: int = 1,
                         source_message_ids: Optional[list] = None, conn: Optional[sqlite3.Connection] = None) -> None:
     conn.execute(
@@ -426,19 +405,6 @@ def save_memory_episode(subject_type: str, subject_key: str, episode_type: str, 
         (subject_type, subject_key, episode_type, summary, importance, _json_or_none(source_message_ids or []), _utcnow()),
     )
     conn.commit()
-
-
-@managed_connection
-def get_memory_facts(subject_type: str, subject_key: str, limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    rows = conn.execute(
-        "SELECT fact_type, fact_value, confidence, updated_at, expires_at "
-        "FROM memory_facts "
-        "WHERE subject_type = ? AND subject_key = ? "
-        "AND (expires_at IS NULL OR expires_at > ?) "
-        "ORDER BY updated_at DESC LIMIT ?",
-        (subject_type, str(subject_key), _utcnow(), limit),
-    ).fetchall()
-    return _rowdicts(rows)
 
 
 @managed_connection

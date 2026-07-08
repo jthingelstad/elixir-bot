@@ -592,6 +592,26 @@ def test_update_message_summary_propagates_to_channel_state():
         conn.close()
 
 
+def test_update_message_summary_user_path_does_not_crash():
+    """C1a regression: the user-summary path used to write the retired
+    memory_facts table and raised `no such table: memory_facts` on every user
+    turn (swallowed as a WARNING). It must now update the message summary
+    cleanly with no memory_facts dependency."""
+    conn = _hybrid_conn()
+    try:
+        msg_id = db.save_message(
+            "leader:user789", "user",
+            "A long message about war strategy that gets a distilled summary later.",
+            discord_user_id="user789", username="strategist", display_name="Strategist",
+            conn=conn,
+        )
+        update_message_summary(msg_id, "War strategy discussion.", conn=conn)
+        row = conn.execute("SELECT summary FROM messages WHERE message_id = ?", (msg_id,)).fetchone()
+        assert row["summary"] == "War strategy discussion."
+    finally:
+        conn.close()
+
+
 def test_save_inference_facts_creates_elixir_inference_memories():
     conn = _hybrid_conn()
     try:
