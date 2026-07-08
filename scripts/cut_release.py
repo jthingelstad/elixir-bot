@@ -175,6 +175,15 @@ def main() -> int:
     url = rn.create_github_release(name=name, date=date, tag=tag, commit=head, body=detailed)
     print(f"GitHub release: {url or '(failed — see log; the cut continues)'}")
 
+    # 5b. Record a durable clan memory of this release (idempotent by tag).
+    try:
+        from storage.contextual_memory import upsert_release_memory
+        upsert_release_memory(name=name, date=date, tag=tag, subject=subject,
+                              body=detailed, url=url)
+        print("Recorded release in clan memory.")
+    except Exception as exc:
+        print(f"⚠️  Clan-memory record failed (release still cut): {exc}")
+
     # 6. Email the detailed tier to clan members with a verified email (BCC so
     # nobody sees anyone else's address). Best-effort — never blocks the rest.
     if not args.no_email:
