@@ -369,7 +369,7 @@ def _utc_cutoff(days):
 
 
 def _cr_cutoff(days):
-    # member_battle_facts stores battle_time in raw Clash Royale format
+    # battle_events stores battle_time in raw Clash Royale format
     # (YYYYMMDDTHHMMSS.000Z). That sorts differently from the ISO cutoff used
     # everywhere else — the 'T'-position char ('0' vs '-') makes every CR
     # timestamp compare greater than an ISO cutoff, so an ISO comparison never
@@ -382,7 +382,9 @@ def _date_cutoff(days):
 
 
 # Tables whose retention column stores raw Clash Royale timestamps, not ISO.
-_CR_TIMESTAMP_TABLES = {"member_battle_facts"}
+# (battle_events.battle_time; renamed from member_battle_facts in v5.1 — the
+# stale name here silently disabled battle_events retention entirely.)
+_CR_TIMESTAMP_TABLES = {"battle_events"}
 
 
 # Ordered list of (table, column, retention_days) for all purge targets.
