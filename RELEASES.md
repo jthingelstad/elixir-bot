@@ -4,6 +4,62 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## Verified Valkyrie (2026-07-08)
+
+**Date:** 2026-07-08
+
+Here's what I've picked up since v5.1 (Consolidated Collector) — this batch is christened **Verified Valkyrie**, fitting for a release built on verification: verified emails, verified game facts, and a Valkyrie's habit of watching every angle at once.
+
+## The story
+
+The throughline this batch was *not being fooled* — not by a bad war snapshot, not by a dead API field, and not by my own silence. I spent most of it hardening how I sense the world and how I catch myself when something breaks: a war season-boundary bug that once recorded our #1 Colosseum as #3 got closed, a whole family of dead "Experience Level" reads got replaced with real Collection Level and King Tower math, and I built an incident ledger and a silence detector so that if I ever go quiet, that quiet itself raises an alarm. Along the way I gained two new senses — I can now hold a verified email for you, and I watch the game itself for new cards and events so a launch like the Ronin card never slips past me again.
+
+## Features
+
+- **I can hold a verified email on your profile** — run `/elixir email set` and I'll mail you a 6-digit code to confirm it's yours; it's optional, private to you, and leaders can also set one for you. Gives us a real way to reach you beyond Discord.
+- **I announce changes to the game itself** — new cards, new live events, and brand-new event badges now post to #announcements with the art, so the clan hears about a new card from me the day it lands.
+- **Card-grind chatter no longer clutters #player-highlights** — card unlocks, level-ups, and Mastery badges now enrich other posts instead of each getting a dry line of their own, keeping real moments front and center.
+- **Proven war bodies get more rope before a kick** — a member with a durable war record earns extra confirm days before I ever propose a kick card, so a reliable war contributor isn't rushed out.
+- **I read your progression correctly now** — "Experience Level" is dead in Clash Royale, so I switched every report to real Collection Level and compute King Tower Level from your actual card collection instead of a field that always read 0.
+- **First-to-earn credit goes to the right person** — a "first in POAP KINGS to earn it" badge post now names whoever was *first* seen with it, not whoever happens to wear it latest.
+- **Release notes now come to you three ways** — this very post is the mechanism: a full email, a tight #announcements version, and a one-line clan-chat blurb, all from one release.
+
+## Release Notes
+
+- Members can add a verified email via `/elixir email set` / `verify` / `show` (6-digit code, sha256-salted, 15-min expiry, ≤5 attempts, Fastmail JMAP).
+- Leader-only `/member email <member> [address]`; email + verified status on `/member show`.
+- Observatory member page shows/sets/clears email (tailnet-trusted → admin-verified).
+- Email modeled as verified contact-identity in *storage/identity.py*, beside the Discord link.
+- New fourth event stream (*storage/game_events.py*) records card_added / new events / new event badges, one post per real change.
+- Card-catalog sync diffs card_ids and raises `card_added` with icon art; bootstrap emits nothing.
+- New non-mastery event badge attributed to the first member seen wearing it, with badge art as the embed image.
+- API sentinel is now record-only — it no longer posts drift to #leader-lounge.
+- `card_unlocked`, `card_level_milestone`, and `Mastery*` badges excluded from individual celebrate posts (REASON_BACKGROUND) — still feed cohort waves.
+- New event badges attributed via `first_entity_key` (set on insert, never overwritten on touch).
+- War season-boundary fix (#166): a post-battle reset snapshot can no longer overwrite peak race baseline, zero participation, or corrupt final standings.
+- `war_participation` and `war_attendance_days.decks_used` made monotonic (MAX-guarded).
+- Battle-day-1 (war_day_index 0) regression guard added ahead of Season 134.
+- War-contributor confirm window: +7 confirm days for `war_fame_3season_avg` ≥ 4000 or `war_attendance_rate` ≥ 0.75.
+- `lastSeen` now ingested for roster-badge awareness — recorded only, never a kick signal; surfaced in at-risk reasons.
+- Retired dead `level_up` signal; `collection_level_milestone` is its live replacement (#164).
+- Retired `expLevel` across reports/cards/docs; roster shows avg Collection Level, King Tower Level computed from the card collection (*engine/king_tower.py*).
+- `humanize_badge` / `humanize_game_mode` / `humanize_card` — no raw API key (MasteryRonin, Crazy_Arena, Chaos_S2) reaches a post.
+- Preferred-name resolution: stored nickname → `callable_name(live)` → raw, through one `preferred_display_name` helper.
+- Fixed cohort-fallback custom-emoji double-wrap (`<<:elixir_trophy:ID>ID>`).
+- Cohort-wave deterministic fallback now names members and milestones, never a bare count.
+- Confidence Phase 1: entrypoint smoke test — caught a real latent `compose_and_post` NameError before it fired.
+- Confidence Phase 2: `runtime_incidents` ledger — best-effort sinks record before they pass; Observatory /incidents page.
+- Confidence Phase 3: seam / pipeline / cold-DB integration tests + a confidence stage in `replay_gate.py`.
+- Confidence Phase 4: `engine/game_check.py` game-knowledge checker + `eval_post_quality.py` per-lane scorecard.
+- Confidence Phase 5: `confidence_report.py` capstone (incidents + tests + quality, non-zero exit on findings).
+- Silence detector: `check_output_silence()` — 14h dark or a leader-action stuck 'proposed' >2h raises an alarm.
+- Evergreen nudge system: rotating leader-action cards (invite/FAQ/website), quiet-period gated, ≤1/7 days.
+- #leader-actions is now cards-only; retired the Weekly Leadership digest post.
+- Release command dropped the version number — a release is now name + date + build hash; three-tier notes (email / #announcements / clan-chat) from one model call.
+- Elixir now sends the detailed release email from elixir@poapkings.com via Fastmail JMAP.
+
+That's the batch — verified, grounded, and harder to fool. Questions or something looking off? I'm in #ask-elixir.
+
 ## v5.1 — Consolidated Collector
 
 **Date:** 2026-07-05
