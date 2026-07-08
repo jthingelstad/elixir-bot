@@ -128,24 +128,46 @@ def register_elixir_app_commands(bot) -> None:
         content = render_admin_help()
         await send_interaction_text(interaction, content, ephemeral=True)
 
+    async def _post_release_relay(text: str) -> str:
+        """Consume cut_release.py's clan-chat marker line, post the #leader-actions
+        card, and strip the marker from the ephemeral reply."""
+        marker = "::RELEASE_CLANCHAT::"
+        kept: list[str] = []
+        note = None
+        for line in text.splitlines():
+            if line.startswith(marker):
+                parts = line.split(marker)  # ['', tag, clanchat]
+                tag = parts[1] if len(parts) > 1 else ""
+                clanchat = parts[2] if len(parts) > 2 else ""
+                try:
+                    from runtime.jobs._core import post_release_relay_card
+                    ok = await post_release_relay_card(clanchat, tag=tag)
+                    note = ("📋 Clan-chat card posted to #leader-actions." if ok
+                            else "Clan-chat card not posted (arena-relay unavailable).")
+                except Exception:
+                    app.log.exception("release relay card failed")
+                    note = "Clan-chat card failed to post (see logs)."
+                continue
+            kept.append(line)
+        result = "\n".join(kept).strip()
+        return f"{result}\n{note}" if note else result
+
     @elixir_commands.command(
         name="release",
         description="Draft or publish Elixir release notes (leader).",
     )
     @app_commands.describe(
-        version='Release version, e.g. "v5.1"',
         name="Optional: use this release name instead of coining one",
         publish="Actually cut & announce (default: preview only)",
     )
     async def slash_release(
         interaction: discord.Interaction,
-        version: str,
         name: str | None = None,
         publish: bool = False,
     ):
-        # Oliver's /oliver release-notes, adapted: preview by default
-        # (Oliver's to=me), publish runs the full cut_release flow —
-        # RELEASES.md, tag, GitHub release, #announcements post.
+        # Preview by default; publish runs the full cut_release flow — RELEASES.md,
+        # name-slug tag, GitHub release, email, #announcements, and the clan-chat
+        # leader-action card. No version number: identity is name + date + hash.
         if not await validate_admin_interaction(
             interaction, command_name="release", write=publish
         ):
@@ -159,8 +181,7 @@ def register_elixir_app_commands(bot) -> None:
         import sys as _sys
 
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        cmd = [_sys.executable, os.path.join("scripts", "cut_release.py"),
-               "--version", version]
+        cmd = [_sys.executable, os.path.join("scripts", "cut_release.py")]
         if name:
             cmd += ["--name", name]
         if not publish:
@@ -174,6 +195,11 @@ def register_elixir_app_commands(bot) -> None:
             )
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=600)
             text = out.decode("utf-8", errors="replace").strip() or "(no output)"
+            # On a real cut, cut_release.py emits the clan-chat blurb on a marker
+            # line; post it as a #leader-actions card and hide the marker from the
+            # ephemeral reply.
+            if publish and proc.returncode == 0:
+                text = await _post_release_relay(text)
             if proc.returncode != 0:
                 text = f"release script exited {proc.returncode}:\n{text[-1500:]}"
         except asyncio.TimeoutError:

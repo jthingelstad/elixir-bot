@@ -568,6 +568,49 @@ async def _emit_evergreen_nudge_card(item: dict) -> bool:
     return True
 
 
+async def post_release_relay_card(clanchat_text: str, *, tag: str) -> bool:
+    """Surface a new release's short clan-chat blurb as an in_game_relay leader-action
+    card in #leader-actions, for a leader to paste into the in-game clan chat. Called by
+    /elixir release after cut_release.py generates the three tiers; the copy is already
+    written (no LLM call here) — we validate length, sign, and post the card."""
+    from runtime.clan_chat_copy import sign_clan_chat_text
+
+    text = " ".join((clanchat_text or "").split())
+    if not text:
+        return False
+    try:
+        channel_config = _channel_config_by_key("arena-relay")
+    except Exception:
+        log.info("release relay skipped: arena-relay unavailable")
+        return False
+    relay_channel = _bot().get_channel(channel_config["id"])
+    if not relay_channel:
+        log.info("release relay skipped: arena-relay channel not found")
+        return False
+
+    copy = sign_clan_chat_text(text, limit=CLAN_CHAT_ACTION_COPY_LIMIT)
+    baseline = await asyncio.to_thread(
+        db.build_leader_action_baseline, action_type="in_game_relay", target_player_tag=None,
+    )
+    action = await asyncio.to_thread(
+        db.create_leader_action_recommendation,
+        action_type="in_game_relay",
+        objective="release_relay",
+        prompt_text=f"Relay the new release into clan chat: {copy}",
+        rationale="New Elixir release — short blurb for the in-game clan chat.",
+        target_channel_key="arena-relay",
+        target_channel_id=channel_config["id"],
+        source_signal_key=f"release_relay:{tag}",
+        source_signal_type="release_relay",
+        copy_original_text=copy,
+        copy_current_text=copy,
+        ui_version=LEADER_ACTION_UI_VERSION,
+        baseline=baseline,
+    )
+    if not action or action.get("source_message_id"):
+        return False
+    await post_leader_action_card(relay_channel, action, copy_messages=[copy])
+    return True
 
 
 async def _weekly_clan_recap():

@@ -43,9 +43,14 @@ def _get_build_hash():
 
 
 BUILD_HASH = _get_build_hash()
-RELEASE_VERSION = os.getenv("ELIXIR_RELEASE_VERSION", "v5.1")
+# Releases are identified by coined name + date + build hash (no version number).
+# cut_release.py rewrites these defaults; BUILD_HASH is read live from git at boot.
 RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "Consolidated Collector")
-RELEASE_LABEL = f'{RELEASE_VERSION} "{RELEASE_CODENAME}"'
+RELEASE_STAMP = os.getenv("ELIXIR_RELEASE_STAMP", "2026-07-05")
+RELEASE_LABEL = (
+    f"{RELEASE_CODENAME} ({RELEASE_STAMP})" if RELEASE_CODENAME and RELEASE_STAMP
+    else (RELEASE_CODENAME or RELEASE_STAMP or "unversioned")
+)
 
 _client = None
 _client_lock = threading.Lock()
@@ -100,7 +105,7 @@ TOOL_RESULT_MAX_CHARS = 20000
 
 def _build_system_prompt(*sections):
     parts = [s for s in sections if s]
-    parts.append(f"Your release version: {RELEASE_LABEL}")
+    parts.append(f"Your release: {RELEASE_LABEL}")
     parts.append(f"Your build version: {BUILD_HASH}")
     return "\n\n".join(parts)
 

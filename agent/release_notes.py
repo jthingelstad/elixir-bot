@@ -46,8 +46,18 @@ RELEASES_MD = os.path.join(REPO_ROOT, "RELEASES.md")
 _COMMIT_CAP = 60
 
 _SUBJECT_TAG = re.compile(r"<subject>(.*?)</subject>", re.S | re.I)
-_NOTES_TAG = re.compile(r"<notes>(.*?)</notes>", re.S | re.I)
-_RELEASE_HEADER = re.compile(r"^## (v[\d.]+) — (.+?)\s*$", re.M)
+# Release headers in RELEASES.md come in two shapes: the legacy versioned
+# `## v5.1 — Consolidated Collector` and the current, version-free
+# `## Blazing Balloon (2026-07-08)`. Match ONLY those two — never the
+# `## The story` / `## Features` section headers inside a release body.
+_RELEASE_HEADER = re.compile(
+    r"^## (?:(v[\d.]+) — (.+?)|(.+?) \((\d{4}-\d{2}-\d{2})\))\s*$", re.M)
+
+
+def slugify_release(name: str) -> str:
+    """Ref-safe git-tag slug from a coined name: 'Blazing Balloon' → 'blazing-balloon'.
+    Returns '' for an empty/None name so the caller can fall back to a dated tag."""
+    return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
 
 ANNOUNCEMENTS_CHANNEL_ID = "1474760975851982959"  # prompts/DISCORD.md #announcements
 
@@ -73,19 +83,31 @@ def head_commit() -> str | None:
 
 
 def latest_release_tag() -> str | None:
-    """The newest v* tag by version sort — the default release baseline."""
-    tags = [t for t in _git(["tag", "-l", "v*", "--sort=-v:refname"]).splitlines() if t.strip()]
+    """The most recently created tag — the default release baseline. Sorted by
+    creation date, not version, so it bridges the scheme change cleanly: it
+    returns the last `v*` tag today and the newest name-slug tag after the first
+    version-free cut (name-slug tags have no version ordering to sort on)."""
+    tags = [t for t in _git(["tag", "--sort=-creatordate"]).splitlines() if t.strip()]
     return tags[0] if tags else None
 
 
 def release_history() -> list[dict]:
-    """Every release in RELEASES.md, newest first: {version, name}. This file
-    is Elixir's release record (Oliver keeps his in the events table)."""
+    """Every release in RELEASES.md, newest first. Each entry always carries a
+    normalized `name`; legacy entries also carry `version`, current entries carry
+    `date`. This file is Elixir's release record (Oliver keeps his in the events
+    table). Both header shapes are parsed so the coin-dedup below still sees the
+    full name history across the scheme change."""
     try:
         text = open(RELEASES_MD).read()
     except OSError:
         return []
-    return [{"version": v, "name": n} for v, n in _RELEASE_HEADER.findall(text)]
+    out: list[dict] = []
+    for m in _RELEASE_HEADER.finditer(text):
+        if m.group(1):  # legacy `## v5.1 — Name`
+            out.append({"version": m.group(1), "name": m.group(2).strip(), "date": None})
+        else:           # current `## Name (YYYY-MM-DD)`
+            out.append({"version": None, "name": m.group(3).strip(), "date": m.group(4)})
+    return out
 
 
 def recent_changes(*, days: int | None = None, since_ref: str | None = None) -> dict:
@@ -241,12 +263,26 @@ def release_notes_prompt(material: dict) -> str:
         "CLOSE: after the last section (no header), end with one short, warm sign-off sentence "
         "in your voice — wrap up and/or point them to #ask-elixir. Do NOT add your name or a "
         "signature block.\n\n"
-        "FORMAT: this renders in Discord and on GitHub, so use markdown — a '## ' header for "
-        "each section, bulleted lists, *italics* for feature/file names, **bold** sparingly on a "
-        "key phrase. Blank line between paragraphs and after each header. No horizontal rules.\n\n"
-        "OUTPUT: first write a single-line subject — fun, fitting, and a little bit clever for "
-        "this audience — between <subject> and </subject>. Then write the ENTIRE announcement "
-        "between <notes> and </notes> tags, with NOTHING outside the two tag pairs.\n\n"
+        "FORMAT: the detailed version renders on GitHub and in email, so use markdown — a '## ' "
+        "header for each section, bulleted lists, *italics* for feature/file names, **bold** "
+        "sparingly. Blank line between paragraphs and after each header. No horizontal rules.\n\n"
+        "THREE VERSIONS — write the SAME announcement at three lengths, all grounded in the SAME "
+        "material below, longest to shortest:\n"
+        "1. DETAILED — the full three-section piece described above (the story + features + "
+        "release notes, with the OPEN framing and CLOSE sign-off). This is the email and the "
+        "GitHub release.\n"
+        "2. ANNOUNCEMENT — a Discord #announcements post: the OPEN framing sentence, a tight 2-3 "
+        "sentence story, and 3-5 of the biggest member-facing features as short bullets. NO full "
+        "changelog. Lead with what the clan will notice. Markdown is fine; keep it well under "
+        "1500 characters. Still first person, still your voice.\n"
+        "3. CLANCHAT — ONE or two sentences for the in-game clan chat, the way a leader would "
+        "actually say it out loud. Name the release and the single most exciting thing. PLAIN "
+        "TEXT ONLY: no markdown, no links, no headers, no emoji shortcodes; under 180 characters "
+        "so it fits one clan-chat line. Do NOT sign it.\n\n"
+        "OUTPUT: emit EXACTLY these four tag pairs and NOTHING outside them — a single-line "
+        "subject (fun, fitting, a little clever) between <subject></subject>; the detailed "
+        "version between <detailed></detailed>; the medium version between "
+        "<announcement></announcement>; the short version between <clanchat></clanchat>.\n\n"
         f"=== SOURCE MATERIAL ({window}) ==={trunc}\n\n"
         "--- Shipped features (merge commits) ---\n"
         f"{material['merges'] or '(none — this repo ships directly to main)'}\n\n"
@@ -271,19 +307,30 @@ def _extract_subject(text: str) -> str:
     return ""
 
 
-def _extract_notes(text: str) -> str:
-    m = _NOTES_TAG.search(text)
+def _extract_tag(text: str, name: str) -> str:
+    """Content between <name>...</name> (case-insensitive, dot-all). Tolerates a
+    missing close tag by taking everything after the open tag."""
+    m = re.search(rf"<{name}>(.*?)</{name}>", text, re.S | re.I)
     if m:
         return m.group(1).strip()
-    opened = re.search(r"<notes>", text, re.I)
+    opened = re.search(rf"<{name}>", text, re.I)
     if opened:
-        return re.sub(r"</notes\s*>", "", text[opened.end():], flags=re.I).strip()
-    return text.strip()
+        return re.sub(rf"</{name}\s*>", "", text[opened.end():], flags=re.I).strip()
+    return ""
+
+
+def _extract_notes(text: str) -> str:
+    """The detailed tier — the email/GitHub body. Accepts the current <detailed>
+    tag or the legacy <notes> tag, and falls back to the whole text."""
+    return _extract_tag(text, "detailed") or _extract_tag(text, "notes") or text.strip()
 
 
 def release_notes_draft(*, days: int | None = None, since_ref: str | None = None) -> dict | None:
-    """Build the announcement. Returns {subject, body, window, release_name},
-    or None if there were no changes in the window."""
+    """Build the three-tier announcement in ONE model call. Returns
+    {subject, body, announcement, clanchat, window, release_name}, or None if
+    there were no changes in the window. `body` is the detailed tier
+    (email/GitHub); `announcement` is the Discord #announcements version;
+    `clanchat` is the short in-game-clan-chat blurb."""
     material = recent_changes(days=days, since_ref=since_ref)
     if material["count"] == 0:
         return None
@@ -299,20 +346,24 @@ def release_notes_draft(*, days: int | None = None, since_ref: str | None = None
         timeout=300,
     )
     out = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-    body = _extract_notes(out)
-    subject = _extract_subject(out) or f"Under my hood: what changed ({material['window']})"
-    return {"subject": subject, "body": body, "window": material["window"],
-            "release_name": material["release_name"]}
+    return {
+        "subject": _extract_subject(out) or f"Under my hood: what changed ({material['window']})",
+        "body": _extract_notes(out),
+        "announcement": _extract_tag(out, "announcement"),
+        "clanchat": _extract_tag(out, "clanchat"),
+        "window": material["window"],
+        "release_name": material["release_name"],
+    }
 
 
-def create_github_release(*, version: str, name: str, commit: str, body: str) -> str | None:
+def create_github_release(*, name: str, date: str, tag: str, commit: str, body: str) -> str | None:
     """Tag `commit` and publish the GitHub release — the permanent code
-    reference for what shipped. Tag = the version (repo convention: v4.8 …);
-    title carries the christened name. Best-effort by contract (Oliver's
-    rule): the announcement must never be blocked by GitHub, so failures log
-    and return None. An existing tag/release is reused."""
-    tag = version
-    title = f'{version} "{name}"' if name else version
+    reference for what shipped. `tag` is the ref-safe name-slug (e.g.
+    'blazing-balloon'); the title carries the human label 'Name (date)'.
+    Best-effort by contract (Oliver's rule): the announcement must never be
+    blocked by GitHub, so failures log and return None. An existing tag/release
+    is reused."""
+    title = f"{name} ({date})" if name else f"Release ({date})"
     try:
         if not _git(["tag", "-l", tag]).strip():
             subprocess.run(["git", "tag", "-a", tag, commit, "-m", f"{title} — Elixir release"],
@@ -337,22 +388,14 @@ def create_github_release(*, version: str, name: str, commit: str, body: str) ->
 
 # ------------------------------------------------------ Discord announcement
 
-def announcement_messages(*, subject: str, body: str, release_url: str | None,
-                          version: str, name: str) -> list[str]:
-    """The #announcements post: the full notes, chunked to Discord's limit,
-    opening with the release title line and closing with the GitHub link."""
+def announcement_messages(*, announcement: str, release_url: str | None,
+                          name: str, date: str) -> list[str]:
+    """The #announcements post: the MEDIUM tier, chunked to Discord's limit,
+    opening with the 'Name (date)' title line and closing with the GitHub link."""
     from runtime.helpers import DISCORD_CHUNK_SIZE, _chunk_for_discord
 
-    title = f'**{version} "{name}"**' if name else f"**{version}**"
-    # Dedup: drop the subject when it just restates the title (e.g. the
-    # --announce-only fallback subject), and drop the body's own leading
-    # "## {version}" header so the post doesn't triple the release name.
-    subj = (subject or "").strip()
-    head = title if (not subj or subj.strip('"') in title or version in subj) else f"{title} — {subj}"
-    body_lines = body.splitlines()
-    if body_lines and body_lines[0].lstrip("# ").startswith(version):
-        body = "\n".join(body_lines[1:]).lstrip()
-    text = f"{head}\n\n{body}"
+    title = f"**{name} ({date})**" if name else f"**Release ({date})**"
+    text = f"{title}\n\n{(announcement or '').strip()}"
     if release_url:
         text += f"\n\n-# Full release on GitHub: {release_url}"
     return _chunk_for_discord(text, size=DISCORD_CHUNK_SIZE)
