@@ -361,6 +361,23 @@ def clear_email_challenge(member_tag: str, conn: Optional[sqlite3.Connection] = 
 
 
 @managed_connection
+def list_member_emails(conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    """Current clan members with a VERIFIED email on file (self-service verified
+    or admin-set, which is trusted). The recipient list for release broadcasts —
+    only confirmed-good addresses, and only members who haven't left."""
+    _ensure_email_schema(conn)
+    rows = conn.execute(
+        "SELECT m.player_tag, m.current_name AS member_name, pm.email "
+        "FROM players m "
+        "JOIN player_metadata pm ON pm.player_tag = m.player_tag "
+        "JOIN clan_memberships cm ON cm.player_tag = m.player_tag AND cm.left_at IS NULL "
+        "WHERE COALESCE(pm.email, '') != '' AND pm.email_verified_at IS NOT NULL "
+        "GROUP BY m.player_tag"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@managed_connection
 def format_member_reference(member_or_tag: str | dict, conn: Optional[sqlite3.Connection] = None) -> str:
     """Return a plain display name for a member tag or identity dict.
 
