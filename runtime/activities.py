@@ -192,6 +192,25 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         ),
         activity_role="communicator",
     ),
+    ActivityDefinition(
+        activity_key="weekly-member-report",
+        owner_lane="announcements",
+        purpose="Arena Dispatch: email each member with a verified address a "
+        "personalized weekly Clash Royale report on their own play, badges, "
+        "cards, and battles. Runs an hour after the public clan recap.",
+        job_id="weekly-member-report",
+        job_function="_weekly_member_report_cycle",
+        schedule_kind="cron",
+        schedule_config={
+            "day_of_week": _attr("WEEKLY_MEMBER_REPORT_DAY", "mon"),
+            "hour": _attr("WEEKLY_MEMBER_REPORT_HOUR", 10),
+            "minute": 0,
+        },
+        delivery_targets=(
+            "Email: each member (To:, individual)",
+        ),
+        activity_role="communicator",
+    ),
     # site-content (POAP KINGS website publishing) was removed entirely 2026-06-21
     # — the website has its own standalone update script now.
     ActivityDefinition(

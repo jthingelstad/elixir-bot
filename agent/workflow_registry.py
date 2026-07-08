@@ -150,6 +150,7 @@ _WORKFLOW_SPECS = (
     # JSON call, no tools, lightweight family (haiku-class — ~10-20 posts/day).
     WorkflowSpec("editorial", tools=[], max_tool_rounds=1, tools_allowed=False),
     WorkflowSpec("weekly_digest", model_family="intensive"),
+    WorkflowSpec("member_report", model_family="intensive"),
     WorkflowSpec("site_promote_content", model_family="promotion"),
     # Release-notes announcement (agent/release_notes.py, ported from Oliver):
     # Elixir's first-person "what I can do now" post — chat-tier, no tools.

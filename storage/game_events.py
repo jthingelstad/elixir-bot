@@ -14,10 +14,11 @@ builds get them from scripts/migrate_v51/schema_v51.py.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 __all__ = [
-    "ensure_schema", "insert_game_event", "new_events_since", "EVENT_TYPES",
+    "ensure_schema", "insert_game_event", "new_events_since", "recent_game_events",
+    "EVENT_TYPES",
 ]
 
 _ISO = "%Y-%m-%dT%H:%M:%SZ"
@@ -98,3 +99,27 @@ def new_events_since(conn, after_event_id: int) -> list:
            ORDER BY event_id""",
         (after_event_id,),
     ).fetchall()
+
+
+def recent_game_events(conn, *, days: int = 7, now: str | None = None) -> list[dict]:
+    """Game-stream changes (new cards/events/badges) observed in the last `days`,
+    newest first, payload parsed — the clan-wide 'what changed in CR' context for a
+    member report (e.g. Ronin's arrival). Live rows only; backfilled history excluded."""
+    ensure_schema(conn)
+    anchor = (datetime.fromisoformat(str(now).replace("Z", "+00:00")).astimezone(timezone.utc)
+              if now else datetime.now(timezone.utc))
+    cutoff = (anchor - timedelta(days=days)).strftime(_ISO)
+    out: list[dict] = []
+    for r in conn.execute(
+        "SELECT event_type, change_key, subject_tag, observed_at, payload_json "
+        "FROM game_events WHERE backfilled = 0 AND observed_at >= ? "
+        "ORDER BY observed_at DESC",
+        (cutoff,),
+    ).fetchall():
+        d = dict(r)
+        try:
+            d["payload"] = json.loads(d.pop("payload_json") or "{}")
+        except (TypeError, ValueError):
+            d["payload"] = {}
+        out.append(d)
+    return out
