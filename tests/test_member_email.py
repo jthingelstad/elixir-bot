@@ -111,3 +111,30 @@ def test_start_requires_mail_configured(engine_conn, monkeypatch):
     monkeypatch.setattr(ev.outbound, "enabled", lambda: False)
     r = ev.start_verification(TAG, "me@example.com")
     assert not r["ok"]
+
+
+def _add_membership(conn, tag, *, left_at=None):
+    conn.execute("INSERT OR IGNORE INTO clans (clan_tag, first_seen_at, last_seen_at) "
+                 "VALUES ('#J2RGCRVG','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')")
+    conn.execute("INSERT INTO clan_memberships (player_tag, joined_at, join_source, left_at) "
+                 "VALUES (?, '2026-01-01T00:00:00Z', 'test', ?)", (tag, left_at))
+
+
+def test_list_member_emails_only_verified_and_current(engine_conn):
+    # current member, verified → included
+    db.set_member_email("#CUR1", "cur@x.com", source="self_service",
+                        verified_at="2026-07-08T00:00:00Z", conn=engine_conn)
+    _add_membership(engine_conn, "#CUR1")
+    # current member, unverified → excluded
+    db.set_member_email("#UNV1", "unv@x.com", source="self_service", conn=engine_conn)
+    _add_membership(engine_conn, "#UNV1")
+    # verified but LEFT the clan → excluded
+    db.set_member_email("#LEFT1", "left@x.com", source="admin_set",
+                        verified_at="2026-07-08T00:00:00Z", conn=engine_conn)
+    _add_membership(engine_conn, "#LEFT1", left_at="2026-02-01T00:00:00Z")
+    engine_conn.commit()
+
+    emails = {m["email"] for m in db.list_member_emails(conn=engine_conn)}
+    assert "cur@x.com" in emails
+    assert "unv@x.com" not in emails      # unverified
+    assert "left@x.com" not in emails     # no longer in the clan

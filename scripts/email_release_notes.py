@@ -21,16 +21,19 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
+import db  # noqa: E402
 from agent import release_notes as rn  # noqa: E402
 from agent.mail import outbound  # noqa: E402
 
-DEFAULT_TO = os.getenv("ELIXIR_RELEASE_EMAIL_TO", "jamie@thingelstad.com")
+EMAIL_ADDRESS = os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--to", default=DEFAULT_TO, help=f"recipient (default: {DEFAULT_TO})")
+    parser.add_argument("--to", default=None,
+                        help="override: email ONLY this address (testing). Default broadcasts "
+                             "to every clan member with a verified email.")
     parser.add_argument("--days", type=int, default=None, help="scope: look back N days")
     parser.add_argument("--since", metavar="REF", help="scope: changes since this ref")
     parser.add_argument("--dry-run", action="store_true", help="print, send nothing")
@@ -49,20 +52,25 @@ def main() -> int:
     subject = draft["subject"]
     if name and name.lower() not in subject.lower():
         subject = f'{name} — {subject}'
+    recipients = [args.to] if args.to else [m["email"] for m in db.list_member_emails()]
     print(f"Release name: {name or '(nameless)'}")
     print(f"Window: {draft['window']}")
-    print(f"Subject: {subject}\n")
+    print(f"Subject: {subject}")
+    print(f"Recipients: {len(recipients)} "
+          f"({'override' if args.to else 'clan members with a verified email'})\n")
 
     if args.dry_run:
         print("=" * 72)
         print(draft["body"])
         print("=" * 72)
-        print(f"\n[dry-run] would email to {args.to} from {os.getenv('ELIXIR_EMAIL_ADDRESS')}")
+        print(f"\n[dry-run] would email to {len(recipients)} recipient(s) from {EMAIL_ADDRESS}")
         return 0
 
-    result = outbound.send(to=args.to, subject=subject, body=draft["body"])
-    print(f"Sent to {result['to']} — emailId {result.get('emailId')} · "
-          f"submissionId {result.get('submissionId')}")
+    if not recipients:
+        print("No clan members have a verified email on file — nothing to send.")
+        return 0
+    outbound.send(to=EMAIL_ADDRESS, bcc=recipients, subject=subject, body=draft["body"])
+    print(f"Sent to {len(recipients)} recipient(s) (bcc) from {EMAIL_ADDRESS}.")
     return 0
 
 

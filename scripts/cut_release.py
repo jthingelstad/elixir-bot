@@ -43,7 +43,7 @@ load_dotenv()  # standalone script: ELIXIR_DB_PATH + CLAUDE_API_KEY + FASTMAIL_J
 from agent import release_notes as rn  # noqa: E402
 
 CORE_PY = os.path.join(rn.REPO_ROOT, "agent", "core.py")
-DEFAULT_EMAIL_TO = os.getenv("ELIXIR_RELEASE_EMAIL_TO", "jamie@thingelstad.com")
+EMAIL_ADDRESS = os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
 # The slash command greps stdout for this marker to post the clan-chat card.
 CLANCHAT_MARKER = "::RELEASE_CLANCHAT::"
 
@@ -92,8 +92,9 @@ def main() -> int:
     parser.add_argument("--since", metavar="REF",
                         help="scope: changes since this ref (default: latest release tag)")
     parser.add_argument("--name", help="skip coining and use this release name")
-    parser.add_argument("--to", default=DEFAULT_EMAIL_TO,
-                        help=f"email recipient for the detailed tier (default: {DEFAULT_EMAIL_TO})")
+    parser.add_argument("--to", default=None,
+                        help="override: email ONLY this address (testing). Default broadcasts "
+                             "the detailed tier to every clan member with a verified email.")
     parser.add_argument("--dry-run", action="store_true", help="print everything, touch nothing")
     parser.add_argument("--no-announce", action="store_true", help="cut without the Discord post")
     parser.add_argument("--no-email", action="store_true", help="cut without the email")
@@ -149,8 +150,14 @@ def main() -> int:
                            ("ANNOUNCEMENT (#announcements)", announcement),
                            ("CLANCHAT (#leader-actions card)", clanchat or "(none)")):
             print("\n" + "=" * 72 + f"\n{tier}\n" + "=" * 72 + f"\n{text}")
+        try:
+            import db
+            n_recips = 1 if args.to else len(db.list_member_emails())
+        except Exception:
+            n_recips = "?"
+        email_to = args.to if args.to else f"{n_recips} member(s) with a verified email"
         print(f"\n[dry-run] would prepend RELEASES.md (## {label}); set core defaults to "
-              f'"{name}" / {date}; tag {tag} + gh release create; email to {args.to}; '
+              f'"{name}" / {date}; tag {tag} + gh release create; email to {email_to}; '
               f"post the announcement; surface the clan-chat card.")
         return 0
 
@@ -168,15 +175,22 @@ def main() -> int:
     url = rn.create_github_release(name=name, date=date, tag=tag, commit=head, body=detailed)
     print(f"GitHub release: {url or '(failed — see log; the cut continues)'}")
 
-    # 6. Email the detailed tier (best-effort — never blocks the rest)
+    # 6. Email the detailed tier to clan members with a verified email (BCC so
+    # nobody sees anyone else's address). Best-effort — never blocks the rest.
     if not args.no_email:
         try:
+            import db
             from agent.mail import outbound
-            if outbound.enabled():
-                result = outbound.send(to=args.to, subject=subject, body=detailed)
-                print(f"Emailed detailed notes to {result['to']} (emailId {result.get('emailId')}).")
-            else:
+            if not outbound.enabled():
                 print("Email skipped: FASTMAIL_JMAP_TOKEN not configured.")
+            else:
+                recipients = [args.to] if args.to else [m["email"] for m in db.list_member_emails()]
+                if not recipients:
+                    print("Email skipped: no clan members have a verified email on file.")
+                else:
+                    outbound.send(to=EMAIL_ADDRESS, bcc=recipients, subject=subject, body=detailed)
+                    where = args.to if args.to else f"{len(recipients)} member(s) (bcc)"
+                    print(f"Emailed detailed notes to {where}.")
         except Exception as exc:
             print(f"⚠️  Email failed (release still cut): {exc}")
 
