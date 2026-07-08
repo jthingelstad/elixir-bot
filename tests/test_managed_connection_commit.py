@@ -42,6 +42,39 @@ def test_conn_none_call_persists():
         check.close()
 
 
+def test_memory_store_conn_none_persists():
+    """memory_store.create_memory with conn=None commits via its decorator."""
+    from memory_store import create_memory, get_memory, get_memory_connection
+
+    created = create_memory(
+        body="Leader noted strong attendance.", source_type="leader_note",
+        is_inference=False, confidence=1.0, created_by="leader:jamie",
+    )
+    check = get_memory_connection()
+    try:
+        assert get_memory(created["memory_id"], conn=check) is not None
+    finally:
+        check.close()
+
+
+def test_memory_store_borrowed_conn_not_committed():
+    """create_memory on a borrowed conn must not commit — rollback discards it."""
+    from memory_store import create_memory, get_memory_connection
+
+    conn = get_memory_connection()
+    try:
+        created = create_memory(
+            body="ephemeral note", source_type="leader_note", is_inference=False,
+            confidence=1.0, created_by="leader:jamie", conn=conn,
+        )
+        mid = created["memory_id"]
+        assert conn.execute("SELECT 1 FROM memories WHERE memory_id=?", (mid,)).fetchone() is not None
+        conn.rollback()
+        assert conn.execute("SELECT 1 FROM memories WHERE memory_id=?", (mid,)).fetchone() is None
+    finally:
+        conn.close()
+
+
 def test_borrowed_conn_is_not_committed_by_writer():
     """With a borrowed conn, the writer must NOT commit — rolling back the
     borrowed conn discards the write (proving no premature mid-step commit)."""

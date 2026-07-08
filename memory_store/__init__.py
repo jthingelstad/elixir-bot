@@ -170,16 +170,29 @@ def ensure_memory_schema(conn: sqlite3.Connection) -> None:
 
 
 def managed_memory_connection(fn: Callable) -> Callable:
+    """Mirrors db.managed_connection: when it owns the connection (conn was None)
+    it commits on success / rolls back on error / closes; a borrowed connection
+    is passed through untouched and never committed here. Decorated writers must
+    NOT call conn.commit() themselves — a mid-tick commit on the engine's
+    connection (chronicles writes memories during EMIT/RECOGNIZE) would defeat
+    the tick's per-step rollback guard."""
     @functools.wraps(fn)
     def wrapper(*args, conn=None, **kwargs):
-        close = conn is None
+        owns = conn is None
         conn = conn or get_memory_connection()
-        if not close:
+        if not owns:
             ensure_memory_schema(conn)
         try:
-            return fn(*args, conn=conn, **kwargs)
+            result = fn(*args, conn=conn, **kwargs)
+            if owns:
+                conn.commit()
+            return result
+        except Exception:
+            if owns:
+                conn.rollback()
+            raise
         finally:
-            if close:
+            if owns:
                 conn.close()
 
     return wrapper
@@ -338,7 +351,8 @@ def create_memory(*, body: str, source_type: str, is_inference: bool, confidence
         _log(conn, memory_id, "created", created_by, {"metadata": metadata, "kind": kind})
     else:
         _log(conn, memory_id, "created", created_by, {"kind": kind})
-    conn.commit()
+    # No conn.commit(): managed_memory_connection commits when it owns the conn;
+    # on a borrowed (engine tick) conn a mid-step commit breaks step atomicity.
     return _fetch_memory(conn, memory_id)
 
 
@@ -352,8 +366,7 @@ def attach_tags(memory_id: int, tags: Iterable[str], *, actor: str, conn=None) -
         )
     if clean:
         _log(conn, memory_id, "edited", actor, {"tags": clean})
-    conn.commit()
-    return clean
+    return clean   # commit owned by managed_memory_connection (never on borrowed conn)
 
 
 @managed_memory_connection
@@ -368,7 +381,7 @@ def attach_evidence_ref(memory_id: int, *, evidence_type: str, evidence_ref: str
                      "label": evidence_label, "url": evidence_url,
                      "metadata": metadata or {}},
     })
-    conn.commit()
+    # commit owned by managed_memory_connection (never on borrowed conn)
 
 
 _UPDATABLE = {"title", "body", "summary", "scope", "confidence", "member_tag",
@@ -420,7 +433,7 @@ def update_memory(memory_id: int, *, actor: str, conn=None, **updates) -> dict:
     conn.execute(f"UPDATE memories SET {', '.join(cols)} WHERE memory_id = ?", args)
     _log(conn, memory_id, "retired" if status in ("archived", "deleted") else "edited",
          actor, diff)
-    conn.commit()
+    # commit owned by managed_memory_connection (never on borrowed conn)
     return _fetch_memory(conn, memory_id)
 
 
@@ -444,7 +457,7 @@ def purge_expired_memories(*, conn=None) -> int:
                  AND retired_at <= strftime('%Y-%m-%dT%H:%M:%SZ', ?, ?))""",
         (now, now, f"-{RETIRED_PURGE_GRACE_DAYS} days"),
     )
-    conn.commit()
+    # commit owned by managed_memory_connection (never on borrowed conn)
     return cur.rowcount
 
 
