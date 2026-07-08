@@ -667,6 +667,12 @@ async def _weekly_clan_recap():
         tags=["weekly", "recap", "clan-history"],
         metadata={"channel_id": channel.id, "workflow": "announcements"},
     )
+    # Also email the recap to clan members who have a verified email (best-effort;
+    # a mail failure must never fail the recap job).
+    try:
+        await _email_weekly_recap(recap_post)
+    except Exception:
+        log.warning("weekly recap email failed", exc_info=True)
     # (POAP KINGS website weekly-recap sync + blog post removed 2026-06-21 — the
     # site has its own update script now. The Discord #announcements recap above
     # and the story relay below are unchanged.)
@@ -675,6 +681,29 @@ async def _weekly_clan_recap():
     except Exception:
         log.warning("weekly story relay card failed", exc_info=True)
     runtime_status.mark_job_success("weekly_clan_recap", "weekly recap posted")
+
+
+async def _email_weekly_recap(recap_post: str) -> int:
+    """BCC the weekly recap to clan members with a verified email (BCC so nobody
+    sees anyone else's address). Discord custom emoji (`<:name:id>`) are stripped
+    so they don't leak into the email as raw text. Best-effort; returns the count."""
+    import re as _re
+
+    from agent.mail import outbound
+
+    if not outbound.enabled():
+        return 0
+    recipients = await asyncio.to_thread(lambda: [m["email"] for m in db.list_member_emails()])
+    if not recipients:
+        return 0
+    body = _re.sub(r"<a?:\w+:\d+>", "", recap_post)
+    body = _re.sub(r"[ \t]{2,}", " ", body).strip()
+    email_addr = os.getenv("ELIXIR_EMAIL_ADDRESS", "elixir@poapkings.com")
+    subject = f"POAP KINGS — Weekly Clan Recap ({datetime.now(CHICAGO).strftime('%b %d, %Y')})"
+    await asyncio.to_thread(
+        outbound.send, to=email_addr, bcc=recipients, subject=subject, body=body)
+    log.info("weekly recap emailed to %d member(s)", len(recipients))
+    return len(recipients)
 
 
 async def _weekly_story_relay_card(recap_text: str) -> bool:
