@@ -45,6 +45,17 @@ BATTLE_DAYS_MIN = 8
 KICK_CONFIRM_DAYS = 7
 NEW_MEMBER_GRACE = 14
 KICK_WATCH_DAYS = 3          # CLAN.md inactivity_days
+# Durable war contributors earn a longer confirmation before a kick card is
+# proposed — softer than a hold (ratified 2026-07-08: "war contribution is
+# meaningful"). A member whose 3-season war fame OR sustained attendance clears
+# the bar gets +WAR_CONTRIB_GRACE_DAYS extra idle days before 'recommended'
+# fires. They still surface as watch/at_risk on the watchlist — this only
+# delays the auto-proposed card, it does not suppress it. Keys off the durable
+# 3-season history, not the live war_reliable layer (which decays after one
+# missed week, so a strong contributor on a short break would lose it instantly).
+WAR_CONTRIB_FAME_BAR = 4000.0   # 3-season avg fame marking a durable war body
+WAR_CONTRIB_ATTEND_BAR = 0.75   # ...or sustained war attendance rate
+WAR_CONTRIB_GRACE_DAYS = 7      # extra confirm days before the card proposes
 HOLD_WINDOW = 4              # Layer-1: 3-of-4 holds, 1-of-4 lapses
 HOLD_NEED = 3
 LAPSE_MAX = 1
@@ -450,6 +461,7 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
     members = conn.execute(
         """SELECT mm.player_tag, mm.tenure_days, mm.role, mm.kick_state,
                   mm.kick_state_since, mm.state_json,
+                  mm.war_fame_3season_avg, mm.war_attendance_rate,
                   pcs.trophies, p.last_seen_at,
                   (SELECT MAX(cm2.joined_at) FROM clan_memberships cm2
                    WHERE cm2.player_tag = mm.player_tag AND cm2.left_at IS NULL)
@@ -495,7 +507,15 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
         else:
             trophies = m["trophies"] or 5000
             at_risk_days = max(7.0, trophies / 1000.0 * 1.4)
-            if days_idle >= at_risk_days + KICK_CONFIRM_DAYS:
+            # Durable war contributors get a longer confirmation before a card
+            # proposes (softer than a hold). Watch/at_risk are unaffected, so
+            # they still appear on the watchlist — only the card is delayed.
+            confirm_days = KICK_CONFIRM_DAYS
+            if (m["war_fame_3season_avg"] or 0) >= WAR_CONTRIB_FAME_BAR or (
+                m["war_attendance_rate"] or 0
+            ) >= WAR_CONTRIB_ATTEND_BAR:
+                confirm_days += WAR_CONTRIB_GRACE_DAYS
+            if days_idle >= at_risk_days + confirm_days:
                 new_state = "recommended"
             elif days_idle >= at_risk_days:
                 new_state = "at_risk"

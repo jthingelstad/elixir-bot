@@ -140,6 +140,49 @@ def test_kick_recommended_fires_transition(engine_conn):
     assert not any(t.get("player_tag") == "#A" for t in again)
 
 
+def _set_war_history(conn, tag, *, fame_avg=None, attendance=None):
+    conn.execute(
+        "UPDATE member_management SET war_fame_3season_avg = ?, "
+        "war_attendance_rate = ? WHERE player_tag = ?",
+        (fame_avg, attendance, tag))
+    conn.commit()
+
+
+def test_war_contributor_gets_extended_confirm_window(engine_conn):
+    # A plain member at 5000 trophies / 15 days idle → recommended (7+7).
+    # A durable war contributor (3-season fame over the bar) gets +7 confirm
+    # days, so at 15 days idle they are still only at_risk — the card waits.
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=15)
+    _set_war_history(engine_conn, "#A", fame_avg=7300.0, attendance=0.875)
+    management.run_tick_evaluators(engine_conn, now=NOW)
+    assert _kick_state(engine_conn) == "at_risk"
+
+
+def test_war_contributor_still_escalates_after_extended_window(engine_conn):
+    # Past the extended threshold (7 at_risk + 14 confirm = 21) the card fires.
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=22)
+    _set_war_history(engine_conn, "#A", fame_avg=7300.0, attendance=0.875)
+    transitions = management.run_tick_evaluators(engine_conn, now=NOW)
+    assert _kick_state(engine_conn) == "recommended"
+    assert any(t["player_tag"] == "#A" for t in transitions)
+
+
+def test_war_grace_qualifies_on_attendance_alone(engine_conn):
+    # Attendance over the bar earns the grace even with modest fame.
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=15)
+    _set_war_history(engine_conn, "#A", fame_avg=500.0, attendance=0.80)
+    management.run_tick_evaluators(engine_conn, now=NOW)
+    assert _kick_state(engine_conn) == "at_risk"
+
+
+def test_weak_war_record_does_not_earn_grace(engine_conn):
+    # Below both bars → no grace → normal 15-day recommendation still fires.
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=15)
+    _set_war_history(engine_conn, "#A", fame_avg=1200.0, attendance=0.30)
+    management.run_tick_evaluators(engine_conn, now=NOW)
+    assert _kick_state(engine_conn) == "recommended"
+
+
 def test_any_battle_resets_to_none(engine_conn):
     _seed_member(engine_conn, trophies=5000, last_battle_days_ago=15)
     management.run_tick_evaluators(engine_conn, now=NOW)

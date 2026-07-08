@@ -77,6 +77,15 @@ from storage.cards import (
 )
 
 
+def _ensure_last_seen_api_column(conn) -> None:
+    """Lazy ALTER: add player_current_state.last_seen_api on live DBs cut before
+    the column existed (v5.1 has no forward-migration runner — fresh builds get
+    it from schema_v51 NEW_DDL). Idempotent; safe to call every snapshot."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(player_current_state)")}
+    if "last_seen_api" not in cols:
+        conn.execute("ALTER TABLE player_current_state ADD COLUMN last_seen_api TEXT")
+
+
 @managed_connection
 def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection] = None, *, create_if_missing: bool = True) -> int:
     """Upsert players + player_current_state + player_daily_metrics + open
@@ -89,6 +98,7 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
     """
     observed_at = _utcnow()
     today = chicago_date_for_utc_timestamp(observed_at) or chicago_today()
+    _ensure_last_seen_api_column(conn)
     seen_tags = set()
     for member in member_list:
         tag = _canon_tag(member.get("tag"))
@@ -116,17 +126,21 @@ def snapshot_members(member_list: list[dict], conn: Optional[sqlite3.Connection]
             "donations_received_week": member.get("donationsReceived", member.get("donations_received", 0)),
             "arena_id": arena_id,
             "arena_name": arena_name,
+            # Ingested for roster-badge awareness only — so Elixir knows when a
+            # member is wearing the in-game "idle" flag. NOT an engagement signal:
+            # battling remains the kick clock (architecture §13.6).
+            "last_seen_api": member.get("lastSeen") or member.get("last_seen"),
         }
         conn.execute(
-            "INSERT INTO player_current_state (player_tag, observed_at, role, exp_level, trophies, best_trophies, clan_rank, previous_clan_rank, donations_week, donations_received_week, arena_id, arena_name) "
-            "VALUES (:player_tag, :observed_at, :role, :exp_level, :trophies, :best_trophies, :clan_rank, :previous_clan_rank, :donations_week, :donations_received_week, :arena_id, :arena_name) "
-            "ON CONFLICT(player_tag) DO UPDATE SET observed_at = excluded.observed_at, role = excluded.role, exp_level = excluded.exp_level, trophies = excluded.trophies, best_trophies = excluded.best_trophies, clan_rank = excluded.clan_rank, previous_clan_rank = excluded.previous_clan_rank, donations_week = excluded.donations_week, donations_received_week = excluded.donations_received_week, arena_id = excluded.arena_id, arena_name = excluded.arena_name",
+            "INSERT INTO player_current_state (player_tag, observed_at, role, exp_level, trophies, best_trophies, clan_rank, previous_clan_rank, donations_week, donations_received_week, arena_id, arena_name, last_seen_api) "
+            "VALUES (:player_tag, :observed_at, :role, :exp_level, :trophies, :best_trophies, :clan_rank, :previous_clan_rank, :donations_week, :donations_received_week, :arena_id, :arena_name, :last_seen_api) "
+            "ON CONFLICT(player_tag) DO UPDATE SET observed_at = excluded.observed_at, role = excluded.role, exp_level = excluded.exp_level, trophies = excluded.trophies, best_trophies = excluded.best_trophies, clan_rank = excluded.clan_rank, previous_clan_rank = excluded.previous_clan_rank, donations_week = excluded.donations_week, donations_received_week = excluded.donations_received_week, arena_id = excluded.arena_id, arena_name = excluded.arena_name, last_seen_api = excluded.last_seen_api",
             {"player_tag": tag, **state},
         )
         conn.execute(
-            "INSERT INTO player_daily_metrics (player_tag, metric_date, exp_level, trophies, best_trophies, clan_rank, donations_week, donations_received_week) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(player_tag, metric_date) DO UPDATE SET exp_level = excluded.exp_level, trophies = excluded.trophies, best_trophies = excluded.best_trophies, clan_rank = excluded.clan_rank, donations_week = excluded.donations_week, donations_received_week = excluded.donations_received_week",
-            (tag, today, state["exp_level"], state["trophies"], state["best_trophies"], state["clan_rank"], state["donations_week"], state["donations_received_week"]),
+            "INSERT INTO player_daily_metrics (player_tag, metric_date, exp_level, trophies, best_trophies, clan_rank, donations_week, donations_received_week, last_seen_api) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(player_tag, metric_date) DO UPDATE SET exp_level = excluded.exp_level, trophies = excluded.trophies, best_trophies = excluded.best_trophies, clan_rank = excluded.clan_rank, donations_week = excluded.donations_week, donations_received_week = excluded.donations_received_week, last_seen_api = excluded.last_seen_api",
+            (tag, today, state["exp_level"], state["trophies"], state["best_trophies"], state["clan_rank"], state["donations_week"], state["donations_received_week"], state["last_seen_api"]),
         )
         if create_if_missing and not _get_current_membership(conn, tag):
             # clan_tag defaults to the home clan and FKs clans — guaranteed on

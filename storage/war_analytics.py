@@ -146,10 +146,33 @@ def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None
     }
 
 
+def _in_game_idle_days(last_seen_api, now: Optional[str] = None) -> Optional[float]:
+    """Days since the CR API lastSeen (the in-game 'idle' roster badge). Pure
+    awareness — not an engagement signal (architecture §13.6). None if unknown."""
+    if not last_seen_api:
+        return None
+    from engine.normalize import parse_cr_time
+
+    seen = parse_cr_time(last_seen_api)
+    if seen is None:
+        return None
+    ref = parse_cr_time(now) if now else datetime.now(timezone.utc)
+    if ref is None:
+        ref = datetime.now(timezone.utc)
+    return max(0.0, (ref - seen).total_seconds() / 86400.0)
+
+
 def _mgmt_rows(conn):
+    # last_seen_api arrived after the v5.1 cut (roster-badge awareness); select
+    # it only when present so pre-ALTER DBs / lean fixtures still read cleanly.
+    has_last_seen = any(
+        r[1] == "last_seen_api"
+        for r in conn.execute("PRAGMA table_info(player_current_state)")
+    )
+    last_seen_col = "cs.last_seen_api, " if has_last_seen else "NULL AS last_seen_api, "
     return conn.execute(
         "SELECT mm.*, m.current_name AS name, cs.clan_rank, cs.trophies, "
-        "cs.donations_week, mm.player_tag AS tag "
+        "cs.donations_week, " + last_seen_col + "mm.player_tag AS tag "
         "FROM member_management mm "
         "JOIN players m ON m.player_tag = mm.player_tag "
         "LEFT JOIN player_current_state cs ON cs.player_tag = mm.player_tag "
@@ -179,12 +202,17 @@ def get_members_at_risk(inactivity_days: int = 7, min_donations_week: int = 20, 
         kick_state = row["kick_state"] or "none"
         reasons = []
         if kick_state in {"watch", "at_risk", "recommended"}:
+            idle_days = _in_game_idle_days(row["last_seen_api"])
+            detail = f"kick_state={kick_state} (battle-based idleness; management.md §3.3)"
+            if idle_days is not None and idle_days >= 1:
+                detail += f" · in-game idle {int(idle_days)}d (roster badge showing)"
             reasons.append({
                 "type": "inactive",
-                "detail": f"kick_state={kick_state} (battle-based idleness; management.md §3.3)",
+                "detail": detail,
                 "value": kick_state,
                 "kick_state_since": row["kick_state_since"],
                 "battle_days_last_28": row["battle_days_last_28"],
+                "in_game_idle_days": round(idle_days, 1) if idle_days is not None else None,
             })
         donations_week = row["donations_week"] or 0
         if donations_week < min_donations_week:
