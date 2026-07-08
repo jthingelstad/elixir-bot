@@ -9,7 +9,7 @@ from memory_store import archive_memory, attach_tags, create_memory, list_memori
 
 # Memory writes route to the durable-memory DB (memory_store ops default there
 # when conn=None). These wrappers therefore do NOT open an operational connection
-# for the memory portion; the few that need operational data (members, war_races)
+# for the memory portion; the few that need operational data (players, war_weeks)
 # open a short-lived operational connection just for that read and pass the
 # caller's original conn (None in production) through to the memory ops. Tests
 # that pass a unified in-memory conn still work — it threads through to both.
@@ -231,17 +231,17 @@ def upsert_member_note_memory(
     if not tag or not text:
         return None
 
-    # Operational read (members/member_current_state) uses an operational conn;
-    # the memory write uses the caller's conn (None -> memory DB).
+    # Operational read (players) uses an operational conn; the memory write uses
+    # the caller's conn (None -> memory DB). v5.1: keyed by player_tag — the old
+    # members/member_current_state join is gone, and update_memory ignores
+    # member_id/role now (only member_tag is a live column), so an existence
+    # check against players is all this needs.
     mem_conn = conn
     close = conn is None
     op_conn = conn or get_connection()
     try:
         member_row = op_conn.execute(
-            "SELECT m.member_id, m.current_name, cs.role "
-            "FROM members m "
-            "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-            "WHERE m.player_tag = ?",
+            "SELECT player_tag, current_name FROM players WHERE player_tag = ?",
             (tag,),
         ).fetchone()
     finally:
@@ -265,9 +265,7 @@ def upsert_member_note_memory(
         memory = update_memory(
             memory["memory_id"],
             actor=created_by,
-            member_id=member_row["member_id"],
             member_tag=tag,
-            role=member_row["role"],
             conn=mem_conn,
         )
     return memory
@@ -308,9 +306,13 @@ def _count_race_streak(conn) -> tuple[int, int | None, int | None]:
 
     Returns (streak_count, latest_season_id, latest_week).
     """
+    # v5.1: war_races was replaced by war_weeks. Skip rows with our_rank IS NULL
+    # (training / not-yet-finished periods) — a period with no finish must not
+    # reset the streak; only an actual non-1st finish does (colosseum 1sts count).
     rows = conn.execute(
-        "SELECT season_id, section_index, our_rank FROM war_races "
-        "WHERE (season_id > ? OR (season_id = ? AND section_index >= ?)) "
+        "SELECT season_id, section_index, our_rank FROM war_weeks "
+        "WHERE our_rank IS NOT NULL "
+        "AND (season_id > ? OR (season_id = ? AND section_index >= ?)) "
         "ORDER BY season_id ASC, section_index ASC",
         (STREAK_START_SEASON, STREAK_START_SEASON, STREAK_START_WEEK - 1),
     ).fetchall()
@@ -337,7 +339,7 @@ def upsert_race_streak_memory(
     conn=None,
 ) -> dict | None:
     """Update the race win streak identity memory after a race completes."""
-    # war_races read uses an operational conn; the memory write uses the caller's
+    # war_weeks read uses an operational conn; the memory write uses the caller's
     # conn (None -> memory DB).
     mem_conn = conn
     close = conn is None
