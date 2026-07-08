@@ -29,13 +29,26 @@ _STREAMS = (
 )
 
 
-def _cutoff(days: int, now: Optional[str] = None) -> str:
-    anchor = (
+def _anchor(now: Optional[str] = None) -> datetime:
+    return (
         datetime.fromisoformat(str(now).replace("Z", "+00:00")).astimezone(timezone.utc)
         if now
         else datetime.now(timezone.utc)
     )
-    return (anchor - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _cutoff(days: int, now: Optional[str] = None) -> str:
+    """ISO cutoff — for the observed_at columns (player/clan/war events)."""
+    return (_anchor(now) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _cutoff_compact(days: int, now: Optional[str] = None) -> str:
+    """CR-compact cutoff (YYYYMMDDTHHMMSS) — for battle_events.battle_time, which
+    is stored in Clash Royale's compact form (20260507T144643.000Z), NOT ISO.
+    Comparing that column against the ISO _cutoff sorts below every real value,
+    so the window filter matches ALL of history (7d and 28d return identical,
+    inflated counts). Same fix as runtime/member_report._cutoff_compact."""
+    return (_anchor(now) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S")
 
 
 @managed_connection
@@ -73,10 +86,11 @@ def summarize_event_windows(
                 key = row["event_type"]
                 counts[key] = counts.get(key, 0) + row["cnt"]
                 total += row["cnt"]
+        battle_cutoff = _cutoff_compact(days, now)   # battle_time is CR-compact, not ISO
         battles = conn.execute(
             "SELECT COUNT(*) AS cnt FROM battle_events WHERE battle_time >= ?"
             + (" AND player_tag = ?" if subject_key else ""),
-            (cutoff, subject_key) if subject_key else (cutoff,),
+            (battle_cutoff, subject_key) if subject_key else (battle_cutoff,),
         ).fetchone()["cnt"]
         out["windows"][f"{days}d"] = {
             "total_events": total,
@@ -145,7 +159,7 @@ def summarize_battle_modes(
     """Per-mode battle activity from battle_events."""
     out: dict = {"windows": {}}
     for days in windows:
-        cutoff = _cutoff(days, now)
+        cutoff = _cutoff_compact(days, now)   # battle_time is CR-compact, not ISO
         where = ["b.battle_time >= ?"]
         params: list = [cutoff]
         if subject_key:
