@@ -472,15 +472,6 @@ def _get_conversation_memory_totals(conn) -> dict:
     return dict(row)
 
 
-def _list_recent_conversation_facts(limit: int, *, conn) -> list[dict]:
-    rows = conn.execute(
-        "SELECT subject_type, subject_key, fact_type, fact_value, confidence, updated_at "
-        "FROM memory_facts ORDER BY updated_at DESC, fact_id DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-    return [dict(row) for row in rows]
-
-
 def _list_recent_conversation_episodes(limit: int, *, conn) -> list[dict]:
     rows = conn.execute(
         "SELECT subject_type, subject_key, episode_type, summary, importance, created_at "
@@ -544,21 +535,9 @@ def _build_memory_report(*, member_query: str | None = None, query: str | None =
             lines.extend(_format_conversation_facts("Member facts", member_ctx.get("facts") or [], limit))
             lines.extend(_format_conversation_episodes("Member episodes", member_ctx.get("episodes") or [], limit))
         else:
-            recent_facts = _list_recent_conversation_facts(limit, conn=conn)
             recent_episodes = _list_recent_conversation_episodes(limit, conn=conn)
             lines.append("")
             lines.append("Recent conversation memory:")
-            if not recent_facts:
-                lines.append("- Recent facts: none")
-            else:
-                lines.append(f"- Recent facts: {len(recent_facts)}")
-                for fact in recent_facts:
-                    lines.append(
-                        f"- Fact `{fact.get('subject_type')}:{fact.get('subject_key')}` "
-                        f"`{fact.get('fact_type')}` ({float(fact.get('confidence') or 0.0):.2f}) "
-                        f"updated {fact.get('updated_at') or 'n/a'}: "
-                        f"{_truncate_for_report(fact.get('fact_value') or '')}"
-                    )
             if not recent_episodes:
                 lines.append("- Recent episodes: none")
             else:

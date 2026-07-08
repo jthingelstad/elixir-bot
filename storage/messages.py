@@ -17,7 +17,7 @@ from db import (
     _utcnow,
     managed_connection,
 )
-from storage.identity import save_memory_episode, save_memory_fact, upsert_discord_user
+from storage.identity import save_memory_episode, upsert_discord_user
 
 # -- Signal and announcement logs ------------------------------------------
 
@@ -451,20 +451,7 @@ def update_message_summary(message_id: int, summary: str, conn: Optional[sqlite3
         (summary, message_id),
     )
     author_type = row["author_type"]
-    discord_user_id = row["discord_user_id"]
     channel_id = row["channel_id"]
-
-    # Propagate to memory_facts (user summary)
-    if author_type == "user" and discord_user_id:
-        save_memory_fact(
-            "discord_user",
-            str(discord_user_id),
-            "last_user_summary",
-            summary,
-            confidence=0.8,
-            source_message_id=message_id,
-            conn=conn,
-        )
 
     # Propagate to channel_state (assistant summary)
     if author_type == "assistant" and channel_id:
