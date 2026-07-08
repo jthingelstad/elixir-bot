@@ -262,10 +262,14 @@ def _build_member_profile_report(member_query: str, *, conn=None) -> str:
         f"- Clan state: Collection Level {_fmt_optional(profile.get('cr_collection_level'))} | trophies {_fmt_optional(trophies)} | "
         f"best {_fmt_optional(best_trophies)} | donations {_fmt_optional(profile.get('donations_week'))} | received {_fmt_optional(profile.get('donations_received_week'))}"
     )
+    email_display = None
+    if profile.get("email"):
+        email_display = f"{profile['email']} ({'verified' if profile.get('email_verified_at') else 'unverified'})"
     lines.append(
-        f"- Discord + notes: linked {'yes' if profile.get('in_discord') else 'no'} | "
+        f"- Discord + contact: linked {'yes' if profile.get('in_discord') else 'no'} | "
         f"handle {_fmt_optional(profile.get('discord_display_name') or profile.get('discord_username'))} | "
-        f"last seen {_fmt_optional(profile.get('discord_last_seen_at'))} | note {_fmt_optional(profile.get('note'))}"
+        f"last seen {_fmt_optional(profile.get('discord_last_seen_at'))} | "
+        f"email {_fmt_optional(email_display)} | note {_fmt_optional(profile.get('note'))}"
     )
     lines.append(
         f"- Player history: wins {_fmt_optional(profile.get('career_wins'))} | losses {_fmt_optional(profile.get('career_losses'))} | "

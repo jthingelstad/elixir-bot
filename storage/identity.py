@@ -13,6 +13,7 @@ from db import (
     _ensure_member,
     _json_or_none,
     _rowdicts,
+    _upsert_member_metadata,
     _utcnow,
     managed_connection,
 )
@@ -224,16 +225,27 @@ def get_discord_link(member_tag: str, conn: Optional[sqlite3.Connection] = None)
 
 @managed_connection
 def get_member_identity(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    _ensure_email_schema(conn)
     row = conn.execute(
         "SELECT m.player_tag, m.current_name AS member_name, du.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name, "
-        "CASE WHEN dl.discord_user_id IS NULL THEN 0 ELSE 1 END AS in_discord "
+        "CASE WHEN dl.discord_user_id IS NULL THEN 0 ELSE 1 END AS in_discord, "
+        "pm.email AS email, pm.email_verified_at AS email_verified_at, pm.email_source AS email_source "
         "FROM players m "
         "LEFT JOIN discord_links dl ON dl.player_tag = m.player_tag AND dl.is_primary = 1 "
         "LEFT JOIN discord_users du ON du.discord_user_id = dl.discord_user_id "
+        "LEFT JOIN player_metadata pm ON pm.player_tag = m.player_tag "
         "WHERE m.player_tag = ?",
         (_canon_tag(member_tag),),
     ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    out = dict(row)
+    out["email"] = out.get("email") or ""
+    out["email_status"] = (
+        "verified" if (out["email"] and out.get("email_verified_at"))
+        else ("unverified" if out["email"] else "none")
+    )
+    return out
 
 
 @managed_connection
@@ -247,6 +259,105 @@ def get_linked_member_for_discord_user(discord_user_id: str | int, conn: Optiona
         (str(discord_user_id),),
     ).fetchone()
     return dict(row) if row else None
+
+
+# -- Member email (contact identity) ---------------------------------------
+#
+# Email is verified contact-identity, kept alongside the Discord link rather than
+# in the generic metadata bucket. The columns physically live on player_metadata;
+# transient verification challenges live in email_verifications.
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def is_valid_email(value: str) -> bool:
+    return bool(_EMAIL_RE.match((value or "").strip()))
+
+
+def _ensure_email_schema(conn) -> None:
+    """Lazy schema for live DBs cut before the email columns/table existed (v5.1
+    has no forward-migration runner; fresh builds get these from schema_v51).
+    Idempotent — safe to call on every email read/write."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(player_metadata)")}
+    if "email" not in cols:
+        conn.execute("ALTER TABLE player_metadata ADD COLUMN email TEXT DEFAULT ''")
+    if "email_verified_at" not in cols:
+        conn.execute("ALTER TABLE player_metadata ADD COLUMN email_verified_at TEXT")
+    if "email_source" not in cols:
+        conn.execute("ALTER TABLE player_metadata ADD COLUMN email_source TEXT DEFAULT ''")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS email_verifications ("
+        "player_tag TEXT PRIMARY KEY REFERENCES players(player_tag) ON DELETE CASCADE, "
+        "pending_email TEXT NOT NULL, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL, "
+        "attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)"
+    )
+
+
+@managed_connection
+def set_member_email(member_tag: str, email: Optional[str], *, source: str,
+                     verified_at: Optional[str] = None,
+                     conn: Optional[sqlite3.Connection] = None) -> None:
+    """Store a member's email. `source` records how it was set (self_service /
+    admin_set); `verified_at` stamps it verified (admin-set counts as trusted)."""
+    _ensure_email_schema(conn)
+    tag = _canon_tag(member_tag)
+    _ensure_member(conn, tag)
+    _upsert_member_metadata(conn, tag, email=(email or "").strip() or None,
+                            email_verified_at=verified_at,
+                            email_source=(source or "").strip() or None)
+    conn.commit()
+
+
+@managed_connection
+def clear_member_email(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> None:
+    _ensure_email_schema(conn)
+    tag = _canon_tag(member_tag)
+    _upsert_member_metadata(conn, tag, email=None, email_verified_at=None, email_source=None)
+    conn.execute("DELETE FROM email_verifications WHERE player_tag = ?", (tag,))
+    conn.commit()
+
+
+@managed_connection
+def upsert_email_challenge(member_tag: str, *, pending_email: str, code_hash: str,
+                           expires_at: str, conn: Optional[sqlite3.Connection] = None) -> None:
+    """Store (or replace) the one active verification challenge for a member."""
+    _ensure_email_schema(conn)
+    tag = _canon_tag(member_tag)
+    _ensure_member(conn, tag)
+    conn.execute(
+        "INSERT INTO email_verifications (player_tag, pending_email, code_hash, expires_at, attempts, created_at) "
+        "VALUES (?, ?, ?, ?, 0, ?) "
+        "ON CONFLICT(player_tag) DO UPDATE SET pending_email=excluded.pending_email, "
+        "code_hash=excluded.code_hash, expires_at=excluded.expires_at, attempts=0, created_at=excluded.created_at",
+        (tag, pending_email.strip(), code_hash, expires_at, _utcnow()),
+    )
+    conn.commit()
+
+
+@managed_connection
+def get_email_challenge(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    _ensure_email_schema(conn)
+    row = conn.execute(
+        "SELECT player_tag, pending_email, code_hash, expires_at, attempts, created_at "
+        "FROM email_verifications WHERE player_tag = ?",
+        (_canon_tag(member_tag),),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+@managed_connection
+def bump_email_challenge_attempts(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> int:
+    tag = _canon_tag(member_tag)
+    conn.execute("UPDATE email_verifications SET attempts = attempts + 1 WHERE player_tag = ?", (tag,))
+    conn.commit()
+    row = conn.execute("SELECT attempts FROM email_verifications WHERE player_tag = ?", (tag,)).fetchone()
+    return row["attempts"] if row else 0
+
+
+@managed_connection
+def clear_email_challenge(member_tag: str, conn: Optional[sqlite3.Connection] = None) -> None:
+    conn.execute("DELETE FROM email_verifications WHERE player_tag = ?", (_canon_tag(member_tag),))
+    conn.commit()
 
 
 @managed_connection

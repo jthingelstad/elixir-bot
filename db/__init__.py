@@ -387,6 +387,7 @@ _MEMBER_METADATA_COLUMNS = frozenset({
     "cr_collection_level_updated_at", "cr_clan_war_wins", "cr_battle_wins",
     "cr_clan_donations", "cr_banner_count", "cr_emote_count", "cr_profile_badges_updated_at",
     "preferred_nickname", "nickname_source", "nickname_updated_at",
+    "email", "email_verified_at", "email_source",
 })
 
 

@@ -422,7 +422,7 @@ def get_member_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> O
         "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
         "md.cr_collection_level, md.cr_collection_level_badge_tier, md.cr_collection_level_badge_max_tier, md.cr_collection_level_updated_at, "
         "md.cr_clan_war_wins, md.cr_battle_wins, md.cr_clan_donations, md.cr_banner_count, md.cr_emote_count, md.cr_profile_badges_updated_at, "
-        "md.profile_url, md.note, "
+        "md.profile_url, md.note, md.email, md.email_verified_at, md.email_source, "
         "md.generated_bio AS bio, md.generated_highlight AS profile_highlight, md.generated_profile_updated_at, "
         "dl.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name, du.last_seen_at AS discord_last_seen_at "
         "FROM players m "

@@ -288,9 +288,13 @@ async def handle_member_update(before: discord.Member, after: discord.Member):
         (
             f"User {after.mention} set their nickname to '{cr_name}' which matches "
             f"clan member tag {tag}. They've been granted the member role. "
-            f"Welcome them and let them know they have full access. Channel: #welcome."
+            f"Welcome them and let them know they have full access. Also mention, as an "
+            f"optional extra, that they can add an email to their profile with the slash "
+            f"command `/elixir email set <address>` (I'll send a code to verify it) — "
+            f"it's optional. Channel: #welcome."
         ),
-        f"Welcome aboard, {cr_name}! You now have full access.",
+        f"Welcome aboard, {cr_name}! You now have full access. "
+        f"Optional: add your email with `/elixir email set <address>` and I'll verify it with a code.",
     )
 
 

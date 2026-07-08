@@ -265,6 +265,23 @@ async def ops_review_dryrun(request: web.Request) -> web.Response:
     raise web.HTTPFound(f"/management?dryrun={note}")
 
 
+async def ops_member_email(request: web.Request) -> web.Response:
+    if not _same_origin(request):
+        raise web.HTTPForbidden(text="bad origin")
+    tag = request.match_info["tag"]
+    if not tag.startswith("#"):
+        tag = f"#{tag}"
+    tag = tag.upper()
+    form = await request.post()
+    email = str(form.get("email", "")).strip()
+    try:
+        note = await asyncio.to_thread(ops.set_member_email, tag, email)
+    except Exception as exc:
+        log.exception("ops_member_email failed")
+        note = f"email update failed: {exc}"
+    raise web.HTTPFound(f"/member/{tag.lstrip('#')}?ok={note}")
+
+
 def add_routes(app: web.Application) -> None:
     app.add_routes([
         web.get("/healthz", healthz),
@@ -291,4 +308,5 @@ def add_routes(app: web.Application) -> None:
         web.post("/ops/tick", ops_tick),
         web.post("/ops/intent/{intent_id}/retry", ops_intent_retry),
         web.post("/ops/weekly-review/dryrun", ops_review_dryrun),
+        web.post("/ops/member/{tag}/email", ops_member_email),
     ])

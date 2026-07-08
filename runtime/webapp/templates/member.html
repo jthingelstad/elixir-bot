@@ -26,7 +26,21 @@
       {% if aliases %}
         <dt>aliases</dt><dd>{% for a in aliases %}{{ a.alias }}{{ ' · ' if not loop.last else '' }}{% endfor %}</dd>
       {% endif %}
+      <dt>email</dt>
+      <dd>
+        {% if contact and contact.email %}
+          {{ contact.email }}
+          {% if contact.email_verified_at %}<span class="badge good">verified</span>{% else %}<span class="badge">unverified</span>{% endif %}
+          <span class="muted">({{ contact.email_source or '?' }})</span>
+        {% else %}<span class="muted">none</span>{% endif %}
+      </dd>
     </dl>
+    <form method="post" action="/ops/member/{{ tag | replace('#','') }}/email" style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">
+      <input type="text" name="email" placeholder="set email — blank or 'clear' to remove"
+             value="{{ contact.email if contact else '' }}" style="flex:1; min-width:200px;">
+      <button type="submit">Save email</button>
+    </form>
+    <p class="muted" style="margin:4px 0 0; font-size:0.85em;">Setting an email here marks it admin-verified.</p>
   </div>
 
   <div class="card">
