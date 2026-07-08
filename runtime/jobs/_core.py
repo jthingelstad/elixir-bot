@@ -63,6 +63,8 @@ WEEKLY_DISCORD_INVITE_RELAY_DAY = os.getenv("WEEKLY_DISCORD_INVITE_RELAY_DAY", "
 WEEKLY_DISCORD_INVITE_RELAY_HOUR = int(os.getenv("WEEKLY_DISCORD_INVITE_RELAY_HOUR", "11"))
 WEEKLY_RECAP_DAY = os.getenv("WEEKLY_RECAP_DAY", "mon")
 WEEKLY_RECAP_HOUR = int(os.getenv("WEEKLY_RECAP_HOUR", "9"))
+WEEKLY_MEMBER_REPORT_DAY = os.getenv("WEEKLY_MEMBER_REPORT_DAY", "mon")
+WEEKLY_MEMBER_REPORT_HOUR = int(os.getenv("WEEKLY_MEMBER_REPORT_HOUR", "10"))
 KICK_RECOMMENDATION_POLICY_CONTEXT = {
     "primary_signal": "inactivity_or_absence",
     "supporting_signals": ["donations", "war_participation"],
@@ -704,6 +706,57 @@ async def _email_weekly_recap(recap_post: str) -> int:
         outbound.send, to=email_addr, bcc=recipients, subject=subject, body=body)
     log.info("weekly recap emailed to %d member(s)", len(recipients))
     return len(recipients)
+
+
+async def _weekly_member_report_cycle():
+    """Arena Dispatch — the personalized weekly Clash Royale email, one per member
+    with a verified address. Each member gets their OWN report (built from their
+    week's battles/badges/cards/profile), narrated in Elixir's voice, and sent
+    individually (To:, never BCC — it's about them, and no address leaks).
+
+    Best-effort and isolated: one member's build/LLM/mail failure is logged and
+    skipped so it can't sink the batch. Skips cleanly when mail is unconfigured
+    or nobody has a verified email."""
+    runtime_status.mark_job_start("weekly_member_report")
+
+    from agent.mail import outbound
+    from agent.workflows import generate_member_report
+    from runtime import member_report
+
+    if not outbound.enabled():
+        runtime_status.mark_job_success("weekly_member_report", "skipped: mail not configured")
+        return {"sent": 0, "total": 0}
+
+    recipients = await asyncio.to_thread(db.list_member_emails)
+    if not recipients:
+        runtime_status.mark_job_success("weekly_member_report", "no members with a verified email")
+        return {"sent": 0, "total": 0}
+
+    def _build_and_send(rec: dict) -> None:
+        tag = rec["player_tag"]
+        name = rec.get("member_name") or tag
+        ctx = member_report.build_member_report_context(tag, name)
+        narrative = generate_member_report(member_report.facts_for_model(ctx))
+        subject, body = member_report.render_member_report(ctx, narrative)
+        outbound.send(to=rec["email"], subject=subject, body=body)
+
+    sent = 0
+    for rec in recipients:
+        try:
+            await asyncio.to_thread(_build_and_send, rec)
+            sent += 1
+        except Exception as exc:  # one member's failure never sinks the batch
+            log.warning("arena dispatch failed for %s: %s", rec.get("player_tag"), exc)
+
+    total = len(recipients)
+    if sent == 0:
+        runtime_status.mark_job_failure(
+            "weekly_member_report", f"0/{total} arena dispatches sent")
+    else:
+        runtime_status.mark_job_success(
+            "weekly_member_report", f"{sent}/{total} arena dispatches sent")
+    log.info("arena dispatch: %d/%d member report(s) emailed", sent, total)
+    return {"sent": sent, "total": total}
 
 
 async def _weekly_story_relay_card(recap_text: str) -> bool:

@@ -34,7 +34,8 @@ def _render_markdown(text: str) -> str:
     (code spans render as proper <code>, bare angle brackets stay literal); the escape
     extension neutralizes raw HTML. No nl2br: single mid-sentence newlines collapse to a
     space, paragraphs come from blank lines."""
-    return _markdown.markdown(text or "", extensions=["sane_lists", _EscapeRawHtmlExtension()])
+    return _markdown.markdown(
+        text or "", extensions=["sane_lists", "tables", _EscapeRawHtmlExtension()])
 
 
 # Email CSS. Delivered as a <style> block (well-supported in Apple Mail, Gmail, most
@@ -46,14 +47,20 @@ _EMAIL_CSS = (
     "Arial,sans-serif;font-size:16px;line-height:1.55;color:#2a2a2a;max-width:640px;"
     "margin:0 auto;padding:8px 2px;}"
     ".elixir-email p{margin:0 0 16px;}"
-    ".elixir-email h2{font-size:20px;font-weight:600;color:#111;margin:34px 0 14px;"
-    "padding-bottom:6px;border-bottom:2px solid #e4e4e4;}"
-    ".elixir-email h3{font-size:17px;font-weight:600;color:#111;margin:28px 0 10px;}"
+    ".elixir-email h2{font-size:19px;font-weight:700;color:#111;margin:28px 0 10px;"
+    "padding-bottom:5px;border-bottom:1px solid #ececec;}"
+    ".elixir-email h3{font-size:18px;font-weight:700;color:#111;margin:16px 0 4px;}"
     ".elixir-email ol,.elixir-email ul{padding-left:24px;margin:0 0 16px;}"
     ".elixir-email li{margin-bottom:12px;padding-left:4px;}"
     ".elixir-email strong{font-weight:600;color:#111;}"
     ".elixir-email hr{border:0;border-top:1px solid #ececec;margin:24px 0;}"
     ".elixir-email a{color:#7b3fe4;}"  # elixir purple
+    # Inline card/badge art (icons ~512px on the CDN) sized down to sit in a line.
+    ".elixir-email img{max-height:44px;width:auto;vertical-align:middle;margin-right:8px;}"
+    # Full battle-log + stat tables.
+    ".elixir-email table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0;}"
+    ".elixir-email th,.elixir-email td{border-bottom:1px solid #eee;padding:6px 8px;text-align:left;}"
+    ".elixir-email th{color:#666;font-weight:600;border-bottom:2px solid #e4e4e4;}"
     ".elixir-sig{margin-top:28px;padding-top:12px;border-top:1px solid #e4e4e4;"
     "font-size:14px;color:#555;}"
     ".elixir-sig p{margin:0 0 4px;}"

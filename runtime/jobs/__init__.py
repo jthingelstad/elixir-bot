@@ -3,9 +3,11 @@
 from runtime.jobs._core import (  # noqa: F401
     WEEKLY_DISCORD_INVITE_RELAY_DAY, WEEKLY_DISCORD_INVITE_RELAY_HOUR,
     WEEKLY_RECAP_DAY, WEEKLY_RECAP_HOUR,
+    WEEKLY_MEMBER_REPORT_DAY, WEEKLY_MEMBER_REPORT_HOUR,
     _query_or_default, _summarize_member_rows,
     _build_ask_elixir_daily_insight_context, _ask_elixir_daily_insight,
     _weekly_clan_recap,
+    _weekly_member_report_cycle,
     _weekly_discord_invite_relay,
 )
 from runtime.jobs._intel import (  # noqa: F401
