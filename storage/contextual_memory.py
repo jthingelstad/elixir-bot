@@ -399,11 +399,47 @@ def upsert_intel_report_memory(
     )
 
 
+def upsert_release_memory(
+    *,
+    name: str,
+    date: str,
+    tag: str,
+    subject: str | None = None,
+    body: str,
+    url: str | None = None,
+    metadata: dict | None = None,
+    conn=None,
+) -> dict | None:
+    """Persist a durable clan memory for an Elixir release — the clan's lasting
+    record of what shipped and when. Keyed by the release tag so a re-cut or a
+    backfill re-run upserts rather than duplicates. Carries the name + date +
+    tag (+ subject/url) as metadata."""
+    label = f"{name} ({date})" if name and date else (name or date or tag)
+    meta = dict(metadata or {})
+    meta.update({"release_name": name, "release_date": date, "tag": tag})
+    if subject:
+        meta["subject"] = subject
+    if url:
+        meta["github_url"] = url
+    return upsert_summary_memory(
+        event_type="elixir_release",
+        event_id=tag,
+        title=f"Elixir release — {label}",
+        body=body,
+        scope="public",
+        created_by="elixir:release",
+        tags=["release", "elixir", tag],
+        metadata=meta,
+        conn=conn,
+    )
+
+
 __all__ = [
     "archive_member_note_memory",
     "upsert_intel_report_memory",
     "upsert_member_note_memory",
     "upsert_race_streak_memory",
+    "upsert_release_memory",
     "upsert_summary_memory",
     "upsert_weekly_summary_memory",
     "upsert_war_recap_memory",
