@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import urllib.request
 
@@ -356,6 +357,17 @@ def release_notes_draft(*, days: int | None = None, since_ref: str | None = None
     }
 
 
+def _gh_bin() -> str | None:
+    """Absolute path to the `gh` CLI. shutil.which first, then the common Homebrew
+    locations — the bot runs under launchd with a minimal PATH that excludes
+    /opt/homebrew/bin, so a bare 'gh' raises FileNotFoundError (git resolves via
+    Apple's /usr/bin/git, but gh is Homebrew-only)."""
+    found = shutil.which("gh")
+    if found:
+        return found
+    return next((p for p in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh") if os.path.exists(p)), None)
+
+
 def create_github_release(*, name: str, date: str, tag: str, commit: str, body: str) -> str | None:
     """Tag `commit` and publish the GitHub release — the permanent code
     reference for what shipped. `tag` is the ref-safe name-slug (e.g.
@@ -370,11 +382,15 @@ def create_github_release(*, name: str, date: str, tag: str, commit: str, body: 
                            cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=15)
             subprocess.run(["git", "push", "origin", tag],
                            cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=60)
-        view = subprocess.run(["gh", "release", "view", tag, "--json", "url", "-q", ".url"],
+        gh = _gh_bin()
+        if not gh:
+            log.warning("gh CLI not found; tag %s pushed but no GitHub release created", tag)
+            return None
+        view = subprocess.run([gh, "release", "view", tag, "--json", "url", "-q", ".url"],
                               cwd=REPO_ROOT, capture_output=True, text=True, timeout=30)
         if view.returncode == 0 and view.stdout.strip():
             return view.stdout.strip()
-        made = subprocess.run(["gh", "release", "create", tag, "--title", title,
+        made = subprocess.run([gh, "release", "create", tag, "--title", title,
                                "--notes-file", "-"],
                               cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
                               input=body)

@@ -171,3 +171,16 @@ def test_announcement_messages_nameless():
                                     name="", date="2026-07-08")
     assert msgs[0].startswith("**Release (2026-07-08)**")
     assert "GitHub" not in msgs[0]
+
+
+def test_gh_bin_resolution(monkeypatch):
+    # On PATH → use it.
+    monkeypatch.setattr(rn.shutil, "which", lambda _: "/usr/local/bin/gh")
+    assert rn._gh_bin() == "/usr/local/bin/gh"
+    # Not on PATH (launchd minimal PATH) → fall back to a known Homebrew location.
+    monkeypatch.setattr(rn.shutil, "which", lambda _: None)
+    monkeypatch.setattr(rn.os.path, "exists", lambda p: p == "/opt/homebrew/bin/gh")
+    assert rn._gh_bin() == "/opt/homebrew/bin/gh"
+    # Nowhere → None (caller skips the GitHub release, tag still pushed).
+    monkeypatch.setattr(rn.os.path, "exists", lambda p: False)
+    assert rn._gh_bin() is None
