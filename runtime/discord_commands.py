@@ -31,6 +31,7 @@ def register_elixir_app_commands(bot) -> None:
     relay_commands = app_commands.Group(name="relay", description="Leader action relay board")
     signal_commands = app_commands.Group(name="signal", description="Signal routing and system-signal commands")
     activity_commands = app_commands.Group(name="activity", description="Recurring activity inspection and manual run commands")
+    email_commands = app_commands.Group(name="email", description="Add and verify your email on your clan profile")
 
     async def send_interaction_text(interaction: discord.Interaction, content: str, *, ephemeral: bool = True, use_followup: bool = False):
         chunks = app._chunk_discord_text(content)
@@ -746,6 +747,109 @@ def register_elixir_app_commands(bot) -> None:
 
         await send_interaction_text(interaction, "\n".join(lines), ephemeral=True)
 
+    # ── Member email (self-service, ephemeral) — acts only on the caller's own
+    # linked profile; the nickname step is what links a Discord user to a member.
+    async def _resolve_caller_tag(interaction: discord.Interaction):
+        link = await asyncio.to_thread(db.get_linked_member_for_discord_user, interaction.user.id)
+        return (link or {}).get("player_tag")
+
+    _NOT_LINKED = ("I can't tell who you are yet — set your Discord nickname to your in-game "
+                   "name first (that links your account), then try again.")
+
+    @email_commands.command(name="set", description="Add an email to your profile; I'll send a code to verify it.")
+    @app_commands.describe(address="The email address to link to your clan profile.")
+    async def slash_email_set(interaction: discord.Interaction, address: str):
+        await interaction.response.defer(ephemeral=True)
+        tag = await _resolve_caller_tag(interaction)
+        if not tag:
+            await send_interaction_text(interaction, _NOT_LINKED, ephemeral=True)
+            return
+        from runtime import email_verification
+        result = await asyncio.to_thread(email_verification.start_verification, tag, address)
+        if result["ok"]:
+            await send_interaction_text(
+                interaction,
+                f"📧 I sent a 6-digit code to **{result['email']}**. Enter it with "
+                f"`/elixir email verify <code>` within {email_verification.CODE_TTL_MINUTES} minutes.",
+                ephemeral=True)
+        else:
+            await send_interaction_text(interaction, f"Couldn't do that — {result['error']}", ephemeral=True)
+
+    @email_commands.command(name="verify", description="Enter the 6-digit code I emailed you.")
+    @app_commands.describe(code="The 6-digit code from the email.")
+    async def slash_email_verify(interaction: discord.Interaction, code: str):
+        await interaction.response.defer(ephemeral=True)
+        tag = await _resolve_caller_tag(interaction)
+        if not tag:
+            await send_interaction_text(interaction, _NOT_LINKED, ephemeral=True)
+            return
+        from runtime import email_verification
+        result = await asyncio.to_thread(email_verification.check_code, tag, code)
+        if result["ok"]:
+            await send_interaction_text(
+                interaction, f"✅ Verified — **{result['email']}** is now on your profile.", ephemeral=True)
+        else:
+            await send_interaction_text(interaction, f"Couldn't verify — {result['error']}", ephemeral=True)
+
+    @email_commands.command(name="show", description="Show the email on your profile.")
+    async def slash_email_show(interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        tag = await _resolve_caller_tag(interaction)
+        if not tag:
+            await send_interaction_text(interaction, _NOT_LINKED, ephemeral=True)
+            return
+        identity = await asyncio.to_thread(db.get_member_identity, tag)
+        email = (identity or {}).get("email") or ""
+        if not email:
+            await send_interaction_text(
+                interaction, "No email on your profile yet. Add one with `/elixir email set <address>`.",
+                ephemeral=True)
+            return
+        status = "✅ verified" if (identity or {}).get("email_verified_at") else "⚠️ not verified"
+        await send_interaction_text(interaction, f"📧 **{email}** — {status}", ephemeral=True)
+
+    # ── Admin: view/set a member's email (leader-only), in the identity family.
+    @member_commands.command(name="email", description="Show or set a member's email (leader).")
+    @app_commands.describe(member="Member name or tag.",
+                           address="Email to set; use 'clear' to remove; omit to just show.")
+    @app_commands.autocomplete(member=member_autocomplete)
+    async def slash_member_email(interaction: discord.Interaction, member: str, address: str | None = None):
+        write = address is not None
+        if not await validate_admin_interaction(interaction, command_name="member.email", write=write):
+            return
+        if not app._has_leader_role(interaction.user):
+            await send_interaction_text(interaction, "Leader role required for this command.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        from runtime.admin import _resolve_member_tag, _utcnow
+        try:
+            tag, label = await asyncio.to_thread(_resolve_member_tag, member)
+        except ValueError as exc:
+            await send_interaction_text(interaction, str(exc), ephemeral=True)
+            return
+        if address is not None:
+            addr = address.strip()
+            if addr.lower() in ("clear", "none", "-", ""):
+                await asyncio.to_thread(db.clear_member_email, tag)
+                await send_interaction_text(interaction, f"Cleared {label}'s email.", ephemeral=True)
+                return
+            if not db.is_valid_email(addr):
+                await send_interaction_text(interaction, f"`{addr}` doesn't look like a valid email.", ephemeral=True)
+                return
+            await asyncio.to_thread(db.set_member_email, tag, addr, source="admin_set", verified_at=_utcnow())
+            await send_interaction_text(
+                interaction, f"Set {label}'s email to **{addr}** (admin-set, trusted).", ephemeral=True)
+            return
+        identity = await asyncio.to_thread(db.get_member_identity, tag)
+        email = (identity or {}).get("email") or ""
+        if not email:
+            await send_interaction_text(interaction, f"{label} has no email on file.", ephemeral=True)
+            return
+        status = "verified" if (identity or {}).get("email_verified_at") else "not verified"
+        src = (identity or {}).get("email_source") or "?"
+        await send_interaction_text(interaction, f"{label}: **{email}** ({status}, source: {src})", ephemeral=True)
+
+    elixir_commands.add_command(email_commands)
     elixir_commands.add_command(tournament_commands)
     elixir_commands.add_command(system_commands)
     elixir_commands.add_command(clan_commands)

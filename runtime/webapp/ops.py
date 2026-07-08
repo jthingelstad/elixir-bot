@@ -67,6 +67,22 @@ class _NoCommitConnection:
         return getattr(self._conn, name)
 
 
+def set_member_email(tag: str, email: str) -> str:
+    """Admin set/clear a member's email from the Observatory. The webapp is
+    tailnet-only behind the login allowlist, so the viewer is the admin; an email
+    set here is trusted (verified). Empty / 'clear' removes it."""
+    tag = tag if tag.startswith("#") else f"#{tag}"
+    email = (email or "").strip()
+    if email.lower() in ("", "clear", "none"):
+        db.clear_member_email(tag)
+        return "email cleared"
+    if not db.is_valid_email(email):
+        return f"invalid email: {email}"
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    db.set_member_email(tag, email, source="admin_set", verified_at=now)
+    return f"email set to {email}"
+
+
 def weekly_review_dryrun() -> dict:
     """Run the weekly review inside a transaction and ROLL BACK: renders what
     Monday would decide without rolling week_anchor or the hysteresis

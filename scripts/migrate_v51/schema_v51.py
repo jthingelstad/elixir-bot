@@ -49,7 +49,20 @@ CREATE TABLE player_metadata (
     cr_collection_level_badge_max_tier INTEGER, cr_collection_level_updated_at TEXT,
     cr_clan_war_wins INTEGER, cr_battle_wins INTEGER, cr_clan_donations INTEGER,
     cr_banner_count INTEGER, cr_emote_count INTEGER, cr_profile_badges_updated_at TEXT,
-    preferred_nickname TEXT, nickname_source TEXT, nickname_updated_at TEXT
+    preferred_nickname TEXT, nickname_source TEXT, nickname_updated_at TEXT,
+    email TEXT DEFAULT '', email_verified_at TEXT, email_source TEXT DEFAULT ''
+);
+
+-- Transient email-verification challenges: a member sets an email, Elixir mails a
+-- 6-digit code, the member enters it to verify. One active challenge per member
+-- (PK), overwritten on re-request; cleared on success/expiry.
+CREATE TABLE email_verifications (
+    player_tag    TEXT PRIMARY KEY REFERENCES players(player_tag) ON DELETE CASCADE,
+    pending_email TEXT NOT NULL,
+    code_hash     TEXT NOT NULL,
+    expires_at    TEXT NOT NULL,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL
 );
 
 CREATE TABLE player_aliases (
@@ -674,7 +687,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 64  # 55 engine (+ runtime_incidents + post_quality_runs + evergreen_nudges + game_events) + 3 conversation + 3 memory + 1 fts-excluded
+EXPECTED_TABLE_COUNT = 65  # 55 engine (+ runtime_incidents + post_quality_runs + evergreen_nudges + game_events + email_verifications) + 3 conversation + 3 memory + 1 fts-excluded
 
 
 _DEAD_MEMBERS_FK = re.compile(

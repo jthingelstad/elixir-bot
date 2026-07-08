@@ -421,10 +421,14 @@ def member_page(tag: str) -> dict | None:
         aliases = _rows(conn, """
             SELECT alias, source, observed_at FROM player_aliases
             WHERE player_tag = ? ORDER BY observed_at DESC LIMIT 15""", (tag,))
+        contact = _one(conn, """
+            SELECT email, email_verified_at, email_source FROM player_metadata
+            WHERE player_tag = ?""", (tag,)) or {}
         return {"player": player, "state": state, "poll": poll,
                 "management": management, "membership": membership,
                 "claims": claims, "events": events, "battles": battles,
-                "attendance": attendance, "links": links, "aliases": aliases}
+                "attendance": attendance, "links": links, "aliases": aliases,
+                "contact": contact}
     finally:
         conn.close()
 
