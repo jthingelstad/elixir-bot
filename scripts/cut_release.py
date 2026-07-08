@@ -1,24 +1,28 @@
-"""Cut an Elixir release — the full ceremony, ported from Oliver's flow.
+"""Cut an Elixir release — the full ceremony (no version number).
 
-    ./venv/bin/python scripts/cut_release.py --version v5.1 --dry-run
-    ./venv/bin/python scripts/cut_release.py --version v5.1
+    ./venv/bin/python scripts/cut_release.py --dry-run
+    ./venv/bin/python scripts/cut_release.py
 
-Flow (mirrors Oliver's /oliver release-notes "list" send, email → Discord):
- 1. Gather git material since the latest v* tag (or --since/--days).
- 2. Coin the release name (alliteration on a Clash Royale card).
- 3. Generate the first-person notes (subject + three-section body).
- 4. Write the release into the repo: prepend RELEASES.md, bump the
-    RELEASE_VERSION/RELEASE_CODENAME defaults in agent/core.py, commit.
-    (Oliver records his release in the events table; Elixir's record is
-    RELEASES.md + the tag, and the running bot reports RELEASE_LABEL from
-    the code defaults at its next restart.)
- 5. Tag that commit with the version and publish the GitHub release
-    (best-effort — never blocks the announcement).
- 6. Post the announcement to Discord #announcements (chunked), carrying
-    the GitHub release URL. No email — Discord only (Jamie, 2026-07-04).
+A release is identified by its coined NAME + DATE + build hash — no SemVer. The
+git tag is the ref-safe name-slug ("Blazing Balloon" → tag `blazing-balloon`);
+the human label is "Blazing Balloon (2026-07-08)".
 
---dry-run prints everything (name, subject, notes, tag plan, announcement
-chunks) and touches nothing. --no-announce cuts the release silently.
+Flow:
+ 1. Gather git material since the latest release tag (or --since/--days).
+ 2. Coin the release name (alliteration on a Clash Royale card) — settles the tag.
+ 3. Generate THREE tiers in one model call: detailed (email + GitHub +
+    RELEASES.md), announcement (Discord #announcements), clanchat (in-game blurb).
+ 4. Write the release: prepend RELEASES.md, bump RELEASE_CODENAME/RELEASE_STAMP in
+    agent/core.py, commit, push.
+ 5. Tag the commit with the name-slug and publish the GitHub release (best-effort).
+ 6. Email the detailed tier from elixir@poapkings.com (best-effort).
+ 7. Post the announcement tier to #announcements (best-effort).
+ 8. Emit the clanchat tier (marker line) — /elixir release posts it as a
+    leader-action card in #leader-actions.
+
+--dry-run prints every tier and touches nothing. --no-announce / --no-email skip
+those sends. --announce-only re-posts the Discord announcement for an already-cut
+release (keyed by its tag slug).
 """
 
 from __future__ import annotations
@@ -34,32 +38,37 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv  # noqa: E402
 
-load_dotenv()  # standalone script: ELIXIR_DB_PATH + CLAUDE_API_KEY from .env
+load_dotenv()  # standalone script: ELIXIR_DB_PATH + CLAUDE_API_KEY + FASTMAIL_JMAP_TOKEN from .env
 
 from agent import release_notes as rn  # noqa: E402
 
 CORE_PY = os.path.join(rn.REPO_ROOT, "agent", "core.py")
+DEFAULT_EMAIL_TO = os.getenv("ELIXIR_RELEASE_EMAIL_TO", "jamie@thingelstad.com")
+# The slash command greps stdout for this marker to post the clan-chat card.
+CLANCHAT_MARKER = "::RELEASE_CLANCHAT::"
 
 
-def _prepend_releases_md(*, version: str, name: str, body: str) -> None:
-    """Prepend the new section to RELEASES.md in the file's own convention
-    (## vX.Y — Name / **Date:** …)."""
+def _label(name: str, date: str) -> str:
+    return f"{name} ({date})" if name else f"Release ({date})"
+
+
+def _prepend_releases_md(*, label: str, date: str, body: str) -> None:
+    """Prepend the new section to RELEASES.md: `## {label}` + a machine-readable
+    `**Date:**` line + the detailed body."""
     text = open(rn.RELEASES_MD).read()
-    today = datetime.date.today().isoformat()
     header, _, rest = text.partition("---\n")
-    section = f"## {version} — {name or 'Unnamed'}\n\n**Date:** {today}\n\n{body.strip()}\n\n"
+    section = f"## {label}\n\n**Date:** {date}\n\n{body.strip()}\n\n"
     open(rn.RELEASES_MD, "w").write(f"{header}---\n\n{section}{rest.lstrip()}")
 
 
-def _bump_core_defaults(*, version: str, name: str) -> None:
-    """Point the RELEASE_VERSION/RELEASE_CODENAME code defaults at this
-    release so the running bot's RELEASE_LABEL is right after its next
-    restart (startup.py posts it at boot)."""
+def _bump_core_defaults(*, name: str, date: str) -> None:
+    """Point the RELEASE_CODENAME/RELEASE_STAMP code defaults at this release so the
+    running bot's RELEASE_LABEL ('Name (date)') is right after its next restart."""
     src = open(CORE_PY).read()
-    src = re.sub(r'RELEASE_VERSION = os\.getenv\("ELIXIR_RELEASE_VERSION", "[^"]*"\)',
-                 f'RELEASE_VERSION = os.getenv("ELIXIR_RELEASE_VERSION", "{version}")', src)
     src = re.sub(r'RELEASE_CODENAME = os\.getenv\("ELIXIR_RELEASE_CODENAME", "[^"]*"\)',
                  f'RELEASE_CODENAME = os.getenv("ELIXIR_RELEASE_CODENAME", "{name}")', src)
+    src = re.sub(r'RELEASE_STAMP = os\.getenv\("ELIXIR_RELEASE_STAMP", "[^"]*"\)',
+                 f'RELEASE_STAMP = os.getenv("ELIXIR_RELEASE_STAMP", "{date}")', src)
     open(CORE_PY, "w").write(src)
 
 
@@ -68,35 +77,34 @@ def _run(args: list[str], *, timeout: int = 60) -> None:
                    text=True, timeout=timeout)
 
 
+def _derive_tag(name: str, *, head: str | None, date: str) -> str:
+    """The ref-safe git tag: the name-slug, or a dated fallback when nameless."""
+    slug = rn.slugify_release(name)
+    if slug:
+        return slug
+    return f"release-{date}-{head or 'head'}"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--version", required=True, help='the release version, e.g. "v5.1"')
     parser.add_argument("--days", type=int, default=None, help="scope: look back N days")
     parser.add_argument("--since", metavar="REF",
-                        help="scope: changes since this ref (default: latest v* tag)")
+                        help="scope: changes since this ref (default: latest release tag)")
     parser.add_argument("--name", help="skip coining and use this release name")
+    parser.add_argument("--to", default=DEFAULT_EMAIL_TO,
+                        help=f"email recipient for the detailed tier (default: {DEFAULT_EMAIL_TO})")
     parser.add_argument("--dry-run", action="store_true", help="print everything, touch nothing")
     parser.add_argument("--no-announce", action="store_true", help="cut without the Discord post")
-    parser.add_argument("--announce-only", action="store_true",
-                        help="retry ONLY the Discord announcement for an already-cut "
-                             "release (e.g. after granting #announcements permission)")
+    parser.add_argument("--no-email", action="store_true", help="cut without the email")
+    parser.add_argument("--announce-only", metavar="TAG",
+                        help="retry ONLY the Discord announcement for an already-cut release "
+                             "(by its tag slug, e.g. blazing-balloon)")
     args = parser.parse_args()
 
-    if not re.fullmatch(r"v\d+\.\d+(\.\d+)?", args.version):
-        print(f"version {args.version!r} doesn't look like v5.1 — refusing")
-        return 2
-
-    # Retry path: the release is already cut (tag + RELEASES.md + GitHub
-    # release exist); only the Discord post failed (locked #announcements, a
-    # transient 403). Regenerate the announcement from the shipped notes and
-    # post it — no re-cut, no new commit.
     if args.announce_only:
-        return _announce_only(args.version)
+        return _announce_only(args.announce_only)
 
-    if rn._git(["tag", "-l", args.version]).strip() and not args.dry_run:
-        print(f"tag {args.version} already exists — refusing")
-        return 2
     dirty = rn._git(["status", "--porcelain"]).strip()
     if dirty and not args.dry_run:
         print("working tree is not clean — commit or stash first:\n" + dirty)
@@ -110,10 +118,17 @@ def main() -> int:
 
     name = args.name if args.name is not None else rn.coin_release_name(material)
     material["release_name"] = name
-    print(f"Release name: {name or '(nameless — coin failed)'}")
+    date = datetime.date.today().isoformat()
+    tag = _derive_tag(name, head=rn.head_commit(), date=date)
+    label = _label(name, date)
+    print(f"Release: {label}  ·  tag {tag}")
 
-    # Generate directly from the gathered material (release_notes_draft would
-    # re-gather and re-coin; the name is already settled above).
+    if rn._git(["tag", "-l", tag]).strip() and not args.dry_run:
+        print(f"tag {tag} already exists — refusing")
+        return 2
+
+    # Generate the three tiers in one call (release_notes_draft re-gathers and
+    # re-coins; the name is already settled, so build from this material directly).
     from agent.core import _create_chat_completion
     resp = _create_chat_completion(
         workflow="release_notes",
@@ -121,81 +136,92 @@ def main() -> int:
         temperature=0.7, max_tokens=8192, timeout=300,
     )
     out = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-    body = rn._extract_notes(out)
+    detailed = rn._extract_notes(out)
+    announcement = rn._extract_tag(out, "announcement") or detailed
+    clanchat = " ".join((rn._extract_tag(out, "clanchat") or "").split())
     subject = rn._extract_subject(out) or f"Under my hood: what changed ({material['window']})"
-
-    title = f'{args.version} "{name}"' if name else args.version
+    if name and name.lower() not in subject.lower():
+        subject = f"{name} — {subject}"
     print(f"Subject: {subject}")
-    print(f"Tag: {args.version}  ·  GitHub title: {title}\n")
 
     if args.dry_run:
-        print("=" * 72)
-        print(body)
-        print("=" * 72)
-        chunks = rn.announcement_messages(subject=subject, body=body,
-                                          release_url="(github-release-url)",
-                                          version=args.version, name=name)
-        print(f"\n[dry-run] would post {len(chunks)} message(s) to #announcements; "
-              f"would prepend RELEASES.md; would set core defaults to "
-              f'{args.version} / "{name}"; would tag + gh release create.')
+        for tier, text in (("DETAILED (email + GitHub)", detailed),
+                           ("ANNOUNCEMENT (#announcements)", announcement),
+                           ("CLANCHAT (#leader-actions card)", clanchat or "(none)")):
+            print("\n" + "=" * 72 + f"\n{tier}\n" + "=" * 72 + f"\n{text}")
+        print(f"\n[dry-run] would prepend RELEASES.md (## {label}); set core defaults to "
+              f'"{name}" / {date}; tag {tag} + gh release create; email to {args.to}; '
+              f"post the announcement; surface the clan-chat card.")
         return 0
 
     # 4. the release commit
-    _prepend_releases_md(version=args.version, name=name, body=body)
-    _bump_core_defaults(version=args.version, name=name)
+    _prepend_releases_md(label=label, date=date, body=detailed)
+    _bump_core_defaults(name=name, date=date)
     _run(["git", "add", "RELEASES.md", "agent/core.py"])
     _run(["git", "commit", "-m",
-          f"release: {title}\n\nCut by scripts/cut_release.py ({material['window']})."])
+          f"release: {label}\n\nCut by scripts/cut_release.py ({material['window']})."])
     _run(["git", "push", "origin", "main"], timeout=120)
     head = rn.head_commit()
     print(f"Release commit: {head}")
 
     # 5. tag + GitHub release (best-effort)
-    url = rn.create_github_release(version=args.version, name=name, commit=head, body=body)
-    print(f"GitHub release: {url or '(failed — see log; announcement continues)'}")
+    url = rn.create_github_release(name=name, date=date, tag=tag, commit=head, body=detailed)
+    print(f"GitHub release: {url or '(failed — see log; the cut continues)'}")
 
-    # 6. Discord announcement — BEST-EFFORT. The release is already cut (commit,
-    # tag, GitHub release); a Discord failure (locked #announcements, a 403)
-    # must NOT abort the script and leave a scary partial state. Warn, and tell
-    # the operator how to retry once the channel permission is fixed.
-    if args.no_announce:
-        print("Skipping announcement (--no-announce).")
-        return 0
-    chunks = rn.announcement_messages(subject=subject, body=body, release_url=url,
-                                      version=args.version, name=name)
-    try:
-        sent = rn.post_announcement(chunks)
-        print(f"Announced in #announcements ({sent} message(s)).")
-    except Exception as exc:
-        print(f"\n⚠️  Release {args.version} IS cut (commit + tag + GitHub release) — "
-              f"but the #announcements post failed: {exc}\n"
-              f"Grant Elixir SEND permission in #announcements, then retry just the post:\n"
-              f"    ./venv/bin/python scripts/cut_release.py --version {args.version} --announce-only")
+    # 6. Email the detailed tier (best-effort — never blocks the rest)
+    if not args.no_email:
+        try:
+            from agent.mail import outbound
+            if outbound.enabled():
+                result = outbound.send(to=args.to, subject=subject, body=detailed)
+                print(f"Emailed detailed notes to {result['to']} (emailId {result.get('emailId')}).")
+            else:
+                print("Email skipped: FASTMAIL_JMAP_TOKEN not configured.")
+        except Exception as exc:
+            print(f"⚠️  Email failed (release still cut): {exc}")
+
+    # 7. Discord announcement — BEST-EFFORT (a locked channel / 403 must not abort).
+    if not args.no_announce:
+        chunks = rn.announcement_messages(announcement=announcement, release_url=url,
+                                          name=name, date=date)
+        try:
+            sent = rn.post_announcement(chunks)
+            print(f"Announced in #announcements ({sent} message(s)).")
+        except Exception as exc:
+            print(f"\n⚠️  Release {tag} IS cut (commit + tag + GitHub release) — "
+                  f"but the #announcements post failed: {exc}\n"
+                  f"Grant Elixir SEND permission in #announcements, then retry just the post:\n"
+                  f"    ./venv/bin/python scripts/cut_release.py --announce-only {tag}")
+
+    # 8. Clan-chat tier — hand the blurb to the caller (the slash command posts the
+    # #leader-actions card; a bare CLI cut just prints it for a human to paste).
+    if clanchat:
+        print(f"{CLANCHAT_MARKER}{tag}{CLANCHAT_MARKER}{clanchat}")
     return 0
 
 
-def _releases_section(version: str) -> str:
-    """The version's section from RELEASES.md (its shipped notes)."""
+def _releases_section(label_or_tag: str) -> str:
+    """The release's detailed section from RELEASES.md, matched by header label."""
     text = open(rn.RELEASES_MD).read()
-    m = re.search(rf'(## {re.escape(version)}\b.*?)(?=\n## v|\Z)', text, re.S)
+    m = re.search(rf'(## {re.escape(label_or_tag)}\b.*?)(?=\n## |\Z)', text, re.S)
     return m.group(1).strip() if m else ""
 
 
-def _announce_only(version: str) -> int:
-    """Post (or re-post) the Discord announcement for an already-cut release."""
-    entry = next((h for h in rn.release_history() if h.get("version") == version), None)
+def _announce_only(tag: str) -> int:
+    """Re-post the Discord announcement for an already-cut release, found by tag slug."""
+    entry = next((h for h in rn.release_history()
+                  if rn.slugify_release(h.get("name") or "") == tag), None)
     if not entry:
-        print(f"{version} not found in RELEASES.md — cut the release first.")
+        print(f"No release with tag {tag} found in RELEASES.md — cut it first.")
         return 2
     name = entry.get("name") or ""
-    body = _releases_section(version)
-    url = f"https://github.com/jthingelstad/elixir-bot/releases/tag/{version}"
-    subject = f'{version} "{name}"' if name else version
-    chunks = rn.announcement_messages(subject=subject, body=body, release_url=url,
-                                      version=version, name=name)
+    date = entry.get("date") or ""
+    body = _releases_section(_label(name, date)) or _releases_section(name)
+    url = f"https://github.com/jthingelstad/elixir-bot/releases/tag/{tag}"
+    chunks = rn.announcement_messages(announcement=body, release_url=url, name=name, date=date)
     try:
         sent = rn.post_announcement(chunks)
-        print(f"Announced {version} in #announcements ({sent} message(s)).")
+        print(f"Announced {tag} in #announcements ({sent} message(s)).")
         return 0
     except Exception as exc:
         print(f"Announcement still failing: {exc}\n"
