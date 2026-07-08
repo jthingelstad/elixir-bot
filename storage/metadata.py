@@ -253,32 +253,45 @@ def get_member_metadata_map(conn: Optional[sqlite3.Connection] = None) -> dict[s
 
 @managed_connection
 def list_member_metadata_rows(status: Optional[str] = "active", conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    # v5.1: members/member_current_state/member_metadata were replaced by
+    # players/player_current_state/player_metadata (all keyed by player_tag);
+    # membership status is an open clan_memberships row, not a column; Discord
+    # names live on discord_users; poap_address was dropped (POAP paused).
+    active_expr = ("EXISTS (SELECT 1 FROM clan_memberships cm "
+                   "WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)")
+    if status == "active":
+        where = f"WHERE {active_expr}"
+    elif status:  # any other explicit status (e.g. 'left') → not a current member
+        where = f"WHERE NOT {active_expr}"
+    else:         # None → all players
+        where = ""
     rows = conn.execute(
-        "SELECT m.member_id, m.player_tag, m.current_name, m.status, cs.role, "
+        "SELECT m.player_tag, m.current_name, "
+        f"{active_expr} AS is_active, cs.role, "
         "md.joined_at, md.birth_month, md.birth_day, md.cr_account_age_days, md.cr_account_age_years, md.cr_account_age_updated_at, "
         "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
         "md.cr_collection_level, md.cr_collection_level_badge_tier, md.cr_collection_level_badge_max_tier, md.cr_collection_level_updated_at, "
         "md.cr_clan_war_wins, md.cr_battle_wins, md.cr_clan_donations, md.cr_banner_count, md.cr_emote_count, md.cr_profile_badges_updated_at, "
-        "md.profile_url, md.poap_address, md.note, "
-        "dl.discord_username, dl.discord_display_name "
-        "FROM members m "
-        "LEFT JOIN member_current_state cs ON cs.member_id = m.member_id "
-        "LEFT JOIN member_metadata md ON md.member_id = m.member_id "
-        "LEFT JOIN discord_links dl ON dl.member_id = m.member_id AND dl.is_primary = 1 "
-        "WHERE (? IS NULL OR m.status = ?) "
-        "ORDER BY COALESCE(cs.clan_rank, 999), m.current_name COLLATE NOCASE",
-        (status, status),
+        "md.profile_url, md.note, "
+        "du.username AS discord_username, du.display_name AS discord_display_name "
+        "FROM players m "
+        "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
+        "LEFT JOIN player_metadata md ON md.player_tag = m.player_tag "
+        "LEFT JOIN discord_links dl ON dl.player_tag = m.player_tag AND dl.is_primary = 1 "
+        "LEFT JOIN discord_users du ON du.discord_user_id = dl.discord_user_id "
+        f"{where} "
+        "ORDER BY COALESCE(cs.clan_rank, 999), m.current_name COLLATE NOCASE"
     ).fetchall()
     result = []
     for row in rows:
         item = {
             "player_tag": row["player_tag"],
             "current_name": row["current_name"] or "",
-            "status": row["status"] or "",
+            "status": "active" if row["is_active"] else "left",
             "role": row["role"] or "",
             "discord_username": row["discord_username"] or "",
             "discord_display_name": row["discord_display_name"] or "",
-            "joined_date": _current_joined_at(conn, row["member_id"]) or "",
+            "joined_date": _current_joined_at(conn, row["player_tag"]) or "",
             "birth_month": row["birth_month"] or "",
             "birth_day": row["birth_day"] or "",
             "cr_account_age_days": row["cr_account_age_days"],
@@ -298,7 +311,7 @@ def list_member_metadata_rows(status: Optional[str] = "active", conn: Optional[s
             "cr_emote_count": row["cr_emote_count"],
             "cr_profile_badges_updated_at": row["cr_profile_badges_updated_at"],
             "profile_url": row["profile_url"] or "",
-            "poap_address": row["poap_address"] or "",
+            "poap_address": "",   # v5.1: poap_address dropped (POAP paused)
             "note": row["note"] or "",
         }
         result.append(item)
