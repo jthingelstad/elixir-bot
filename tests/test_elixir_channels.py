@@ -79,6 +79,12 @@ class _FakeBot:
         self.tree = _FakeTree()
 
 
+def _root(bot, name):
+    """Fetch a top-level command group by name — the surface is now split into
+    two roots: /elixir (member: email + help) and /clanops (leader ops)."""
+    return next(c for c in bot.tree.commands if c.name == name)
+
+
 def test_on_message_routes_interactive_channel_when_mentioned():
     message = _make_message(100, "member-chat", "<@999> how am I doing?")
 
@@ -2171,7 +2177,7 @@ def test_on_message_rewrites_member_refs_before_reply_and_save():
 def test_slash_help_does_not_save_conversation_history():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
+    root = _root(bot, "clanops")
     help_command = root.get_command("help")
 
     response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
@@ -2195,20 +2201,49 @@ def test_slash_help_does_not_save_conversation_history():
     mock_save.assert_not_called()
 
 
-def test_register_elixir_app_commands_includes_signals():
+def test_command_surface_is_split_member_vs_leader():
+    """/elixir is the member surface (email + help); /clanops holds the leader
+    groups; memory/system/signal were dropped from Discord entirely."""
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
-    signal_group = root.get_command("signal")
-    assert signal_group is not None
-    assert signal_group.get_command("publish-pending") is not None
-    assert signal_group.get_command("show") is None
+    elixir = _root(bot, "elixir")
+    clanops = _root(bot, "clanops")
+    assert sorted(c.name for c in elixir.commands) == ["email", "help"]
+    assert set(c.name for c in clanops.commands) == {
+        "clan", "member", "relay", "activity", "tournament", "release", "help"}
+    # dropped groups exist under neither root
+    for root in (elixir, clanops):
+        for gone in ("system", "memory", "signal"):
+            assert root.get_command(gone) is None
+
+
+def test_member_help_is_ungated():
+    """/elixir help is member-facing: no leader role, no #clanops channel needed,
+    and it never emits the leader/channel gate messages."""
+    bot = _FakeBot()
+    register_elixir_app_commands(bot)
+    help_cmd = _root(bot, "elixir").get_command("help")
+
+    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
+    interaction = SimpleNamespace(
+        channel=SimpleNamespace(id=999, name="general", type="text"),
+        user=SimpleNamespace(id=42, name="member", display_name="Member", roles=[]),
+        response=response,
+        followup=SimpleNamespace(send=AsyncMock()),
+        edit_original_response=AsyncMock(),
+    )
+    asyncio.run(help_cmd.callback(interaction))
+
+    response.defer.assert_awaited_once_with(ephemeral=True)
+    sent = response.send_message.await_args.args[0]
+    assert "/elixir email set" in sent
+    assert "Leader role required" not in sent and "#clanops" not in sent
 
 
 def test_register_elixir_app_commands_includes_relay_status():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
+    root = _root(bot, "clanops")
     relay_group = root.get_command("relay")
     assert relay_group is not None
     assert relay_group.get_command("status") is not None
@@ -2217,7 +2252,7 @@ def test_register_elixir_app_commands_includes_relay_status():
 def test_slash_relay_status_allowed_in_arena_relay():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
+    root = _root(bot, "clanops")
     relay_group = root.get_command("relay")
     status_command = relay_group.get_command("status")
 
@@ -2253,7 +2288,7 @@ def test_slash_relay_status_allowed_in_arena_relay():
 def test_slash_non_relay_command_still_rejected_in_arena_relay():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
+    root = _root(bot, "clanops")
     clan_group = root.get_command("clan")
     war_status_command = clan_group.get_command("war")
 
@@ -2274,7 +2309,7 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
     ):
         asyncio.run(war_status_command.callback(interaction))
 
-    response.send_message.assert_awaited_once_with("Use `/elixir ...` in `#clanops`.", ephemeral=True)
+    response.send_message.assert_awaited_once_with("Use `/clanops ...` in `#clanops`.", ephemeral=True)
     response.defer.assert_not_awaited()
     mock_dispatch.assert_not_awaited()
     interaction.edit_original_response.assert_not_awaited()
@@ -2284,7 +2319,7 @@ def test_slash_non_relay_command_still_rejected_in_arena_relay():
 def test_register_elixir_app_commands_includes_member_audit_discord():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
+    root = _root(bot, "clanops")
     member_group = root.get_command("member")
     assert member_group is not None
     assert member_group.get_command("audit-discord") is not None
@@ -2390,21 +2425,6 @@ def test_dispatch_admin_command_rejects_non_manual_activity():
     )
 
     assert result == "`war-poll` cannot be run manually."
-
-
-def test_dispatch_admin_command_handles_system_signals():
-    with patch("runtime.admin._run_system_signals", new=AsyncMock(return_value="Published 1 pending system signal(s).")) as mock_run:
-        result = asyncio.run(
-            elixir.dispatch_admin_command(
-                "signal.publish-pending",
-                preview=False,
-                short=False,
-                args={},
-            )
-        )
-
-    assert result == "Published 1 pending system signal(s)."
-    mock_run.assert_awaited_once_with(preview=False)
 
 
 def test_dispatch_admin_command_handles_activity_run():
@@ -2551,44 +2571,9 @@ def test_resolve_member_tag_rejects_empty_and_overlong_inputs():
         runtime_admin._resolve_member_tag("x" * 100)
 
 
-def test_admin_command_requires_leader_for_memory():
-    assert admin_command_requires_leader("memory.show") is True
-    assert admin_command_requires_leader("system.status") is False
-
-
-def test_dispatch_admin_command_handles_memory():
-    with patch("runtime.admin._build_memory_report", return_value="**Elixir Memory**\n- Context store: 3 total") as mock_report:
-        result = asyncio.run(
-            elixir.dispatch_admin_command(
-                "memory.show",
-                preview=False,
-                short=False,
-                args={"member": "King Levy", "limit": "3", "include_system_internal": "true"},
-            )
-        )
-
-    assert result == "**Elixir Memory**\n- Context store: 3 total"
-    mock_report.assert_called_once_with(
-        member_query="King Levy",
-        query=None,
-        limit="3",
-        include_system_internal=True,
-    )
-
-
-def test_dispatch_admin_command_handles_db_status():
-    with patch("elixir._build_db_status_report", return_value="**Elixir DB Status | Memory**\n- Tables:") as mock_report:
-        result = asyncio.run(
-            elixir.dispatch_admin_command(
-                "system.storage",
-                preview=False,
-                short=False,
-                args={"view": "memory"},
-            )
-        )
-
-    assert result == "**Elixir DB Status | Memory**\n- Tables:"
-    mock_report.assert_called_once_with(group="memory")
+def test_admin_command_requires_leader_classification():
+    assert admin_command_requires_leader("member.set") is True
+    assert admin_command_requires_leader("clan.status") is False
 
 
 def test_dispatch_admin_command_handles_war_status():
@@ -2613,7 +2598,7 @@ def test_dispatch_admin_command_handles_war_status():
 def test_slash_clan_members_full_passes_flag_to_admin_dispatch():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
+    root = _root(bot, "clanops")
     clan_group = root.get_command("clan")
     clan_list_command = clan_group.get_command("members")
 
@@ -2644,44 +2629,10 @@ def test_slash_clan_members_full_passes_flag_to_admin_dispatch():
     followup.send.assert_not_awaited()
 
 
-def test_slash_system_storage_dispatches_to_admin():
-    bot = _FakeBot()
-    register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
-    system_group = root.get_command("system")
-    db_status_command = system_group.get_command("storage")
-
-    response = SimpleNamespace(is_done=lambda: False, send_message=AsyncMock(), defer=AsyncMock())
-    followup = SimpleNamespace(send=AsyncMock())
-    interaction = SimpleNamespace(
-        channel=SimpleNamespace(id=200, name="clan-ops", type="text"),
-        user=SimpleNamespace(id=123, name="jamie", display_name="Jamie", roles=[]),
-        response=response,
-        followup=followup,
-        edit_original_response=AsyncMock(),
-    )
-
-    with (
-        patch("runtime.app._is_clanops_channel", return_value=True),
-        patch("runtime.discord_commands.dispatch_admin_command", new=AsyncMock(return_value="db report")) as mock_dispatch,
-    ):
-        asyncio.run(db_status_command.callback(interaction, view="memory"))
-
-    mock_dispatch.assert_awaited_once_with(
-        "system.storage",
-        preview=False,
-        short=False,
-        args={"view": "memory"},
-    )
-    response.defer.assert_awaited_once_with(ephemeral=True)
-    interaction.edit_original_response.assert_awaited_once_with(content="db report")
-    followup.send.assert_not_awaited()
-
-
 def test_slash_clan_war_dispatches_to_admin():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
+    root = _root(bot, "clanops")
     clan_group = root.get_command("clan")
     war_status_command = clan_group.get_command("war")
 
@@ -2715,7 +2666,7 @@ def test_slash_clan_war_dispatches_to_admin():
 def test_slash_member_set_discord_passes_identity_to_admin_dispatch():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
+    root = _root(bot, "clanops")
     member_group = root.get_command("member")
     set_discord_command = member_group.get_command("set")
 
@@ -2750,7 +2701,7 @@ def test_slash_member_set_discord_passes_identity_to_admin_dispatch():
 def test_slash_activity_run_defers_before_dispatching():
     bot = _FakeBot()
     register_elixir_app_commands(bot)
-    root = bot.tree.commands[0]
+    root = _root(bot, "clanops")
     jobs_group = root.get_command("activity")
     run_command = jobs_group.get_command("run")
 
@@ -3722,10 +3673,6 @@ def test_build_db_status_report_lists_group_summaries():
     assert report.startswith("**Elixir DB Status**")
     assert "File: `elixir.db` | schema v15 | size 40.0 KB | WAL 8.0 KB | SHM 32.0 KB" in report
     assert "Storage: page size 4,096 B | pages 10 | free pages 2 | journal wal | tables 3" in report
-    assert (
-        "Use `/elixir system storage` for the full rollup or "
-        "`/elixir system storage view:<all|clan|war|memory>` for a focused section."
-    ) in report
     assert "Clan: 1 tables | 50 rows | 4.0 KB" in report
     assert "War: 1 tables | 320 rows | 12.0 KB" in report
     assert "Memory: 1 tables | 1,200 rows | 24.0 KB" in report

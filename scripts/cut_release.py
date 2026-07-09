@@ -17,7 +17,7 @@ Flow:
  5. Tag the commit with the name-slug and publish the GitHub release (best-effort).
  6. Email the detailed tier from elixir@poapkings.com (best-effort).
  7. Post the announcement tier to #announcements (best-effort).
- 8. Emit the clanchat tier (marker line) — /elixir release posts it as a
+ 8. Emit the clanchat tier (marker line) — /clanops release posts it as a
     leader-action card in #leader-actions.
 
 --dry-run prints every tier and touches nothing. --no-announce / --no-email skip

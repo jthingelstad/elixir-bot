@@ -35,9 +35,8 @@ RELAY_STATUS_VIEWS = {"all", "pending", "decided"}
 
 COMMAND_SPECS = {
     "help": AdminCommandSpec("help", ("help",), "Show the Elixir operator help page.", event_type="help"),
-    "system.status": AdminCommandSpec("system.status", ("system", "status"), "Show Elixir runtime health and telemetry.", event_type="status_report"),
-    "system.storage": AdminCommandSpec("system.storage", ("system", "storage"), "Show grouped database storage status.", event_type="storage_report"),
-    "system.schedule": AdminCommandSpec("system.schedule", ("system", "schedule"), "Show scheduled activities and next runs.", event_type="schedule_report"),
+    # system.* / memory.show / signal.publish-pending were removed from Discord —
+    # the Observatory web app owns that telemetry/management (co-leaders don't need it).
     "clan.status": AdminCommandSpec("clan.status", ("clan", "status"), "Show the operational clan status report.", event_type="clan_status_report"),
     "clan.war": AdminCommandSpec("clan.war", ("clan", "war"), "Show the live war-awareness report.", event_type="war_status_report"),
     "clan.members": AdminCommandSpec("clan.members", ("clan", "members"), "List active clan members.", event_type="clan_members_report"),
@@ -46,10 +45,8 @@ COMMAND_SPECS = {
     "member.audit-discord": AdminCommandSpec("member.audit-discord", ("member", "audit-discord"), "Audit Discord ↔ clan member linkage and surface gaps.", leader_only=True, event_type="member_audit_discord"),
     "member.set": AdminCommandSpec("member.set", ("member", "set"), "Set one member field.", leader_only=True, write=True, event_type="member_set"),
     "member.clear": AdminCommandSpec("member.clear", ("member", "clear"), "Clear one member field.", leader_only=True, write=True, event_type="member_clear"),
-    "memory.show": AdminCommandSpec("memory.show", ("memory", "show"), "Inspect stored conversation and contextual memory.", leader_only=True, event_type="memory_report"),
     "relay.status": AdminCommandSpec("relay.status", ("relay", "status"), "Show leader action recommendations and reaction decisions.", leader_only=True, event_type="relay_status_report"),
     "relay.test-card": AdminCommandSpec("relay.test-card", ("relay", "test-card"), "Post a test #leader-actions leader action card for a real action type.", leader_only=True, write=True, event_type="relay_test_card"),
-    "signal.publish-pending": AdminCommandSpec("signal.publish-pending", ("signal", "publish-pending"), "Queue missing startup signals and publish pending system announcements.", leader_only=True, write=True, event_type="signal_publish_pending"),
     "activity.list": AdminCommandSpec("activity.list", ("activity", "list"), "List registered recurring activities.", event_type="activity_list"),
     "activity.show": AdminCommandSpec("activity.show", ("activity", "show"), "Show one recurring activity in detail.", event_type="activity_show"),
     "activity.run": AdminCommandSpec("activity.run", ("activity", "run"), "Run one registered activity now.", leader_only=True, write=True, event_type="activity_run"),
@@ -61,12 +58,9 @@ COMMAND_SPECS = {
 }
 
 COMMAND_GROUP_ORDER = [
-    "system",
     "clan",
     "member",
-    "memory",
     "relay",
-    "signal",
     "activity",
     "integration",
 ]
@@ -111,7 +105,7 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def render_admin_help(*, slash_prefix: str = "/elixir") -> str:
+def render_admin_help(*, slash_prefix: str = "/clanops") -> str:
     grouped = {group: [] for group in COMMAND_GROUP_ORDER}
     for spec in COMMAND_SPECS.values():
         if spec.key == "help":
@@ -139,7 +133,7 @@ def render_admin_help(*, slash_prefix: str = "/elixir") -> str:
             "- Preview mode still runs the logic and shows would-be Discord posts.",
             "",
             "Examples:",
-            f"- `{slash_prefix} system status`",
+            f"- `{slash_prefix} clan status`",
             f"- `{slash_prefix} clan members detail:full`",
             f"- `{slash_prefix} member show member:Ditika`",
             f"- `{slash_prefix} member set member:Ditika field:join-date value:2026-03-07`",
@@ -868,9 +862,9 @@ async def _run_member_audit_discord() -> str:
         for guild_member, suggestion in unlinked_discord[:25]:
             label = f"{guild_member.display_name} (<@{guild_member.id}>)"
             if suggestion:
-                lines.append(f"- {label} → likely **{suggestion}**. Run `/elixir member verify-discord member:{suggestion.split(' (`')[0]}`.")
+                lines.append(f"- {label} → likely **{suggestion}**. Run `/clanops member verify-discord member:{suggestion.split(' (`')[0]}`.")
             else:
-                lines.append(f"- {label} → no confident match. Use `/elixir member set` to link manually.")
+                lines.append(f"- {label} → no confident match. Use `/clanops member set` to link manually.")
         if len(unlinked_discord) > 25:
             lines.append(f"- …and {len(unlinked_discord) - 25} more")
         lines.append("")
@@ -878,7 +872,7 @@ async def _run_member_audit_discord() -> str:
     if role_missing:
         lines.append("**Linked users missing the Member role**")
         for guild_member in role_missing[:25]:
-            lines.append(f"- {guild_member.display_name} (<@{guild_member.id}>) — run `/elixir member verify-discord` to reapply")
+            lines.append(f"- {guild_member.display_name} (<@{guild_member.id}>) — run `/clanops member verify-discord` to reapply")
         if len(role_missing) > 25:
             lines.append(f"- …and {len(role_missing) - 25} more")
         lines.append("")
@@ -935,13 +929,6 @@ async def dispatch_admin_command(command: str | dict, *, preview: bool = False, 
 
     if key == "help":
         return render_admin_help()
-    if key == "system.status":
-        return elixir._build_status_report()
-    if key == "system.storage":
-        group = args.get("view")
-        return elixir._build_db_status_report(group=None if group in {None, "", "all"} else group)
-    if key == "system.schedule":
-        return elixir._build_schedule_report()
     if key == "clan.status":
         clan, war = await elixir._load_live_clan_context()
         if short:
@@ -957,14 +944,6 @@ async def dispatch_admin_command(command: str | dict, *, preview: bool = False, 
         )
     if key == "member.show":
         return await asyncio.to_thread(_build_member_profile_report, args["member"])
-    if key == "memory.show":
-        return await asyncio.to_thread(
-            _build_memory_report,
-            member_query=args.get("member"),
-            query=args.get("query"),
-            limit=args.get("limit", 5),
-            include_system_internal=str(args.get("include_system_internal", "")).lower() in {"1", "true", "yes", "on"},
-        )
     if key == "relay.status":
         return await asyncio.to_thread(
             _build_relay_status_report,
@@ -979,8 +958,6 @@ async def dispatch_admin_command(command: str | dict, *, preview: bool = False, 
         return await _run_member_field_command("set", preview=preview, args=args)
     if key == "member.clear":
         return await _run_member_field_command("clear", preview=preview, args=args)
-    if key == "signal.publish-pending":
-        return await _run_system_signals(preview=preview)
     if key == "activity.list":
         return await asyncio.to_thread(_build_activity_list_report)
     if key == "activity.show":

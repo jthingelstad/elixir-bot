@@ -258,10 +258,6 @@ def _build_db_status_report(group: str | None = None):
         bucket["bytes"] += int(table.get("approx_bytes") or 0)
         grouped_tables.setdefault(table_group, []).append(table)
 
-    lines.append(
-        "- Use `/elixir system storage` for the full rollup or "
-        "`/elixir system storage view:<all|clan|war|memory>` for a focused section."
-    )
     for table_group in ("clan", "war", "memory"):
         bucket = group_totals.get(table_group, {"tables": 0, "rows": 0, "bytes": 0})
         lines.append(
@@ -583,13 +579,13 @@ def _build_help_report(role: str) -> str:
         operator_section = [
             "",
             "**Operator commands** (slash commands, not natural language)",
-            "- Use `/elixir ...` for operator commands in this channel.",
-            "- System: `/elixir system status`, `/elixir system storage`, `/elixir system schedule`.",
-            "- Clan: `/elixir clan status`, `/elixir clan war`, `/elixir clan members`.",
-            "- Member: `/elixir member show`, `/elixir member verify-discord`, `/elixir member set`, `/elixir member clear`.",
-            "- Signal: `/elixir signal publish-pending`.",
-            "- Activity: `/elixir activity list`, `/elixir activity show`, `/elixir activity run`.",
-            "- Integration: `/elixir integration list`, `/elixir integration status integration:poap-kings`, `/elixir integration publish integration:poap-kings target:...`.",
+            "- Use `/clanops ...` for operator commands in this channel.",
+            "- Clan: `/clanops clan status`, `/clanops clan war`, `/clanops clan members`.",
+            "- Member: `/clanops member show`, `/clanops member verify-discord`, `/clanops member set`, `/clanops member clear`.",
+            "- Activity: `/clanops activity list`, `/clanops activity show`, `/clanops activity run`.",
+            "- Tournament: `/clanops tournament watch|status|stop|recap|history`.",
+            "- Release: `/clanops release`.",
+            "- System health, memory, and telemetry live in the Observatory (web).",
         ]
         return "\n".join(
             ["**Elixir Help — ClanOps**", "", "**What I can help with**"]
