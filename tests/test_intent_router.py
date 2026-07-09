@@ -187,5 +187,6 @@ def test_help_report_clanops_keeps_operator_command_section():
 
     report = _build_help_report("clanops")
     assert "Elixir Help — ClanOps" in report
-    assert "/elixir system status" in report
+    assert "/clanops clan status" in report
+    assert "/elixir system" not in report          # system dropped from Discord
     assert "Operator commands" in report

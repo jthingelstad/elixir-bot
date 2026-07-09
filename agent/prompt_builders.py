@@ -69,7 +69,7 @@ def _help_system(channel_name: str, *, role: str) -> str:
         "You are answering a 'how can you help me?' style question in a clan operations channel. "
         "Speak as a clan ops collaborator — concrete about what you can do for an operator: "
         "promotions, demotions, kicks, roster review, war participation, contributor leaderboards, "
-        "system status. You can also point to the slash commands (`/elixir ...`), "
+        "system status. You can also point to the slash commands (`/clanops ...`), "
         "but lead with the natural-language help."
         if role == "clanops"
         else

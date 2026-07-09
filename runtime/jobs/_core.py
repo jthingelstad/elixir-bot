@@ -573,7 +573,7 @@ async def _emit_evergreen_nudge_card(item: dict) -> bool:
 async def post_release_relay_card(clanchat_text: str, *, tag: str) -> bool:
     """Surface a new release's short clan-chat blurb as an in_game_relay leader-action
     card in #leader-actions, for a leader to paste into the in-game clan chat. Called by
-    /elixir release after cut_release.py generates the three tiers; the copy is already
+    /clanops release after cut_release.py generates the three tiers; the copy is already
     written (no LLM call here) — we validate length, sign, and post the card."""
     from runtime.clan_chat_copy import sign_clan_chat_text
 

@@ -23,13 +23,15 @@ def _is_arena_relay_command_channel(app, channel, command_name: str) -> bool:
 def register_elixir_app_commands(bot) -> None:
     import runtime.app as app
 
-    elixir_commands = app_commands.Group(name="elixir", description="Elixir clanops commands")
-    system_commands = app_commands.Group(name="system", description="Runtime health, storage, and schedule commands")
+    # /elixir is the MEMBER surface (email + help). /clanops is the co-leader
+    # surface (everything gated by validate_admin_interaction). memory/system/signal
+    # were dropped from Discord — the Observatory web app owns that telemetry and
+    # management (and co-leaders don't need them).
+    elixir_commands = app_commands.Group(name="elixir", description="Your Elixir profile & email")
+    clanops_commands = app_commands.Group(name="clanops", description="Elixir leader operations")
     clan_commands = app_commands.Group(name="clan", description="Clan-wide status and roster commands")
     member_commands = app_commands.Group(name="member", description="Single-member inspection and metadata commands")
-    memory_commands = app_commands.Group(name="memory", description="Inspect Elixir memory")
     relay_commands = app_commands.Group(name="relay", description="Leader action relay board")
-    signal_commands = app_commands.Group(name="signal", description="Signal routing and system-signal commands")
     activity_commands = app_commands.Group(name="activity", description="Recurring activity inspection and manual run commands")
     email_commands = app_commands.Group(name="email", description="Add and verify your email on your clan profile")
 
@@ -59,7 +61,7 @@ def register_elixir_app_commands(bot) -> None:
             app._is_clanops_channel(interaction.channel)
             or _is_arena_relay_command_channel(app, interaction.channel, command_name)
         ):
-            await send_interaction_text(interaction, "Use `/elixir ...` in `#clanops`.", ephemeral=True)
+            await send_interaction_text(interaction, "Use `/clanops ...` in `#clanops`.", ephemeral=True)
             return False
         if admin_command_requires_leader(command_name) and not app._has_leader_role(interaction.user):
             await send_interaction_text(interaction, "Leader role required for this command.", ephemeral=True)
@@ -122,8 +124,24 @@ def register_elixir_app_commands(bot) -> None:
                 break
         return choices
 
-    @elixir_commands.command(name="help", description="Show Elixir clanops help.")
-    async def slash_help(interaction: discord.Interaction):
+    @elixir_commands.command(name="help", description="How to use Elixir as a clan member.")
+    async def slash_elixir_help(interaction: discord.Interaction):
+        # Member-facing help — no admin gate. Explains the self-service email flow
+        # and points leaders at /clanops.
+        await interaction.response.defer(ephemeral=True)
+        content = (
+            "**Elixir — for members** 👑\n\n"
+            "Link an email to your clan profile to get your personalized weekly "
+            "Clash Royale report:\n"
+            "• `/elixir email set <address>` — I'll email you a 6-digit code\n"
+            "• `/elixir email verify <code>` — enter the code to confirm\n"
+            "• `/elixir email show` — see the email on your profile\n\n"
+            "_Leaders:_ operator commands live under `/clanops`."
+        )
+        await send_interaction_text(interaction, content, ephemeral=True)
+
+    @clanops_commands.command(name="help", description="Show Elixir leader operations help.")
+    async def slash_clanops_help(interaction: discord.Interaction):
         if not await validate_admin_interaction(interaction, command_name="help", write=False):
             return
         content = render_admin_help()
@@ -153,7 +171,7 @@ def register_elixir_app_commands(bot) -> None:
         result = "\n".join(kept).strip()
         return f"{result}\n{note}" if note else result
 
-    @elixir_commands.command(
+    @clanops_commands.command(
         name="release",
         description="Draft or publish Elixir release notes (leader).",
     )
@@ -210,30 +228,6 @@ def register_elixir_app_commands(bot) -> None:
             text = f"Release command failed: {exc}"
         await send_interaction_text(interaction, text[-3800:], ephemeral=True)
 
-    @system_commands.command(name="status", description=COMMAND_SPECS["system.status"].description)
-    async def slash_system_status(interaction: discord.Interaction):
-        await run_admin_interaction(interaction, command_name="system.status", event_type=COMMAND_SPECS["system.status"].event_type)
-
-    @system_commands.command(name="storage", description=COMMAND_SPECS["system.storage"].description)
-    @app_commands.describe(view="Optional focused storage view.")
-    @app_commands.choices(view=[
-        app_commands.Choice(name="All", value="all"),
-        app_commands.Choice(name="Clan", value="clan"),
-        app_commands.Choice(name="War", value="war"),
-        app_commands.Choice(name="Memory", value="memory"),
-    ])
-    async def slash_system_storage(interaction: discord.Interaction, view: str | None = None):
-        await run_admin_interaction(
-            interaction,
-            command_name="system.storage",
-            args={"view": view or "all"},
-            event_type=COMMAND_SPECS["system.storage"].event_type,
-        )
-
-    @system_commands.command(name="schedule", description=COMMAND_SPECS["system.schedule"].description)
-    async def slash_system_schedule(interaction: discord.Interaction):
-        await run_admin_interaction(interaction, command_name="system.schedule", event_type=COMMAND_SPECS["system.schedule"].event_type)
-
     @clan_commands.command(name="status", description=COMMAND_SPECS["clan.status"].description)
     @app_commands.describe(short="Return the compact clan status variant.")
     async def slash_clan_status(interaction: discord.Interaction, short: bool = False):
@@ -275,33 +269,6 @@ def register_elixir_app_commands(bot) -> None:
             command_name="member.show",
             args={"member": member},
             event_type=COMMAND_SPECS["member.show"].event_type,
-        )
-
-    @memory_commands.command(name="show", description=COMMAND_SPECS["memory.show"].description)
-    @app_commands.describe(
-        member="Optional member name or tag filter.",
-        query="Optional contextual-memory search text.",
-        limit="Maximum items to show per section.",
-        system_internal="Include system-internal contextual memories.",
-    )
-    @app_commands.autocomplete(member=member_autocomplete)
-    async def slash_memory_show(
-        interaction: discord.Interaction,
-        member: str | None = None,
-        query: str | None = None,
-        limit: app_commands.Range[int, 1, 10] = 5,
-        system_internal: bool = False,
-    ):
-        await run_admin_interaction(
-            interaction,
-            command_name="memory.show",
-            args={
-                "member": member,
-                "query": query,
-                "limit": str(limit),
-                "include_system_internal": "true" if system_internal else "false",
-            },
-            event_type=COMMAND_SPECS["memory.show"].event_type,
         )
 
     @relay_commands.command(name="status", description=COMMAND_SPECS["relay.status"].description)
@@ -425,17 +392,6 @@ def register_elixir_app_commands(bot) -> None:
             write=True,
         )
 
-    @signal_commands.command(name="publish-pending", description=COMMAND_SPECS["signal.publish-pending"].description)
-    @app_commands.describe(preview="Suppress Discord sends when supported.")
-    async def slash_signal_publish_pending(interaction: discord.Interaction, preview: bool = False):
-        await run_admin_interaction(
-            interaction,
-            command_name="signal.publish-pending",
-            preview=preview,
-            event_type=COMMAND_SPECS["signal.publish-pending"].event_type,
-            write=True,
-        )
-
     ACTIVITY_CHOICES = [
         app_commands.Choice(name=label, value=value)
         for label, value in manual_activity_choices()
@@ -498,7 +454,7 @@ def register_elixir_app_commands(bot) -> None:
         if active:
             await send_interaction_text(
                 interaction,
-                f"Already watching **{active.get('name', active['tournament_tag'])}** (`{active['tournament_tag']}`). Use `/elixir tournament stop` first.",
+                f"Already watching **{active.get('name', active['tournament_tag'])}** (`{active['tournament_tag']}`). Use `/clanops tournament stop` first.",
                 use_followup=True,
             )
             return
@@ -849,23 +805,24 @@ def register_elixir_app_commands(bot) -> None:
         src = (identity or {}).get("email_source") or "?"
         await send_interaction_text(interaction, f"{label}: **{email}** ({status}, source: {src})", ephemeral=True)
 
+    # /elixir = member surface (email + help).
     elixir_commands.add_command(email_commands)
-    elixir_commands.add_command(tournament_commands)
-    elixir_commands.add_command(system_commands)
-    elixir_commands.add_command(clan_commands)
-    elixir_commands.add_command(member_commands)
-    elixir_commands.add_command(memory_commands)
-    elixir_commands.add_command(relay_commands)
-    elixir_commands.add_command(signal_commands)
-    elixir_commands.add_command(activity_commands)
+    # /clanops = co-leader surface (all validate_admin_interaction-gated groups).
+    clanops_commands.add_command(clan_commands)
+    clanops_commands.add_command(member_commands)
+    clanops_commands.add_command(relay_commands)
+    clanops_commands.add_command(activity_commands)
+    clanops_commands.add_command(tournament_commands)
 
     try:
         if app.APP_GUILD is not None:
             bot.tree.add_command(elixir_commands, guild=app.APP_GUILD)
+            bot.tree.add_command(clanops_commands, guild=app.APP_GUILD)
         else:
             bot.tree.add_command(elixir_commands)
+            bot.tree.add_command(clanops_commands)
     except app_commands.CommandAlreadyRegistered:
-        app.log.info("/elixir slash commands already registered")
+        app.log.info("/elixir + /clanops slash commands already registered")
     except Exception as exc:
         app.log.error("Slash command registration failed: %s", exc)
         raise
