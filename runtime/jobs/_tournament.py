@@ -241,17 +241,17 @@ async def _tournament_watch_tick():
             _schedule_tournament_recap(tag, delay_seconds=TOURNAMENT_RECAP_DELAY_SECONDS)
             stop_tournament_watch()
 
-        # Post live tournament signals directly to #clan-events (v5-style),
+        # Post live tournament signals directly to #elixir (v5-style),
         # replacing the v4 awareness pipeline (item 7).
         if live_signals:
             try:
-                channel_id = _get_singleton_channel_id("clan-events")
+                channel_id = _get_singleton_channel_id("elixir")
                 channel = _bot().get_channel(channel_id) if channel_id else None
                 if channel is None:
-                    log.error("Tournament watch: #clan-events channel not found")
+                    log.error("Tournament watch: #elixir channel not found")
                 else:
                     ok = await compose_and_post(
-                        channel, lane="clan-events",
+                        channel, lane="elixir",
                         context=_tournament_signal_context(live_signals),
                     )
                     if not ok:
@@ -270,11 +270,11 @@ async def _tournament_watch_tick():
 
 
 def _tournament_signal_context(signals: list[dict]) -> str:
-    """Facts for the agent to compose a live tournament update for #clan-events."""
+    """Facts for the agent to compose a live tournament update for #elixir."""
     import json
 
     return (
-        "Live tournament update(s) for the clan. Write a short #clan-events post in "
+        "Live tournament update(s) for the clan. Write a short #elixir post in "
         "your own voice about what's happening (e.g. a tournament started, a lead "
         "change). Use only these facts; do not invent details.\n\n"
         f"```json\n{json.dumps(signals, indent=2, default=str)}\n```"
@@ -316,14 +316,14 @@ def _format_tournament_close_post(tournament_name: str, api_data: dict, *, top_n
 
 
 async def _post_tournament_close(tournament_tag: str, api_data: dict) -> None:
-    """Post the deterministic close-out (facts + leaderboard) to #clan-events."""
+    """Post the deterministic close-out (facts + leaderboard) to #elixir."""
     try:
         tournament = await asyncio.to_thread(db.get_tournament_by_tag, tournament_tag)
         tournament_name = (tournament or {}).get("name") or api_data.get("name") or tournament_tag
         text = _format_tournament_close_post(tournament_name, api_data)
-        channel_id = _get_singleton_channel_id("clan-events")
+        channel_id = _get_singleton_channel_id("elixir")
         if not channel_id:
-            log.error("Tournament close: #clan-events channel not configured")
+            log.error("Tournament close: #elixir channel not configured")
             return
         channel = _bot().get_channel(channel_id)
         if not channel:
@@ -379,7 +379,7 @@ async def resume_pending_tournament_recaps() -> None:
 
 
 async def _tournament_recap(tournament_tag: str):
-    """Generate and post a tournament recap to #clan-events."""
+    """Generate and post a tournament recap to #elixir."""
     try:
         context = await asyncio.to_thread(db.build_tournament_recap_context, tournament_tag)
         if not context:
@@ -396,9 +396,9 @@ async def _tournament_recap(tournament_tag: str):
         title = f"**Tournament Recap | {tournament_name}**"
         full_post = f"{title}\n\n{recap_text}"
 
-        channel_id = _get_singleton_channel_id("clan-events")
+        channel_id = _get_singleton_channel_id("elixir")
         if not channel_id:
-            log.error("Tournament recap: #clan-events channel not configured")
+            log.error("Tournament recap: #elixir channel not configured")
             return
         channel = _bot().get_channel(channel_id)
         if not channel:

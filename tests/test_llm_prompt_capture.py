@@ -63,8 +63,8 @@ def test_every_call_captures_prompt_and_response(monkeypatch):
     monkeypatch.setattr(db, "record_llm_call", messages_store.record_llm_call)
     # A NON-awareness workflow — capture must happen for everything, not just the brain.
     core._create_chat_completion(
-        workflow="editorial",
-        system="EDITORIAL SYSTEM",
+        workflow="channel_update",
+        system="CHANNEL UPDATE SYSTEM",
         messages=[{"role": "user", "content": "grade this post"}],
         max_tokens=1024,
     )
@@ -72,14 +72,14 @@ def test_every_call_captures_prompt_and_response(monkeypatch):
     try:
         row = conn.execute(
             "SELECT call_id, workflow, prompt_json, response_json FROM llm_calls "
-            "WHERE workflow = 'editorial' ORDER BY call_id DESC LIMIT 1"
+            "WHERE workflow = 'channel_update' ORDER BY call_id DESC LIMIT 1"
         ).fetchone()
     finally:
         conn.close()
     assert row is not None
     prompt = json.loads(row["prompt_json"])
     response = json.loads(row["response_json"])
-    assert prompt["system"] == "EDITORIAL SYSTEM"
+    assert prompt["system"] == "CHANNEL UPDATE SYSTEM"
     assert prompt["messages"] == [{"role": "user", "content": "grade this post"}]
     assert response["text"] == '{"ok": true}'
     assert response["stop_reason"] == "end_turn"

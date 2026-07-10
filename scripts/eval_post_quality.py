@@ -61,7 +61,7 @@ def _depth_judge(copy, intent_type):
         from agent.core import _create_chat_completion, response_text
 
         resp = _create_chat_completion(
-            workflow="editorial",
+            workflow="post_quality_eval",
             system=_DEPTH_SYSTEM,
             messages=[{"role": "user", "content": f"[{intent_type}] {copy}"}],
             temperature=0.2, max_tokens=120, timeout=30,

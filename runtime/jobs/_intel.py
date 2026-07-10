@@ -40,18 +40,18 @@ def _bot():
 
 
 async def _clan_wars_intel_report():
-    """Generate and post the Clan Wars Intel Report to #river-race."""
+    """Generate and post the Clan Wars Intel Report to #elixir."""
     runtime_status.mark_job_start("clan_wars_intel")
 
     try:
-        channel_id = _get_singleton_channel_id("river-race")
+        channel_id = _get_singleton_channel_id("elixir")
     except Exception as exc:
         runtime_status.mark_job_failure("clan_wars_intel", f"channel config error: {exc}")
         return
 
     channel = _bot().get_channel(channel_id)
     if not channel:
-        runtime_status.mark_job_failure("clan_wars_intel", "river-race channel not found")
+        runtime_status.mark_job_failure("clan_wars_intel", "elixir channel not found")
         return
 
     try:
@@ -79,7 +79,7 @@ async def _clan_wars_intel_report():
 
     memory_context = None
     try:
-        channel_config = _channel_config_by_key("river-race")
+        channel_config = _channel_config_by_key("elixir")
         memory_context = await asyncio.to_thread(
             build_lane_memory_context, channel_config, signals=[],
         )

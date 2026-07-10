@@ -323,7 +323,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="clan-wars-intel",
-        owner_lane="river-race",
+        owner_lane="elixir",
         purpose="Generate a detailed intel report on competing clans for the war season.",
         job_id="clan-wars-intel",
         job_function="_clan_wars_intel_report",
@@ -335,7 +335,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "minute": 0,
         },
         delivery_targets=(
-            "Discord: #river-race",
+            "Discord: #elixir",
         ),
         activity_role="communicator",
         manual_trigger_allowed=True,
