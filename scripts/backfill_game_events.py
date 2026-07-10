@@ -31,13 +31,6 @@ from storage import game_events as ge  # noqa: E402
 from storage._formatting import preferred_display_name  # noqa: E402
 
 
-def _card_rows(conn):
-    return conn.execute(
-        "SELECT card_id, name, rarity, elixir_cost, card_type, icon_url, "
-        "COALESCE(first_seen_at, synced_at) AS seen_at FROM card_catalog"
-    ).fetchall()
-
-
 def _sentinel_rows(conn, sentinel_type):
     return conn.execute(
         "SELECT * FROM api_sentinel_observations WHERE sentinel_type = ? "
@@ -54,20 +47,16 @@ def _sample(row):
 
 def _plan(conn) -> list[dict]:
     """Every history row we'd record, as (dedup_key, event_type, change_key,
-    observed_at, subject_tag, payload). Pure — no writes."""
+    observed_at, subject_tag, payload). Pure — no writes.
+
+    NOTE: this deliberately does NOT seed `card_added` for the existing card
+    catalog. A `card_added` event means "this card is NEW to the game"; emitting
+    one per pre-existing card (the original bug — 126 bogus events on
+    2026-07-07, only Ronin genuinely new) floods the stream and misleads the
+    brain into thinking the whole catalog just released. New cards are detected
+    going forward by the daily catalog sync (storage.card_catalog: only fires
+    for card_ids not already known). The catalog table itself is the history."""
     plan: list[dict] = []
-    for c in _card_rows(conn):
-        plan.append({
-            "dedup_key": f"card_added:{c['card_id']}", "event_type": "card_added",
-            "change_key": f"card:{c['card_id']}", "observed_at": c["seen_at"],
-            "subject_tag": None,
-            "payload": {
-                "event_type": "card_added", "card_id": c["card_id"],
-                "name": c["name"], "rarity": c["rarity"],
-                "elixir_cost": c["elixir_cost"], "card_type": c["card_type"],
-                "icon_url": c["icon_url"],
-            },
-        })
     for e in _sentinel_rows(conn, "event"):
         s = _sample(e)
         tag = e["name"]

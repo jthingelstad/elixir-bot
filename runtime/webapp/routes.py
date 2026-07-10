@@ -198,8 +198,20 @@ async def war_page(request: web.Request) -> web.Response:
 
 
 async def llm_page(request: web.Request) -> web.Response:
-    data = await asyncio.to_thread(queries.llm_page)
+    workflow = request.query.get("workflow") or None
+    data = await asyncio.to_thread(queries.llm_page, workflow)
     return render("llm.html", request, nav="llm", **data)
+
+
+async def llm_call_detail_page(request: web.Request) -> web.Response:
+    try:
+        call_id = int(request.match_info["call_id"])
+    except (TypeError, ValueError):
+        raise web.HTTPBadRequest(text="bad call id")
+    data = await asyncio.to_thread(queries.llm_call_detail, call_id)
+    if data is None:
+        raise web.HTTPNotFound(text="no such call")
+    return render("llm_detail.html", request, nav="llm", **data)
 
 
 async def chat_page(request: web.Request) -> web.Response:
@@ -302,6 +314,7 @@ def add_routes(app: web.Application) -> None:
         web.get("/management", management_page),
         web.get("/war", war_page),
         web.get("/llm", llm_page),
+        web.get("/llm/{call_id}", llm_call_detail_page),
         web.get("/chat", chat_page),
         web.get("/chat/messages", chat_get),
         web.post("/chat", chat_post),
