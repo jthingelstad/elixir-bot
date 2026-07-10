@@ -56,6 +56,21 @@ def _coerce_int(value) -> int:
         return 0
 
 
+def _race_score(info: dict) -> tuple[int, str, str]:
+    """A clan's live race score, coalescing the two fields the River Race API
+    uses. Clash moved the accumulating war score into ``periodPoints`` in the
+    current format — ``fame`` reads 0 all week (verified 2026-07-10 mid-war: our
+    clan fame=0 / periodPoints=8050, and we were leading). Older weeks still
+    carry it in ``fame``. Take whichever is the real (larger) score so both
+    regimes read correctly, and report which field it came from so callers can
+    label it. Returns (score, source, label)."""
+    fame = _coerce_int(info.get("fame"))
+    points = _coerce_int(info.get("period_points"))
+    if points > fame:
+        return points, "period_points", "points"
+    return fame, "fame", "fame"
+
+
 def _live_race(conn) -> Optional[tuple[dict, str]]:
     """The engine's riverrace baseline: (race-aspect projection, observed_at)."""
     row = conn.execute(
@@ -77,8 +92,7 @@ def _race_standings_from_projection(projection: dict) -> list[dict]:
     ranked = sorted(
         clans.items(),
         key=lambda kv: (
-            _coerce_int((kv[1] or {}).get("fame")),
-            _coerce_int((kv[1] or {}).get("period_points")),
+            _race_score(kv[1] or {})[0],
             _coerce_int((kv[1] or {}).get("war_league_score")),
         ),
         reverse=True,
@@ -86,19 +100,19 @@ def _race_standings_from_projection(projection: dict) -> list[dict]:
     standings = []
     for rank, (tag, info) in enumerate(ranked, start=1):
         info = info or {}
-        fame = _coerce_int(info.get("fame"))
+        score, source, label = _race_score(info)
         standings.append({
             "rank": rank,
             "clan_tag": tag,
             "clan_name": info.get("name"),
-            "fame": fame,
+            "fame": _coerce_int(info.get("fame")),
             "repair_points": 0,
             "period_points": _coerce_int(info.get("period_points")),
             "war_league_score": _coerce_int(info.get("war_league_score")),
             "is_us": tag == our_tag,
-            "active_score": fame,
-            "score_source": "fame",
-            "score_label": "fame",
+            "active_score": score,
+            "score_source": source,
+            "score_label": label,
         })
     return standings
 
@@ -143,6 +157,14 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
 
     standings = _race_standings_from_projection(projection)
     race_rank = next((s["rank"] for s in standings if s["is_us"]), None)
+    # The live race score: coalesce fame/periodPoints (the API moved the
+    # accumulating score into periodPoints — fame reads 0 all week in the
+    # current format). This is what the clan actually sees in-game.
+    _us = next((s for s in standings if s["is_us"]), None)
+    our_score = _us["active_score"] if _us else our_fame
+    our_score_source = _us["score_source"] if _us else "fame"
+    our_score_label = _us["score_label"] if _us else "fame"
+    our_period_points = _us["period_points"] if _us else None
 
     observed_dt = coerce_utc_datetime(observed_at)
     _, period_ends_at = war_reset_window_utc(observed_dt or observed_at)
@@ -152,13 +174,14 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         "war_state": "training" if phase == "practice" else "inWar",
         "clan_tag": _canon_tag(projection.get("our_tag") or HOME_CLAN),
         "clan_name": next((s["clan_name"] for s in standings if s["is_us"]), None),
-        "fame": our_fame,
+        "fame": our_score,
+        "raw_fame": our_fame,
         "repair_points": 0,
-        "period_points": None,
+        "period_points": our_period_points,
         "war_league_score": next((s["war_league_score"] for s in standings if s["is_us"]), None),
-        "active_score": our_fame,
-        "score_source": "fame",
-        "score_label": "fame",
+        "active_score": our_score,
+        "score_source": our_score_source,
+        "score_label": our_score_label,
         "season_id": season_id,
         "section_index": section_index,
         "week": (section_index + 1) if section_index is not None else None,
@@ -179,7 +202,7 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         "race_standings": standings,
         "war_day_key": war_day_key(season_id, section_index, period_index, observed_at),
         "finish_time": None,
-        "race_completed": phase != "practice" and our_fame >= finish_line,
+        "race_completed": phase != "practice" and our_score >= finish_line,
         "race_completed_at": None,
         "race_completed_early": False,
         "trophy_change": int(trophy_change) if isinstance(trophy_change, (int, float)) else None,

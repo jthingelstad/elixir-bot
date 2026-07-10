@@ -793,14 +793,34 @@ def list_prompt_failures(limit: int = 20, workflow: Optional[str] = None, conn: 
     return _rowdicts(rows)
 
 
+def _ensure_llm_blob_columns(conn: sqlite3.Connection) -> None:
+    """Lazy forward-add of the prompt/response capture columns (no migration
+    runner in v5.1 — same discipline as runtime/awareness/store). The PRAGMA
+    check is cheap and connection-scoped, so it's correct even if the process
+    ever reconnects to a DB that predates these columns (and across the
+    per-test isolated DBs); the ALTER only fires when a column is actually
+    missing."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(llm_calls)").fetchall()}
+    missing = [c for c in ("prompt_json", "response_json") if c not in cols]
+    if not missing:
+        return
+    for col in missing:
+        conn.execute(f"ALTER TABLE llm_calls ADD COLUMN {col} TEXT")
+    conn.commit()
+
+
 @managed_connection
 def record_llm_call(workflow: str, model: str, *, ok: bool = True, error: Optional[str] = None, duration_ms: Optional[int] = None,
                     prompt_tokens: Optional[int] = None, completion_tokens: Optional[int] = None, total_tokens: Optional[int] = None,
-                    cache_creation_tokens: Optional[int] = None, cache_read_tokens: Optional[int] = None, conn: Optional[sqlite3.Connection] = None) -> None:
+                    cache_creation_tokens: Optional[int] = None, cache_read_tokens: Optional[int] = None,
+                    prompt_json: Optional[str] = None, response_json: Optional[str] = None,
+                    conn: Optional[sqlite3.Connection] = None) -> None:
+    _ensure_llm_blob_columns(conn)
     conn.execute(
         "INSERT INTO llm_calls (recorded_at, workflow, model, ok, error, duration_ms, "
-        "prompt_tokens, completion_tokens, total_tokens, cache_creation_tokens, cache_read_tokens) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "prompt_tokens, completion_tokens, total_tokens, cache_creation_tokens, cache_read_tokens, "
+        "prompt_json, response_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             _utcnow(),
             workflow,
@@ -813,9 +833,29 @@ def record_llm_call(workflow: str, model: str, *, ok: bool = True, error: Option
             total_tokens,
             cache_creation_tokens,
             cache_read_tokens,
+            prompt_json,
+            response_json,
         ),
     )
     conn.commit()
+
+
+@managed_connection
+def get_llm_call(call_id: int, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    """Full detail for one LLM call — metadata + the captured prompt/response
+    blobs, JSON-decoded. Powers the Observatory per-call drill-down. None when
+    the call doesn't exist; blobs are None once pruned (LLM_PROMPT_RETENTION_DAYS)."""
+    _ensure_llm_blob_columns(conn)
+    row = conn.execute("SELECT * FROM llm_calls WHERE call_id = ?", (int(call_id),)).fetchone()
+    if row is None:
+        return None
+    out = dict(row)
+    for raw_key, key in (("prompt_json", "prompt"), ("response_json", "response")):
+        try:
+            out[key] = json.loads(out.get(raw_key) or "null")
+        except (TypeError, ValueError):
+            out[key] = None
+    return out
 
 
 @managed_connection

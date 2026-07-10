@@ -9,6 +9,8 @@ from db import (
     BATTLE_EVENT_RETENTION_DAYS,
     CLAN_EVENT_RETENTION_DAYS,
     CONVERSATION_RETENTION_DAYS,
+    LLM_CALL_RETENTION_DAYS,
+    LLM_PROMPT_RETENTION_DAYS,
     PLAYER_EVENT_RETENTION_DAYS,
     RAW_PAYLOAD_RETENTION_DAYS,
     TOURNAMENT_RETENTION_DAYS,
@@ -415,6 +417,9 @@ _PURGE_TARGETS = [
     ("war_attendance_days", "observed_at", WAR_RETENTION_DAYS),
     ("messages", "created_at", CONVERSATION_RETENTION_DAYS),
     ("tournaments", "watching_started_at", TOURNAMENT_RETENTION_DAYS),
+    # LLM call telemetry: drop the whole row after 90d (blobs get NULLed at 14d
+    # first — see the prompt-blob prune in purge_old_data).
+    ("llm_calls", "recorded_at", LLM_CALL_RETENTION_DAYS),
 ]
 
 _PURGE_DATE_TARGETS = []
@@ -432,5 +437,20 @@ def purge_old_data(conn: Optional[sqlite3.Connection] = None) -> dict[str, int]:
         cutoff = _date_cutoff(days)
         cursor = conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
         stats[table] = cursor.rowcount
+    # LLM prompt/response blobs: NULL them after the (short) prompt-retention
+    # window while keeping the lightweight metadata row for cost analysis until
+    # its own 90d row-delete above. UPDATE, not DELETE — the row survives.
+    blob_cutoff = _utc_cutoff(LLM_PROMPT_RETENTION_DAYS)
+    try:
+        cursor = conn.execute(
+            "UPDATE llm_calls SET prompt_json = NULL, response_json = NULL "
+            "WHERE recorded_at < ? AND (prompt_json IS NOT NULL OR response_json IS NOT NULL)",
+            (blob_cutoff,),
+        )
+        stats["llm_calls_blobs_pruned"] = cursor.rowcount
+    except sqlite3.OperationalError:
+        # Columns not yet added on a DB that has never recorded a call — nothing
+        # to prune. (They are lazily added by record_llm_call on first write.)
+        stats["llm_calls_blobs_pruned"] = 0
     conn.commit()
     return stats

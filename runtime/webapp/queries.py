@@ -527,14 +527,18 @@ def war_page() -> dict:
         conn.close()
 
 
-def llm_page(limit: int = 50) -> dict:
+def llm_page(workflow: str | None = None, limit: int = 50) -> dict:
     conn = db.get_connection()
     try:
-        calls = _rows(conn, """
-            SELECT recorded_at, workflow, model, ok, error, duration_ms,
+        where = "WHERE workflow = ? " if workflow else ""
+        params = (workflow, limit) if workflow else (limit,)
+        calls = _rows(conn, f"""
+            SELECT call_id, recorded_at, workflow, model, ok, error, duration_ms,
                    prompt_tokens, completion_tokens, total_tokens,
                    cache_creation_tokens, cache_read_tokens
-            FROM llm_calls ORDER BY call_id DESC LIMIT ?""", (limit,))
+            FROM llm_calls {where}ORDER BY call_id DESC LIMIT ?""", params)
+        workflows = [r["workflow"] for r in _rows(conn,
+            "SELECT DISTINCT workflow FROM llm_calls ORDER BY workflow")]
         failures = _rows(conn, """
             SELECT recorded_at, workflow, failure_type, failure_stage, channel_name,
                    substr(COALESCE(question,''),1,140) AS question,
@@ -551,7 +555,8 @@ def llm_page(limit: int = 50) -> dict:
             FROM elixir_improvement_suggestions
             ORDER BY suggestion_id DESC LIMIT 15""")
         return {"calls": calls, "failures": failures, "feedback": feedback,
-                "suggestions": suggestions}
+                "suggestions": suggestions, "workflows": workflows,
+                "active_workflow": workflow or ""}
     finally:
         conn.close()
 
@@ -660,3 +665,17 @@ def editorial_page(limit: int = 50) -> dict:
                 "reports": reports}
     finally:
         conn.close()
+
+
+# ------------------------------------------------------------- llm drill-down
+
+def llm_call_detail(call_id: int) -> dict | None:
+    """Full detail for one LLM call — metadata + the captured prompt (system,
+    messages, tools) and response (text, tool calls). The blobs are None once
+    pruned (LLM_PROMPT_RETENTION_DAYS); the row survives for cost analysis."""
+    detail = db.get_llm_call(call_id)
+    if detail is None:
+        return None
+    detail["prompt"] = detail.get("prompt") or None
+    detail["response"] = detail.get("response") or None
+    return detail
