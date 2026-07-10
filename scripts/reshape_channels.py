@@ -36,13 +36,15 @@ EVERYONE_ROLE_ID = GUILD_ID  # @everyone role id == guild id
 ANNOUNCEMENTS_ID = "1474760975851982959"
 SEND_MESSAGES = 1 << 11  # 0x800
 
-# Deprecated channels → archive (name is only for the log).
+# Deprecated ELIXIR-OWNED auto-posting channels → archive (name is only for the
+# log). NOTE: #clan-chat is deliberately NOT here — it's the members' own main
+# chat channel, not Elixir-owned. "Folding it into #ask-elixir" means Elixir
+# stops answering there (the `general` lane), NOT archiving the channel.
 DEPRECATED = {
     "1482352067573059675": "river-race",
     "1523195660856459387": "battle-feed",
     "1482352147029950474": "player-highlights",
     "1482352241628414013": "clan-events",
-    "1474760693491433585": "clan-chat",
 }
 
 ROLLBACK_PATH = os.path.join(
