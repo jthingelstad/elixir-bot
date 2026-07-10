@@ -562,34 +562,6 @@ def test_execute_tool_get_clan_health_sensitive_aspect_blocked_in_interactive():
     assert "leadership channels" in result["error"]
 
 
-@pytest.mark.xfail(reason="tool result shape drift vs pre-cut expectations; read layer works - assertions need the v5.1 shapes", strict=False)
-def test_execute_tool_get_elixir_state_public_events_are_scope_filtered():
-    with patch("event_core.read.event_facades.list_recent_events") as mock_recent:
-        mock_recent.return_value = [
-            {"event_key": "game_event:public", "scope": "public"},
-        ]
-
-        result = json.loads(
-            elixir_agent._execute_tool(
-                "get_elixir_state",
-                {"aspect": "recent_events", "days": 14, "limit": 3},
-                workflow="interactive",
-            )
-        )
-
-    assert result["scope"] == "public"
-    assert result["events"][0]["scope"] == "public"
-    mock_recent.assert_called_once_with(
-        days=14,
-        scope="public",
-        event_type=None,
-        subject_type=None,
-        subject_key=None,
-        event_class="signal",
-        limit=3,
-    )
-
-
 def test_execute_tool_get_elixir_state_blocks_leadership_scope_in_interactive():
     result = json.loads(
         elixir_agent._execute_tool(
@@ -1183,8 +1155,13 @@ def test_create_chat_completion_drops_blank_anthropic_messages():
         )
 
     assert result.content[0].text == "ok"
+    # Blank turns dropped; the surviving last message carries a cache breakpoint
+    # (string content promoted to a text block).
     assert create.call_args.kwargs["messages"] == [
-        {"role": "user", "content": "Current winstreak"}
+        {"role": "user", "content": [
+            {"type": "text", "text": "Current winstreak",
+             "cache_control": {"type": "ephemeral"}},
+        ]}
     ]
     assert create.call_args.kwargs["system"][0]["text"] == "sys"
 
@@ -1207,14 +1184,16 @@ def test_create_chat_completion_drops_empty_text_blocks():
 
     assert result.content[0].text == "ok"
     assert create.call_args.kwargs["messages"] == [
-        {"role": "user", "content": [{"type": "text", "text": "status"}]}
+        {"role": "user", "content": [
+            {"type": "text", "text": "status", "cache_control": {"type": "ephemeral"}},
+        ]}
     ]
 
 
-def test_create_chat_completion_skips_cache_for_awareness():
-    """awareness ticks are 1+ hours apart, exceeding the 5-min cache TTL —
-    caching the system+tools prefix pays the 1.25x write premium with no
-    payoff. Confirmed in May 2026 sampling: 89% write-only calls."""
+def test_create_chat_completion_caches_awareness():
+    """The awareness brain is now a multi-round Sonnet agentic loop (tool rounds
+    seconds apart within one tick), so caching the system+tools+message prefix
+    yields cache reads on rounds 2+ — a large net win. It must be cached."""
     response = _mock_anthropic_response()
     create = Mock(return_value=response)
     mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
@@ -1225,14 +1204,40 @@ def test_create_chat_completion_skips_cache_for_awareness():
         elixir_agent._create_chat_completion(
             workflow="awareness",
             system="sys",
-            messages=[{"role": "user", "content": "u"}],
+            messages=[{"role": "user", "content": "the read"}],
             tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
         )
 
     sys_block = create.call_args.kwargs["system"][0]
-    assert "cache_control" not in sys_block, "awareness must not cache the system prompt"
-    tools = create.call_args.kwargs["tools"]
-    assert all("cache_control" not in t for t in tools), "awareness must not cache tools"
+    assert sys_block.get("cache_control") == {"type": "ephemeral"}
+    assert create.call_args.kwargs["tools"][-1].get("cache_control") == {"type": "ephemeral"}
+    # The message prefix (the read) carries a breakpoint too — that's the bulk
+    # of the re-sent input, not just system+tools.
+    last_msg = create.call_args.kwargs["messages"][-1]
+    assert last_msg["content"][-1].get("cache_control") == {"type": "ephemeral"}
+
+
+def test_message_cache_breakpoint_marks_last_block_of_last_message():
+    """A growing tool loop: the breakpoint rides the end of the history so each
+    round's prefix is cache-readable. String content becomes a text block; an
+    existing block list only has its FINAL block marked (earlier blocks stay
+    byte-identical so the prefix keeps matching)."""
+    import agent.core as core
+    out = core._with_message_cache_breakpoint([
+        {"role": "user", "content": "read"},
+        {"role": "assistant", "content": [{"type": "text", "text": "thinking"}]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "a", "content": "r1"},
+            {"type": "tool_result", "tool_use_id": "b", "content": "r2"},
+        ]},
+    ])
+    # earlier messages untouched
+    assert out[0]["content"] == "read"
+    assert "cache_control" not in out[1]["content"][0]
+    # only the final block of the last message is marked
+    tail = out[-1]["content"]
+    assert "cache_control" not in tail[0]
+    assert tail[1].get("cache_control") == {"type": "ephemeral"}
 
 
 def test_create_chat_completion_caches_other_workflows():

@@ -280,27 +280,9 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         delivery_targets=(),
         activity_role="observer",
     ),
-    ActivityDefinition(
-        activity_key="player-pulse",
-        owner_lane="battle-feed",
-        purpose="The Pulse (pulse.md): 8-hour player-stream windows, three a "
-        "day sweeping the globe's active hours — battles, modes, overnight "
-        "carriers, quiet achievements, and each window's coolest battle. "
-        "Cheap 30-min check; posts ride the standard intent pipeline "
-        "(Sonnet 5 compose + Editor gate) into #battle-feed.",
-        job_id="player-pulse",
-        job_function="_player_pulse",
-        schedule_kind="interval",
-        schedule_config={
-            "minutes": 30,
-            "max_instances": 1,
-            "coalesce": True,
-        },
-        delivery_targets=(
-            "Discord: #battle-feed (via communication_intents)",
-        ),
-        activity_role="observer+communicator",
-    ),
+    # player-pulse retired 2026-07-10: its #battle-feed posts rode the engine
+    # delivery pipeline (now off) and battle-mode momentum is brain-owned in
+    # #elixir. Removing the ActivityDefinition unschedules the job.
     ActivityDefinition(
         activity_key="engine-health",
         owner_lane="elixir-log",
@@ -319,46 +301,9 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         ),
         activity_role="observer",
     ),
-    ActivityDefinition(
-        activity_key="editorial-sweep",
-        owner_lane="elixir-log",
-        purpose="Daily Editor rubric feeder (editor.md §3): yesterday's 👎/👍 "
-        "prompt feedback becomes anti-pattern/exemplar rubric candidates.",
-        job_id="editorial-sweep",
-        job_function="_editorial_sweep",
-        schedule_kind="cron",
-        schedule_config={
-            "hour": _attr("EDITORIAL_SWEEP_HOUR", 8),
-            "minute": 31,
-        },
-        delivery_targets=(
-            "Storage: editorial rubric candidate memories",
-        ),
-        activity_role="observer",
-    ),
-    ActivityDefinition(
-        activity_key="editorial-review",
-        owner_lane="elixir-log",
-        purpose="The Editor's weekly self-review (editor.md §4): score the "
-        "week's gated output against the rubric, write the synthesis memory, "
-        "post one report with the drift line + proposed rubric additions "
-        "(auto-added at confidence 0.6, Jamie's veto by 👎).",
-        job_id="editorial-review",
-        job_function="_editorial_review",
-        schedule_kind="cron",
-        schedule_config={
-            "day_of_week": _attr("EDITORIAL_REVIEW_DAY", "sun"),
-            "hour": _attr("EDITORIAL_REVIEW_HOUR", 20),
-            "minute": 7,
-            "timezone": "America/Chicago",
-            "max_instances": 1,
-            "coalesce": True,
-        },
-        delivery_targets=(
-            "Discord webhook: #elixir-log weekly editorial report",
-        ),
-        activity_role="observer+communicator",
-    ),
+    # editorial-sweep + editorial-review retired 2026-07-10 with the Editor: the
+    # brain composes with depth natively, so there's no template gate to tune and
+    # no rubric to feed. Removing the ActivityDefinitions unschedules both jobs.
     ActivityDefinition(
         activity_key="db-maintenance",
         owner_lane="elixir-log",
@@ -396,6 +341,34 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         manual_trigger_allowed=True,
         enabled_by_default=False,
         legacy_commands=("intel-report",),
+    ),
+    ActivityDefinition(
+        activity_key="awareness-loop",
+        owner_lane="elixir-log",
+        purpose="Shadow-mode v1 of the awareness loop (the central deliberative "
+        "heartbeat): build the read, run the benched brain READ-ONLY, persist "
+        "the train of thought, and write a diagnostic to #elixir-log. Posts "
+        "NOTHING member-facing. Runs on the internal scheduler during the "
+        "shadow watch; the brain stays read-only (cannot post) until graduated.",
+        job_id="awareness-loop",
+        job_function="_awareness_loop",
+        # Wall-clock cron, not an interval: pinned to :05 of every hour so the
+        # cadence is deterministic across restarts (an interval trigger re-phases
+        # to "startup + 60min" every restart). :05 lands just after the top-of-
+        # hour engine tick, so the brain reads freshly-refreshed state and dodges
+        # the :00 cron crowd. Tunable via AWARENESS_LOOP_MINUTE.
+        schedule_kind="cron",
+        schedule_config={
+            "minute": _attr("AWARENESS_LOOP_MINUTE", 5),
+            "max_instances": 1,
+            "coalesce": True,
+        },
+        delivery_targets=(
+            "Discord webhook: #elixir-log (SHADOW — nothing member-facing)",
+        ),
+        activity_role="observer",
+        manual_trigger_allowed=True,
+        enabled_by_default=True,
     ),
 )
 

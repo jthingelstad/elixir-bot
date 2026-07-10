@@ -26,6 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import db
 
 
+# 'deferred' retained only to score legacy rows in historical exports; the live
+# system no longer produces it (defer retired 2026-07-10).
 TERMINAL_STATUSES = {"done", "deferred", "rejected"}
 RECOMMENDATION_TYPES = {
     "demotion_recommendation",

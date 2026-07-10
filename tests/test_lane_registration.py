@@ -73,3 +73,22 @@ def test_every_config_lane_has_a_voice_file():
     assert not missing, (
         f"CHANNEL_LANE_CONFIG lanes with no prompts/lanes/<lane>.md: {sorted(missing)}"
     )
+
+
+def test_every_discord_md_lane_is_in_channel_lane_config():
+    """Forward direction the on_ready validator enforces: a `Lane:` in DISCORD.md
+    with no CHANNEL_LANE_CONFIG entry hard-crashes on_ready. This is the exact
+    gap that broke the #elixir deploy (2026-07-10): the channel was in DISCORD.md
+    before its lane was registered in the config."""
+    discord_md = open(prompts._DISCORD_MD if hasattr(prompts, "_DISCORD_MD")
+                      else os.path.join(os.path.dirname(_LANES_DIR), "DISCORD.md")).read()
+    lanes_in_md = {
+        line.split(":", 1)[1].strip()
+        for line in discord_md.splitlines()
+        if line.strip().lower().startswith("lane:")
+    }
+    missing = lanes_in_md - set(prompts.CHANNEL_LANE_CONFIG)
+    assert not missing, (
+        f"DISCORD.md lanes absent from CHANNEL_LANE_CONFIG (on_ready would crash): "
+        f"{sorted(missing)}"
+    )

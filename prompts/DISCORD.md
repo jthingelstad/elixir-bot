@@ -47,6 +47,21 @@ Elixir's long-form weekly recap and major Elixir update channel.
 - Keep the recap readable, reflective, and within Discord's 2,000-character limit.
 - This is not a routine update feed.
 
+## #elixir
+
+ID: 1525159652256645241
+Lane: elixir
+Workflow: interactive
+ToolPolicy: read_only
+MemoryScope: public
+DurableMemory: true
+
+Elixir's commentary & updates channel — the awareness brain's public voice.
+
+- The brain posts here: player stories, hot streaks, trophy pushes, Ranked/2v2/event momentum, durable milestones, the war race (day transitions, rank swings, week & season recaps), and clan-wide trends.
+- Everything worth *saying* about the game lives here; factual roster/system changes go to #announcements instead.
+- Curated over voluminous — silence is allowed; a post should sound like Elixir actually looked at the moment.
+
 ## #river-race
 
 ID: 1482352067573059675

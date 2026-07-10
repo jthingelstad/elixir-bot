@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import db as _db
@@ -28,6 +28,11 @@ CASE_TYPES = {
     "demotion_review",
     "war_recovery",
 }
+
+# How long an open member-review case may sit uncorroborated by the management
+# engine (state='none') before the backstop dismisses it. >= 7 guarantees a full
+# weekly review has run for promote/demote grains before we reap the case.
+_CASE_RECONCILE_GRACE_DAYS = 7
 
 _LEADER_REVIEW_CASES = {
     "kick_recommendation": {
@@ -58,8 +63,10 @@ __all__ = [
     "get_decision_case_by_id",
     "list_decision_cases",
     "list_due_decision_cases",
-    "defer_decision_case",
     "resolve_decision_case",
+    "reconcile_departed_member_cases",
+    "reconcile_uncorroborated_member_cases",
+    "sync_terminal_leader_action_cases",
     "link_leader_action_to_case",
     "upsert_decision_cases_from_signals",
     "upsert_member_review_case",
@@ -258,7 +265,7 @@ def list_decision_cases(
     limit: int = 20,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
-    clean_statuses = [status for status in (statuses or [CASE_OPEN, CASE_DEFERRED]) if status]
+    clean_statuses = [status for status in (statuses or [CASE_OPEN]) if status]
     where = []
     params: list = []
     if clean_statuses:
@@ -288,10 +295,10 @@ def list_due_decision_cases(
 ) -> list[dict]:
     current = _clean_text(now) or _db._utcnow()
     where = [
-        "status IN (?, ?)",
+        "status = ?",
         "(due_at IS NULL OR due_at <= ?)",
     ]
-    params: list = [CASE_OPEN, CASE_DEFERRED, current]
+    params: list = [CASE_OPEN, current]
     if case_type:
         where.append("case_type = ?")
         params.append(case_type)
@@ -301,27 +308,6 @@ def list_due_decision_cases(
         (*params, max(1, min(int(limit or 20), 100))),
     ).fetchall()
     return [_row_to_case(row, now=current) for row in rows]
-
-
-@managed_connection
-def defer_decision_case(
-    case_id: int,
-    *,
-    due_at: str,
-    resolution: str | None = None,
-    conn: Optional[sqlite3.Connection] = None,
-) -> dict | None:
-    now = _db._utcnow()
-    conn.execute(
-        """
-        UPDATE decision_cases
-        SET status = ?, due_at = ?, resolution = COALESCE(?, resolution), updated_at = ?
-        WHERE case_id = ?
-        """,
-        (CASE_DEFERRED, _clean_text(due_at), _clean_text(resolution), now, int(case_id)),
-    )
-    conn.commit()
-    return get_decision_case_by_id(case_id, conn=conn)
 
 
 @managed_connection
@@ -349,6 +335,177 @@ def resolve_decision_case(
     return get_decision_case_by_id(case_id, conn=conn)
 
 
+# Mirror of engine.recognition.recognizers.KICK_SUPPRESS_DAYS. A departure is
+# attributed to a kick when a kick_recommendation was marked done within this
+# window before the member left. Kept local to avoid a storage->engine import
+# (engine depends on storage, not the reverse).
+_KICK_ATTRIBUTION_DAYS = 14
+
+
+def _departure_was_kick(conn, tag: str, left_at: str | None) -> bool:
+    """True when a member's departure is attributable to a kick — a ``done``
+    kick_recommendation within the attribution window before they left (same
+    rule as recognition's C1 kick-suppression). A kick means the leadership
+    action was ENACTED, which is meaningfully different from an organic leave.
+    """
+    params: list = [tag]
+    window = ""
+    anchor = _parse_utc(left_at) if left_at else None
+    if anchor:
+        cutoff = (anchor - timedelta(days=_KICK_ATTRIBUTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+        window = "AND COALESCE(decided_at, proposed_at) >= ?"
+        params.append(cutoff)
+    row = conn.execute(
+        f"""SELECT 1 FROM leader_action_recommendations
+            WHERE action_type = 'kick_recommendation' AND target_player_tag = ?
+              AND status = 'done' AND COALESCE(is_test, 0) = 0 {window} LIMIT 1""",
+        params,
+    ).fetchone()
+    return row is not None
+
+
+@managed_connection
+def reconcile_departed_member_cases(
+    *,
+    now: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Close open/deferred member-review cases whose subject has left the clan,
+    distinguishing a KICK from an organic leave.
+
+    The decision-case store is the durable member-review layer the awareness
+    brain and #leader-actions read. Unlike ``member_management`` — which drops a
+    row the moment a member leaves — it is NOT self-reconciling: an open
+    inactivity / promotion / demotion case for a departed member lingers
+    indefinitely and resurfaces as a stale recommendation (observed 2026-07-09
+    loop #12: 5 of 9 kick reviews targeted members who had already left, four via
+    the 2026-07-04 roster cut). We key off current membership rather than a leave
+    event that some paths never emit.
+
+    Kicks are meaningfully different from leaves. When a fulfilled kick explains
+    the departure, the review's recommended action was ENACTED, so the case is
+    **resolved** (resolution ``kicked``). An organic departure makes the review
+    moot, so the case is **dismissed** (resolution ``member_left``).
+    """
+    current = _clean_text(now) or _db._utcnow()
+    placeholders = ",".join("?" * len(CASE_TYPES))
+    rows = conn.execute(
+        f"""SELECT dc.case_id, dc.case_type, dc.target_player_tag, dc.target_player_name,
+                   (SELECT MAX(cm.left_at) FROM clan_memberships cm
+                    WHERE UPPER(cm.player_tag) = UPPER(dc.target_player_tag)) AS left_at
+            FROM decision_cases dc
+            WHERE dc.status IN (?, ?)
+              AND dc.case_type IN ({placeholders})
+              AND dc.target_player_tag IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM clan_memberships cm
+                  WHERE UPPER(cm.player_tag) = UPPER(dc.target_player_tag)
+                    AND cm.left_at IS NULL
+              )""",
+        (CASE_OPEN, CASE_DEFERRED, *sorted(CASE_TYPES)),
+    ).fetchall()
+    reconciled: list[dict] = []
+    for row in rows:
+        if _departure_was_kick(conn, row["target_player_tag"], row["left_at"]):
+            status, resolution, outcome = CASE_RESOLVED, "kicked", "kicked"
+        else:
+            status, resolution, outcome = CASE_DISMISSED, "member_left", "left"
+        resolve_decision_case(
+            int(row["case_id"]),
+            status=status,
+            resolution=resolution,
+            resolved_at=current,
+            conn=conn,
+        )
+        reconciled.append({
+            "case_id": int(row["case_id"]),
+            "case_type": row["case_type"],
+            "target_player_tag": row["target_player_tag"],
+            "target_player_name": row["target_player_name"],
+            "outcome": outcome,
+        })
+    return reconciled
+
+
+@managed_connection
+def reconcile_uncorroborated_member_cases(
+    *,
+    grace_days: int = _CASE_RECONCILE_GRACE_DAYS,
+    now: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Dismiss OPEN member-review cases the management engine no longer
+    corroborates. A case whose backing ``member_management`` state is 'none' (the
+    engine has zero interest on that dimension) for at least ``grace_days``, with
+    no open 'proposed' leader-action card, is stale: it was created by the brain
+    or a signal path (``upsert_member_review_case``) but the deterministic engine
+    never backed it. Ratko #365 was the motivating case — a promotion_review with
+    ``promote_state='none'`` and no card, which nothing closed, so it nagged the
+    awareness read as "due" forever (Loop #26).
+
+    The grace window lets a fresh flag breathe: ``kick_state`` recomputes each
+    tick but promote/demote roll weekly, so ``grace_days`` >= 7 guarantees at
+    least one full weekly review has run and still returned 'none' before we
+    dismiss. building / at_risk / eligible cases are kept — the engine IS tracking
+    them. Departed members go through ``reconcile_departed_member_cases``; this is
+    the in-clan-but-uncorroborated backstop. Idempotent — steady-state touches 0.
+    """
+    current = _clean_text(now) or _db._utcnow()
+    try:
+        parsed = datetime.fromisoformat(current.rstrip("Z"))
+    except (ValueError, AttributeError):
+        parsed = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = (parsed - timedelta(days=max(0, int(grace_days)))).strftime("%Y-%m-%dT%H:%M:%S")
+
+    dismissed: list[dict] = []
+    for case_type, state_col, action_type in (
+        ("inactivity_review", "kick_state", "kick_recommendation"),
+        ("promotion_review", "promote_state", "promotion_recommendation"),
+        ("demotion_review", "demote_state", "demotion_recommendation"),
+    ):
+        rows = conn.execute(
+            f"""SELECT dc.case_id, dc.target_player_tag, dc.target_player_name
+                FROM decision_cases dc
+                LEFT JOIN member_management mm
+                  ON UPPER(mm.player_tag) = UPPER(dc.target_player_tag)
+                WHERE dc.case_type = ?
+                  AND dc.status = ?
+                  AND dc.target_player_tag IS NOT NULL
+                  AND dc.opened_at <= ?
+                  AND COALESCE(mm.{state_col}, 'none') = 'none'
+                  AND EXISTS (
+                      SELECT 1 FROM clan_memberships cm
+                      WHERE UPPER(cm.player_tag) = UPPER(dc.target_player_tag)
+                        AND cm.left_at IS NULL
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM leader_action_recommendations lar
+                      WHERE UPPER(lar.target_player_tag) = UPPER(dc.target_player_tag)
+                        AND lar.action_type = ?
+                        AND lar.status = 'proposed'
+                        AND COALESCE(lar.is_test, 0) = 0
+                  )""",
+            (case_type, CASE_OPEN, cutoff, action_type),
+        ).fetchall()
+        for row in rows:
+            resolve_decision_case(
+                int(row["case_id"]),
+                status=CASE_DISMISSED,
+                resolution=("Auto-dismissed: management engine shows no active "
+                            f"candidacy (state=none) after {grace_days}d and no open card."),
+                resolved_at=current,
+                conn=conn,
+            )
+            dismissed.append({
+                "case_id": int(row["case_id"]),
+                "case_type": case_type,
+                "target_player_tag": row["target_player_tag"],
+                "target_player_name": row["target_player_name"],
+                "outcome": "uncorroborated",
+            })
+    return dismissed
+
+
 def _leader_action_case_config(action_type: str | None) -> dict | None:
     return _LEADER_REVIEW_CASES.get((action_type or "").strip())
 
@@ -368,7 +525,9 @@ def _case_lifecycle_from_action(action: dict, *, now: str | None = None) -> tupl
     if status == "proposed":
         return CASE_OPEN, "recommended"
     if status == "deferred":
-        return CASE_DEFERRED, "deferred"
+        # Defer retired 2026-07-10: any legacy deferred action closes its case
+        # (a decline). The engine re-nominates on sustained evidence instead.
+        return CASE_DISMISSED, "rejected"
     if status == "done":
         return CASE_RESOLVED, "accepted"
     if status == "rejected":
@@ -386,9 +545,6 @@ def _leader_action_resolution(action: dict, outcome: str) -> str | None:
         return "Leader declined the recommended action."
     if outcome == "expired":
         return "Recommendation expired before a leader decision was recorded."
-    if outcome == "deferred":
-        days = action.get("defer_days")
-        return f"Deferred for {days} day(s)." if days else "Deferred for leader review."
     return None
 
 
@@ -463,7 +619,6 @@ def backfill_decision_cases_from_leader_actions(
         "created": 0,
         "updated": 0,
         "linked": 0,
-        "deferred": 0,
         "resolved": 0,
         "dismissed": 0,
         "expired": 0,
@@ -482,7 +637,7 @@ def backfill_decision_cases_from_leader_actions(
         case_key = _case_key(case_type, target_player_tag=tag)
         existing = get_decision_case(case_key, conn=conn)
         case_status, outcome = _case_lifecycle_from_action(action, now=now)
-        due_at = action.get("deferred_until") if outcome == "deferred" else None
+        due_at = None  # defer retired 2026-07-10 — no case carries a revisit timer
         name = _clean_text(action.get("target_player_name")) or tag
         title = f"{config['title']}: {name}"
         recommendation = _clean_text(action.get("prompt_text")) or f"Review {name}."
@@ -516,15 +671,7 @@ def backfill_decision_cases_from_leader_actions(
             link_leader_action_to_case(action["action_id"], case["case_id"], conn=conn)
             summary["linked"] += 1
 
-        if outcome == "deferred" and due_at:
-            defer_decision_case(
-                case["case_id"],
-                due_at=due_at,
-                resolution=_leader_action_resolution(action, outcome),
-                conn=conn,
-            )
-            summary["deferred"] += 1
-        elif outcome in {"accepted", "rejected", "expired"}:
+        if outcome in {"accepted", "rejected", "expired"}:
             terminal_status = CASE_RESOLVED if outcome == "accepted" else CASE_DISMISSED
             resolve_decision_case(
                 case["case_id"],
@@ -540,6 +687,72 @@ def backfill_decision_cases_from_leader_actions(
             if outcome == "expired":
                 summary["expired"] += 1
     return summary
+
+
+@managed_connection
+def sync_terminal_leader_action_cases(
+    *,
+    now: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Propagate a terminal leader-action state onto its backing decision case.
+
+    When a leader marks a kick / promotion / demotion card ``done`` (or rejects
+    it), the matching member-review case should move to match — a done kick
+    RESOLVES the inactivity review (action enacted), a done promotion RESOLVES
+    the promotion review, a rejection DISMISSES it. (Legacy ``deferred`` rows are
+    treated as declines and DISMISS the case — defer retired 2026-07-10.) Nothing wired this
+    at runtime before (``backfill_decision_cases_from_leader_actions`` was a
+    manual one-shot), so a completed kick left its ``inactivity_review`` case
+    OPEN and it resurfaced as a stale recommendation to the awareness brain
+    (2026-07-09 loop #12). This closes the loop at decision time — before the
+    member even leaves the roster, so the membership reconciler is a pure
+    backstop.
+
+    RESOLVE-ONLY: it matches an EXISTING case by key and never creates one
+    (case creation stays the signal/recognizer path's job). Idempotent — once a
+    case is closed it is skipped, so steady-state this touches ~0 rows.
+    """
+    review_types = tuple(_LEADER_REVIEW_CASES)
+    rows = conn.execute(
+        f"""SELECT * FROM leader_action_recommendations
+            WHERE action_type IN ({",".join("?" * len(review_types))})
+              AND COALESCE(is_test, 0) = 0
+              AND target_player_tag IS NOT NULL
+              AND status IN ('done', 'rejected', 'deferred')
+            ORDER BY COALESCE(decided_at, proposed_at) ASC, action_id ASC""",
+        review_types,
+    ).fetchall()
+    synced: list[dict] = []
+    for row in rows:
+        action = dict(row)
+        config = _leader_action_case_config(action.get("action_type"))
+        tag = _db._canon_tag(action.get("target_player_tag")) if action.get("target_player_tag") else None
+        if not config or not tag:
+            continue
+        case = get_decision_case(_case_key(config["case_type"], target_player_tag=tag), conn=conn)
+        if not case or case["status"] not in {CASE_OPEN, CASE_DEFERRED}:
+            continue  # no backing case, or already closed — nothing to propagate
+        _case_status, outcome = _case_lifecycle_from_action(action, now=now)
+        if outcome in {"accepted", "rejected", "expired"}:
+            terminal = CASE_RESOLVED if outcome == "accepted" else CASE_DISMISSED
+            resolve_decision_case(
+                case["case_id"], status=terminal,
+                resolution=_leader_action_resolution(action, outcome),
+                resolved_at=action.get("decided_at") or action.get("expires_at") or now,
+                conn=conn,
+            )
+        else:
+            continue
+        synced.append({
+            "case_id": case["case_id"],
+            "case_type": config["case_type"],
+            "target_player_tag": tag,
+            "target_player_name": case.get("target_player_name") or tag,
+            "action_type": action.get("action_type"),
+            "outcome": outcome,
+        })
+    return synced
 
 
 @managed_connection
@@ -682,12 +895,19 @@ def decision_case_snapshot(
     *,
     open_limit: int = 10,
     due_limit: int = 10,
+    dedupe: bool = False,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
-    return {
-        "due": [_compact_case(case) for case in list_due_decision_cases(limit=due_limit, conn=conn)],
-        "open": [_compact_case(case) for case in list_decision_cases(limit=open_limit, conn=conn)],
-    }
+    """Compact due/open cases. Every due case is also an open case, so by
+    default ``open`` repeats the whole ``due`` list. Pass ``dedupe=True`` to
+    drop that overlap — ``open`` then means "open but not currently due",
+    matching "due = needs attention now; open = being monitored"."""
+    due = [_compact_case(case) for case in list_due_decision_cases(limit=due_limit, conn=conn)]
+    open_cases = [_compact_case(case) for case in list_decision_cases(limit=open_limit, conn=conn)]
+    if dedupe:
+        due_keys = {c.get("case_key") for c in due}
+        open_cases = [c for c in open_cases if c.get("case_key") not in due_keys]
+    return {"due": due, "open": open_cases}
 
 
 

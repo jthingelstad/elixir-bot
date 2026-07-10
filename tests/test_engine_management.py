@@ -602,3 +602,46 @@ def test_promotion_fallback_sane_without_evidence():
     }
     out = compose.render_intent(row)
     assert "Newbie" in out and "Elder" in out   # graceful with no evidence
+
+
+def test_management_read_summary_reflects_engine_states():
+    """The awareness read must see the engine's actionable verdicts (recommended/
+    eligible), NOT trending states (building/watch/at_risk), and only for members
+    who are still in the clan."""
+    import db
+
+    conn = db.get_connection()
+    try:
+        conn.execute("INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, "
+                     "last_seen_at, is_home) VALUES ('#CLAN','C','2026-02-04',?,1)", (NOW,))
+
+        def _seed(tag, name, *, left=None, kick="none", promote="none", demote="none", role="member"):
+            conn.execute("INSERT INTO players (player_tag, current_name, first_seen_at, "
+                         "last_seen_at) VALUES (?,?,?,?)", (tag, name, NOW, NOW))
+            conn.execute("INSERT INTO clan_memberships (player_tag, clan_tag, joined_at, "
+                         "left_at, join_source) VALUES (?, '#CLAN', '2026-06-01', ?, 'test')", (tag, left))
+            conn.execute(
+                "INSERT INTO member_management (player_tag, role, kick_state, promote_state, "
+                "demote_state, computed_at, week_anchor, promote_qualifying_weeks, state_json) "
+                "VALUES (?,?,?,?,?,?,?,0,'{}')",
+                (tag, role, kick, promote, demote, NOW, '2026-06-28'),
+            )
+
+        _seed("#KREC", "KickRec", kick="recommended")           # actionable kick
+        _seed("#KWATCH", "KickWatch", kick="at_risk")           # trending only
+        _seed("#PROM", "Promote", promote="eligible", role="member")  # actionable promote
+        _seed("#DEM", "Demote", demote="recommended", role="elder")   # actionable demote
+        _seed("#PLAIN", "Plain")                                 # nothing
+        _seed("#GONE", "Gone", left="2026-07-04", kick="recommended")  # left → excluded
+        conn.commit()
+
+        summary = management.management_read_summary(conn)
+
+        kick_tags = {m["player_tag"] for m in summary["actionable"]["kick"]}
+        assert kick_tags == {"#KREC"}                    # recommended only, #GONE excluded
+        assert {m["player_tag"] for m in summary["actionable"]["promote"]} == {"#PROM"}
+        assert {m["player_tag"] for m in summary["actionable"]["demote"]} == {"#DEM"}
+        assert summary["building_counts"]["kick"] == 1   # #KWATCH trending, not actionable
+        assert summary["members_evaluated"] == 5         # #GONE not counted
+    finally:
+        conn.close()

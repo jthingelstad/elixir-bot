@@ -107,27 +107,14 @@ def test_compose_context_bans_invention_and_pins_questions():
         assert q in ctx
 
 
-# ------------------------------------------------------------- gate wiring
+# ------------------------------------------------------------- brain-powered daily
 
-def test_job_routes_copy_through_editor_gate():
-    """The composed post is judged; a 'revise' verdict triggers exactly one
-    recompose, and the verdict is recorded with the intent_id=0 marker."""
+def _run_daily_with(generated):
+    """Run _ask_elixir_daily_insight with the brain composer stubbed to return
+    ``generated`` (a {"post","topic"} dict or None). Returns (mock_post, saved)."""
     import runtime.jobs._core as core
 
     channel = SimpleNamespace(id=1482368505058955467, name="ask-elixir", type="text")
-    generated = {"event_type": "channel_update", "summary": "s",
-                 "content": "Elixir watches the war. Try asking: > How's the war going?"}
-    revised = {"event_type": "channel_update", "summary": "s",
-               "content": "REVISED COPY. Try asking: > How's the war going?"}
-    verdicts = [
-        {"verdict": "revise", "dimensions": {}, "critique": "too flat"},
-        {"verdict": "pass", "dimensions": {}, "critique": ""},
-    ]
-    gen_calls = []
-
-    def fake_generate(name, lane, ctx, **kwargs):
-        gen_calls.append(ctx)
-        return revised if len(gen_calls) > 1 else generated
 
     async def fake_to_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -141,42 +128,37 @@ def test_job_routes_copy_through_editor_gate():
         patch("runtime.jobs._core.asyncio.to_thread", side_effect=fake_to_thread),
         patch("runtime.jobs._core._get_singleton_channel_id", return_value=channel.id),
         patch("runtime.jobs._core._bot", return_value=SimpleNamespace(get_channel=lambda _id: channel)),
-        patch("runtime.jobs._core._channel_config_by_key", return_value={
-            "name": "#ask-elixir", "lane_key": "ask-elixir",
-        }),
-        patch("runtime.jobs._core.build_lane_memory_context", return_value={}),
-        patch("runtime.jobs._core.db.list_channel_messages", return_value=[]),
-        patch("runtime.jobs._core.elixir_agent.generate_channel_update", side_effect=fake_generate),
-        patch("runtime.jobs._core._runtime_app", return_value=SimpleNamespace(
-            _entry_posts=lambda r: [r["content"]] if r and r.get("content") else [],
-        )),
-        patch("engine.editor.enabled", return_value=True),
-        patch("engine.editor.judge", side_effect=verdicts) as mock_judge,
+        patch("runtime.awareness.read.build_read", return_value={"time": None}),
+        patch("runtime.jobs._core.elixir_agent.generate_ask_elixir_daily", return_value=generated),
         patch("runtime.jobs._core._post_to_elixir", new=AsyncMock()) as mock_post,
         patch("runtime.jobs._core.db.save_message", side_effect=fake_save_message),
         patch("runtime.jobs._core._channel_msg_kwargs", return_value={}),
         patch("runtime.jobs._core._channel_scope", return_value="chan"),
     ):
         asyncio.run(core._ask_elixir_daily_insight())
+    return mock_post, saved
 
-    assert len(gen_calls) == 2, "revise verdict must trigger exactly one recompose"
-    assert "EDITOR CRITIQUE" in gen_calls[1]
-    assert mock_judge.call_count == 2
+
+def test_daily_posts_brain_composed_hook():
+    """The daily posts exactly the brain's composed text — no editor gate,
+    no template rotation."""
+    post_text = "🔥 dez42 is on an 11-win Path of Legends run. Try asking:\n> Show dez42's ranked decks"
+    mock_post, saved = _run_daily_with({"post": post_text, "topic": "ranked-run"})
+
+    assert mock_post.await_count == 1
     posted = mock_post.await_args.args[1]
-    assert posted["content"] == revised["content"]
+    assert posted["content"] == post_text
     assert saved.get("event_type") == "daily_clan_insight"
+    assert saved.get("workflow") == "ask-elixir"
 
-    conn = _conn()
-    try:
-        rows = conn.execute(
-            "SELECT intent_id, verdict, final_copy FROM editor_verdicts"
-        ).fetchall()
-        assert len(rows) == 1
-        assert rows[0]["intent_id"] == 0  # the no-intent marker
-        assert rows[0]["verdict"] == "revise"
-        assert rows[0]["final_copy"] == revised["content"]
-    finally:
-        conn.close()
+
+def test_daily_skips_when_no_hook():
+    """No worthwhile hook (composer returns None) → nothing is posted; fail-open
+    to silence, never filler."""
+    mock_post, saved = _run_daily_with(None)
+
+    assert mock_post.await_count == 0
+    assert saved == {}
 
 
 # --- rehearsal-driven tool fixes (2026-07-04) -------------------------------

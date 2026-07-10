@@ -60,6 +60,22 @@ HOLD_WINDOW = 4              # Layer-1: 3-of-4 holds, 1-of-4 lapses
 HOLD_NEED = 3
 LAPSE_MAX = 1
 
+# Re-nomination after a decline (defer retired 2026-07-10). Declining a card is
+# now the only "not now" — the engine reconsiders on sustained evidence, not a
+# leader-set clock. After a decline, a member who STILL qualifies is re-carded
+# once this cooldown lapses (a decline note like "revisit in a month" writes a
+# longer expires_at that overrides it). Kick uses the per-tick sweep
+# (renominate_after_cooldown); promote/demote honour the same window in the
+# weekly review, which re-emits every eligible member each Monday.
+KICK_RENOMINATE_COOLDOWN_DAYS = 7
+PROMOTE_RENOMINATE_COOLDOWN_DAYS = 14
+DEMOTE_RENOMINATE_COOLDOWN_DAYS = 14
+_RENOMINATE_COOLDOWN_DAYS = {
+    "kick_recommendation": KICK_RENOMINATE_COOLDOWN_DAYS,
+    "promotion_recommendation": PROMOTE_RENOMINATE_COOLDOWN_DAYS,
+    "demotion_recommendation": DEMOTE_RENOMINATE_COOLDOWN_DAYS,
+}
+
 ELDER_PLUS = ("elder", "coLeader", "leader")
 LEADERSHIP_ROLES = ("coLeader", "leader")   # excluded from the elder ranking
 
@@ -92,6 +108,62 @@ def _eligibility_row(row, *, kind: str, rationale: str) -> dict:
         "kind": kind,
         "role": row["role"] or "member",
         "rationale": rationale,
+    }
+
+
+# The engine's actionable tiers per management verdict. Below these a member is
+# only trending (watch/at_risk/building) — context, not a call to act.
+_MGMT_ACTIONABLE = {
+    "kick": {"recommended"},
+    "promote": {"eligible", "recommended"},
+    "demote": {"eligible", "recommended"},
+}
+_MGMT_BUILDING = {
+    "kick": {"watch", "at_risk"},
+    "promote": {"building"},
+    "demote": {"building"},
+}
+_MGMT_STATE_COL = {"kick": "kick_state", "promote": "promote_state", "demote": "demote_state"}
+
+
+def management_read_summary(conn) -> dict:
+    """Read-only snapshot of the engine's CURRENT management verdicts for current
+    members — the authoritative source for who (if anyone) warrants a kick /
+    promotion / demotion right now.
+
+    The awareness brain must treat this as the source of truth for those
+    recommendations rather than re-deriving them from raw donation/war stats: the
+    state machines here ARE the "right logic". ``actionable`` lists the members
+    the engine currently flags (these already back #leader-actions cards);
+    ``building_counts`` is how many are trending toward each action but not yet
+    actionable — context, not a call to act.
+    """
+    rows = conn.execute(
+        """SELECT mm.player_tag, mm.role, mm.kick_state, mm.promote_state, mm.demote_state,
+                  p.current_name
+           FROM member_management mm
+           LEFT JOIN players p ON p.player_tag = mm.player_tag
+           WHERE EXISTS (SELECT 1 FROM clan_memberships cm
+                         WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL)"""
+    ).fetchall()
+    actionable: dict[str, list] = {"kick": [], "promote": [], "demote": []}
+    building = {"kick": 0, "promote": 0, "demote": 0}
+    for row in rows:
+        for action, col in _MGMT_STATE_COL.items():
+            state = row[col] or "none"
+            if state in _MGMT_ACTIONABLE[action]:
+                actionable[action].append({
+                    "player_tag": row["player_tag"],
+                    "player_name": row["current_name"] or row["player_tag"],
+                    "role": row["role"] or "member",
+                    "state": state,
+                })
+            elif state in _MGMT_BUILDING[action]:
+                building[action] += 1
+    return {
+        "actionable": actionable,
+        "building_counts": building,
+        "members_evaluated": len(rows),
     }
 
 
@@ -620,6 +692,96 @@ def withdraw_stale_actions(conn, now: str | None = None) -> list[dict]:
     return withdrawn
 
 
+def _iso_naive(value: str | None):
+    """Parse a stored ISO stamp (with or without a trailing Z) to a naive UTC
+    datetime. Storage stamps (decided_at, expires_at) have no Z; the engine's
+    ``now`` carries one — normalise both. None/garbage → None."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.strip().rstrip("Z"))
+    except ValueError:
+        return None
+
+
+def _renomination_blocked_until(conn, tag: str, action_type: str, cooldown_days: int):
+    """When may a fresh card be raised for (tag, action_type)? Reads the latest
+    DECIDED card: if it was a decline, returns the naive-UTC datetime before
+    which we must not re-raise — ``decided_at + cooldown``, or a longer
+    note-derived ``expires_at`` ("revisit in a month"). Returns None when the
+    last decision was not a decline (nothing to hold) or there is no decided
+    card, so first-time nominations are never blocked."""
+    row = conn.execute(
+        """SELECT status, decided_at, expires_at
+             FROM leader_action_recommendations
+            WHERE target_player_tag = ? AND action_type = ?
+              AND status IN ('done', 'rejected')
+              AND COALESCE(is_test, 0) = 0
+            ORDER BY decided_at DESC, action_id DESC LIMIT 1""",
+        (tag, action_type),
+    ).fetchone()
+    if row is None or row["status"] != "rejected":
+        return None
+    decided_dt = _iso_naive(row["decided_at"])
+    if decided_dt is None:
+        return None
+    ready = decided_dt + timedelta(days=cooldown_days)
+    expires_dt = _iso_naive(row["expires_at"])
+    if expires_dt is not None and expires_dt > ready:
+        ready = expires_dt
+    return ready
+
+
+def renominate_after_cooldown(conn, now: str | None = None) -> list[dict]:
+    """Kick-only re-nomination sweep. ``run_tick_evaluators`` fires a kick card
+    only on the transition INTO 'recommended', so a member declined once but
+    persistently idle would never resurface (their state stays 'recommended', no
+    new transition). Re-raise them once the decline cooldown lapses and they
+    STILL qualify. Idempotent: an open 'proposed' kick card suppresses it, so it
+    creates at most one card per decline cycle.
+
+    Promote/demote are NOT swept here — they re-nominate through the weekly
+    review (which re-emits every eligible member each Monday), gated by the same
+    ``_renomination_blocked_until`` window (see ``run_weekly_review``). Sweeping
+    them per-tick would create cards off the weekly grain (management.md §2)."""
+    now = now or utcnow()
+    now_dt = _iso_naive(now)
+    if now_dt is None:
+        return []
+    rows = conn.execute(
+        """SELECT mm.player_tag AS player_tag,
+                  COALESCE(p.current_name, mm.player_tag) AS player_name
+             FROM member_management mm
+             LEFT JOIN players p ON p.player_tag = mm.player_tag
+            WHERE mm.kick_state = 'recommended'
+              AND NOT EXISTS (
+                  SELECT 1 FROM leader_action_recommendations l3
+                   WHERE l3.target_player_tag = mm.player_tag
+                     AND l3.action_type = 'kick_recommendation'
+                     AND l3.status = 'proposed'
+                     AND COALESCE(l3.is_test, 0) = 0
+              )"""
+    ).fetchall()
+    fired: list[dict] = []
+    for row in rows:
+        blocked_until = _renomination_blocked_until(
+            conn, row["player_tag"], "kick_recommendation", KICK_RENOMINATE_COOLDOWN_DAYS)
+        if blocked_until is None:
+            continue  # last decision wasn't a decline → nothing to re-raise
+        if blocked_until > now_dt:
+            continue  # still inside the cooldown / note window
+        fired.append({
+            "player_tag": row["player_tag"],
+            "player_name": row["player_name"],
+            "action_type": "kick_recommendation",
+            "rationale": (
+                "Re-nominated: kick candidacy sustained "
+                f"{KICK_RENOMINATE_COOLDOWN_DAYS}+ days after the last card was declined."
+            ),
+        })
+    return fired
+
+
 def _has_leadership_hold(tag: str) -> bool:
     """Open flag_member_watch hold: an active leadership watch memory for the
     tag. v5.1 memory pass: memories live in the engine DB (memory.md D1), so
@@ -778,6 +940,25 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
             "promote_state": p_state, "promote_qualifying_weeks": p_weeks,
             "demote_state": d_state, "kick_state": m["kick_state"] or "none",
         })
+
+    # Honour the decline cooldown: a member the leaders recently declined stays
+    # 'eligible' (they still qualify) but is not re-carded until the cooldown
+    # (or a longer decline-note window) lapses — otherwise a Monday decline
+    # reappears the very next Monday, ignoring the leader's "not now".
+    now_dt = _iso_naive(now)
+
+    def _past_cooldown(rows: list[dict], action_type: str) -> list[dict]:
+        cooldown = _RENOMINATE_COOLDOWN_DAYS[action_type]
+        kept: list[dict] = []
+        for r in rows:
+            blocked = _renomination_blocked_until(conn, r["player_tag"], action_type, cooldown)
+            if blocked is not None and now_dt is not None and blocked > now_dt:
+                continue
+            kept.append(r)
+        return kept
+
+    promote_eligible = _past_cooldown(promote_eligible, "promotion_recommendation")
+    demote_eligible = _past_cooldown(demote_eligible, "demotion_recommendation")
 
     return {
         "week_anchor": week_anchor,
