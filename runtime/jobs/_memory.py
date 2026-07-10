@@ -550,7 +550,7 @@ def _build_memory_synthesis_context():
 
     # Recent posts from the channels that carry the week's operational and
     # narrative story. Keyed on channel names that match prompts.py config.
-    channel_keys = ("leader-lounge", "river-race", "clan-events", "announcements")
+    channel_keys = ("leader-lounge", "elixir", "announcements")
     posts_by_channel: dict[str, list[dict]] = {}
     for key in channel_keys:
         try:

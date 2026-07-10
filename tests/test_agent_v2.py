@@ -1410,7 +1410,7 @@ def test_create_chat_completion_respects_model_env_overrides():
         assert create.call_args.kwargs["model"] == "claude-test-chat"  # clanops is chat-tier
 
         elixir_agent._create_chat_completion(
-            workflow="editorial",
+            workflow="unregistered_workflow",  # unknown → lightweight default tier
             messages=[{"role": "user", "content": "status"}],
         )
         assert create.call_args.kwargs["model"] == "claude-test-lightweight"
