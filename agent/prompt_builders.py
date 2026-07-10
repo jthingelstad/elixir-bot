@@ -152,6 +152,24 @@ def _awareness_system():
     )
 
 
+def _ask_elixir_daily_system():
+    """System prompt for the brain-powered #ask-elixir daily post.
+
+    Loads the ask_elixir_daily agent prompt (a rich, data-grounded
+    feature-discovery invitation). Same identity/knowledge/policy blocks as the
+    awareness brain so it composes in voice and grounds on real clan data — but
+    its job is to invite members to engage, not to narrate the situation.
+    """
+    return _build_system_prompt(
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        prompts.policy(),
+        prompts.agent_prompt("ask_elixir_daily"),
+        _discord_formatting_guidance(),
+        _discord_emoji_guidance(),
+    )
+
+
 def _memory_synthesis_system():
     """System prompt for the weekly memory-synthesis job.
 
@@ -377,7 +395,7 @@ def _clanops_system(channel_name):
         "Use tools to ground factual claims. Be direct, concrete, and operational. "
         "If a member is referenced by name or Discord handle, resolve them first instead of guessing.\n\n"
         "When leaders ask what you are monitoring, which recommendations are open, what you would do next, "
-        "why you posted something, or whether a recommendation was deferred, use `get_elixir_state` first. "
+        "why you posted something, or whether a recommendation was declined, use `get_elixir_state` first. "
         "Use aspect='decision_cases' for open/due recommendations, aspect='communication_intents' for recent planned/skipped/delivered/failed communications, "
         "aspect='war_season' for the live war-season snapshot, "
         "aspect='event_summary' or aspect='recent_events' for the event stream, "
@@ -915,6 +933,7 @@ __all__ = [
     "_weekly_digest_system",
     "_event_system",
     "_awareness_system",
+    "_ask_elixir_daily_system",
     "_memory_synthesis_system",
     "_clan_chat_copy_system",
 ]

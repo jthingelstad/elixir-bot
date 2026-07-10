@@ -661,7 +661,6 @@ def build_leader_action_feedback_synthesis_context(
     counts = {
         "total": len(actions),
         ACTION_DONE: sum(1 for item in actions if item.get("status") == ACTION_DONE),
-        ACTION_DEFERRED: sum(1 for item in actions if item.get("status") == ACTION_DEFERRED),
         ACTION_REJECTED: sum(1 for item in actions if item.get("status") == ACTION_REJECTED),
         "with_notes": sum(1 for item in actions if item.get("decision_note")),
     }
@@ -743,7 +742,7 @@ def upsert_leader_action_feedback_profile(
             body = (
                 f"Decision stats (last {decision_stats['window_days']}d): "
                 f"done {decision_stats[ACTION_DONE]} · declined {decision_stats[ACTION_REJECTED]} · "
-                f"deferred {decision_stats[ACTION_DEFERRED]} · decline rate {rate_text}\n\n"
+                f"decline rate {rate_text}\n\n"
             ) + body
     title = f"Arena Relay Feedback: {clean_type}"
     event_id = _feedback_event_id(clean_type)
@@ -928,18 +927,17 @@ def leader_action_decision_stats(
 ) -> dict:
     """Trailing decision counts and decline rate, per action type.
 
-    decline_rate is rejected / (done + rejected) — defers are neutral and
-    excluded from the denominator. Returns one stats dict when action_type
-    is given, else a mapping of action_type -> stats dict.
+    decline_rate is rejected / (done + rejected). Returns one stats dict when
+    action_type is given, else a mapping of action_type -> stats dict.
     """
     window_days = max(1, int(days or 30))
     cutoff = _cutoff_hours_ago(window_days * 24)
     where = [
         "COALESCE(is_test, 0) = 0",
         "decided_at >= ?",
-        "status IN (?, ?, ?)",
+        "status IN (?, ?)",
     ]
-    params: list = [cutoff, ACTION_DONE, ACTION_REJECTED, ACTION_DEFERRED]
+    params: list = [cutoff, ACTION_DONE, ACTION_REJECTED]
     clean_type = (action_type or "").strip() or None
     if clean_type:
         where.append("action_type = ?")
@@ -955,7 +953,6 @@ def leader_action_decision_stats(
             "window_days": window_days,
             ACTION_DONE: 0,
             ACTION_REJECTED: 0,
-            ACTION_DEFERRED: 0,
             "decided": 0,
             "decline_rate": None,
         }
@@ -981,7 +978,6 @@ def decide_leader_action_by_message(
     discord_user_id: str | int,
     emoji: str,
     decision_note: str | None = None,
-    defer_days: int | None = None,
     decided_at: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
@@ -994,7 +990,6 @@ def decide_leader_action_by_message(
         discord_user_id=discord_user_id,
         emoji=emoji,
         decision_note=decision_note,
-        defer_days=defer_days,
         decided_at=decided_at,
         conn=conn,
     )
@@ -1008,7 +1003,6 @@ def decide_leader_action(
     discord_user_id: str | int,
     emoji: str | None = None,
     decision_note: str | None = None,
-    defer_days: int | None = None,
     decided_at: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[dict]:
@@ -1016,7 +1010,7 @@ def decide_leader_action(
     if not action:
         return None
     status = (status or "").strip()
-    if status not in {ACTION_DONE, ACTION_DEFERRED, ACTION_REJECTED}:
+    if status not in {ACTION_DONE, ACTION_REJECTED}:
         raise ValueError(f"invalid leader action status: {status}")
     stamp = decided_at or _db._utcnow()
     outcome = None
@@ -1024,17 +1018,22 @@ def decide_leader_action(
         action["status"] = status
         outcome = _pending_outcome(action, decided_at=stamp)
     clean_note = " ".join((decision_note or "").split()) or None
-    deferred_until = None
-    clean_defer_days = None
     expires_at = action.get("expires_at")
-    if status == ACTION_DEFERRED:
-        try:
-            clean_defer_days = max(1, min(int(defer_days or 1), 30))
-        except (TypeError, ValueError):
-            clean_defer_days = 1
-        parsed = _parse_utc(stamp) or datetime.now(timezone.utc).replace(tzinfo=None)
-        deferred_until = (parsed + timedelta(days=clean_defer_days)).strftime("%Y-%m-%dT%H:%M:%S")
-        expires_at = deferred_until
+    # A decline reason like "revisit in a month" tunes when the engine may
+    # re-nominate this member: parse it into a suppression window written to
+    # expires_at (mirrors record_leader_action_note_by_message). No note → the
+    # engine's default per-dimension re-nomination cooldown applies.
+    if status == ACTION_REJECTED and clean_note:
+        feedback = _note_feedback(clean_note, noted_at=stamp)
+        if feedback.get("suppressed_until"):
+            expires_at = feedback["suppressed_until"]
+            outcome = {
+                **(outcome or {}),
+                "leader_note": {
+                    "category": feedback.get("note_category"),
+                    "suppressed_until": feedback.get("suppressed_until"),
+                },
+            }
     conn.execute(
         """
         UPDATE leader_action_recommendations
@@ -1042,7 +1041,7 @@ def decide_leader_action(
             decision_emoji = ?, decision_note = COALESCE(?, decision_note),
             decision_note_at = CASE WHEN ? IS NOT NULL THEN ? ELSE decision_note_at END,
             decision_note_by_discord_user_id = CASE WHEN ? IS NOT NULL THEN ? ELSE decision_note_by_discord_user_id END,
-            defer_days = ?, deferred_until = ?, expires_at = ?, outcome_json = ?, updated_at = ?
+            expires_at = ?, outcome_json = ?, updated_at = ?
         WHERE action_id = ?
         """,
         (
@@ -1055,8 +1054,6 @@ def decide_leader_action(
             stamp,
             clean_note,
             str(discord_user_id),
-            clean_defer_days,
-            deferred_until,
             expires_at,
             _json_dumps(outcome),
             stamp,
@@ -1070,41 +1067,26 @@ def decide_leader_action(
             # Inlined at the v5.1 cut (storage.decision_cases retired with Gen B):
             # the decision_cases table is carried, so the case-sync is two UPDATEs.
             case_now = _db._utcnow()
-            if status == ACTION_DEFERRED and deferred_until:
-                conn.execute(
-                    """UPDATE decision_cases
-                       SET status = 'deferred', due_at = ?,
-                           resolution = COALESCE(?, resolution), updated_at = ?
-                       WHERE case_id = ?""",
-                    (
-                        deferred_until,
-                        clean_note or f"Deferred for {clean_defer_days} day(s).",
-                        case_now,
-                        int(updated["case_id"]),
-                    ),
-                )
-                conn.commit()
-            elif status in (ACTION_DONE, ACTION_REJECTED):
-                case_status = "resolved" if status == ACTION_DONE else "dismissed"
-                default_note = (
-                    "Leader accepted the recommended action."
-                    if status == ACTION_DONE
-                    else "Leader declined the recommended action."
-                )
-                conn.execute(
-                    """UPDATE decision_cases
-                       SET status = ?, resolved_at = ?, resolution = ?,
-                           due_at = NULL, updated_at = ?
-                       WHERE case_id = ?""",
-                    (
-                        case_status,
-                        case_now,
-                        clean_note or default_note,
-                        case_now,
-                        int(updated["case_id"]),
-                    ),
-                )
-                conn.commit()
+            case_status = "resolved" if status == ACTION_DONE else "dismissed"
+            default_note = (
+                "Leader accepted the recommended action."
+                if status == ACTION_DONE
+                else "Leader declined the recommended action."
+            )
+            conn.execute(
+                """UPDATE decision_cases
+                   SET status = ?, resolved_at = ?, resolution = ?,
+                       due_at = NULL, updated_at = ?
+                   WHERE case_id = ?""",
+                (
+                    case_status,
+                    case_now,
+                    clean_note or default_note,
+                    case_now,
+                    int(updated["case_id"]),
+                ),
+            )
+            conn.commit()
         except Exception:
             # The card decision is the user action of record; case sync should
             # not make the Discord reaction handler fail.

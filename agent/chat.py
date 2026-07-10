@@ -41,6 +41,42 @@ def _preview_text(value, limit=500):
     return text[:limit]
 
 
+def _summarize_tool_args(args: dict, limit: int = 120) -> str:
+    """Compact one-line summary of a tool call's arguments for the trace."""
+    if not isinstance(args, dict) or not args:
+        return ""
+    parts = []
+    for k, v in args.items():
+        sv = json.dumps(v, default=str, ensure_ascii=False) if not isinstance(v, str) else v
+        if len(sv) > 40:
+            sv = sv[:37] + "…"
+        parts.append(f"{k}={sv}")
+    out = ", ".join(parts)
+    return out[:limit] + ("…" if len(out) > limit else "")
+
+
+def _summarize_tool_result(result) -> str:
+    """Compact summary of a tool result envelope (JSON string) for the trace:
+    surfaces the error kind on failure, or size + top-level shape on success."""
+    if result is None:
+        return "no result"
+    raw = result if isinstance(result, str) else json.dumps(result, default=str)
+    try:
+        obj = json.loads(raw)
+    except (TypeError, ValueError):
+        return f"{len(raw)}B (unparsed)"
+    if isinstance(obj, dict):
+        if obj.get("error"):
+            return f"error: {obj.get('error')}"
+        # Tool envelopes wrap the payload; describe the most informative shape.
+        keys = list(obj.keys())
+        shape = f"{len(keys)} keys" if keys else "empty"
+        return f"ok · {shape} · {len(raw)}B"
+    if isinstance(obj, list):
+        return f"ok · {len(obj)} items · {len(raw)}B"
+    return f"ok · {len(raw)}B"
+
+
 def _failure_payload(kind, detail=None, *, response_text=None, parsed_obj=None, phase=None):
     payload = {"kind": kind}
     if detail is not None:
@@ -326,7 +362,7 @@ def _tool_result_succeeded(envelope_json: str) -> bool:
 def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                      temperature=0.7, max_tokens=4096, workflow="generic",
                      allowed_tools=None, response_schema=None, strict_json=True,
-                     return_errors=False, tool_stats=None):
+                     return_errors=False, tool_stats=None, on_event=None):
     """Run a chat completion with tool-calling loop.
 
     conversation_history: optional list of {role, content} dicts to inject
@@ -374,6 +410,16 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
     tool_stats.setdefault("write_calls_succeeded", 0)
     tool_stats.setdefault("write_calls_denied", 0)
 
+    def _emit(event: dict) -> None:
+        """Fire a live progress event (tool call, truncation) to an optional
+        observer. Best-effort — a broken observer must never break the turn."""
+        if on_event is None:
+            return
+        try:
+            on_event(event)
+        except Exception:
+            log.debug("on_event observer raised (ignored)", exc_info=True)
+
     def _create_completion(call_messages, *, allow_tools=True):
         start = time.perf_counter()
         use_tools = allow_tools and bool(allowed_tools)
@@ -419,6 +465,7 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
 
     def _truncation_failure(phase, content):
         log.warning("llm_truncated workflow=%s phase=%s max_tokens=%d", workflow, phase, max_tokens)
+        _emit({"type": "truncation", "phase": phase, "max_tokens": max_tokens})
         if return_errors:
             return _failure_payload(
                 "truncation",
@@ -575,6 +622,15 @@ def _chat_with_tools(system_prompt, user_message, conversation_history=None,
                     )
                     if is_awareness_write and _tool_result_succeeded(result):
                         tool_stats["write_calls_succeeded"] += 1
+            trace_entry = {
+                "tool": fn_name,
+                "args": _summarize_tool_args(fn_args),
+                "round": _round,
+                "allowed": allowed,
+                "result": _summarize_tool_result(result),
+            }
+            tool_stats.setdefault("tool_trace", []).append(trace_entry)
+            _emit({"type": "tool", **trace_entry})
             tool_result_blocks.append({
                 "type": "tool_result",
                 "tool_use_id": tool_use.id,

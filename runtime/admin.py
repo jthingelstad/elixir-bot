@@ -353,7 +353,7 @@ def _build_relay_status_report(*, view: str = "all", limit: int = 10, conn=None)
         elif view == "decided":
             actions = [
                 action for action in db.list_leader_actions(limit=limit * 3, conn=conn)
-                if action.get("status") in {db.ACTION_DONE, db.ACTION_DEFERRED, db.ACTION_REJECTED}
+                if action.get("status") in {db.ACTION_DONE, db.ACTION_REJECTED}
             ][:limit]
         else:
             actions = db.list_leader_actions(limit=limit, conn=conn)
@@ -368,7 +368,7 @@ def _build_relay_status_report(*, view: str = "all", limit: int = 10, conn=None)
         pending_count = len(db.list_leader_actions(status=db.ACTION_PROPOSED, limit=50, conn=conn))
         lines = ["**Arena Relay Leader Actions**"]
         lines.append(f"- Pending: {pending_count}")
-        lines.append("- Feedback: ✅/☑️ means done, ❌ means rejected, defer is terminal")
+        lines.append("- Feedback: ✅/☑️ means done, ❌ means declined (engine re-nominates on sustained evidence)")
         lines.append("")
         if not refreshed:
             lines.append("_No leader actions recorded yet._")

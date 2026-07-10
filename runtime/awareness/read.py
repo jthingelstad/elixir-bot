@@ -1,0 +1,472 @@
+"""Assemble "the read" — the situation snapshot the awareness loop reviews.
+
+``build_read`` collapses the v5.1 storage palette (the same modules the
+Observatory reads through ``runtime/webapp/queries.py``) into a single dict
+handed to ``agent.workflows.run_awareness_tick``. It is pure: local DB reads
+only, no Discord I/O and no LLM call.
+
+Every block is optional and degrades independently — a loader that raises
+appends its name to ``_degraded`` and yields an empty/None block, so the read
+renders sanely on an empty v5.1 DB. This mirrors the v4-era ``_note_degraded``
+discipline, rebuilt from current v5.1 sources.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
+
+import db
+from storage import cases, events_read, leader_actions, revisits, war_status
+
+log = logging.getLogger("elixir")
+
+
+# Signals the awareness loop is REQUIRED to address (awareness.md "Hard-Post
+# Floors"). Both the doc names and the concrete v5.1 event_types are listed so
+# the derivation works regardless of which vocabulary the stream carries.
+HARD_POST_EVENT_TYPES = frozenset({
+    "war_battle_rank_change",
+    "war_week_complete",
+    "war_season_complete",
+    "capability_unlock",
+    "member_join",
+    "member_leave",
+    # concrete v5.1 event_stream types
+    "member_joined",
+    "member_left",
+    "week_finished",
+    "season_closed",
+})
+
+
+# event_type → lane. Player-stream events default to "milestone"; the streams
+# themselves (player/clan/war) give the fallback lane.
+_LANE_BY_EVENT_TYPE: dict[str, str] = {
+    # war
+    "season_closed": "war",
+    "season_started": "war",
+    "war_day_opened": "war",
+    "week_finished": "war",
+    "war_battle_rank_change": "war",
+    # clan_event
+    "member_joined": "clan_event",
+    "member_left": "clan_event",
+    "role_changed": "clan_event",
+    "weekly_donation_leader": "clan_event",
+    # battle_mode
+    "pol_promotion": "battle_mode",
+    "pol_season_closed": "battle_mode",
+    # system
+    "capability_unlock": "system",
+}
+
+_LANE_BY_STREAM: dict[str, str] = {
+    "war": "war",
+    "clan": "clan_event",
+    "player": "milestone",
+}
+
+_LANE_KEYS = ("war", "battle_mode", "milestone", "clan_event", "leadership", "system")
+
+# Channels whose recent traffic we surface as channel_memory, keyed by the
+# communication_intents.lane value the delivery layer writes. The brain posts to
+# only these two; each delivered post is recorded as a fulfilled "awareness:post"
+# intent (store.record_awareness_post) whose payload carries the content preview.
+_CHANNEL_LANES = (
+    "announcements",
+    "elixir",
+)
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# The signal feed is "what's new since the last tick" — not a rolling window.
+# Player / clan / war are pure deltas: only events new since the last tick, with
+# backfilled rows (seeded history) dropped. A hard floor bounds any single tick
+# to ~1 day of catch-up so a long downtime can't flood one tick with a backlog.
+# GAME events are handled separately (see _game_context) — a new card / seasonal
+# event is not a one-tick blip; the brain needs it as standing background so it
+# can both announce "Ronin just appeared" AND, weeks later, recognize a member
+# unlocking that new card.
+_SIGNAL_STREAMS = ("player", "clan", "war")
+_SIGNAL_CATCHUP_FLOOR_DAYS = 1
+_SIGNAL_LIMIT = 80
+_GAME_CONTEXT_DAYS = 28
+
+
+def _signals(conn) -> list[dict]:
+    from runtime.awareness import store
+    floor = (_now() - timedelta(days=_SIGNAL_CATCHUP_FLOOR_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    last_at = store.last_tick_at(conn=conn)
+    since = max(last_at, floor) if last_at else floor
+    return events_read.list_recent_events(
+        since=since,
+        streams=_SIGNAL_STREAMS,
+        exclude_backfilled=True,
+        limit=_SIGNAL_LIMIT,
+        conn=conn,
+    )
+
+
+def _game_context(conn) -> dict:
+    """Standing game-world background: recently-added cards and recent game
+    events, over a wider window than the delta feed. Each carries ``is_new``
+    (first seen since the last tick) so the brain can announce a just-appeared
+    card once, then keep the card as context for weeks — e.g. spotting members
+    unlocking it. Backfilled rows are INCLUDED here (unlike the delta feed);
+    ``is_new`` keys off recency, so seeded history reads as context, not news."""
+    from runtime.awareness import store
+    last_at = store.last_tick_at(conn=conn)
+    rows = events_read.list_recent_events(
+        days=_GAME_CONTEXT_DAYS, streams=("game",), limit=40, conn=conn,
+    )
+
+    def _entry(e: dict) -> dict:
+        payload = e.get("payload") or {}
+        observed = e.get("observed_at") or ""
+        return {
+            "name": payload.get("name") or payload.get("title") or payload.get("event_tag"),
+            "rarity": payload.get("rarity"),
+            "elixir_cost": payload.get("elixir_cost"),
+            "seen_at": observed[:10],
+            "is_new": bool(last_at and observed > last_at),
+        }
+
+    cards = [_entry(e) for e in rows if e.get("event_type") == "card_added"]
+    events = [_entry(e) for e in rows if e.get("event_type") == "event_started"]
+    return {"recent_cards": cards, "recent_events": events, "window_days": _GAME_CONTEXT_DAYS}
+
+
+def _parse_json(value, default=None):
+    import json
+
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _signal_key(event: dict) -> str:
+    """A stable identifier the agent echoes back in ``covers_signal_keys``."""
+    key = event.get("dedup_key")
+    if key:
+        return str(key)
+    return ":".join(str(event.get(field) or "") for field in (
+        "stream", "event_type", "subject_tag", "observed_at",
+    ))
+
+
+def _lane_for(event: dict) -> str:
+    event_type = event.get("event_type") or ""
+    lane = _LANE_BY_EVENT_TYPE.get(event_type)
+    if lane:
+        return lane
+    return _LANE_BY_STREAM.get(event.get("stream") or "", "system")
+
+
+def _compact_signal(event: dict) -> dict:
+    return {
+        "signal_key": _signal_key(event),
+        "event_type": event.get("event_type"),
+        "stream": event.get("stream"),
+        "subject_tag": event.get("subject_tag"),
+        "observed_at": event.get("observed_at"),
+        "scope": event.get("scope"),
+    }
+
+
+# --------------------------------------------------------------------- blocks
+
+def _war_clock_dict(conn) -> dict | None:
+    """Live war clock rebuilt from the stored race projection — the same
+    adapter as ``runtime.webapp.queries._war_clock_dict``."""
+    from engine.clock import war_clock
+    from engine.tick import HOME_CLAN
+
+    row = conn.execute(
+        "SELECT payload_json, observed_at FROM state_baselines "
+        "WHERE entity_kind='riverrace' AND entity_tag=? AND aspect='race'",
+        (HOME_CLAN,),
+    ).fetchone()
+    if row is None:
+        return None
+    p = _parse_json(row["payload_json"], {}) or {}
+    cr_shaped = {
+        "periodType": p.get("period_type"),
+        "periodIndex": p.get("period_index"),
+        "sectionIndex": p.get("section_index"),
+        "clan": {"tag": p.get("our_tag"), "fame": p.get("our_fame")},
+    }
+    clock = asdict(war_clock(cr_shaped, _now(), season_id=p.get("season_id")))
+    clock["baseline_observed_at"] = row["observed_at"]
+    return clock
+
+
+def _time_block(conn, war: dict | None) -> dict | None:
+    """Authoritative "what moment is it in the war". None when no war is
+    active. Built from war_status (which itself derives from the war clock);
+    falls back to the raw war clock if war_status is unavailable."""
+    if war:
+        return {
+            "phase": war.get("phase"),
+            "phase_display": war.get("phase_display"),
+            "day_number": (
+                war.get("battle_day_number")
+                if war.get("battle_day_number") is not None
+                else war.get("practice_day_number")
+            ),
+            "is_final_battle_day": bool(war.get("final_battle_day_active")),
+            "is_final_practice_day": bool(war.get("final_practice_day_active")),
+            "is_colosseum_week": bool(war.get("colosseum_week")),
+            "season_id": war.get("season_id"),
+            "week": war.get("week"),
+            "period_ends_at": war.get("period_ends_at"),
+        }
+    clock = _war_clock_dict(conn)
+    if not clock:
+        return None
+    return {
+        "phase": clock.get("phase"),
+        "season_id": clock.get("season_id"),
+        "week": clock.get("week"),
+        "is_colosseum_week": bool(clock.get("is_colosseum_week")),
+    }
+
+
+def _standing_block(war: dict | None) -> dict | None:
+    """Clan rank, fame, deficit-to-leader, and the rival scoreboard."""
+    if not war:
+        return None
+    standings = war.get("race_standings") or []
+    if not standings:
+        return None
+    us = next((s for s in standings if s.get("is_us")), None)
+    if us is None:
+        return None
+    # Use the coalesced live score (active_score), not raw `fame` — the API keeps
+    # the current war's accumulating score in periodPoints and `fame` reads 0 all
+    # week in the current format (that's why the brain saw 0 fame while we led).
+    def _score(s):
+        return s.get("active_score") or s.get("fame") or 0
+    leader_score = _score(standings[0]) if standings else 0
+    our_score = _score(us)
+    our_rank = us.get("rank")
+    return {
+        "rank": our_rank,
+        "fame": our_score,
+        "leader_fame": leader_score,
+        "deficit_to_leader": (leader_score - our_score) if our_rank != 1 else 0,
+        "field_size": len(standings),
+        "score_source": us.get("score_source") or "fame",
+        "scoreboard": [
+            {"name": s.get("clan_name"), "fame": _score(s), "rank": s.get("rank")}
+            for s in standings
+        ],
+    }
+
+
+def _channel_memory(conn) -> dict:
+    """Recent per-lane traffic (communication intents + editor verdicts) so the
+    agent knows what each channel has already heard from it."""
+    out: dict[str, dict] = {}
+    for lane in _CHANNEL_LANES:
+        intents = [dict(r) for r in conn.execute(
+            "SELECT intent_type, status, created_at, discord_message_id, payload_json "
+            "FROM communication_intents WHERE lane = ? "
+            "ORDER BY created_at DESC LIMIT 5",
+            (lane,),
+        ).fetchall()]
+        out[lane] = {
+            "recent_intents": [
+                {
+                    "intent_type": r.get("intent_type"),
+                    "status": r.get("status"),
+                    "created_at": r.get("created_at"),
+                    "posted": bool(r.get("discord_message_id")),
+                    # The content preview lives in the payload now that the brain
+                    # is the writer — this is what tells it "here's what I already
+                    # said on this channel" so it doesn't repeat an angle.
+                    "preview": _intent_content_preview(r.get("payload_json")),
+                }
+                for r in intents
+            ],
+        }
+    return out
+
+
+def _intent_content_preview(payload_json) -> str:
+    """Pull the content preview out of an awareness:post intent payload (best
+    effort; empty string for legacy intents without a content field)."""
+    if not payload_json:
+        return ""
+    try:
+        payload = json.loads(payload_json)
+    except (ValueError, TypeError):
+        return ""
+    return str(payload.get("content") or "")[:200]
+
+
+def _recent_agent_writes(limit: int = 10) -> list[dict]:
+    """Recent leadership-scope memories Elixir authored, so the agent avoids
+    re-flagging a watch or re-writing an arc it just recorded.
+
+    The memory store lives in its own database (``managed_memory_connection``
+    opens it per call), so this never borrows the operational connection.
+    """
+    import memory_store
+
+    mconn = memory_store.get_memory_connection()
+    try:
+        memory_store.ensure_memory_schema(mconn)
+    finally:
+        mconn.close()
+    memories = memory_store.list_memories(viewer_scope="leadership", limit=limit * 3)
+    out: list[dict] = []
+    for m in memories:
+        if m.get("source_type") not in {"elixir_inference", "elixir_synthesis"}:
+            continue
+        out.append({
+            "memory_id": m.get("memory_id"),
+            "title": m.get("title"),
+            "tags": m.get("tags") or [],
+            "member_tag": m.get("member_tag"),
+            "created_at": m.get("created_at"),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _leader_action_board(conn) -> dict:
+    """Open #leader-actions cards (undecided asks) + recent decisions."""
+    open_cards = leader_actions.list_leader_actions(status="proposed", limit=15, conn=conn)
+    recent = leader_actions.list_leader_actions(limit=15, conn=conn)
+    decided = [a for a in recent if (a.get("status") or "proposed") != "proposed"]
+
+    def _compact(action: dict) -> dict:
+        return {
+            "action_id": action.get("action_id"),
+            "action_type": action.get("action_type"),
+            "objective": action.get("objective"),
+            "status": action.get("status"),
+            "target_player_tag": action.get("target_player_tag"),
+            "target_player_name": action.get("target_player_name"),
+            "decision_emoji": action.get("decision_emoji"),
+            "decision_note": action.get("decision_note"),
+            "proposed_at": action.get("proposed_at"),
+            "decided_at": action.get("decided_at"),
+        }
+
+    return {
+        "open": [_compact(a) for a in open_cards],
+        "recent_decisions": [_compact(a) for a in decided[:10]],
+    }
+
+
+def _decision_cases(conn) -> dict:
+    """Compact due/open cases with no overlap — ``decision_case_snapshot``
+    strips the internal ``state`` blob and dedupes ``open`` against ``due``
+    ("due = needs attention now; open = already being monitored")."""
+    return cases.decision_case_snapshot(open_limit=25, due_limit=25, dedupe=True, conn=conn)
+
+
+def _management(conn) -> dict:
+    """The engine's current promote/demote/kick verdicts — the authoritative
+    source for management recommendations (see engine.management). Imported
+    lazily to avoid a runtime->engine import at module load."""
+    from engine.management import management_read_summary
+    return management_read_summary(conn)
+
+
+def _due_revisits(conn, limit: int = 20) -> list[dict]:
+    rows = revisits.list_due_revisits(limit=limit, conn=conn)
+    return [
+        {
+            "signal_key": row.get("signal_key"),
+            "due_at": row.get("due_at"),
+            "rationale": row.get("rationale"),
+            "scheduled_at": row.get("created_at"),
+        }
+        for row in rows
+    ]
+
+
+def build_read(conn=None) -> dict:
+    """Assemble the awareness read from the v5.1 storage palette.
+
+    Pass ``conn`` to share a connection; otherwise a fresh read connection is
+    opened and closed here. Every block degrades independently — the returned
+    dict always carries the expected keys plus a ``_degraded`` list naming any
+    block whose loader raised this build.
+    """
+    own = conn is None
+    if own:
+        conn = db.get_connection()
+    degraded: list[str] = []
+
+    def _load(name, fn, default):
+        try:
+            return fn()
+        except Exception:
+            log.warning("build_read: block %s degraded", name, exc_info=True)
+            degraded.append(name)
+            return default
+
+    try:
+        war = _load("war_status", lambda: war_status.get_current_war_status(conn=conn), None)
+
+        events = _load("signals", lambda: _signals(conn), [])
+        signals_by_lane: dict[str, list[dict]] = {key: [] for key in _LANE_KEYS}
+        hard_post_signals: list[dict] = []
+        for event in events:
+            lane = _lane_for(event)
+            compact = _compact_signal(event)
+            signals_by_lane.setdefault(lane, []).append(compact)
+            if (event.get("event_type") or "") in HARD_POST_EVENT_TYPES:
+                hard_post_signals.append(compact)
+
+        read = {
+            "generated_at": _now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "time": _load("time", lambda: _time_block(conn, war), None),
+            "standing": _load("standing", lambda: _standing_block(war), None),
+            "war_season": _load(
+                "war_season", lambda: war_status.get_war_season_snapshot(conn=conn), None
+            ),
+            "signals_by_lane": signals_by_lane,
+            "hard_post_signals": hard_post_signals,
+            "game_context": _load(
+                "game_context", lambda: _game_context(conn),
+                {"recent_cards": [], "recent_events": [], "window_days": _GAME_CONTEXT_DAYS},
+            ),
+            "decision_cases": _load("decision_cases", lambda: _decision_cases(conn), {"due": [], "open": []}),
+            "channel_memory": _load("channel_memory", lambda: _channel_memory(conn), {}),
+            "recent_agent_writes": _load("recent_agent_writes", lambda: _recent_agent_writes(), []),
+            "leader_action_board": _load(
+                "leader_action_board", lambda: _leader_action_board(conn),
+                {"open": [], "recent_decisions": []},
+            ),
+            "management": _load(
+                "management", lambda: _management(conn),
+                {"actionable": {"kick": [], "promote": [], "demote": []},
+                 "building_counts": {}, "members_evaluated": 0},
+            ),
+            "due_revisits": _load("due_revisits", lambda: _due_revisits(conn), []),
+        }
+        read["_degraded"] = degraded
+        read["_signal_count"] = len(events)
+        if degraded:
+            log.info("build_read: %d block(s) degraded: %s", len(degraded), ", ".join(degraded))
+        return read
+    finally:
+        if own:
+            conn.close()
+
+
+__all__ = ["build_read", "HARD_POST_EVENT_TYPES"]

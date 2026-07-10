@@ -15,6 +15,7 @@ from agent.core import (
 from agent.chat import _clan_context, _format_memory_context, _format_recent_posts, _parse_response
 from agent.prompt_builders import (
     _arena_relay_observation_system,
+    _ask_elixir_daily_system,
     _awareness_system,
     _channel_lane_system,
     _clan_chat_copy_system,
@@ -36,7 +37,7 @@ from agent.prompt_builders import (
     _war_recap_system,
     _weekly_digest_system,
 )
-from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
+from agent.tool_policy import READ_TOOLS, RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
 
 
 def _chat_with_tools(*args, **kwargs):
@@ -426,7 +427,44 @@ def synthesize_leader_action_feedback(context: dict):
     )
 
 
-def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None):
+def generate_ask_elixir_daily(read: dict, *, tool_stats: dict | None = None):
+    """Brain-composed #ask-elixir daily post: a rich, data-true feature-discovery
+    invitation. Given the full clan read, the brain surfaces one genuinely
+    interesting hook and invites members to explore it with answerable questions.
+
+    Returns ``{"post": str, "topic": str|None}`` on success, or ``None`` when
+    there's no worthwhile hook / composition failed — the caller then posts
+    nothing that day (no filler, fail-open-to-silence)."""
+    public = {k: v for k, v in (read or {}).items() if not k.startswith("_")}
+    user_msg = (
+        "Here is the current clan situation. Compose today's #ask-elixir "
+        "feature-discovery post per your system prompt: one real, specific hook "
+        "from what's happening now, then an invitation with 2-3 answerable "
+        "sample questions. If there's genuinely no worthwhile hook today, return "
+        "no post.\n\n"
+        f"```json\n{json.dumps(public, indent=2, default=str)}\n```\n"
+    )
+    result = _chat_with_tools(
+        _ask_elixir_daily_system(),
+        user_msg,
+        workflow="ask_elixir_daily",
+        max_tokens=1400,
+        allowed_tools=TOOLSETS_BY_WORKFLOW["ask_elixir_daily"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["ask_elixir_daily"],
+        strict_json=True,
+        return_errors=True,
+        tool_stats=tool_stats,
+    )
+    if not isinstance(result, dict) or "_error" in result:
+        return None
+    post = str(result.get("post") or "").strip()
+    if not post:
+        return None
+    return {"post": post, "topic": result.get("topic")}
+
+
+def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None,
+                       shadow: bool = False, on_event=None):
     """Run one awareness-loop turn. Receives the assembled Situation, returns
     a structured post plan: ``{"posts": [...], "skipped_reason": "..."}``.
 
@@ -438,25 +476,89 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None):
     ``write_calls_issued``, ``write_calls_succeeded``, and ``write_calls_denied``
     so the caller can persist the awareness write budget usage in
     ``awareness_ticks``.
+
+    ``shadow`` (default False) preserves today's behavior. When True, the turn
+    runs with READ-ONLY tools (no write tools in the allowed set) so the model
+    physically cannot write, regardless of the awareness spec's
+    ``write_tools_allowed``. Used by the shadow-mode awareness loop.
     """
     # Strip `_`-prefixed internal fields (e.g., _raw_signal_count, _clan_tag)
     # before serializing — the agent does not need runtime bookkeeping.
     public_situation = {k: v for k, v in (situation or {}).items() if not k.startswith("_")}
-    user_msg = (
+    base_user_msg = (
         "Here is the current Situation. Decide what, if anything, to post and "
         "where, following the lane rules in your system prompt. Silence is an "
         "allowed outcome. Hard-post-floor signals (in `hard_post_signals`) "
         "must be addressed.\n\n"
         f"```json\n{json.dumps(public_situation, indent=2, default=str)}\n```\n"
     )
-    return _chat_with_tools(
-        _awareness_system(),
-        user_msg,
-        workflow="awareness",
-        allowed_tools=TOOLSETS_BY_WORKFLOW["awareness"],
-        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["awareness"],
-        strict_json=True,
-        tool_stats=tool_stats,
+    allowed_tools = READ_TOOLS if shadow else TOOLSETS_BY_WORKFLOW["awareness"]
+
+    def _tick(user_msg, max_tokens):
+        return _chat_with_tools(
+            _awareness_system(),
+            user_msg,
+            workflow="awareness",
+            # The brain deliberates over the whole read (many signals across
+            # lanes) and may emit several posts; 4096 truncates mid-response.
+            # Give it the same headroom as clanops, more on the retry.
+            max_tokens=max_tokens,
+            allowed_tools=allowed_tools,
+            response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["awareness"],
+            strict_json=True,
+            # Always surface WHY a tick produced nothing (truncation, schema
+            # error, timeout, max tool rounds) as a {"_error": ...} payload so
+            # we can retry a transient truncation here; the None-on-failure
+            # contract for non-shadow callers is re-applied below.
+            return_errors=True,
+            tool_stats=tool_stats,
+            on_event=on_event,
+        )
+
+    result = _tick(base_user_msg, 8192)
+
+    # A truncation is over-generation, not a genuine ceiling: the same read
+    # usually deliberates fine on a second pass (observed loop #9 truncated at
+    # 8192, loop #10 on a near-identical read chose silence cleanly). Retry
+    # once with real headroom and an explicit economy nudge before giving up —
+    # a hard-post-floor signal shouldn't wait a whole tick on a stochastic
+    # runaway. Raising the ceiling alone wouldn't help; a runaway just costs
+    # more before hitting it. The retry re-reads the same tools if it needs to.
+    # (The full prompt + response of every round is captured at the LLM layer —
+    # agent.core records it onto the llm_calls row — so nothing extra is needed
+    # here for Observatory visibility.)
+    if _is_truncation_error(result):
+        log.warning(
+            "awareness tick truncated (max_tokens=8192, phase=%s); retrying once with headroom",
+            result["_error"].get("phase"),
+        )
+        if on_event is not None:
+            try:
+                on_event({"type": "retry", "reason": "truncation", "max_tokens": 16384})
+            except Exception:
+                log.debug("on_event retry notice raised (ignored)", exc_info=True)
+        retry_msg = base_user_msg + (
+            "\n\nYour previous attempt ran past the length limit and was discarded. "
+            "Be economical: combine redundant beats, cover a milestone backlog in a "
+            "single post per channel rather than one post per signal, and keep each "
+            "`content` tight. Emit only the posts that clear the bar."
+        )
+        result = _tick(retry_msg, 16384)
+
+    # Preserve the external contract: non-shadow callers expect None on failure;
+    # shadow callers want the {"_error": ...} payload so the loop can classify
+    # the tick as failed (not deliberate silence).
+    if not shadow and isinstance(result, dict) and "_error" in result:
+        return None
+    return result
+
+
+def _is_truncation_error(result) -> bool:
+    """True when a run_awareness_tick result is a truncation failure payload."""
+    return (
+        isinstance(result, dict)
+        and isinstance(result.get("_error"), dict)
+        and result["_error"].get("kind") == "truncation"
     )
 
 
@@ -1210,6 +1312,7 @@ __all__ = [
     "generate_intel_report",
     "run_memory_synthesis",
     "run_awareness_tick",
+    "generate_ask_elixir_daily",
     "respond_in_reception",
     "respond_in_channel",
     "respond_in_deck_review",

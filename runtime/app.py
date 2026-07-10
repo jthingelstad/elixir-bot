@@ -77,6 +77,10 @@ WAR_ATTENDANCE_MINUTE = int(os.getenv("WAR_ATTENDANCE_MINUTE", "15"))
 ACTION_OUTCOME_REFRESH_HOUR = int(os.getenv("ACTION_OUTCOME_REFRESH_HOUR", "9"))
 ACTION_OUTCOME_REFRESH_MINUTE = int(os.getenv("ACTION_OUTCOME_REFRESH_MINUTE", "30"))
 ASK_ELIXIR_DAILY_INSIGHT_HOUR = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_HOUR", "12"))
+# The awareness loop runs hourly on a wall-clock cron (deterministic across
+# restarts) at this minute past the hour. :05 lands just after the top-of-hour
+# engine tick, so the brain reads freshly-refreshed state.
+AWARENESS_LOOP_MINUTE = int(os.getenv("AWARENESS_LOOP_MINUTE", "5"))
 ASK_ELIXIR_DAILY_INSIGHT_MINUTE = int(os.getenv("ASK_ELIXIR_DAILY_INSIGHT_MINUTE", "0"))
 PROMOTION_CONTENT_DAY = os.getenv("PROMOTION_CONTENT_DAY", "fri")
 PROMOTION_CONTENT_HOUR = int(os.getenv("PROMOTION_CONTENT_HOUR", "9"))
@@ -1174,14 +1178,17 @@ async def _engine_tick():
             raise RuntimeError(f"engine send: post to lane {lane!r} failed")
         return message_id
 
-    def _run():
-        from engine import editor as engine_editor
+    live = _awareness_live()
 
+    def _run():
         conn = engine_db.connect()
         try:
+            # When the awareness brain owns posting (live), the engine skips
+            # RECOGNIZE + DELIVER entirely — no intents, no compose, no send. The
+            # editor gate retired with the delivery path.
             counters = engine_tick_mod.run_tick(
                 conn, api=_cr_api, send_fn=send_fn, compose_fn=_engine_compose_copy,
-                editor_gate=engine_editor.gate,  # live only — offline/tests never inject it
+                deliver=not live,
             )
             fulfilled = conn.execute(
                 """SELECT * FROM communication_intents
@@ -1373,68 +1380,247 @@ async def _engine_health():
     return {"problems": problems, "db_size_bytes": size}
 
 
-async def _editorial_sweep():
-    """Daily Editor rubric feeder (editor.md §3): yesterday's 👎/👍 prompt
-    feedback becomes anti-pattern/exemplar candidates. Kept separate from
-    engine-health so that job stays strictly read-only."""
-    from engine import db as engine_db
-    from engine import editor as engine_editor
+# The leader-only #thinking channel — Elixir's train of thought lands here as a
+# bot-native embed per loop, with the full read/tool-trace/decision in a thread.
+# Replaced the old #elixir-log webhook (2026-07-09).
+THINKING_CHANNEL_ID = int(os.getenv("ELIXIR_THINKING_CHANNEL_ID", "1524983821852872896"))
 
-    runtime_status.mark_job_start("editorial_sweep")
 
-    def _run():
-        conn = engine_db.connect()
+# Live #thinking session for the in-flight tick. Awareness runs one-at-a-time
+# (scheduler max_instances=1), so a single holder is safe; a fresh `start`
+# finalizes any stale session first.
+_thinking_session: dict = {}
+
+
+async def _awareness_event(event: dict) -> None:
+    """Stream one awareness-tick event to #thinking as it happens: ``start``
+    opens the per-loop thread with the read, ``tool`` / ``truncation`` / ``retry``
+    append live so the runtime train of thought is visible, and ``end`` finalizes
+    the header with the outcome + verbatim decision. Never raises — a diagnostic
+    hiccup must not fail the tick; the thought is persisted regardless."""
+    import discord
+    from runtime.awareness import shadow as shadow_mod
+
+    channel = bot.get_channel(THINKING_CHANNEL_ID)
+    if channel is None:
+        log.warning("awareness: #thinking channel %s not found; event dropped",
+                    THINKING_CHANNEL_ID)
+        return
+    none = discord.AllowedMentions.none()
+    etype = event.get("type")
+    try:
+        if etype == "start":
+            embed = discord.Embed(title="🧠 Awareness — deliberating…", color=0x95A5A6)
+            embed.add_field(name="Read", value=(event.get("read_summary") or "—")[:1024],
+                            inline=False)
+            msg = await channel.send(embed=embed, allowed_mentions=none)
+            thread = await msg.create_thread(name="Awareness — deliberating…",
+                                             auto_archive_duration=1440)
+            _thinking_session.clear()
+            _thinking_session.update(message=msg, thread=thread)
+            await thread.send("_Live train of thought — tool calls stream in below._",
+                              allowed_mentions=none)
+
+        elif etype in ("tool", "truncation", "retry"):
+            thread = _thinking_session.get("thread")
+            if thread is not None:
+                await thread.send(shadow_mod.format_live_event(event)[:1900],
+                                  allowed_mentions=none)
+
+        elif etype == "end":
+            render = event.get("render") or {}
+            n = event.get("loop_number")
+            obs_url = render.get("observatory_url")
+            thread = _thinking_session.get("thread")
+            msg = _thinking_session.get("message")
+            if thread is not None:
+                for i, chunk in enumerate(render.get("thread_chunks") or []):
+                    total = len(render["thread_chunks"])
+                    body = chunk if total == 1 else f"{chunk}\n_({i + 1}/{total})_"
+                    await thread.send(body, allowed_mentions=none)
+                # Convenience link to the Observatory LLM view (this tick's rounds
+                # at the top) — drill into any call for the full prompt + response.
+                if obs_url:
+                    await thread.send(f"🔍 **Full prompts/responses in the Observatory:** {obs_url}",
+                                      allowed_mentions=none, suppress_embeds=True)
+                try:
+                    await thread.edit(name=render.get("thread_name") or f"Loop #{n}")
+                except Exception:
+                    pass
+            if msg is not None:
+                embed = discord.Embed(title=render.get("header") or f"🧠 Loop #{n}",
+                                      color=render.get("color"),
+                                      url=obs_url or None)
+                for name, value in (render.get("fields") or {}).items():
+                    embed.add_field(name=name, value=(value or "—")[:1024], inline=False)
+                if obs_url:
+                    embed.add_field(name="Full details",
+                                    value=f"[Observatory · prompts & responses]({obs_url})", inline=False)
+                try:
+                    await msg.edit(embed=embed)
+                except Exception:
+                    log.debug("awareness: #thinking header edit failed", exc_info=True)
+            _thinking_session.clear()
+    except Exception:
+        log.exception("awareness: #thinking event %s failed", etype)
+
+
+def _awareness_live() -> bool:
+    """True when the awareness brain is the sole proactive poster. The single
+    ELIXIR_AWARENESS_LIVE flag flips brain posting ON and the engine's proactive
+    delivery OFF together — one switch, no gap, no double-post, reversible."""
+    return os.getenv("ELIXIR_AWARENESS_LIVE", "0").strip().lower() in (
+        "1", "true", "yes", "on"
+    )
+
+
+async def _awareness_loop():
+    """The awareness loop (runtime/awareness). Builds the read, runs the brain,
+    persists the train of thought, and STREAMS a bot-native #thinking diagnostic.
+
+    When ``ELIXIR_AWARENESS_LIVE`` is set the brain is the SOLE proactive poster:
+    it posts its plan to #announcements / #elixir and escalates clan-chat-worthy
+    posts as #leader-actions relay cards. Unset (default) it stays shadow-only —
+    nothing member-facing. The same flag turns the engine's proactive delivery
+    off (see _engine_tick), so there's never a gap or a double-post."""
+    from runtime.awareness import deliver as deliver_mod
+    from runtime.awareness import store as awareness_store
+    from runtime.awareness.loop import run_awareness_loop
+
+    live = _awareness_live()
+    runtime_status.mark_job_start("awareness_loop")
+    loop = asyncio.get_running_loop()
+
+    def _progress_fn(event):
+        # Runs in the worker thread; marshal each live event back to the loop.
         try:
-            return engine_editor.sweep_prompt_feedback(conn)
-        finally:
-            conn.close()
+            asyncio.run_coroutine_threadsafe(_awareness_event(event), loop).result(timeout=90)
+        except Exception:
+            log.exception("awareness: #thinking event bridge failed")
+
+    def _post_fn(channel_id, copy):
+        # Worker thread → bot loop, mirroring the engine send_fn.
+        fut = asyncio.run_coroutine_threadsafe(_engine_send(int(channel_id), copy), loop)
+        return fut.result(timeout=120)
+
+    def _relay_fn(post, channel_name):
+        fut = asyncio.run_coroutine_threadsafe(
+            _awareness_relay_to_clan_chat(post, channel_name), loop
+        )
+        return fut.result(timeout=120)
+
+    def _deliver_fn(read, plan):
+        return deliver_mod.deliver_posts(
+            read, plan,
+            post_fn=_post_fn,
+            record_fn=awareness_store.record_awareness_post,
+            relay_fn=_relay_fn,
+        )
 
     try:
-        counters = await asyncio.to_thread(_run)
+        counters = await asyncio.to_thread(
+            run_awareness_loop, shadow=not live, progress_fn=_progress_fn,
+            deliver_fn=(_deliver_fn if live else None),
+        )
     except Exception as exc:
-        runtime_status.mark_job_failure("editorial_sweep", str(exc))
-        log.exception("editorial sweep failed")
+        runtime_status.mark_job_failure("awareness_loop", str(exc))
+        log.exception("awareness loop failed")
         return
-    runtime_status.mark_job_success("editorial_sweep", json.dumps(counters))
-    log.info("editorial sweep: %s", counters)
+    runtime_status.mark_job_success("awareness_loop", json.dumps(counters, default=str))
+    log.info("awareness loop (%s): %s", "live" if live else "shadow", counters)
     return counters
 
 
-async def _editorial_review():
-    """The Editor's weekly self-review (editor.md §4, Sun 20:07 CT): score the
-    week's gated output, write the synthesis memory, post ONE report with the
-    drift line + proposed rubric additions (auto-added at confidence 0.6;
-    Jamie's 👎 or a note retires them — silence is consent)."""
-    from engine import db as engine_db
-    from engine import editor as engine_editor
-    from runtime import elixir_log
+async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
+    """Escalate a brain post the brain flagged (``relay_to_clan_chat``) into an
+    in-game relay HITL card in #leader-actions. The Discord post has ALREADY
+    landed; this only offers a leader a copy/paste clan-chat version. Guarded by
+    the existing leader-action post policy (backlog cap + per-objective cooldown)
+    so the brain can't flood the board. Never raises into delivery — returns
+    False on any guard/failure; the delivered post stands regardless."""
+    content = post.get("content")
+    if isinstance(content, list):
+        content = "\n\n".join(str(c) for c in content if c is not None)
+    content = (content or "").strip()
+    if not content:
+        return False
 
-    runtime_status.mark_job_start("editorial_review")
+    key_hash = hashlib.sha1(content.encode("utf-8")).hexdigest()[:12]
+    objective = f"awareness_relay:{key_hash}"
+    action_key = f"awareness-relay:{key_hash}"
 
-    def _run():
-        conn = engine_db.connect()
-        try:
-            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            return engine_editor.compose_weekly_review(conn, now)
-        finally:
-            conn.close()
-
-    try:
-        result = await asyncio.to_thread(_run)
-    except Exception as exc:
-        runtime_status.mark_job_failure("editorial_review", str(exc))
-        log.exception("editorial review failed")
-        return
-    try:
-        await asyncio.to_thread(elixir_log.post_event, result["report"])
-    except Exception:
-        log.exception("editorial review report post failed")
-    runtime_status.mark_job_success(
-        "editorial_review",
-        json.dumps({"verdicts": result.get("verdict_counts"),
-                    "proposals": len(result.get("proposals") or [])}),
+    allowed, reason = await asyncio.to_thread(
+        can_post_leader_action, action_type="in_game_relay", objective=objective
     )
-    return result
+    if not allowed:
+        log.info("awareness relay skipped by policy: %s", reason)
+        return False
+    try:
+        channel_config = _channel_config_by_key("arena-relay")
+    except Exception:
+        log.warning("awareness relay skipped: arena-relay unavailable")
+        return False
+    relay_channel = bot.get_channel(int(channel_config["id"]))
+    if relay_channel is None:
+        log.warning("awareness relay skipped: arena-relay channel not found")
+        return False
+
+    fallback = sign_clan_chat_text(content, limit=CLASH_COPY_MAX_LENGTH)
+    context = (
+        "Awareness brain relay: redraft this Discord post as ONE plain-text "
+        "Clash Royale in-game clan chat message a leader can paste. Same facts, "
+        "same warmth, shorter and plainer — no markdown, no emoji codes, no links. "
+        "Introduce nothing new.\n"
+        f"Reason it's worth sharing: {post.get('relay_reason') or ''}\n"
+        f"Discord post (source): {content}"
+    )
+    try:
+        generated = await generate_clan_chat_copy(
+            intent="awareness_relay",
+            context=context,
+            max_messages=1,
+            max_chars=CLASH_COPY_MAX_LENGTH,
+            forbidden_terms=("http://", "https://", "www.", "Discord"),
+            fallback_messages=[content],
+            metadata={"source": "awareness_relay", "channel": channel_name},
+        )
+        copy = generated.messages[0] if generated and generated.messages else fallback
+    except Exception:
+        log.warning("awareness relay clan-chat copy generation failed", exc_info=True)
+        copy = fallback
+
+    baseline = await asyncio.to_thread(
+        db.build_leader_action_baseline, action_type="in_game_relay", target_player_tag=None
+    )
+    prompt_text = f"Paste this clan-chat note (from #{channel_name}): {copy}"
+    action = await asyncio.to_thread(
+        db.create_leader_action_recommendation,
+        action_type="in_game_relay",
+        objective=objective,
+        prompt_text=prompt_text,
+        rationale=(post.get("relay_reason") or post.get("summary")
+                   or "Brain-flagged for clan chat"),
+        target_channel_key="arena-relay",
+        target_channel_id=channel_config["id"],
+        target_player_tag=None,
+        target_player_name=None,
+        source_signal_key=action_key,
+        source_signal_type="awareness_relay",
+        copy_original_text=copy,
+        copy_current_text=copy,
+        baseline=baseline,
+        action_key=action_key,
+        ui_version=LEADER_ACTION_UI_VERSION,
+    )
+    if not action or action.get("source_message_id"):
+        return False
+    card_messages = await post_leader_action_card(relay_channel, action, copy_messages=[copy])
+    return bool(card_messages)
+
+
+# _editorial_sweep + _editorial_review retired 2026-07-10 with the Editor (their
+# ActivityDefinitions are gone, so nothing schedules them). The brain composes
+# with depth natively — no template gate to feed or self-review.
 
 
 async def _player_pulse():

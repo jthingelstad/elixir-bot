@@ -31,7 +31,6 @@ from storage.contextual_memory import upsert_weekly_summary_memory
 from runtime.helpers import (
     _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id,
     _channel_config_by_key, _format_weekly_recap_post, _strip_weekly_recap_header,
-    build_lane_memory_context,
 )
 from runtime.helpers._common import _load_live_clan_context, _post_to_elixir
 from runtime import status as runtime_status
@@ -245,15 +244,11 @@ def _build_ask_elixir_daily_insight_context(clan, war):
 
 
 async def _ask_elixir_daily_insight():
-    """Daily #ask-elixir post — capability-discovery rotation (Jamie,
-    2026-07-04: the card-trivia version "isn't interesting"; this one teaches
-    members what Elixir can do, with copy-pasteable next questions). One real
-    data nugget per post; composed copy passes the Editor gate (fail-open);
-    deterministic fallback if composition fails."""
-    from engine import editor as engine_editor
-    from runtime.jobs import ask_discovery
-    from storage import runtime_status as storage_runtime_status
-
+    """Daily #ask-elixir post — brain-powered feature discovery (rebuilt
+    2026-07-10). The awareness brain reads the whole clan, surfaces one real,
+    interesting hook, and invites members to explore it with answerable
+    questions. No canned category rotation, no editor gate. Fail-open to
+    silence: a failed/empty compose posts nothing that day (no filler)."""
     runtime_status.mark_job_start("daily_clan_insight")
     try:
         channel_id = _get_singleton_channel_id("ask-elixir")
@@ -266,92 +261,28 @@ async def _ask_elixir_daily_insight():
         runtime_status.mark_job_failure("daily_clan_insight", "ask-elixir channel not found")
         return
 
-    def _pick():
-        conn = db.get_connection()
+    def _compose():
+        """Build the clan read and compose the daily post. Runs in a thread;
+        returns {"post", "topic"} or None. Never raises."""
         try:
-            statuses = storage_runtime_status.list_runtime_job_status(conn=conn)
-            last_summary = (statuses.get("daily_clan_insight") or {}).get("last_summary")
-            last_key = ask_discovery.last_category_key(last_summary)
-            return ask_discovery.pick_category(conn, last_key)
-        finally:
-            conn.close()
+            from runtime.awareness import read as awareness_read
 
-    picked = await asyncio.to_thread(_pick)
-    if not picked:
-        runtime_status.mark_job_success("daily_clan_insight", "no category with data")
+            read = awareness_read.build_read()
+            return elixir_agent.generate_ask_elixir_daily(read)
+        except Exception:
+            log.error("Ask Elixir daily compose failed", exc_info=True)
+            return None
+
+    composed = await asyncio.to_thread(_compose)
+    if not composed or not composed.get("post"):
+        runtime_status.mark_job_success("daily_clan_insight", "no hook today — skipped")
         return
-    cat, facts = picked
 
-    recent_posts = await asyncio.to_thread(
-        db.list_channel_messages, channel.id, 10, "assistant",
-    )
-    channel_config = _channel_config_by_key("ask-elixir")
-    memory_context = await asyncio.to_thread(
-        build_lane_memory_context, channel_config, signals=[],
-    )
-    context = ask_discovery.compose_context(cat, facts)
-
-    def _generate(ctx):
-        return elixir_agent.generate_channel_update(
-            channel_config["name"], channel_config["lane_key"], ctx,
-            recent_posts=recent_posts, memory_context=memory_context,
-            leadership=False,
-        )
-
-    def _compose_and_gate():
-        """LLM compose → Editor judge → (revise once | fallback). Runs in a
-        thread; returns the final post text. Never raises."""
-        text = None
-        try:
-            result = _generate(context)
-            posts = _runtime_app()._entry_posts(result) if result else []
-            text = "\n\n".join(posts) if posts else None
-        except Exception:
-            log.error("Ask Elixir discovery generation failed", exc_info=True)
-        if not text:
-            return ask_discovery.fallback_post(cat, facts)
-        if not engine_editor.enabled():
-            return text
-        conn = db.get_connection()
-        try:
-            now = datetime.now(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            rubric = engine_editor.build_rubric_context(conn, "capability_spotlight", "ask-elixir")
-            recent = engine_editor.recent_copies(conn)
-            gate_facts = {**facts, "sample_questions": cat["questions"]}
-            v = engine_editor.judge(text, gate_facts, recent, rubric, "ask-elixir", "capability_spotlight")
-            final = text
-            if v.get("verdict") == "revise":
-                try:
-                    revised_result = _generate(
-                        context + "\n\nEDITOR CRITIQUE (address this; same facts only):\n" + (v.get("critique") or "")
-                    )
-                    posts = _runtime_app()._entry_posts(revised_result) if revised_result else []
-                    revised = "\n\n".join(posts) if posts else None
-                    if revised:
-                        v2 = engine_editor.judge(revised, gate_facts, recent, rubric, "ask-elixir", "capability_spotlight")
-                        final = revised if v2.get("verdict") in ("pass", "error") else ask_discovery.fallback_post(cat, facts)
-                    else:
-                        final = ask_discovery.fallback_post(cat, facts)
-                except Exception:
-                    log.warning("discovery revise pass failed (keeping original)", exc_info=True)
-            elif v.get("verdict") == "fallback":
-                final = ask_discovery.fallback_post(cat, facts)
-            # intent_id=0: this post has no communication intent (scheduled
-            # job outside the engine pipeline); 0 is the reserved marker.
-            engine_editor.record_verdict(conn, 0, v.get("verdict", "error"),
-                                         v.get("dimensions"), text, final, now)
-            conn.commit()
-            return final
-        except Exception:
-            log.warning("discovery editor gate failed (fail-open)", exc_info=True)
-            return text
-        finally:
-            conn.close()
-
-    final_text = await asyncio.to_thread(_compose_and_gate)
+    final_text = composed["post"]
+    topic = composed.get("topic") or "daily"
     result = {
         "event_type": "channel_update",
-        "summary": f"capability spotlight: {cat['key']}",
+        "summary": f"ask-elixir daily: {topic}",
         "content": final_text,
     }
 
@@ -363,12 +294,9 @@ async def _ask_elixir_daily_insight():
         summary=result["summary"],
         **ch, workflow="ask-elixir",
         event_type="daily_clan_insight",
-        raw_json={"result": result, "context_kind": "capability_spotlight",
-                  "category": cat["key"], "facts": facts},
+        raw_json={"result": result, "context_kind": "ask_elixir_daily", "topic": topic},
     )
-    runtime_status.mark_job_success(
-        "daily_clan_insight", f"posted category={cat['key']}"
-    )
+    runtime_status.mark_job_success("daily_clan_insight", f"posted topic={topic}")
 
 
 

@@ -121,6 +121,14 @@ _WORKFLOW_SPECS = (
         tools=AWARENESS_TOOLS,
         max_tool_rounds=8,
         write_tools_allowed=True,
+        model_family="chat",
+    ),
+    WorkflowSpec(
+        "ask_elixir_daily",
+        response_schema={"required": ["post"]},
+        tools=INTERACTIVE_READ_TOOLS,
+        max_tool_rounds=6,
+        model_family="chat",
     ),
     WorkflowSpec(
         "memory_synthesis",
@@ -146,9 +154,8 @@ _WORKFLOW_SPECS = (
         model_family="chat",
         tools_allowed=False,
     ),
-    # The Editor's critic + weekly self-review (editor.md §2/§4): one strict-
-    # JSON call, no tools, lightweight family (haiku-class — ~10-20 posts/day).
-    WorkflowSpec("editorial", tools=[], max_tool_rounds=1, tools_allowed=False),
+    # "editorial" workflow retired 2026-07-10 — the Editor gate + eval harness
+    # are gone; the brain composes with depth natively (no per-post critic).
     WorkflowSpec("weekly_digest", model_family="intensive"),
     WorkflowSpec("member_report", model_family="intensive"),
     WorkflowSpec("site_promote_content", model_family="promotion"),

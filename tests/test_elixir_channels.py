@@ -4035,56 +4035,6 @@ def test_build_weekly_clan_recap_context_summarizes_week():
     assert "recent joins this week: Newbie" in report
 
 
-@pytest.mark.xfail(reason="stale pre-v5.1 fixture/flow (Gen-B channel semantics, old schema seeds); subjects live - fixture rewrite pending", strict=False)
-def test_weekly_recap_context_includes_project_and_event_stream_pulse():
-    with (
-        patch("memory_store.list_memories", return_value=[]),
-        patch("elixir.db.get_weekly_digest_summary", return_value={"window_days": 7}),
-        patch("elixir.db.build_clan_trend_summary_context", return_value=""),
-        patch("elixir.db.build_clan_voyage_context", return_value="No Clan Voyage screenshots"),
-        patch("elixir.db.get_war_season_snapshot", return_value={
-            "season_id": 133,
-            "summary": "Season 133; Week 3; Battle Day 2; rank 1",
-            "state": {
-                "participation_health": {
-                    "engaged_count": 12,
-                    "total_participants": 43,
-                    "untouched_count": 31,
-                    "finished_count": 8,
-                },
-            },
-        }),
-        patch("event_core.read.event_facades.summarize_event_windows", return_value={
-            "7d": {"total": 14, "by_type": {"member_join": 3, "war_battle_day_started": 2}},
-            "28d": {"total": 40, "by_type": {}},
-        }),
-        patch("event_core.read.event_facades.list_recent_events", return_value=[
-            {"event_type": "member_join", "subject_key": "#ABC", "source_signal_key": "join:#ABC"},
-        ]),
-        patch("event_core.read.event_facades.summarize_battle_modes", return_value={
-            "7d": {"modes": {
-                "ladder": {"label": "Trophy Road", "battles": 300, "active_members": 30, "win_rate": 0.55, "top_members": []},
-                "ranked": {"label": "Ranked", "battles": 40, "active_members": 5, "win_rate": 0.52,
-                           "top_members": [{"name": "OllieTurtle"}, {"name": "pax"}]},
-                "two_v_two": {"label": "2v2", "battles": 5, "active_members": 2, "win_rate": 0.4, "top_members": []},
-            }},
-        }),
-    ):
-        report = elixir._build_weekly_clan_recap_context({"name": "POAP KINGS"}, {})
-
-    assert "active war-season project: Season 133; Week 3; Battle Day 2; rank 1" in report
-    assert "war project participation: engaged 12/43 | untouched 31 | finished 8" in report
-    assert "event stream pulse: 7d 14 events | 28d 40 events" in report
-    assert "top 7d event types: member_join=3, war_battle_day_started=2" in report
-    assert "recent event stream examples: member_join:#ABC" in report
-    # per-mode activity beyond Trophy Road is surfaced for non-war stories;
-    # Trophy Road itself is excluded and thin modes (<10 battles) are filtered.
-    assert "game-mode activity beyond Trophy Road" in report
-    assert "Ranked: 40 battles across 5 member(s), 52% win rate | most active: OllieTurtle, pax" in report
-    assert "Trophy Road:" not in report
-    assert "2v2:" not in report
-
-
 def test_share_channel_result_rewrites_member_refs_before_posting():
     channel = AsyncMock()
     channel.id = 300

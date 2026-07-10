@@ -22,11 +22,17 @@ __all__ = [
 
 DETECTION_WINDOWS = (1, 7, 28)
 
-_STREAMS = (
-    ("player", "player_events", "player_tag"),
-    ("clan", "clan_events", "COALESCE(subject_tag, clan_tag)"),
-    ("war", "war_events", "CAST(season_id AS TEXT)"),
+# (stream, table, subject_expr, timing_expr, has_backfilled). game_events is a
+# different shape — no `timing` column, but it carries `backfilled` — so its
+# metadata differs. It is NOT in the default set: legacy callers (member_report,
+# webapp history) don't expect game-level rows; the awareness brain opts in.
+_ALL_STREAMS = (
+    ("player", "player_events", "player_tag", "timing", False),
+    ("clan", "clan_events", "COALESCE(subject_tag, clan_tag)", "timing", False),
+    ("war", "war_events", "CAST(season_id AS TEXT)", "timing", False),
+    ("game", "game_events", "subject_tag", "NULL", True),
 )
+_DEFAULT_STREAMS = ("player", "clan", "war")
 
 
 def _anchor(now: Optional[str] = None) -> datetime:
@@ -69,7 +75,9 @@ def summarize_event_windows(
         cutoff = _cutoff(days, now)
         counts: dict[str, int] = {}
         total = 0
-        for stream, table, subject_expr in _STREAMS:
+        for stream, table, subject_expr, _timing_expr, _has_bf in _ALL_STREAMS:
+            if stream not in _DEFAULT_STREAMS:
+                continue
             where = ["observed_at >= ?"]
             params: list = [cutoff]
             if scope:
@@ -110,14 +118,19 @@ def list_recent_events(
     subject_type: str | None = None,  # call-site compatibility; unused
     subject_key: str | None = None,
     event_class: str | None = None,  # call-site compatibility; unused
+    streams: tuple[str, ...] | None = None,
+    exclude_backfilled: bool = False,
     limit: int = 100,
     now: str | None = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
     del subject_type, event_class
     cutoff = since or _cutoff(days, now)
+    wanted = set(streams) if streams else set(_DEFAULT_STREAMS)
     events: list[dict] = []
-    for stream, table, subject_expr in _STREAMS:
+    for stream, table, subject_expr, timing_expr, has_backfilled in _ALL_STREAMS:
+        if stream not in wanted:
+            continue
         where = ["observed_at >= ?"]
         params: list = [cutoff]
         if scope:
@@ -129,9 +142,12 @@ def list_recent_events(
         if subject_key:
             where.append(f"{subject_expr} = ?")
             params.append(subject_key)
+        if exclude_backfilled and has_backfilled:
+            # Backfilled rows are seeded history, not "new" — never a live signal.
+            where.append("COALESCE(backfilled, 0) = 0")
         for row in conn.execute(
             f"SELECT dedup_key, event_type, {subject_expr} AS subject_tag, observed_at, "
-            f"timing, scope, payload_json FROM {table} "
+            f"{timing_expr} AS timing, scope, payload_json FROM {table} "
             f"WHERE {' AND '.join(where)} ORDER BY observed_at DESC LIMIT ?",
             (*params, max(1, int(limit))),
         ).fetchall():

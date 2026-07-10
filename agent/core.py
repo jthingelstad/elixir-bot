@@ -15,11 +15,12 @@ from runtime import status as runtime_status
 
 log = logging.getLogger("elixir_agent")
 
-# Workflows whose call cadence (1+ hours apart) exceeds the 5-min ephemeral
-# cache TTL, so caching the system+tools prefix pays the 1.25x write premium
-# but rarely yields a read. Confirmed in May 2026 sampling: awareness had
-# 89% write-only calls, 10% read-only, 1% mixed — net cost penalty.
-WORKFLOWS_WITHOUT_CACHE = {"awareness"}
+# Workflows to exclude from prompt caching. Empty by default: any workflow that
+# makes several tool-calling rounds seconds apart within one turn gets cache
+# reads on rounds 2+, so the 1.25x write premium pays off inside the same turn.
+# (Awareness used to live here from its v4.5 single-call-per-tick reflex days —
+# it is now a multi-round Sonnet agentic loop where caching is a large net win.)
+WORKFLOWS_WITHOUT_CACHE: set[str] = set()
 
 # Per-workflow request timeouts (seconds) override the 60s default. Sonnet 4.6
 # on the weekly memory_synthesis batch (~75K input tokens) routinely completes
@@ -28,6 +29,10 @@ WORKFLOWS_WITHOUT_CACHE = {"awareness"}
 # before this override was added.
 WORKFLOW_TIMEOUT_OVERRIDES = {
     "memory_synthesis": 300,
+    # The awareness loop is Sonnet deliberating over the full read plus a tool
+    # round-trip (get_elixir_state); like memory_synthesis it can run past the
+    # 60s default, and a timeout there silently collapses the tick to "silence."
+    "awareness": 180,
 }
 
 
@@ -173,6 +178,109 @@ _TOOL_CHOICE_MAP = {
 }
 
 
+def _with_message_cache_breakpoint(messages):
+    """Mark the final content block of the last message with an ephemeral
+    cache_control breakpoint, so the whole conversation prefix (system + tools +
+    all prior turns) is cached up to that point.
+
+    In a multi-round tool loop the history only grows — each round appends and
+    re-sends everything before it — so putting the breakpoint at the current end
+    lets the *next* round read that prefix from cache instead of re-billing it at
+    full price. The last message before a completion is always one we build (the
+    initial user string, or a tool_result user turn); raw SDK assistant blocks
+    are only ever mid-history, never last, so this never mutates an SDK object.
+    """
+    if not messages:
+        return messages
+    last = messages[-1]
+    content = last.get("content")
+    if isinstance(content, str):
+        new_content = [{"type": "text", "text": content,
+                        "cache_control": {"type": "ephemeral"}}]
+    elif isinstance(content, list) and content and isinstance(content[-1], dict):
+        new_content = list(content)
+        new_content[-1] = {**new_content[-1], "cache_control": {"type": "ephemeral"}}
+    else:
+        return messages  # unexpected shape (e.g. SDK-object tail) — skip, don't risk it
+    return messages[:-1] + [{**last, "content": new_content}]
+
+
+# ── Prompt capture (always on) ───────────────────────────────────────────────
+# Every LLM call records its full assembled prompt + response onto the
+# ``llm_calls`` row, so anything Elixir sends to the model is inspectable in the
+# Observatory (drill into any call). Serialization is best-effort and guarded —
+# a capture failure must never break the actual call. The blobs are pruned after
+# LLM_PROMPT_RETENTION_DAYS; the metadata row lives LLM_CALL_RETENTION_DAYS.
+
+
+def _jsonable_block(block):
+    """One content block (dict OR native SDK block) → a plain JSON-able dict."""
+    if isinstance(block, dict):
+        return block
+    btype = getattr(block, "type", None)
+    if btype == "text":
+        return {"type": "text", "text": getattr(block, "text", "")}
+    if btype == "tool_use":
+        return {"type": "tool_use", "id": getattr(block, "id", None),
+                "name": getattr(block, "name", None),
+                "input": getattr(block, "input", None)}
+    if btype == "tool_result":
+        return {"type": "tool_result",
+                "tool_use_id": getattr(block, "tool_use_id", None),
+                "content": getattr(block, "content", None)}
+    return {"type": btype or "unknown", "repr": str(block)[:2000]}
+
+
+def _jsonable_messages(messages):
+    """Serialize the messages list (mixed dict / SDK-block content) for capture."""
+    out = []
+    for m in messages or []:
+        content = m.get("content") if isinstance(m, dict) else None
+        if isinstance(content, str):
+            ser = content
+        elif isinstance(content, list):
+            ser = [_jsonable_block(b) for b in content]
+        else:
+            ser = content
+        out.append({"role": m.get("role") if isinstance(m, dict) else "?", "content": ser})
+    return out
+
+
+def _serialize_prompt(system, messages, tools, max_tokens, temperature):
+    """The full assembled prompt, as a JSON string — or None on failure.
+    Tool DEFINITIONS are large and static; the names are the useful signal."""
+    try:
+        import json as _json
+        return _json.dumps({
+            "system": system,
+            "messages": _jsonable_messages(messages),
+            "tools": [t.get("name") for t in (tools or []) if isinstance(t, dict)],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }, default=str)
+    except Exception:
+        log.debug("prompt capture: prompt serialize failed (ignored)", exc_info=True)
+        return None
+
+
+def _serialize_response(resp):
+    """The model's response (text + requested tool calls + stop reason) as a
+    JSON string — or None on failure."""
+    if resp is None:
+        return None
+    try:
+        import json as _json
+        return _json.dumps({
+            "stop_reason": getattr(resp, "stop_reason", None),
+            "text": response_text(resp),
+            "tool_uses": [{"name": b.name, "input": b.input}
+                          for b in response_tool_uses(resp)],
+        }, default=str)
+    except Exception:
+        log.debug("prompt capture: response serialize failed (ignored)", exc_info=True)
+        return None
+
+
 # ── Main completion function ─────────────────────────────────────────────────
 
 
@@ -187,6 +295,15 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
     selected_model = _model_for_workflow(workflow, model=model)
 
     sanitized_messages = _sanitize_anthropic_messages(messages)
+    # Snapshot the semantic prompt (pre cache-control markers) for capture — what
+    # the model sees, without the ephemeral-cache plumbing.
+    prompt_json = _serialize_prompt(system, sanitized_messages, tools, max_tokens, temperature)
+
+    cache_enabled = workflow not in WORKFLOWS_WITHOUT_CACHE
+    if cache_enabled:
+        # Cache the growing message prefix (the read + accumulated tool results),
+        # not just system+tools — that payload is the bulk of the re-sent input.
+        sanitized_messages = _with_message_cache_breakpoint(sanitized_messages)
 
     effective_timeout = WORKFLOW_TIMEOUT_OVERRIDES.get(workflow, timeout)
 
@@ -197,8 +314,6 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
         "max_tokens": max_tokens,
         "timeout": effective_timeout,
     }
-
-    cache_enabled = workflow not in WORKFLOWS_WITHOUT_CACHE
 
     # System prompt with optional prompt caching
     if system:
@@ -260,6 +375,8 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
                 total_tokens=total_tokens,
                 cache_creation_tokens=cache_creation_tokens,
                 cache_read_tokens=cache_read_tokens,
+                prompt_json=prompt_json,
+                response_json=_serialize_response(resp),
             )
         except (OSError, sqlite3.Error):
             log.warning("llm_call_persist_failed workflow=%s", workflow, exc_info=True)
@@ -279,6 +396,8 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
                 ok=False,
                 error=exc,
                 duration_ms=duration,
+                prompt_json=prompt_json,
+                response_json=None,
             )
         except (OSError, sqlite3.Error):
             log.warning("llm_call_persist_failed workflow=%s", workflow, exc_info=True)

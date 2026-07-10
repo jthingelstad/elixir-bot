@@ -107,8 +107,10 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
         if n:
             problems.append(f"{table}.{col}: {n} space-format timestamp(s)")
 
-    # 5) intents only on known lanes / statuses
-    known_lanes = set(PREFIX_LANE.values()) | {FAIL_CLOSED_LANE}
+    # 5) intents only on known lanes / statuses. The awareness brain records its
+    # delivered posts as fulfilled "awareness:post" intents on its two channels
+    # (announcements is already a PREFIX_LANE value; elixir is the new one).
+    known_lanes = set(PREFIX_LANE.values()) | {FAIL_CLOSED_LANE, "elixir"}
     bad = [
         r[0]
         for r in conn.execute(

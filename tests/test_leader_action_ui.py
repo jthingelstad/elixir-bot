@@ -60,18 +60,20 @@ def test_war_nudge_action_type_is_not_registered():
     assert "war_nudge_recommendation" not in leader_action_ui.leader_action_type_choices()
 
 
-def test_role_action_uses_multi_row_decision_copy_defer_and_note_controls():
+def test_role_action_uses_multi_row_decision_copy_and_note_controls_no_defer():
+    # Defer retired 2026-07-10: role cards carry Done / Decline / Edit Copy /
+    # Add Note only — no Defer Select. Re-nomination is engine-driven now.
     view = LeaderActionView(_action("kick_recommendation"))
     rows = {getattr(child, "label", None): child.row for child in view.children}
 
     assert rows["Kicked"] == 0
     assert rows["Decline"] == 0
     assert rows["Edit Copy"] == 1
-    assert rows["Add Note"] == 3
+    assert rows["Add Note"] == 2
     assert "Preview Copy" not in rows
     assert "Profile" not in rows
     assert "War Detail" not in rows
-    assert any(isinstance(child, discord.ui.Select) and child.row == 2 for child in view.children)
+    assert not any(isinstance(child, discord.ui.Select) for child in view.children)
 
 
 def test_terminal_action_has_no_controls():

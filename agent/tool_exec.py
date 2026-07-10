@@ -1040,6 +1040,19 @@ def _state_event_class(arguments):
     return None if event_class == "all" else event_class
 
 
+def _compact_intent(row: dict) -> dict:
+    """Project a communication_intents row to what a reader needs, dropping the
+    heavy payload_json / recognition_key / lifecycle-timestamp plumbing."""
+    return {
+        "intent_type": row.get("intent_type"),
+        "lane": row.get("lane"),
+        "status": row.get("status"),
+        "created_at": row.get("created_at"),
+        "posted": bool(row.get("discord_message_id")),
+        "last_error": row.get("last_error") or None,
+    }
+
+
 def _execute_get_elixir_state(arguments, workflow=None):
     """Read Elixir's internal event/project/case/intent state with scope gates."""
     aspect = arguments.get("aspect", "operational_summary")
@@ -1129,14 +1142,28 @@ def _execute_get_elixir_state(arguments, workflow=None):
         }
 
     if aspect == "operational_summary":
+        # A dashboard, not a data dump. Every block is structurally bounded so
+        # the result stays under the tool envelope's char cap as data grows —
+        # otherwise the envelope blindly drops whole arrays mid-deliberation.
+        # Cases are capped tighter than intents because the awareness read
+        # already carries the full deduped case set; this is a drill-down.
+        case_limit = min(limit, 10)
+        intent_limit = min(limit, 15)
         return {
             "event_windows": event_facades.summarize_event_windows(windows=_ELIXIR_STATE_WINDOWS, scope=None),
             "recent_events": event_facades.list_recent_events(days=7, limit=10),
             "game_modes": event_facades.summarize_battle_modes(windows=(7,)),
             "war_season": db.get_war_season_snapshot(),
-            "decision_cases": db.decision_case_snapshot(open_limit=limit, due_limit=limit),
-            "recent_intents": db.list_recent_communication_intents(limit=limit),
-            "failed_intents": db.list_recent_communication_intents(status="failed", limit=limit),
+            "decision_cases": db.decision_case_snapshot(
+                open_limit=case_limit, due_limit=case_limit, dedupe=True
+            ),
+            "recent_intents": [
+                _compact_intent(i) for i in db.list_recent_communication_intents(limit=intent_limit)
+            ],
+            "failed_intents": [
+                _compact_intent(i)
+                for i in db.list_recent_communication_intents(status="failed", limit=intent_limit)
+            ],
         }
 
     return {"error": f"Unknown aspect: {aspect}"}

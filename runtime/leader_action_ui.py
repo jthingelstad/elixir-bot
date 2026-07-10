@@ -16,11 +16,6 @@ log = logging.getLogger("elixir.leader_action_ui")
 
 LEADER_ACTION_UI_VERSION = "leader-action-ui-v1"
 CLASH_COPY_MAX_LENGTH = 180
-DEFER_OPTIONS = (
-    ("1 day", 1, "Hold this recommendation for one day."),
-    ("3 days", 3, "Give the situation a few days to change."),
-    ("7 days", 7, "Do not revisit this for a week."),
-)
 
 
 @dataclass(frozen=True)
@@ -32,7 +27,6 @@ class LeaderActionTypeSpec:
     done_label: str
     decline_label: str = "Decline"
     allow_copy_edit: bool = False
-    allow_defer: bool = False
     copy_field_label: str = "Clash Copy"
 
 
@@ -54,7 +48,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Posted All",
         "Skip",
         allow_copy_edit=True,
-        allow_defer=True,
         copy_field_label="Clash Copy Sequence",
     ),
     "in_game_relay": LeaderActionTypeSpec(
@@ -65,7 +58,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Posted",
         "Skip",
         allow_copy_edit=True,
-        allow_defer=True,
     ),
     "promotion_recommendation": LeaderActionTypeSpec(
         "promotion_recommendation",
@@ -74,7 +66,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         0x2ECC71,
         "Promoted",
         allow_copy_edit=True,
-        allow_defer=True,
     ),
     "demotion_recommendation": LeaderActionTypeSpec(
         "demotion_recommendation",
@@ -83,7 +74,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         0xF39C12,
         "Demoted",
         allow_copy_edit=True,
-        allow_defer=True,
     ),
     "kick_recommendation": LeaderActionTypeSpec(
         "kick_recommendation",
@@ -92,7 +82,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         0xE74C3C,
         "Kicked",
         allow_copy_edit=True,
-        allow_defer=True,
     ),
     "celebration_relay": LeaderActionTypeSpec(
         "celebration_relay",
@@ -110,7 +99,6 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         0x3498DB,
         "Fixed",
         "Dismiss",
-        allow_defer=True,
     ),
 }
 
@@ -151,10 +139,6 @@ def _status_label(action: dict) -> str:
     status = action.get("status") or db.ACTION_PROPOSED
     if status == db.ACTION_DONE:
         return "Done"
-    if status == db.ACTION_DEFERRED:
-        days = action.get("defer_days")
-        suffix = f" {days}d" if days else ""
-        return f"Deferred{suffix}"
     if status == db.ACTION_REJECTED:
         return "Declined"
     return "Open"
@@ -345,7 +329,7 @@ class DecisionReasonModal(discord.ui.Modal):
             style=discord.TextStyle.paragraph,
             max_length=240,
             required=False,
-            placeholder="Optional. Example: already handled, not the right call, wait for war reset.",
+            placeholder="Optional. 'revisit in a week/month' delays re-nomination; else the engine reconsiders on new evidence.",
         )
         self.add_item(self.reason)
 
@@ -450,45 +434,6 @@ class LeaderActionButton(discord.ui.Button):
             return
 
 
-class DeferSelect(discord.ui.Select):
-    def __init__(self, action: dict):
-        self.action_id = int(action["action_id"])
-        options = [
-            discord.SelectOption(label=label, value=str(days), description=description, emoji="⏳")
-            for label, days, description in DEFER_OPTIONS
-        ]
-        super().__init__(
-            placeholder="Defer recommendation...",
-            options=options,
-            min_values=1,
-            max_values=1,
-            row=2,
-            custom_id=f"leader_action:{self.action_id}:defer",
-        )
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        if not await _ensure_leader(interaction):
-            return
-        try:
-            days = int((self.values or ["1"])[0])
-        except (TypeError, ValueError):
-            days = 1
-        action = await asyncio.to_thread(
-            db.decide_leader_action,
-            self.action_id,
-            status=db.ACTION_DEFERRED,
-            discord_user_id=interaction.user.id,
-            emoji="⏳",
-            defer_days=days,
-            decision_note=f"Deferred for {days} day{'s' if days != 1 else ''}.",
-        )
-        if not action:
-            await _send_ephemeral(interaction, "Action not found.")
-            return
-        queue_leader_action_feedback_refresh(action.get("action_type"))
-        await _apply_card_update(interaction, action)
-
-
 class LeaderActionView(discord.ui.View):
     def __init__(self, action: dict):
         super().__init__(timeout=None)
@@ -526,15 +471,13 @@ class LeaderActionView(discord.ui.View):
                 row=1,
                 disabled=not proposed,
             ))
-        if spec.allow_defer and proposed:
-            self.add_item(DeferSelect(action))
         self.add_item(LeaderActionButton(
             action,
             kind="note",
             label="Add Note",
             emoji="📝",
             style=discord.ButtonStyle.secondary,
-            row=3 if spec.allow_defer else 2,
+            row=2,
         ))
 
 

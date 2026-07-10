@@ -103,7 +103,16 @@ def _current_clock(conn, now: datetime):
 
 
 def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn,
-             editor_gate=None) -> dict:
+             editor_gate=None, deliver: bool = True) -> dict:
+    """Run one engine tick.
+
+    ``deliver`` gates the proactive posting path (steps 6–7: RECOGNIZE +
+    DELIVER). When False, the engine still polls, projects, runs MANAGE and
+    leader-actions, and emits the event stream the awareness brain reads — it
+    just stops raising communication intents and composing/sending posts. This
+    is how the brain becomes the sole proactive poster (see
+    ELIXIR_AWARENESS_LIVE): with delivery off there's no double-posting and no
+    unbounded pending-intent backlog (only consume() expires intents)."""
     now = now or datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     counters: dict = {}
@@ -249,6 +258,48 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn,
         counters["kick_transitions"] = len(transitions)
         withdrawals = management.withdraw_stale_actions(conn, now=now_iso)
         counters["management_withdrawals"] = sum(int(w.get("count", 1)) for w in withdrawals)
+        # Propagate terminal leader-action state onto its backing decision case:
+        # a done kick/promotion/demotion resolves its review the moment the leader
+        # decides — before the member even leaves the roster. Nothing wired this
+        # before, so completed actions left their cases OPEN and they resurfaced
+        # as stale recommendations to the awareness brain.
+        from storage.cases import (
+            reconcile_departed_member_cases,
+            reconcile_uncorroborated_member_cases,
+            sync_terminal_leader_action_cases,
+        )
+        synced_cases = sync_terminal_leader_action_cases(now=now_iso, conn=conn)
+        counters["action_cases_synced"] = len(synced_cases)
+        if synced_cases:
+            log.info(
+                "synced %d decision case(s) from terminal leader-actions: %s",
+                len(synced_cases),
+                ", ".join(f"{c['target_player_name']}({c['case_type']}:{c['outcome']})" for c in synced_cases),
+            )
+        # Backstop: close any member-review case whose subject has left but whose
+        # departure wasn't already resolved above (organic leave, manual clear).
+        # A fulfilled kick resolves as kicked; an organic leave dismisses.
+        departed_cases = reconcile_departed_member_cases(now=now_iso, conn=conn)
+        counters["departed_cases_reconciled"] = len(departed_cases)
+        if departed_cases:
+            log.info(
+                "reconciled %d member-review case(s) for departed members: %s",
+                len(departed_cases),
+                ", ".join(f"{c['target_player_name']}({c['case_type']}:{c['outcome']})" for c in departed_cases),
+            )
+        # Backstop 2: dismiss in-clan member-review cases the engine no longer
+        # corroborates (state=none past the grace window, no open card) — the
+        # brain/signal path can open cases the deterministic engine never backs
+        # (Ratko #365 lingered as a "due" nag for a week). Runs after the terminal
+        # + departed reconcilers so it only sees genuinely-orphaned open cases.
+        uncorroborated = reconcile_uncorroborated_member_cases(now=now_iso, conn=conn)
+        counters["uncorroborated_cases_dismissed"] = len(uncorroborated)
+        if uncorroborated:
+            log.info(
+                "dismissed %d uncorroborated member-review case(s): %s",
+                len(uncorroborated),
+                ", ".join(f"{c['target_player_name']}({c['case_type']})" for c in uncorroborated),
+            )
         if transitions:
             from storage.leader_actions import create_leader_action_recommendation
 
@@ -264,21 +315,48 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn,
                     source_signal_type="engine_kick_state",
                     conn=conn,
                 )
+        # Re-nominate persistently-idle members whose last kick card was declined
+        # once the decline cooldown lapses (defer retired 2026-07-10 — the engine
+        # reconsiders on sustained evidence, not a leader-set clock). Transition-
+        # fire above can't catch these: their kick_state never left 'recommended'.
+        renominations = management.renominate_after_cooldown(conn, now=now_iso)
+        counters["kick_renominations"] = len(renominations)
+        if renominations:
+            from storage.leader_actions import create_leader_action_recommendation
+
+            for r in renominations:
+                create_leader_action_recommendation(
+                    action_type="kick_recommendation",
+                    target_player_tag=r["player_tag"],
+                    target_player_name=r.get("player_name"),
+                    objective=f"Review kick candidacy for {r['player_tag']}",
+                    rationale=r.get("rationale") or "Re-nominated after decline cooldown.",
+                    source_signal_key=f"engine:kick-renominate:{r['player_tag']}:{now_iso}",
+                    source_signal_type="engine_kick_state",
+                    conn=conn,
+                )
         conn.commit()
 
-    # -- step 6: RECOGNIZE — score → coalesce → claim → raise intents
-    with _guard(counters, "recognize", conn):
-        clock_dict = asdict(clock) if clock is not None else None
-        rec = recognition.run_recognizers(conn, clock_dict, now_iso)
-        counters.update({f"recognize_{k}": v for k, v in rec.items()})
-        conn.commit()
+    # -- steps 6/7: RECOGNIZE + DELIVER — proactive posting. Skipped entirely
+    # when the awareness brain owns posting (deliver=False): no intents raised,
+    # nothing composed or sent. Everything above (poll, project, MANAGE,
+    # leader-actions, event emit) still runs, so the brain's read is intact.
+    if deliver:
+        # -- step 6: RECOGNIZE — score → coalesce → claim → raise intents
+        with _guard(counters, "recognize", conn):
+            clock_dict = asdict(clock) if clock is not None else None
+            rec = recognition.run_recognizers(conn, clock_dict, now_iso)
+            counters.update({f"recognize_{k}": v for k, v in rec.items()})
+            conn.commit()
 
-    # -- step 7: DELIVER — at-least-once
-    with _guard(counters, "deliver", conn):
-        d = delivery.consume(conn, send_fn, compose_fn, now_iso,
-                             editor_gate=editor_gate)
-        counters.update({f"deliver_{k}": v for k, v in d.items()})
-        conn.commit()
+        # -- step 7: DELIVER — at-least-once
+        with _guard(counters, "deliver", conn):
+            d = delivery.consume(conn, send_fn, compose_fn, now_iso,
+                                 editor_gate=editor_gate)
+            counters.update({f"deliver_{k}": v for k, v in d.items()})
+            conn.commit()
+    else:
+        counters["proactive_posting"] = "disabled"
 
     counters["tick_completed_at"] = utcnow()
     return counters

@@ -49,6 +49,11 @@ CLAN_EVENT_RETENTION_DAYS = 365
 WAR_RETENTION_DAYS = 365
 CONVERSATION_RETENTION_DAYS = 30
 TOURNAMENT_RETENTION_DAYS = 365
+# LLM call telemetry: keep the full prompt/response BLOBS briefly (debugging /
+# prompt-tuning window), then NULL them but keep the lightweight metadata row
+# (tokens/model/latency) longer for cost analysis, then drop the row entirely.
+LLM_PROMPT_RETENTION_DAYS = 14
+LLM_CALL_RETENTION_DAYS = 90
 CONVERSATION_MAX_PER_SCOPE = 20
 
 # The v5.1 spine — used only to REFUSE a wrong database, never to rebuild one

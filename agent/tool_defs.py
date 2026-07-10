@@ -851,7 +851,11 @@ TOOLS = [
             "Pass case_type only when the followup is a member kick/promotion/demotion review that "
             "should also become a #leader-actions card; otherwise omit it and it is tracked as a "
             "general followup case. Keep the recommendation concrete (who, what, when) so a human "
-            "can act on it without re-doing the analysis."
+            "can act on it without re-doing the analysis. "
+            "ATOMIC — each call is ONE decision a leader can act on or decline on its own. Never "
+            "bundle multiple members or multiple actions into one followup: three kick reviews are "
+            "three calls, a kick and a promotion are two calls. If you catch yourself writing 'and' "
+            "or a list of members into a single recommendation, split it."
         ),
         "input_schema": {
             "type": "object",

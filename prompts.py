@@ -32,6 +32,16 @@ CHANNEL_LANE_CONFIG = {
         "memory_scope": "public",
         "durable_memory_enabled": True,
     },
+    "elixir": {
+        # The awareness brain's public commentary channel (broadcast; the brain
+        # composes and posts via runtime/awareness/deliver.py, not the router).
+        "workflow": "interactive",
+        "tool_policy": "read_only",
+        "reply_policy": "disabled",
+        "singleton": True,
+        "memory_scope": "public",
+        "durable_memory_enabled": True,
+    },
     "river-race": {
         "workflow": "channel_update",
         "tool_policy": "read_only",
