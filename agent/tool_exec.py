@@ -544,6 +544,20 @@ def _execute_get_member_war_detail(arguments):
 
 # ── River Race domain execution ────────────────────────────────────────────
 
+def _compact_deck_row(member: dict) -> dict:
+    """Slim a war-day participant to identity + deck/points counts for the
+    get_river_race engagement tool. The full member-reference dict (donation
+    ranks, elder flags, war_points_rank, etc.) is irrelevant to 'who has decks
+    left today' and, times ~50 members, overflowed the tool-result char cap."""
+    return {
+        "member_ref": member.get("member_ref") or member.get("name"),
+        "tag": member.get("tag"),
+        "decks_used_today": member.get("decks_used_today"),
+        "decks_used_total": member.get("decks_used_total"),
+        "points_today": member.get("points_today"),
+    }
+
+
 def _remaining_deck_participant_summary(day_state: dict) -> dict:
     total_participants = int(day_state.get("total_participants") or 0)
     finished_count = int(day_state.get("finished_count") or 0)
@@ -646,9 +660,13 @@ def _execute_get_river_race(arguments):
             # is each member's cumulative season points. The season points leader is
             # the War Champ. decks_used_today is the daily signal.
             "top_points_total": day_state.get("top_points_total"),
-            "used_all_4": day_state.get("used_all_4"),
-            "used_some": day_state.get("used_some"),
-            "used_none": day_state.get("used_none"),
+            # Deck-usage rosters are slimmed to identity + deck/points counts: the
+            # full member-reference dict (donation ranks, elder flags, etc.) blew
+            # the 20K tool-result cap and dropped used_none (the no-show list the
+            # brain needs). The brain drills into a member via get_member if needed.
+            "used_all_4": [_compact_deck_row(m) for m in (day_state.get("used_all_4") or [])],
+            "used_some": [_compact_deck_row(m) for m in (day_state.get("used_some") or [])],
+            "used_none": [_compact_deck_row(m) for m in (day_state.get("used_none") or [])],
         })
         return data
 
