@@ -11,7 +11,6 @@ from db import (
     _build_form_summary,
     _canon_tag,
     _card_level,
-    _played_as,
     _rowdicts,
     _utcnow,
     chicago_today,
@@ -963,47 +962,17 @@ def get_member_recent_losses(
     sample_battles = len(rows)
     losses = [r for r in rows if r["outcome"] == "L"]
     losses_examined = len(losses)
-    counts: dict[tuple[str, Optional[str]], int] = {}
-    icons: dict[str, str] = {}
+    # Only opponent tags are available in battle_events (no deck lists — QA H3),
+    # so aggregate loss counts per opponent tag for cr_api scouting chains.
     opponent_agg: dict[str, dict] = {}
     for row in losses:
         opp_tag = row["opponent_tag"]
         if opp_tag:
             entry = opponent_agg.get(opp_tag)
             if entry is None:
-                entry = {
-                    "tag": opp_tag,
-                    "name": row["opponent_name"],
-                    "clan_tag": row["opponent_clan_tag"],
-                    "losses_count": 0,
-                }
+                entry = {"tag": opp_tag, "losses_count": 0}
                 opponent_agg[opp_tag] = entry
             entry["losses_count"] += 1
-        try:
-            opp_cards = json.loads(row["opponent_deck_json"] or "[]")
-        except (TypeError, ValueError):
-            continue
-        for card in opp_cards:
-            name = card.get("name")
-            if not name:
-                continue
-            played_as = _played_as(card)
-            counts[(name, played_as)] = counts.get((name, played_as), 0) + 1
-            icon = (card.get("iconUrls") or {}).get("medium") if isinstance(card.get("iconUrls"), dict) else None
-            if icon and name not in icons:
-                icons[name] = icon
-    ordered = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:top_cards]
-    top_opponent_cards = []
-    for (name, played_as), count in ordered:
-        entry = {
-            "name": name,
-            "icon_url": icons.get(name, ""),
-            "appearances": count,
-            "pct_of_losses": round(count / losses_examined * 100) if losses_examined else 0,
-        }
-        if played_as:
-            entry["played_as"] = played_as
-        top_opponent_cards.append(entry)
     crown_diffs = [
         (r["crowns_for"] or 0) - (r["crowns_against"] or 0)
         for r in losses
@@ -1016,37 +985,31 @@ def get_member_recent_losses(
             current_loss_streak += 1
         else:
             break
-    losses_with_opponent_data = sum(
-        1 for r in losses if (r["opponent_deck_json"] or "").strip() not in ("", "[]", "null")
-    )
-    coverage_note = None
-    if losses_examined and losses_with_opponent_data < losses_examined:
-        coverage_note = (
-            f"{losses_with_opponent_data}/{losses_examined} losses had opponent deck data captured "
-            "(older battles may pre-date opponent-deck capture)."
-        )
     opponent_tags = sorted(
         opponent_agg.values(),
         key=lambda o: (o["losses_count"], o.get("name") or ""),
         reverse=True,
     )
+    # QA H3: battle_events does not capture opponent deck lists (opponent_deck_json
+    # is a hardcoded NULL), so top_opponent_cards is always empty and the old
+    # coverage_note falsely implied newer battles had deck data. Be honest: report
+    # what we actually have (loss streak, crown deficit, opponent tags) and state
+    # that opponent cards aren't available, so the model doesn't fabricate them.
     return {
         "member_tag": member_tag,
         "member_name": member_row["current_name"],
         "scope": scope,
         "lookback_battles": sample_battles,
         "losses_examined": losses_examined,
-        "losses_with_opponent_data": losses_with_opponent_data,
         "current_loss_streak": current_loss_streak,
         "avg_crown_deficit": avg_crown_deficit,
-        "top_opponent_cards": top_opponent_cards,
         "opponent_tags": opponent_tags,
-        "coverage_note": coverage_note,
-        "guidance": (
-            "Use top_opponent_cards to ground swap suggestions: cite specific cards that have "
-            "appeared most often in this player's recent losses, then propose counters they own. "
-            "Use opponent_tags to chain into cr_api (aspect='player' / 'clan') if the user asks "
-            "to scout a specific opponent they lost to."
+        "opponent_decks_captured": False,
+        "note": (
+            "Opponent deck lists are NOT captured in battle history — specific "
+            "opponent cards are unavailable, so do not cite or invent them. Ground "
+            "loss-pattern comments in loss streak / crown deficit, and use "
+            "opponent_tags to scout an opponent via cr_api (aspect='player'/'clan')."
         ),
     }
 
