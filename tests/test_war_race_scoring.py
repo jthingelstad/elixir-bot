@@ -135,6 +135,23 @@ def test_no_daily_action_suppresses_meaningless_day_rank():
     assert sb["weekly"]["fame"] == 6870
 
 
+def test_war_season_snapshot_exposes_live_race(engine_conn):
+    """get_war_season_snapshot (feeds get_elixir_state) must map the real
+    get_current_war_status keys — regression for QA H13/H14 where it read stale
+    'standings'/'our_fame'/'day_number' and returned an empty race block."""
+    with patch.object(war_status, "_live_race",
+                      return_value=(_projection(LOOP44), "2026-07-11T07:06:00Z")):
+        snap = war_status.get_war_season_snapshot(conn=engine_conn)
+    race = snap["state"]["race"]
+    assert race["fame"] == 3435 and race["race_rank"] == 1
+    assert [s["clan_name"] for s in race["race_standings"]] == ["POAP KINGS", "R.E.I.C.H", "euromix"]
+    assert race["period_points"] == 10525 and race["day_rank"] == 1
+    assert race["primary_metric"] == "fame"
+    assert snap["state"]["day_number"] is not None
+    # The old buggy keys must be gone.
+    assert "standings" not in race and "our_fame" not in race
+
+
 def test_colosseum_is_period_points_only():
     # Colosseum: no weekly fame/boat — the race is decided by period points, and
     # the finish line is 5,000 period points.

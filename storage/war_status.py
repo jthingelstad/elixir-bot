@@ -879,14 +879,29 @@ def get_war_season_snapshot(conn: Optional[sqlite3.Connection] = None) -> dict |
             "last_observed_at": current.get("observed_at"),
             "state": {
                 "season_id": season_id,
-                "week": current.get("section_index"),
+                "week": current.get("week"),
                 "phase": phase,
                 "phase_display": current.get("phase_display") or phase,
-                "day_number": current.get("day_number"),
+                # get_current_war_status keys are battle_day_number / race_* /
+                # fame — NOT day_number/standings/our_fame (the old keys here read
+                # None/[] and emptied the whole live race block; QA H13/H14).
+                "day_number": current.get("battle_day_number")
+                if current.get("battle_day_number") is not None
+                else current.get("practice_day_number"),
                 "race": {
-                    "standings": current.get("standings") or [],
-                    "our_fame": current.get("our_fame"),
+                    # Two separate races, never mixed (see get_current_war_status):
+                    "primary_metric": current.get("primary_metric"),
+                    "race_rank": current.get("race_rank"),
+                    "race_standings": current.get("race_standings") or [],
+                    "fame": current.get("fame"),
+                    "boat_scored": current.get("boat_scored"),
+                    "day_rank": current.get("day_rank"),
+                    "day_standings": current.get("day_standings") or [],
+                    "period_points": current.get("period_points"),
+                    "day_scored": current.get("day_scored"),
+                    "projected_day_fame": current.get("projected_day_fame"),
                     "finish_line": current.get("finish_line"),
+                    "colosseum_week": current.get("colosseum_week"),
                 },
                 "participation_health": dict(participation) if participation else {},
                 "season_summary": {
