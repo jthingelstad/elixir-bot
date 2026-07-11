@@ -440,16 +440,36 @@ def get_war_battle_win_rates(season_id: Optional[str] = None, limit: int = 10, m
 
 @managed_connection
 def get_clan_boat_battle_record(wars: int = 3, conn: Optional[sqlite3.Connection] = None) -> dict:
+    # QA H9: this used to ignore `wars` entirely and count ALL boat battles ever
+    # while labelling the result "last N wars". Scope it to the N most recent war
+    # sections (season_id, section_index) and report which ones are covered.
+    wars = max(1, int(wars or 3))
+    recent = conn.execute(
+        "SELECT DISTINCT season_id, section_index FROM battle_events "
+        "WHERE is_war = 1 AND season_id IS NOT NULL AND section_index IS NOT NULL "
+        "ORDER BY season_id DESC, section_index DESC LIMIT ?",
+        (wars,),
+    ).fetchall()
+    covered = [{"season_id": r["season_id"], "section_index": r["section_index"]} for r in recent]
+    if not covered:
+        return {"window_wars": wars, "wars_covered": [], "boat_battles": 0,
+                "wins": 0, "losses": 0, "win_rate": None}
+    placeholders = ",".join(["(?, ?)"] * len(covered))
+    params: list = []
+    for c in covered:
+        params.extend([c["season_id"], c["section_index"]])
     rows = conn.execute(
         "SELECT b.outcome, COUNT(*) AS cnt FROM battle_events b "
-        "WHERE b.is_war = 1 AND b.battle_type LIKE '%oat%' "
-        "GROUP BY b.outcome"
+        f"WHERE b.is_war = 1 AND b.battle_type LIKE '%oat%' AND (b.season_id, b.section_index) IN ({placeholders}) "
+        "GROUP BY b.outcome",
+        tuple(params),
     ).fetchall()
     outcomes = {row["outcome"]: row["cnt"] for row in rows}
     wins = outcomes.get("W", 0)
     losses = outcomes.get("L", 0)
     return {
         "window_wars": wars,
+        "wars_covered": covered,
         "boat_battles": wins + losses,
         "wins": wins,
         "losses": losses,
