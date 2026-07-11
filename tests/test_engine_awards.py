@@ -97,6 +97,28 @@ def test_grant_season_awards_full_slate():
         conn.close()
 
 
+def test_award_leaderboard_accepts_rank_and_limit():
+    """QA H19: get_awards(mode='leaderboard') passed rank/limit that the storage
+    fn didn't accept, so every call raised TypeError. Now it filters/caps."""
+    from agent.tool_exec import _execute_get_awards
+    conn = db.get_connection()
+    try:
+        _seed_season(conn)
+        engine_awards.grant_season_awards(conn, SEASON, AT)
+        conn.commit()
+        # all-time counts, no crash
+        board = db.award_leaderboard(award_type="war_champ")
+        assert board and all("count" in r and "player_name" in r for r in board)
+        # rank filter (1st-place only) + limit cap both apply
+        top = db.award_leaderboard(award_type="war_champ", rank=1, limit=2)
+        assert len(top) <= 2
+        # the tool path no longer raises
+        out = _execute_get_awards({"mode": "leaderboard", "award_type": "war_champ"})
+        assert isinstance(out, dict) and out["mode"] == "leaderboard" and out["count"] >= 1
+    finally:
+        conn.close()
+
+
 def test_iron_king_grants_with_full_coverage():
     conn = db.get_connection()
     try:
