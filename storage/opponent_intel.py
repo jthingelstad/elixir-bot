@@ -9,6 +9,8 @@ from __future__ import annotations
 import statistics
 from datetime import datetime, timezone
 
+from storage._formatting import external_safe_name
+
 
 def _parse_cr_time(value: str | None) -> datetime | None:
     from engine.normalize import parse_cr_time  # the single parser (tz-aware)
@@ -57,14 +59,16 @@ def analyze_clan_roster(clan_profile: dict, *, now: datetime | None = None) -> d
 
         if len(top_players) < 5:
             top_players.append({
-                "name": m.get("name", "?"),
+                # QA L19: external opponent names never enter the display_name
+                # pipeline — sanitize inline so injection tokens don't reach the brain.
+                "name": external_safe_name(m.get("name")),
                 "trophies": m.get("trophies", 0),
                 "role": role,
             })
 
     return {
         "tag": clan_profile.get("tag", ""),
-        "name": clan_profile.get("name", "Unknown"),
+        "name": external_safe_name(clan_profile.get("name"), fallback="Unknown"),
         "member_count": member_count,
         "max_members": 50,
         "clan_score": clan_profile.get("clanScore", 0),
@@ -101,7 +105,7 @@ def analyze_war_participants(clan_war_entry: dict) -> dict:
 
     return {
         "tag": clan_war_entry.get("tag", ""),
-        "name": clan_war_entry.get("name", "Unknown"),
+        "name": external_safe_name(clan_war_entry.get("name"), fallback="Unknown"),
         # QA H17: `fame` (the clan's boat fame) IS the standing. The old
         # `total_fame` summed each member's fame — a DIFFERENT basis that does
         # not reconcile with clan fame (defenses + placement aren't a member
@@ -220,6 +224,37 @@ def compute_threat_rating(roster: dict | None, war: dict | None) -> int:
     return rating
 
 
+def threat_rating_breakdown(roster: dict | None, war: dict | None) -> dict:
+    """The 1-5 threat rating plus its component contributions and a note on what
+    it ignores (QA L21). The rating is a roster+engagement heuristic — it does
+    NOT weigh current fame / period points, so a strong-roster clan that is
+    actually losing the race can still outrank the leader. Callers wanting
+    'who is winning' should read the standings, not this rating.
+    """
+    components: dict[str, float] = {}
+    if roster:
+        components["war_trophies"] = round(min(roster.get("war_trophies", 0) / 500, 10), 2)
+        components["avg_trophies"] = round(min(roster.get("avg_trophies", 0) / 800, 10), 2)
+        components["roster_fullness"] = round(
+            roster.get("member_count", 0) / (roster.get("max_members", 50) or 50) * 10, 2
+        )
+        mc = roster.get("member_count", 1) or 1
+        components["recent_activity"] = round(roster.get("recently_active_count", 0) / mc * 10, 2)
+        components["donations"] = round(min(roster.get("donations_per_week", 0) / 2000, 10), 2)
+    if war:
+        components["war_engagement"] = round(war.get("engagement_pct", 0) / 10, 2)
+    return {
+        "rating": compute_threat_rating(roster, war),
+        "scale": "1 (weak) to 5 (dangerous)",
+        "components_0_10": components,
+        "note": (
+            "Roster + war-engagement heuristic only; ignores current fame / period "
+            "points, so it does not tell you who is winning the race — read the "
+            "standings for that."
+        ),
+    }
+
+
 def build_clan_intel_entry(
     clan_war_entry: dict,
     clan_profile: dict | None,
@@ -237,14 +272,21 @@ def build_clan_intel_entry(
     war_analysis = analyze_war_participants(clan_war_entry)
     roster_analysis = analyze_clan_roster(clan_profile, now=now) if clan_profile else None
     profile_available = clan_profile is not None
-    threat = compute_threat_rating(roster_analysis, war_analysis)
+    threat = threat_rating_breakdown(roster_analysis, war_analysis)
     return {
         "tag": f"#{tag}",
-        "name": (clan_profile or {}).get("name") or clan_war_entry.get("name") or "Unknown",
+        # QA L19: external opponent clan name — sanitize before it reaches the brain.
+        "name": external_safe_name(
+            (clan_profile or {}).get("name") or clan_war_entry.get("name"),
+            fallback="Unknown",
+        ),
         "is_us": is_us,
         "roster": roster_analysis,
         "war": war_analysis,
-        "threat_rating": threat,
+        # QA L21: a plain int hid the heuristic's basis; surface the sub-scores
+        # and the "ignores fame" caveat. Keep threat_rating as the scalar.
+        "threat_rating": threat["rating"],
+        "threat_breakdown": threat,
         "profile_available": profile_available,
     }
 
@@ -297,5 +339,6 @@ __all__ = [
     "build_clan_intel_entry",
     "build_intel_report",
     "compute_threat_rating",
+    "threat_rating_breakdown",
     "war_day_context",
 ]

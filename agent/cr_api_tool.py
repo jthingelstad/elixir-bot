@@ -9,6 +9,7 @@ API-only surfaces.
 from __future__ import annotations
 
 import cr_api
+from storage._formatting import external_safe_name as _ext
 from storage.game_modes import battle_matches_mode
 
 
@@ -41,7 +42,7 @@ def _filter_cr_player(payload):
     current_deck = payload.get("currentDeck") or []
     achievements = payload.get("achievements") or []
     return {
-        "name": payload.get("name"),
+        "name": _ext(payload.get("name")),
         "tag": payload.get("tag"),
         "trophies": payload.get("trophies"),
         "bestTrophies": payload.get("bestTrophies"),
@@ -52,7 +53,7 @@ def _filter_cr_player(payload):
         "donations": payload.get("donations"),
         "donationsReceived": payload.get("donationsReceived"),
         "role": payload.get("role"),
-        "clan": {"tag": clan.get("tag"), "name": clan.get("name")} if clan else None,
+        "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
         "arena": {"name": arena.get("name")} if arena else None,
         "currentFavouriteCard": fav.get("name") if fav else None,
         "currentDeck": [
@@ -113,10 +114,10 @@ def _filter_cr_battle_participant(p):
     clan = p.get("clan") or {}
     return {
         "tag": p.get("tag"),
-        "name": p.get("name"),
+        "name": _ext(p.get("name")),
         "crowns": p.get("crowns"),
         "trophyChange": p.get("trophyChange"),
-        "clan": {"tag": clan.get("tag"), "name": clan.get("name")} if clan else None,
+        "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
     }
 
 
@@ -168,7 +169,7 @@ def _filter_cr_clan(payload):
     location = payload.get("location") or {}
     member_list = payload.get("memberList") or []
     return {
-        "name": payload.get("name"),
+        "name": _ext(payload.get("name")),
         "tag": payload.get("tag"),
         "description": _truncated_description(payload),
         "type": payload.get("type"),
@@ -189,7 +190,7 @@ def _filter_cr_clan_members(payload, *, limit):
     trimmed = [
         {
             "tag": member.get("tag"),
-            "name": member.get("name"),
+            "name": _ext(member.get("name")),
             "role": member.get("role"),
             "trophies": member.get("trophies"),
                 "donations": member.get("donations"),
@@ -200,7 +201,7 @@ def _filter_cr_clan_members(payload, *, limit):
         for member in member_list[:limit]
     ]
     return {
-        "clan_name": payload.get("name"),
+        "clan_name": _ext(payload.get("name")),
         "clan_tag": payload.get("tag"),
         "total_members": len(member_list),
         "members_returned": len(trimmed),
@@ -216,7 +217,7 @@ def _filter_cr_clan_war(payload):
         participants = clan.get("participants") or []
         clan_summaries.append({
             "tag": clan.get("tag"),
-            "name": clan.get("name"),
+            "name": _ext(clan.get("name")),
             # QA H18: fame is week-cumulative (the boat); periodPoints is TODAY's
             # race (what players drive, resets daily) and is the ONLY meaningful
             # metric on a Colosseum week — the bridge previously dropped it.
@@ -228,7 +229,7 @@ def _filter_cr_clan_war(payload):
         for participant in participants:
             race_top_participants.append({
                 "tag": participant.get("tag"),
-                "name": participant.get("name"),
+                "name": _ext(participant.get("name")),
                 "clan_tag": clan.get("tag"),
                 "fame": participant.get("fame"),
                 "decksUsed": participant.get("decksUsed"),
@@ -281,20 +282,20 @@ def _filter_cr_tournament(payload, *, limit):
     trimmed = [
         {
             "tag": member.get("tag"),
-            "name": member.get("name"),
+            "name": _ext(member.get("name")),
             "score": member.get("score"),
             "rank": member.get("rank"),
             "previousRank": member.get("previousRank"),
             "clan": {
                 "tag": (member.get("clan") or {}).get("tag"),
-                "name": (member.get("clan") or {}).get("name"),
+                "name": _ext((member.get("clan") or {}).get("name")),
             } if member.get("clan") else None,
         }
         for member in members[:limit]
     ]
     return {
         "tag": payload.get("tag"),
-        "name": payload.get("name"),
+        "name": _ext(payload.get("name")),
         "description": _truncated_description(payload),
         "type": payload.get("type"),
         "status": payload.get("status"),
@@ -306,7 +307,12 @@ def _filter_cr_tournament(payload, *, limit):
         "levelCap": payload.get("levelCap"),
         "preparationDuration": payload.get("preparationDuration"),
         "duration": payload.get("duration"),
-        "members_count": payload.get("membersCount"),
+        # QA L24: the API omits membersCount on some tournaments; fall back to the
+        # length of the returned member list rather than surfacing null next to
+        # members_returned:1.
+        "members_count": payload.get("membersCount")
+        if payload.get("membersCount") is not None
+        else len(members),
         "members_returned": len(trimmed),
         "members": trimmed,
     }
@@ -338,7 +344,7 @@ def _filter_cr_ranking_list(payload, *, limit, score_field="eloRating"):
             "tag": item.get("tag"),
             "name": item.get("name"),
                 score_field: item.get(score_field),
-            "clan": {"tag": clan.get("tag"), "name": clan.get("name")} if clan else None,
+            "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
         })
         if len(rows) >= limit:
             break
@@ -367,8 +373,8 @@ def _filter_cr_leaderboard(payload, *, limit):
             "rank": item.get("rank"),
             "score": item.get("score"),
             "tag": item.get("tag"),
-            "name": item.get("name"),
-            "clan": {"tag": clan.get("tag"), "name": clan.get("name")} if clan else None,
+            "name": _ext(item.get("name")),
+            "clan": {"tag": clan.get("tag"), "name": _ext(clan.get("name"))} if clan else None,
         })
         if len(rows) >= limit:
             break
@@ -382,6 +388,12 @@ def _execute_cr_api(arguments):
     replacing them — so the LLM sees both the true API value and the human
     meaning (docs/reference/v5.1/normalize.md principle 3)."""
     result = _execute_cr_api_inner(arguments)
+    # QA L23: every aspect is TTL-cached (up to 600s for the river-race log) but
+    # carried no fetch timestamp — stamp when the bridge returned so the brain
+    # can age external data. Only on successful dict payloads (not error dicts).
+    if isinstance(result, dict) and "error" not in result and "observed_at" not in result:
+        from datetime import datetime, timezone
+        result["observed_at"] = datetime.now(timezone.utc).isoformat()
     try:
         from engine.normalize import annotate
 
