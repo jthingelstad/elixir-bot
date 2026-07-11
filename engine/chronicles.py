@@ -44,9 +44,9 @@ def _war_chronicle(conn, season_id: int) -> str | None:
         SELECT section_index, period_type, our_rank, our_fame
         FROM war_weeks WHERE season_id = ? ORDER BY section_index""", (season_id,))
     standings = _rows(conn, """
-        SELECT player_tag, SUM(COALESCE(fame,0)) AS fame
+        SELECT player_tag, SUM(COALESCE(fame,0)) AS points
         FROM war_participation WHERE season_id = ?
-        GROUP BY player_tag HAVING fame > 0 ORDER BY fame DESC LIMIT 5""",
+        GROUP BY player_tag HAVING points > 0 ORDER BY points DESC LIMIT 5""",
         (season_id,))
     awards = _rows(conn, """
         SELECT award_type, player_tag, rank, metric_value, metric_unit
@@ -73,9 +73,9 @@ def _war_chronicle(conn, season_id: int) -> str | None:
             parts.append(f"Every ranked week finished first — {firsts} straight.")
     if season["war_champ_tag"]:
         champ = _name(conn, season["war_champ_tag"])
-        top_fame = standings[0]["fame"] if standings else None
+        top_points = standings[0]["points"] if standings else None
         parts.append(f"War Champ: {champ}"
-                     + (f" with {top_fame} season fame" if top_fame else "") + ".")
+                     + (f" with {top_points} season points" if top_points else "") + ".")
         fp = season["free_pass_tag"]
         if fp and fp != season["war_champ_tag"]:
             parts.append(f"The Free Pass rotated to {_name(conn, fp)} "
@@ -83,11 +83,11 @@ def _war_chronicle(conn, season_id: int) -> str | None:
         elif fp:
             parts.append("They keep the Free Pass (no rotation due).")
         if len(standings) > 1:
-            others = ", ".join(f"{_name(conn, s['player_tag'])} ({s['fame']})"
+            others = ", ".join(f"{_name(conn, s['player_tag'])} ({s['points']})"
                                for s in standings[1:4])
             parts.append(f"Top contributors behind them: {others}.")
     elif standings:  # season not yet closed (or champ unknown): keep the leader
-        tops = ", ".join(f"{_name(conn, s['player_tag'])} ({s['fame']})"
+        tops = ", ".join(f"{_name(conn, s['player_tag'])} ({s['points']})"
                          for s in standings[:4])
         parts.append(f"Top contributors: {tops}.")
     extras = [a for a in awards if a["award_type"] not in ("war_champ", "free_pass")]

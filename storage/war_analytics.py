@@ -121,38 +121,38 @@ def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None
     ).fetchone()
     clan = conn.execute(
         # QA L6: dropped the dead avg_fame_per_row column (never read — the
-        # average below is computed from total_fame / participants instead).
+        # average below is computed from total_points / participants instead).
         "SELECT COUNT(DISTINCT player_tag) AS participants, "
-        "SUM(COALESCE(fame, 0)) AS total_fame "
+        "SUM(COALESCE(fame, 0)) AS total_points "
         "FROM war_participation WHERE season_id = ?",
         (season_id,),
     ).fetchone()
     participants = clan["participants"] or 0
-    avg_fame_per_member = round((clan["total_fame"] or 0) / participants, 1) if participants else 0
+    avg_points_per_member = round((clan["total_points"] or 0) / participants, 1) if participants else 0
     name_row = conn.execute("SELECT COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?", (member_tag,)).fetchone()
     return {
         "season_id": season_id,
         "tag": member_tag,
         "name": name_row["name"] if name_row else None,
         "member": {
-            "total_fame": mine["fame"] or 0,
+            "total_points": mine["fame"] or 0,
             "races_participated": mine["races"] or 0,
             "decks_used": mine["decks_used"] or 0,
         },
         "clan_average": {
             "participants": participants,
-            "avg_fame_per_member": avg_fame_per_member,
+            "avg_points_per_member": avg_points_per_member,
         },
-        "fame_vs_average": (mine["fame"] or 0) - avg_fame_per_member,
-        # QA L6: both member.total_fame and the average are CUMULATIVE across all
+        "points_vs_average": (mine["fame"] or 0) - avg_points_per_member,
+        # QA L6: both member.total_points and the average are CUMULATIVE across all
         # the season's weeks, and the average denominator counts every distinct
         # participant (including 0-deck / part-season members), so a member who
         # played fewer weeks reads low vs the average for a coverage reason, not
         # a performance one. Neither side is per-week normalized.
         "basis_note": (
-            "Season-cumulative fame on both sides; the average spans every distinct "
+            "Season-cumulative points on both sides; the average spans every distinct "
             "participant (incl. low-participation/departed) and is not weeks-normalized — "
-            "compare races_participated before reading fame_vs_average as effort."
+            "compare races_participated before reading points_vs_average as effort."
         ),
     }
 
@@ -293,11 +293,11 @@ def get_trending_war_contributors(season_id: Optional[str] = None, recent_races:
             continue
         qmarks = ",".join("?" for _ in section_set)
         for row in conn.execute(
-            f"SELECT player_tag, AVG(COALESCE(fame, 0)) AS avg_fame FROM war_participation "
+            f"SELECT player_tag, AVG(COALESCE(fame, 0)) AS avg_points FROM war_participation "
             f"WHERE season_id = ? AND section_index IN ({qmarks}) GROUP BY player_tag",
             (season_id, *section_set),
         ).fetchall():
-            members.setdefault(row["player_tag"], {})[key] = row["avg_fame"] or 0
+            members.setdefault(row["player_tag"], {})[key] = row["avg_points"] or 0
     out = []
     for tag, vals in members.items():
         recent_avg = vals.get("recent") or 0
@@ -307,13 +307,13 @@ def get_trending_war_contributors(season_id: Optional[str] = None, recent_races:
         item = {
             "tag": tag,
             "name": name_row["name"] if name_row else None,
-            "recent_avg_fame": round(recent_avg, 0),
-            "earlier_avg_fame": round(earlier_avg, 0) if earlier_avg is not None else None,
-            "fame_trend": round(delta, 0) if delta is not None else None,
+            "recent_avg_points": round(recent_avg, 0),
+            "earlier_avg_points": round(earlier_avg, 0) if earlier_avg is not None else None,
+            "points_trend": round(delta, 0) if delta is not None else None,
         }
         out.append(_member_reference_fields(conn, tag, item))
-    out.sort(key=lambda i: -(i.get("fame_trend") if i.get("fame_trend") is not None else i.get("recent_avg_fame") or 0))
-    # QA M9: with only one section recorded there's no earlier window — fame_trend
+    out.sort(key=lambda i: -(i.get("points_trend") if i.get("points_trend") is not None else i.get("recent_avg_points") or 0))
+    # QA M9: with only one section recorded there's no earlier window — points_trend
     # is all null and this is a current-average list, NOT a trend. Say so.
     trend_available = bool(earlier)
     return {
@@ -323,8 +323,8 @@ def get_trending_war_contributors(season_id: Optional[str] = None, recent_races:
         "trend_available": trend_available,
         "note": None if trend_available else (
             "only one war week recorded this season — no earlier window to trend "
-            "against; recent_avg_fame is a current average, not a trend. (Per-member "
-            "'fame' here is that member's period-point contribution.)"
+            "against; recent_avg_points is a current average, not a trend. (Per-member "
+            "'points' here is that member's period-point contribution.)"
         ),
         "members": out[:limit],
     }
@@ -343,23 +343,23 @@ def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqli
         return []
     rows = conn.execute(
         "SELECT wp.player_tag AS tag, MAX(COALESCE(m.display_name, m.current_name)) AS name, "
-        "SUM(COALESCE(wp.fame, 0)) AS total_fame, COUNT(*) AS races_participated, "
-        "ROUND(AVG(COALESCE(wp.fame, 0)), 0) AS avg_fame, "
+        "SUM(COALESCE(wp.fame, 0)) AS total_points, COUNT(*) AS races_participated, "
+        "ROUND(AVG(COALESCE(wp.fame, 0)), 0) AS avg_points, "
         "SUM(COALESCE(wp.decks_used, 0)) AS decks_used "
         "FROM war_participation wp "
         "JOIN players m ON m.player_tag = wp.player_tag "
         "WHERE wp.season_id = ? AND COALESCE(wp.fame, 0) > 0 "
         "AND EXISTS (SELECT 1 FROM clan_memberships cm "
         "  WHERE cm.player_tag = wp.player_tag AND cm.left_at IS NULL) "
-        "GROUP BY wp.player_tag ORDER BY total_fame DESC, races_participated DESC",
+        "GROUP BY wp.player_tag ORDER BY total_points DESC, races_participated DESC",
         (season_id,),
     ).fetchall()
     result = []
     for row in rows:
         item = dict(row)
         item["tag"] = _canon_tag(item["tag"])
-        item["finalized_fame"] = item["total_fame"] or 0
-        item["in_progress_fame"] = 0  # participation is live-updated; split retired
+        item["finalized_points"] = item["total_points"] or 0
+        item["in_progress_points"] = 0  # participation is live-updated; split retired
         result.append(_member_reference_fields(conn, item["tag"], item))
     return result
 

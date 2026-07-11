@@ -56,7 +56,7 @@ I have `cr_api` and the full read-tool set. For most signal types the relevant e
 A post that just restates the signal dict ("gooba is on a 7-win streak, nice") is a failure. The bar is concrete: the final post MUST include at least one of these, and everything cited must come from a tool result or the signal dict — never invented:
 
 - **Opponent specifics** — names, trophy counts, or deck archetype of the players they were beating.
-- **Comparative math** — fame / trophy / win-rate compared to their own prior period, or compared to another named member.
+- **Comparative math** — war points / trophy / win-rate compared to their own prior period, or compared to another named member. (A member's war contribution is **points**, never "fame" — fame is the clan's boat only; see GAME.md.)
 - **Rival scouting** — named opponent clan (tag, member count, recent activity) when an opposing clan's move is the story.
 - **Pace or gap math** — "180 fame behind, 6h left, 30 fame/hr needed" style arithmetic tied to the `time` block.
 - **Named connection to earlier context** — "the ladder push he started after the deck rework two weeks back" type callbacks, citing a prior memory or signal.

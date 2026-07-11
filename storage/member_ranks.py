@@ -1,7 +1,7 @@
 """storage.member_ranks — in-clan comparative ranks for active members.
 
 Computes 1-indexed ranks (donation_rank_week, donation_rank_season,
-war_fame_rank_current_race, war_fame_rank_season) and Elder-board booleans
+war_points_rank_current_race, war_points_rank_season) and Elder-board booleans
 (elder_eligible, elder_eligible_crossed_this_week) for every active member
 in a single pass. Consumers (via _member_reference_fields) look up by
 member_id rather than re-deriving from raw rows.
@@ -38,8 +38,8 @@ ELDER_ELIGIBILITY_DEFAULTS = {
 RANK_FIELDS = (
     "donation_rank_week",
     "donation_rank_season",
-    "war_fame_rank_current_race",
-    "war_fame_rank_season",
+    "war_points_rank_current_race",
+    "war_points_rank_season",
     "elder_eligible",
     "elder_eligible_crossed_this_week",
 )
@@ -105,8 +105,8 @@ def compute_member_ranks(conn: Optional[sqlite3.Connection] = None) -> dict[int,
     _populate_donation_rank_week(conn, ranks)
     _populate_donation_rank_season(conn, ranks, season_id)
     current_race_id = _current_war_race_id(conn, season_id)
-    _populate_war_fame_rank_current_race(conn, ranks, current_race_id)
-    _populate_war_fame_rank_season(conn, ranks, season_id)
+    _populate_war_points_rank_current_race(conn, ranks, current_race_id)
+    _populate_war_points_rank_season(conn, ranks, season_id)
     _populate_elder_eligibility(conn, ranks, today, season_id)
     return ranks
 
@@ -161,8 +161,8 @@ def _current_war_race_id(conn, season_id):
     return (row["season_id"], row["section_index"]) if row else None
 
 
-def _populate_war_fame_rank_current_race(conn, ranks, war_race_id):
-    """1-indexed rank by fame in the current/most-recent race.
+def _populate_war_points_rank_current_race(conn, ranks, war_race_id):
+    """1-indexed rank by war points in the current/most-recent race.
 
     Tie-break: more decks_used wins; then name. Active members with no
     participation row stay at ``None``.
@@ -181,11 +181,11 @@ def _populate_war_fame_rank_current_race(conn, ranks, war_race_id):
     ).fetchall()
     for i, row in enumerate(rows):
         if row["member_id"] in ranks:
-            ranks[row["member_id"]]["war_fame_rank_current_race"] = i + 1
+            ranks[row["member_id"]]["war_points_rank_current_race"] = i + 1
 
 
-def _populate_war_fame_rank_season(conn, ranks, season_id):
-    """1-indexed rank by season-to-date war fame.
+def _populate_war_points_rank_season(conn, ranks, season_id):
+    """1-indexed rank by season-to-date war points.
 
     Mirrors ``get_war_champ_standings`` ordering so mid-season standings
     align with the season-end War Champ result.
@@ -193,19 +193,19 @@ def _populate_war_fame_rank_season(conn, ranks, season_id):
     if season_id is None:
         return
     rows = conn.execute(
-        "SELECT wp.player_tag AS member_id, SUM(COALESCE(wp.fame, 0)) AS total_fame, "
+        "SELECT wp.player_tag AS member_id, SUM(COALESCE(wp.fame, 0)) AS total_points, "
         "       COUNT(*) AS races_participated, m.current_name "
         "FROM war_participation wp "
         "JOIN players m ON m.player_tag = wp.player_tag "
         "WHERE wp.season_id = ? AND EXISTS (SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL) "
         "AND COALESCE(wp.fame, 0) > 0 "
         "GROUP BY wp.player_tag "
-        "ORDER BY total_fame DESC, races_participated DESC, m.current_name COLLATE NOCASE",
+        "ORDER BY total_points DESC, races_participated DESC, m.current_name COLLATE NOCASE",
         (season_id,),
     ).fetchall()
     for i, row in enumerate(rows):
         if row["member_id"] in ranks:
-            ranks[row["member_id"]]["war_fame_rank_season"] = i + 1
+            ranks[row["member_id"]]["war_points_rank_season"] = i + 1
 
 
 def _populate_elder_eligibility(conn, ranks, today, season_id):

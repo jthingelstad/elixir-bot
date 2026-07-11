@@ -172,8 +172,8 @@ def test_member_question_views_are_covered():
         assert recent["losses"] == 8
 
         comparison = db.compare_member_war_to_clan_average("#ABC123", season_id=129, conn=conn)
-        assert comparison["member"]["total_fame"] == 3600
-        assert comparison["clan_average"]["avg_total_fame"] == 2700.0
+        assert comparison["member"]["total_points"] == 3600
+        assert comparison["clan_average"]["avg_points_per_member"] == 2700.0
 
         slumping = db.get_members_on_losing_streak(min_streak=3, conn=conn)
         assert slumping[0]["tag"] == "#DEF456"

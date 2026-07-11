@@ -140,7 +140,7 @@ TOOLS = [
             "Every response includes the member's war_player_type (regular/occasional/rare/never) "
             "based on historical participation.\n\n"
             "Aspects:\n"
-            "- summary: fame earned, decks used, race context for current season\n"
+            "- summary: points earned, decks used, race context for current season\n"
             "- attendance: participation rate, races played/missed, last 4 weeks\n"
             "- battles: war-battle win/loss/draw record for the season\n"
             "- missed_days: which specific war days were missed\n"
@@ -177,7 +177,7 @@ TOOLS = [
             "Aspects:\n"
             "- standings: competing clan rankings with fame, names, and our position "
             "(default — use for 'who are we racing', 'how do we compare', rival clans)\n"
-            "- engagement: live war-day member participation — deck usage, top fame earners, "
+            "- engagement: live war-day member participation — deck usage, top points earners, "
             "who hasn't battled yet (use for 'who still needs to battle', 'how are we doing today')"
         ),
         "input_schema": {
@@ -200,13 +200,14 @@ TOOLS = [
             "Aspects:\n"
             "- summary: season overview with races, fame/member, top contributors, non-participants\n"
             "- standings: members ranked by a war metric. Use the `metric` param: "
-            "'fame' (default — War Champ leaderboard), 'win_rate' (highest war-battle "
+            "'points' (default — War Champ leaderboard; 'fame' is accepted as a "
+            "back-compat alias), 'win_rate' (highest war-battle "
             "win rates), or 'attendance' (active members with zero war participation). "
             "Each member entry is enriched with war_player_type "
             "(regular/occasional/rare/never). Use for end-of-week race recaps and "
-            "'who is contributing most/least'. The fame metric includes the "
-            "current in-progress week's fame (per-player `finalized_fame` and "
-            "`in_progress_fame` are exposed) and bundles a top-3 `rookie_mvps` "
+            "'who is contributing most/least'. The points metric includes the "
+            "current in-progress week's points (per-player `finalized_points` and "
+            "`in_progress_points` are exposed) and bundles a top-3 `rookie_mvps` "
             "list so a single 'war champ standings' question covers the rookie "
             "race too. The response carries a `freshness` block with `as_of` "
             "and `current_week_included` — quote those when answering 'right "
@@ -234,9 +235,9 @@ TOOLS = [
                 },
                 "metric": {
                     "type": "string",
-                    "description": "Ranking metric for aspect='standings'. Default: fame.",
-                    "default": "fame",
-                    "enum": ["fame", "win_rate", "attendance"],
+                    "description": "Ranking metric for aspect='standings'. Default: points ('fame' accepted as a back-compat alias).",
+                    "default": "points",
+                    "enum": ["points", "fame", "win_rate", "attendance"],
                 },
                 "season_id": {
                     "type": "integer",
@@ -923,9 +924,9 @@ TOOLS = [
             "- leaderboard: aggregate count per member for a given award_type + "
             "rank. Use for 'who has won X the most' questions. Requires award_type.\n"
             "- current_standings: live standings for the four season-end awards in "
-            "one call — War Champ (top fame), Iron King (perfect war attendance — "
+            "one call — War Champ (top points), Iron King (perfect war attendance — "
             "4/4 decks every required battle day, post-victory days excluded), "
-            "Donation Champ (top season donations), Rookie MVP (top fame among "
+            "Donation Champ (top season donations), Rookie MVP (top points among "
             "members who joined this season). Mid-season the three competitive "
             "awards (War Champ, Donation Champ, Rookie MVP) show who would win "
             "if the season ended now; Iron King is NOT a one-winner race — it's "
@@ -940,7 +941,7 @@ TOOLS = [
             "metadata. The `freshness` block includes `as_of` and "
             "`current_week_included` — quote those when answering 'right now' "
             "questions so players see how fresh the read is. War Champ and "
-            "Rookie MVP fame include the current in-progress week. Honors "
+            "Rookie MVP points include the current in-progress week. Honors "
             "season_id; ignores member_tag / award_type / rank / limit "
             "filters.\n\n"
             "For a single player's full trophy case prefer get_member with "

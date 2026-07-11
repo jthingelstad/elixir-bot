@@ -3509,8 +3509,8 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
             "total_clan_fame": 23456,
             "fame_per_active_member": 1116.95,
             "top_contributors": [
-                {"member_ref": "King Levy (<@1474760692992180429>)", "total_fame": 3200},
-                {"member_ref": "Finn", "total_fame": 3100},
+                {"member_ref": "King Levy (<@1474760692992180429>)", "total_points": 3200},
+                {"member_ref": "Finn", "total_points": 3100},
             ],
             "nonparticipants": [{"member_ref": "Vijay"}],
         }),
@@ -3564,9 +3564,9 @@ def test_build_war_status_report_summarizes_current_war_awareness():
             "finished_count": 9,
             "untouched_count": 8,
             "total_participants": 25,
-            "top_fame_total": [
-                {"member_ref": "King Levy", "fame_today": 800},
-                {"member_ref": "Finn", "fame_today": 600},
+            "top_points_total": [
+                {"member_ref": "King Levy", "points_today": 800},
+                {"member_ref": "Finn", "points_today": 600},
             ],
             "used_none": [
                 {"member_ref": "Vijay"},
@@ -3576,11 +3576,11 @@ def test_build_war_status_report_summarizes_current_war_awareness():
         patch("elixir.db.get_war_week_summary", return_value={
             "participant_count": 23,
             "top_participants": [
-                {"member_ref": "King Levy", "fame": 3200},
-                {"member_ref": "Finn", "fame": 2900},
+                {"member_ref": "King Levy", "points": 3200},
+                {"member_ref": "Finn", "points": 2900},
             ],
             "day_summaries": [
-                {"phase": "battle", "phase_display": "Battle Day 1", "engaged_count": 20, "finished_count": 11, "top_fame_today": [{"member_ref": "King Levy"}]},
+                {"phase": "battle", "phase_display": "Battle Day 1", "engaged_count": 20, "finished_count": 11, "top_points_today": [{"member_ref": "King Levy"}]},
             ],
             "race": None,
         }),
@@ -3589,14 +3589,14 @@ def test_build_war_status_report_summarizes_current_war_awareness():
             "total_clan_fame": 30100,
             "fame_per_active_member": 1204.0,
             "top_contributors": [
-                {"member_ref": "King Levy", "total_fame": 6200},
-                {"member_ref": "Finn", "total_fame": 5800},
+                {"member_ref": "King Levy", "total_points": 6200},
+                {"member_ref": "Finn", "total_points": 5800},
             ],
             "nonparticipants": [{"member_ref": "Vijay"}],
         }),
         patch("elixir.db.list_recent_war_day_summaries", return_value=[
-            {"phase": "battle", "phase_display": "Battle Day 2", "engaged_count": 17, "finished_count": 9, "top_fame_today": [{"member_ref": "King Levy"}]},
-            {"phase": "battle", "phase_display": "Battle Day 1", "engaged_count": 20, "finished_count": 11, "top_fame_today": [{"member_ref": "Finn"}]},
+            {"phase": "battle", "phase_display": "Battle Day 2", "engaged_count": 17, "finished_count": 9, "top_points_today": [{"member_ref": "King Levy"}]},
+            {"phase": "battle", "phase_display": "Battle Day 1", "engaged_count": 20, "finished_count": 11, "top_points_today": [{"member_ref": "Finn"}]},
         ]),
         patch("elixir.db.get_latest_clan_boat_defense_status", return_value=None),
     ):
@@ -3864,8 +3864,8 @@ def test_build_top_war_contributors_report_formats_season_leaders():
     with patch("elixir.db.get_war_season_summary", return_value={
         "season_id": 130,
         "top_contributors": [
-            {"member_ref": "King Levy", "total_fame": 3200, "races_played": 4},
-            {"member_ref": "Vijay", "total_fame": 2800, "races_played": 4},
+            {"member_ref": "King Levy", "total_points": 3200, "races_played": 4},
+            {"member_ref": "Vijay", "total_points": 2800, "races_played": 4},
         ],
     }) as mock_summary:
         report = elixir._build_top_war_contributors_report()
@@ -3873,8 +3873,8 @@ def test_build_top_war_contributors_report_formats_season_leaders():
     mock_summary.assert_called_once_with(top_n=5)
     assert report == (
         "**Top War Contributors (Season 130)**\n"
-        "1. King Levy — 3,200 fame across 4 race(s)\n"
-        "2. Vijay — 2,800 fame across 4 race(s)"
+        "1. King Levy — 3,200 points across 4 race(s)\n"
+        "2. Vijay — 2,800 points across 4 race(s)"
     )
 
 
@@ -3920,8 +3920,8 @@ def test_build_clan_status_short_report_is_compact():
         patch("elixir.db.get_war_season_summary", return_value={
             "fame_per_active_member": 1116.95,
             "top_contributors": [
-                {"member_ref": "King Levy (<@1474760692992180429>)", "total_fame": 3200},
-                {"member_ref": "Finn", "total_fame": 3100},
+                {"member_ref": "King Levy (<@1474760692992180429>)", "total_points": 3200},
+                {"member_ref": "Finn", "total_points": 3100},
             ],
         }),
         patch("elixir.db.get_members_at_risk", return_value={"members": [{"member_ref": "Vijay"}]}),
@@ -4000,7 +4000,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
             "window_days": 7,
             "roster": {"active_members": 21, "open_slots": 29, "avg_collection_level": 1577, "avg_trophies": 7523.4, "donations_week_total": 1400},
             "war_score_trend": {"direction": "up", "score_change": 120, "trophy_change_total": 40, "races": 1, "avg_rank": 1.0, "avg_fame": 12345},
-            "war_season_summary": {"season_id": 77, "races": 3, "total_clan_fame": 50234, "fame_per_active_member": 2392.1, "top_contributors": [{"member_ref": "King Levy", "total_fame": 3200}]},
+            "war_season_summary": {"season_id": 77, "races": 3, "total_clan_fame": 50234, "fame_per_active_member": 2392.1, "top_contributors": [{"member_ref": "King Levy", "total_points": 3200}]},
             "recent_war_races": [{
                 "season_id": 77,
                 "week": 2,
@@ -4009,7 +4009,7 @@ def test_build_weekly_clan_recap_context_summarizes_week():
                 "our_fame": 12345,
                 "trophy_change": 20,
                 "created_date": "20260308T180000.000Z",
-                "top_participants": [{"member_ref": "King Levy", "fame": 3200, "decks_used": 4}],
+                "top_participants": [{"member_ref": "King Levy", "points": 3200, "decks_used": 4}],
                 "standings_preview": [{"rank": 1, "name": "POAP KINGS", "fame": 12345}],
             }],
             "trending_war_contributors": {"members": [{"member_ref": "Finn", "fame_delta": 400}]},

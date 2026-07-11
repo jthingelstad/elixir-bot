@@ -23,7 +23,7 @@ Prioritize clear guidance, not wiki-style completeness.
 A River Race has **two different scores**, and they are two different races. Never compare one clan's period points against another clan's fame.
 
 - **Period points** are the number members see and battle for each day (the medal count in-game). They **reset to 0 at every daily reset**. This is *today's* race — what the clan is actively driving right now. A maxed individual day is about 900 period points.
-- **Fame is a CLAN metric only — members never accumulate fame.** What an individual member earns and contributes is **points**; those sum into the clan's daily total, which converts to clan fame at day close. So a member's war contribution is measured in **points**, never "fame". If a data field labels a member's value `fame` (the API/`war_participation` call it that for historical reasons), treat it as that member's **points** contribution and say "points", not "fame". Only the clan has fame.
+- **Fame is a CLAN metric only — members never accumulate fame.** What an individual member earns and contributes is **points**; those sum into the clan's daily total, which converts to clan fame at day close. So a member's war contribution is measured in **points**, never "fame". The read-path data now labels a member's contribution `points` directly (only the raw `war_participation` DB column is still named `fame`, for historical reasons — you will not see that raw name). Only the clan has fame.
 - **Member-facing language: just say "points", not "period points".** Members earn points across the **day**, the **week**, and the whole **war season** — that's how a player thinks of it. ("Period points" is the technical name for the daily-resetting clan scoreboard; don't use that phrase with members.)
 - **The War Champ is the top season points earner** — the member who contributed the most points across the season. That's the recognition we crown, so frame the season points leaderboard as the race for War Champ.
 - **Fame** is the **boat** — it is *cumulative for the week* and decides who wins the race. At each day's **close**, the day's period-point **rank** awards fame to the boat: **1st +3,000 · 2nd +1,800 · 3rd +1,000 · 4th +600 · 5th +400**. So fame only moves at day close; during a live day the boat sits still while period points climb. In-game, the boat screen shows your *projected* fame reward for your current daily rank (e.g. "+3,000" while sitting 1st) — that is contingent on holding the rank until reset, not banked yet.
@@ -112,7 +112,7 @@ A River Race has **two different scores**, and they are two different races. Nev
 
 ## Rewards and Recognition
 
-- Weekly war participation is worth celebrating, especially strong fame totals and full-deck usage.
+- Weekly war participation is worth celebrating, especially strong points totals and full-deck usage.
 - First place in a race is a major clan achievement.
 - At season end, recognize top contributors and perfect participation.
 - Members must still be in the clan at race conclusion to claim their River Chest.

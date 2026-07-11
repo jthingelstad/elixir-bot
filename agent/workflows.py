@@ -180,7 +180,7 @@ def _roster_bio_context(clan_data, roster_data=None):
             line.append(
                 "current_season_war: "
                 f"{war_season.get('races_played') or 0} races, "
-                f"{war_season.get('total_fame') or 0:,} fame, "
+                f"{war_season.get('total_points') or 0:,} points, "
                 f"{war_season.get('total_decks_used') or 0} decks"
             )
 
@@ -293,7 +293,7 @@ def _promotion_context(clan_data, war_data, roster_data=None):
         for member in (season_summary.get("top_contributors") or [])[:5]:
             lines.append(
                 f"- {member.get('member_name') or member.get('name')} | "
-                f"{member.get('total_fame', 0):,} fame | races: {member.get('races_participated', 0)}"
+                f"{member.get('total_points', 0):,} points | races: {member.get('races_participated', 0)}"
             )
 
     return "\n".join(lines)

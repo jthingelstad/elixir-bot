@@ -749,14 +749,14 @@ def test_execute_tool_get_war_season_win_rates_uses_db():
         mock_db.get_war_battle_win_rates.assert_called_once_with(season_id=129, limit=5, min_battles=4)
 
 
-def test_execute_tool_get_war_season_standings_metric_fame():
+def test_execute_tool_get_war_season_standings_default_points():
     with (
         patch("elixir_agent.db") as mock_db,
         patch("agent.tool_exec._enrich_war_player_types") as mock_enrich,
         patch("agent.tool_exec._war_standings_freshness") as mock_fresh,
     ):
         mock_db.get_war_champ_standings.return_value = [
-            {"name": "Player", "total_fame": 5000}
+            {"name": "Player", "total_points": 5000}
         ]
         mock_fresh.return_value = {
             "as_of": "2026-05-03T10:39:00",
@@ -770,9 +770,9 @@ def test_execute_tool_get_war_season_standings_metric_fame():
             "get_war_season", {"aspect": "standings", "season_id": 129}
         ))
         assert result["season_id"] == 129
-        assert result["metric"] == "fame"
+        assert result["metric"] == "points"
         assert result["freshness"]["current_week_included"] is True
-        assert result["members"] == [{"name": "Player", "total_fame": 5000}]
+        assert result["members"] == [{"name": "Player", "total_points": 5000}]
         mock_db.get_war_champ_standings.assert_called_once_with(season_id=129)
         mock_enrich.assert_called_once()
 

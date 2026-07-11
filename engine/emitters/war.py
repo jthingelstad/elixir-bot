@@ -302,14 +302,14 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
 
 def _season_standings(conn, season_id: int) -> list[dict]:
     rows = conn.execute(
-        """SELECT player_tag, SUM(COALESCE(fame, 0)) AS total_fame,
+        """SELECT player_tag, SUM(COALESCE(fame, 0)) AS total_points,
                   SUM(COALESCE(decks_used, 0)) AS decks_used
            FROM war_participation WHERE season_id = ?
-           GROUP BY player_tag ORDER BY total_fame DESC, player_tag""",
+           GROUP BY player_tag ORDER BY total_points DESC, player_tag""",
         (season_id,),
     ).fetchall()
     return [
-        {"player_tag": r["player_tag"], "fame": r["total_fame"],
+        {"player_tag": r["player_tag"], "points": r["total_points"],
          "decks_used": r["decks_used"], "rank": i + 1}
         for i, r in enumerate(rows)
     ]

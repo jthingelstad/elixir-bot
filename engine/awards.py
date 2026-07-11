@@ -8,16 +8,16 @@ and writes rows idempotently (schema.md §7.5 UNIQUE constraint).
 Semantics ported from the retired heartbeat/_awards.py + storage/awards.py
 (git 1b6ef38~1), re-grounded on v5.1 tables:
 
-- war_champ    — podium, ranks 1–3 by cumulative season fame (Q2 erratum)
+- war_champ    — podium, ranks 1–3 by cumulative season points (Q2 erratum)
 - free_pass    — exactly ONE row, from war_seasons.free_pass_tag (Q2 rotation)
 - iron_king    — perfect attendance every finalized battle day of every
                  section; requires full-season attendance coverage (s133 only
                  has data from week 4 day 2 — the guard skips with a reason)
 - donation_champ — top-3 by summed weekly donation peaks (Sunday-robust MAX
                  per ISO week, summed across the season window)
-- rookie_mvp   — top-3 season fame among members whose open membership began
+- rookie_mvp   — top-3 season points among members whose open membership began
                  during the season
-- war_participant — every member with season fame > 0; SILENT (rows only —
+- war_participant — every member with season points > 0; SILENT (rows only —
                  the old engine deliberately never posted these)
 
 The single "season awards" summary intent (volume principle: one post, not
@@ -94,11 +94,11 @@ def _grant(conn, *, award_type: str, season_id: int, player_tag: str,
 
 def _war_champ_podium(conn, season_id: int, awarded_at: str) -> list[dict]:
     rows = conn.execute(
-        """SELECT player_tag, SUM(COALESCE(fame, 0)) AS total_fame,
+        """SELECT player_tag, SUM(COALESCE(fame, 0)) AS total_points,
                   COUNT(*) AS races
            FROM war_participation WHERE season_id = ?
-           GROUP BY player_tag HAVING total_fame > 0
-           ORDER BY total_fame DESC, player_tag""",
+           GROUP BY player_tag HAVING total_points > 0
+           ORDER BY total_points DESC, player_tag""",
         (season_id,),
     ).fetchall()
     out = []
@@ -112,15 +112,15 @@ def _war_champ_podium(conn, season_id: int, awarded_at: str) -> list[dict]:
         granted = _grant(
             conn, award_type="war_champ", season_id=season_id,
             player_tag=r["player_tag"], rank=rank,
-            metric_value=r["total_fame"], metric_unit="fame",
+            metric_value=r["total_points"], metric_unit="points",
             metadata={"races_participated": r["races"],
-                      "avg_fame": round(r["total_fame"] / r["races"], 1) if r["races"] else None},
+                      "avg_points": round(r["total_points"] / r["races"], 1) if r["races"] else None},
             awarded_at=awarded_at,
         )
         if granted:
             out.append({"rank": rank, "tag": r["player_tag"],
                         "name": _name(conn, r["player_tag"]),
-                        "metric_value": r["total_fame"], "metric_unit": "fame"})
+                        "metric_value": r["total_points"], "metric_unit": "points"})
     return out
 
 
@@ -132,14 +132,14 @@ def _free_pass(conn, season_id: int, awarded_at: str) -> list[dict]:
     if not row or not row["free_pass_tag"]:
         return []
     tag = row["free_pass_tag"]
-    fame = conn.execute(
+    points = conn.execute(
         "SELECT SUM(COALESCE(fame,0)) FROM war_participation WHERE season_id = ? AND player_tag = ?",
         (season_id, tag),
     ).fetchone()[0]
     rotated = bool(row["war_champ_tag"] and row["war_champ_tag"] != tag)
     granted = _grant(
         conn, award_type="free_pass", season_id=season_id, player_tag=tag,
-        rank=1, metric_value=fame, metric_unit="fame",
+        rank=1, metric_value=points, metric_unit="points",
         metadata={"rotation_applied": rotated,
                   "war_champ_tag": row["war_champ_tag"]},
         awarded_at=awarded_at,
@@ -234,35 +234,35 @@ def _rookie_mvps(conn, season_id: int, awarded_at: str) -> list[dict]:
     if not start or not end:
         return []
     rows = conn.execute(
-        """SELECT wp.player_tag, SUM(COALESCE(wp.fame, 0)) AS total_fame,
+        """SELECT wp.player_tag, SUM(COALESCE(wp.fame, 0)) AS total_points,
                   COUNT(*) AS races
            FROM war_participation wp
            JOIN clan_memberships cm ON cm.player_tag = wp.player_tag
                 AND cm.left_at IS NULL AND cm.joined_at >= ? AND cm.joined_at < ?
            WHERE wp.season_id = ?
-           GROUP BY wp.player_tag HAVING total_fame > 0
-           ORDER BY total_fame DESC, races DESC, wp.player_tag""",
+           GROUP BY wp.player_tag HAVING total_points > 0
+           ORDER BY total_points DESC, races DESC, wp.player_tag""",
         (start, end, season_id),
     ).fetchall()
     out = []
     for i, r in enumerate(rows[:PODIUM]):
         if _grant(conn, award_type="rookie_mvp", season_id=season_id,
                   player_tag=r["player_tag"], rank=i + 1,
-                  metric_value=r["total_fame"], metric_unit="fame",
+                  metric_value=r["total_points"], metric_unit="points",
                   metadata={"races_participated": r["races"]},
                   awarded_at=awarded_at):
             out.append({"rank": i + 1, "tag": r["player_tag"],
                         "name": _name(conn, r["player_tag"]),
-                        "metric_value": r["total_fame"], "metric_unit": "fame"})
+                        "metric_value": r["total_points"], "metric_unit": "points"})
     return out
 
 
 def _war_participants(conn, season_id: int, awarded_at: str) -> int:
     """Silent accrual — rows only, never posted (carried behavior)."""
     rows = conn.execute(
-        """SELECT player_tag, SUM(COALESCE(fame, 0)) AS total_fame
+        """SELECT player_tag, SUM(COALESCE(fame, 0)) AS total_points
            FROM war_participation WHERE season_id = ?
-           GROUP BY player_tag HAVING total_fame > 0""",
+           GROUP BY player_tag HAVING total_points > 0""",
         (season_id,),
     ).fetchall()
     n = 0
@@ -270,7 +270,7 @@ def _war_participants(conn, season_id: int, awarded_at: str) -> int:
         if _active(conn, r["player_tag"]) and _grant(
             conn, award_type="war_participant", season_id=season_id,
             player_tag=r["player_tag"], rank=1,
-            metric_value=r["total_fame"], metric_unit="fame",
+            metric_value=r["total_points"], metric_unit="points",
             awarded_at=awarded_at,
         ):
             n += 1

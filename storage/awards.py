@@ -398,7 +398,7 @@ def get_rookie_mvp_candidates(
         f"""
         SELECT wp.player_tag AS tag,
                MAX(m.current_name) AS name,
-               SUM(COALESCE(wp.fame, 0)) AS total_fame,
+               SUM(COALESCE(wp.fame, 0)) AS total_points,
                COUNT(*) AS races_participated
         FROM war_participation wp
         JOIN players m ON m.player_tag = wp.player_tag
@@ -409,8 +409,8 @@ def get_rookie_mvp_candidates(
          AND cm.joined_at < ?
         WHERE wp.season_id = ? AND {_ACTIVE}
         GROUP BY wp.player_tag
-        HAVING total_fame > 0
-        ORDER BY total_fame DESC, races_participated DESC
+        HAVING total_points > 0
+        ORDER BY total_points DESC, races_participated DESC
         LIMIT ?
         """,
         (_cr_time_to_iso(start) or start, _cr_time_to_iso(end) or end, int(season_id), max(1, int(limit))),
@@ -420,7 +420,7 @@ def get_rookie_mvp_candidates(
             "tag": _canon_tag(r["tag"]),
             "name": r["name"],
             "member_id": _canon_tag(r["tag"]),
-            "total_fame": r["total_fame"] or 0,
+            "total_points": r["total_points"] or 0,
             "races_participated": r["races_participated"],
             "rank": i + 1,
         }
@@ -441,19 +441,19 @@ def get_war_participant_candidates(
     rows = conn.execute(
         f"""
         SELECT wp.player_tag AS tag, MAX(m.current_name) AS name,
-               SUM(COALESCE(wp.fame, 0)) AS total_fame
+               SUM(COALESCE(wp.fame, 0)) AS total_points
         FROM war_participation wp
         JOIN players m ON m.player_tag = wp.player_tag
         WHERE wp.season_id = ? AND {_ACTIVE}
         GROUP BY wp.player_tag
-        HAVING total_fame > 0
-        ORDER BY total_fame DESC
+        HAVING total_points > 0
+        ORDER BY total_points DESC
         """,
         (int(season_id),),
     ).fetchall()
     return [
         {"tag": _canon_tag(r["tag"]), "name": r["name"],
-         "member_id": _canon_tag(r["tag"]), "total_fame": r["total_fame"] or 0}
+         "member_id": _canon_tag(r["tag"]), "total_points": r["total_points"] or 0}
         for r in rows
     ]
 
@@ -483,11 +483,11 @@ def get_season_awards_standings(
             "rank": i + 1,
             "tag": entry["tag"],
             "name": entry.get("name"),
-            "metric_value": entry.get("total_fame"),
-            "metric_unit": "fame",
+            "metric_value": entry.get("total_points"),
+            "metric_unit": "points",
             "metadata": {
                 "races_participated": entry.get("races_participated"),
-                "avg_fame": entry.get("avg_fame"),
+                "avg_points": entry.get("avg_points"),
             },
         })
 
@@ -522,8 +522,8 @@ def get_season_awards_standings(
             "rank": entry["rank"],
             "tag": entry["tag"],
             "name": entry.get("name"),
-            "metric_value": entry.get("total_fame"),
-            "metric_unit": "fame",
+            "metric_value": entry.get("total_points"),
+            "metric_unit": "points",
             "metadata": {
                 "races_participated": entry.get("races_participated"),
             },
