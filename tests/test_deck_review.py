@@ -155,7 +155,11 @@ def test_get_member_recent_losses_returns_empty_when_no_battles():
         db.snapshot_members([{"tag": "#PLAYER", "name": "Player", "role": "member"}], conn=conn)
         out = db.get_member_recent_losses("#PLAYER", scope="war_10", conn=conn)
         assert out["losses_examined"] == 0
-        assert out["top_opponent_cards"] == []
+        # QA H3: opponent deck lists aren't captured, so the tool no longer
+        # promises top_opponent_cards — it states so honestly instead.
+        assert out["opponent_decks_captured"] is False
+        assert "top_opponent_cards" not in out
+        assert out["opponent_tags"] == []
     finally:
         conn.close()
 
