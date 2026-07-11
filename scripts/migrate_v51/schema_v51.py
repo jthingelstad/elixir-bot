@@ -419,6 +419,9 @@ CREATE TABLE war_weeks (
     period_type TEXT,
     created_date TEXT, finish_time TEXT,
     our_rank INTEGER, our_fame INTEGER, trophy_change INTEGER, our_clan_score INTEGER,
+    -- Boat-defense fame for the week (API periodLogs.progressEarnedFromDefenses,
+    -- summed); placement fame = our_fame - defense_fame.
+    defense_fame INTEGER,
     thread_id INTEGER,
     PRIMARY KEY (season_id, section_index)
 );
