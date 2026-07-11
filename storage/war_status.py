@@ -851,21 +851,34 @@ def get_season_window(
         "FROM war_weeks ww WHERE ww.season_id = ? ORDER BY ww.section_index ASC",
         (int(sid),),
     ).fetchall()
-    trajectory = [
-        {
+    # QA M14: a week's our_rank/our_fame stay NULL until it finalizes at close,
+    # so the in-progress week read as null rank/fame (and weeks_recorded overstated
+    # completeness). Fill the live current week from the war clock and flag it.
+    live = get_current_war_status(conn=conn) or {}
+    live_sid = live.get("season_id")
+    live_section = live.get("section_index")
+    trajectory = []
+    for row in weeks:
+        item = {
             "section_index": row["section_index"],
             "rank": row["our_rank"],
             "fame": row["our_fame"],
             "trophy_change": row["trophy_change"],
             "clans": row["clans"] or None,
+            "in_progress": False,
         }
-        for row in weeks
-    ]
+        if live_sid == int(sid) and row["section_index"] == live_section and row["our_fame"] is None:
+            item["rank"] = live.get("race_rank")
+            item["fame"] = live.get("fame")
+            item["in_progress"] = True
+        trajectory.append(item)
+    finalized = sum(1 for t in trajectory if not t["in_progress"])
     return {
         "season_id": int(sid),
         "start": start,
         "end": end,
         "weeks_recorded": len(trajectory),
+        "weeks_finalized": finalized,
         "week_trajectory": trajectory,
     }
 
