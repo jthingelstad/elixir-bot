@@ -610,9 +610,11 @@ def _execute_get_river_race(arguments):
             "partial_deck_participant_count": remaining_deck_participants["partial"],
             "participants_with_decks_left_count": remaining_deck_participants["total"],
             "remaining_deck_participants": remaining_deck_participants,
-            # No per-member daily war fame is tracked (QA M6); top_fame_total is
-            # cumulative season fame, and decks_used_today is the daily signal.
+            # Members contribute PERIOD POINTS, not fame (fame is clan-only);
+            # top_fame_total is each member's cumulative season point contribution
+            # (the API/data label it 'fame'). decks_used_today is the daily signal.
             "top_fame_total": day_state.get("top_fame_total"),
+            "member_value_note": "per-member 'fame' values are that member's period-point contribution; only the clan has fame",
             "used_all_4": day_state.get("used_all_4"),
             "used_some": day_state.get("used_some"),
             "used_none": day_state.get("used_none"),
