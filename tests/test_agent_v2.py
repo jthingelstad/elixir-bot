@@ -1273,7 +1273,7 @@ def test_create_chat_completion_uses_sonnet_for_long_form_workflows():
         patch("agent.core._get_client", return_value=mock_client),
         patch("elixir_agent.runtime_status.record_llm_call"),
     ):
-        for workflow in ("clan_chat_copy", "interactive", "channel_update", "clanops", "season_awards"):
+        for workflow in ("clan_chat_copy", "interactive", "channel_update", "clanops"):
             elixir_agent._create_chat_completion(
                 workflow=workflow,
                 messages=[{"role": "user", "content": "status"}],

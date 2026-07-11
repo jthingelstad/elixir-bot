@@ -1,15 +1,10 @@
 import elixir_agent
 
-from agent.workflow_registry import canonical_workflow_name, get_workflow_spec
+from agent.workflow_registry import get_workflow_spec
 
 
 def _names(tools):
     return [tool["name"] for tool in tools]
-
-
-def test_observe_alias_resolves_to_observation():
-    assert canonical_workflow_name("observe") == "observation"
-    assert get_workflow_spec("observe") is get_workflow_spec("observation")
 
 
 def test_registry_generates_compatibility_maps():
@@ -24,8 +19,6 @@ def test_registry_generates_compatibility_maps():
         "intel_report",
         "tournament_recap",
         "tournament_update",
-        "war_recap",
-        "season_awards",
         "awareness",
         "memory_synthesis",
         "clan_chat_copy",
@@ -34,12 +27,6 @@ def test_registry_generates_compatibility_maps():
         assert elixir_agent.MAX_ROUNDS_BY_WORKFLOW[workflow] == spec.max_tool_rounds
         assert elixir_agent.RESPONSE_SCHEMAS_BY_WORKFLOW[workflow] == spec.response_schema
         assert _names(elixir_agent.TOOLSETS_BY_WORKFLOW[workflow]) == _names(spec.tools)
-
-
-def test_legacy_observe_toolset_still_available():
-    assert _names(elixir_agent.TOOLSETS_BY_WORKFLOW["observe"]) == _names(
-        elixir_agent.TOOLSETS_BY_WORKFLOW["observation"]
-    )
 
 
 def test_registry_model_selection_matches_existing_defaults(monkeypatch):
@@ -54,9 +41,8 @@ def test_registry_model_selection_matches_existing_defaults(monkeypatch):
     assert elixir_agent._model_for_workflow("leader_action_feedback") == "intensive-model"
     assert elixir_agent._model_for_workflow("memory_synthesis") == "intensive-model"
     assert elixir_agent._model_for_workflow("clan_chat_copy") == "chat-model"
-    assert elixir_agent._model_for_workflow("observe") == "light-model"
 
 
 def test_empty_toolsets_stay_empty():
-    for workflow in ("reception", "war_recap", "season_awards", "memory_synthesis", "leader_action_feedback", "clan_chat_copy"):
+    for workflow in ("reception", "memory_synthesis", "leader_action_feedback", "clan_chat_copy"):
         assert elixir_agent.TOOLSETS_BY_WORKFLOW[workflow] == []

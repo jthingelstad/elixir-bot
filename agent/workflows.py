@@ -28,13 +28,10 @@ from agent.prompt_builders import (
     _leader_action_feedback_system,
     _member_report_system,
     _memory_synthesis_system,
-    _observe_system,
     _promote_system,
     _reception_system,
-    _season_awards_system,
     _tournament_recap_system,
     _tournament_update_system,
-    _war_recap_system,
     _weekly_digest_system,
 )
 from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
@@ -298,44 +295,6 @@ def _promotion_context(clan_data, war_data, roster_data=None):
 
     return "\n".join(lines)
 
-def observe_and_post(clan_data, war_data, signals=None, recent_posts=None, memory_context=None):
-    """Observation with signals from heartbeat. Returns dict or None.
-
-    signals: list of signal dicts from heartbeat.tick(), or None when no detector output is being passed.
-    recent_posts: list of recent message dicts from db.list_channel_messages().
-    """
-    # Only include war context when signals are war-related (type starts with "war_")
-    has_war_signals = signals and any(
-        str((s or {}).get("type") or "").startswith("war_") for s in signals
-    )
-    context = _clan_context(clan_data, war_data, max_members=MAX_CONTEXT_MEMBERS_DEFAULT,
-                            include_war=has_war_signals)
-
-    if signals:
-        signals_text = json.dumps(signals, indent=2, default=str)
-        user_msg = (
-            f"=== HEARTBEAT SIGNALS ===\n{signals_text}\n\n"
-            f"{context}"
-        )
-    else:
-        user_msg = context
-
-    # Add war status context (with competing clan standings) for war signals
-    if has_war_signals:
-        war_ctx = _war_status_prompt_context()
-        if war_ctx:
-            user_msg += f"\n\n{war_ctx}"
-
-    user_msg += _format_recent_posts(recent_posts)
-    user_msg += _format_memory_context(memory_context)
-
-    return _chat_with_tools(
-        _observe_system(), user_msg,
-        workflow="observation",
-        allowed_tools=TOOLSETS_BY_WORKFLOW["observe"],
-        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["observation"],
-        strict_json=True,
-    )
 
 
 def generate_channel_update(channel_name, lane_key, context, *,
@@ -1149,76 +1108,6 @@ def _parse_member_report(text: str) -> dict:
     return {name: block(name) for name in _MEMBER_REPORT_BLOCKS}
 
 
-def generate_season_awards_post(signals, *, recent_posts=None, memory_context=None):
-    """Generate the consolidated season-awards post for a
-    ``season_awards_granted`` signal batch.
-
-    Self-contained context — signal payload only, no clan context, no
-    ambient time block. The payload is the authoritative record for
-    names, fame totals, ranks, and battle days, so the prompt forbids
-    the LLM from drawing award-fact details from RAG memory or recent
-    posts.
-    """
-    user_msg = (
-        "Write the Season Awards post for #clan-events. Base the post on "
-        "the signal payload below — the war_champ / iron_kings / "
-        "donation_champs / rookie_mvps arrays are the only source of "
-        "truth for names, ranks, and metrics. Do not fill in facts from "
-        "memory or recent posts.\n\n"
-        "Signal:\n"
-        f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```\n"
-    )
-    user_msg += _format_recent_posts(recent_posts, channel_label="#clan-events")
-    user_msg += _format_memory_context(memory_context)
-    return _chat_with_tools(
-        _season_awards_system(),
-        user_msg,
-        workflow="season_awards",
-        allowed_tools=TOOLSETS_BY_WORKFLOW["season_awards"],
-        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["season_awards"],
-        strict_json=True,
-    )
-
-
-def generate_war_recap_update(signals, *, recent_posts=None, memory_context=None):
-    """Generate a war-recap post for a batch of war_completed /
-    war_champ_standings / war_season_complete signals.
-
-    Runs with a dedicated system prompt and a self-contained user context
-    — only the signal payload (+ recent posts for tone continuity). No
-    _clan_context dump, no ambient time/phase block, no river-race
-    standings. The signal payload is the only ground truth. This exists
-    to prevent the LLM from confabulating season numbers or fame totals
-    from RAG memory (the root cause of the 04-19 'Season 130 closes'
-    misfire, which happened even though the signal payload itself was for
-    an old season because a corrupted finish_time slipped through the
-    detector).
-
-    Returns the parsed response dict (with ``content`` as a string) or
-    None. An empty ``content`` string is a valid self-suppression
-    response — the delivery layer will skip posting but still mark the
-    outcome delivered.
-    """
-    user_msg = (
-        "Write a war-recap post for the target channel named in the first "
-        "signal's routing. Base the post on the signals below — their "
-        "payload is the only ground truth. Do not add facts that are not "
-        "in the payload.\n\n"
-        "Signals:\n"
-        f"```json\n{json.dumps(signals or [], indent=2, default=str)}\n```\n"
-    )
-    user_msg += _format_recent_posts(recent_posts, channel_label="this channel")
-    user_msg += _format_memory_context(memory_context)
-    return _chat_with_tools(
-        _war_recap_system(),
-        user_msg,
-        workflow="war_recap",
-        allowed_tools=TOOLSETS_BY_WORKFLOW["war_recap"],
-        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["war_recap"],
-        strict_json=True,
-    )
-
-
 def generate_tournament_update(signals, *, recent_posts=None, memory_context=None):
     """Generate a live tournament post for a batch of tournament_* signals.
 
@@ -1332,7 +1221,6 @@ def generate_intel_report(our_tag, competitor_tags, *, season_id=None, memory_co
 
 
 __all__ = [
-    "observe_and_post",
     "generate_channel_update",
     "generate_clan_chat_copy",
     "generate_intel_report",
@@ -1346,9 +1234,7 @@ __all__ = [
     "analyze_arena_relay_screenshot",
     "generate_message",
     "generate_promote_content",
-    "generate_season_awards_post",
     "generate_tournament_recap",
     "generate_tournament_update",
-    "generate_war_recap_update",
     "generate_weekly_recap",
 ]

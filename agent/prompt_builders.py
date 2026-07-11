@@ -758,79 +758,6 @@ def _member_report_system():
     )
 
 
-def _season_awards_system():
-    """System prompt for the consolidated season-awards post to #elixir.
-
-    Ground-truth contract: the signal payload is the only source for names,
-    fame totals, ranks, and donation counts. No RAG memory, no clan context,
-    no ambient time — the awards table is authoritative and a misnamed
-    champ would be embarrassing. Same clean-context model as the tournament
-    and war-recap lanes.
-    """
-    return _build_system_prompt(
-        prompts.identity_block(),
-        prompts.knowledge_block(),
-        "**You are writing the Season Awards post for #elixir.**\n\n"
-        "Ground truth: the signal payload in the user message. The "
-        "`season_id`, `war_champ`, `iron_kings`, `donation_champs`, and "
-        "`rookie_mvps` fields are authoritative — use names, ranks, fame "
-        "totals, donation counts, and battle-days from them and nothing else.\n\n"
-        "Hard constraints:\n"
-        "- Do NOT use recent-posts or memory context to fill in details. Those are tone reference only.\n"
-        "- Do NOT invent or guess at metrics. If a field isn't in the payload, omit it.\n"
-        "- Do NOT list War Participant — it's intentionally excluded from this post.\n"
-        "- If a bucket (e.g. iron_kings) is empty, skip that section quietly; don't announce 'no one won'.\n"
-        "- Reference only the season named in `season_id`.\n\n"
-        "Post shape:\n"
-        "- Lead with a bold headline naming the season (e.g. '**Season 131 Awards are in.**').\n"
-        "- War Champ next — rank-1 gets the spotlight with fame total; mention rank-2 and rank-3 by name with their fame.\n"
-        "- Iron King(s) — bold every name. If multiple, list them together as a small honor roll.\n"
-        "- Donation Champ — rank-1 with count; briefly mention rank-2 / rank-3 if present.\n"
-        "- Rookie MVP — rank-1 highlight; mention the other ranks if they exist.\n"
-        "- Close with one short forward-looking beat toward the new season.\n\n"
-        "Style:\n"
-        "- First person as Elixir. Celebratory but not gushing. 3-5 paragraphs, flowing prose with a few bulleted lines where a list reads better.\n"
-        "- Under 2000 characters total. Light **bold** on player names and the headline.\n"
-        f"{_discord_formatting_guidance()}"
-        f"{_discord_emoji_guidance()}"
-        "Respond with JSON only (no markdown wrapper):\n"
-        '{"event_type": "season_awards_post", "summary": "<one-line summary>", "content": "<the full post>"}',
-    )
-
-
-def _war_recap_system():
-    """System prompt for war-recap posts (war_completed, war_champ_standings,
-    war_season_complete).
-
-    Self-contained like the tournament lane: identity + game knowledge +
-    Discord formatting, no clan-events lifecycle prose and no ambient
-    river-race context. The signal payload is the only ground truth. This
-    exists to prevent the LLM from RAG-pulling stale memory or confusing
-    the current season with a prior one (04-19 "Season 130 closes" misfire,
-    which happened because a corrupted finish_time let a 13-day-old race
-    fire as 'just completed' and the model filled in narrative from memory).
-    """
-    return _build_system_prompt(
-        prompts.identity_block(),
-        prompts.knowledge_block(),
-        "**You are writing a war recap post.**\n\n"
-        "Ground truth: the signal payload in the user message. The "
-        "`season_id`, `section_index`, `standings`, `leader`, "
-        "`perfect_participants`, `our_rank`, `our_fame`, and "
-        "`trophy_change` fields are authoritative. Use them and nothing else.\n\n"
-        "Hard constraints:\n"
-        "- Do NOT reference any season other than the one named in `season_id`.\n"
-        "- Do NOT invent fame totals, standings, or names. If a fact isn't in the signal, it doesn't go in the post.\n"
-        "- Do NOT use recent-posts or memory context to fill in standings details — those are for tone continuity only.\n"
-        "- If `finish_time` is missing, equal to '19691231T235959.000Z', parses earlier than year 2000, or is more than 7 days before now, suppress the post entirely. Return `{\"content\": \"\"}` with an empty content string.\n"
-        "- `section_index` is zero-based; the human-readable week number is `section_index + 1`.\n\n"
-        f"{_discord_formatting_guidance()}"
-        f"{_discord_emoji_guidance()}"
-        "Respond with JSON only (no markdown wrapper):\n"
-        '{"event_type": "war_recap", "summary": "<one-line summary>", "content": "<the full post>"}',
-    )
-
-
 def _tournament_update_system():
     """System prompt for live tournament commentary posts.
 
@@ -901,10 +828,6 @@ def _event_system():
     )
 
 
-def _observe_system():
-    return _proactive_channel_system("#elixir", "clan-events", leadership=False)
-
-
 def _channel_lane_system(channel_name: str, *, leadership: bool = False):
     return _proactive_channel_system(
         channel_name,
@@ -916,7 +839,6 @@ def _channel_lane_system(channel_name: str, *, leadership: bool = False):
     )
 
 __all__ = [
-    "_observe_system",
     "_interactive_system",
     "_clanops_system",
     "_arena_relay_observation_system",

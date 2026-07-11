@@ -849,39 +849,6 @@ async def _v5_post(channel_id, text, *, metadata: dict | None = None) -> bool:
     return True
 
 
-def _engine_compose_copy(intent) -> str | None:
-    """Compose voice for an engine intent (recognition.md §7): subject history
-    context + the same agent path as before. Meta-guard + deterministic
-    fallback live in engine.delivery.consume."""
-    from engine import db as engine_db
-    from engine.recognition import compose as engine_compose
-
-    lanes = engine_compose.channels()
-    ch = lanes.get(intent["lane"]) or {}
-    conn = engine_db.connect()
-    try:
-        context = engine_compose.intent_context(conn, intent)
-    finally:
-        conn.close()
-    result = elixir_agent.generate_channel_update(
-        ch.get("channel_name") or intent["lane"],
-        intent["lane"],
-        context,
-        leadership=bool(ch.get("leadership")),
-    )
-    if isinstance(result, str):
-        return result.strip() or None
-    if isinstance(result, dict):
-        posts = result.get("posts")
-        if posts:
-            p = posts[0]
-            if isinstance(p, dict):
-                return (p.get("content") or p.get("summary") or "").strip() or None
-            return str(p)
-        return (result.get("content") or result.get("summary") or "").strip() or None
-    return None
-
-
 async def _engine_send(channel_id: int, text: str, image_url: str | None = None):
     """Async Discord send for the engine; returns the first message id or None.
     When image_url is set (game-level card/badge announcements), post the copy
@@ -1185,8 +1152,7 @@ async def _engine_tick():
             # skips RECOGNIZE + DELIVER entirely — no intents, no compose, no
             # send. The editor gate retired with the delivery path.
             counters = engine_tick_mod.run_tick(
-                conn, api=_cr_api, send_fn=send_fn, compose_fn=_engine_compose_copy,
-                deliver=False,
+                conn, api=_cr_api, send_fn=send_fn, deliver=False,
             )
             fulfilled = conn.execute(
                 """SELECT * FROM communication_intents
