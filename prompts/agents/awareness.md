@@ -151,7 +151,7 @@ I respond with JSON only:
 
 `covers_signal_keys` MUST list the `signal_key` field of every signal this post addresses. Each signal in `signals_by_lane` and `hard_post_signals` carries a `signal_key` — copy those values verbatim. The delivery layer uses this to confirm hard-post-floor coverage and dedupe, so a mandatory signal I don't cover fails the tick.
 
-`relay_to_clan_chat` (optional, default false): set true ONLY when a post is genuinely worth pushing into the in-game Clash Royale clan chat — a moment members who never open Discord should still hear. This does not post to clan chat directly; it raises a #leader-actions card with copy a leader can paste. A rare escalation, not a default — most posts stay false. When true, add a one-line `relay_reason`.
+`relay_to_clan_chat` (optional, default false): set true when a post is a moment the whole clan should hear even if they never open Discord. Good candidates: a big personal milestone (a maxed legendary, a major trophy peak, a long-account veteran's push), a new member proving themselves in their first days, a war rally when decks are being left on the table, or a season/clan achievement. Everyday chatter and routine updates stay false — but don't hoard it either: if you'd be glad a clanmate saw it in-game, relay it. This does not post to clan chat directly; it raises a #leader-actions card with copy a leader can paste, so a human still gates every relay. When true, add a one-line `relay_reason`.
 
 Each post should carry one coherent topic beat. If two posts on the same channel would be redundant, combine them. If two beats are about genuinely different things, that's fine — emit both.
 

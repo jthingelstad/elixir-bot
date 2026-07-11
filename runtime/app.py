@@ -1567,10 +1567,12 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
 
     fallback = sign_clan_chat_text(content, limit=CLASH_COPY_MAX_LENGTH)
     context = (
-        "Awareness brain relay: redraft this Discord post as ONE plain-text "
-        "Clash Royale in-game clan chat message a leader can paste. Same facts, "
-        "same warmth, shorter and plainer — no markdown, no emoji codes, no links. "
-        "Introduce nothing new.\n"
+        "Awareness brain relay: redraft this Discord post as 1-2 short plain-text "
+        "Clash Royale in-game clan chat messages a leader can paste in sequence. "
+        "In-game chat is tight, so lead with the headline in message 1; add a "
+        "SECOND message ONLY when the story genuinely needs the backup detail — "
+        "most relays are a single message. Same facts, same warmth, shorter and "
+        "plainer — no markdown, no emoji codes, no links. Introduce nothing new.\n"
         f"Reason it's worth sharing: {post.get('relay_reason') or ''}\n"
         f"Discord post (source): {content}"
     )
@@ -1578,21 +1580,26 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
         generated = await generate_clan_chat_copy(
             intent="awareness_relay",
             context=context,
-            max_messages=1,
+            max_messages=2,
             max_chars=CLASH_COPY_MAX_LENGTH,
             forbidden_terms=("http://", "https://", "www.", "Discord"),
             fallback_messages=[content],
             metadata={"source": "awareness_relay", "channel": channel_name},
         )
-        copy = generated.messages[0] if generated and generated.messages else fallback
+        copies = list(generated.messages) if generated and generated.messages else [fallback]
     except Exception:
         log.warning("awareness relay clan-chat copy generation failed", exc_info=True)
-        copy = fallback
+        copies = [fallback]
+    # Cap the sequence at 2 so a relay never becomes a wall of pastes; persist as
+    # newline-joined text so it round-trips through _split_copy_messages on edit.
+    copies = [c.strip() for c in copies if c and c.strip()][:2] or [fallback]
+    copy_text = "\n".join(copies)
 
     baseline = await asyncio.to_thread(
         db.build_leader_action_baseline, action_type="in_game_relay", target_player_tag=None
     )
-    prompt_text = f"Paste this clan-chat note (from #{channel_name}): {copy}"
+    seq_note = f" ({len(copies)} messages, paste in order)" if len(copies) > 1 else ""
+    prompt_text = f"Paste this clan-chat note (from #{channel_name}){seq_note}: {copy_text}"
     action = await asyncio.to_thread(
         db.create_leader_action_recommendation,
         action_type="in_game_relay",
@@ -1606,15 +1613,15 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
         target_player_name=None,
         source_signal_key=action_key,
         source_signal_type="awareness_relay",
-        copy_original_text=copy,
-        copy_current_text=copy,
+        copy_original_text=copy_text,
+        copy_current_text=copy_text,
         baseline=baseline,
         action_key=action_key,
         ui_version=LEADER_ACTION_UI_VERSION,
     )
     if not action or action.get("source_message_id"):
         return False
-    card_messages = await post_leader_action_card(relay_channel, action, copy_messages=[copy])
+    card_messages = await post_leader_action_card(relay_channel, action, copy_messages=copies)
     return bool(card_messages)
 
 
