@@ -566,11 +566,21 @@ async def _weekly_clan_recap():
     recap_context = await asyncio.to_thread(_build_weekly_clan_recap_context, clan, war)
     recent_posts = await asyncio.to_thread(db.list_channel_messages, recap_channel_id, 5, "assistant")
     previous_message = _strip_weekly_recap_header(recent_posts[-1]["content"] if recent_posts else "")
-    recap_text = await asyncio.to_thread(
-        elixir_agent.generate_weekly_digest,
-        recap_context,
-        previous_message,
-    )
+
+    def _compose():
+        """Build the awareness read and compose the recap with the brain (rebuilt
+        2026-07-11 — the recap is now brain-written, in voice and aware of what it
+        posted this week). Runs in a thread; returns recap text or None."""
+        try:
+            from runtime.awareness import read as awareness_read
+
+            read = awareness_read.build_read()
+            return elixir_agent.generate_weekly_recap(read, recap_context, previous_message)
+        except Exception:
+            log.error("Weekly recap compose failed", exc_info=True)
+            return None
+
+    recap_text = await asyncio.to_thread(_compose)
     if not recap_text:
         runtime_status.mark_job_success("weekly_clan_recap", "no recap generated")
         return
