@@ -453,11 +453,11 @@ def _build_war_status_report(clan=None, war=None):
                 f"{current_day.get('untouched_count', 0)} untouched | "
                 f"{current_day.get('total_participants', 0)} tracked"
             )
-            # Members contribute PERIOD POINTS, not fame (fame is clan-only) —
-            # and daily per-member points aren't tracked (QA M6), so show the
-            # cumulative season point-contribution leaders.
+            # Members contribute POINTS, not fame (fame is clan-only); daily
+            # per-member points aren't tracked (QA M6), so show the season points
+            # leaders — the race for War Champ.
             lines.append(
-                f"- War point contributors (season): {_join_member_bits(current_day.get('top_fame_total') or [], _fame_today_label, limit=5)}"
+                f"- Season points leaders (War Champ race): {_join_member_bits(current_day.get('top_fame_total') or [], _fame_today_label, limit=5)}"
             )
             lines.append(
                 f"- Waiting on: {_join_member_bits(current_day.get('used_none') or [], lambda member: _member_label(member), limit=6)}"
