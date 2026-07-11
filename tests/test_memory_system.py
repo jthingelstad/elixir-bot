@@ -372,7 +372,6 @@ def test_upsert_war_recap_memory_stores_battle_day_week_and_season_recaps():
         conn.close()
 
 
-@pytest.mark.xfail(reason="pre-rebuild memory API semantics (versions/audit/evidence/RRF/metadata shapes) retired or reshaped by the 2026-07-04 memory pass (memory.md D1-D5); successor coverage lives in test_memory_v51.py - rewrite or delete pending", strict=False)
 def test_member_note_memory_is_upserted_and_archived():
     conn = _hybrid_conn()
     try:
@@ -462,7 +461,6 @@ def test_build_memory_report_shows_member_conversation_and_contextual_memory():
         conn.close()
 
 
-@pytest.mark.xfail(reason="pre-rebuild memory API semantics (versions/audit/evidence/RRF/metadata shapes) retired or reshaped by the 2026-07-04 memory pass (memory.md D1-D5); successor coverage lives in test_memory_v51.py - rewrite or delete pending", strict=False)
 def test_build_memory_report_search_can_include_system_internal():
     conn = _hybrid_conn()
     try:
@@ -491,7 +489,6 @@ def test_build_memory_report_search_can_include_system_internal():
         conn.close()
 
 
-@pytest.mark.xfail(reason="pre-rebuild memory API semantics (versions/audit/evidence/RRF/metadata shapes) retired or reshaped by the 2026-07-04 memory pass (memory.md D1-D5); successor coverage lives in test_memory_v51.py - rewrite or delete pending", strict=False)
 def test_build_memory_report_global_view_shows_conversation_memory_counts():
     conn = _hybrid_conn()
     try:
