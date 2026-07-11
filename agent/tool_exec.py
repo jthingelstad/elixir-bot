@@ -549,9 +549,22 @@ def _execute_get_river_race(arguments):
         war_status = db.get_current_war_status()
         if not isinstance(war_status, dict):
             return {"error": "No active war data available."}
+        # Two separate races, never coalesced (see storage/war_status.py):
+        #  - race_standings (by fame) = the WEEKLY boat race that decides the week
+        #  - day_standings (by period_points) = TODAY's race, resets each day
+        # Compare within one race only; never a clan's period points vs another's
+        # fame. primary_metric names which race decides this week.
         return {
+            "primary_metric": war_status.get("primary_metric"),
             "race_standings": war_status.get("race_standings", []),
             "race_rank": war_status.get("race_rank"),
+            "finish_line": war_status.get("finish_line"),
+            "boat_scored": war_status.get("boat_scored"),
+            "day_standings": war_status.get("day_standings", []),
+            "day_rank": war_status.get("day_rank"),
+            "day_scored": war_status.get("day_scored"),
+            "period_points": war_status.get("period_points"),
+            "projected_day_fame": war_status.get("projected_day_fame"),
             "season_week_label": war_status.get("season_week_label"),
             "is_colosseum_week": db.is_colosseum_week_confirmed(
                 war_status.get("period_type"),
@@ -571,7 +584,9 @@ def _execute_get_river_race(arguments):
         remaining_deck_participants = _remaining_deck_participant_summary(day_state)
         data.update({
             "war_day_key": day_state.get("war_day_key"),
-            "clan_fame": day_state.get("clan_fame"),
+            "clan_fame": day_state.get("clan_fame"),          # WEEKLY boat fame (cumulative)
+            "clan_period_points": day_state.get("period_points"),  # TODAY's points (resets daily)
+            "day_rank": day_state.get("day_rank"),
             "total_participants": day_state.get("total_participants"),
             "engaged_count": day_state.get("engaged_count"),
             "finished_count": day_state.get("finished_count"),

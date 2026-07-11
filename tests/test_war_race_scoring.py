@@ -86,6 +86,23 @@ def test_standings_are_single_field_and_never_mixed():
     assert "fame" not in sb["today"]["scoreboard"][0]
 
 
+def test_projected_day_fame_mirrors_in_game_boat_reward():
+    # Leading today (1st in period points) projects +3,000 fame at day close;
+    # the read surfaces it as projected_fame_if_held.
+    war = _status(LOOP44)
+    assert war["projected_day_fame"] == 3000
+    assert _standing_block(war)["today"]["projected_fame_if_held"] == 3000
+    # 2nd today would project +1,800.
+    second = {
+        "#US": {"name": "POAP KINGS", "fame": 3435, "period_points": 400},
+        "#RIV": {"name": "R.E.I.C.H", "fame": 1800, "period_points": 900},
+    }
+    assert _status(second)["projected_day_fame"] == 1800
+    # No projection before the day scores, or in Colosseum (no fame).
+    fresh = {"#US": {"name": "POAP KINGS", "fame": 6870, "period_points": 0}}
+    assert _status(fresh, period_index=5)["projected_day_fame"] is None
+
+
 def test_day_one_boat_not_scored():
     # Battle Day 1: no day has closed, so every clan's fame is still 0; the live
     # action is today's period-point race.

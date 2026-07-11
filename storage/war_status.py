@@ -48,27 +48,19 @@ HOME_CLAN = "#J2RGCRVG"
 FAME_FINISH_LINE = 10_000
 FAME_FINISH_LINE_COLOSSEUM = 5_000
 
+# Fame ("movement points") a clan banks at day close for its daily period-point
+# rank (Clash wiki). Intact boat defenses add a further diminishing survival
+# award on top, which the live API does not expose — so this is the placement
+# floor, not the whole day's fame. In-game the boat screen shows this as the
+# projected reward for your current rank if you hold it to reset.
+DAILY_RANK_FAME = {1: 3_000, 2: 1_800, 3: 1_000, 4: 600, 5: 400}
+
 
 def _coerce_int(value) -> int:
     try:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
-
-
-def _race_score(info: dict) -> tuple[int, str, str]:
-    """A clan's live race score, coalescing the two fields the River Race API
-    uses. Clash moved the accumulating war score into ``periodPoints`` in the
-    current format — ``fame`` reads 0 all week (verified 2026-07-10 mid-war: our
-    clan fame=0 / periodPoints=8050, and we were leading). Older weeks still
-    carry it in ``fame``. Take whichever is the real (larger) score so both
-    regimes read correctly, and report which field it came from so callers can
-    label it. Returns (score, source, label)."""
-    fame = _coerce_int(info.get("fame"))
-    points = _coerce_int(info.get("period_points"))
-    if points > fame:
-        return points, "period_points", "points"
-    return fame, "fame", "fame"
 
 
 def _live_race(conn) -> Optional[tuple[dict, str]]:
@@ -86,13 +78,20 @@ def _live_race(conn) -> Optional[tuple[dict, str]]:
         return None
 
 
-def _race_standings_from_projection(projection: dict) -> list[dict]:
+def _rank_standings(projection: dict, *, by: str) -> list[dict]:
+    """Clans ranked by ONE River Race field — ``by`` is 'fame' (the weekly
+    cumulative boat race that decides the winner) or 'period_points' (today's
+    race, which resets each day). Every entry still carries BOTH raw scores so a
+    caller never has to re-derive them, but only the chosen field drives the
+    order/rank. Keeping the two scoreboards strictly separate is the whole point:
+    a clan's period points and another clan's fame are different races and must
+    never be compared to each other (see get_current_war_status)."""
     clans = projection.get("clans") or {}
     our_tag = _canon_tag(projection.get("our_tag") or HOME_CLAN)
     ranked = sorted(
         clans.items(),
         key=lambda kv: (
-            _race_score(kv[1] or {})[0],
+            _coerce_int((kv[1] or {}).get(by)),
             _coerce_int((kv[1] or {}).get("war_league_score")),
         ),
         reverse=True,
@@ -100,7 +99,6 @@ def _race_standings_from_projection(projection: dict) -> list[dict]:
     standings = []
     for rank, (tag, info) in enumerate(ranked, start=1):
         info = info or {}
-        score, source, label = _race_score(info)
         standings.append({
             "rank": rank,
             "clan_tag": tag,
@@ -110,9 +108,6 @@ def _race_standings_from_projection(projection: dict) -> list[dict]:
             "period_points": _coerce_int(info.get("period_points")),
             "war_league_score": _coerce_int(info.get("war_league_score")),
             "is_us": tag == our_tag,
-            "active_score": score,
-            "score_source": source,
-            "score_label": label,
         })
     return standings
 
@@ -155,16 +150,36 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
     if latest_logged and season_id == latest_logged["season_id"] and section_index == latest_logged["section_index"]:
         trophy_change = latest_logged["trophy_change"]
 
-    standings = _race_standings_from_projection(projection)
-    race_rank = next((s["rank"] for s in standings if s["is_us"]), None)
-    # The live race score: coalesce fame/periodPoints (the API moved the
-    # accumulating score into periodPoints — fame reads 0 all week in the
-    # current format). This is what the clan actually sees in-game.
-    _us = next((s for s in standings if s["is_us"]), None)
-    our_score = _us["active_score"] if _us else our_fame
-    our_score_source = _us["score_source"] if _us else "fame"
-    our_score_label = _us["score_label"] if _us else "fame"
-    our_period_points = _us["period_points"] if _us else None
+    # Two separate races, never coalesced (see _rank_standings):
+    #  - WEEKLY fame = the boat, awarded at each day's close by that day's rank;
+    #    it decides who wins the week. 0 during Day 1 until the first day closes.
+    #  - DAILY period points = today's race, what players drive; resets each day.
+    # Colosseum weeks have period points only (no weekly fame), so the metric
+    # that decides the race there is period_points.
+    race_standings = _rank_standings(projection, by="fame")            # weekly boat
+    day_standings = _rank_standings(projection, by="period_points")    # today
+    _us_race = next((s for s in race_standings if s["is_us"]), None)
+    _us_day = next((s for s in day_standings if s["is_us"]), None)
+    race_rank = _us_race["rank"] if _us_race else None
+    day_rank = _us_day["rank"] if _us_day else None
+    if _us_race:
+        our_fame = _us_race["fame"]
+    our_period_points = _us_day["period_points"] if _us_day else None
+    boat_scored = any(s["fame"] > 0 for s in race_standings)
+    # No battles logged yet this day → the daily standings are a 0-0-0 tie and
+    # our day_rank is meaningless (don't let the brain read it as "losing today").
+    day_scored = any(s["period_points"] > 0 for s in day_standings)
+    primary_metric = "period_points" if colosseum else "fame"
+    # What we'd bank at day close if our current daily rank holds — placement
+    # fame only (defenses add more, unseen). Mirrors the in-game boat projection;
+    # only meaningful once today has scored, and there is no fame in Colosseum.
+    projected_day_fame = (
+        DAILY_RANK_FAME.get(day_rank) if (day_scored and not colosseum) else None
+    )
+    # Finish-line / completion pace against the field that actually accumulates
+    # for this week type — NEVER the daily number on a normal week (that would
+    # falsely "complete" the race on a big battle day, e.g. 10,525 period points).
+    accumulating_score = _coerce_int(our_period_points) if colosseum else our_fame
 
     observed_dt = coerce_utc_datetime(observed_at)
     _, period_ends_at = war_reset_window_utc(observed_dt or observed_at)
@@ -173,15 +188,16 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         "observed_at": observed_at,
         "war_state": "training" if phase == "practice" else "inWar",
         "clan_tag": _canon_tag(projection.get("our_tag") or HOME_CLAN),
-        "clan_name": next((s["clan_name"] for s in standings if s["is_us"]), None),
-        "fame": our_score,
-        "raw_fame": our_fame,
+        "clan_name": next((s["clan_name"] for s in race_standings if s["is_us"]), None),
+        "fame": our_fame,
         "repair_points": 0,
         "period_points": our_period_points,
-        "war_league_score": next((s["war_league_score"] for s in standings if s["is_us"]), None),
-        "active_score": our_score,
-        "score_source": our_score_source,
-        "score_label": our_score_label,
+        "war_league_score": next((s["war_league_score"] for s in race_standings if s["is_us"]), None),
+        "primary_metric": primary_metric,
+        "boat_scored": boat_scored,
+        "day_scored": day_scored,
+        "projected_day_fame": projected_day_fame,
+        "finish_line": finish_line,
         "season_id": season_id,
         "section_index": section_index,
         "week": (section_index + 1) if section_index is not None else None,
@@ -199,10 +215,12 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         "practice_day_number": phase_day_number(phase, period_index) if phase == "practice" else None,
         "practice_day_total": FIRST_BATTLE_PERIOD_OFFSET if phase == "practice" else None,
         "race_rank": race_rank,
-        "race_standings": standings,
+        "race_standings": race_standings,
+        "day_rank": day_rank,
+        "day_standings": day_standings,
         "war_day_key": war_day_key(season_id, section_index, period_index, observed_at),
         "finish_time": None,
-        "race_completed": phase != "practice" and our_score >= finish_line,
+        "race_completed": phase != "practice" and _coerce_int(accumulating_score) >= finish_line,
         "race_completed_at": None,
         "race_completed_early": False,
         "trophy_change": int(trophy_change) if isinstance(trophy_change, (int, float)) else None,
@@ -330,6 +348,7 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
         "day_number": day_number,
         "day_total": status.get("battle_day_total") if phase == "battle" else status.get("practice_day_total"),
         "race_rank": status.get("race_rank"),
+        "day_rank": status.get("day_rank"),
         "clan_fame": status.get("fame"),
         "war_league_score": status.get("war_league_score"),
         "period_points": status.get("period_points"),
@@ -441,6 +460,7 @@ def get_war_deck_status_today(conn: Optional[sqlite3.Connection] = None) -> dict
         "time_left_seconds": state.get("time_left_seconds"),
         "time_left_text": state.get("time_left_text"),
         "race_rank": state.get("race_rank"),
+        "day_rank": state.get("day_rank"),
         "clan_fame": state.get("clan_fame"),
         "war_league_score": state.get("war_league_score"),
         "period_points": state.get("period_points"),
@@ -482,16 +502,31 @@ def _format_war_now_text(data: dict) -> str:
     if data.get("time_left_text"):
         lines.append(f"Period ends in {data['time_left_text']}")
 
-    standings = data.get("race_standings") or []
-    if standings:
-        lines.append("Race standings:")
-        for clan in standings:
+    # Two scoreboards, each single-field so they can never be conflated.
+    # Today's period-point race is the live action; the weekly fame race is the
+    # boat / who wins the week. In Colosseum there is no weekly fame — only the
+    # period-point race matters.
+    colosseum = bool(data.get("is_colosseum_week"))
+    day_standings = data.get("day_standings") or []
+    if day_standings and data.get("phase") == "battle" and data.get("day_scored"):
+        lines.append("Today's period points (resets at day reset):")
+        for clan in day_standings:
             marker = " (us)" if clan.get("is_us") else ""
-            score = clan.get("active_score", clan.get("fame", 0))
-            label = clan.get("score_label") or "fame"
             lines.append(
                 f"  {clan['rank']}. {clan.get('clan_name', '?')}{marker} | "
-                f"{score:,} {label}"
+                f"{_coerce_int(clan.get('period_points')):,} points"
+            )
+    race_standings = data.get("race_standings") or []
+    if race_standings and not colosseum:
+        label = "Weekly fame race (the boat — decides the week):"
+        if not data.get("boat_scored"):
+            label = "Weekly fame race (boat has not scored yet — awarded at day close):"
+        lines.append(label)
+        for clan in race_standings:
+            marker = " (us)" if clan.get("is_us") else ""
+            lines.append(
+                f"  {clan['rank']}. {clan.get('clan_name', '?')}{marker} | "
+                f"{_coerce_int(clan.get('fame')):,} fame"
             )
     return "\n".join(lines)
 
@@ -537,6 +572,10 @@ def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> tuple[Op
         "is_final_battle_day": bool(status.get("final_battle_day_active", False)),
         "is_final_practice_day": bool(status.get("final_practice_day_active", False)),
         "race_standings": status.get("race_standings") or [],
+        "day_standings": status.get("day_standings") or [],
+        "primary_metric": status.get("primary_metric"),
+        "boat_scored": bool(status.get("boat_scored")),
+        "day_scored": bool(status.get("day_scored")),
     }
     data["now_text"] = _format_war_now_text(data)
     data.pop("day_total", None)

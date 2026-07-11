@@ -241,34 +241,70 @@ def _time_block(conn, war: dict | None) -> dict | None:
 
 
 def _standing_block(war: dict | None) -> dict | None:
-    """Clan rank, fame, deficit-to-leader, and the rival scoreboard."""
+    """The two River Race scoreboards, kept strictly separate so they can never
+    be conflated:
+      - ``weekly``: the fame boat race — who wins the week. Fame is 0 until the
+        first battle day closes (``boat_scored`` says whether it has started).
+        Absent in Colosseum weeks, which have no weekly fame.
+      - ``today``: the period-point race — what players are driving right now;
+        resets each day. Present only once the day has scored.
+    ``primary_metric`` names the race that decides this week ("fame" normally,
+    "period_points" in Colosseum). A clan's period points and another clan's
+    fame are DIFFERENT races — never compare across the two blocks."""
     if not war:
         return None
-    standings = war.get("race_standings") or []
-    if not standings:
+    race = war.get("race_standings") or []
+    day = war.get("day_standings") or []
+    if not race and not day:
         return None
-    us = next((s for s in standings if s.get("is_us")), None)
-    if us is None:
+    colosseum = bool(war.get("colosseum_week"))
+
+    weekly = None
+    if race and not colosseum:
+        us = next((s for s in race if s.get("is_us")), None)
+        if us is not None:
+            our_fame = us.get("fame") or 0
+            leader_fame = race[0].get("fame") or 0
+            weekly = {
+                "rank": us.get("rank"),
+                "fame": our_fame,
+                "leader_fame": leader_fame,
+                "deficit_to_leader": (leader_fame - our_fame) if us.get("rank") != 1 else 0,
+                "finish_line": war.get("finish_line"),
+                "boat_scored": bool(war.get("boat_scored")),
+                "scoreboard": [
+                    {"name": s.get("clan_name"), "fame": s.get("fame") or 0, "rank": s.get("rank")}
+                    for s in race
+                ],
+            }
+
+    today = None
+    if day and war.get("day_scored"):
+        us = next((s for s in day if s.get("is_us")), None)
+        if us is not None:
+            our_pp = us.get("period_points") or 0
+            leader_pp = day[0].get("period_points") or 0
+            today = {
+                "rank": us.get("rank"),
+                "period_points": our_pp,
+                "leader_period_points": leader_pp,
+                "deficit_to_leader": (leader_pp - our_pp) if us.get("rank") != 1 else 0,
+                # Fame we'd bank at day close if this rank holds (placement only;
+                # defenses add more, unseen). Mirrors the in-game boat projection.
+                "projected_fame_if_held": war.get("projected_day_fame"),
+                "scoreboard": [
+                    {"name": s.get("clan_name"), "period_points": s.get("period_points") or 0, "rank": s.get("rank")}
+                    for s in day
+                ],
+            }
+
+    if weekly is None and today is None:
         return None
-    # Use the coalesced live score (active_score), not raw `fame` — the API keeps
-    # the current war's accumulating score in periodPoints and `fame` reads 0 all
-    # week in the current format (that's why the brain saw 0 fame while we led).
-    def _score(s):
-        return s.get("active_score") or s.get("fame") or 0
-    leader_score = _score(standings[0]) if standings else 0
-    our_score = _score(us)
-    our_rank = us.get("rank")
     return {
-        "rank": our_rank,
-        "fame": our_score,
-        "leader_fame": leader_score,
-        "deficit_to_leader": (leader_score - our_score) if our_rank != 1 else 0,
-        "field_size": len(standings),
-        "score_source": us.get("score_source") or "fame",
-        "scoreboard": [
-            {"name": s.get("clan_name"), "fame": _score(s), "rank": s.get("rank")}
-            for s in standings
-        ],
+        "primary_metric": war.get("primary_metric") or "fame",
+        "field_size": len(race) or len(day),
+        "weekly": weekly,
+        "today": today,
     }
 
 
