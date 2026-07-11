@@ -217,6 +217,21 @@ def _enrich_war_player_type(result, tag):
         conn.close()
 
 
+def _annotate_roster_status(result, member_tag):
+    """Flag a departed member on a member-facing result dict (QA H6/M20/L18) so
+    their stats aren't read as a current-roster player / active war no-show."""
+    if not isinstance(result, dict):
+        return result
+    status = db.member_roster_status(member_tag)
+    result.update(status)
+    if status.get("roster_status") == "departed":
+        result["departed_note"] = (
+            f"This member left the clan on {status.get('left_at')}; their stats are "
+            "historical and any current-roster / war-attendance attribution is not live."
+        )
+    return result
+
+
 def _enrich_war_player_types(members):
     """Add war_player_type to each member dict in a list."""
     from storage.war_analytics import war_player_types_by_tag
@@ -506,6 +521,7 @@ def _execute_get_member_war_detail(arguments):
 
     if isinstance(result, dict):
         _enrich_war_player_type(result, member_tag)
+        _annotate_roster_status(result, member_tag)
 
     return result
 
@@ -1458,8 +1474,12 @@ def _execute_tool(name, arguments, workflow=None):
     """Execute a tool call and return the result as a string."""
     try:
         if name == "resolve_member":
+            # QA M1: don't hard-filter to active — a recently-departed or observed
+            # player must resolve (each match carries its own status field) rather
+            # than returning [] as if they never existed.
             result = db.resolve_member(
                 arguments["query"],
+                status=None,
                 limit=arguments.get("limit", 5),
             )
         elif name == "get_member":
@@ -1500,6 +1520,8 @@ def _execute_tool(name, arguments, workflow=None):
                     "member_tag": member_tag,
                     "hint": "No card collection snapshot exists yet for this member.",
                 }
+            else:
+                _annotate_roster_status(result, member_tag)
         elif name == "lookup_member_cards":
             member_tag = _resolve_member_tag(arguments["member_tag"])
             include_battles = bool(((arguments.get("filter") or {}).get("mode")) == "war"
@@ -1510,6 +1532,7 @@ def _execute_tool(name, arguments, workflow=None):
                 filter=arguments.get("filter"),
                 limit=arguments.get("limit", 20),
             )
+            _annotate_roster_status(result, member_tag)
         elif name == "cr_api":
             result = _execute_cr_api(arguments)
         elif name == "get_clan_intel_report":

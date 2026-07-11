@@ -6,10 +6,18 @@ from db import (
     _canon_tag,
     managed_connection,
 )
-from storage._enrichment import _member_reference_fields
+from storage._enrichment import _member_reference_fields, _membership_status_for
 from storage.war_status import _season_bounds, get_current_season_id, get_current_war_status
 
 from storage._formatting import format_member_reference as _format_member_reference
+
+
+@managed_connection
+def member_roster_status(tag, conn=None) -> dict:
+    """Roster status for one member: {roster_status: active|departed|unknown,
+    left_at}. QA H6/M1/M20/L18 — lets read paths flag a departed member rather
+    than reporting them as an active roster player / war no-show."""
+    return _membership_status_for(conn, _canon_tag(tag))
 
 # v5.1 sources: war_participation is keyed (season_id, section_index,
 # player_tag); the per-day source is war_attendance_days; war battle records

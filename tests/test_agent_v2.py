@@ -26,7 +26,8 @@ def test_execute_tool_resolve_member_uses_db_query():
         mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_source": "current_name_exact"}]
         result = json.loads(elixir_agent._execute_tool("resolve_member", {"query": "King Levy"}))
         assert result[0]["player_tag"] == "#ABC123"
-        mock_db.resolve_member.assert_called_once_with("King Levy", limit=5)
+        # status=None so departed/observed players still resolve (QA M1).
+        mock_db.resolve_member.assert_called_once_with("King Levy", status=None, limit=5)
 
 
 def test_execute_tool_get_member_profile_refreshes_member_cache():
@@ -377,6 +378,7 @@ def test_execute_tool_get_member_chests_resolves_member_name():
         mock_db.resolve_member.return_value = [{"player_tag": "#ABC123", "match_score": 950}]
         result = json.loads(elixir_agent._execute_tool("get_member", {"member_tag": "King Levy", "include": ["chests"]}))
         assert result["chests"] == [{"name": "Silver Chest", "index": 1}]
+        # resolved via _resolve_member_tag (name->tag), which keeps the active default.
         mock_db.resolve_member.assert_called_once_with("King Levy", limit=5)
         mock_chests.assert_called_once_with("#ABC123")
 
