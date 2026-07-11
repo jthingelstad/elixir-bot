@@ -3533,7 +3533,7 @@ def test_build_clan_status_report_summarizes_operational_clan_state():
     assert "Roster: 21/50 members | 29 open" in report
     assert "weekly donations 1,400" in report
     assert "top donors King Levy (<@1474760692992180429>) 220, Finn 180, Vijay 140" in report
-    assert "War now: season 77 | week 2 | state riverRace | rank 1" in report
+    assert "War now: season 77 | week 2 | state riverRace | boat-rank 1" in report
     assert "Watch list: 1 with no war decks this season | 1 at risk | 1 on cold streaks | 1 joined in last 30d" in report
     assert "War today: 2 used all 4 decks | 3 used some | 2 unused" in report
     assert "Recent joins: New Guy (join timing unknown)" in report
@@ -3564,7 +3564,7 @@ def test_build_war_status_report_summarizes_current_war_awareness():
             "finished_count": 9,
             "untouched_count": 8,
             "total_participants": 25,
-            "top_fame_today": [
+            "top_fame_total": [
                 {"member_ref": "King Levy", "fame_today": 800},
                 {"member_ref": "Finn", "fame_today": 600},
             ],
@@ -3606,10 +3606,10 @@ def test_build_war_status_report_summarizes_current_war_awareness():
         )
 
     assert report.startswith("**POAP KINGS War Status**")
-    assert "Live: state full | season 129 | week 2 | Battle Day 2 | rank 2" in report
+    assert "Live: state full | season 129 | week 2 | Battle Day 2 | boat-rank 2" in report
     assert "Clock: Battle Day 2 | time left 22h 29m | key `s00129-w01-p011`" in report
     assert "Engagement: 17 engaged | 9 finished all 4 | 8 untouched | 25 tracked" in report
-    assert "Leaders today: King Levy 800, Finn 600" in report
+    assert "War fame leaders (season): King Levy 800, Finn 600" in report
     assert "Waiting on: Vijay, Ditika" in report
     assert "This season: 2 race(s) | total fame 30,100 | fame/member 1,204.00 | top King Levy 6,200, Finn 5,800" in report
     assert "Live feed: 5 clan(s) in the current river race" in report
@@ -3931,7 +3931,7 @@ def test_build_clan_status_short_report_is_compact():
 
     assert report.startswith("**POAP KINGS Status (Short)**")
     assert "Roster: 21/50 | open 29" in report
-    assert "War: season 77 | week 2 | rank 1 | fame 12,345" in report
+    assert "War: season 77 | week 2 | boat-rank 1 | boat-fame 12,345 (weekly)" in report
     assert "Season: fame/member 1,117.0 | top King Levy (<@1474760692992180429>) 3,200, Finn 3,100" in report
     assert "Watch: 1 at risk | 1 on cold streaks" in report
 
