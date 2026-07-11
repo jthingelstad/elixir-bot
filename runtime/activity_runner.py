@@ -98,7 +98,14 @@ async def _build_rest_channel_lookup(runtime_module: Any) -> tuple[discord.Clien
         channels: dict[int, Any] = {}
         for channel_config in prompts.discord_channel_configs():
             channel_id = int(channel_config["id"])
-            channels[channel_id] = await client.fetch_channel(channel_id)
+            # A deleted/unreachable channel must not crash the whole shell runner
+            # — skip it (the startup audit already reports reachability).
+            try:
+                channels[channel_id] = await client.fetch_channel(channel_id)
+            except Exception:
+                import logging
+                logging.getLogger("elixir").warning(
+                    "activity_runner: channel %s unreachable; skipping", channel_id)
         return client, _ChannelLookup(channels)
     except Exception:
         await client.close()

@@ -62,22 +62,6 @@ Elixir's commentary & updates channel — the awareness brain's public voice.
 - Everything worth *saying* about the game lives here; factual roster/system changes go to #announcements instead.
 - Curated over voluminous — silence is allowed; a post should sound like Elixir actually looked at the moment.
 
-## #river-race
-
-ID: 1482352067573059675
-Lane: river-race
-Workflow: channel_update
-ToolPolicy: read_only
-MemoryScope: public
-DurableMemory: true
-
-Elixir's public River Race scoreboard and recap channel.
-
-- Use this channel for River Race scoreboard updates, meaningful momentum changes, weekly/season recaps, War Champ leader updates, and major contributor recognition.
-- Keep frequency lower than the raw war signal stream. Prefer fewer, better posts that tell members something they would not get by opening Clash Royale.
-- Do not use this channel for leader action requests or copy/paste clan-chat prompts; those belong in #leader-actions.
-- Do not use this channel for general war Q&A; members can ask in #ask-elixir or mention Elixir in #clan-chat.
-
 ## #leader-actions
 
 ID: 1513758211206025227
@@ -102,58 +86,6 @@ Elixir's leader action board.
 - Elixir stores the decision timestamp and later compares clan or member data against the captured baseline.
 - Any action card still showing buttons is open. Completed, declined, or deferred cards should have controls removed and function as the record of what happened.
 - Broader reasoning, debate, and exploratory leadership questions belong in #leaders; this channel is the crisp action queue.
-
-## #battle-feed
-
-ID: 1523195660856459387
-Lane: battle-feed
-Workflow: channel_update
-ToolPolicy: read_only
-MemoryScope: public
-DurableMemory: false
-
-The entertainment lane — distinct from #player-highlights (the trophy case,
-scarce earned recognition). Home of the Pulse (docs/reference/v5.1/pulse.md):
-one post per 8-hour window, three a day, narrating the shape of the clan's
-last stretch — battles, modes, overnight carriers, quiet achievements — plus
-each window's coolest battle. Fun, grounded, brief on quiet windows. Nothing
-here is a milestone announcement; those belong in #player-highlights.
-
-## #player-highlights
-
-ID: 1482352147029950474
-Lane: member-highlights
-Workflow: channel_update
-ToolPolicy: read_only
-MemoryScope: public
-DurableMemory: true
-
-Elixir's curated player-story stream.
-
-- Use this channel for both durable player milestones and live non-war battle momentum.
-- Durable milestones include arena jumps, level-ups, card unlocks, evolutions, badge unlocks, achievements, account anniversaries, challenge milestones, and meaningful personal bests.
-- Live battle-mode highlights include hot streaks, trophy pushes, Ranked movement, Ultimate Champion reaches, and global-rank moments.
-- Keep the spotlight on the player and why the moment matters. Let the framing distinguish a permanent achievement from a current-session push.
-- Prefer curated posts over volume. Routine badge ticks or small trophy movement should usually be skipped.
-- No war coordination, clan lifecycle events, leadership notes, or recruiting copy here.
-
-## #clan-events
-
-ID: 1482352241628414013
-Lane: clan-events
-Workflow: channel_update
-ToolPolicy: read_only
-MemoryScope: public
-DurableMemory: true
-
-Elixir's clan-wide celebration and recognition stream.
-
-- Use this channel for joins, promotions, anniversaries, birthdays, and broader clan recognitions.
-- Keep the tone communal, welcoming, proud, and positive-first.
-- Birthdays and anniversaries should feel more ceremonial and thankful than routine.
-- Leave posts should usually be reserved for members with established time in the clan, not quick join-and-leave cases.
-- This is the place for clan-centric moments, not tactical war chatter.
-- Posts here should feel like shared clan milestones.
 
 ## #recruiting
 

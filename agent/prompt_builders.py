@@ -260,15 +260,15 @@ def _intel_report_system():
     """System prompt for the scheduled Clan Wars Intel Report workflow.
 
     The LLM fetches intel on each current competitor via cr_api + get_clan_intel_report,
-    then composes a Discord-ready multi-message post for #river-race.
+    then composes a Discord-ready multi-message post for #elixir.
     """
     return _build_system_prompt(
         prompts.identity_block(),
         prompts.knowledge_block(),
-        prompts.channel_section("river-race"),
+        prompts.channel_section("elixir"),
         "You are writing the Clan Wars Intel Report for the start of a new river race season. "
         "Your job: scout each of our current river race opponents and produce a Discord-ready report "
-        "posted to #river-race.\n\n"
+        "posted to #elixir.\n\n"
         "Tools:\n"
         "- cr_api(aspect='clan_war', tag='<our tag>') — confirm the five clans in our current race.\n"
         "- cr_api(aspect='clan', tag='#X') — quick profile look at an opponent clan.\n"
@@ -354,7 +354,7 @@ def _interactive_system(channel_name):
         "Members can react to your responses with 👍 or 👎 to give feedback — 👎 triggers an automatic offer for them to retry. Occasionally (perhaps once every 5–10 substantive responses, not every turn) close your reply with a brief one-liner inviting that feedback, e.g. *\"React 👍 or 👎 if this helped or missed — I learn from it.\"* Only do this on substantive answers, never on greetings, clarifying questions, deflections, or quick acknowledgements. Don't repeat the nudge in the same conversation thread.\n\n"
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
-        "If they specify a target channel, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
+        "If they specify a target channel, include \"share_channel\" with that exact channel name. Otherwise default to #elixir.\n\n"
         "When someone tells you something to remember, corrects a fact, or states a durable fact worth persisting, "
         "include a \"memories\" array in your JSON response. "
         "Each entry: {\"title\": \"short label\", \"body\": \"full fact\", \"action\": \"save\" or \"correct\", "
@@ -374,7 +374,7 @@ def _interactive_system(channel_name):
         "Or, when sharing to the clan:\n"
         '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "reply in the current channel", '
-        '"share_content": "the clan-facing post for the target channel", "share_channel": "#clan-events", '
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#elixir", '
         '"memories": [], "metadata": {}}',
     )
 
@@ -435,7 +435,7 @@ def _clanops_system(channel_name):
         "For performance, momentum, or roster-health questions over time, prefer the long-term trend tools and summaries.\n\n"
         "If you mention specific clan members in `content` or `share_content`, include their player tags in `member_tags` and their written names in `member_names`.\n\n"
         "A user may ask you to share something with the clan. When they do, use event_type \"channel_share\" and include a \"share_content\" field. "
-        "If they specify a target channel, include \"share_channel\" with that exact channel name. Otherwise default to #clan-events.\n\n"
+        "If they specify a target channel, include \"share_channel\" with that exact channel name. Otherwise default to #elixir.\n\n"
         f"{_discord_formatting_guidance()}"
         f"{_discord_emoji_guidance(allow_in_sensitive=True)}"
         "Respond with JSON only (no markdown wrapper):\n"
@@ -445,7 +445,7 @@ def _clanops_system(channel_name):
         "Or, when sharing to the clan:\n"
         '{"event_type": "channel_share", "member_tags": [], "member_names": [], '
         '"summary": "one sentence TL;DR", "content": "reply in the current channel", '
-        '"share_content": "the clan-facing post for the target channel", "share_channel": "#clan-events", '
+        '"share_content": "the clan-facing post for the target channel", "share_channel": "#elixir", '
         '"memories": [], "metadata": {}}',
     )
 
@@ -759,7 +759,7 @@ def _member_report_system():
 
 
 def _season_awards_system():
-    """System prompt for the consolidated season-awards post to #clan-events.
+    """System prompt for the consolidated season-awards post to #elixir.
 
     Ground-truth contract: the signal payload is the only source for names,
     fame totals, ranks, and donation counts. No RAG memory, no clan context,
@@ -770,7 +770,7 @@ def _season_awards_system():
     return _build_system_prompt(
         prompts.identity_block(),
         prompts.knowledge_block(),
-        "**You are writing the Season Awards post for #clan-events.**\n\n"
+        "**You are writing the Season Awards post for #elixir.**\n\n"
         "Ground truth: the signal payload in the user message. The "
         "`season_id`, `war_champ`, `iron_kings`, `donation_champs`, and "
         "`rookie_mvps` fields are authoritative — use names, ranks, fame "
@@ -902,7 +902,7 @@ def _event_system():
 
 
 def _observe_system():
-    return _proactive_channel_system("#clan-events", "clan-events", leadership=False)
+    return _proactive_channel_system("#elixir", "clan-events", leadership=False)
 
 
 def _channel_lane_system(channel_name: str, *, leadership: bool = False):

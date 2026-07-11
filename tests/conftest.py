@@ -110,7 +110,11 @@ def assert_db_invariants(conn: sqlite3.Connection, label: str = "") -> None:
     # 5) intents only on known lanes / statuses. The awareness brain records its
     # delivered posts as fulfilled "awareness:post" intents on its two channels
     # (announcements is already a PREFIX_LANE value; elixir is the new one).
-    known_lanes = set(PREFIX_LANE.values()) | {FAIL_CLOSED_LANE, "elixir"}
+    # RETIRED_LANES: channels deleted 2026-07-11 (content consolidated into
+    # #elixir). Historical intents on them stay valid — the invariant accepts
+    # them even though they're no longer PREFIX_LANE targets.
+    _RETIRED_LANES = {"member-highlights", "clan-events", "river-race", "battle-feed"}
+    known_lanes = set(PREFIX_LANE.values()) | {FAIL_CLOSED_LANE, "elixir"} | _RETIRED_LANES
     bad = [
         r[0]
         for r in conn.execute(
