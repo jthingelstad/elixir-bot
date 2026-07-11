@@ -1296,6 +1296,8 @@ def _execute_get_clan_intel_report(arguments):
     Wraps storage.opponent_intel.build_clan_intel_entry so the scheduled Intel
     Report (and conversational scouting) runs through normal tool plumbing.
     """
+    from datetime import datetime, timezone
+
     from storage.opponent_intel import build_clan_intel_entry, war_day_context
 
     raw_tag = arguments.get("clan_tag")
@@ -1334,6 +1336,9 @@ def _execute_get_clan_intel_report(arguments):
     # and note that war participant_count (this week's war roster) is not the
     # same population as roster member_count (the clan's full member list).
     entry["war_context"] = war_day_context(war)
+    # QA L20: roster activity counts (recently_active_count) are relative to now;
+    # stamp when this snapshot was read so the brain can age it.
+    entry["observed_at"] = datetime.now(timezone.utc).isoformat()
     war_block = entry.get("war") or {}
     roster_block = entry.get("roster") or {}
     p_count = war_block.get("participant_count")

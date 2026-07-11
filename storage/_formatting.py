@@ -170,6 +170,27 @@ def preferred_display_name(conn, tag: str | None, raw_name: str | None = None) -
     return tag or ""
 
 
+def external_safe_name(raw_name: str | None, *, fallback: str = "(name hidden)") -> str:
+    """Injection-safe display form for an EXTERNAL name with no DB row — an
+    opponent clan, an opposing player, a tournament (QA L19/L22).
+
+    Clan members flow through the materialized display_name pipeline; external
+    entities never enter `players`, so their raw API names ('огурец погибели',
+    control chars, prompt-structure tokens) would otherwise reach the LLM
+    verbatim. Clean + injection-guard; if nothing readable survives, return a
+    neutral marker rather than the raw name."""
+    if not raw_name:
+        return fallback
+    safe = injection_safe(callable_name(raw_name))
+    if safe and _has_ascii_alnum(safe):
+        return safe
+    # Non-Latin-but-clean names (e.g. 'السعودية') have no ascii alnum but are not
+    # an injection risk once callable_name + injection_safe pass — keep them.
+    if safe:
+        return safe
+    return fallback
+
+
 def format_member_reference(*args, **kwargs):
     """Format a member reference — delegates to storage.identity."""
     from storage.identity import format_member_reference as _impl
