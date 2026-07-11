@@ -142,6 +142,37 @@ def test_flag_member_watch_can_upsert_decision_case(memdb):
     assert case["target_player_tag"] == "#ABC123"
 
 
+def test_awareness_write_does_not_reopen_a_leader_closed_case(memdb):
+    """QA H20/H21: an awareness write must not silently reopen a decision case
+    a leader deliberately resolved/dismissed."""
+    db.snapshot_members([{"tag": "#ZZZ9", "name": "Rook", "role": "member"}])
+    first = json.loads(tool_exec._execute_tool(
+        "flag_member_watch",
+        {"member_tag": "Rook", "reason": "Silent; review removal.", "case_type": "kick_review"},
+        workflow="awareness",
+    ))
+    case_id = first["case_id"]
+    # Leader dismisses the case.
+    db.resolve_decision_case(case_id, status="dismissed", resolution="Leader kept them.")
+    assert db.get_decision_case_by_id(case_id)["status"] == "dismissed"
+
+    # A later awareness write must NOT reopen it.
+    json.loads(tool_exec._execute_tool(
+        "flag_member_watch",
+        {"member_tag": "Rook", "reason": "Still silent.", "case_type": "kick_review"},
+        workflow="awareness",
+    ))
+    assert db.get_decision_case_by_id(case_id)["status"] == "dismissed"
+
+    # The controlled re-nomination path (allow_reopen=True) still may.
+    db.upsert_member_review_case(
+        case_type="kick_review",
+        member={"tag": "#ZZZ9", "name": "Rook"},
+        allow_reopen=True,
+    )
+    assert db.get_decision_case_by_id(case_id)["status"] == "open"
+
+
 # ---------------------------------------------------------------------------
 # record_leadership_followup
 # ---------------------------------------------------------------------------

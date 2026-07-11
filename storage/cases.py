@@ -163,6 +163,7 @@ def upsert_decision_case(
     status: str = CASE_OPEN,
     state: Optional[dict] = None,
     case_key: str | None = None,
+    allow_reopen: bool = False,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
     clean_type = _clean_text(case_type)
@@ -179,6 +180,13 @@ def upsert_decision_case(
         subject_key=clean_subject_key,
         target_player_tag=canon_tag,
     )
+    # QA H20/H21: a resolved/dismissed case is a decision a leader deliberately
+    # closed. An automated/awareness write must not silently reopen it — only a
+    # controlled re-nomination path (allow_reopen=True) may. Leave it untouched.
+    if not allow_reopen:
+        existing = get_decision_case(clean_case_key, conn=conn)
+        if existing and existing.get("status") in (CASE_RESOLVED, CASE_DISMISSED):
+            return existing
     now = _db._utcnow()
     clean_status = _normalize_case_status(status)
     conn.execute(
@@ -658,6 +666,9 @@ def backfill_decision_cases_from_leader_actions(
             status=case_status if case_status in {CASE_OPEN, CASE_DEFERRED} else CASE_OPEN,
             state=_leader_action_case_state(action, outcome=outcome, backfilled_at=backfilled_at),
             case_key=case_key,
+            # A live leader-action card IS the authority; reflect it even over a
+            # prior closure (this reconstructs case state from the action board).
+            allow_reopen=True,
             conn=conn,
         )
         if not case:
@@ -810,6 +821,7 @@ def upsert_member_review_case(
     source_event_key: str | None = None,
     source_event_type: str | None = None,
     due_at: str | None = None,
+    allow_reopen: bool = False,
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict | None:
     tag = member.get("tag") or member.get("player_tag") or member.get("member_tag")
@@ -839,6 +851,7 @@ def upsert_member_review_case(
         source_event_type=source_event_type,
         due_at=due_at,
         state={"member": dict(member)},
+        allow_reopen=allow_reopen,
         conn=conn,
     )
 
