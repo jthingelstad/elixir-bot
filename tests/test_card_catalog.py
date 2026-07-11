@@ -81,16 +81,25 @@ class TestLikeEscape:
 class TestCardCatalogLookup:
     def test_lookup_by_name(self, catalog_db):
         _seed_catalog(catalog_db)
-        results = lookup_cards(name="Knight", conn=catalog_db)
-        assert any(r["name"] == "Knight" for r in results)
+        results = lookup_cards(name="Knight", conn=catalog_db)["cards"]
+        # QA M17: an exact-name match ranks first, not alphabetically.
+        assert results[0]["name"] == "Knight"
 
     def test_lookup_wildcards_in_name_do_not_expand(self, catalog_db):
         _seed_catalog(catalog_db)
-        results = lookup_cards(name="%", conn=catalog_db)
-        assert len(results) == 0
+        out = lookup_cards(name="%", conn=catalog_db)
+        assert out["cards"] == [] and out["total_matched"] == 0
 
     def test_lookup_by_rarity(self, catalog_db):
         _seed_catalog(catalog_db)
-        results = lookup_cards(rarity="epic", conn=catalog_db)
+        results = lookup_cards(rarity="epic", conn=catalog_db)["cards"]
         assert all(r["rarity"] == "epic" for r in results)
         assert {r["name"] for r in results} == {"Balloon", "P.E.K.K.A"}
+
+    def test_lookup_surfaces_truncation(self, catalog_db):
+        _seed_catalog(catalog_db)
+        out = lookup_cards(limit=2, conn=catalog_db)
+        # QA M18: a capped result reports total_matched + truncated.
+        assert out["returned"] == 2
+        assert out["total_matched"] > 2
+        assert out["truncated"] is True
