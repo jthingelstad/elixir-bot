@@ -39,6 +39,11 @@ HARD_POST_EVENT_TYPES = frozenset({
     "member_left",
     "week_finished",
     "season_closed",
+    # The clan's OWN founding anniversary is a can't-miss celebration (unlike
+    # member birthdays / join anniversaries, which stay discretionary). It fires
+    # once a year and ages out of the delta feed after one covered tick, so it
+    # won't repeat-fail; cake_days_today keeps it visible all day as backup.
+    "clan_birthday",
 })
 
 

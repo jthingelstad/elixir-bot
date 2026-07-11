@@ -73,6 +73,13 @@ def test_cake_days_today_surfaces_active_members_all_day(engine_conn):
     cr = next(c for c in cake if c["type"] == "cr_account_anniversary")
     assert cr["years"] == 5
 
+    # The clan's OWN founding anniversary is a hard-post floor (mandatory big
+    # celebration); the member cake days are discretionary, NOT hard-post.
+    hard_keys = {s.get("signal_key") for s in (read.get("hard_post_signals") or [])}
+    assert f"clan_birthday:{today}" in hard_keys
+    assert f"member_birthday:#A:{today}" not in hard_keys
+    assert "cr_account_anniversary:#A:5" not in hard_keys
+
 
 def test_cake_days_today_empty_when_none_today(engine_conn):
     engine_conn.execute(
