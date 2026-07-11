@@ -275,16 +275,6 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
 
     season_id = status.get("season_id")
     section_index = status.get("section_index")
-    day_rows = {}
-    if season_id is not None and section_index is not None:
-        for row in conn.execute(
-            "SELECT player_tag, decks_used, decks_available, fame_delta "
-            "FROM war_attendance_days WHERE season_id = ? AND section_index = ? "
-            "AND war_day_index = (SELECT MAX(war_day_index) FROM war_attendance_days "
-            "                     WHERE season_id = ? AND section_index = ?)",
-            (season_id, section_index, season_id, section_index),
-        ).fetchall():
-            day_rows[row["player_tag"]] = dict(row)
 
     # Riverrace participants persist for the whole week even after a player
     # leaves the clan — without a membership filter, departed players landed
@@ -301,7 +291,6 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
     participants, used_all, used_some, used_none, departed = [], [], [], [], []
     for tag, info in participants_map.items():
         info = info or {}
-        day = day_rows.get(tag) or {}
         item = {
             "tag": tag,
             "name": info.get("name"),
@@ -310,7 +299,10 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
             "boat_attacks": _coerce_int(info.get("boat_attacks")),
             "decks_used_total": _coerce_int(info.get("decks_used")),
             "decks_used_today": _coerce_int(info.get("decks_used_today")),
-            "fame_today": _coerce_int(day.get("fame_delta")),
+            # QA M6: per-member daily war fame is not tracked (fame_delta is
+            # never populated), so there is no honest "fame today" — None, not a
+            # misleading 0. Today's engagement signal is decks_used_today.
+            "fame_today": None,
         }
         item = _member_reference_fields(conn, tag, item)
         item["is_current_member"] = (not open_tags) or tag in open_tags
@@ -326,7 +318,9 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
         else:
             used_none.append(item)
 
-    top_fame_today = sorted(participants, key=lambda i: (-(i.get("fame_today") or 0), -(i.get("fame") or 0), (i.get("name") or "").lower()))
+    # top_fame_today would just re-rank by cumulative fame (daily fame isn't
+    # tracked — QA M6), so it's omitted rather than mislabelled. top_fame_total
+    # is the honest cumulative-fame leaderboard.
     top_fame_total = sorted(participants, key=lambda i: (-(i.get("fame") or 0), -(i.get("decks_used_total") or 0), (i.get("name") or "").lower()))
 
     observed_dt = coerce_utc_datetime(observed_at_live)
@@ -378,7 +372,6 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
         "used_all_4": used_all,
         "used_some": used_some,
         "used_none": used_none,
-        "top_fame_today": top_fame_today[:5],
         "top_fame_total": top_fame_total[:5],
         "participants": participants,
     }
@@ -467,7 +460,6 @@ def get_war_deck_status_today(conn: Optional[sqlite3.Connection] = None) -> dict
         "used_all_4": state.get("used_all_4") or [],
         "used_some": state.get("used_some") or [],
         "used_none": state.get("used_none") or [],
-        "top_fame_today": state.get("top_fame_today") or [],
         "top_fame_total": state.get("top_fame_total") or [],
         "engaged_count": state.get("engaged_count") or 0,
         "finished_count": state.get("finished_count") or 0,

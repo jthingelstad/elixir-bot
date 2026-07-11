@@ -337,8 +337,9 @@ def _build_clan_status_report(clan=None, war=None):
             f"season {war_status.get('season_id')}" if war_status.get("season_id") is not None else None,
             f"week {war_status.get('week')}" if war_status.get("week") is not None else None,
             f"state {war_status.get('war_state') or 'n/a'}",
-            f"rank {war_status.get('race_rank')}" if war_status.get("race_rank") is not None else None,
-            f"fame {_fmt_num(war_status.get('fame'))}",
+            f"boat-rank {war_status.get('race_rank')}" if war_status.get("race_rank") is not None else None,
+            f"boat-fame {_fmt_num(war_status.get('fame'))} (weekly)",
+            f"today-points {_fmt_num(war_status.get('period_points'))}" if war_status.get("period_points") is not None else None,
             f"repair {_fmt_num(war_status.get('repair_points'))}",
             f"score {_fmt_num(war_status.get('war_league_score'))}",
         ]
@@ -426,10 +427,11 @@ def _build_war_status_report(clan=None, war=None):
             f"season {war_status.get('season_id')}" if war_status.get("season_id") is not None else None,
             f"week {war_status.get('week')}" if war_status.get("week") is not None else None,
             war_status.get("phase_display"),
-            f"rank {war_status.get('race_rank')}" if war_status.get("race_rank") is not None else None,
-            f"fame {_fmt_num(war_status.get('fame'))}",
+            f"boat-rank {war_status.get('race_rank')}" if war_status.get("race_rank") is not None else None,
+            f"boat-fame {_fmt_num(war_status.get('fame'))} (weekly)",
             f"score {_fmt_num(war_status.get('war_league_score'))}",
-            f"period {_fmt_num(war_status.get('period_points'))}" if war_status.get("period_points") is not None else None,
+            f"today-rank {war_status.get('day_rank')}" if war_status.get("day_scored") and war_status.get("day_rank") is not None else None,
+            f"today-points {_fmt_num(war_status.get('period_points'))}" if war_status.get("period_points") is not None else None,
             "finished yes" if war_status.get("race_completed") else None,
             f"finish {war_status.get('finish_time')}" if war_status.get("finish_time") else None,
             "completed early" if war_status.get("race_completed_early") else None,
@@ -451,8 +453,10 @@ def _build_war_status_report(clan=None, war=None):
                 f"{current_day.get('untouched_count', 0)} untouched | "
                 f"{current_day.get('total_participants', 0)} tracked"
             )
+            # Daily per-member war fame isn't tracked (QA M6) — show cumulative
+            # season-fame leaders instead of a mislabelled "today".
             lines.append(
-                f"- Leaders today: {_join_member_bits(current_day.get('top_fame_today') or [], _fame_today_label, limit=5)}"
+                f"- War fame leaders (season): {_join_member_bits(current_day.get('top_fame_total') or [], _fame_today_label, limit=5)}"
             )
             lines.append(
                 f"- Waiting on: {_join_member_bits(current_day.get('used_none') or [], lambda member: _member_label(member), limit=6)}"
@@ -540,8 +544,8 @@ def _build_clan_status_short_report(clan=None, war=None):
         lines.append(
             f"- War: season {war_status.get('season_id') if war_status.get('season_id') is not None else 'n/a'} "
             f"| week {war_status.get('week') if war_status.get('week') is not None else 'n/a'} "
-            f"| rank {war_status.get('race_rank') if war_status.get('race_rank') is not None else 'n/a'} "
-            f"| fame {_fmt_num(war_status.get('fame'))}"
+            f"| boat-rank {war_status.get('race_rank') if war_status.get('race_rank') is not None else 'n/a'} "
+            f"| boat-fame {_fmt_num(war_status.get('fame'))} (weekly)"
             f"{' | finished' if war_status.get('race_completed') else ''}"
         )
     if season_summary:
