@@ -3609,7 +3609,7 @@ def test_build_war_status_report_summarizes_current_war_awareness():
     assert "Live: state full | season 129 | week 2 | Battle Day 2 | boat-rank 2" in report
     assert "Clock: Battle Day 2 | time left 22h 29m | key `s00129-w01-p011`" in report
     assert "Engagement: 17 engaged | 9 finished all 4 | 8 untouched | 25 tracked" in report
-    assert "War fame leaders (season): King Levy 800, Finn 600" in report
+    assert "War point contributors (season): King Levy 800, Finn 600" in report
     assert "Waiting on: Vijay, Ditika" in report
     assert "This season: 2 race(s) | total fame 30,100 | fame/member 1,204.00 | top King Levy 6,200, Finn 5,800" in report
     assert "Live feed: 5 clan(s) in the current river race" in report
