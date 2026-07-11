@@ -2,7 +2,7 @@
 
 # QA Audit — Elixir-Bot Awareness Brain Tool Surface (16 tools)
 
-**Audit date:** 2026-07-11 · **Method:** 16-agent value-correctness sweep (multi-agent workflow) · **Status:** batch-fix in progress — see commit history for resolved findings.
+**Audit date:** 2026-07-11 · **Method:** 16-agent value-correctness sweep (multi-agent workflow) · **Status:** ✅ **all 88 findings resolved** (25 HIGH · 33 MEDIUM · 30 LOW) as of 2026-07-11 — see commit history for the per-finding fixes. A handful were resolved transitively (e.g. L13 by the H12/M12 battle_events rewrite; L11 already echoed maxed_only) and are noted in their commit.
 
 ## 1. Executive Summary
 
