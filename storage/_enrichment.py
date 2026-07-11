@@ -34,7 +34,39 @@ def _member_reference_fields(conn: sqlite3.Connection, member_id, item: dict) ->
         if item.get(name_field):
             item[name_field] = preferred or callable_name(item[name_field])
     item.update(_member_ranks_for(conn, tag))
+    # QA H6/M20/L18: annotate roster status so a departed member is never
+    # reported as an active war no-show / current-roster player. active =
+    # has an open membership; departed = only closed memberships (with the
+    # last left_at); unknown = observed non-member never in clan_memberships.
+    item.update(_membership_status_for(conn, tag))
     return item
+
+
+_MEMBERSHIP_CACHE: dict[int, dict] = {}
+_MEMBERSHIP_CACHE_MAX = 16
+
+
+def _membership_status_for(conn: sqlite3.Connection, tag: str) -> dict:
+    """Roster status for one member, batch-loaded and cached per connection
+    (like the rank table) so this stays O(1) per enriched row."""
+    key = id(conn)
+    cache = _MEMBERSHIP_CACHE.get(key)
+    if cache is None:
+        cache = {}
+        for row in conn.execute(
+            "SELECT player_tag, "
+            "MAX(CASE WHEN left_at IS NULL THEN 1 ELSE 0 END) AS has_open, "
+            "MAX(left_at) AS last_left FROM clan_memberships GROUP BY player_tag"
+        ):
+            active = bool(row["has_open"])
+            cache[row["player_tag"]] = {
+                "roster_status": "active" if active else "departed",
+                "left_at": None if active else row["last_left"],
+            }
+        if len(_MEMBERSHIP_CACHE) >= _MEMBERSHIP_CACHE_MAX:
+            _MEMBERSHIP_CACHE.pop(next(iter(_MEMBERSHIP_CACHE)))
+        _MEMBERSHIP_CACHE[key] = cache
+    return dict(cache.get(tag, {"roster_status": "unknown", "left_at": None}))
 
 
 # Member-rank cache keyed on id(conn). sqlite3.Connection rejects arbitrary
@@ -48,8 +80,9 @@ _MEMBER_RANKS_CACHE_MAX = 16
 
 
 def _clear_member_ranks_cache() -> None:
-    """Test hook to drop all cached rank tables."""
+    """Test hook to drop all cached rank + membership tables."""
     _MEMBER_RANKS_CACHE.clear()
+    _MEMBERSHIP_CACHE.clear()
 
 
 def _member_ranks_for(conn: sqlite3.Connection, member_id: int) -> dict:
