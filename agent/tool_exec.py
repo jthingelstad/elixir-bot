@@ -746,7 +746,7 @@ def _execute_get_war_season(arguments):
             season_id=season_id, limit=limit, min_battles=1,
         )
     elif aspect == "boat_battles":
-        return db.get_clan_boat_battle_record(wars=3)
+        return db.get_clan_boat_battle_record(weeks=3)
     elif aspect == "score_trend":
         return db.get_war_score_trend(days=30)
     elif aspect == "season_comparison":

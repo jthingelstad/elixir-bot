@@ -439,20 +439,26 @@ def get_war_battle_win_rates(season_id: Optional[str] = None, limit: int = 10, m
 
 
 @managed_connection
-def get_clan_boat_battle_record(wars: int = 3, conn: Optional[sqlite3.Connection] = None) -> dict:
-    # QA H9: this used to ignore `wars` entirely and count ALL boat battles ever
-    # while labelling the result "last N wars". Scope it to the N most recent war
-    # sections (season_id, section_index) and report which ones are covered.
-    wars = max(1, int(wars or 3))
+def get_clan_boat_battle_record(weeks: int = 3, conn: Optional[sqlite3.Connection] = None) -> dict:
+    # QA H9 + cadence: a River Race "war" happens per WEEK (a section within a
+    # season), so the unit here is a war WEEK, not an ambiguous "war" (which a
+    # player reads as a whole season). This used to ignore the window and count
+    # ALL boat battles ever; scope it to the N most recent war weeks
+    # (season_id, section_index) and report which weeks are covered.
+    weeks = max(1, int(weeks or 3))
     recent = conn.execute(
         "SELECT DISTINCT season_id, section_index FROM battle_events "
         "WHERE is_war = 1 AND season_id IS NOT NULL AND section_index IS NOT NULL "
         "ORDER BY season_id DESC, section_index DESC LIMIT ?",
-        (wars,),
+        (weeks,),
     ).fetchall()
-    covered = [{"season_id": r["season_id"], "section_index": r["section_index"]} for r in recent]
+    covered = [
+        {"season_id": r["season_id"], "week": (r["section_index"] or 0) + 1,
+         "section_index": r["section_index"]}
+        for r in recent
+    ]
     if not covered:
-        return {"window_wars": wars, "wars_covered": [], "boat_battles": 0,
+        return {"window_weeks": weeks, "weeks_covered": [], "boat_battles": 0,
                 "wins": 0, "losses": 0, "win_rate": None}
     placeholders = ",".join(["(?, ?)"] * len(covered))
     params: list = []
@@ -468,8 +474,8 @@ def get_clan_boat_battle_record(wars: int = 3, conn: Optional[sqlite3.Connection
     wins = outcomes.get("W", 0)
     losses = outcomes.get("L", 0)
     return {
-        "window_wars": wars,
-        "wars_covered": covered,
+        "window_weeks": weeks,
+        "weeks_covered": covered,
         "boat_battles": wins + losses,
         "wins": wins,
         "losses": losses,
