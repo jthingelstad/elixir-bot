@@ -1622,6 +1622,14 @@ def _execute_tool(name, arguments, workflow=None):
             is_inference = from_awareness
             confidence = 0.7 if from_awareness else 1.0
 
+            # QA M28: the awareness create_memory path was an unconditional INSERT
+            # (the leader path upserts) — dedup a repeated identical observation
+            # via a content-hash event key so ticks don't pile up duplicates.
+            import hashlib as _hashlib
+            _dedup_id = _hashlib.sha1(
+                f"{title}|{member_tag_input or ''}|{body}".encode("utf-8")
+            ).hexdigest()[:16]
+
             if member_tag_input:
                 resolved_tag = _resolve_member_tag(member_tag_input)
                 if from_awareness:
@@ -1635,6 +1643,9 @@ def _execute_tool(name, arguments, workflow=None):
                         created_by=actor,
                         scope="leadership",
                         member_tag=resolved_tag,
+                        event_type="awareness_obs",
+                        event_id=_dedup_id,
+                        idempotent=True,
                     )
                 else:
                     memory = upsert_member_note_memory(
@@ -1661,6 +1672,9 @@ def _execute_tool(name, arguments, workflow=None):
                     confidence=confidence,
                     created_by=actor,
                     scope="leadership",
+                    event_type="awareness_obs" if from_awareness else None,
+                    event_id=_dedup_id if from_awareness else None,
+                    idempotent=from_awareness,
                 )
                 if tags:
                     attach_tags(memory["memory_id"], tags, actor=actor)
