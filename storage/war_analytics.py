@@ -120,9 +120,10 @@ def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None
         (season_id, member_tag),
     ).fetchone()
     clan = conn.execute(
+        # QA L6: dropped the dead avg_fame_per_row column (never read — the
+        # average below is computed from total_fame / participants instead).
         "SELECT COUNT(DISTINCT player_tag) AS participants, "
-        "SUM(COALESCE(fame, 0)) AS total_fame, "
-        "AVG(COALESCE(fame, 0)) AS avg_fame_per_row "
+        "SUM(COALESCE(fame, 0)) AS total_fame "
         "FROM war_participation WHERE season_id = ?",
         (season_id,),
     ).fetchone()
@@ -143,6 +144,16 @@ def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None
             "avg_fame_per_member": avg_fame_per_member,
         },
         "fame_vs_average": (mine["fame"] or 0) - avg_fame_per_member,
+        # QA L6: both member.total_fame and the average are CUMULATIVE across all
+        # the season's weeks, and the average denominator counts every distinct
+        # participant (including 0-deck / part-season members), so a member who
+        # played fewer weeks reads low vs the average for a coverage reason, not
+        # a performance one. Neither side is per-week normalized.
+        "basis_note": (
+            "Season-cumulative fame on both sides; the average spans every distinct "
+            "participant (incl. low-participation/departed) and is not weeks-normalized — "
+            "compare races_participated before reading fame_vs_average as effort."
+        ),
     }
 
 
@@ -590,6 +601,17 @@ def compare_fame_per_member_to_previous_season(season_id: Optional[str] = None, 
             "current season is in progress (partial fame) — not directly comparable "
             "to a completed season"
             if current_in_progress and previous else None
+        ),
+        # QA L8: fame_per_member = the clan's cumulative BOAT fame for the season
+        # (placement + defense — a clan-level number, NOT a sum of member fame)
+        # divided by the count of distinct members who scored. It's an engagement
+        # ratio (clan output per participating member), not an average individual
+        # contribution, and it is not per-week normalized, so a season with more
+        # weeks banks more fame. Compare seasons of equal length for a fair read.
+        "metric_basis": (
+            "clan season boat-fame total / distinct scoring participants; a clan-level "
+            "ratio, not a per-member average, and not normalized per week (more weeks = "
+            "more fame). Colosseum weeks contribute their banked fame too."
         ),
     }
 

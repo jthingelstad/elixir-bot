@@ -20,7 +20,22 @@ from db import (
     _utcnow,
     managed_connection,
 )
+from storage._formatting import callable_name, injection_safe
 from storage.war_status import get_current_season_id
+
+
+def _fold_award_names(rows: list[dict]) -> list[dict]:
+    """QA L26: player_name is COALESCE(display_name, current_name); the
+    display_name branch is already injection-safe, but the current_name fallback
+    is raw. Fold every player_name through callable_name + injection_safe so a
+    holder missing a materialized display_name can't leak an unsafe raw name
+    (folding an already-safe name is a no-op)."""
+    for row in rows:
+        name = row.get("player_name")
+        if name:
+            row["player_name"] = injection_safe(callable_name(name)) or callable_name(name)
+    return rows
+
 
 __all__ = [
     "insert_award",
@@ -126,7 +141,7 @@ def list_awards(award_type: Optional[str] = None, season_id: Optional[int] = Non
         "ORDER BY a.season_id DESC, a.award_type ASC, a.rank ASC LIMIT ?",
         (*params, max(1, int(limit))),
     ).fetchall()
-    return _rowdicts(rows)
+    return _fold_award_names(_rowdicts(rows))
 
 
 @managed_connection
@@ -160,7 +175,7 @@ def award_leaderboard(
         sql += " LIMIT ?"
         params.append(int(limit))
     rows = conn.execute(sql, tuple(params)).fetchall()
-    return _rowdicts(rows)
+    return _fold_award_names(_rowdicts(rows))
 
 
 @managed_connection
@@ -174,7 +189,7 @@ def get_awards_by_season(season_id: int, conn: Optional[sqlite3.Connection] = No
         "ORDER BY a.award_type ASC, a.rank ASC",
         (int(season_id),),
     ).fetchall()
-    return _rowdicts(rows)
+    return _fold_award_names(_rowdicts(rows))
 
 
 # -- season helpers ----------------------------------------------------------
