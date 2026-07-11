@@ -146,6 +146,39 @@ def _compare_series_window(rows, value_key):
     }
 
 
+def _events_battle_window(conn, canon_tag: str, start_ymd: str, end_ymd: str, window_days: int) -> dict:
+    """Battle W/L/volume for a member over a calendar window, read from the
+    authoritative battle_events store (QA H2/M2: the daily rollups it replaced
+    are lossy for new/backfilled members — e.g. a real 27-battle week showed up
+    as 2 tracked days / 10 battles). battle_time is UTC-compact
+    'YYYYMMDDTHHMMSS...'; compare on the 8-char date prefix. Because
+    battle_events is complete, the window coverage is authoritative — we surface
+    days_with_battles so a low-activity week reads as low activity, not missing
+    data."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS battles, "
+        "SUM(outcome = 'W') AS wins, SUM(outcome = 'L') AS losses, SUM(outcome = 'D') AS draws, "
+        "SUM(COALESCE(trophy_change, 0)) AS trophy_delta, "
+        "COUNT(DISTINCT substr(battle_time, 1, 8)) AS days_with_battles "
+        "FROM battle_events WHERE player_tag = ? "
+        "AND substr(battle_time, 1, 8) >= ? AND substr(battle_time, 1, 8) <= ?",
+        (canon_tag, start_ymd, end_ymd),
+    ).fetchone()
+    battles = int(row["battles"] or 0)
+    wins = int(row["wins"] or 0)
+    losses = int(row["losses"] or 0)
+    return {
+        "days": int(row["days_with_battles"] or 0),
+        "window_days": window_days,
+        "battles": battles,
+        "wins": wins,
+        "losses": losses,
+        "draws": int(row["draws"] or 0),
+        "trophy_change_total": int(row["trophy_delta"] or 0),
+        "win_rate": round(wins / battles, 4) if battles else None,
+    }
+
+
 @managed_connection
 def compare_member_trend_windows(tag: str, window_days: int = 7, conn: Optional[sqlite3.Connection] = None) -> dict:
     total_days = max(window_days * 2, 2)
@@ -153,38 +186,15 @@ def compare_member_trend_windows(tag: str, window_days: int = 7, conn: Optional[
     current_trophies = trophy_history[-window_days:] if window_days else trophy_history
     previous_trophies = trophy_history[-(window_days * 2):-window_days] if window_days else []
 
-    battle_rows = get_member_daily_battle_summary(tag, days=total_days, conn=conn)
-    battle_by_day = {}
-    for row in battle_rows:
-        daily = battle_by_day.setdefault(
-            row["battle_date"],
-            {"battle_date": row["battle_date"], "battles": 0, "wins": 0, "losses": 0, "draws": 0, "trophy_change_total": 0},
-        )
-        daily["battles"] += int(row.get("battles") or 0)
-        daily["wins"] += int(row.get("wins") or 0)
-        daily["losses"] += int(row.get("losses") or 0)
-        daily["draws"] += int(row.get("draws") or 0)
-        daily["trophy_change_total"] += int(row.get("trophy_change_total") or 0)
-    ordered_battles = [battle_by_day[key] for key in sorted(battle_by_day)]
-    current_battles = ordered_battles[-window_days:] if window_days else ordered_battles
-    previous_battles = ordered_battles[-(window_days * 2):-window_days] if window_days else []
-
-    def _battle_window(rows):
-        battles = sum(row["battles"] for row in rows)
-        wins = sum(row["wins"] for row in rows)
-        losses = sum(row["losses"] for row in rows)
-        draws = sum(row["draws"] for row in rows)
-        trophy_delta = sum(row["trophy_change_total"] for row in rows)
-        win_rate = round(wins / battles, 4) if battles else None
-        return {
-            "days": len(rows),
-            "battles": battles,
-            "wins": wins,
-            "losses": losses,
-            "draws": draws,
-            "trophy_change_total": trophy_delta,
-            "win_rate": win_rate,
-        }
+    canon = _canon_tag(tag)
+    today = datetime.fromisoformat(chicago_today()).date()
+    win = max(window_days, 1)
+    cur_start = (today - timedelta(days=win - 1)).strftime("%Y%m%d")
+    cur_end = today.strftime("%Y%m%d")
+    prev_start = (today - timedelta(days=2 * win - 1)).strftime("%Y%m%d")
+    prev_end = (today - timedelta(days=win)).strftime("%Y%m%d")
+    current_battle_window = _events_battle_window(conn, canon, cur_start, cur_end, win)
+    previous_battle_window = _events_battle_window(conn, canon, prev_start, prev_end, win)
 
     member_row = conn.execute(
         "SELECT player_tag AS member_id, player_tag AS tag, display_name AS name FROM players WHERE player_tag = ?",
@@ -199,12 +209,42 @@ def compare_member_trend_windows(tag: str, window_days: int = 7, conn: Optional[
         "window_days": window_days,
         "current": {
             "trophies": _compare_series_window(current_trophies, "trophies"),
-            "battle_activity": _battle_window(current_battles),
+            "battle_activity": current_battle_window,
         },
         "previous": {
             "trophies": _compare_series_window(previous_trophies, "trophies"),
-            "battle_activity": _battle_window(previous_battles),
+            "battle_activity": previous_battle_window,
         },
+    }
+
+
+def _events_clan_battle_window(conn, start_ymd: str, end_ymd: str, window_days: int) -> dict:
+    """Clan-wide battle activity over a calendar window from authoritative
+    battle_events (current members only). QA H1: the clan_daily_battle_rollups
+    this replaced were stale (data ended a week behind), so the previous week
+    read as 0 battles / 0-0-0 — a false 'dead clan' signal — while battle_events
+    held thousands of real battles."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS battles, "
+        "SUM(b.outcome = 'W') AS wins, SUM(b.outcome = 'L') AS losses, SUM(b.outcome = 'D') AS draws, "
+        "SUM(COALESCE(b.trophy_change, 0)) AS trophy_delta, "
+        "COUNT(DISTINCT b.player_tag) AS active_members "
+        "FROM battle_events b "
+        "WHERE substr(b.battle_time, 1, 8) >= ? AND substr(b.battle_time, 1, 8) <= ? "
+        "AND EXISTS (SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = b.player_tag AND cm.left_at IS NULL)",
+        (start_ymd, end_ymd),
+    ).fetchone()
+    battles = int(row["battles"] or 0)
+    wins = int(row["wins"] or 0)
+    return {
+        "window_days": window_days,
+        "battles": battles,
+        "wins": wins,
+        "losses": int(row["losses"] or 0),
+        "draws": int(row["draws"] or 0),
+        "trophy_change_total": int(row["trophy_delta"] or 0),
+        "active_members": int(row["active_members"] or 0),
+        "win_rate": round(wins / battles, 4) if battles else None,
     }
 
 
@@ -214,7 +254,6 @@ def compare_clan_trend_windows(window_days: int = 7, clan_tag: Optional[str] = N
     counts = get_clan_member_count_history(days=total_days, clan_tag=clan_tag, conn=conn)
     scores = get_clan_score_history(days=total_days, clan_tag=clan_tag, conn=conn)
     trophy_totals = get_clan_total_member_trophies_history(days=total_days, clan_tag=clan_tag, conn=conn)
-    battles = get_clan_daily_battle_summary(days=total_days, clan_tag=clan_tag, conn=conn)
 
     def _split(rows):
         return rows[-window_days:] if window_days else rows, rows[-(window_days * 2):-window_days] if window_days else []
@@ -223,36 +262,14 @@ def compare_clan_trend_windows(window_days: int = 7, clan_tag: Optional[str] = N
     current_scores, previous_scores = _split(scores)
     current_trophies, previous_trophies = _split(trophy_totals)
 
-    battle_by_day = {}
-    for row in battles:
-        daily = battle_by_day.setdefault(
-            row["battle_date"],
-            {"battle_date": row["battle_date"], "battles": 0, "wins": 0, "losses": 0, "draws": 0, "trophy_change_total": 0},
-        )
-        daily["battles"] += int(row.get("battles") or 0)
-        daily["wins"] += int(row.get("wins") or 0)
-        daily["losses"] += int(row.get("losses") or 0)
-        daily["draws"] += int(row.get("draws") or 0)
-        daily["trophy_change_total"] += int(row.get("trophy_change_total") or 0)
-    ordered_battles = [battle_by_day[key] for key in sorted(battle_by_day)]
-    current_battles, previous_battles = _split(ordered_battles)
-
-    def _battle_window(rows):
-        battles = sum(row["battles"] for row in rows)
-        wins = sum(row["wins"] for row in rows)
-        losses = sum(row["losses"] for row in rows)
-        draws = sum(row["draws"] for row in rows)
-        trophy_delta = sum(row["trophy_change_total"] for row in rows)
-        win_rate = round(wins / battles, 4) if battles else None
-        return {
-            "days": len(rows),
-            "battles": battles,
-            "wins": wins,
-            "losses": losses,
-            "draws": draws,
-            "trophy_change_total": trophy_delta,
-            "win_rate": win_rate,
-        }
+    win = max(window_days, 1)
+    today = datetime.fromisoformat(chicago_today()).date()
+    cur_start = (today - timedelta(days=win - 1)).strftime("%Y%m%d")
+    cur_end = today.strftime("%Y%m%d")
+    prev_start = (today - timedelta(days=2 * win - 1)).strftime("%Y%m%d")
+    prev_end = (today - timedelta(days=win)).strftime("%Y%m%d")
+    current_battle_window = _events_clan_battle_window(conn, cur_start, cur_end, win)
+    previous_battle_window = _events_clan_battle_window(conn, prev_start, prev_end, win)
 
     clan_row = conn.execute(
         "SELECT clan_tag, clan_name FROM clan_daily_metrics "
@@ -269,13 +286,13 @@ def compare_clan_trend_windows(window_days: int = 7, clan_tag: Optional[str] = N
             "member_count": _compare_series_window(current_counts, "member_count"),
             "clan_score": _compare_series_window(current_scores, "clan_score"),
             "total_member_trophies": _compare_series_window(current_trophies, "total_member_trophies"),
-            "battle_activity": _battle_window(current_battles),
+            "battle_activity": current_battle_window,
         },
         "previous": {
             "member_count": _compare_series_window(previous_counts, "member_count"),
             "clan_score": _compare_series_window(previous_scores, "clan_score"),
             "total_member_trophies": _compare_series_window(previous_trophies, "total_member_trophies"),
-            "battle_activity": _battle_window(previous_battles),
+            "battle_activity": previous_battle_window,
         },
     }
 
