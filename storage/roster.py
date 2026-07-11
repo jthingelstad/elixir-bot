@@ -10,6 +10,23 @@ from typing import Optional
 _NON_FOLD_CHARS = re.compile(r"[^a-z0-9 ]+")
 _FOLD_WHITESPACE = re.compile(r"\s+")
 
+
+def _hours_since_iso(value: Optional[str]) -> Optional[float]:
+    """Hours between an ISO/compact timestamp and now (UTC), or None if
+    unparseable. Used for freshness/staleness stamps (QA L4)."""
+    if not value:
+        return None
+    from engine.normalize import parse_cr_time
+    dt = parse_cr_time(value)
+    if dt is None:
+        try:
+            dt = datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds() / 3600)
+
 # v5.1: "active member" = has an open clan_memberships row (§7); the old
 # members.status column is gone. `m` must alias players in the outer query.
 _ACTIVE = (
@@ -286,7 +303,10 @@ def resolve_member(query: str, status: Optional[str] = "active", limit: int = 5,
     rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag, m.current_name, "
         f"CASE WHEN {_ACTIVE} THEN 'active' ELSE 'observed' END AS status, "
-        "cs.role, cs.trophies, cs.clan_rank, "
+        # QA L3: carry the state snapshot time so the mutable stats below
+        # (trophies/rank/role) aren't read as live — for authoritative current
+        # stats callers should still go to get_member.
+        "cs.role, cs.trophies, cs.clan_rank, cs.observed_at, "
         "dl.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name "
         "FROM players m "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
@@ -456,6 +476,13 @@ def get_member_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> O
     _member_reference_fields(conn, row["player_tag"], result)
     recent_form = get_member_recent_form(tag, conn=conn)
     if recent_form:
+        # QA L4: stamp how old the recent-form snapshot is so a stale form (a
+        # departed / inactive member whose battles stopped days ago) isn't read
+        # as current. Age from computed_at; flag stale past 48h.
+        age_hours = _hours_since_iso(recent_form.get("computed_at"))
+        if age_hours is not None:
+            recent_form["form_age_hours"] = round(age_hours, 1)
+            recent_form["form_stale"] = age_hours > 48
         result["recent_form"] = recent_form
     deck = get_member_current_deck(tag, conn=conn)
     if deck:

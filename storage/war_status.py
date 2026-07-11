@@ -215,6 +215,15 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         "projected_day_fame": projected_day_fame,
         "projected_defense_fame": projected_defense_fame,
         "projected_fame_at_close": projected_fame_at_close,
+        # QA L7: projected_day_fame is the PLACEMENT floor only (fame for holding
+        # today's daily rank at close); boat-defense survival fame is counted
+        # separately in projected_defense_fame. Read projected_fame_at_close for
+        # the combined day-close total, not projected_day_fame alone.
+        "projection_note": (
+            "projected_day_fame = placement fame for holding today's daily rank at close; "
+            "boat-defense fame is separate (projected_defense_fame, from the API's periodLogs, "
+            "null when unavailable). projected_fame_at_close combines both."
+        ),
         "defenses_remaining": our_defense.get("defenses_remaining"),
         "clinches_finish_today": clinches_finish_today,
         "finish_line": finish_line,
