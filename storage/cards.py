@@ -170,7 +170,12 @@ def _normalize_rarity_filter(value: str | None) -> str | None:
         "champion": "champion",
         "champions": "champion",
     }
-    return aliases.get(raw, raw)
+    # QA L17: return None for anything outside the five real rarities (e.g.
+    # 'mythic') so the lookup_member_cards unknown_rarity guard actually fires,
+    # instead of passing the bogus value through to a valid-looking 0-match
+    # result. Card rarities from the API are always one of the five, so a card's
+    # own rarity never trips this.
+    return aliases.get(raw)
 
 
 def _card_reference_for_collection(card: dict, *, card_type: str | None = None) -> dict:
