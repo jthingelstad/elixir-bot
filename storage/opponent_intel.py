@@ -123,6 +123,51 @@ def analyze_war_participants(clan_war_entry: dict) -> dict:
         "zero_deck_today": zero_deck_today,
         "engagement_pct": round(active_participants / participant_count * 100, 1) if participant_count else 0,
         "avg_decks_used": round(total_decks / participant_count, 1) if participant_count else 0,
+        # QA M23: decks_used / active_participants / fame are CUMULATIVE across
+        # the week's battle days; *_today fields are just the current war day.
+        # Don't read total_decks_used as today's effort.
+        "coverage_note": (
+            "total_decks_used, active_participants, fame and repair_points are cumulative "
+            "over the week's battle days so far; the *_today fields are the current war day only."
+        ),
+    }
+
+
+# Period layout inside a river-race section (mirrors engine/clock.py):
+# 7 days per section — 0-2 training, 3-6 the four war/colosseum battle days.
+_PERIODS_PER_SECTION = 7
+_TRAINING_DAYS = 3
+_WAR_DAYS = 4
+
+
+def war_day_context(war_payload: dict | None) -> dict:
+    """War-day framing for a currentriverrace payload — which battle day of four
+    the cumulative numbers cover. QA M23: the intel report otherwise shows
+    cumulative-over-week figures with no war-day anchor.
+    """
+    payload = war_payload or {}
+    period_type = payload.get("periodType") or None
+    period_index = payload.get("periodIndex")
+    section_index = payload.get("sectionIndex")
+    day_index = period_index % _PERIODS_PER_SECTION if isinstance(period_index, int) else None
+    war_day_index = (
+        day_index - _TRAINING_DAYS
+        if isinstance(day_index, int) and day_index >= _TRAINING_DAYS
+        else None
+    )
+    if period_type == "training":
+        label = "Training day (no battle-day decks yet)"
+    elif war_day_index is not None:
+        label = f"War day {war_day_index + 1} of {_WAR_DAYS}"
+    else:
+        label = "War day (unknown index)"
+    return {
+        "section_index": section_index,
+        "week_label": f"Week {section_index + 1}" if isinstance(section_index, int) else None,
+        "period_index": period_index,
+        "period_type": period_type,
+        "war_day_index": war_day_index,
+        "war_day_label": label,
     }
 
 
@@ -252,4 +297,5 @@ __all__ = [
     "build_clan_intel_entry",
     "build_intel_report",
     "compute_threat_rating",
+    "war_day_context",
 ]
