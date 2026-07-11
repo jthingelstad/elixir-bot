@@ -55,12 +55,14 @@ def _clan_trend_prompt_context(days=30, window_days=7):
 
 def _war_status_prompt_context():
     """Return the single 'war now' block shared with the get_river_race tool."""
+    from agent.war_render import render_war_now
+
     try:
-        _, text = db.build_war_now_context()
+        data = db.build_war_now_context()
     except Exception as exc:
         log.warning("War status context unavailable: %s", exc)
         return ""
-    return text or ""
+    return render_war_now(data) if data else ""
 
 
 _WAR_MENTION_PATTERNS = tuple(re.compile(pat, re.IGNORECASE) for pat in (

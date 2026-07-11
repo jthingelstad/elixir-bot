@@ -497,68 +497,13 @@ def get_war_deck_status_today(conn: Optional[sqlite3.Connection] = None) -> dict
     }
 
 
-def _format_war_now_text(data: dict) -> str:
-    parts = [f"Season {data['season_id']} · Week {data['week']}"]
-    phase_with_total = data.get("phase_display")
-    day_number = data.get("day_number")
-    day_total = data.get("day_total")
-    if phase_with_total and day_total:
-        phase_with_total = f"{phase_with_total} of {day_total}"
-        if day_number is not None:
-            after_today = max(0, day_total - day_number)
-            phase_word = "battle" if data.get("phase") == "battle" else "practice"
-            if after_today > 0:
-                more = "day" if after_today == 1 else "days"
-                phase_with_total += f" (today + {after_today} more {phase_word} {more})"
-    if phase_with_total:
-        parts.append(phase_with_total)
-    if data.get("is_colosseum_week"):
-        parts.append("Colosseum (final week, 100 trophy stakes)")
-    if data.get("is_final_battle_day"):
-        parts.append("Final battle day")
-    elif data.get("is_final_practice_day"):
-        parts.append("Final practice day")
-
-    lines = ["=== RIVER RACE — CURRENT MOMENT ===", " · ".join(parts)]
-    if data.get("time_left_text"):
-        lines.append(f"Period ends in {data['time_left_text']}")
-
-    # Two scoreboards, each single-field so they can never be conflated.
-    # Today's period-point race is the live action; the weekly fame race is the
-    # boat / who wins the week. In Colosseum there is no weekly fame — only the
-    # period-point race matters.
-    colosseum = bool(data.get("is_colosseum_week"))
-    day_standings = data.get("day_standings") or []
-    if day_standings and data.get("phase") == "battle" and data.get("day_scored"):
-        lines.append("Today's period points (resets at day reset):")
-        for clan in day_standings:
-            marker = " (us)" if clan.get("is_us") else ""
-            lines.append(
-                f"  {clan['rank']}. {clan.get('clan_name', '?')}{marker} | "
-                f"{_coerce_int(clan.get('period_points')):,} points"
-            )
-    race_standings = data.get("race_standings") or []
-    if race_standings and not colosseum:
-        label = "Weekly fame race (the boat — decides the week):"
-        if not data.get("boat_scored"):
-            label = "Weekly fame race (boat has not scored yet — awarded at day close):"
-        lines.append(label)
-        for clan in race_standings:
-            marker = " (us)" if clan.get("is_us") else ""
-            lines.append(
-                f"  {clan['rank']}. {clan.get('clan_name', '?')}{marker} | "
-                f"{_coerce_int(clan.get('fame')):,} fame"
-            )
-    return "\n".join(lines)
-
-
-def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> tuple[Optional[dict], str]:
-    """Single source of truth for 'what moment is it in the war' for LLM
-    consumption. Returns (data, text); (None, "") when there is no race
-    baseline yet."""
+def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
+    """Single source of truth for 'what moment is it in the war' — returns the
+    STRUCTURED data only (no rendered prose; the agent layer renders it via
+    agent.war_render.render_war_now). ``None`` when there is no race baseline yet."""
     status = get_current_war_status(conn=conn) or {}
     if not status:
-        return None, ""
+        return None
     day_state = get_current_war_day_state(conn=conn) or {}
 
     period_type = status.get("period_type")
@@ -598,9 +543,7 @@ def build_war_now_context(conn: Optional[sqlite3.Connection] = None) -> tuple[Op
         "boat_scored": bool(status.get("boat_scored")),
         "day_scored": bool(status.get("day_scored")),
     }
-    data["now_text"] = _format_war_now_text(data)
-    data.pop("day_total", None)
-    return data, data["now_text"]
+    return data
 
 
 @managed_connection

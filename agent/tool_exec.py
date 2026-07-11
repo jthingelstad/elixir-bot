@@ -619,9 +619,14 @@ def _execute_get_river_race(arguments):
         }
 
     if aspect == "engagement":
-        data, _text = db.build_war_now_context()
+        from agent.war_render import render_war_now
+
+        data = db.build_war_now_context()
         if not data:
             return {"error": "No active war data available."}
+        # Render the war-now prose at the agent boundary (storage returns data
+        # only). Surfaced to the brain as the ``now_text`` field, as before.
+        data["now_text"] = render_war_now(data)
         day_state = db.get_current_war_day_state() or {}
         remaining_deck_participants = _remaining_deck_participant_summary(day_state)
         data.update({
