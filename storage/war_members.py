@@ -199,7 +199,13 @@ def get_member_war_battle_record(tag, season_id=None, conn=None):
         "SUM(CASE WHEN outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
         "SUM(CASE WHEN outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
         "SUM(CASE WHEN outcome = 'D' THEN 1 ELSE 0 END) AS draws, "
-        "COUNT(*) AS battles "
+        "COUNT(*) AS battles, "
+        # QA M4: war_day_index NULL = a training/practice-day war game, not a
+        # counted battle-day attack — split them so this reconciles with
+        # missed_days (which only counts battle days).
+        "SUM(CASE WHEN war_day_index IS NOT NULL THEN 1 ELSE 0 END) AS battle_day_battles, "
+        "COUNT(DISTINCT section_index) AS weeks_covered, "
+        "MIN(battle_time) AS first_battle_time, MAX(battle_time) AS last_battle_time "
         f"FROM battle_events WHERE {' AND '.join(where)}",
         tuple(params),
     ).fetchone()
@@ -207,6 +213,7 @@ def get_member_war_battle_record(tag, season_id=None, conn=None):
     losses = row["losses"] or 0
     draws = row["draws"] or 0
     battles = row["battles"] or 0
+    battle_day = row["battle_day_battles"] or 0
     return {
         "season_id": season_id,
         "tag": canon_tag,
@@ -216,7 +223,14 @@ def get_member_war_battle_record(tag, season_id=None, conn=None):
         "losses": losses,
         "draws": draws,
         "battles": battles,
+        "battle_day_battles": battle_day,
+        "training_or_practice_battles": battles - battle_day,
         "win_rate": round(wins / battles, 4) if battles else 0,
+        # QA M5: this is a WHOLE-SEASON total, not a single week.
+        "weeks_covered": row["weeks_covered"] or 0,
+        "first_battle_time": row["first_battle_time"],
+        "last_battle_time": row["last_battle_time"],
+        "scope_note": "whole-season war battles (all weeks); battle_day_battles are the counted battle-day attacks that reconcile with attendance/missed_days.",
     }
 
 

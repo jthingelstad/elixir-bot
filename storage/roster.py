@@ -677,7 +677,10 @@ def get_members_on_losing_streak(min_streak: int = 3, scope: str = "competitive_
         "ORDER BY f.current_streak DESC, cs.clan_rank ASC, m.current_name COLLATE NOCASE",
         (scope, min_streak),
     ).fetchall()
-    return [_member_reference_fields(conn, row["tag"], dict(row)) for row in rows]
+    # QA M11: hot_streaks defaults to ladder_ranked_10 but losing_streaks to
+    # competitive_10 (a different battle universe) — stamp the scope so the two
+    # lists aren't read as symmetric.
+    return [dict(_member_reference_fields(conn, row["tag"], dict(row)), scope=scope) for row in rows]
 
 
 @managed_connection
@@ -693,7 +696,9 @@ def get_members_on_hot_streak(min_streak: int = 4, scope: str = "ladder_ranked_1
         "ORDER BY f.current_streak DESC, COALESCE(f.avg_trophy_change, 0) DESC, cs.clan_rank ASC, m.current_name COLLATE NOCASE",
         (scope, min_streak),
     ).fetchall()
-    return [_member_reference_fields(conn, row["tag"], dict(row)) for row in rows]
+    # QA M11: stamp scope (see get_members_on_losing_streak) — this list is
+    # ladder+ranked, not the same universe as the competitive losing-streak list.
+    return [dict(_member_reference_fields(conn, row["tag"], dict(row)), scope=scope) for row in rows]
 
 
 @managed_connection
