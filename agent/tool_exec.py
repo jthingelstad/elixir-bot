@@ -445,14 +445,14 @@ def _execute_get_awards(arguments):
             raise ValueError("get_awards(mode='leaderboard') requires award_type")
         results = db.award_leaderboard(
             award_type=award_type,
-            rank=int(rank) if rank is not None else 1,
+            rank=int(rank) if rank is not None else None,
             limit=int(limit) if limit is not None else 20,
         )
         return {
             "mode": "leaderboard",
             "filters": {
                 "award_type": award_type,
-                "rank": int(rank) if rank is not None else 1,
+                "rank": int(rank) if rank is not None else None,
             },
             "count": len(results),
             "results": results,

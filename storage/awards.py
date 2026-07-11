@@ -130,20 +130,36 @@ def list_awards(award_type: Optional[str] = None, season_id: Optional[int] = Non
 
 
 @managed_connection
-def award_leaderboard(award_type: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
-    """All-time counts per member: member_id (tag), player_tag, player_name,
-    count, latest_season_id."""
-    where = "WHERE a.award_type = ?" if award_type else ""
-    params = (award_type,) if award_type else ()
-    rows = conn.execute(
+def award_leaderboard(
+    award_type: Optional[str] = None,
+    rank: Optional[int] = None,
+    limit: Optional[int] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """All-time award counts per member: member_id (tag), player_tag,
+    player_name, count, latest_season_id. Optionally restrict to a placement
+    ``rank`` (e.g. only 1st-place awards) and cap the leaderboard to ``limit``
+    rows (QA H19: the tool passed rank/limit but this fn didn't accept them)."""
+    clauses, params = [], []
+    if award_type:
+        clauses.append("a.award_type = ?")
+        params.append(award_type)
+    if rank is not None:
+        clauses.append("a.rank = ?")
+        params.append(int(rank))
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    sql = (
         "SELECT a.player_tag AS member_id, a.player_tag, COALESCE(p.display_name, p.current_name) AS player_name, "
         "COUNT(*) AS count, MAX(a.season_id) AS latest_season_id "
         "FROM awards a LEFT JOIN players p ON p.player_tag = a.player_tag "
         f"{where} "
         "GROUP BY a.player_tag "
-        "ORDER BY count DESC, player_name COLLATE NOCASE",
-        params,
-    ).fetchall()
+        "ORDER BY count DESC, player_name COLLATE NOCASE"
+    )
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    rows = conn.execute(sql, tuple(params)).fetchall()
     return _rowdicts(rows)
 
 
