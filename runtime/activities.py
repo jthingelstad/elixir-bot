@@ -80,7 +80,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ),
     ActivityDefinition(
         activity_key="war-attendance-snapshot",
-        owner_lane="river-race",
+        owner_lane="arena-relay",  # #river-race retired; data-only job (no posts)
         purpose="Finalize war_attendance_days for the just-closed war day "
         "(evaluators read finalized days only — runtime.md §3). CR war days "
         "roll at ~09:37–10:00 UTC; this runs just before the boundary.",

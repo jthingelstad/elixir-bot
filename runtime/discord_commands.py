@@ -484,15 +484,17 @@ def register_elixir_app_commands(bot) -> None:
         try:
             from runtime.discord_posting import compose_and_post
 
-            target_config = app.prompts.discord_singleton_lane("clan-events")
+            # #clan-events was retired (channel deleted 2026-07-11) — the brain's
+            # #elixir is the consolidated public home for this now.
+            target_config = app.prompts.discord_singleton_lane("elixir")
             channel = app.bot.get_channel(target_config["id"])
             if channel is None:
-                app.log.warning("tournament_watching_started: #clan-events channel unavailable")
+                app.log.warning("tournament_watching_started: #elixir channel unavailable")
             else:
                 max_capacity = api_data.get("maxCapacity")
                 context = (
                     "Elixir just started watching a new tournament for the clan. "
-                    "Announce it for #clan-events in your own voice — concise and "
+                    "Announce it for #elixir in your own voice — concise and "
                     "inviting; let members know they can jump in. Use only these facts.\n\n"
                     f"Tournament: {api_data.get('name')} (#{clean_tag})\n"
                     f"Status: {status_label}\n"
@@ -503,7 +505,7 @@ def register_elixir_app_commands(bot) -> None:
                     f"Type: {api_data.get('type') or 'unknown'}\n"
                     f"Elixir polls for updates every {jobs.TOURNAMENT_POLL_MINUTES} minutes."
                 )
-                await compose_and_post(channel, lane="clan-events", context=context)
+                await compose_and_post(channel, lane="elixir", context=context)
         except Exception as exc:
             app.log.warning("tournament_watching_started delivery failed: %s", exc)
 

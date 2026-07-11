@@ -72,19 +72,18 @@ def test_arena_relay_channel_is_configured():
     assert prompts.resolve_channel_reference("arena-relay")["name"] == "#leader-actions"
 
 
-def test_member_highlights_channel_replaces_old_progression_split():
-    channel = prompts.discord_singleton_lane("member-highlights")
-    assert channel["id"] == 1482352147029950474
-    assert channel["name"] == "#player-highlights"
-    assert channel["reply_policy"] == "disabled"
-    section = prompts.channel_section("#player-highlights")
-    assert "curated player-story stream" in section.lower()
-    assert "live non-war battle momentum" in section.lower()
-    assert prompts.resolve_channel_reference("player-progress")["lane"] == "member-highlights"
-    assert prompts.resolve_channel_reference("trophy-road")["lane"] == "member-highlights"
-    assert prompts.resolve_channel_reference("trophy-case")["lane"] == "member-highlights"
-    assert prompts.resolve_channel_reference("player-highlights")["lane"] == "member-highlights"
-    assert "Member Highlights Lane" in prompts.lane_prompt("player-progress")
+def test_retired_topic_channels_are_gone():
+    """#player-highlights / #river-race / #battle-feed / #clan-events were
+    deleted 2026-07-11; their lanes are removed and public commentary is
+    consolidated into #elixir (the awareness brain's channel)."""
+    from engine.recognition.compose import PREFIX_LANE
+    for lane in ("member-highlights", "river-race", "battle-feed", "clan-events"):
+        assert lane not in prompts.CHANNEL_LANE_CONFIG
+    # recognition prefixes that used to fan out to those channels now go to #elixir
+    assert PREFIX_LANE["celebrate"] == "elixir"
+    assert PREFIX_LANE["clan"] == "elixir"
+    assert PREFIX_LANE["war"] == "elixir"
+    assert prompts.discord_singleton_lane("elixir")["id"]
 
 
 def test_channel_section_nonexistent():

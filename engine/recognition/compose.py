@@ -16,12 +16,15 @@ import re
 # recognition.md §6 — intent prefix → lane key (lane key ≠ channel name; the
 # leadership lane's key is 'arena-relay' but resolves to #leader-actions).
 PREFIX_LANE = {
-    "celebrate": "member-highlights",
-    "clan": "clan-events",
-    "cohort": "clan-events",
-    "war": "river-race",
+    # #member-highlights / #clan-events / #river-race / #battle-feed were retired
+    # (channels deleted 2026-07-11); the awareness brain consolidates all public
+    # commentary into #elixir, so these prefixes route there now.
+    "celebrate": "elixir",
+    "clan": "elixir",
+    "cohort": "elixir",
+    "war": "elixir",
     "welcome": "reception",
-    "pulse": "battle-feed",
+    "pulse": "elixir",
     "game": "announcements",
     "leadership": "arena-relay",
 }

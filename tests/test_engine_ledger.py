@@ -114,7 +114,7 @@ def test_card_grind_is_background_not_posted(engine_conn):
     counters = _run(engine_conn)
     assert counters["celebrate_posted"] == 0
     assert engine_conn.execute(
-        "SELECT COUNT(*) FROM communication_intents WHERE lane = 'member-highlights'"
+        "SELECT COUNT(*) FROM communication_intents WHERE lane = 'elixir'"
     ).fetchone()[0] == 0
     # the event still exists as context, and the suppression reason is recorded
     assert engine_conn.execute(
@@ -139,7 +139,7 @@ def test_mastery_badge_background_but_real_badge_posts_via_bypass_peer(engine_co
     engine_conn.commit()
     _run(engine_conn)
     posted = engine_conn.execute(
-        "SELECT intent_type FROM communication_intents WHERE lane = 'member-highlights'"
+        "SELECT intent_type FROM communication_intents WHERE lane = 'elixir'"
     ).fetchall()
     assert [r["intent_type"] for r in posted] == ["celebrate:collection_level_milestone"]
     # both card-grind moments suppressed as background
