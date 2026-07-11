@@ -828,7 +828,7 @@ def test_execute_tool_get_war_season_boat_battles_and_trends():
         assert boat == {"wins": 2, "losses": 1}
         assert trend["direction"] == "up"
         assert fame["delta"] == 120.0
-        mock_db.get_clan_boat_battle_record.assert_called_once_with(wars=3)
+        mock_db.get_clan_boat_battle_record.assert_called_once_with(weeks=3)
         mock_db.get_war_score_trend.assert_called_once_with(days=30)
         mock_db.compare_fame_per_member_to_previous_season.assert_called_once_with(season_id=129)
 

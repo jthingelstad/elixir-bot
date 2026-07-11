@@ -12,6 +12,12 @@ Prioritize clear guidance, not wiki-style completeness.
 - `section_index` is the current race week within that season, starting at 0.
 - When speaking to humans, refer to the week as `section_index + 1`.
 
+### War cadence — say "week" or "season", never an ambiguous "war"
+
+- A River Race runs **one week at a time**; each week is its own race. A **season** is a run of ~4–5 of those weeks that ends in Colosseum week (aligned to Pass Royale / the trophy-road month).
+- "N wars" is ambiguous to a player and must be avoided: a player reads a "war" as a whole **season** (~4–5 weeks, i.e. 12–14+ weeks for three), while our data often counts **weeks** (a `section_index` is one week). Always say the unit explicitly — "the last 3 **weeks** of war" or "the last 3 **seasons**" — never "the last 3 wars".
+- When a tool reports a war-count window (e.g. `weeks_covered`), it is counting **weeks** (season + week), not seasons. Frame it that way.
+
 ### Period Points vs Fame — the two scoreboards (do not confuse them)
 
 A River Race has **two different scores**, and they are two different races. Never compare one clan's period points against another clan's fame.
