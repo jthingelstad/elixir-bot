@@ -129,15 +129,26 @@ def sync_card_catalog(api_response: dict, conn=None) -> int:
 # ---------------------------------------------------------------------------
 
 def _row_to_dict(row) -> dict:
-    """Convert a sqlite3.Row to a plain dict with a mode_label field."""
+    """Convert a sqlite3.Row to a plain dict with a mode_label field.
+
+    QA L16: mode_label here is a CAPABILITY of the card in the catalog (whether
+    an Evo / Hero form exists at all), NOT whether a given member has unlocked
+    it — the member-card tool uses the same word for unlock state. Emit explicit
+    supports_evo / supports_hero booleans so the two can't be conflated, and note
+    the capability sense on the label.
+    """
     d = dict(row)
     evo = d.get("max_evolution_level")
+    supports_evo = evo in (1, 3)
+    supports_hero = evo in (2, 3)
+    d["supports_evo"] = supports_evo
+    d["supports_hero"] = supports_hero
     if evo == 3:
-        d["mode_label"] = "Evo + Hero"
+        d["mode_label"] = "Evo + Hero (available)"
     elif evo == 2:
-        d["mode_label"] = "Hero"
+        d["mode_label"] = "Hero (available)"
     elif evo == 1:
-        d["mode_label"] = "Evo"
+        d["mode_label"] = "Evo (available)"
     else:
         d["mode_label"] = None
     return d
@@ -202,12 +213,22 @@ def lookup_cards(
     sql = f"SELECT * FROM card_catalog{where} {order} LIMIT ?"
     rows = conn.execute(sql, [*params, *order_params, limit]).fetchall()
     cards = [_row_to_dict(r) for r in rows]
-    return {
+    result = {
         "cards": cards,
         "total_matched": total_matched,
         "returned": len(cards),
         "truncated": total_matched > len(cards),
     }
+    # QA L15: elixir_cost is NULL for costless cards (Mirror, tower troops), so a
+    # min/max_cost filter silently drops them (SQL NULL comparisons are never
+    # true). Flag it so "cost 0-10" reading as empty isn't mistaken for "no such
+    # cards exist".
+    if min_cost is not None or max_cost is not None:
+        result["cost_filter_note"] = (
+            "Cards with no elixir cost (Mirror, tower troops) are excluded by a "
+            "min/max_cost filter — their elixir_cost is null, not a number."
+        )
+    return result
 
 
 @managed_connection

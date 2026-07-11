@@ -64,6 +64,16 @@ def _seed_catalog(conn):
     sync_card_catalog(_SAMPLE_API_RESPONSE, conn=conn)
 
 
+class TestRarityFilterGuard:
+    def test_unknown_rarity_returns_none(self):
+        # QA L17: 'mythic' must normalize to None so the unknown_rarity guard
+        # fires instead of a valid-looking 0-match result.
+        from storage.cards import _normalize_rarity_filter
+        assert _normalize_rarity_filter("mythic") is None
+        assert _normalize_rarity_filter("legendaries") == "legendary"
+        assert _normalize_rarity_filter("Champion") == "champion"
+
+
 class TestLikeEscape:
     def test_escape_percent(self):
         assert _escape_like("50%") == "50\\%"
@@ -103,3 +113,23 @@ class TestCardCatalogLookup:
         assert out["returned"] == 2
         assert out["total_matched"] > 2
         assert out["truncated"] is True
+
+    def test_capability_booleans(self, catalog_db):
+        # QA L16: Knight has an Evo form (maxEvolutionLevel=1) — supports_evo True,
+        # supports_hero False; the label reads as a capability, not an unlock.
+        _seed_catalog(catalog_db)
+        knight = lookup_cards(name="Knight", conn=catalog_db)["cards"][0]
+        assert knight["supports_evo"] is True
+        assert knight["supports_hero"] is False
+        assert "available" in knight["mode_label"]
+        archers = lookup_cards(name="Archers", conn=catalog_db)["cards"][0]
+        assert archers["supports_evo"] is False
+        assert archers["mode_label"] is None
+
+    def test_cost_filter_notes_null_cost_exclusion(self, catalog_db):
+        # QA L15: a min/max_cost filter drops NULL-cost cards — surface that.
+        _seed_catalog(catalog_db)
+        out = lookup_cards(min_cost=0, max_cost=10, conn=catalog_db)
+        assert "cost_filter_note" in out
+        # No cost filter → no note.
+        assert "cost_filter_note" not in lookup_cards(name="Knight", conn=catalog_db)
