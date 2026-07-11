@@ -126,16 +126,21 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
             (season_id, canon_tag),
         ).fetchone()
 
-    four_week_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=28)).strftime("%Y%m%dT%H%M%S.000Z")
+    # QA H5: war_weeks.created_date is stored in two formats — compact
+    # '20260629T093706.000Z' and ISO '2026-07-06'. A raw string compare against a
+    # compact cutoff drops the ISO-format rows (the two NEWEST weeks) because '-'
+    # sorts below digits, understating recent attendance and feeding kick reads.
+    # Normalise both sides to a bare YYYYMMDD date prefix before comparing.
+    four_week_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=28)).strftime("%Y%m%d")
     recent_total = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM war_weeks WHERE created_date >= ?",
+        "SELECT COUNT(*) AS cnt FROM war_weeks WHERE substr(REPLACE(created_date, '-', ''), 1, 8) >= ?",
         (four_week_cutoff,),
     ).fetchone()["cnt"]
     recent_played = conn.execute(
         "SELECT COUNT(*) AS cnt "
         "FROM war_participation wp "
         "JOIN war_weeks ww ON ww.season_id = wp.season_id AND ww.section_index = wp.section_index "
-        "WHERE ww.created_date >= ? AND wp.player_tag = ? AND COALESCE(wp.decks_used, 0) > 0",
+        "WHERE substr(REPLACE(ww.created_date, '-', ''), 1, 8) >= ? AND wp.player_tag = ? AND COALESCE(wp.decks_used, 0) > 0",
         (four_week_cutoff, canon_tag),
     ).fetchone()["cnt"]
     return {
