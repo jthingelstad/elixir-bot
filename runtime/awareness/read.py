@@ -56,6 +56,11 @@ _LANE_BY_EVENT_TYPE: dict[str, str] = {
     "member_left": "clan_event",
     "role_changed": "clan_event",
     "weekly_donation_leader": "clan_event",
+    # clan_event — calendar "cake days" (also surfaced all-day via cake_days_today)
+    "member_birthday": "clan_event",
+    "clan_birthday": "clan_event",
+    "join_anniversary": "clan_event",
+    "cr_account_anniversary": "clan_event",
     # battle_mode
     "pol_promotion": "battle_mode",
     "pol_season_closed": "battle_mode",
@@ -140,6 +145,51 @@ def _game_context(conn) -> dict:
     cards = [_entry(e) for e in rows if e.get("event_type") == "card_added"]
     events = [_entry(e) for e in rows if e.get("event_type") == "event_started"]
     return {"recent_cards": cards, "recent_events": events, "window_days": _GAME_CONTEXT_DAYS}
+
+
+# Cake-day event types the calendar emitter writes (engine/emitters/clan.py).
+_CAKE_DAY_TYPES = (
+    "member_birthday", "clan_birthday", "join_anniversary", "cr_account_anniversary",
+)
+
+
+def _cake_days_today(conn) -> list[dict]:
+    """Today's member "cake days", surfaced for the WHOLE Chicago day rather than
+    the one-tick delta window — so the brain reliably celebrates them once (it
+    dedups against channel_memory) instead of missing a birthday that scrolled out
+    of the signal feed between loops. ACTIVE members only: a departed ex-member is
+    never surfaced (clan_birthday has a null subject and is clan-wide)."""
+    today_chi = db.chicago_today()
+    rows = conn.execute(
+        """SELECT e.event_type, e.subject_tag, e.dedup_key, e.payload_json,
+                  COALESCE(p.display_name, p.current_name) AS name
+           FROM clan_events e
+           LEFT JOIN players p ON p.player_tag = e.subject_tag
+           WHERE e.event_type IN ({placeholders})
+             AND e.observed_at LIKE ?
+             AND (e.subject_tag IS NULL
+                  OR EXISTS (SELECT 1 FROM clan_memberships cm
+                             WHERE cm.player_tag = e.subject_tag AND cm.left_at IS NULL))
+           ORDER BY e.event_type, name""".format(
+            placeholders=", ".join("?" for _ in _CAKE_DAY_TYPES)
+        ),
+        (*_CAKE_DAY_TYPES, f"{today_chi}T%"),
+    ).fetchall()
+
+    out: list[dict] = []
+    for r in rows:
+        payload = _parse_json(r["payload_json"], {}) or {}
+        entry = {
+            "type": r["event_type"],
+            "name": r["name"] or payload.get("name"),
+            "subject_tag": r["subject_tag"],
+            "signal_key": r["dedup_key"],
+        }
+        for k in ("years", "months", "is_annual"):
+            if k in payload:
+                entry[k] = payload[k]
+        out.append(entry)
+    return out
 
 
 def _parse_json(value, default=None):
@@ -488,6 +538,7 @@ def build_read(conn=None) -> dict:
                 "game_context", lambda: _game_context(conn),
                 {"recent_cards": [], "recent_events": [], "window_days": _GAME_CONTEXT_DAYS},
             ),
+            "cake_days_today": _load("cake_days_today", lambda: _cake_days_today(conn), []),
             "decision_cases": _load("decision_cases", lambda: _decision_cases(conn), {"due": [], "open": []}),
             "channel_memory": _load("channel_memory", lambda: _channel_memory(conn), {}),
             "recent_agent_writes": _load("recent_agent_writes", lambda: _recent_agent_writes(), []),
