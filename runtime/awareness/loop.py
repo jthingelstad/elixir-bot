@@ -125,6 +125,19 @@ def run_awareness_loop(*, shadow: bool = True, progress_fn=None, deliver_fn=None
         # or is a silent None; record it so a bad tick isn't read as silence.
         counters["error"] = counters["error"] or f"tick_failed: {reason}"
 
+    # QA H22: a revisit's job is to resurface a signal ONCE at due_at. Nothing
+    # marked them done, so due revisits nagged the read every tick forever. On a
+    # non-failed live tick the brain HAS now seen them — mark them revisited so
+    # they clear (if the brain wants another look it schedules a fresh revisit).
+    if not shadow and outcome != "failed":
+        surfaced = [r.get("signal_key") for r in (read.get("due_revisits") or []) if r.get("signal_key")]
+        if surfaced:
+            try:
+                from storage import revisits
+                counters["revisits_cleared"] = revisits.mark_revisited(surfaced)
+            except Exception:
+                log.warning("awareness loop: mark_revisited failed", exc_info=True)
+
     loop_number = None
     try:
         rec = store.persist_thought(read, plan, shadow=shadow, tool_trace=tool_trace)
