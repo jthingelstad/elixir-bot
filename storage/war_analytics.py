@@ -302,7 +302,21 @@ def get_trending_war_contributors(season_id: Optional[str] = None, recent_races:
         }
         out.append(_member_reference_fields(conn, tag, item))
     out.sort(key=lambda i: -(i.get("fame_trend") if i.get("fame_trend") is not None else i.get("recent_avg_fame") or 0))
-    return {"season_id": season_id, "recent_races": recent_races, "members": out[:limit]}
+    # QA M9: with only one section recorded there's no earlier window — fame_trend
+    # is all null and this is a current-average list, NOT a trend. Say so.
+    trend_available = bool(earlier)
+    return {
+        "season_id": season_id,
+        "recent_races": recent_races,
+        "sections_available": len(sections),
+        "trend_available": trend_available,
+        "note": None if trend_available else (
+            "only one war week recorded this season — no earlier window to trend "
+            "against; recent_avg_fame is a current average, not a trend. (Per-member "
+            "'fame' here is that member's period-point contribution.)"
+        ),
+        "members": out[:limit],
+    }
 
 
 @managed_connection
