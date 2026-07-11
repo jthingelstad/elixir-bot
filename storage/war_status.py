@@ -678,25 +678,42 @@ def get_war_season_summary(season_id: Optional[int] = None, top_n: int = 5, conn
 
 @managed_connection
 def get_trophy_drops(days: int = 7, min_drop: int = 100, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    """Members whose Trophy Road trophies actually DECLINED over the window.
+
+    QA H11: this previously computed MAX-MIN (an unsigned spread) and labelled
+    it 'drop', so a member who *climbed* 8700->9004 was reported as dropping
+    304. We now take the directional first->last net (like get_trophy_changes)
+    and return only genuine declines of at least min_drop. Note: this reads
+    Trophy Road (player_daily_metrics.trophies); Path-of-Legends/ranked losses
+    live elsewhere and are not covered here."""
     cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%d")
     rows = conn.execute(
-        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
-        "MIN(dm.trophies) AS min_trophies, MAX(dm.trophies) AS max_trophies, "
-        "MAX(dm.metric_date) AS latest_metric_date, "
-        "(MAX(dm.trophies) - MIN(dm.trophies)) AS spread "
-        "FROM player_daily_metrics dm "
-        "JOIN players m ON m.player_tag = dm.player_tag "
-        "WHERE dm.metric_date >= ? "
-        "AND EXISTS (SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL) "
-        "GROUP BY dm.player_tag "
-        "HAVING spread >= ? "
-        "ORDER BY spread DESC",
-        (cutoff, min_drop),
+        """
+        WITH ranked AS (
+            SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name,
+                   d.trophies, d.metric_date, d.player_tag,
+                   ROW_NUMBER() OVER (PARTITION BY d.player_tag ORDER BY d.metric_date ASC) AS rn_asc,
+                   ROW_NUMBER() OVER (PARTITION BY d.player_tag ORDER BY d.metric_date DESC) AS rn_desc
+            FROM player_daily_metrics d
+            JOIN players m ON m.player_tag = d.player_tag
+            WHERE d.metric_date >= ?
+              AND EXISTS (SELECT 1 FROM clan_memberships cm WHERE cm.player_tag = m.player_tag AND cm.left_at IS NULL)
+        )
+        SELECT a.tag, a.name,
+               a.trophies AS from_trophies, b.trophies AS to_trophies,
+               a.metric_date AS from_date, b.metric_date AS to_date,
+               (b.trophies - a.trophies) AS change
+        FROM ranked a
+        JOIN ranked b ON a.player_tag = b.player_tag
+        WHERE a.rn_asc = 1 AND b.rn_desc = 1 AND (b.trophies - a.trophies) <= ?
+        ORDER BY change ASC
+        """,
+        (cutoff, -abs(min_drop)),
     ).fetchall()
     result = []
     for row in rows:
         item = dict(row)
-        item["drop"] = item.pop("spread")
+        item["drop"] = -item["change"]  # positive magnitude of the decline
         result.append(item)
     return result
 
