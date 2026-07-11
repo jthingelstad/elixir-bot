@@ -242,7 +242,7 @@ def get_member_history(tag: str, days: int = 30, conn: Optional[sqlite3.Connecti
     tag = _canon_tag(tag)
     daily = conn.execute(
         "SELECT d.metric_date, d.trophies, d.best_trophies, d.donations_week AS donations, "
-        "d.donations_received_week AS donations_received, d.exp_level, d.clan_rank "
+        "d.donations_received_week AS donations_received, d.clan_rank "
         "FROM player_daily_metrics d WHERE d.player_tag = ? AND d.metric_date >= ? "
         "ORDER BY d.metric_date ASC",
         (tag, cutoff[:10]),
@@ -286,7 +286,7 @@ def resolve_member(query: str, status: Optional[str] = "active", limit: int = 5,
     rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag, m.current_name, "
         f"CASE WHEN {_ACTIVE} THEN 'active' ELSE 'observed' END AS status, "
-        "cs.role, cs.exp_level, cs.trophies, cs.clan_rank, "
+        "cs.role, cs.trophies, cs.clan_rank, "
         "dl.discord_user_id, du.username AS discord_username, du.display_name AS discord_display_name "
         "FROM players m "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
@@ -363,7 +363,7 @@ def list_members(status: str = "active", conn: Optional[sqlite3.Connection] = No
     rows = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag, m.current_name, "
         f"CASE WHEN {_ACTIVE} THEN 'active' ELSE 'observed' END AS status, "
-        "cs.role, cs.exp_level, cs.trophies, "
+        "cs.role, cs.trophies, "
         "cs.best_trophies, cs.clan_rank, cs.donations_week, cs.donations_received_week, cs.arena_name, "
         "md.note, md.profile_url, md.cr_account_age_days, md.cr_account_age_years, md.cr_account_age_updated_at, "
         "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
@@ -416,7 +416,7 @@ def get_member_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> O
     row = conn.execute(
         "SELECT m.player_tag AS member_id, m.player_tag, COALESCE(m.display_name, m.current_name) AS member_name, "
         f"CASE WHEN {_ACTIVE} THEN 'active' ELSE 'observed' END AS status, "
-        "cs.observed_at, cs.role, cs.exp_level, cs.trophies, cs.best_trophies, cs.clan_rank, "
+        "cs.observed_at, cs.role, cs.trophies, cs.best_trophies, cs.clan_rank, "
         "cs.donations_week, cs.donations_received_week, cs.arena_name, "
         "md.birth_month, md.birth_day, md.cr_account_age_days, md.cr_account_age_years, md.cr_account_age_updated_at, "
         "md.cr_games_per_day, md.cr_games_per_day_window_days, md.cr_games_per_day_updated_at, "
@@ -575,7 +575,7 @@ def get_member_overview(tag: str, conn: Optional[sqlite3.Connection] = None) -> 
 def list_longest_tenure_members(limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     today = datetime.now(timezone.utc).date()
     rows = conn.execute(
-        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.exp_level, cs.trophies, cs.clan_rank "
+        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.trophies, cs.clan_rank "
         "FROM players m "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
         f"WHERE {_ACTIVE}"
@@ -609,7 +609,7 @@ def list_recent_joins(days: int = 30, conn: Optional[sqlite3.Connection] = None)
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=days))
     season_id = get_current_season_id(conn=conn)
     rows = conn.execute(
-        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.exp_level, cs.trophies, cs.clan_rank "
+        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.trophies, cs.clan_rank "
         "FROM players m "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
         f"WHERE {_ACTIVE}"

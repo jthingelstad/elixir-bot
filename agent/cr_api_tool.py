@@ -43,7 +43,6 @@ def _filter_cr_player(payload):
     return {
         "name": payload.get("name"),
         "tag": payload.get("tag"),
-        "expLevel": payload.get("expLevel"),
         "trophies": payload.get("trophies"),
         "bestTrophies": payload.get("bestTrophies"),
         "wins": payload.get("wins"),
@@ -193,8 +192,7 @@ def _filter_cr_clan_members(payload, *, limit):
             "name": member.get("name"),
             "role": member.get("role"),
             "trophies": member.get("trophies"),
-            "expLevel": member.get("expLevel"),
-            "donations": member.get("donations"),
+                "donations": member.get("donations"),
             "donationsReceived": member.get("donationsReceived"),
             "lastSeen": member.get("lastSeen"),
             "clanRank": member.get("clanRank"),
@@ -339,8 +337,7 @@ def _filter_cr_ranking_list(payload, *, limit, score_field="eloRating"):
             "rank": item.get("rank"),
             "tag": item.get("tag"),
             "name": item.get("name"),
-            "expLevel": item.get("expLevel"),
-            score_field: item.get(score_field),
+                score_field: item.get(score_field),
             "clan": {"tag": clan.get("tag"), "name": clan.get("name")} if clan else None,
         })
         if len(rows) >= limit:

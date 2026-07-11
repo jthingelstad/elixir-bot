@@ -159,7 +159,7 @@ class TestExecuteCrApiDispatch:
                     "rank": 1,
                     "tag": "#P1",
                     "name": "Ranked One",
-                    "expLevel": 70,
+                    # exp/experience level is gone from the game — not surfaced.
                     "eloRating": 2500,
                     "clan": {"tag": "#C1", "name": "Clan One"},
                 }
