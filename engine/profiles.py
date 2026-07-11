@@ -95,7 +95,7 @@ def duo_partners(conn, tag: str, start: str, end: str, limit: int = 3) -> list[d
     until the ingest column has data). Dates compare against battle_time's
     CR-compact form via the date prefix."""
     rows = conn.execute(
-        """SELECT b.teammate_tag, p.current_name, COUNT(*) AS games,
+        """SELECT b.teammate_tag, COALESCE(p.display_name, p.current_name) AS name, COUNT(*) AS games,
                   SUM(b.outcome = 'W') AS wins
            FROM battle_events b
            LEFT JOIN players p ON p.player_tag = b.teammate_tag
@@ -106,7 +106,7 @@ def duo_partners(conn, tag: str, start: str, end: str, limit: int = 3) -> list[d
         (tag, start.replace("-", ""), limit),
     ).fetchall()
     return [
-        {"tag": r["teammate_tag"], "name": r["current_name"],
+        {"tag": r["teammate_tag"], "name": r["name"],
          "games": r["games"], "wins": r["wins"] or 0}
         for r in rows
     ]

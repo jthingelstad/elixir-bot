@@ -947,7 +947,7 @@ def get_member_recent_losses(
     member_tag = _canon_tag(tag)
     predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["competitive_10"])
     member_row = conn.execute(
-        "SELECT player_tag AS member_id, current_name FROM players WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
@@ -1067,7 +1067,7 @@ def get_member_recent_battles(
     member_tag = _canon_tag(tag)
     predicate = _LOSSES_SCOPE_PREDICATES.get(scope, _LOSSES_SCOPE_PREDICATES["overall_10"])
     member_row = conn.execute(
-        "SELECT player_tag AS member_id, current_name FROM players WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
@@ -1155,7 +1155,7 @@ def _rollup_summary(rows) -> dict:
 def get_member_ranked_status(tag: str, days: int = 30, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     member_tag = _canon_tag(tag)
     member_row = conn.execute(
-        "SELECT player_tag AS member_id, current_name FROM players WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
@@ -1232,7 +1232,7 @@ def list_player_daily_battle_rollups(tag: str, days: int = 30, mode_group: Optio
 def get_member_mode_activity(tag: str, days: int = 30, mode_group: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     member_tag = _canon_tag(tag)
     member_row = conn.execute(
-        "SELECT player_tag AS member_id, current_name FROM players WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
@@ -1300,7 +1300,7 @@ def get_member_special_event_activity(
 ) -> Optional[dict]:
     member_tag = _canon_tag(tag)
     member_row = conn.execute(
-        "SELECT player_tag AS member_id, current_name FROM players WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, COALESCE(display_name, current_name) AS current_name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
