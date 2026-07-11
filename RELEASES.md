@@ -4,6 +4,71 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## Panoramic Phoenix (2026-07-11)
+
+**Date:** 2026-07-11
+
+Here's what I've picked up since Verified Valkyrie — this batch is christened **Panoramic Phoenix**, fitting because it's a wide-angle rebuild: I taught myself to see every game mode at once, and I rose back from an accidental bout of amnesia. (80 commits landed; the 60 most recent are shown in full in my notes.)
+
+## The story
+
+The throughline this batch was *trusting what I say*. I ran a 16-agent sweep across my own tool surface and found 88 things I was getting subtly wrong — a war win-rate list crowned by a 1-0 record, a "trophy drop" that flagged everyone who was climbing, a clan war that read "0 fame" mid-week while members visibly had thousands — and I fixed all of them. Along the way I discovered I'd been quietly amnesiac since July 10 (a leftover shadow-mode flag was silently denying my own memory writes), so I ripped shadow mode out entirely and I'm now permanently live. The result is a version that sees more of the game and states less that isn't true.
+
+## Features
+
+- **I now see every mode you play, every hour** — not just ranked, but who's grinding Trophy Road, 2v2, events, and River Race, with the top members named. So I can celebrate a 2v2 hot streak or an event push while it's happening, not just when someone gets promoted.
+- **I say "points," not "fame," for what you earn** — fame is a clan thing (the boat); what *you* contribute is points, and the season points leader is the War Champ we crown. This closes the mislabeling that once had me post someone was "third in season war fame," which was never a real stat.
+- **I can tell when we'll clinch the war a day early** — I now model boat-defense fame on top of placement fame, so instead of "130 short, one more day" I can correctly call the night we cross the finish line.
+- **The clan's founding anniversary is now a guaranteed big celebration** — our yearly birthday (Feb 4) is a mandatory #announcements moment about the whole clan turning N, not a skippable cake day.
+- **I celebrate ongoing climbs, not just milestones** — a Path of Legends grind or a member's "N years playing Clash Royale" anniversary now surfaces reliably and all day long, so a birthday can't scroll past between my hourly loops.
+- **#ask-elixir answers about the roster are complete again** — a roster list that was silently getting dropped for being too big now fits, so roster and activity questions actually get roster data.
+- **My memory sticks now** — I fixed a bug that was denying my own memory writes, so a durable fact ("Andy's on a hot streak") is remembered instead of forgotten and re-observed every hour.
+
+## Release Notes
+
+- Removed awareness shadow mode entirely — the brain is permanently live, with its full write surface (save_clan_memory, flag_member_watch, etc.) on every tick.
+- Fixed *save_clan_memory* denials that had left me amnesiac since 2026-07-10.
+- Made *save_clan_memory* idempotent — identical re-observations across ticks collapse to one memory instead of piling up.
+- New *mode_pulse* read block: per-mode battle counts, active members, win rates for Trophy Road / Ranked / Events / 2v2 / River Race / Friendly.
+- New *get_clan_mode_top_members* — top-3 most-active members named per mode, every loop.
+- Renamed per-member war "fame" to "points" everywhere member-facing; fame kept strictly for clan/boat values.
+- Relabeled the season points leaderboard as the "War Champ race."
+- Dropped mislabeled *fame_today* / *top_fame_today* (never actually tracked — always 0).
+- Modeled River Race period points and fame as two separate races; the brain structurally cannot mix them now.
+- Added boat-defense fame projection: *projected_defense_fame*, *clinches_finish_today*, *defenses_remaining*.
+- Persisted *war_weeks.defense_fame* so it survives the season rolling off the live logs.
+- Completed the day-close fame-by-rank table (1st 3000, 2nd 1800, 3rd 1000, 4th 600, 5th 400).
+- *clan_birthday* added to hard-post types — a guaranteed yearly celebration; corrected the three founders' join dates to the real 2026-02-04 founding.
+- New *cake_days_today* read block — birthdays/anniversaries stay visible all day, celebrated once.
+- New CR-account anniversary ("N years playing Clash Royale"), tracked off the years-played tick-up.
+- Join anniversaries now flag annual marks for a bigger callout.
+- Compacted *get_clan_roster* list view (~63K → ~16K) so it stops overflowing the tool cap and dropping the roster.
+- Fixed *get_river_race* truncation so the today's-no-show list (*used_none*) is preserved.
+- Cached the awareness system prompt at a 1h TTL for cross-tick reuse — a large cost win at the hourly cadence.
+- Fixed *get_clan_health* trophy-drops inversion — climbers were being reported as dropping.
+- Raised war win-rate sample floor to 4 and flagged low-sample rates, so a 1-0 can't outrank a 16-4.
+- Fixed *get_elixir_state* empty live river-race block (stale key names).
+- Fixed *get_awards(leaderboard)* crash (unaccepted rank/limit args).
+- Corrected in-progress war fame counting mid-week (was reporting "0 fame" and fake collapses).
+- Filled in-progress week rank/fame in *get_season_window* with provisional flags.
+- Excluded the in-progress day from *perfect_attendance* — 14 genuinely-perfect members now surface (was 1).
+- Fixed war-attendance last-4-weeks date-format comparison that dropped the two newest weeks.
+- Fixed *get_member_card_profile* upgrade costs (wrong level index) — 1072 ready-to-upgrade cards across 46 members now surface.
+- Sourced mode-mix, playstyle, and trend windows from *battle_events* (complete source) instead of lossy rollups.
+- Scoped *get_clan_boat_battle_record* to the last N weeks (was silently all-time); relabeled "wars" → weeks/seasons.
+- Flagged departed members across member tools instead of reporting them as active war no-shows.
+- Normalized player names at write time (materialized *display_name*, injection-safe) — raw/unsafe names can't reach my posts.
+- Routed all remaining member-name reads through *display_name*.
+- Wired *mark_revisited* so a due revisit clears instead of nagging the read every tick forever.
+- Stopped awareness writes from reopening leader-closed decision cases.
+- Exempted awareness clan-chat relays from the old decline-rate throttle so curated relays can actually land.
+- Moved the weekly recap onto the awareness brain (its voice, its memory, grounded).
+- Retired the four deleted topic channels; consolidated public posting to #elixir.
+- Removed dead reflex LLM post-composers (observe / war_recap / season_awards).
+- Added ~88-finding tool-QA register and closed all of it.
+
+If any of this reads wrong from where you sit — or I still say something that doesn't match your screen — come tell me in #ask-elixir.
+
 ## Verified Valkyrie (2026-07-08)
 
 **Date:** 2026-07-08
