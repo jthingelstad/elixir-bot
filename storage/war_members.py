@@ -54,7 +54,7 @@ def get_member_war_status(tag, season_id=None, conn=None):
                 "battle_date": current_war.get("war_day_key"),
                 "decks_used_today": decks_today,
                 "decks_used_total": (totals["decks_used"] if totals else None) or 0,
-                "fame": (totals["fame"] if totals else None) or 0,
+                "points": (totals["fame"] if totals else None) or 0,
                 "repair_points": (totals["repair_points"] if totals else None) or 0,
                 "decks_left_today": max(0, 4 - decks_today),
             }
