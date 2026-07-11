@@ -176,3 +176,25 @@ def test_mark_revisited_clears_covered_and_skipped_revisits(memdb):
 
     pending_keys = {r["signal_key"] for r in list_pending_revisits()}
     assert pending_keys == {"untouched"}
+
+
+def test_awareness_loop_clears_surfaced_revisits(monkeypatch):
+    """QA H22: a non-failed live tick marks the revisits it surfaced as done, so
+    they don't nag the read every tick forever."""
+    from unittest.mock import patch
+    from runtime.awareness import loop as loop_mod
+
+    read = {"due_revisits": [{"signal_key": "war:demo", "rationale": "look again"}], "_degraded": []}
+    silence_plan = {"posts": [], "skipped_reason": "nothing new"}
+
+    with (
+        patch("runtime.awareness.read.build_read", return_value=read),
+        patch("agent.workflows.run_awareness_tick", return_value=silence_plan),
+        patch("runtime.awareness.store.persist_thought", return_value={"thought_id": "t", "loop_number": 1}),
+        patch("runtime.awareness.shadow.build_shadow_render", return_value={"outcome": "silence"}),
+        patch("storage.revisits.mark_revisited", return_value=1) as mark,
+    ):
+        counters = loop_mod.run_awareness_loop(shadow=False)
+
+    mark.assert_called_once_with(["war:demo"])
+    assert counters.get("revisits_cleared") == 1
