@@ -145,6 +145,15 @@ def _seed_rollups(conn, tag: str, battles: int, wins: int, mode="ranked",
                     last_aggregated_at)
                VALUES (?, ?, ?, ?, ?, ?, '2026-07-01T00:00:00Z')""",
             (tag, d, mode, b, w, b - w))
+        # player_mode_profile now reads battle_events (QA M2), so mirror the
+        # rollup counts into per-battle rows for the same day.
+        ymd = d.replace("-", "")
+        for j in range(b):
+            conn.execute(
+                "INSERT INTO battle_events (dedup_key, player_tag, battle_time, observed_at, outcome, mode_group) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (f"{tag}-{ymd}-{mode}-{j}", tag, f"{ymd}T12{j:02d}00.000Z",
+                 "2026-07-01T00:00:00Z", "W" if j < w else "L", mode))
 
 
 def test_rollover_closes_season_and_posts_podium():

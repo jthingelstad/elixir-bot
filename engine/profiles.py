@@ -1,6 +1,6 @@
 """Playstyle profiles — ranked-and-profiles.md §2.3 (D2/D4 ratified).
 
-A computed READ over player_daily_battle_rollups (no new pipeline, no cache):
+A computed READ over battle_events (no new pipeline, no cache):
 per-mode mix over a trailing window plus deterministic identity labels — the
 same label for the same numbers, testable, and trustworthy as *facts* for the
 Editor-era composer (grounded specifics, never invented color).
@@ -36,16 +36,20 @@ def player_mode_profile(conn, tag: str, days: int = 28, today: str | None = None
     """Mode mix + identity over the trailing `days` Chicago days.
 
     Returns {total_battles, window_days, modes: {mode: {battles, wins, share}},
-    identity, secondary, duo_partners} — every number derived from rollup rows.
-    `today` (ISO date) pins the window end for determinism in tests."""
+    identity, secondary, duo_partners} — derived from the authoritative
+    battle_events store (QA M2: the daily rollups it replaced undercounted
+    new/backfilled members, e.g. 57 vs the real 80 battles). `today` (ISO date)
+    pins the window end for determinism in tests."""
     end = date.fromisoformat(today) if today else date.today()
     start = (end - timedelta(days=days)).isoformat()
+    start_ymd = start.replace("-", "")
+    end_ymd = end.isoformat().replace("-", "")
     rows = conn.execute(
-        """SELECT mode_group, SUM(battles) AS battles, SUM(wins) AS wins
-           FROM player_daily_battle_rollups
-           WHERE player_tag = ? AND battle_date >= ? AND battle_date <= ?
+        """SELECT mode_group, COUNT(*) AS battles, SUM(outcome = 'W') AS wins
+           FROM battle_events
+           WHERE player_tag = ? AND substr(battle_time, 1, 8) >= ? AND substr(battle_time, 1, 8) <= ?
            GROUP BY mode_group ORDER BY battles DESC""",
-        (tag, start, end.isoformat()),
+        (tag, start_ymd, end_ymd),
     ).fetchall()
     total = sum(r["battles"] or 0 for r in rows)
     modes = {
