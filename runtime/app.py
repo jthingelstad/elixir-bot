@@ -1535,8 +1535,10 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     """Escalate a brain post the brain flagged (``relay_to_clan_chat``) into an
     in-game relay HITL card in #leader-actions. The Discord post has ALREADY
     landed; this only offers a leader a copy/paste clan-chat version. Guarded by
-    the existing leader-action post policy (backlog cap + per-objective cooldown)
-    so the brain can't flood the board. Never raises into delivery — returns
+    the leader-action post policy (backlog cap + same-objective cooldown) so the
+    brain can't flood the board — but NOT the earned-frequency decline throttle,
+    which is an old-engine artifact that shouldn't gate curated brain relays
+    (throttle_on_decline=False). Never raises into delivery — returns
     False on any guard/failure; the delivered post stands regardless."""
     content = post.get("content")
     if isinstance(content, list):
@@ -1550,7 +1552,10 @@ async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     action_key = f"awareness-relay:{key_hash}"
 
     allowed, reason = await asyncio.to_thread(
-        can_post_leader_action, action_type="in_game_relay", objective=objective
+        can_post_leader_action,
+        action_type="in_game_relay",
+        objective=objective,
+        throttle_on_decline=False,
     )
     if not allowed:
         log.info("awareness relay skipped by policy: %s", reason)

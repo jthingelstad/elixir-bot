@@ -9,6 +9,9 @@ responsiveness signals instead:
   any timezone re-open the budget the moment they decide cards.
 - **Earned frequency**: an action type the leaders keep declining
   self-throttles to one card per cooldown (see can_post_leader_action).
+  Awareness-brain relays opt out of this gate (throttle_on_decline=False):
+  they're curated per-post, not recurring, so a decline is a routing
+  choice rather than a signal to post less.
 
 Critical war moments bypass both gates.
 """
@@ -70,9 +73,15 @@ def can_post_leader_action(
     critical: bool = False,
     action_type: str | None = None,
     objective: str | None = None,
+    throttle_on_decline: bool = True,
     conn=None,
     now: datetime | None = None,
 ) -> tuple[bool, str | None]:
+    # ``throttle_on_decline=False`` opts out of the earned-frequency (decline-rate)
+    # gate. That gate is an old-engine artifact meant for recurring management-style
+    # nudges; the awareness brain's relays are editorially curated per-post, so a
+    # leader declining a copy/paste card is a routing choice, not a signal to post
+    # less. The backlog cap + same-objective cooldown below still apply to them.
     if critical:
         return True, None
     backlog = count_open_leader_actions(conn=conn, now=now)
@@ -91,7 +100,7 @@ def can_post_leader_action(
             f"objective_cooldown:{clean_type}:{clean_objective}:"
             f"{LEADER_ACTION_IN_GAME_RELAY_OBJECTIVE_COOLDOWN_HOURS}h",
         )
-    if clean_type:
+    if clean_type and throttle_on_decline:
         stats = db.leader_action_decision_stats(action_type=clean_type, conn=conn)
         decided = int(stats.get("decided") or 0)
         rate = stats.get("decline_rate")
