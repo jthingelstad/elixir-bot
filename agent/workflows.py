@@ -1087,15 +1087,44 @@ def generate_promote_content(clan_data, war_data=None, roster_data=None):
         return None
 
 
-def generate_weekly_digest(summary_context, previous_message=""):
-    """Generate a long-form weekly clan recap for Discord. Returns text or None."""
-    prev_text = f"Your previous weekly recap: {previous_message}" if previous_message else "(no previous recap provided)"
-    user_msg = f"{summary_context}\n\n{prev_text}\n\nWrite this week's clan recap."
-    return _generate_simple_message(
-        _weekly_digest_system(), user_msg,
-        workflow="weekly_digest", temperature=0.8, max_tokens=1200,
-        error_label="Weekly digest",
+def generate_weekly_recap(read: dict, week_context: str, previous_message: str = "",
+                          *, tool_stats: dict | None = None):
+    """Brain-composed Weekly Clan Recap (rebuilt 2026-07-11). The awareness brain
+    reads the whole clan (``read``, incl. what it already posted this week) plus
+    an aggregated week fact-base (``week_context``) and writes the weekly
+    retrospective in its own voice — grounded, synthesizing the week's arc rather
+    than re-listing moments it already posted. Tools available for verification.
+
+    Returns the recap body text, or None when composition fails / there's no week
+    to recap (the caller then posts nothing)."""
+    public = {k: v for k, v in (read or {}).items() if not k.startswith("_")}
+    prev_text = (f"Last week's recap (for continuity/callback):\n{previous_message}"
+                 if previous_message else "(no previous recap on file)")
+    user_msg = (
+        "Write this week's Weekly Clan Recap per your system prompt: the "
+        "clan-level story of the week, the human beats (named members, real "
+        "numbers), and a short forward look. Ground every claim — especially any "
+        "rank or superlative — in the week facts, the read, or a tool result.\n\n"
+        f"THE WEEK (aggregated facts):\n{week_context}\n\n"
+        f"{prev_text}\n\n"
+        "THE READ (live clan state + what I already posted this week):\n"
+        f"```json\n{json.dumps(public, indent=2, default=str)}\n```\n"
     )
+    result = _chat_with_tools(
+        _weekly_digest_system(),
+        user_msg,
+        workflow="weekly_digest",
+        max_tokens=1600,
+        allowed_tools=TOOLSETS_BY_WORKFLOW["weekly_digest"],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["weekly_digest"],
+        strict_json=True,
+        return_errors=True,
+        tool_stats=tool_stats,
+    )
+    if not isinstance(result, dict) or "_error" in result:
+        return None
+    recap = str(result.get("recap") or "").strip()
+    return recap or None
 
 
 _MEMBER_REPORT_BLOCKS = ("overview", "standouts", "meta", "closer")
@@ -1324,5 +1353,5 @@ __all__ = [
     "generate_tournament_recap",
     "generate_tournament_update",
     "generate_war_recap_update",
-    "generate_weekly_digest",
+    "generate_weekly_recap",
 ]

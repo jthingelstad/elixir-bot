@@ -156,7 +156,11 @@ _WORKFLOW_SPECS = (
     ),
     # "editorial" workflow retired 2026-07-10 — the Editor gate + eval harness
     # are gone; the brain composes with depth natively (no per-post critic).
-    WorkflowSpec("weekly_digest", model_family="intensive"),
+    # weekly_digest: brain-powered Weekly Clan Recap (rebuilt 2026-07-11 to
+    # compose from the awareness read via tools, like ask_elixir_daily). The
+    # workflow key stays "weekly_digest" for lane-routing stability.
+    WorkflowSpec("weekly_digest", response_schema={"required": ["recap"]},
+                 tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=6, model_family="intensive"),
     WorkflowSpec("member_report", model_family="intensive"),
     WorkflowSpec("site_promote_content", model_family="promotion"),
     # Release-notes announcement (agent/release_notes.py, ported from Oliver):

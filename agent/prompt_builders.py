@@ -703,31 +703,22 @@ def _promote_system(required_trophies=2000):
 
 
 def _weekly_digest_system():
-    announcements = prompts.discord_singleton_lane("announcements")
-    purpose, knowledge, channel_context = _lane_base(announcements["name"], announcements["lane_key"])
+    """System prompt for the brain-powered Weekly Clan Recap (rebuilt
+    2026-07-11). Loads the weekly-recap agent prompt with the same
+    identity/knowledge/policy blocks as the awareness brain, so the recap
+    composes in the brain's voice and grounds on real clan data — its job is the
+    weekly retrospective (posted to #announcements and emailed to members).
+
+    The workflow key stays ``weekly_digest`` for lane-routing stability; only the
+    composition moved to the brain.
+    """
     return _build_system_prompt(
-        purpose,
-        knowledge,
-        channel_context,
-        "Your job: write Elixir's weekly clan recap for Discord.\n\n"
-        "This is a must-read weekly digest for current clan members.\n"
-        "Write 3-5 paragraphs. Keep it readable and Discord-native, but longer and more reflective than a normal announcement.\n\n"
-        "Content priorities:\n"
-        "- Start with the clan-level story of the week.\n"
-        "- Weave in River Race outcomes, momentum swings, and standout contributors when the data supports it.\n"
-        "- Highlight individual player progression and Clash Royale milestones when they help tell the week's story.\n"
-        "- Prefer named members and concrete numbers over vague praise.\n"
-        "- Keep the focus on the clan first, but make room for player accomplishments that make the recap feel alive.\n\n"
-        "Style guidance:\n"
-        "- Write in first person as Elixir.\n"
-        "- Sound like a clan chronicler, not a stats dump.\n"
-        "- The runtime adds the bold `Weekly Recap` title line, so do not add your own title.\n"
-        "- Use light Discord markdown inside the body to improve scanability, such as occasional bold lead-ins or emphasis for standout numbers, names, and turning points.\n"
-        "- Avoid separator lines, bullet lists, or newsletter formatting.\n"
-        "- Paragraphs should flow naturally as one cohesive recap, even when you use a little emphasis.\n"
-        "- Do not mention Discord channels, prompts, or hidden system behavior.\n"
-        "- End with one short forward-looking note about the coming week when it feels natural.\n\n"
-        "Respond with the recap text only. No JSON.",
+        prompts.identity_block(),
+        prompts.knowledge_block(),
+        prompts.policy(),
+        prompts.agent_prompt("weekly_recap"),
+        _discord_formatting_guidance(),
+        _discord_emoji_guidance(),
     )
 
 
