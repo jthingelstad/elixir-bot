@@ -345,11 +345,11 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ActivityDefinition(
         activity_key="awareness-loop",
         owner_lane="elixir-log",
-        purpose="Shadow-mode v1 of the awareness loop (the central deliberative "
-        "heartbeat): build the read, run the benched brain READ-ONLY, persist "
-        "the train of thought, and write a diagnostic to #elixir-log. Posts "
-        "NOTHING member-facing. Runs on the internal scheduler during the "
-        "shadow watch; the brain stays read-only (cannot post) until graduated.",
+        purpose="The awareness loop (the central deliberative heartbeat): build "
+        "the read, run the brain with its full read + write tool surface, persist "
+        "the train of thought, deliver its post plan to the member-facing "
+        "channels, and write a diagnostic to #elixir-log. The brain is the clan's "
+        "sole proactive poster.",
         job_id="awareness-loop",
         job_function="_awareness_loop",
         # Wall-clock cron, not an interval: pinned to :05 of every hour so the

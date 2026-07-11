@@ -109,10 +109,10 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn,
     ``deliver`` gates the proactive posting path (steps 6–7: RECOGNIZE +
     DELIVER). When False, the engine still polls, projects, runs MANAGE and
     leader-actions, and emits the event stream the awareness brain reads — it
-    just stops raising communication intents and composing/sending posts. This
-    is how the brain becomes the sole proactive poster (see
-    ELIXIR_AWARENESS_LIVE): with delivery off there's no double-posting and no
-    unbounded pending-intent backlog (only consume() expires intents)."""
+    just stops raising communication intents and composing/sending posts. The
+    scheduled runtime always passes deliver=False: the awareness brain is the
+    sole proactive poster, so there's no double-posting and no unbounded
+    pending-intent backlog (only consume() expires intents)."""
     now = now or datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     counters: dict = {}

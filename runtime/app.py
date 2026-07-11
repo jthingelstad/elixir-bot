@@ -1178,17 +1178,15 @@ async def _engine_tick():
             raise RuntimeError(f"engine send: post to lane {lane!r} failed")
         return message_id
 
-    live = _awareness_live()
-
     def _run():
         conn = engine_db.connect()
         try:
-            # When the awareness brain owns posting (live), the engine skips
-            # RECOGNIZE + DELIVER entirely — no intents, no compose, no send. The
-            # editor gate retired with the delivery path.
+            # The awareness brain is the SOLE proactive poster, so the engine
+            # skips RECOGNIZE + DELIVER entirely — no intents, no compose, no
+            # send. The editor gate retired with the delivery path.
             counters = engine_tick_mod.run_tick(
                 conn, api=_cr_api, send_fn=send_fn, compose_fn=_engine_compose_copy,
-                deliver=not live,
+                deliver=False,
             )
             fulfilled = conn.execute(
                 """SELECT * FROM communication_intents
@@ -1399,7 +1397,7 @@ async def _awareness_event(event: dict) -> None:
     the header with the outcome + verbatim decision. Never raises — a diagnostic
     hiccup must not fail the tick; the thought is persisted regardless."""
     import discord
-    from runtime.awareness import shadow as shadow_mod
+    from runtime.awareness import diagnostic as diag_mod
 
     channel = bot.get_channel(THINKING_CHANNEL_ID)
     if channel is None:
@@ -1424,7 +1422,7 @@ async def _awareness_event(event: dict) -> None:
         elif etype in ("tool", "truncation", "retry"):
             thread = _thinking_session.get("thread")
             if thread is not None:
-                await thread.send(shadow_mod.format_live_event(event)[:1900],
+                await thread.send(diag_mod.format_live_event(event)[:1900],
                                   allowed_mentions=none)
 
         elif etype == "end":
@@ -1465,29 +1463,18 @@ async def _awareness_event(event: dict) -> None:
         log.exception("awareness: #thinking event %s failed", etype)
 
 
-def _awareness_live() -> bool:
-    """True when the awareness brain is the sole proactive poster. The single
-    ELIXIR_AWARENESS_LIVE flag flips brain posting ON and the engine's proactive
-    delivery OFF together — one switch, no gap, no double-post, reversible."""
-    return os.getenv("ELIXIR_AWARENESS_LIVE", "0").strip().lower() in (
-        "1", "true", "yes", "on"
-    )
-
-
 async def _awareness_loop():
     """The awareness loop (runtime/awareness). Builds the read, runs the brain,
     persists the train of thought, and STREAMS a bot-native #thinking diagnostic.
 
-    When ``ELIXIR_AWARENESS_LIVE`` is set the brain is the SOLE proactive poster:
-    it posts its plan to #announcements / #elixir and escalates clan-chat-worthy
-    posts as #leader-actions relay cards. Unset (default) it stays shadow-only —
-    nothing member-facing. The same flag turns the engine's proactive delivery
-    off (see _engine_tick), so there's never a gap or a double-post."""
+    The brain is the SOLE proactive poster: it posts its plan to #announcements /
+    #elixir and escalates clan-chat-worthy posts as #leader-actions relay cards.
+    The engine's proactive delivery is off (see _engine_tick), so there's never a
+    gap or a double-post."""
     from runtime.awareness import deliver as deliver_mod
     from runtime.awareness import store as awareness_store
     from runtime.awareness.loop import run_awareness_loop
 
-    live = _awareness_live()
     runtime_status.mark_job_start("awareness_loop")
     loop = asyncio.get_running_loop()
 
@@ -1519,15 +1506,14 @@ async def _awareness_loop():
 
     try:
         counters = await asyncio.to_thread(
-            run_awareness_loop, shadow=not live, progress_fn=_progress_fn,
-            deliver_fn=(_deliver_fn if live else None),
+            run_awareness_loop, progress_fn=_progress_fn, deliver_fn=_deliver_fn,
         )
     except Exception as exc:
         runtime_status.mark_job_failure("awareness_loop", str(exc))
         log.exception("awareness loop failed")
         return
     runtime_status.mark_job_success("awareness_loop", json.dumps(counters, default=str))
-    log.info("awareness loop (%s): %s", "live" if live else "shadow", counters)
+    log.info("awareness loop (live): %s", counters)
     return counters
 
 

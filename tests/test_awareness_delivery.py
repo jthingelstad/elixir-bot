@@ -119,17 +119,17 @@ def test_failed_tick_does_not_advance_cursor(engine_conn):
 
     # A successful silence advances the cursor.
     store.persist_thought({}, {"posts": [], "skipped_reason": "quiet"},
-                          shadow=False, conn=engine_conn)
+                          conn=engine_conn)
     after_silence = store.last_tick_at(conn=engine_conn)
     assert after_silence is not None
 
     # A FAILED tick (no posts key / _error) is persisted but must NOT move it.
-    store.persist_thought({}, {"_error": "delivery boom"}, shadow=False, conn=engine_conn)
+    store.persist_thought({}, {"_error": "delivery boom"}, conn=engine_conn)
     after_failure = store.last_tick_at(conn=engine_conn)
     assert after_failure == after_silence
 
     # A real post advances it again.
     store.record_awareness_post(lane="elixir", content="hi", conn=engine_conn)
     store.persist_thought({}, {"posts": [{"channel": "elixir", "content": "hi"}]},
-                          shadow=False, conn=engine_conn)
+                          conn=engine_conn)
     assert store.last_tick_at(conn=engine_conn) >= after_silence

@@ -12,7 +12,7 @@ import agent.core as core
 import db
 from db import managed_connection
 from runtime import app
-from runtime.awareness import shadow as shadow_mod
+from runtime.awareness import diagnostic as diag_mod
 from runtime.webapp import queries
 from storage import messages as messages_store
 from storage import metadata as metadata_store
@@ -184,7 +184,7 @@ def test_metadata_row_deleted_after_90d():
 
 
 def test_observatory_url_points_at_llm_workflow_view():
-    url = shadow_mod.observatory_url()
+    url = diag_mod.observatory_url()
     assert url.endswith("/llm?workflow=awareness")
 
 
@@ -238,7 +238,7 @@ def test_end_event_links_to_llm_view(monkeypatch):
         "header": "🧠 · Loop #42", "outcome": "posted", "color": 0x2ECC71,
         "fields": {"Decision": "1 post"}, "thread_name": "Loop #42 · posted",
         "thread_chunks": ["the decision"],
-        "observatory_url": shadow_mod.observatory_url(),
+        "observatory_url": diag_mod.observatory_url(),
     }
     asyncio.run(app._awareness_event({"type": "start", "read_summary": "x"}))
     asyncio.run(app._awareness_event({"type": "end", "render": render, "loop_number": 42}))

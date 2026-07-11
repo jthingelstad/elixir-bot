@@ -1,8 +1,9 @@
-"""Tests for the shadow-mode awareness loop (runtime/awareness).
+"""Tests for the awareness loop (runtime/awareness).
 
-Safety-first: the loop must post NOTHING member-facing. These tests verify the
-read assembler degrades sanely on an empty v5.1 DB, the loop persists a thought
-without any member send, and the benched brain runs read-only under shadow.
+The brain is the clan's sole proactive poster. These tests verify the read
+assembler degrades sanely on an empty v5.1 DB, the loop persists a thought and
+(when given a deliver_fn) delivers live, and the brain always runs with its full
+read + write tool surface.
 """
 
 from unittest.mock import patch
@@ -43,13 +44,13 @@ def test_build_read_returns_expected_keys_on_empty_db():
 
 
 # ---------------------------------------------------------------------------
-# run_awareness_loop (shadow)
+# run_awareness_loop
 # ---------------------------------------------------------------------------
 
-def test_run_awareness_loop_shadow_posts_nothing_member_facing(monkeypatch):
-    """With a plan carrying posts, shadow mode persists a thought and hands a
-    render to post_fn — and makes NO member-facing send. The only delivery is
-    the diagnostic render (bot-native #thinking, done by the caller's post_fn)."""
+def test_run_awareness_loop_without_deliver_fn_posts_nothing_member_facing(monkeypatch):
+    """With no deliver_fn, the loop persists a thought and hands a render to the
+    #thinking diagnostic stream — and makes NO member-facing send (delivery only
+    happens when a deliver_fn is supplied)."""
     from runtime.awareness import loop as loop_mod
 
     plan = {
@@ -66,11 +67,9 @@ def test_run_awareness_loop_shadow_posts_nothing_member_facing(monkeypatch):
     events = []
 
     with patch("agent.workflows.run_awareness_tick", return_value=plan) as brain:
-        counters = loop_mod.run_awareness_loop(shadow=True, progress_fn=events.append)
+        counters = loop_mod.run_awareness_loop(progress_fn=events.append)
 
-    # The brain was consulted in shadow mode.
     brain.assert_called_once()
-    assert brain.call_args.kwargs.get("shadow") is True
 
     # (a) The ONLY delivery is the diagnostic stream — a `start` then an `end`,
     # not a member-facing send. The end carries the outcome render.
@@ -83,8 +82,10 @@ def test_run_awareness_loop_shadow_posts_nothing_member_facing(monkeypatch):
 
     assert counters["posts_planned"] == 1
     assert counters["chose_silence"] is False
+    # No deliver_fn → nothing was delivered.
+    assert counters.get("posts_delivered", 0) == 0
 
-    # (b) A row was written to awareness_thoughts.
+    # (b) A row was written to awareness_thoughts (shadow column is legacy → 0).
     conn = db.get_connection()
     try:
         from runtime.awareness.store import ensure_awareness_schema
@@ -97,17 +98,40 @@ def test_run_awareness_loop_shadow_posts_nothing_member_facing(monkeypatch):
         conn.close()
     assert len(rows) == 1
     assert rows[0]["post_count"] == 1
-    assert rows[0]["shadow"] == 1
+    assert rows[0]["shadow"] == 0
     assert rows[0]["chose_silence"] == 0
 
 
-def test_run_awareness_loop_shadow_records_silence(monkeypatch):
+def test_run_awareness_loop_live_delivers_the_plan(monkeypatch):
+    """With a deliver_fn, the loop delivers the plan's posts live and records the
+    delivery count."""
+    from runtime.awareness import loop as loop_mod
+
+    plan = {
+        "posts": [{"channel": "elixir", "content": "live post", "covers_signal_keys": []}],
+        "skipped_reason": None,
+    }
+    delivered = {}
+
+    def _deliver(read, plan_arg):
+        delivered["called"] = True
+        return {"delivered": 1, "failed": False}
+
+    with patch("agent.workflows.run_awareness_tick", return_value=plan) as brain:
+        counters = loop_mod.run_awareness_loop(deliver_fn=_deliver)
+
+    brain.assert_called_once()
+    assert delivered.get("called") is True
+    assert counters["posts_delivered"] == 1
+
+
+def test_run_awareness_loop_records_silence(monkeypatch):
     from runtime.awareness import loop as loop_mod
 
     plan = {"posts": [], "skipped_reason": "nothing material changed"}
 
     with patch("agent.workflows.run_awareness_tick", return_value=plan):
-        counters = loop_mod.run_awareness_loop(shadow=True)
+        counters = loop_mod.run_awareness_loop()
 
     assert counters["chose_silence"] is True
     assert counters["posts_planned"] == 0
@@ -144,7 +168,7 @@ def test_run_awareness_loop_records_tick_failure_not_silence(monkeypatch):
 
 
     with patch("agent.workflows.run_awareness_tick", return_value=None):
-        counters = loop_mod.run_awareness_loop(shadow=True)
+        counters = loop_mod.run_awareness_loop()
 
     assert counters["tick_failed"] is True
     assert counters["chose_silence"] is False
@@ -162,7 +186,7 @@ def test_run_awareness_loop_numbers_loops_and_captures_tool_trace():
     reached for are captured into the render (header + threaded detail)."""
     from runtime.awareness import loop as loop_mod
 
-    def _tick(read, *, shadow, tool_stats, on_event=None):
+    def _tick(read, *, tool_stats, on_event=None):
         # Simulate the brain drilling into battle detail via the tool surface —
         # the real tick both records the trace and streams a live tool event.
         entry = {
@@ -177,8 +201,8 @@ def test_run_awareness_loop_numbers_loops_and_captures_tool_trace():
     events1, events2 = [], []
 
     with patch("agent.workflows.run_awareness_tick", side_effect=_tick):
-        c1 = loop_mod.run_awareness_loop(shadow=True, progress_fn=events1.append)
-        c2 = loop_mod.run_awareness_loop(shadow=True, progress_fn=events2.append)
+        c1 = loop_mod.run_awareness_loop(progress_fn=events1.append)
+        c2 = loop_mod.run_awareness_loop(progress_fn=events2.append)
 
     assert c1["loop_number"] == 1 and c2["loop_number"] == 2
     assert c1["tool_calls"] == 1
@@ -204,32 +228,12 @@ def test_run_awareness_loop_numbers_loops_and_captures_tool_trace():
 
 
 # ---------------------------------------------------------------------------
-# run_awareness_tick(shadow=True) — read-only tools
+# run_awareness_tick — always the full read + write tool surface
 # ---------------------------------------------------------------------------
 
-def test_run_awareness_tick_shadow_uses_read_only_tools():
-    """Shadow mode must hand the model a toolset with NO write tools, so it
-    physically cannot write regardless of the awareness spec's flag."""
-    import agent.workflows as workflows
-
-    captured = {}
-
-    def _capture(*args, **kwargs):
-        captured["allowed_tools"] = kwargs.get("allowed_tools")
-        return {"posts": []}
-
-    with patch.object(workflows, "_chat_with_tools", side_effect=_capture):
-        workflows.run_awareness_tick({"time": None}, shadow=True)
-
-    allowed_names = {t["name"] for t in captured["allowed_tools"]}
-    write_names = {t["name"] for t in WRITE_TOOLS}
-    assert write_names, "expected write tools to exist"
-    assert allowed_names.isdisjoint(write_names)
-
-
-def test_run_awareness_tick_default_keeps_write_tools():
-    """Default (shadow=False) behavior is unchanged — the awareness toolset
-    still carries its write surface."""
+def test_run_awareness_tick_uses_the_write_surface():
+    """The brain always runs with the awareness toolset (read + write). Shadow
+    mode was removed — there is no read-only variant."""
     import agent.workflows as workflows
     from agent.tool_policy import TOOLSETS_BY_WORKFLOW
 
@@ -243,6 +247,12 @@ def test_run_awareness_tick_default_keeps_write_tools():
         workflows.run_awareness_tick({"time": None})
 
     assert captured["allowed_tools"] is TOOLSETS_BY_WORKFLOW["awareness"]
+    # The write surface is actually present (not the read-only set).
+    allowed_names = {t["name"] for t in captured["allowed_tools"]}
+    write_names = {t["name"] for t in WRITE_TOOLS}
+    assert write_names, "expected write tools to exist"
+    assert "save_clan_memory" in allowed_names
+    assert allowed_names & write_names
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +276,7 @@ def test_run_awareness_tick_retries_once_on_truncation():
         return _TRUNCATION if len(calls) == 1 else plan
 
     with patch.object(workflows, "_chat_with_tools", side_effect=_fake):
-        result = workflows.run_awareness_tick({"time": None}, shadow=True)
+        result = workflows.run_awareness_tick({"time": None})
 
     assert result == plan
     assert len(calls) == 2
@@ -286,56 +296,45 @@ def test_run_awareness_tick_no_retry_when_first_pass_succeeds():
         return {"posts": []}
 
     with patch.object(workflows, "_chat_with_tools", side_effect=_fake):
-        workflows.run_awareness_tick({"time": None}, shadow=True)
+        workflows.run_awareness_tick({"time": None})
 
     assert len(calls) == 1  # a clean first pass is never retried
 
 
-def test_run_awareness_tick_persistent_truncation_shadow_surfaces_error():
-    """If both passes truncate, shadow mode still surfaces the {_error} payload
-    so the loop classifies the tick as FAILED, never as deliberate silence."""
+def test_run_awareness_tick_persistent_truncation_surfaces_error():
+    """If both passes truncate, the tick surfaces the {_error} payload so the
+    loop classifies the tick as FAILED (with detail), never as silence."""
     import agent.workflows as workflows
 
     with patch.object(workflows, "_chat_with_tools", return_value=_TRUNCATION):
-        result = workflows.run_awareness_tick({"time": None}, shadow=True)
+        result = workflows.run_awareness_tick({"time": None})
 
     assert result.get("_error", {}).get("kind") == "truncation"
 
 
-def test_run_awareness_tick_persistent_truncation_non_shadow_returns_none():
-    """Non-shadow callers keep their None-on-failure contract even after the
-    retry is exhausted."""
-    import agent.workflows as workflows
-
-    with patch.object(workflows, "_chat_with_tools", return_value=_TRUNCATION):
-        result = workflows.run_awareness_tick({"time": None}, shadow=False)
-
-    assert result is None
-
-
 # ---------------------------------------------------------------------------
-# Shadow render — the full intended post must reach #elixir-log, never a
-# 200-char preview (shadow mode exists so the real post can be reviewed).
+# Diagnostic render — the full posted content must reach #elixir-log, never a
+# 200-char preview (the diagnostic is the observability record of the tick).
 # ---------------------------------------------------------------------------
 
-def test_shadow_render_full_content_chunked_not_truncated():
-    """The full intended post must survive into the thread detail, split across
+def test_diagnostic_render_full_content_chunked_not_truncated():
+    """The full posted content must survive into the thread detail, split across
     Discord-sized chunks — never truncated to a preview."""
-    from runtime.awareness import shadow as shadow_mod
+    from runtime.awareness import diagnostic as diag_mod
 
     # A realistic long post — well over one Discord message.
     body = "\n".join(f"- line {i}: something worth reading in full" for i in range(120))
     plan = {"posts": [{"channel": "leader-lounge", "content": body,
                        "covers_signal_keys": ["k1"]}]}
 
-    render = shadow_mod.build_shadow_render({"time": None}, plan, tool_trace=[], loop_number=12)
+    render = diag_mod.build_diagnostic_render({"time": None}, plan, tool_trace=[], loop_number=12)
     chunks = render["thread_chunks"]
     joined = "\n".join(chunks)
 
     assert render["outcome"] == "posted"
     assert "Loop #12" in render["header"]
     assert len(chunks) > 1, "a long post should be split across chunks"
-    assert all(len(c) <= shadow_mod._MAX_LEN for c in chunks)
+    assert all(len(c) <= diag_mod._MAX_LEN for c in chunks)
     # Every source line survives somewhere — nothing was silently dropped.
     assert "- line 0:" in joined and "- line 119:" in joined
     assert "…" not in joined  # no ellipsis-truncation of the decision
