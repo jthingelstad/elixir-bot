@@ -395,7 +395,10 @@ def get_clan_roster_summary(conn: Optional[sqlite3.Connection] = None) -> dict:
         # AVG ignores NULLs — averages only members whose collection level is synced.
         "SELECT COUNT(*) AS active_members, "
         "ROUND(AVG(md.cr_collection_level), 0) AS avg_collection_level, "
-        "ROUND(AVG(COALESCE(cs.trophies, 0)), 2) AS avg_trophies, "
+        # QA L10: the average only covers members whose collection level is synced;
+        # count them so a low denominator isn't mistaken for a clan-wide average.
+        "COUNT(md.cr_collection_level) AS collection_level_sample_size, "
+        "ROUND(AVG(COALESCE(cs.trophies, 0)), 0) AS avg_trophies, "
         "SUM(COALESCE(cs.donations_week, 0)) AS donations_week_total, "
         "MAX(COALESCE(cs.trophies, 0)) AS top_trophies "
         "FROM players m "
@@ -406,6 +409,14 @@ def get_clan_roster_summary(conn: Optional[sqlite3.Connection] = None) -> dict:
     war = get_current_war_status(conn=conn)
     result = dict(row)
     result["open_slots"] = max(0, 50 - (result["active_members"] or 0))
+    # QA L10: flag when the collection-level average omits unsynced members.
+    active = result.get("active_members") or 0
+    sample = result.get("collection_level_sample_size") or 0
+    if sample < active:
+        result["avg_collection_level_note"] = (
+            f"Averaged over {sample} of {active} members with a synced collection level; "
+            "unsynced members are excluded."
+        )
     if war:
         result["current_war"] = war
     return result
@@ -665,11 +676,26 @@ def get_member_recent_form(tag: str, scope: str = "competitive_10", conn: Option
     return dict(row) if row else None
 
 
+def _streak_row(conn, row, scope: str) -> dict:
+    """Shape a streak row (QA M11/L12): stamp the battle scope, carry computed_at
+    freshness, and — when the streak has hit the recent-form sample ceiling —
+    note it may actually be longer than the number shown."""
+    item = dict(_member_reference_fields(conn, row["tag"], dict(row)), scope=scope)
+    streak = row["current_streak"] or 0
+    sample = row["sample_size"] or 0
+    if sample and streak >= sample:
+        item["streak_note"] = (
+            f"Streak equals the {sample}-battle recent-form window — the true streak "
+            "may be longer than shown."
+        )
+    return item
+
+
 @managed_connection
 def get_members_on_losing_streak(min_streak: int = 3, scope: str = "competitive_10", conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     rows = conn.execute(
         "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.clan_rank, cs.role, "
-        "f.current_streak, f.current_streak_type, f.wins, f.losses, f.sample_size, f.form_label, f.summary "
+        "f.current_streak, f.current_streak_type, f.wins, f.losses, f.sample_size, f.form_label, f.summary, f.computed_at "
         "FROM player_recent_form f "
         "JOIN players m ON m.player_tag = f.player_tag "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
@@ -680,7 +706,9 @@ def get_members_on_losing_streak(min_streak: int = 3, scope: str = "competitive_
     # QA M11: hot_streaks defaults to ladder_ranked_10 but losing_streaks to
     # competitive_10 (a different battle universe) — stamp the scope so the two
     # lists aren't read as symmetric.
-    return [dict(_member_reference_fields(conn, row["tag"], dict(row)), scope=scope) for row in rows]
+    # QA L12: computed_at surfaces staleness; the streak can't exceed sample_size
+    # (the recent-form window), so a "10" streak may actually be longer.
+    return [_streak_row(conn, row, scope) for row in rows]
 
 
 @managed_connection
@@ -688,7 +716,7 @@ def get_members_on_hot_streak(min_streak: int = 4, scope: str = "ladder_ranked_1
     rows = conn.execute(
         "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.clan_rank, cs.role, "
         "f.current_streak, f.current_streak_type, f.wins, f.losses, f.draws, f.sample_size, "
-        "f.form_label, f.summary, f.avg_trophy_change "
+        "f.form_label, f.summary, f.avg_trophy_change, f.computed_at "
         "FROM player_recent_form f "
         "JOIN players m ON m.player_tag = f.player_tag "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
@@ -698,7 +726,8 @@ def get_members_on_hot_streak(min_streak: int = 4, scope: str = "ladder_ranked_1
     ).fetchall()
     # QA M11: stamp scope (see get_members_on_losing_streak) — this list is
     # ladder+ranked, not the same universe as the competitive losing-streak list.
-    return [dict(_member_reference_fields(conn, row["tag"], dict(row)), scope=scope) for row in rows]
+    # QA L12: computed_at + sample-cap note (see get_members_on_losing_streak).
+    return [_streak_row(conn, row, scope) for row in rows]
 
 
 @managed_connection
