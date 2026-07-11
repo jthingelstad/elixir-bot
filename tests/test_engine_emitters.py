@@ -195,3 +195,83 @@ def test_calendar_birthday_and_anniversary(engine_conn):
     assert n == len(events)
     # idempotent: same day re-run adds nothing
     assert emit_calendar(engine_conn, "2026-07-01") == 0
+
+
+def _home_clan(conn):
+    conn.execute(
+        "INSERT INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
+        "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-02-04', ?, 1)", (NOW,))
+
+
+def _cake_member(conn, tag, name, *, birth=(None, None), joined="2026-06-15",
+                 cr_years=None, cr_celebrated=None, left_at=None):
+    conn.execute(
+        "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+        "VALUES (?, ?, ?, ?)", (tag, name, NOW, NOW))
+    conn.execute(
+        "INSERT INTO player_metadata (player_tag, birth_month, birth_day, "
+        "cr_account_age_years, cr_years_celebrated) VALUES (?, ?, ?, ?, ?)",
+        (tag, birth[0], birth[1], cr_years, cr_celebrated))
+    conn.execute(
+        "INSERT INTO clan_memberships (player_tag, joined_at, left_at, join_source) "
+        "VALUES (?, ?, ?, 'test')", (tag, joined, left_at))
+
+
+def _cr_years_celebrated(conn, tag):
+    return conn.execute(
+        "SELECT cr_years_celebrated FROM player_metadata WHERE player_tag = ?", (tag,)
+    ).fetchone()[0]
+
+
+def test_cr_account_anniversary_ticks_up(engine_conn):
+    _home_clan(engine_conn)
+    _cake_member(engine_conn, "#A", "Al", cr_years=5)  # cr_years_celebrated NULL
+    engine_conn.commit()
+
+    # First sight: baseline only — never celebrate a member's current age.
+    emit_calendar(engine_conn, "2026-07-01")
+    assert "cr_account_anniversary" not in [e[0] for e in _events(engine_conn, "clan_events")]
+    assert _cr_years_celebrated(engine_conn, "#A") == 5
+
+    # A year tick-up emits exactly one anniversary and advances the baseline.
+    engine_conn.execute(
+        "UPDATE player_metadata SET cr_account_age_years = 6 WHERE player_tag = '#A'")
+    emit_calendar(engine_conn, "2026-07-01")
+    cr_events = [e for e in _events(engine_conn, "clan_events") if e[0] == "cr_account_anniversary"]
+    assert cr_events == [("cr_account_anniversary", "cr_account_anniversary:#A:6")]
+    payload = json.loads(engine_conn.execute(
+        "SELECT payload_json FROM clan_events WHERE event_type='cr_account_anniversary'"
+    ).fetchone()[0])
+    assert payload["years"] == 6 and payload["name"] == "Al"
+    assert _cr_years_celebrated(engine_conn, "#A") == 6
+
+    # Idempotent: nothing left to celebrate.
+    assert emit_calendar(engine_conn, "2026-07-01") == 0
+
+
+def test_cr_account_anniversary_skips_departed_member(engine_conn):
+    _home_clan(engine_conn)
+    # A departed member whose years already rose — must never be celebrated.
+    _cake_member(engine_conn, "#B", "Bo", cr_years=6, cr_celebrated=5, left_at="2026-06-20")
+    engine_conn.commit()
+    emit_calendar(engine_conn, "2026-07-01")
+    assert "cr_account_anniversary" not in [e[0] for e in _events(engine_conn, "clan_events")]
+
+
+def test_join_anniversary_flags_annual_marks(engine_conn):
+    _home_clan(engine_conn)
+    _cake_member(engine_conn, "#A", "Al", joined="2026-07-01")  # 12 months → annual
+    _cake_member(engine_conn, "#C", "Cy", joined="2027-04-01")  # 3 months → not annual
+    engine_conn.commit()
+    emit_calendar(engine_conn, "2027-07-01")
+
+    payloads = {
+        r["subject_tag"]: json.loads(r["payload_json"])
+        for r in engine_conn.execute(
+            "SELECT subject_tag, payload_json FROM clan_events WHERE event_type='join_anniversary'"
+        )
+    }
+    assert payloads["#A"]["is_annual"] is True
+    assert payloads["#A"]["months"] == 12 and payloads["#A"]["years"] == 1
+    assert payloads["#C"]["is_annual"] is False
+    assert payloads["#C"]["months"] == 3

@@ -51,7 +51,8 @@ CREATE TABLE player_metadata (
     cr_clan_war_wins INTEGER, cr_battle_wins INTEGER, cr_clan_donations INTEGER,
     cr_banner_count INTEGER, cr_emote_count INTEGER, cr_profile_badges_updated_at TEXT,
     preferred_nickname TEXT, nickname_source TEXT, nickname_updated_at TEXT,
-    email TEXT DEFAULT '', email_verified_at TEXT, email_source TEXT DEFAULT ''
+    email TEXT DEFAULT '', email_verified_at TEXT, email_source TEXT DEFAULT '',
+    cr_years_celebrated INTEGER
 );
 
 -- Transient email-verification challenges: a member sets an email, Elixir mails a

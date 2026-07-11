@@ -266,10 +266,24 @@ def _clan_founded(conn) -> str | None:
         return None
 
 
+def _ensure_cr_years_column(conn) -> None:
+    """Lazy schema for the CR-account-anniversary baseline (v5.1 has no
+    forward-migration runner; fresh builds get it from schema_v51). Idempotent —
+    ``cr_years_celebrated`` holds the last years-played value we celebrated, so
+    first sight sets a silent baseline instead of flooding a 'hit N years' post
+    for every already-known member."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(player_metadata)")}
+    if "cr_years_celebrated" not in cols:
+        conn.execute("ALTER TABLE player_metadata ADD COLUMN cr_years_celebrated INTEGER")
+
+
 def emit_calendar(conn, today_chicago: str) -> int:
     """Clock-driven calendar events (events.md §4) — runs on the first tick of
     each America/Chicago day. Port of CakeDayDetector (detectors.py:920–995);
-    date-embedded dedup keys are the idempotency."""
+    date-embedded dedup keys are the idempotency. Every cake day is gated to
+    ACTIVE members (clan_memberships.left_at IS NULL) — a departed ex-member is
+    never celebrated."""
+    _ensure_cr_years_column(conn)
     n = 0
     stamp = f"{today_chicago}T12:00:00Z"
     today = date.fromisoformat(today_chicago)
@@ -315,9 +329,41 @@ def emit_calendar(conn, today_chicago: str) -> int:
             continue
         months = (today.year - jd.year) * 12 + (today.month - jd.month)
         if months >= 3 and months % 3 == 0:  # quarterly milestones (detectors.py:984)
+            # Annual marks (12/24 mo) are the real anniversary — flag them so the
+            # brain makes a bigger deal of them than a routine 3/6/9-month touch.
             n += cal_event("join_anniversary", f"join_anniversary:{r['tag']}:{today_chicago}",
                            r["tag"], {"name": r["name"], "years": months // 12,
-                                      "months": months})
+                                      "months": months, "is_annual": months % 12 == 0})
+
+    # CR account anniversary — no true creation date exists (the CR API only
+    # exposes a gameplay-derived "years played" badge), so we celebrate the
+    # tick-up: when a member's cr_account_age_years rises above the value we last
+    # celebrated. First sight sets a silent baseline (no post). Active only.
+    for r in conn.execute(
+        """SELECT p.player_tag AS tag, p.current_name AS name,
+                  md.cr_account_age_years AS years, md.cr_years_celebrated AS celebrated
+           FROM player_metadata md
+           JOIN players p ON p.player_tag = md.player_tag
+           JOIN clan_memberships cm ON cm.player_tag = p.player_tag AND cm.left_at IS NULL
+           WHERE md.cr_account_age_years IS NOT NULL""",
+    ).fetchall():
+        years = r["years"]
+        celebrated = r["celebrated"]
+        if celebrated is None:
+            # Baseline only — never celebrate a member's current age on first sight.
+            conn.execute(
+                "UPDATE player_metadata SET cr_years_celebrated = ? WHERE player_tag = ?",
+                (years, r["tag"]),
+            )
+            continue
+        if years > celebrated:
+            n += cal_event("cr_account_anniversary",
+                           f"cr_account_anniversary:{r['tag']}:{years}",
+                           r["tag"], {"name": r["name"], "years": years})
+            conn.execute(
+                "UPDATE player_metadata SET cr_years_celebrated = ? WHERE player_tag = ?",
+                (years, r["tag"]),
+            )
     return n
 
 
