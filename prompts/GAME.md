@@ -12,6 +12,17 @@ Prioritize clear guidance, not wiki-style completeness.
 - `section_index` is the current race week within that season, starting at 0.
 - When speaking to humans, refer to the week as `section_index + 1`.
 
+### Period Points vs Fame — the two scoreboards (do not confuse them)
+
+A River Race has **two different scores**, and they are two different races. Never compare one clan's period points against another clan's fame.
+
+- **Period points** are the number members see and battle for each day (the medal count in-game). They **reset to 0 at every daily reset**. This is *today's* race — what the clan is actively driving right now. A maxed individual day is about 900 period points.
+- **Fame** is the **boat** — it is *cumulative for the week* and decides who wins the race. At each day's **close**, the day's period-point **rank** awards fame to the boat: **1st +3,000 · 2nd +1,800 · 3rd +1,000 · 4th +600 · 5th +400**. So fame only moves at day close; during a live day the boat sits still while period points climb. In-game, the boat screen shows your *projected* fame reward for your current daily rank (e.g. "+3,000" while sitting 1st) — that is contingent on holding the rank until reset, not banked yet.
+- **Boat defenses also add fame.** Intact clan boat defenses at day close pay a diminishing "survival award" (~59 for the 1st intact defense, then 53, 47, 43, 41, 37, 31…) *on top of* the placement fame above. This is **not exposed by the live API** — treat defense fame as real but unattributable and unpredictable from our data; never claim a specific member earned it or forecast it.
+- Because of defense fame, a clan with **full defenses that takes 1st every day can cross the 10,000 finish line by the end of Battle Day 3 and win a day early** — that is a perfect River Race run (placement ~3,000/day + defense survival awards compounding).
+- Consequence: on **Battle Day 1** every clan's fame is still 0 (no day has closed yet). The live lead that day is the *period-point* lead, not fame. By Day 3 fame reflects the earlier days' placements while today's period points start fresh from 0.
+- In the data: `standing.weekly` is the fame/boat race; `standing.today` is the period-point race; `primary_metric` says which one decides the week. Speak to whichever race is the point — today's period-point push during a live battle day, the weekly fame/boat standing for who's winning the week — and keep the numbers in their own race.
+
 ### War Phases
 
 - There are two main live war phases: `practice` and `battle`.
@@ -44,7 +55,7 @@ Prioritize clear guidance, not wiki-style completeness.
 - The clan that reaches the finish line first wins the weekly race.
 - Weekly placement matters for rewards and clan trophies.
 - First place is a meaningful achievement and should be celebrated.
-- The race finish line is 10,000 fame in normal weeks and 5,000 fame in the final (Colosseum) week. When a `pace_status` field is present in signal data, use it — it already accounts for the correct target.
+- The finish line in a normal week is **10,000 fame** (the boat/weekly race). Colosseum is different: it has **no weekly fame** — the race is decided by accumulated **period points** (finish line 5,000), so in Colosseum frame the race in period points, not fame. When a `pace_status` field is present in signal data, use it — it already accounts for the correct target and metric.
 - If the live `currentriverrace` payload includes `clan.finishTime`, treat that as the authoritative sign that the clan has finished the current weekly race.
 - Once the race is complete, war messaging should shift from urgency and "drive to win" framing into recognition, closure, and clean finish framing.
 - After `clan.finishTime` is set, remaining battle days still allow members to play their war decks and earn personal River Race chest rewards, but those post-finish battles do NOT add to the clan's Fame or season Fame total. Never tell members that continuing to battle will increase their season Fame — it will not. Frame any post-finish reminder purely around personal chest rewards, not Fame or standings.
@@ -81,6 +92,7 @@ Prioritize clear guidance, not wiki-style completeness.
 
 - The last week of every River Race season is Colosseum week, whether the season is 4 or 5 weeks long.
 - Colosseum week is the most important week of the season — the finale.
+- Colosseum has **no weekly fame and no boat** — the race is decided by accumulated **period points** only. Talk about period points and the finish line (5,000), never fame or boat position, during Colosseum.
 - Regular river race weeks have 20 trophies on the line. Colosseum week has 100 trophies — more than all other weeks combined. This is why it matters so much.
 - There are NO boat defenses to set during Colosseum week. Do not mention boat defenses at all during this week.
 - There are no boat battles during Colosseum week.
