@@ -434,8 +434,16 @@ def get_war_battle_win_rates(season_id: Optional[str] = None, limit: int = 10, m
     for row in rows:
         item = dict(row)
         item["win_rate"] = round((row["wins"] or 0) / row["battles"], 3) if row["battles"] else 0
+        # QA M8: a small sample (e.g. 1-0 = 100%) isn't a real "top" win rate —
+        # flag it so the brain doesn't crown it over a 16-4.
+        item["low_sample"] = int(row["battles"] or 0) < 8
         members.append(_member_reference_fields(conn, row["tag"], item))
-    return {"season_id": season_id, "min_battles": min_battles, "members": members}
+    return {
+        "season_id": season_id,
+        "min_battles": min_battles,
+        "note": "win_rate on fewer than 8 battles (low_sample=true) is noisy — do not rank it above a larger, slightly-lower rate.",
+        "members": members,
+    }
 
 
 @managed_connection

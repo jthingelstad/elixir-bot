@@ -746,7 +746,7 @@ def test_execute_tool_get_war_season_win_rates_uses_db():
         mock_db.get_war_battle_win_rates.return_value = {"season_id": 129, "members": []}
         result = json.loads(elixir_agent._execute_tool("get_war_season", {"aspect": "win_rates", "season_id": 129, "limit": 5}))
         assert result == {"season_id": 129, "members": []}
-        mock_db.get_war_battle_win_rates.assert_called_once_with(season_id=129, limit=5, min_battles=1)
+        mock_db.get_war_battle_win_rates.assert_called_once_with(season_id=129, limit=5, min_battles=4)
 
 
 def test_execute_tool_get_war_season_standings_metric_fame():
@@ -788,7 +788,7 @@ def test_execute_tool_get_war_season_standings_metric_win_rate():
             {"aspect": "standings", "metric": "win_rate", "season_id": 129, "limit": 30},
         ))
         assert result == {"season_id": 129, "members": []}
-        mock_db.get_war_battle_win_rates.assert_called_once_with(season_id=129, limit=30, min_battles=1)
+        mock_db.get_war_battle_win_rates.assert_called_once_with(season_id=129, limit=30, min_battles=4)
         mock_enrich.assert_called_once()
 
 

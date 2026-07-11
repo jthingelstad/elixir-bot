@@ -730,7 +730,7 @@ def _execute_get_war_season(arguments):
             }
         elif metric == "win_rate":
             raw = db.get_war_battle_win_rates(
-                season_id=season_id, limit=limit, min_battles=1,
+                season_id=season_id, limit=limit, min_battles=4,
             )
         elif metric == "attendance":
             raw = db.get_members_without_war_participation(season_id=season_id)
@@ -744,7 +744,7 @@ def _execute_get_war_season(arguments):
         return raw
     elif aspect == "win_rates":
         return db.get_war_battle_win_rates(
-            season_id=season_id, limit=limit, min_battles=1,
+            season_id=season_id, limit=limit, min_battles=4,
         )
     elif aspect == "boat_battles":
         return db.get_clan_boat_battle_record(weeks=3)
