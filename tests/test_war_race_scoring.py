@@ -152,6 +152,32 @@ def test_war_season_snapshot_exposes_live_race(engine_conn):
     assert "standings" not in race and "our_fame" not in race
 
 
+def test_perfect_attendance_excludes_in_progress_day(engine_conn):
+    """QA H10: a member perfect on the finalized battle days must count even if
+    they haven't finished the in-progress day's decks yet."""
+    import storage.war_analytics as wa
+    engine_conn.execute("INSERT OR IGNORE INTO clans (clan_tag, first_seen_at, last_seen_at, is_home) VALUES ('#J2RGCRVG','2026-07-01','2026-07-11',1)")
+    engine_conn.execute("INSERT INTO players (player_tag, current_name, display_name, first_seen_at, last_seen_at) VALUES ('#PERF','Perf','Perf','2026-07-01','2026-07-11')")
+    engine_conn.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (555, '2026-07-01')")
+    for day, used in ((0, 4), (1, 4), (2, 1)):  # perfect days 0-1; day 2 in progress (1/4)
+        engine_conn.execute(
+            "INSERT INTO war_attendance_days (season_id, section_index, war_day_index, player_tag, decks_used, decks_available, observed_at) "
+            "VALUES (555, 0, ?, '#PERF', ?, 4, '2026-07-11T00:00:00Z')",
+            (day, used),
+        )
+    engine_conn.commit()
+    # live war = Battle Day 3 (war_day_index 2) of section 0 → that day is excluded
+    proj = {"season_id": 555, "section_index": 0, "period_index": 5, "period_type": "warDay",
+            "our_tag": "#US", "our_fame": 0,
+            "clans": {"#US": {"name": "POAP KINGS", "fame": 0, "period_points": 0}}, "participants": {}}
+    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T07:06:00Z")):
+        perfect = wa.get_perfect_war_participants(season_id=555, conn=engine_conn)
+    names = {m["name"] for m in perfect}
+    assert "Perf" in names  # counted on the 2 finalized days despite the unfinished day 3
+    perf = next(m for m in perfect if m["name"] == "Perf")
+    assert perf["battle_days"] == 2  # only finalized days counted
+
+
 def test_war_season_summary_counts_in_progress_fame(engine_conn):
     """QA H7/H8: war_weeks.our_fame is NULL until a week finalizes, so a live
     season summed to 0 clan fame while members had thousands. The in-progress

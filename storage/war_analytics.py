@@ -343,12 +343,22 @@ def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqli
 def get_perfect_war_participants(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     """Members with perfect attendance: every deck used on every finalized
     battle day (war_attendance_days; Iron King definition)."""
-    from storage.war_status import get_current_season_id
+    from storage.war_status import get_current_season_id, get_current_war_status
 
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     if season_id is None:
         return []
+    # QA H10: the in-progress battle day isn't finalized — members who are
+    # perfect-so-far simply haven't finished today's decks yet. Counting it
+    # excluded ~everyone still working through today. Drop the current live day.
+    live = get_current_war_status(conn=conn) or {}
+    where = ["wad.season_id = ?"]
+    params: list = [season_id]
+    if (live.get("season_id") == season_id and live.get("phase") == "battle"
+            and live.get("battle_day_number")):
+        where.append("NOT (wad.section_index = ? AND wad.war_day_index = ?)")
+        params.extend([live.get("section_index"), int(live["battle_day_number"]) - 1])
     rows = conn.execute(
         "SELECT wad.player_tag AS tag, MAX(COALESCE(m.display_name, m.current_name)) AS name, "
         "COUNT(*) AS battle_days, "
@@ -356,11 +366,11 @@ def get_perfect_war_participants(season_id: Optional[str] = None, conn: Optional
         "SUM(COALESCE(wad.decks_used, 0)) AS decks_used "
         "FROM war_attendance_days wad "
         "JOIN players m ON m.player_tag = wad.player_tag "
-        "WHERE wad.season_id = ? "
+        f"WHERE {' AND '.join(where)} "
         "GROUP BY wad.player_tag "
         "HAVING battle_days > 0 AND perfect_days = battle_days "
         "ORDER BY decks_used DESC, name COLLATE NOCASE",
-        (season_id,),
+        tuple(params),
     ).fetchall()
     return [_member_reference_fields(conn, r["tag"], dict(r)) for r in rows]
 
