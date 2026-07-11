@@ -213,32 +213,42 @@ def _filter_cr_clan_members(payload, *, limit):
 def _filter_cr_clan_war(payload):
     clans = payload.get("clans") or []
     clan_summaries = []
-    top_participants = []
+    race_top_participants = []
     for clan in clans:
         participants = clan.get("participants") or []
         clan_summaries.append({
             "tag": clan.get("tag"),
             "name": clan.get("name"),
+            # QA H18: fame is week-cumulative (the boat); periodPoints is TODAY's
+            # race (what players drive, resets daily) and is the ONLY meaningful
+            # metric on a Colosseum week — the bridge previously dropped it.
             "fame": clan.get("fame"),
+            "periodPoints": clan.get("periodPoints"),
             "repairPoints": clan.get("repairPoints"),
             "participants_count": len(participants),
         })
         for participant in participants:
-            top_participants.append({
+            race_top_participants.append({
                 "tag": participant.get("tag"),
                 "name": participant.get("name"),
                 "clan_tag": clan.get("tag"),
                 "fame": participant.get("fame"),
                 "decksUsed": participant.get("decksUsed"),
+                "decksUsedToday": participant.get("decksUsedToday"),
             })
-    top_participants.sort(key=lambda participant: participant.get("fame") or 0, reverse=True)
+    race_top_participants.sort(key=lambda participant: participant.get("fame") or 0, reverse=True)
     return {
         "state": payload.get("state"),
         "sectionIndex": payload.get("sectionIndex"),
         "periodIndex": payload.get("periodIndex"),
         "periodType": payload.get("periodType"),
+        "metric_note": (
+            "clan.fame = week-cumulative boat fame; clan.periodPoints = today's "
+            "period-point race (resets daily). On a Colosseum week use periodPoints."
+        ),
         "clans": clan_summaries,
-        "top_participants": top_participants[:5],
+        # Ranked across ALL clans in the race, not one clan (QA M24) — hence the name.
+        "race_top_participants": race_top_participants[:5],
     }
 
 

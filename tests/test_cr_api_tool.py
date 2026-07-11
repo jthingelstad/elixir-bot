@@ -354,9 +354,12 @@ class TestFilters:
         with patch("cr_api.get_current_war", return_value=payload):
             r = execute_cr_api({"aspect": "clan_war", "tag": "#PYLQ2"})
         assert len(r["clans"]) == 5
-        assert len(r["top_participants"]) == 5
+        # Renamed race_top_participants (ranked across all clans, QA M24); each
+        # clan summary carries periodPoints (QA H18).
+        assert len(r["race_top_participants"]) == 5
+        assert "periodPoints" in r["clans"][0]
         # Sorted desc by fame.
-        fames = [p["fame"] for p in r["top_participants"]]
+        fames = [p["fame"] for p in r["race_top_participants"]]
         assert fames == sorted(fames, reverse=True)
 
     def test_clan_war_log_extracts_focal_clan_rank(self, execute_cr_api):
