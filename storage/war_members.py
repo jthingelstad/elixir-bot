@@ -68,8 +68,8 @@ def get_member_war_status(tag, season_id=None, conn=None):
     }
     if season_id is not None:
         season_row = conn.execute(
-            "SELECT COUNT(*) AS races_played, SUM(COALESCE(wp.fame, 0)) AS total_fame, "
-            "SUM(COALESCE(wp.decks_used, 0)) AS total_decks_used, AVG(COALESCE(wp.fame, 0)) AS avg_fame "
+            "SELECT COUNT(*) AS races_played, SUM(COALESCE(wp.fame, 0)) AS total_points, "
+            "SUM(COALESCE(wp.decks_used, 0)) AS total_decks_used, AVG(COALESCE(wp.fame, 0)) AS avg_points "
             "FROM war_participation wp "
             "WHERE wp.season_id = ? AND wp.player_tag = ?",
             (season_id, canon_tag),
@@ -127,7 +127,7 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
             (season_id,),
         ).fetchone()["cnt"]
         season_row = conn.execute(
-            "SELECT COUNT(*) AS races_played, SUM(COALESCE(wp.fame, 0)) AS total_fame, "
+            "SELECT COUNT(*) AS races_played, SUM(COALESCE(wp.fame, 0)) AS total_points, "
             "SUM(COALESCE(wp.decks_used, 0)) AS total_decks_used "
             "FROM war_participation wp "
             "WHERE wp.season_id = ? AND wp.player_tag = ? AND COALESCE(wp.decks_used, 0) > 0",
@@ -160,7 +160,7 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
             "races_played": season_row["races_played"] if season_row else 0,
             "total_races": total_races,
             "participation_rate": round((season_row["races_played"] or 0) / total_races, 4) if season_row and total_races else 0,
-            "total_fame": season_row["total_fame"] if season_row else 0,
+            "total_points": season_row["total_points"] if season_row else 0,
             "total_decks_used": season_row["total_decks_used"] if season_row else 0,
             "races_missed": max(0, total_races - (season_row["races_played"] or 0)) if season_row else total_races,
         },

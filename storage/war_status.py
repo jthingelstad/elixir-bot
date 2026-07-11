@@ -323,15 +323,15 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
         item = {
             "tag": tag,
             "name": info.get("name"),
-            "fame": _coerce_int(info.get("fame")),
+            "points": _coerce_int(info.get("fame")),
             "repair_points": _coerce_int(info.get("repair_points")),
             "boat_attacks": _coerce_int(info.get("boat_attacks")),
             "decks_used_total": _coerce_int(info.get("decks_used")),
             "decks_used_today": _coerce_int(info.get("decks_used_today")),
-            # QA M6: per-member daily war fame is not tracked (fame_delta is
-            # never populated), so there is no honest "fame today" — None, not a
+            # QA M6: per-member daily war points are not tracked (fame_delta is
+            # never populated), so there is no honest "points today" — None, not a
             # misleading 0. Today's engagement signal is decks_used_today.
-            "fame_today": None,
+            "points_today": None,
         }
         item = _member_reference_fields(conn, tag, item)
         item["is_current_member"] = (not open_tags) or tag in open_tags
@@ -347,10 +347,10 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
         else:
             used_none.append(item)
 
-    # top_fame_today would just re-rank by cumulative fame (daily fame isn't
-    # tracked — QA M6), so it's omitted rather than mislabelled. top_fame_total
-    # is the honest cumulative-fame leaderboard.
-    top_fame_total = sorted(participants, key=lambda i: (-(i.get("fame") or 0), -(i.get("decks_used_total") or 0), (i.get("name") or "").lower()))
+    # top_points_today would just re-rank by cumulative points (daily points
+    # aren't tracked — QA M6), so it's omitted rather than mislabelled.
+    # top_points_total is the honest cumulative-points leaderboard.
+    top_points_total = sorted(participants, key=lambda i: (-(i.get("points") or 0), -(i.get("decks_used_total") or 0), (i.get("name") or "").lower()))
 
     observed_dt = coerce_utc_datetime(observed_at_live)
     started_at, ends_at = war_reset_window_utc(observed_dt or observed_at_live)
@@ -401,7 +401,7 @@ def get_war_day_state(war_day_key_arg: Optional[str] = None, observed_at: Option
         "used_all_4": used_all,
         "used_some": used_some,
         "used_none": used_none,
-        "top_fame_total": top_fame_total[:5],
+        "top_points_total": top_points_total[:5],
         "participants": participants,
     }
 
@@ -437,7 +437,7 @@ def list_recent_war_day_summaries(limit: int = 7, phase: Optional[str] = None, c
             "finished_count": row["finished_count"],
             "total_participants": row["participants"],
             "observed_at": row["observed_at"],
-            "top_fame_today": [],
+            "top_points_today": [],
         })
     return out
 
@@ -489,7 +489,7 @@ def get_war_deck_status_today(conn: Optional[sqlite3.Connection] = None) -> dict
         "used_all_4": state.get("used_all_4") or [],
         "used_some": state.get("used_some") or [],
         "used_none": state.get("used_none") or [],
-        "top_fame_total": state.get("top_fame_total") or [],
+        "top_points_total": state.get("top_points_total") or [],
         "engaged_count": state.get("engaged_count") or 0,
         "finished_count": state.get("finished_count") or 0,
         "untouched_count": state.get("untouched_count") or 0,
@@ -619,7 +619,7 @@ def get_war_week_summary(season_id: Optional[int] = None, section_index: Optiona
         (season_id, section_index),
     ).fetchone()
     participant_rows = conn.execute(
-        "SELECT wp.player_tag, COALESCE(p.display_name, p.current_name) AS player_name, wp.fame, wp.repair_points, wp.boat_attacks, wp.decks_used "
+        "SELECT wp.player_tag, COALESCE(p.display_name, p.current_name) AS player_name, wp.fame AS points, wp.repair_points, wp.boat_attacks, wp.decks_used "
         "FROM war_participation wp LEFT JOIN players p ON p.player_tag = wp.player_tag "
         "WHERE wp.season_id = ? AND wp.section_index = ? "
         "ORDER BY COALESCE(wp.fame, 0) DESC, COALESCE(wp.decks_used, 0) DESC, player_name COLLATE NOCASE",
@@ -630,7 +630,7 @@ def get_war_week_summary(season_id: Optional[int] = None, section_index: Optiona
         item = {
             "tag": row["player_tag"],
             "name": row["player_name"],
-            "fame": row["fame"] or 0,
+            "points": row["points"] or 0,
             "repair_points": row["repair_points"] or 0,
             "boat_attacks": row["boat_attacks"] or 0,
             "decks_used": row["decks_used"] or 0,
@@ -652,7 +652,7 @@ def get_war_week_summary(season_id: Optional[int] = None, section_index: Optiona
             "phase_display": f"Battle Day {row['war_day_index'] + 1}",
             "engaged_count": row["engaged_count"],
             "finished_count": row["finished_count"],
-            "top_fame_today": [],
+            "top_points_today": [],
         })
 
     return {
@@ -930,7 +930,7 @@ def get_war_season_snapshot(conn: Optional[sqlite3.Connection] = None) -> dict |
         ).fetchall()
         participation = conn.execute(
             """SELECT COUNT(DISTINCT player_tag) AS players,
-                      COALESCE(SUM(fame), 0) AS fame,
+                      COALESCE(SUM(fame), 0) AS points,
                       COALESCE(SUM(decks_used), 0) AS decks_used
                FROM war_participation WHERE season_id = ?""",
             (season_id,),

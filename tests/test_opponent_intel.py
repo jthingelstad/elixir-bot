@@ -153,9 +153,9 @@ class TestAnalyzeWarParticipants:
         result = analyze_war_participants(entry)
 
         assert result["participant_count"] == 3
-        # QA H17: renamed from total_fame — it's the member-fame sum, not the
+        # QA H17: renamed from total_fame — it's the member-points sum, not the
         # clan standing (that's `fame`).
-        assert result["participant_attributed_fame"] == 300
+        assert result["participant_attributed_points"] == 300
         assert result["active_participants"] == 2
         assert result["full_deck_today"] == 1
         assert result["zero_deck_today"] == 2

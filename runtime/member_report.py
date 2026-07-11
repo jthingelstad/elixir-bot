@@ -293,7 +293,7 @@ def facts_for_model(ctx: dict) -> str:
     if ctx["war"]:
         s = (ctx["war"] or {}).get("season") or {}
         lines.append(f"WAR: {s.get('total_decks_used', 0)} decks used, "
-                     f"{s.get('total_fame', 0)} fame this season")
+                     f"{s.get('total_points', 0)} points this season")
     if ctx["clan_standing"]:
         cs = ctx["clan_standing"]
         lines.append(f"CLAN STANDING: #{cs['rank']} of {cs['of']} clanmates by battles played")

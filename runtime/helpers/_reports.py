@@ -95,9 +95,9 @@ def _build_top_war_contributors_report(limit=5):
 
     for index, member in enumerate(contributors, start=1):
         name = _member_label(member)
-        fame = member.get("total_fame", 0)
+        points = member.get("total_points", 0)
         races = member.get("races_played", 0)
-        lines.append(f"{index}. {name} — {fame:,} fame across {races} race(s)")
+        lines.append(f"{index}. {name} — {points:,} points across {races} race(s)")
     return "\n".join(lines)
 
 
@@ -348,7 +348,7 @@ def _build_clan_status_report(clan=None, war=None):
     if season_summary:
         top_contributors = _join_member_bits(
             season_summary.get("top_contributors") or [],
-            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_fame') or 0)}",
+            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_points') or 0)}",
         )
         lines.append(
             f"- War season: {season_summary.get('races', 0)} races | total fame {_fmt_num(season_summary.get('total_clan_fame'))} "
@@ -412,14 +412,14 @@ def _build_war_status_report(clan=None, war=None):
     clan_name = clan.get("name") or war_status.get("clan_name") or "Clan"
     lines = [f"**{clan_name} War Status**"]
 
-    def _fame_today_label(member):
-        return f"{_member_label(member)} {_fmt_num(member.get('fame_today') or 0)}"
+    def _points_today_label(member):
+        return f"{_member_label(member)} {_fmt_num(member.get('points_today') or 0)}"
 
-    def _fame_total_label(member):
-        return f"{_member_label(member)} {_fmt_num(member.get('fame') or 0)}"
+    def _points_total_label(member):
+        return f"{_member_label(member)} {_fmt_num(member.get('points') or 0)}"
 
-    def _season_fame_label(member):
-        return f"{_member_label(member)} {_fmt_num(member.get('total_fame') or 0)}"
+    def _season_points_label(member):
+        return f"{_member_label(member)} {_fmt_num(member.get('total_points') or 0)}"
 
     if war_status:
         live_bits = [
@@ -457,7 +457,7 @@ def _build_war_status_report(clan=None, war=None):
             # per-member points aren't tracked (QA M6), so show the season points
             # leaders — the race for War Champ.
             lines.append(
-                f"- Season points leaders (War Champ race): {_join_member_bits(current_day.get('top_fame_total') or [], _fame_today_label, limit=5)}"
+                f"- Season points leaders (War Champ race): {_join_member_bits(current_day.get('top_points_total') or [], _points_today_label, limit=5)}"
             )
             lines.append(
                 f"- Waiting on: {_join_member_bits(current_day.get('used_none') or [], lambda member: _member_label(member), limit=6)}"
@@ -484,12 +484,12 @@ def _build_war_status_report(clan=None, war=None):
             lines.append(
                 f"- This week: rank {_fmt_num(race.get('our_rank'))}/{_fmt_num(race.get('total_clans'))} | "
                 f"fame {_fmt_num(race.get('our_fame'))} | participants {_fmt_num(week_summary.get('participant_count'))} | "
-                f"top {_join_member_bits(top_participants, _fame_total_label, limit=3)}"
+                f"top {_join_member_bits(top_participants, _points_total_label, limit=3)}"
             )
         elif day_summaries:
             lines.append(
                 f"- This week so far: {len(day_summaries)} tracked war day(s) | "
-                f"top {_join_member_bits(top_participants, _fame_total_label, limit=3)}"
+                f"top {_join_member_bits(top_participants, _points_total_label, limit=3)}"
             )
 
     if recent_days:
@@ -499,7 +499,7 @@ def _build_war_status_report(clan=None, war=None):
                 (
                     f"{day.get('phase_display')}: {day.get('engaged_count', 0)} engaged, "
                     f"{day.get('finished_count', 0)} finished, "
-                    f"leader {(_member_label((day.get('top_fame_today') or [{}])[0]) if day.get('top_fame_today') else 'none')}"
+                    f"leader {(_member_label((day.get('top_points_today') or [{}])[0]) if day.get('top_points_today') else 'none')}"
                 )
                 if day.get("phase") == "battle"
                 else f"{day.get('phase_display')}: tracked"
@@ -511,7 +511,7 @@ def _build_war_status_report(clan=None, war=None):
         lines.append(
             f"- This season: {season_summary.get('races', 0)} race(s) | total fame {_fmt_num(season_summary.get('total_clan_fame'))} | "
             f"fame/member {_fmt_num(season_summary.get('fame_per_active_member'), 2)} | "
-            f"top {_join_member_bits(season_summary.get('top_contributors') or [], _season_fame_label, limit=3)}"
+            f"top {_join_member_bits(season_summary.get('top_contributors') or [], _season_points_label, limit=3)}"
         )
         lines.append(
             f"- Season watch: {len(season_summary.get('nonparticipants') or [])} with no war participation yet"
@@ -552,7 +552,7 @@ def _build_clan_status_short_report(clan=None, war=None):
     if season_summary:
         top_contributors = _join_member_bits(
             season_summary.get("top_contributors") or [],
-            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_fame') or 0)}",
+            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_points') or 0)}",
             limit=2,
         )
         lines.append(
@@ -949,7 +949,7 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
     if season_summary:
         top_contributors = _join_member_bits(
             season_summary.get("top_contributors") or [],
-            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_fame') or 0)} fame",
+            lambda member: f"{_member_label(member)} {_fmt_num(member.get('total_points') or 0)} points",
             limit=5,
         )
         lines.append(
@@ -967,7 +967,7 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         for entry in season_awards.get("war_champ") or []:
             lines.append(
                 f"- War Champ rank {entry.get('rank')}: {entry.get('name')} ({entry.get('tag')}) "
-                f"— {_fmt_num(entry.get('metric_value'))} fame"
+                f"— {_fmt_num(entry.get('metric_value'))} points"
             )
         for entry in season_awards.get("iron_kings") or []:
             lines.append(
@@ -982,7 +982,7 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
         for entry in season_awards.get("rookie_mvps") or []:
             lines.append(
                 f"- Rookie MVP rank {entry.get('rank')}: {entry.get('name')} ({entry.get('tag')}) "
-                f"— {_fmt_num(entry.get('metric_value'))} fame"
+                f"— {_fmt_num(entry.get('metric_value'))} points"
             )
 
     recent_races = summary.get("recent_war_races") or []
@@ -1001,7 +1001,7 @@ def _build_weekly_clan_recap_context(clan=None, war=None):
                     "  top participants: "
                     + _join_member_bits(
                         top_participants,
-                        lambda member: f"{_member_label(member)} {_fmt_num(member.get('fame') or 0)} fame / {member.get('decks_used') or 0} decks",
+                        lambda member: f"{_member_label(member)} {_fmt_num(member.get('points') or 0)} points / {member.get('decks_used') or 0} decks",
                         limit=3,
                     )
                 )

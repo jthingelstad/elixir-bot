@@ -637,12 +637,10 @@ def _execute_get_river_race(arguments):
             "partial_deck_participant_count": remaining_deck_participants["partial"],
             "participants_with_decks_left_count": remaining_deck_participants["total"],
             "remaining_deck_participants": remaining_deck_participants,
-            # Members contribute POINTS, not fame (fame is clan-only); top_fame_total
-            # is each member's cumulative season points (the API/data label it
-            # 'fame'). The season points leader is the War Champ. decks_used_today
-            # is the daily signal.
-            "top_fame_total": day_state.get("top_fame_total"),
-            "member_value_note": "per-member 'fame' values are that member's season POINTS contribution (only the clan has fame); the season points leader is the War Champ.",
+            # Members contribute POINTS, not fame (fame is clan-only); top_points_total
+            # is each member's cumulative season points. The season points leader is
+            # the War Champ. decks_used_today is the daily signal.
+            "top_points_total": day_state.get("top_points_total"),
             "used_all_4": day_state.get("used_all_4"),
             "used_some": day_state.get("used_some"),
             "used_none": day_state.get("used_none"),
@@ -700,7 +698,7 @@ def _war_standings_freshness(season_id=None):
 
 
 def _current_week_war_top(limit: int = 10) -> list[dict]:
-    """Per-member fame for the CURRENT war section (this week), active members.
+    """Per-member points for the CURRENT war section (this week), active members.
     Fail-open: any error returns [] (the summary is still useful without it)."""
     try:
         conn = _facade_db().get_connection()
@@ -715,7 +713,7 @@ def _current_week_war_top(limit: int = 10) -> list[dict]:
         if not row:
             return []
         rows = conn.execute(
-            """SELECT COALESCE(p.display_name, p.current_name) AS name, wp.fame, wp.decks_used
+            """SELECT COALESCE(p.display_name, p.current_name) AS name, wp.fame AS points, wp.decks_used
                FROM war_participation wp
                JOIN players p ON p.player_tag = wp.player_tag
                JOIN clan_memberships cm ON cm.player_tag = wp.player_tag
@@ -740,20 +738,21 @@ def _execute_get_war_season(arguments):
     if aspect == "summary":
         result = db.get_war_season_summary(season_id=season_id, top_n=limit)
         # "top contributors THIS WEEK" needs the current section's per-member
-        # fame, not season cumulative (rehearsal 2026-07-04: the model answered
+        # points, not season cumulative (rehearsal 2026-07-04: the model answered
         # season totals to a this-week question because only those existed).
         if isinstance(result, dict) and not season_id:
             result["current_week_top"] = _current_week_war_top(limit)
         return result
     elif aspect == "standings":
-        metric = arguments.get("metric", "fame")
-        if metric == "fame":
+        # "fame" is accepted as a back-compat alias for the per-member points metric.
+        metric = arguments.get("metric", "points")
+        if metric in ("points", "fame"):
             members = db.get_war_champ_standings(season_id=season_id)
             _enrich_war_player_types(members)
             rookie_mvps = db.get_rookie_mvp_candidates(season_id=season_id, limit=3)
             return {
                 "season_id": season_id,
-                "metric": "fame",
+                "metric": "points",
                 "freshness": _war_standings_freshness(season_id),
                 "members": members,
                 "rookie_mvps": rookie_mvps,

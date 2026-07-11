@@ -94,7 +94,7 @@ def analyze_war_participants(clan_war_entry: dict) -> dict:
     participants = clan_war_entry.get("participants") or []
     participant_count = len(participants)
 
-    total_fame = sum(p.get("fame", 0) for p in participants)
+    total_points = sum(p.get("fame", 0) for p in participants)
     total_repair = sum(p.get("repairPoints", 0) for p in participants)
     total_decks = sum(p.get("decksUsed", 0) for p in participants)
     total_decks_today = sum(p.get("decksUsedToday", 0) for p in participants)
@@ -107,7 +107,7 @@ def analyze_war_participants(clan_war_entry: dict) -> dict:
         "tag": clan_war_entry.get("tag", ""),
         "name": external_safe_name(clan_war_entry.get("name"), fallback="Unknown"),
         # QA H17: `fame` (the clan's boat fame) IS the standing. The old
-        # `total_fame` summed each member's fame — a DIFFERENT basis that does
+        # `total_fame` summed each member's points — a DIFFERENT basis that does
         # not reconcile with clan fame (defenses + placement aren't a member
         # sum), so ranking clans by it was invalid. Relabel it clearly and never
         # treat it as the clan standing.
@@ -118,7 +118,7 @@ def analyze_war_participants(clan_war_entry: dict) -> dict:
         # the ladder clanScore that analyze_clan_roster reports under clan_score.
         "war_trophies": clan_war_entry.get("clanScore", 0),
         "participant_count": participant_count,
-        "participant_attributed_fame": total_fame,
+        "participant_attributed_points": total_points,
         "total_repair_points": total_repair,
         "total_decks_used": total_decks,
         "total_decks_today": total_decks_today,

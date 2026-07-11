@@ -674,7 +674,7 @@ def list_recent_joins(days: int = 30, conn: Optional[sqlite3.Connection] = None)
             item["recent_form"] = dict(form)
         if season_id is not None:
             war = conn.execute(
-                "SELECT COUNT(*) AS races_played, SUM(COALESCE(wp.fame, 0)) AS total_fame "
+                "SELECT COUNT(*) AS races_played, SUM(COALESCE(wp.fame, 0)) AS total_points "
                 "FROM war_participation wp "
                 "WHERE wp.season_id = ? AND wp.player_tag = ?",
                 (season_id, row["tag"]),
@@ -794,7 +794,7 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
             (row["season_id"], row["section_index"]),
         ).fetchall())
         top_participants = conn.execute(
-            "SELECT wp.player_tag AS tag, COALESCE(p.display_name, p.current_name) AS name, wp.fame, wp.repair_points, wp.decks_used "
+            "SELECT wp.player_tag AS tag, COALESCE(p.display_name, p.current_name) AS name, wp.fame AS points, wp.repair_points, wp.decks_used "
             "FROM war_participation wp LEFT JOIN players p ON p.player_tag = wp.player_tag "
             "WHERE wp.season_id = ? AND wp.section_index = ? "
             "ORDER BY COALESCE(wp.fame, 0) DESC, COALESCE(wp.decks_used, 0) DESC, name COLLATE NOCASE "
