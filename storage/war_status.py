@@ -661,6 +661,24 @@ def get_war_season_summary(season_id: Optional[int] = None, top_n: int = 5, conn
         "FROM war_weeks WHERE season_id = ?",
         (season_id,),
     ).fetchone()
+    total_fame = total_races["total_clan_fame"] or 0
+    races = total_races["cnt"]
+    # QA H7/H8: war_weeks.our_fame is NULL until a week finalizes at close, so the
+    # in-progress week contributed 0 and the whole season read "0 clan fame" while
+    # members visibly had thousands. Add the live current-week boat fame from the
+    # war clock when the current week isn't yet finalized in war_weeks.
+    in_progress = False
+    live = get_current_war_status(conn=conn) or {}
+    if live.get("season_id") == season_id and live.get("fame"):
+        cur = conn.execute(
+            "SELECT our_fame FROM war_weeks WHERE season_id = ? AND section_index = ?",
+            (season_id, live.get("section_index")),
+        ).fetchone()
+        if not (cur and cur["our_fame"] is not None):
+            total_fame += int(live["fame"])
+            in_progress = True
+            if cur is None:  # current week not yet a war_weeks row → count it
+                races += 1
     top = get_war_champ_standings(season_id=season_id, conn=conn)[:top_n]
     nonparticipants = get_members_without_war_participation(season_id=season_id, conn=conn)["members"]
     active_members = conn.execute(
@@ -668,9 +686,10 @@ def get_war_season_summary(season_id: Optional[int] = None, top_n: int = 5, conn
     ).fetchone()["cnt"]
     return {
         "season_id": season_id,
-        "races": total_races["cnt"],
-        "total_clan_fame": total_races["total_clan_fame"] or 0,
-        "fame_per_active_member": round((total_races["total_clan_fame"] or 0) / active_members, 2) if active_members else 0,
+        "races": races,
+        "total_clan_fame": total_fame,
+        "fame_per_active_member": round(total_fame / active_members, 2) if active_members else 0,
+        "current_week_in_progress": in_progress,
         "top_contributors": top,
         "nonparticipants": nonparticipants,
     }

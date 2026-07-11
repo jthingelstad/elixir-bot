@@ -467,12 +467,18 @@ def get_war_score_trend(days: int = 30, conn: Optional[sqlite3.Connection] = Non
 
 @managed_connection
 def compare_fame_per_member_to_previous_season(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
-    from storage.war_status import get_current_season_id
+    from storage.war_status import get_current_season_id, get_current_war_status
 
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     if season_id is None:
         return None
+
+    # QA H8: war_weeks.our_fame is NULL until a week finalizes, so the live
+    # season summed to 0 fame and produced a fake fame-per-member collapse
+    # (e.g. -1966.7). Fold in the live current-week boat fame for whichever
+    # season is in progress (same fix as get_war_season_summary / H7).
+    live = get_current_war_status(conn=conn) or {}
 
     def _season_stats(sid):
         row = conn.execute(
@@ -480,6 +486,17 @@ def compare_fame_per_member_to_previous_season(season_id: Optional[str] = None, 
             "FROM war_weeks WHERE season_id = ?",
             (sid,),
         ).fetchone()
+        total_fame = row["total_fame"] or 0
+        weeks = row["weeks"] or 0
+        if live.get("season_id") == sid and live.get("fame"):
+            cur = conn.execute(
+                "SELECT our_fame FROM war_weeks WHERE season_id = ? AND section_index = ?",
+                (sid, live.get("section_index")),
+            ).fetchone()
+            if not (cur and cur["our_fame"] is not None):
+                total_fame += int(live["fame"])
+                if cur is None:
+                    weeks += 1
         participants = conn.execute(
             "SELECT COUNT(DISTINCT player_tag) AS cnt FROM war_participation "
             "WHERE season_id = ? AND COALESCE(fame, 0) > 0",
@@ -487,22 +504,34 @@ def compare_fame_per_member_to_previous_season(season_id: Optional[str] = None, 
         ).fetchone()["cnt"]
         return {
             "season_id": sid,
-            "total_fame": row["total_fame"] or 0,
-            "weeks": row["weeks"] or 0,
+            "total_fame": total_fame,
+            "weeks": weeks,
             "participants": participants,
-            "fame_per_member": round((row["total_fame"] or 0) / participants, 1) if participants else 0,
+            "fame_per_member": round(total_fame / participants, 1) if participants else 0,
         }
 
     current = _season_stats(int(season_id))
     previous = _season_stats(int(season_id) - 1)
     if not previous["weeks"]:
         previous = None
+    # If the current season is still in progress (fewer weeks than the finished
+    # one), fame_per_member is a partial total — the change is not a collapse,
+    # it's an incomplete season. Flag it so consumers don't misread it.
+    current_in_progress = bool(
+        live.get("season_id") == int(season_id) and live.get("fame")
+    )
     return {
         "current": current,
         "previous": previous,
+        "current_in_progress": current_in_progress,
         "fame_per_member_change": (
             round(current["fame_per_member"] - previous["fame_per_member"], 1)
             if previous else None
+        ),
+        "comparison_caveat": (
+            "current season is in progress (partial fame) — not directly comparable "
+            "to a completed season"
+            if current_in_progress and previous else None
         ),
     }
 
