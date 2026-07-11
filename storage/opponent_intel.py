@@ -102,12 +102,19 @@ def analyze_war_participants(clan_war_entry: dict) -> dict:
     return {
         "tag": clan_war_entry.get("tag", ""),
         "name": clan_war_entry.get("name", "Unknown"),
+        # QA H17: `fame` (the clan's boat fame) IS the standing. The old
+        # `total_fame` summed each member's fame — a DIFFERENT basis that does
+        # not reconcile with clan fame (defenses + placement aren't a member
+        # sum), so ranking clans by it was invalid. Relabel it clearly and never
+        # treat it as the clan standing.
         "fame": clan_war_entry.get("fame", 0),
         "repair_points": clan_war_entry.get("repairPoints", 0),
         "period_points": clan_war_entry.get("periodPoints", 0),
-        "clan_score": clan_war_entry.get("clanScore", 0),
+        # QA M22: in the river-race entry `clanScore` is clan WAR trophies, not
+        # the ladder clanScore that analyze_clan_roster reports under clan_score.
+        "war_trophies": clan_war_entry.get("clanScore", 0),
         "participant_count": participant_count,
-        "total_fame": total_fame,
+        "participant_attributed_fame": total_fame,
         "total_repair_points": total_repair,
         "total_decks_used": total_decks,
         "total_decks_today": total_decks_today,
