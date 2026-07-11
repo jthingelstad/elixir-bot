@@ -1490,6 +1490,55 @@ def _special_event_participation(
 
 
 @managed_connection
+def get_clan_mode_top_members(days: int = 7, per_mode: int = 3, conn: Optional[sqlite3.Connection] = None) -> dict:
+    """Top most-active members per mode group over the window — the NAMED activity
+    behind the aggregate mode mix (who's grinding ranked, pushing an event, running
+    2v2 or ladder). Sourced from the authoritative battle_events store, keyed by
+    mode label; ranked rows also carry the member's current Path-of-Legends league.
+    Compact by design (top ``per_mode`` each) so it fits the awareness read."""
+    days = max(1, int(days or 7))
+    per_mode = max(1, min(int(per_mode or 3), 10))
+    rows = conn.execute(
+        """
+        WITH m AS (
+          SELECT b.mode_group,
+                 COALESCE(p.display_name, p.current_name) AS name,
+                 pcs.ranked_league AS league,
+                 COUNT(*) AS battles,
+                 SUM(b.outcome = 'W') AS wins,
+                 SUM(b.outcome = 'L') AS losses,
+                 SUM(COALESCE(b.trophy_change, 0)) AS trophy_delta,
+                 ROW_NUMBER() OVER (PARTITION BY b.mode_group ORDER BY COUNT(*) DESC) AS rn
+          FROM battle_events b
+          LEFT JOIN players p ON p.player_tag = b.player_tag
+          LEFT JOIN player_current_state pcs ON pcs.player_tag = b.player_tag
+          WHERE b.battle_time >= strftime('%Y%m%dT%H%M%S.000Z', 'now', ?)
+            AND b.mode_group IS NOT NULL
+          GROUP BY b.mode_group, b.player_tag
+        )
+        SELECT mode_group, name, league, battles, wins, losses, trophy_delta
+        FROM m WHERE rn <= ? ORDER BY mode_group, battles DESC
+        """,
+        (f"-{days} day", per_mode),
+    ).fetchall()
+    out: dict[str, list] = {}
+    for r in rows:
+        battles = int(r["battles"] or 0)
+        entry = {
+            "member_ref": r["name"],
+            "battles": battles,
+            "wins": int(r["wins"] or 0),
+            "losses": int(r["losses"] or 0),
+            "win_rate": round((r["wins"] or 0) / battles, 3) if battles else 0,
+            "trophy_delta": int(r["trophy_delta"] or 0),
+        }
+        if r["mode_group"] == "ranked" and r["league"] is not None:
+            entry["league"] = r["league"]
+        out.setdefault(mode_group_label(r["mode_group"]), []).append(entry)
+    return out
+
+
+@managed_connection
 def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None, limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> dict:
     days = max(1, int(days or 30))
     limit = max(1, min(int(limit or 10), 50))
