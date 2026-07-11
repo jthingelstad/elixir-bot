@@ -170,12 +170,28 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
     # our day_rank is meaningless (don't let the brain read it as "losing today").
     day_scored = any(s["period_points"] > 0 for s in day_standings)
     primary_metric = "period_points" if colosseum else "fame"
-    # What we'd bank at day close if our current daily rank holds — placement
-    # fame only (defenses add more, unseen). Mirrors the in-game boat projection;
-    # only meaningful once today has scored, and there is no fame in Colosseum.
+    # What we'd bank at day close if our current daily rank holds — PLACEMENT
+    # fame. Mirrors the in-game boat projection; only meaningful once today has
+    # scored, and there is no fame in Colosseum.
     projected_day_fame = (
         DAILY_RANK_FAME.get(day_rank) if (day_scored and not colosseum) else None
     )
+    # Boat defenses ALSO add fame at day close (survival award) — read directly
+    # from the API's periodLogs (our_defense.defense_fame_recent), NOT
+    # back-calculated. Project the recent per-day rate when defenses still stand.
+    # This is what lets a full-defense clan cross the finish line a day early, so
+    # fold it into projected_fame_at_close + a clinches_finish_today flag.
+    our_defense = projection.get("our_defense") or {}
+    projected_defense_fame = None
+    if not colosseum and (our_defense.get("defenses_remaining") or 0) > 0:
+        projected_defense_fame = our_defense.get("defense_fame_recent")
+    projected_fame_at_close = None
+    clinches_finish_today = False
+    if not colosseum and projected_day_fame is not None:
+        projected_fame_at_close = our_fame + projected_day_fame + (projected_defense_fame or 0)
+        # We'd cross the finish line at TODAY's close (winning the week early) if
+        # holding this rank + defenses gets us there and we're not already over.
+        clinches_finish_today = our_fame < finish_line <= projected_fame_at_close
     # Finish-line / completion pace against the field that actually accumulates
     # for this week type — NEVER the daily number on a normal week (that would
     # falsely "complete" the race on a big battle day, e.g. 10,525 period points).
@@ -197,6 +213,10 @@ def get_current_war_status(conn: Optional[sqlite3.Connection] = None) -> Optiona
         "boat_scored": boat_scored,
         "day_scored": day_scored,
         "projected_day_fame": projected_day_fame,
+        "projected_defense_fame": projected_defense_fame,
+        "projected_fame_at_close": projected_fame_at_close,
+        "defenses_remaining": our_defense.get("defenses_remaining"),
+        "clinches_finish_today": clinches_finish_today,
         "finish_line": finish_line,
         "season_id": season_id,
         "section_index": section_index,

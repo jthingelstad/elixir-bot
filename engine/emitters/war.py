@@ -23,6 +23,35 @@ from engine.emitters import insert_stream_event
 from engine.normalize import war_day as normalize_war_day
 
 
+def _our_defense_projection(payload: dict, our_tag: str | None) -> dict | None:
+    """Per-day boat-defense fame for our clan, read DIRECTLY from the API's
+    periodLogs (`progressEarnedFromDefenses`) — no back-calculation. Intact clan
+    boat defenses pay a fame "survival award" at each day's close ON TOP of
+    placement fame (e.g. 3,000 placement + 435 defenses = 3,435/day), which is
+    what lets a full-defense clan cross the finish line a day early. Returns the
+    most recent closed day's defense fame + current intact defenses, or None if
+    the API omits the field (then we simply don't project defenses)."""
+    if not our_tag:
+        return None
+    days = []
+    for pl in payload.get("periodLogs") or []:
+        idx = pl.get("periodIndex")
+        for it in pl.get("items") or []:
+            if canon_tag((it.get("clan") or {}).get("tag")) == our_tag:
+                dfame = it.get("progressEarnedFromDefenses")
+                if dfame is not None:
+                    days.append((idx if idx is not None else -1, int(dfame), it.get("numOfDefensesRemaining")))
+    if not days:
+        return None
+    days.sort(key=lambda d: d[0])
+    recent = days[-1]
+    return {
+        "defense_fame_recent": recent[1],
+        "defenses_remaining": recent[2],
+        "defense_fame_days": [d[1] for d in days],
+    }
+
+
 def project_race_aspect(payload: dict, season_id: int | None) -> dict:
     """The riverrace baseline: one deterministic projection of the live race."""
     clan = payload.get("clan") or {}
@@ -57,6 +86,7 @@ def project_race_aspect(payload: dict, season_id: int | None) -> dict:
         "period_type": payload.get("periodType"),
         "our_tag": canon_tag(clan.get("tag")),
         "our_fame": clan.get("fame"),
+        "our_defense": _our_defense_projection(payload, canon_tag(clan.get("tag"))),
         "clans": clans,
         "participants": participants,
     }

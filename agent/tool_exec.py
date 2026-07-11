@@ -581,6 +581,14 @@ def _execute_get_river_race(arguments):
             "day_scored": war_status.get("day_scored"),
             "period_points": war_status.get("period_points"),
             "projected_day_fame": war_status.get("projected_day_fame"),
+            # Boat defenses add fame too (from the API's periodLogs) — fold them
+            # into "will we finish today". clinches_finish_today = we cross the
+            # finish line at today's close (winning the week early) if this rank +
+            # defenses hold.
+            "projected_defense_fame": war_status.get("projected_defense_fame"),
+            "projected_fame_at_close": war_status.get("projected_fame_at_close"),
+            "defenses_remaining": war_status.get("defenses_remaining"),
+            "clinches_finish_today": war_status.get("clinches_finish_today"),
             "season_week_label": war_status.get("season_week_label"),
             "is_colosseum_week": db.is_colosseum_week_confirmed(
                 war_status.get("period_type"),
