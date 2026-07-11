@@ -331,11 +331,20 @@ def _is_max(card: dict) -> bool:
 
 
 def _ready_required(card: dict) -> Optional[int]:
-    """Cards required to advance this card one level. None if maxed/unknown."""
+    """Cards required to advance this card one level. None if maxed/unknown.
+
+    QA H15/H16: cards_required_to_upgrade is keyed on the RARITY-RELATIVE level
+    (the api_level, 1-indexed per rarity), NOT the 1-16 display level. Passing
+    the display level indexed into the wrong row (or past the table end -> a
+    spurious None), mispricing ~75% of cards and hiding ready-to-upgrade cards
+    clan-wide. Use api_level, falling back to level only if it's absent."""
     from cr_knowledge import cards_required_to_upgrade
     if _is_max(card):
         return None
-    return cards_required_to_upgrade(card.get("rarity"), card.get("level"))
+    level = card.get("api_level")
+    if level is None:
+        level = card.get("level")
+    return cards_required_to_upgrade(card.get("rarity"), level)
 
 
 def _enrich_card_for_lookup(card: dict, king_tower_level: Optional[int]) -> dict:
