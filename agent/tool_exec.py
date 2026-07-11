@@ -598,6 +598,8 @@ def _execute_get_river_race(arguments):
             "is_final_battle_day": bool(war_status.get("final_battle_day_active")),
             "is_final_practice_day": bool(war_status.get("final_practice_day_active")),
             "trophy_stakes_text": war_status.get("trophy_stakes_text"),
+            # QA M7: freshness — the race baseline is polled, not live-to-the-second.
+            "observed_at": war_status.get("observed_at"),
         }
 
     if aspect == "engagement":
@@ -608,6 +610,7 @@ def _execute_get_river_race(arguments):
         remaining_deck_participants = _remaining_deck_participant_summary(day_state)
         data.update({
             "war_day_key": day_state.get("war_day_key"),
+            "observed_at": day_state.get("observed_at"),  # QA M7: freshness anchor
             "clan_fame": day_state.get("clan_fame"),          # WEEKLY boat fame (cumulative)
             "clan_period_points": day_state.get("period_points"),  # TODAY's points (resets daily)
             "day_rank": day_state.get("day_rank"),
@@ -981,12 +984,20 @@ def _execute_get_clan_game_modes(arguments):
             "duos": [dict(r) for r in rows],
         }
     if aspect == "side_modes":
+        # QA M13: side_mode_progress + leaderboards are not populated yet (no
+        # progress_json / leaderboard-context source). Empty means NOT TRACKED,
+        # not "nothing happening" — say so rather than imply a quiet clan.
+        side_progress = summary["side_mode_progress"]
+        leaderboards = summary["leaderboards"]
         return {
             "aspect": aspect,
             "window_days": summary["window_days"],
-            "side_mode_progress": summary["side_mode_progress"],
-            "leaderboards": summary["leaderboards"],
+            "side_mode_progress": side_progress,
+            "leaderboards": leaderboards,
             "mode_mix": summary["by_group"],
+            "side_mode_progress_tracked": bool(side_progress),
+            "leaderboards_tracked": bool(leaderboards),
+            "note": "side_mode_progress / leaderboards are not tracked yet; empty here means no data source, not clan inactivity — use mode_mix for side-mode activity.",
         }
     if aspect == "events":
         return {
@@ -1105,19 +1116,30 @@ def _execute_get_elixir_state(arguments, workflow=None):
         scope, error = _state_scope(arguments, workflow)
         if error:
             return error
-        return event_facades.summarize_event_windows(
+        result = event_facades.summarize_event_windows(
             windows=_state_windows(arguments),
             scope=scope,
             subject_type=arguments.get("subject_type"),
             subject_key=arguments.get("subject_key"),
             event_class=_state_event_class(arguments),
         )
+        if isinstance(result, dict):
+            # QA M15: signal-event counts reflect the ~7-day event stream, while
+            # battles_mirrored spans the full battle history — the coverages
+            # differ. event_class is NOT applied here (streams are signal events).
+            result["coverage_note"] = (
+                "signal-event counts cover only the recent event stream (~7d); "
+                "battles_mirrored spans the full battle history — different coverage. "
+                "event_class does not filter this view; use get_clan_game_modes for battles."
+            )
+        return result
 
     if aspect == "recent_events":
         scope, error = _state_scope(arguments, workflow)
         if error:
             return error
-        return {
+        event_class = _state_event_class(arguments)
+        out = {
             "scope": scope or "all",
             "days": _state_days(arguments),
             "events": event_facades.list_recent_events(
@@ -1126,10 +1148,16 @@ def _execute_get_elixir_state(arguments, workflow=None):
                 event_type=arguments.get("event_type"),
                 subject_type=arguments.get("subject_type"),
                 subject_key=arguments.get("subject_key"),
-                event_class=_state_event_class(arguments),
+                event_class=event_class,
                 limit=limit,
             ),
         }
+        if event_class == "battle":
+            # QA M16: event_class='battle' is a no-op here (this is the signal
+            # stream, not battle_events) — don't let it read as "no battles".
+            out["note"] = ("event_class='battle' is not supported by this signal-event "
+                           "view; use get_clan_game_modes for battle activity.")
+        return out
 
     if aspect == "game_modes":
         return event_facades.summarize_battle_modes(
