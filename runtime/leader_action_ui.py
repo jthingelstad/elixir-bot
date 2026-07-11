@@ -329,7 +329,7 @@ class DecisionReasonModal(discord.ui.Modal):
             style=discord.TextStyle.paragraph,
             max_length=240,
             required=False,
-            placeholder="Optional. 'revisit in a week/month' delays re-nomination; else the engine reconsiders on new evidence.",
+            placeholder="Optional. 'revisit in a week/month' delays re-nomination; else reconsidered on new evidence.",
         )
         self.add_item(self.reason)
 
