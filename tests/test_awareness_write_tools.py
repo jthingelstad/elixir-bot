@@ -357,3 +357,13 @@ def test_record_awareness_tick_persists_write_counts(memdb):
     assert row["write_calls_issued"] == 2
     assert row["write_calls_succeeded"] == 2
     assert row["write_calls_denied"] == 0
+
+
+def test_save_clan_memory_awareness_is_idempotent(memdb):
+    """QA M28: a repeated identical awareness observation dedups instead of
+    piling up duplicate memories (the leader path already upserts)."""
+    args = {"title": "Andy hot streak", "body": "Andy on a 5-win run.", "member_tag": None}
+    first = json.loads(tool_exec._execute_tool("save_clan_memory", args, workflow="awareness"))
+    second = json.loads(tool_exec._execute_tool("save_clan_memory", args, workflow="awareness"))
+    assert first["success"] and second["success"]
+    assert first["memory_id"] == second["memory_id"]  # same memory, no duplicate

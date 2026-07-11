@@ -313,7 +313,7 @@ def create_memory(*, body: str, source_type: str, is_inference: bool, confidence
                   war_season_id: Optional[str] = None, war_week_id: Optional[str] = None,
                   event_type: Optional[str] = None, event_id: Optional[str] = None,
                   retention_class: str = "standard", expires_at: Optional[str] = None,
-                  metadata: Optional[dict] = None, conn=None) -> dict:
+                  metadata: Optional[dict] = None, idempotent: bool = False, conn=None) -> dict:
     """Signature preserved from the old store; member_id / role /
     retention_class / war_* are accepted-and-absorbed (war ids fold into the
     event key when no event pair is given; the rest are legacy no-ops)."""
@@ -324,6 +324,17 @@ def create_memory(*, body: str, source_type: str, is_inference: bool, confidence
     kind = _norm_kind(source_type)
     now = _utcnow()
     ek = _event_key(event_type, event_id) or _event_key(war_season_id, war_week_id)
+    # QA M28: opt-in idempotency — when a stable event key is supplied and the
+    # caller asks for it, return the existing active memory instead of inserting
+    # a duplicate (the awareness save path uses this; other callers unaffected).
+    if idempotent and ek:
+        existing = conn.execute(
+            "SELECT memory_id FROM memories WHERE source_event_key = ? AND retired_at IS NULL "
+            "ORDER BY memory_id DESC LIMIT 1",
+            (ek,),
+        ).fetchone()
+        if existing:
+            return _fetch_memory(conn, existing["memory_id"])
     cur = conn.execute(
         """INSERT INTO memories (kind, title, body, summary, scope, confidence,
                member_tag, channel_key, source_event_key, created_by,
