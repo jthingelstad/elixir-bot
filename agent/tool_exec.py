@@ -453,6 +453,14 @@ def _execute_get_awards(arguments):
         if isinstance(standings, dict):
             standings = dict(standings)
             standings["freshness"] = _war_standings_freshness(target_season)
+            # QA M26: these are LIVE in-progress standings. The durable awards
+            # ledger (mode='list') is written only at season close, so list()
+            # can show 0 for an active season — not a contradiction.
+            standings["provisional"] = True
+            standings["source_note"] = (
+                "live in-progress standings; awards are committed to the ledger "
+                "(mode='list') only when the season closes."
+            )
         return standings
 
     if mode == "leaderboard":
@@ -482,6 +490,7 @@ def _execute_get_awards(arguments):
         member_tag=resolved_tag,
         limit=int(limit) if limit is not None else 100,
     )
+    cap = int(limit) if limit is not None else 100
     return {
         "mode": "list",
         "filters": {
@@ -491,6 +500,13 @@ def _execute_get_awards(arguments):
             "rank": int(rank) if rank is not None else None,
         },
         "count": len(results),
+        # QA L25: a capped result reads as complete without this.
+        "truncated": len(results) >= cap,
+        # QA M27: season_id is overloaded — war seasons are small integers
+        # (e.g. 129-134); Path-of-Legends champ awards use a YYYYMM month
+        # (e.g. 202606). Filtering by a war integer silently excludes pol awards
+        # for the same period.
+        "season_id_note": "season_id mixes war-season integers (129-134) and Path-of-Legends YYYYMM months (e.g. 202606); a war-integer filter excludes pol awards.",
         "results": results,
     }
 
@@ -1562,6 +1578,15 @@ def _execute_tool(name, arguments, workflow=None):
                 }
             else:
                 _annotate_roster_status(result, member_tag)
+                # QA M21: upgrade costs / cards-required come from a static offline
+                # cost table (card levels are live; the per-level card counts are
+                # not) — flag the precision so "N to next level" isn't overstated.
+                if isinstance(result, dict):
+                    result["upgrade_cost_note"] = (
+                        "cards_required / ready-to-upgrade counts come from a static "
+                        "card-cost table, not live game state; treat them as close "
+                        "estimates, and gold to actually upgrade is unknown."
+                    )
         elif name == "lookup_member_cards":
             member_tag = _resolve_member_tag(arguments["member_tag"])
             include_battles = bool(((arguments.get("filter") or {}).get("mode")) == "war"
