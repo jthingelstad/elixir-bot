@@ -156,13 +156,17 @@ _MODE_PULSE_DAYS = 7
 
 
 def _mode_pulse(conn) -> dict:
-    """Per-mode clan battle activity over the last 7 days — the ONGOING-activity
-    view (Path of Legends / 2v2 / events / Trophy Road), distinct from the one-off
-    pol_promotion events in the battle_mode lane. This is how the brain notices a
-    ranked grind or a 2v2 hot streak (awareness.md 'mode_pulse'). Compacted from
-    get_clan_game_mode_summary (the full summary is ~14K chars and carries the full
-    member-reference dict per player): keep the mode mix + slim top-active members.
-    The brain drills deeper via the get_clan_game_modes tool."""
+    """Per-mode clan battle activity over the last 7 days across EVERY mode the
+    clan plays (Path of Legends / 2v2 / events / Trophy Road / River Race /
+    Friendly) — the ongoing-activity view, distinct from the one-off pol_promotion
+    events in the battle_mode lane. Two parts:
+      - ``mode_mix``: aggregate per mode (battles, active members, win rate, trophy
+        delta) — so the brain always knows how much is happening in each mode.
+      - ``top_by_mode``: the top-3 most-active NAMED members per mode (W/L, win
+        rate, trophy delta; ranked rows carry PoL league) — so the brain sees WHO
+        is grinding each mode, not just aggregates.
+    Both are compact (~1.5K vs the ~14K raw summary). The brain drills deeper via
+    the get_clan_game_modes tool."""
     summary = db.get_clan_game_mode_summary(days=_MODE_PULSE_DAYS, limit=5)
 
     def _mode_row(g: dict) -> dict:
@@ -174,21 +178,10 @@ def _mode_pulse(conn) -> dict:
             "trophy_delta": g.get("trophy_delta"),
         }
 
-    def _ranked_row(m: dict) -> dict:
-        return {
-            "member_ref": m.get("member_ref") or m.get("name"),
-            "ranked_battles": m.get("ranked_battles"),
-            "wins": m.get("wins"),
-            "losses": m.get("losses"),
-            "win_rate": m.get("win_rate"),
-            "trophy_delta": m.get("trophy_delta"),
-            "league": m.get("max_league_seen"),
-        }
-
     return {
         "window_days": summary.get("window_days"),
         "mode_mix": [_mode_row(g) for g in (summary.get("by_group") or [])],
-        "ranked_top": [_ranked_row(m) for m in (summary.get("ranked_activity") or [])[:5]],
+        "top_by_mode": db.get_clan_mode_top_members(days=_MODE_PULSE_DAYS, per_mode=3, conn=conn),
     }
 
 
@@ -585,7 +578,7 @@ def build_read(conn=None) -> dict:
             ),
             "mode_pulse": _load(
                 "mode_pulse", lambda: _mode_pulse(conn),
-                {"mode_mix": [], "ranked_top": [], "window_days": _MODE_PULSE_DAYS},
+                {"mode_mix": [], "top_by_mode": {}, "window_days": _MODE_PULSE_DAYS},
             ),
             "cake_days_today": _load("cake_days_today", lambda: _cake_days_today(conn), []),
             "decision_cases": _load("decision_cases", lambda: _decision_cases(conn), {"due": [], "open": []}),
