@@ -157,7 +157,11 @@ def lookup_cards(
 ) -> list[dict]:
     """Flexible card lookup for the LLM tool.
 
-    All parameters are optional filters. Returns a list of card dicts.
+    All parameters are optional filters. Returns
+    ``{cards, total_matched, returned, truncated}`` so the caller can tell a
+    complete result from a capped one (QA M18), and — when a name is given —
+    orders by relevance so an exact/prefix match wins over an alphabetical one
+    (QA M17: `name='Knight'` used to return "Golden Knight" first).
     """
     clauses = []
     params = []
@@ -183,11 +187,27 @@ def lookup_cards(
         clauses.append("max_evolution_level IS NULL")
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    sql = f"SELECT * FROM card_catalog{where} ORDER BY name LIMIT ?"
-    params.append(limit)
+    total_matched = conn.execute(
+        f"SELECT COUNT(*) FROM card_catalog{where}", params
+    ).fetchone()[0]
 
-    rows = conn.execute(sql, params).fetchall()
-    return [_row_to_dict(r) for r in rows]
+    if name:
+        # exact match, then prefix, then shortest (Knight before Golden Knight).
+        order = ("ORDER BY (LOWER(name) = LOWER(?)) DESC, "
+                 "(LOWER(name) LIKE LOWER(?) || '%') DESC, LENGTH(name) ASC, name")
+        order_params = [name, _escape_like(name)]
+    else:
+        order = "ORDER BY name"
+        order_params = []
+    sql = f"SELECT * FROM card_catalog{where} {order} LIMIT ?"
+    rows = conn.execute(sql, [*params, *order_params, limit]).fetchall()
+    cards = [_row_to_dict(r) for r in rows]
+    return {
+        "cards": cards,
+        "total_matched": total_matched,
+        "returned": len(cards),
+        "truncated": total_matched > len(cards),
+    }
 
 
 @managed_connection
