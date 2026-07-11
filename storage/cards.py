@@ -589,17 +589,34 @@ def _matches_filter(card: dict, filt: dict, *, war_card_names: set[str]) -> bool
     return True
 
 
-def _war_card_names(conn: sqlite3.Connection, member_tag: str) -> set[str]:
-    """Names of cards across the player's inferred war decks (mode=war filter)."""
+def _war_card_names(conn: sqlite3.Connection, member_tag: str) -> tuple[set[str], dict]:
+    """Names of cards across the player's inferred war decks (mode=war filter),
+    plus the reconstruction evidence.
+
+    QA M19: the flat name set alone gives the caller no signal whether it came
+    from 16 war battles or 2, or whether it collapses one deck or four. Return
+    the evidence (war_battles_seen / distinct_decks / confidence / status)
+    alongside so lookup_member_cards can size the reconstruction honestly.
+    """
     from storage.war_analytics import reconstruct_member_war_decks
     result = reconstruct_member_war_decks(member_tag, conn=conn)
     names: set[str] = set()
-    for deck in result.get("decks", []) or []:
+    decks = result.get("decks", []) or []
+    for deck in decks:
         for card in deck.get("cards", []) or []:
             name = card.get("name") if isinstance(card, dict) else None
             if name:
                 names.add(name)
-    return names
+    evidence = dict(result.get("evidence") or {})
+    evidence.setdefault("decks_reconstructed", len(decks))
+    coverage = {
+        "war_battles_seen": evidence.get("war_battles_seen"),
+        "distinct_decks_observed": evidence.get("distinct_decks_observed"),
+        "decks_reconstructed": evidence.get("decks_reconstructed"),
+        "confidence": result.get("confidence"),
+        "status": result.get("status"),
+    }
+    return names, coverage
 
 
 @managed_connection
@@ -678,7 +695,10 @@ def lookup_member_cards(
             "cards": deck_cards,
         }
 
-    war_names: set[str] = _war_card_names(conn, tag) if filt.get("mode") == "war" else set()
+    war_names: set[str] = set()
+    war_coverage: dict = {}
+    if filt.get("mode") == "war":
+        war_names, war_coverage = _war_card_names(conn, tag)
 
     all_cards = [c for c in snapshot["cards"] + snapshot["support_cards"] if c.get("name")]
     matching = [c for c in all_cards if _matches_filter(c, filt, war_card_names=war_names)]
@@ -710,6 +730,10 @@ def lookup_member_cards(
             "War decks are inferred from cards played in recent war battles, not "
             "authoritative — the CR API does not expose them. Phrase carefully."
         )
+        # QA M19: size the reconstruction so the caller can weigh it — a flat
+        # total_matching hides whether these cards came from 16 war battles or 2,
+        # or collapse one deck vs four.
+        result["war_coverage"] = war_coverage
     return result
 
 

@@ -9,6 +9,7 @@ from storage.opponent_intel import (
     analyze_war_participants,
     build_intel_report,
     compute_threat_rating,
+    war_day_context,
 )
 
 # ---------------------------------------------------------------------------
@@ -154,6 +155,37 @@ class TestAnalyzeWarParticipants:
         result = analyze_war_participants(entry)
         assert result["participant_count"] == 0
         assert result["engagement_pct"] == 0
+
+    def test_coverage_note_flags_cumulative(self):
+        # QA M23: the cumulative-vs-today distinction must be spelled out.
+        entry = _make_war_clan_entry("ABC", "Test", participants=[
+            _make_war_participant("A", "Alpha", fame=200, decks_used=8, decks_today=4),
+        ])
+        result = analyze_war_participants(entry)
+        assert "cumulative" in result["coverage_note"]
+
+
+# ---------------------------------------------------------------------------
+# war_day_context (QA M23)
+# ---------------------------------------------------------------------------
+
+class TestWarDayContext:
+    def test_battle_day_index(self):
+        # periodIndex 4 → day 4 within section → war day 2 of 4.
+        ctx = war_day_context({"sectionIndex": 2, "periodIndex": 4, "periodType": "warDay"})
+        assert ctx["war_day_index"] == 1
+        assert ctx["war_day_label"] == "War day 2 of 4"
+        assert ctx["week_label"] == "Week 3"
+
+    def test_training_day(self):
+        ctx = war_day_context({"sectionIndex": 0, "periodIndex": 1, "periodType": "training"})
+        assert ctx["war_day_index"] is None
+        assert "Training" in ctx["war_day_label"]
+
+    def test_missing_payload(self):
+        ctx = war_day_context(None)
+        assert ctx["war_day_index"] is None
+        assert ctx["week_label"] is None
 
 
 # ---------------------------------------------------------------------------

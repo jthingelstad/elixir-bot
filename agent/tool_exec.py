@@ -1296,7 +1296,7 @@ def _execute_get_clan_intel_report(arguments):
     Wraps storage.opponent_intel.build_clan_intel_entry so the scheduled Intel
     Report (and conversational scouting) runs through normal tool plumbing.
     """
-    from storage.opponent_intel import build_clan_intel_entry
+    from storage.opponent_intel import build_clan_intel_entry, war_day_context
 
     raw_tag = arguments.get("clan_tag")
     try:
@@ -1329,6 +1329,21 @@ def _execute_get_clan_intel_report(arguments):
     is_us = clan_tag == cr_api.CLAN_TAG
     clan_profile = cr_api.get_clan_by_tag(clan_tag)
     entry = build_clan_intel_entry(target_entry, clan_profile, is_us=is_us)
+
+    # QA M23: anchor the cumulative war numbers to which battle day they cover,
+    # and note that war participant_count (this week's war roster) is not the
+    # same population as roster member_count (the clan's full member list).
+    entry["war_context"] = war_day_context(war)
+    war_block = entry.get("war") or {}
+    roster_block = entry.get("roster") or {}
+    p_count = war_block.get("participant_count")
+    m_count = roster_block.get("member_count") if roster_block else None
+    if p_count is not None and m_count is not None and p_count != m_count:
+        entry["participation_note"] = (
+            f"{p_count} members entered this week's war vs {m_count} in the clan roster — "
+            "war participant_count counts only those who joined the river race, "
+            "not full clan membership."
+        )
     return entry
 
 def _execute_flag_member_watch(arguments):
