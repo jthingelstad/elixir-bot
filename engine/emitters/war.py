@@ -147,6 +147,23 @@ def merge_baseline(old: dict, new: dict) -> dict:
     return new
 
 
+def _ensure_war_weeks_defense_column(conn) -> None:
+    """Lazy add war_weeks.defense_fame (v5.1 has no forward-migration runner).
+    Persists the week's boat-defense fame (the API's per-day
+    progressEarnedFromDefenses, summed) so it survives the season rolling off
+    the live periodLogs — placement portion = our_fame - defense_fame."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(war_weeks)")}
+    if "defense_fame" not in cols:
+        conn.execute("ALTER TABLE war_weeks ADD COLUMN defense_fame INTEGER")
+
+
+def _week_defense_fame(state: dict) -> int | None:
+    """This week's cumulative boat-defense fame from the projection's per-day
+    periodLogs values (None if the API didn't provide them)."""
+    days = ((state or {}).get("our_defense") or {}).get("defense_fame_days")
+    return sum(days) if days else None
+
+
 def _ensure_season(conn, season_id: int, observed_at: str) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO war_seasons (season_id, started_at) VALUES (?, ?)",
@@ -154,13 +171,15 @@ def _ensure_season(conn, season_id: int, observed_at: str) -> None:
     )
 
 
-def _upsert_week(conn, season_id, section_index, period_type, observed_at) -> None:
+def _upsert_week(conn, season_id, section_index, period_type, observed_at, defense_fame=None) -> None:
     conn.execute(
-        """INSERT INTO war_weeks (season_id, section_index, period_type, created_date)
-           VALUES (?, ?, ?, ?)
+        """INSERT INTO war_weeks (season_id, section_index, period_type, created_date, defense_fame)
+           VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(season_id, section_index)
-           DO UPDATE SET period_type = excluded.period_type""",
-        (season_id, section_index, period_type, observed_at[:10]),
+           DO UPDATE SET
+               period_type = excluded.period_type,
+               defense_fame = MAX(COALESCE(war_weeks.defense_fame, 0), COALESCE(excluded.defense_fame, 0))""",
+        (season_id, section_index, period_type, observed_at[:10], defense_fame),
     )
 
 
@@ -186,14 +205,15 @@ def _finalize_week(conn, state: dict, observed_at: str) -> None:
     our_rank = None if degenerate else _our_rank(state)
     conn.execute(
         """INSERT INTO war_weeks (season_id, section_index, period_type,
-                                  finish_time, our_rank, our_fame)
-           VALUES (?, ?, ?, ?, ?, ?)
+                                  finish_time, our_rank, our_fame, defense_fame)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(season_id, section_index) DO UPDATE SET
                finish_time = excluded.finish_time,
                our_rank = COALESCE(excluded.our_rank, war_weeks.our_rank),
-               our_fame = MAX(COALESCE(war_weeks.our_fame, 0), COALESCE(excluded.our_fame, 0))""",
+               our_fame = MAX(COALESCE(war_weeks.our_fame, 0), COALESCE(excluded.our_fame, 0)),
+               defense_fame = MAX(COALESCE(war_weeks.defense_fame, 0), COALESCE(excluded.defense_fame, 0))""",
         (season_id, section, state.get("period_type"), observed_at,
-         our_rank, our_fame),
+         our_rank, our_fame, _week_defense_fame(state)),
     )
     if degenerate:
         # nothing trustworthy to write to the per-clan standings; keep prior
@@ -387,8 +407,10 @@ def emit_race(conn, entity_tag, old, new, observed_at, window_start) -> int:
     old_type, new_type = old.get("period_type"), new.get("period_type")
 
     if new_season is not None:
+        _ensure_war_weeks_defense_column(conn)
         _ensure_season(conn, new_season, observed_at)
-        _upsert_week(conn, new_season, new_section, new_type, observed_at)
+        _upsert_week(conn, new_season, new_section, new_type, observed_at,
+                     defense_fame=_week_defense_fame(new))
 
     # season rollover: prior season dies, new one is born (same observation)
     if new_season is not None and old_season is not None and new_season != old_season:

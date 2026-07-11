@@ -780,7 +780,7 @@ def get_trophy_changes(since_hours: int = 24, conn: Optional[sqlite3.Connection]
 @managed_connection
 def get_war_history(n: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     rows = conn.execute(
-        "SELECT (season_id * 100 + section_index) AS id, season_id, section_index, our_rank, our_fame, "
+        "SELECT (season_id * 100 + section_index) AS id, season_id, section_index, our_rank, our_fame, defense_fame, "
         "finish_time, created_date, NULL AS standings_json FROM war_weeks ORDER BY created_date DESC LIMIT ?",
         (n,),
     ).fetchall()
@@ -857,7 +857,7 @@ def get_season_window(
         return None
     start, end = _season_bounds(conn, int(sid))
     weeks = conn.execute(
-        "SELECT ww.section_index, ww.our_rank, ww.our_fame, ww.trophy_change, "
+        "SELECT ww.section_index, ww.our_rank, ww.our_fame, ww.trophy_change, ww.defense_fame, "
         "(SELECT COUNT(*) FROM war_week_clans wwc "
         " WHERE wwc.season_id = ww.season_id AND wwc.section_index = ww.section_index) AS clans "
         "FROM war_weeks ww WHERE ww.season_id = ? ORDER BY ww.section_index ASC",
@@ -875,6 +875,7 @@ def get_season_window(
             "section_index": row["section_index"],
             "rank": row["our_rank"],
             "fame": row["our_fame"],
+            "defense_fame": row["defense_fame"],
             "trophy_change": row["trophy_change"],
             "clans": row["clans"] or None,
             "in_progress": False,
@@ -914,7 +915,7 @@ def get_war_season_snapshot(conn: Optional[sqlite3.Connection] = None) -> dict |
             (season_id,),
         ).fetchone()
         weeks = conn.execute(
-            """SELECT section_index, our_rank, our_fame, trophy_change
+            """SELECT section_index, our_rank, our_fame, defense_fame, trophy_change
                FROM war_weeks WHERE season_id = ? ORDER BY section_index""",
             (season_id,),
         ).fetchall()
