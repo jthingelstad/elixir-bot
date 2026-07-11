@@ -272,6 +272,13 @@ def _standing_block(war: dict | None) -> dict | None:
                 "deficit_to_leader": (leader_fame - our_fame) if us.get("rank") != 1 else 0,
                 "finish_line": war.get("finish_line"),
                 "boat_scored": bool(war.get("boat_scored")),
+                # Fame projected at today's close = placement + boat-defense fame
+                # (both from the API). clinches_finish_today => we cross the finish
+                # line tonight, winning the week a day early.
+                "projected_fame_at_close": war.get("projected_fame_at_close"),
+                "projected_defense_fame": war.get("projected_defense_fame"),
+                "defenses_remaining": war.get("defenses_remaining"),
+                "clinches_finish_today": bool(war.get("clinches_finish_today")),
                 "scoreboard": [
                     {"name": s.get("clan_name"), "fame": s.get("fame") or 0, "rank": s.get("rank")}
                     for s in race

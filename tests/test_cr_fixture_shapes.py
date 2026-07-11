@@ -37,7 +37,7 @@ ROSTER_MEMBER_KEYS = {
     "name", "previous_clan_rank", "role", "trophies",
 }
 RACE_KEYS = {
-    "clans", "our_fame", "our_tag", "participants",
+    "clans", "our_fame", "our_tag", "participants", "our_defense",
     "period_index", "period_type", "season_id", "section_index",
 }
 RACE_PARTICIPANT_KEYS = {

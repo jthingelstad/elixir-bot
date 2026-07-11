@@ -135,6 +135,35 @@ def test_no_daily_action_suppresses_meaningless_day_rank():
     assert sb["weekly"]["fame"] == 6870
 
 
+def test_boat_defense_fame_clinches_finish_today():
+    """Boat-defense fame (from the API's periodLogs) turns a 'just short'
+    placement projection into finishing tonight — the Loop #50 gap. Live BD3:
+    6,870 + 3,000 placement = 9,870 (130 short) but + 435 defenses = 10,305."""
+    proj = {
+        "season_id": 134, "section_index": 0, "period_index": 5, "period_type": "warDay",
+        "our_tag": "#US", "our_fame": 6870,
+        "our_defense": {"defense_fame_recent": 435, "defenses_remaining": 15, "defense_fame_days": [435, 435]},
+        "clans": {
+            "#US": {"name": "POAP KINGS", "fame": 6870, "period_points": 3900},
+            "#R": {"name": "R.E.I.C.H", "fame": 3600, "period_points": 0},
+        },
+        "participants": {},
+    }
+    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T13:06:00Z")):
+        war = war_status.get_current_war_status(conn=None)
+    assert war["projected_day_fame"] == 3000       # placement only
+    assert war["projected_defense_fame"] == 435     # from the API, not back-calc
+    assert war["projected_fame_at_close"] == 10305  # 6870 + 3000 + 435
+    assert war["clinches_finish_today"] is True      # 9870 alone would read "130 short"
+    assert war["defenses_remaining"] == 15
+
+    # Without defenses standing, placement alone is 130 short → does NOT clinch.
+    proj["our_defense"] = {"defense_fame_recent": 0, "defenses_remaining": 0, "defense_fame_days": []}
+    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T13:06:00Z")):
+        war2 = war_status.get_current_war_status(conn=None)
+    assert war2["projected_fame_at_close"] == 9870 and war2["clinches_finish_today"] is False
+
+
 def test_war_season_snapshot_exposes_live_race(engine_conn):
     """get_war_season_snapshot (feeds get_elixir_state) must map the real
     get_current_war_status keys — regression for QA H13/H14 where it read stale
