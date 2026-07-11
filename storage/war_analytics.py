@@ -128,11 +128,11 @@ def compare_member_war_to_clan_average(tag: str, season_id: Optional[str] = None
     ).fetchone()
     participants = clan["participants"] or 0
     avg_fame_per_member = round((clan["total_fame"] or 0) / participants, 1) if participants else 0
-    name_row = conn.execute("SELECT current_name FROM players WHERE player_tag = ?", (member_tag,)).fetchone()
+    name_row = conn.execute("SELECT COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?", (member_tag,)).fetchone()
     return {
         "season_id": season_id,
         "tag": member_tag,
-        "name": name_row["current_name"] if name_row else None,
+        "name": name_row["name"] if name_row else None,
         "member": {
             "total_fame": mine["fame"] or 0,
             "races_participated": mine["races"] or 0,
@@ -292,10 +292,10 @@ def get_trending_war_contributors(season_id: Optional[str] = None, recent_races:
         recent_avg = vals.get("recent") or 0
         earlier_avg = vals.get("earlier")
         delta = recent_avg - earlier_avg if earlier_avg is not None else None
-        name_row = conn.execute("SELECT current_name FROM players WHERE player_tag = ?", (tag,)).fetchone()
+        name_row = conn.execute("SELECT COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?", (tag,)).fetchone()
         item = {
             "tag": tag,
-            "name": name_row["current_name"] if name_row else None,
+            "name": name_row["name"] if name_row else None,
             "recent_avg_fame": round(recent_avg, 0),
             "earlier_avg_fame": round(earlier_avg, 0) if earlier_avg is not None else None,
             "fame_trend": round(delta, 0) if delta is not None else None,
@@ -317,7 +317,7 @@ def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqli
     if season_id is None:
         return []
     rows = conn.execute(
-        "SELECT wp.player_tag AS tag, MAX(m.current_name) AS name, "
+        "SELECT wp.player_tag AS tag, MAX(COALESCE(m.display_name, m.current_name)) AS name, "
         "SUM(COALESCE(wp.fame, 0)) AS total_fame, COUNT(*) AS races_participated, "
         "ROUND(AVG(COALESCE(wp.fame, 0)), 0) AS avg_fame, "
         "SUM(COALESCE(wp.decks_used, 0)) AS decks_used "
@@ -350,7 +350,7 @@ def get_perfect_war_participants(season_id: Optional[str] = None, conn: Optional
     if season_id is None:
         return []
     rows = conn.execute(
-        "SELECT wad.player_tag AS tag, MAX(m.current_name) AS name, "
+        "SELECT wad.player_tag AS tag, MAX(COALESCE(m.display_name, m.current_name)) AS name, "
         "COUNT(*) AS battle_days, "
         "SUM(CASE WHEN wad.decks_used >= wad.decks_available THEN 1 ELSE 0 END) AS perfect_days, "
         "SUM(COALESCE(wad.decks_used, 0)) AS decks_used "
@@ -409,7 +409,7 @@ def get_war_battle_win_rates(season_id: Optional[str] = None, limit: int = 10, m
         where.append("b.season_id = ?")
         params.append(season_id)
     rows = conn.execute(
-        "SELECT b.player_tag AS tag, MAX(m.current_name) AS name, "
+        "SELECT b.player_tag AS tag, MAX(COALESCE(m.display_name, m.current_name)) AS name, "
         "COUNT(*) AS battles, "
         "SUM(CASE WHEN b.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
         "SUM(CASE WHEN b.outcome = 'L' THEN 1 ELSE 0 END) AS losses "
@@ -756,7 +756,7 @@ def reconstruct_member_war_decks(
     (deck_json — a join, not raw_json inference; schema.md §9)."""
     member_tag = _canon_tag(tag)
     member_row = conn.execute(
-        "SELECT player_tag, current_name FROM players WHERE player_tag = ?",
+        "SELECT player_tag, COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?",
         (member_tag,),
     ).fetchone()
     if not member_row:
@@ -782,7 +782,7 @@ def reconstruct_member_war_decks(
 
     base_payload = {
         "member_tag": member_tag,
-        "member_name": member_row["current_name"],
+        "member_name": member_row["name"],
         "evidence": {
             "war_battles_seen": war_battles_seen,
             "distinct_decks_observed": len(distinct_decks),

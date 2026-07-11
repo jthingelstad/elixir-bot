@@ -748,7 +748,7 @@ def get_member_signature_cards(tag: str, mode_scope: str = "overall", conn: Opti
 @managed_connection
 def get_members_with_most_level_16_cards(limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     member_rows = conn.execute(
-        "SELECT m.player_tag AS member_id, m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role "
+        "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.clan_rank, cs.role "
         "FROM players m "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
         "WHERE EXISTS (SELECT 1 FROM clan_memberships cm "

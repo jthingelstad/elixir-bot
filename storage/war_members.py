@@ -106,7 +106,7 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     member = conn.execute(
-        "SELECT player_tag, current_name FROM players WHERE player_tag = ?",
+        "SELECT player_tag, COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?",
         (canon_tag,),
     ).fetchone()
     if not member:
@@ -141,7 +141,7 @@ def get_member_war_attendance(tag, season_id=None, conn=None):
     return {
         "season_id": season_id,
         "tag": canon_tag,
-        "name": member["current_name"],
+        "name": member["name"],
         "member_ref": _format_member_reference(canon_tag, conn=conn),
         "season": {
             "races_played": season_row["races_played"] if season_row else 0,
@@ -165,7 +165,7 @@ def get_member_war_battle_record(tag, season_id=None, conn=None):
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     member = conn.execute(
-        "SELECT player_tag, current_name FROM players WHERE player_tag = ?",
+        "SELECT player_tag, COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?",
         (canon_tag,),
     ).fetchone()
     if not member:
@@ -197,7 +197,7 @@ def get_member_war_battle_record(tag, season_id=None, conn=None):
     return {
         "season_id": season_id,
         "tag": canon_tag,
-        "name": member["current_name"],
+        "name": member["name"],
         "member_ref": _format_member_reference(canon_tag, conn=conn),
         "wins": wins,
         "losses": losses,
@@ -213,7 +213,7 @@ def get_member_missed_war_days(tag, season_id=None, conn=None):
     if season_id is None:
         season_id = get_current_season_id(conn=conn)
     member = conn.execute(
-        "SELECT player_tag, current_name FROM players WHERE player_tag = ?",
+        "SELECT player_tag, COALESCE(display_name, current_name) AS name FROM players WHERE player_tag = ?",
         (canon_tag,),
     ).fetchone()
     if not member or season_id is None:
@@ -238,7 +238,7 @@ def get_member_missed_war_days(tag, season_id=None, conn=None):
     return {
         "season_id": season_id,
         "tag": canon_tag,
-        "name": member["current_name"],
+        "name": member["name"],
         "member_ref": _format_member_reference(canon_tag, conn=conn),
         "tracked_days": len(tracked_days),
         "days_participated": participated,
