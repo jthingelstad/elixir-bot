@@ -152,3 +152,10 @@ When per-mode activity is available — battle counts, win rates, top players by
 - Member -> Elder -> Co-Leader -> Leader
 - Elder is a meaningful trust role, not an automatic reward.
 - Co-Leader and Leader are leadership roles and should be discussed carefully.
+
+## Player Levels — Collection Level
+
+- **Collection Level** (`cr_collection_level`) is the headline account-progression number, shown in the upper-left of the home screen. It measures how far a player has taken their whole collection.
+- It's a running total: **+1 for every card upgrade**, and **+5 for unlocking each Evolution or Hero form**. So it climbs steadily over an account's lifetime — strong veterans in this clan sit around ~1700–2100 (e.g. King Thing ~1690, Vijay ~2100).
+- "Experience level" no longer exists in Clash Royale — it was removed and replaced entirely by Collection Level. Do not reference or ask about experience level; use Collection Level (or trophies for ladder strength).
+- In the API it arrives as a badge (`CollectionLevel`), not a top-level field — Supercell adds profile stats via badges. Our normalization already lifts it onto the profile as `cr_collection_level` (with badge tier). Prefer that field.
