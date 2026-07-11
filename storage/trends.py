@@ -340,7 +340,11 @@ def build_clan_trend_summary_context(days: int = 30, window_days: int = 7, clan_
     lines = [
         "=== CLAN TREND SUMMARY ===",
         f"clan: {comparison['clan'].get('clan_name')} ({comparison['clan'].get('clan_tag')})",
-        f"window_days: {days}",
+        # QA L9: `days` is the HISTORY span the snapshots below cover, NOT the
+        # comparison window — that's `window_days` (7d), shown on the
+        # current_Nd_vs_previous_Nd line. Naming it window_days here read as if
+        # the deltas compared 30-day windows.
+        f"history_days: {days} (comparison window below is {window_days}d)",
         (
             f"latest_snapshot: {latest_counts.get('metric_date') or latest_scores.get('metric_date') or latest_trophies.get('metric_date') or 'n/a'} | "
             f"members {latest_counts.get('member_count')} | clan_score {latest_scores.get('clan_score')} | "

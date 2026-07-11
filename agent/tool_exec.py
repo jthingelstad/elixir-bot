@@ -995,8 +995,12 @@ def _execute_get_clan_game_modes(arguments):
         return {
             "aspect": aspect,
             "window_days": days,
-            "note": "pairs are directional (player's own logged battles); "
-                    "teammates outside the clan don't appear",
+            # QA L14: the JOIN is against `players` (not the active roster), so a
+            # teammate who has LEFT the clan but is still known WILL appear;
+            # only never-seen external teammates are absent.
+            "note": "pairs are directional (player's own logged battles); a teammate "
+                    "who has since left the clan can still appear, but a teammate never "
+                    "seen in our data (a random / non-roster player) does not",
             "duos": [dict(r) for r in rows],
         }
     if aspect == "side_modes":
