@@ -82,7 +82,7 @@ def get_member_war_stats(tag, conn=None):
     canon = _canon_tag(tag)
     rows = conn.execute(
         "SELECT (wp.season_id * 100 + wp.section_index) AS id, wp.player_tag AS tag, "
-        "p.current_name AS name, wp.fame, wp.repair_points, wp.decks_used, "
+        "COALESCE(p.display_name, p.current_name) AS name, wp.fame, wp.repair_points, wp.decks_used, "
         "wp.season_id, wp.section_index, ww.our_rank, ww.created_date "
         "FROM war_participation wp "
         "LEFT JOIN war_weeks ww ON ww.season_id = wp.season_id AND ww.section_index = wp.section_index "

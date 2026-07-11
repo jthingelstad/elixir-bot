@@ -256,7 +256,7 @@ def get_player_intel_refresh_targets(limit: int = 12, stale_after_hours: int = 6
     runtime.md §4) instead of profile-snapshot ages."""
     stale_cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=stale_after_hours)).strftime("%Y-%m-%dT%H:%M:%S")
     rows = conn.execute(
-        "SELECT m.player_tag AS member_id, m.player_tag AS tag, m.current_name AS name, "
+        "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
         "cs.role, cs.clan_rank, ps.last_profile_poll AS last_profile_at, "
         "ps.last_battle_seen AS last_battle_at "
         "FROM players m "
@@ -1499,7 +1499,7 @@ def _special_event_participation(
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days or 30)))).strftime("%Y%m%dT%H%M%S.000Z")
     event_contexts = _special_event_context_index(conn)
     rows = conn.execute(
-        "SELECT m.player_tag AS member_id, m.player_tag AS tag, m.current_name AS name, "
+        "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
         "bf.game_mode_id, bf.game_mode_name, bf.event_tag, COUNT(*) AS event_battles, "
         "SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
         "SUM(CASE WHEN bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
@@ -1596,7 +1596,7 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
             by_group[group]["members_active"] = int(row["members_active"] or 0)
 
     ranked_members = conn.execute(
-        "SELECT m.player_tag AS member_id, m.player_tag AS tag, m.current_name AS name, COUNT(*) AS ranked_battles, "
+        "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, COUNT(*) AS ranked_battles, "
         "SUM(CASE WHEN bf.outcome = 'W' THEN 1 ELSE 0 END) AS wins, "
         "SUM(CASE WHEN bf.outcome = 'L' THEN 1 ELSE 0 END) AS losses, "
         "SUM(COALESCE(bf.trophy_change, 0)) AS trophy_delta, MAX(bf.league_number) AS max_league_seen, "
@@ -1618,7 +1618,7 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
         ranked_activity.append(_member_reference_fields(conn, item.pop("member_id"), item))
 
     profile_rows = conn.execute(
-        "SELECT m.player_tag AS member_id, m.player_tag AS tag, m.current_name AS name, "
+        "SELECT m.player_tag AS member_id, m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
         "NULL AS current_path_of_legend_season_result_json, NULL AS progress_json, "
         "cs.trophies, cs.best_trophies, cs.ranked_league, cs.ranked_trophies "
         "FROM players m "

@@ -414,7 +414,7 @@ def get_clan_roster_summary(conn: Optional[sqlite3.Connection] = None) -> dict:
 @managed_connection
 def get_member_profile(tag: str, conn: Optional[sqlite3.Connection] = None) -> Optional[dict]:
     row = conn.execute(
-        "SELECT m.player_tag AS member_id, m.player_tag, m.current_name AS member_name, "
+        "SELECT m.player_tag AS member_id, m.player_tag, COALESCE(m.display_name, m.current_name) AS member_name, "
         f"CASE WHEN {_ACTIVE} THEN 'active' ELSE 'observed' END AS status, "
         "cs.observed_at, cs.role, cs.exp_level, cs.trophies, cs.best_trophies, cs.clan_rank, "
         "cs.donations_week, cs.donations_received_week, cs.arena_name, "
@@ -575,7 +575,7 @@ def get_member_overview(tag: str, conn: Optional[sqlite3.Connection] = None) -> 
 def list_longest_tenure_members(limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     today = datetime.now(timezone.utc).date()
     rows = conn.execute(
-        "SELECT m.player_tag AS tag, m.current_name AS name, cs.role, cs.exp_level, cs.trophies, cs.clan_rank "
+        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.exp_level, cs.trophies, cs.clan_rank "
         "FROM players m "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
         f"WHERE {_ACTIVE}"
@@ -609,7 +609,7 @@ def list_recent_joins(days: int = 30, conn: Optional[sqlite3.Connection] = None)
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=days))
     season_id = get_current_season_id(conn=conn)
     rows = conn.execute(
-        "SELECT m.player_tag AS tag, m.current_name AS name, cs.role, cs.exp_level, cs.trophies, cs.clan_rank "
+        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.exp_level, cs.trophies, cs.clan_rank "
         "FROM players m "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
         f"WHERE {_ACTIVE}"
@@ -668,7 +668,7 @@ def get_member_recent_form(tag: str, scope: str = "competitive_10", conn: Option
 @managed_connection
 def get_members_on_losing_streak(min_streak: int = 3, scope: str = "competitive_10", conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     rows = conn.execute(
-        "SELECT m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role, "
+        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.clan_rank, cs.role, "
         "f.current_streak, f.current_streak_type, f.wins, f.losses, f.sample_size, f.form_label, f.summary "
         "FROM player_recent_form f "
         "JOIN players m ON m.player_tag = f.player_tag "
@@ -683,7 +683,7 @@ def get_members_on_losing_streak(min_streak: int = 3, scope: str = "competitive_
 @managed_connection
 def get_members_on_hot_streak(min_streak: int = 4, scope: str = "ladder_ranked_10", conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     rows = conn.execute(
-        "SELECT m.player_tag AS tag, m.current_name AS name, cs.clan_rank, cs.role, "
+        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.clan_rank, cs.role, "
         "f.current_streak, f.current_streak_type, f.wins, f.losses, f.draws, f.sample_size, "
         "f.form_label, f.summary, f.avg_trophy_change "
         "FROM player_recent_form f "
@@ -708,7 +708,7 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
     cutoff_race = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y%m%dT%H%M%S.000Z")
 
     top_donors = conn.execute(
-        "SELECT m.player_tag AS tag, m.current_name AS name, cs.role, cs.clan_rank, cs.donations_week "
+        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.clan_rank, cs.donations_week "
         "FROM players m "
         "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
         f"WHERE {_ACTIVE} AND COALESCE(cs.donations_week, 0) > 0 "
@@ -733,7 +733,7 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
             (row["season_id"], row["section_index"]),
         ).fetchall())
         top_participants = conn.execute(
-            "SELECT wp.player_tag AS tag, p.current_name AS name, wp.fame, wp.repair_points, wp.decks_used "
+            "SELECT wp.player_tag AS tag, COALESCE(p.display_name, p.current_name) AS name, wp.fame, wp.repair_points, wp.decks_used "
             "FROM war_participation wp LEFT JOIN players p ON p.player_tag = wp.player_tag "
             "WHERE wp.season_id = ? AND wp.section_index = ? "
             "ORDER BY COALESCE(wp.fame, 0) DESC, COALESCE(wp.decks_used, 0) DESC, name COLLATE NOCASE "
@@ -762,7 +762,7 @@ def get_weekly_digest_summary(days: int = 7, conn: Optional[sqlite3.Connection] 
     # Progression from daily metrics (player_profile_snapshots retired).
     progression = []
     active_members = conn.execute(
-        f"SELECT m.player_tag AS tag, m.current_name AS name FROM players m WHERE {_ACTIVE}"
+        f"SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name FROM players m WHERE {_ACTIVE}"
     ).fetchall()
     for row in active_members:
         metrics = conn.execute(

@@ -43,21 +43,52 @@ def payload_hash(payload) -> str:
     ).hexdigest()
 
 
+def _ensure_display_name_column(conn) -> None:
+    """Lazy idempotent add of players.display_name for live DBs cut before it
+    existed (v5.1 has no forward-migration runner — see docs). Fresh builds get
+    it from schema_v51. Cheap: PRAGMA reads the cached schema."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(players)")}
+    if "display_name" not in cols:
+        conn.execute("ALTER TABLE players ADD COLUMN display_name TEXT")
+
+
+def refresh_display_name(conn, player_tag: str, name: str | None = None) -> str:
+    """Recompute + persist players.display_name — the single materialized,
+    LLM-safe name (normalize-at-source). Call after a name change, nickname
+    generation, or leader override. Reads current state when ``name`` is None."""
+    from storage._formatting import compute_display_name
+
+    _ensure_display_name_column(conn)
+    display = compute_display_name(conn, player_tag, name)
+    conn.execute(
+        "UPDATE players SET display_name = ? WHERE player_tag = ?", (display, player_tag)
+    )
+    return display
+
+
 def ensure_player(conn, player_tag: str, name: str | None = None,
                   observed_at: str | None = None) -> None:
-    """§7: any tag the engine observes is a player — upsert its identity row.
+    """§7: any tag the engine observes is a player — upsert its identity row,
+    materializing the injection-safe players.display_name in the same write
+    (normalize-at-source: nothing downstream ever sees the raw name).
 
     Roster diffs maintain members' rows; this covers deep-polled tags that
     never appeared in a roster diff (departed members, replay ordering).
     """
+    from storage._formatting import compute_display_name
+
     at = observed_at or utcnow()
+    _ensure_display_name_column(conn)
+    # None when no incoming name → COALESCE keeps the existing display_name.
+    display = compute_display_name(conn, player_tag, name) if name else None
     conn.execute(
-        """INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at)
-           VALUES (?, ?, ?, ?)
+        """INSERT INTO players (player_tag, current_name, display_name, first_seen_at, last_seen_at)
+           VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(player_tag) DO UPDATE SET
              last_seen_at = excluded.last_seen_at,
-             current_name = COALESCE(excluded.current_name, players.current_name)""",
-        (player_tag, name, at, at),
+             current_name = COALESCE(excluded.current_name, players.current_name),
+             display_name = COALESCE(excluded.display_name, players.display_name)""",
+        (player_tag, name, display, at, at),
     )
 
 

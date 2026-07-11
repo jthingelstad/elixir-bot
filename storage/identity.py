@@ -379,22 +379,26 @@ def list_member_emails(conn: Optional[sqlite3.Connection] = None) -> list[dict]:
 
 @managed_connection
 def format_member_reference(member_or_tag: str | dict, conn: Optional[sqlite3.Connection] = None) -> str:
-    """Return a plain display name for a member tag or identity dict.
+    """Return the readable, LLM-safe display name for a member tag or dict.
 
-    The returned form runs through ``callable_name`` so emoji, hearts,
-    fullwidth Latin, and superscripts collapse to the readable equivalent
-    a Discord user would actually type — "²⁸" becomes "28",
-    "Ｓｈａｆｉｔｈ Ｎｉｈａｌ♥️" becomes "Shafith Nihal", "L-Drxgo⚡" becomes
-    "L-Drxgo". Falls back to the literal name when the input is entirely
-    non-Latin / non-decomposable.
+    Normalize-at-source: when a connection + tag are available this reads the
+    materialized ``players.display_name`` (stored nickname / cleaned / safe
+    fallback). Without a connection it cleans and injection-guards the available
+    raw name in place, so "²⁸"→"28" and an instruction-like name never surfaces.
     """
-    from storage._formatting import callable_name
+    from storage._formatting import callable_name, injection_safe, preferred_display_name
 
-    member = member_or_tag if isinstance(member_or_tag, dict) else get_member_identity(member_or_tag, conn=conn)
-    if not member:
-        return callable_name(str(member_or_tag))
-    raw = member.get("member_name") or member.get("current_name") or member.get("player_tag")
-    return callable_name(raw)
+    member = member_or_tag if isinstance(member_or_tag, dict) else None
+    tag = (member.get("player_tag") or member.get("tag")) if member else member_or_tag
+    if conn is not None and tag:
+        dn = preferred_display_name(conn, tag)
+        if dn:
+            return dn
+    if member is None:
+        member = get_member_identity(member_or_tag, conn=conn) if conn is not None else None
+    raw = ((member or {}).get("member_name") or (member or {}).get("current_name")
+           or (member or {}).get("player_tag") or str(member_or_tag))
+    return injection_safe(callable_name(raw)) or callable_name(raw)
 
 
 @managed_connection

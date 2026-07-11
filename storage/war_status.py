@@ -559,7 +559,7 @@ def get_war_week_summary(season_id: Optional[int] = None, section_index: Optiona
         (season_id, section_index),
     ).fetchone()
     participant_rows = conn.execute(
-        "SELECT wp.player_tag, p.current_name AS player_name, wp.fame, wp.repair_points, wp.boat_attacks, wp.decks_used "
+        "SELECT wp.player_tag, COALESCE(p.display_name, p.current_name) AS player_name, wp.fame, wp.repair_points, wp.boat_attacks, wp.decks_used "
         "FROM war_participation wp LEFT JOIN players p ON p.player_tag = wp.player_tag "
         "WHERE wp.season_id = ? AND wp.section_index = ? "
         "ORDER BY COALESCE(wp.fame, 0) DESC, COALESCE(wp.decks_used, 0) DESC, player_name COLLATE NOCASE",
@@ -641,7 +641,7 @@ def get_war_season_summary(season_id: Optional[int] = None, top_n: int = 5, conn
 def get_trophy_drops(days: int = 7, min_drop: int = 100, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)).strftime("%Y-%m-%d")
     rows = conn.execute(
-        "SELECT m.player_tag AS tag, m.current_name AS name, "
+        "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, "
         "MIN(dm.trophies) AS min_trophies, MAX(dm.trophies) AS max_trophies, "
         "MAX(dm.metric_date) AS latest_metric_date, "
         "(MAX(dm.trophies) - MIN(dm.trophies)) AS spread "
@@ -668,7 +668,7 @@ def get_trophy_changes(since_hours: int = 24, conn: Optional[sqlite3.Connection]
     rows = conn.execute(
         """
         WITH ranked AS (
-            SELECT m.player_tag AS tag, m.current_name AS name, d.trophies, d.metric_date,
+            SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, d.trophies, d.metric_date,
                 ROW_NUMBER() OVER (PARTITION BY d.player_tag ORDER BY d.metric_date ASC) AS rn_asc,
                 ROW_NUMBER() OVER (PARTITION BY d.player_tag ORDER BY d.metric_date DESC) AS rn_desc,
                 d.player_tag

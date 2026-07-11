@@ -140,7 +140,7 @@ def management_read_summary(conn) -> dict:
     """
     rows = conn.execute(
         """SELECT mm.player_tag, mm.role, mm.kick_state, mm.promote_state, mm.demote_state,
-                  p.current_name
+                  COALESCE(p.display_name, p.current_name) AS current_name
            FROM member_management mm
            LEFT JOIN players p ON p.player_tag = mm.player_tag
            WHERE EXISTS (SELECT 1 FROM clan_memberships cm
@@ -370,7 +370,7 @@ def _elder_scores(conn, now: str, week_anchor: str) -> dict:
     bar is the clan itself; filter failures affect candidacy (§3.1), not the
     distribution."""
     members = conn.execute(
-        """SELECT mm.player_tag, mm.role, mm.tenure_days, p.current_name
+        """SELECT mm.player_tag, mm.role, mm.tenure_days, COALESCE(p.display_name, p.current_name) AS current_name
            FROM member_management mm
            LEFT JOIN players p ON p.player_tag = mm.player_tag
            WHERE EXISTS (SELECT 1 FROM clan_memberships cm
@@ -750,7 +750,7 @@ def renominate_after_cooldown(conn, now: str | None = None) -> list[dict]:
         return []
     rows = conn.execute(
         """SELECT mm.player_tag AS player_tag,
-                  COALESCE(p.current_name, mm.player_tag) AS player_name
+                  COALESCE(p.display_name, mm.player_tag) AS player_name
              FROM member_management mm
              LEFT JOIN players p ON p.player_tag = mm.player_tag
             WHERE mm.kick_state = 'recommended'
@@ -819,7 +819,7 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
     rows_out: list[dict] = []
 
     members = conn.execute(
-        """SELECT mm.*, p.current_name AS player_name
+        """SELECT mm.*, COALESCE(p.display_name, p.current_name) AS player_name
            FROM member_management mm
            LEFT JOIN players p ON p.player_tag = mm.player_tag
            WHERE EXISTS (SELECT 1 FROM clan_memberships cm

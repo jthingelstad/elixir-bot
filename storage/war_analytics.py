@@ -91,7 +91,7 @@ def get_members_without_war_participation(season_id: Optional[str] = None, conn:
     members = []
     if season_id is not None:
         rows = conn.execute(
-            "SELECT m.player_tag AS tag, m.current_name AS name, cs.role, cs.clan_rank "
+            "SELECT m.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name, cs.role, cs.clan_rank "
             "FROM players m "
             "LEFT JOIN player_current_state cs ON cs.player_tag = m.player_tag "
             f"WHERE {_ACTIVE} AND NOT EXISTS ("
@@ -171,7 +171,7 @@ def _mgmt_rows(conn):
     )
     last_seen_col = "cs.last_seen_api, " if has_last_seen else "NULL AS last_seen_api, "
     return conn.execute(
-        "SELECT mm.*, m.current_name AS name, cs.clan_rank, cs.trophies, "
+        "SELECT mm.*, COALESCE(m.display_name, m.current_name) AS name, cs.clan_rank, cs.trophies, "
         "cs.donations_week, " + last_seen_col + "mm.player_tag AS tag "
         "FROM member_management mm "
         "JOIN players m ON m.player_tag = mm.player_tag "
@@ -373,7 +373,7 @@ def get_recent_role_changes(days: int = 30, conn: Optional[sqlite3.Connection] =
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
     rows = conn.execute(
-        "SELECT ce.subject_tag AS tag, p.current_name AS name, ce.payload_json, ce.observed_at "
+        "SELECT ce.subject_tag AS tag, COALESCE(p.display_name, p.current_name) AS name, ce.payload_json, ce.observed_at "
         "FROM clan_events ce LEFT JOIN players p ON p.player_tag = ce.subject_tag "
         "WHERE ce.event_type = 'role_changed' AND ce.observed_at >= ? "
         "ORDER BY ce.observed_at DESC",

@@ -653,7 +653,7 @@ def _current_week_war_top(limit: int = 10) -> list[dict]:
         if not row:
             return []
         rows = conn.execute(
-            """SELECT p.current_name AS name, wp.fame, wp.decks_used
+            """SELECT COALESCE(p.display_name, p.current_name) AS name, wp.fame, wp.decks_used
                FROM war_participation wp
                JOIN players p ON p.player_tag = wp.player_tag
                JOIN clan_memberships cm ON cm.player_tag = wp.player_tag
@@ -742,7 +742,7 @@ def _donations_this_week(limit: int = 10) -> dict:
         return {"note": "donation data unavailable", "top_donors_this_week": []}
     try:
         rows = conn.execute(
-            """SELECT p.current_name AS name,
+            """SELECT COALESCE(p.display_name, p.current_name) AS name,
                       COALESCE(pcs.donations_week, 0) AS donated,
                       COALESCE(pcs.donations_received_week, 0) AS received
                FROM player_current_state pcs
@@ -864,7 +864,7 @@ def _ranked_current_standings(limit: int = 10) -> list[dict]:
         return []
     try:
         rows = conn.execute(
-            """SELECT p.current_name AS name, pcs.ranked_league AS league,
+            """SELECT COALESCE(p.display_name, p.current_name) AS name, pcs.ranked_league AS league,
                       pcs.ranked_trophies AS rating
                FROM player_current_state pcs
                JOIN players p ON p.player_tag = pcs.player_tag
@@ -916,7 +916,7 @@ def _execute_get_clan_game_modes(arguments):
         conn = db.get_connection()
         try:
             rows = conn.execute(
-                """SELECT p1.current_name AS player, p2.current_name AS teammate,
+                """SELECT COALESCE(p1.display_name, p1.current_name) AS player, COALESCE(p2.display_name, p2.current_name) AS teammate,
                           COUNT(*) AS battles, SUM(b.outcome = 'W') AS wins
                    FROM battle_events b
                    JOIN players p1 ON p1.player_tag = b.player_tag

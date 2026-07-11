@@ -32,6 +32,7 @@ NEW_DDL = """
 CREATE TABLE players (
     player_tag    TEXT PRIMARY KEY,
     current_name  TEXT,
+    display_name  TEXT,
     first_seen_at TEXT NOT NULL,
     last_seen_at  TEXT NOT NULL
 );
