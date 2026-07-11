@@ -22,6 +22,17 @@ log = logging.getLogger("elixir_agent")
 # it is now a multi-round Sonnet agentic loop where caching is a large net win.)
 WORKFLOWS_WITHOUT_CACHE: set[str] = set()
 
+# Workflows whose STABLE prefix (system prompt + tool defs) should use the 1-hour
+# cache TTL instead of the 5-minute default. The awareness loop runs hourly with a
+# ~14K-token system prompt that never changes between ticks; a 5m TTL expires in the
+# 60-min gap, so every tick re-creates it. With a 1h TTL the prefix survives to the
+# next tick (and TTL refreshes on each read), so it is cache-READ, not re-created —
+# a large net win at the hourly cadence. Anthropic caps TTL at 1h (no 2h option), so
+# this only pays off for cadences <= ~1h; the volatile message prefix stays at 5m.
+# NOTE: session/bursty workflows (interactive/clanops/deck_review) are intentionally
+# NOT here — they complete in one burst, so the cheaper 5m write is better for them.
+LONG_CACHE_TTL_WORKFLOWS: set[str] = {"awareness"}
+
 # Per-workflow request timeouts (seconds) override the 60s default. Sonnet 4.6
 # on the weekly memory_synthesis batch (~75K input tokens) routinely completes
 # in 55-120s, which trips the default timeout and triggers SDK retries that
@@ -300,6 +311,11 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
     prompt_json = _serialize_prompt(system, sanitized_messages, tools, max_tokens, temperature)
 
     cache_enabled = workflow not in WORKFLOWS_WITHOUT_CACHE
+    # Stable prefix (system + tools) gets a 1h TTL for periodic workflows so it
+    # survives the gap between runs; the volatile message prefix always stays 5m.
+    prefix_cc = {"type": "ephemeral"}
+    if cache_enabled and workflow in LONG_CACHE_TTL_WORKFLOWS:
+        prefix_cc = {"type": "ephemeral", "ttl": "1h"}
     if cache_enabled:
         # Cache the growing message prefix (the read + accumulated tool results),
         # not just system+tools — that payload is the bulk of the re-sent input.
@@ -319,14 +335,14 @@ def _create_chat_completion(*, workflow, messages, system=None, model=None, temp
     if system:
         system_block = {"type": "text", "text": system}
         if cache_enabled:
-            system_block["cache_control"] = {"type": "ephemeral"}
+            system_block["cache_control"] = prefix_cc
         kwargs["system"] = [system_block]
 
     # Tools with optional prompt caching on the last tool definition
     if tools:
         if cache_enabled:
             cached_tools = [dict(t) for t in tools]
-            cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+            cached_tools[-1] = {**cached_tools[-1], "cache_control": prefix_cc}
             kwargs["tools"] = cached_tools
         else:
             kwargs["tools"] = list(tools)

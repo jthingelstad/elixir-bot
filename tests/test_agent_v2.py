@@ -1204,13 +1204,39 @@ def test_create_chat_completion_caches_awareness():
             tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
         )
 
+    # The stable prefix (system + tools) uses the 1h TTL for awareness: the
+    # ~14K-token system prompt is identical across hourly ticks, so a 1h cache
+    # (refreshed on each tick's reads) survives the 60-min gap and is read, not
+    # re-created. Session/bursty workflows keep the 5m default.
+    sys_block = create.call_args.kwargs["system"][0]
+    assert sys_block.get("cache_control") == {"type": "ephemeral", "ttl": "1h"}
+    assert create.call_args.kwargs["tools"][-1].get("cache_control") == {"type": "ephemeral", "ttl": "1h"}
+    # The volatile message prefix (the read) always stays at the 5m default — it
+    # changes every tick and is only reused across the multi-round tool loop.
+    last_msg = create.call_args.kwargs["messages"][-1]
+    assert last_msg["content"][-1].get("cache_control") == {"type": "ephemeral"}
+
+
+def test_create_chat_completion_session_workflow_uses_5m_cache():
+    """Session/bursty workflows (not in LONG_CACHE_TTL_WORKFLOWS) keep the 5m
+    default on the stable prefix — they complete in one burst, so the cheaper 5m
+    write beats a 1h write that would never be re-read."""
+    response = _mock_anthropic_response()
+    create = Mock(return_value=response)
+    mock_client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    with (
+        patch("agent.core._get_client", return_value=mock_client),
+        patch("elixir_agent.runtime_status.record_llm_call"),
+    ):
+        elixir_agent._create_chat_completion(
+            workflow="interactive",
+            system="sys",
+            messages=[{"role": "user", "content": "q"}],
+            tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
+        )
     sys_block = create.call_args.kwargs["system"][0]
     assert sys_block.get("cache_control") == {"type": "ephemeral"}
     assert create.call_args.kwargs["tools"][-1].get("cache_control") == {"type": "ephemeral"}
-    # The message prefix (the read) carries a breakpoint too — that's the bulk
-    # of the re-sent input, not just system+tools.
-    last_msg = create.call_args.kwargs["messages"][-1]
-    assert last_msg["content"][-1].get("cache_control") == {"type": "ephemeral"}
 
 
 def test_message_cache_breakpoint_marks_last_block_of_last_message():
