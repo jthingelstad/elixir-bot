@@ -1530,20 +1530,24 @@ def _special_event_participation(
 def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None, limit: int = 10, conn: Optional[sqlite3.Connection] = None) -> dict:
     days = max(1, int(days or 30))
     limit = max(1, min(int(limit or 10), 50))
-    cutoff = (datetime.fromisoformat(chicago_today()) - timedelta(days=max(days - 1, 0))).date().isoformat()
-    where = ["r.battle_date >= ?"]
-    params: list = [cutoff]
+    # QA H12/M12: read the mode mix from the authoritative battle_events store,
+    # not player_daily_battle_rollups — the rollups are lossy/stale, so mode_mix
+    # (by_group) contradicted the battle_events-sourced ranked_activity in the
+    # SAME payload (e.g. ranked 1152 vs 451). Same rolling window as
+    # ranked_activity below so the two counts reconcile.
+    where = ["b.battle_time >= strftime('%Y%m%dT%H%M%S.000Z', 'now', ?)"]
+    params: list = [f"-{days} day"]
     if mode_group:
-        where.append("r.mode_group = ?")
+        where.append("b.mode_group = ?")
         params.append(mode_group)
     rows = conn.execute(
-        "SELECT r.mode_group, r.game_mode_id, r.game_mode_name, COUNT(DISTINCT r.player_tag) AS members_active, "
-        "SUM(r.battles) AS battles, SUM(r.wins) AS wins, SUM(r.losses) AS losses, SUM(r.draws) AS draws, "
-        "SUM(r.trophy_change_total) AS trophy_delta "
-        "FROM player_daily_battle_rollups r "
+        "SELECT b.mode_group, b.game_mode_id, b.game_mode_name, COUNT(DISTINCT b.player_tag) AS members_active, "
+        "COUNT(*) AS battles, SUM(b.outcome = 'W') AS wins, SUM(b.outcome = 'L') AS losses, SUM(b.outcome = 'D') AS draws, "
+        "SUM(COALESCE(b.trophy_change, 0)) AS trophy_delta "
+        "FROM battle_events b "
         f"WHERE {' AND '.join(where)} "
-        "GROUP BY r.mode_group, r.game_mode_id, r.game_mode_name "
-        "ORDER BY battles DESC, r.mode_group ASC, COALESCE(r.game_mode_id, 0) ASC",
+        "GROUP BY b.mode_group, b.game_mode_id, b.game_mode_name "
+        "ORDER BY battles DESC, b.mode_group ASC, COALESCE(b.game_mode_id, 0) ASC",
         tuple(params),
     ).fetchall()
 
@@ -1584,10 +1588,10 @@ def get_clan_game_mode_summary(days: int = 30, mode_group: Optional[str] = None,
         bucket["win_rate"] = round(bucket["wins"] / bucket["battles"], 4) if bucket["battles"] else None
 
     member_count_rows = conn.execute(
-        "SELECT r.mode_group, COUNT(DISTINCT r.player_tag) AS members_active "
-        "FROM player_daily_battle_rollups r "
+        "SELECT b.mode_group, COUNT(DISTINCT b.player_tag) AS members_active "
+        "FROM battle_events b "
         f"WHERE {' AND '.join(where)} "
-        "GROUP BY r.mode_group",
+        "GROUP BY b.mode_group",
         tuple(params),
     ).fetchall()
     for row in member_count_rows:

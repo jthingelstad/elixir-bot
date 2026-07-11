@@ -109,6 +109,11 @@ def test_ranked_and_clan_game_mode_query_helpers():
     assert ranked["recent_ranked"]["battles"] == 1
     assert summary["ranked_activity"][0]["tag"] == "#ABC123"
     assert summary["side_mode_progress"][0]["progress_key"] == "AutoChess_2026_Season_9"
+    # QA H12: mode_mix (by_group) and ranked_activity now share the authoritative
+    # battle_events source, so their ranked counts reconcile (were 1152 vs 451).
+    ranked_group = next((g for g in summary["by_group"] if g["mode_group"] == "ranked"), None)
+    assert ranked_group is not None and ranked_group["battles"] == 1
+    assert sum(m["ranked_battles"] for m in summary["ranked_activity"]) == ranked_group["battles"]
 
 
 def test_game_mode_contexts_capture_events_and_leaderboards():
