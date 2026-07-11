@@ -152,6 +152,26 @@ def test_war_season_snapshot_exposes_live_race(engine_conn):
     assert "standings" not in race and "our_fame" not in race
 
 
+def test_war_season_summary_counts_in_progress_fame(engine_conn):
+    """QA H7/H8: war_weeks.our_fame is NULL until a week finalizes, so a live
+    season summed to 0 clan fame while members had thousands. The in-progress
+    week's live boat fame must be folded in."""
+    engine_conn.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (999, '2026-07-01')")
+    engine_conn.execute("INSERT INTO war_weeks (season_id, section_index) VALUES (999, 0)")  # our_fame NULL
+    engine_conn.commit()
+    proj = {
+        "season_id": 999, "section_index": 0, "period_index": 4, "period_type": "warDay",
+        "our_tag": "#US", "our_fame": 5000,
+        "clans": {"#US": {"name": "POAP KINGS", "fame": 5000, "period_points": 0}},
+        "participants": {},
+    }
+    with patch.object(war_status, "_live_race", return_value=(proj, "2026-07-11T07:06:00Z")):
+        summ = war_status.get_war_season_summary(season_id=999, conn=engine_conn)
+    assert summ["total_clan_fame"] == 5000        # not 0
+    assert summ["current_week_in_progress"] is True
+    assert summ["races"] == 1  # the NULL-fame week isn't double-counted
+
+
 def test_colosseum_is_period_points_only():
     # Colosseum: no weekly fame/boat — the race is decided by period points, and
     # the finish line is 5,000 period points.
