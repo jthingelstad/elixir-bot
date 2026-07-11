@@ -673,27 +673,23 @@ def test_execute_tool_get_river_race_standings():
 
 def test_execute_tool_get_river_race_engagement():
     with patch("elixir_agent.db") as mock_db:
-        mock_db.build_war_now_context.return_value = (
-            {
-                "season_id": 129,
-                "week": 1,
-                "phase": "battle",
-                "phase_display": "Battle Day 1",
-                "day_number": 1,
-                "day_total": 4,
-                "period_type": "warDay",
-                "time_left_seconds": 12000,
-                "time_left_text": "3h 20m",
-                "period_started_at": "2026-03-05T10:00:00Z",
-                "period_ends_at": "2026-03-06T10:00:00Z",
-                "is_colosseum_week": False,
-                "is_final_battle_day": False,
-                "is_final_practice_day": False,
-                "race_standings": [],
-                "now_text": "=== RIVER RACE — CURRENT MOMENT ===\nSeason 129 · Week 1 · Battle Day 1 of 4\nPeriod ends in 3h 20m",
-            },
-            "=== RIVER RACE — CURRENT MOMENT ===\nSeason 129 · Week 1 · Battle Day 1 of 4\nPeriod ends in 3h 20m",
-        )
+        mock_db.build_war_now_context.return_value = {
+            "season_id": 129,
+            "week": 1,
+            "phase": "battle",
+            "phase_display": "Battle Day 1",
+            "day_number": 1,
+            "day_total": 4,
+            "period_type": "warDay",
+            "time_left_seconds": 12000,
+            "time_left_text": "3h 20m",
+            "period_started_at": "2026-03-05T10:00:00Z",
+            "period_ends_at": "2026-03-06T10:00:00Z",
+            "is_colosseum_week": False,
+            "is_final_battle_day": False,
+            "is_final_practice_day": False,
+            "race_standings": [],
+        }
         mock_db.get_current_war_day_state.return_value = {
             "war_day_key": "s00129-w01-p010",
             "clan_fame": 5000,
@@ -897,7 +893,7 @@ def test_respond_in_channel_keeps_ask_elixir_lightweight_followups_focused():
 def test_respond_in_channel_uses_clanops_workflow():
     with (
         patch("elixir_agent._chat_with_tools", return_value=None) as mock_chat,
-        patch("agent.workflows.db.build_war_now_context", return_value=(None, "")),
+        patch("agent.workflows.db.build_war_now_context", return_value=None),
     ):
         result = elixir_agent.respond_in_channel(
             question="We should review promotions this week.",
@@ -919,30 +915,22 @@ def test_respond_in_channel_injects_war_context_for_war_question():
     with (
         patch("elixir_agent._chat_with_tools", return_value={"event_type": "channel_response", "content": "ok"}) as mock_chat,
         patch("agent.workflows.db.build_clan_trend_summary_context", return_value="trends"),
-        patch("agent.workflows.db.build_war_now_context", return_value=(
-            {
-                "season_id": 129,
-                "week": 3,
-                "phase": "battle",
-                "phase_display": "Battle Day 2",
-                "day_number": 2,
-                "day_total": 4,
-                "time_left_text": "12h 30m",
-                "is_colosseum_week": False,
-                "is_final_battle_day": False,
-                "is_final_practice_day": False,
-                "race_standings": [
-                    {"rank": 1, "clan_name": "POAP KINGS", "fame": 12000, "is_us": True},
-                    {"rank": 2, "clan_name": "Dragon Riders", "fame": 11000, "is_us": False},
-                ],
-            },
-            "=== RIVER RACE — CURRENT MOMENT ===\n"
-            "Season 129 · Week 3 · Battle Day 2 of 4\n"
-            "Period ends in 12h 30m\n"
-            "Race standings:\n"
-            "  1. POAP KINGS (us) | 12,000 fame\n"
-            "  2. Dragon Riders | 11,000 fame",
-        )),
+        patch("agent.workflows.db.build_war_now_context", return_value={
+            "season_id": 129,
+            "week": 3,
+            "phase": "battle",
+            "phase_display": "Battle Day 2",
+            "day_number": 2,
+            "day_total": 4,
+            "time_left_text": "12h 30m",
+            "is_colosseum_week": False,
+            "is_final_battle_day": False,
+            "is_final_practice_day": False,
+            "race_standings": [
+                {"rank": 1, "clan_name": "POAP KINGS", "fame": 12000, "is_us": True},
+                {"rank": 2, "clan_name": "Dragon Riders", "fame": 11000, "is_us": False},
+            ],
+        }),
     ):
         elixir_agent.respond_in_channel(
             question="How's the race going?",
@@ -1055,7 +1043,13 @@ def test_analyze_arena_relay_screenshot_passes_image_and_action_context():
     }
     with (
         patch("elixir_agent._chat_with_tools", return_value={"event_type": "arena_relay_screenshot_observation", "content": "ok"}) as mock_chat,
-        patch("agent.workflows.db.build_war_now_context", return_value=(None, "=== RIVER RACE — CURRENT MOMENT ===\nTraining Day 1")),
+        patch("agent.workflows.db.build_war_now_context", return_value={
+            "season_id": 130, "week": 1, "phase": "practice",
+            "phase_display": "Training Day 1", "day_number": 1, "day_total": None,
+            "time_left_text": None, "is_colosseum_week": False,
+            "is_final_battle_day": False, "is_final_practice_day": False,
+            "race_standings": [], "day_standings": [],
+        }),
         patch("agent.workflows.db.list_leader_actions", return_value=[
             {
                 "action_id": 7,
