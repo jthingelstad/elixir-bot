@@ -12,11 +12,24 @@ import elixir_agent
 
 def test_execute_tool_get_clan_roster_list():
     with patch("elixir_agent.db") as mock_db:
-        mock_db.list_members.return_value = [{"player_tag": "#ABC123", "member_name": "King Levy"}]
+        # Full member dict; the list view keeps roster-relevant keys and drops the
+        # noisy cr_* internals / *_updated_at timestamps (all 50 with the full dict
+        # overflowed the 20K tool cap and dropped the whole members list).
+        mock_db.list_members.return_value = [{
+            "member_ref": "King Levy", "player_tag": "#ABC123", "role": "leader",
+            "roster_status": "active", "trophies": 9000, "donations_week": 300,
+            "cr_account_age_updated_at": "2026-07-04T01:08:46", "cr_banner_count": 12,
+            "cr_battle_wins": 8000, "discord_user_id": "123", "note": "",
+        }]
         result = json.loads(elixir_agent._execute_tool("get_clan_roster", {"aspect": "list"}))
         # 2026-07-04 rehearsal: list is wrapped with an in-band semantics note
         # (the model misread donations_week as lifetime and refused an answer).
-        assert result["members"] == [{"player_tag": "#ABC123", "member_name": "King Levy"}]
+        member = result["members"][0]
+        assert member["member_ref"] == "King Levy"
+        assert member["donations_week"] == 300 and member["role"] == "leader"
+        # noise dropped
+        assert "cr_banner_count" not in member and "cr_account_age_updated_at" not in member
+        assert "discord_user_id" not in member and "note" not in member
         assert "THIS WEEK" in result["note"]
         mock_db.list_members.assert_called_once_with()
 

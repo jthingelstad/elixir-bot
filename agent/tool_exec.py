@@ -846,6 +846,21 @@ def _donations_this_week(limit: int = 10) -> dict:
         conn.close()
 
 
+_ROSTER_LIST_KEYS = (
+    "member_ref", "player_tag", "role", "roster_status", "trophies", "clan_rank",
+    "donations_week", "donations_received_week", "war_points_rank_season",
+    "joined_date", "elder_eligible", "in_discord", "cr_games_per_day",
+)
+
+
+def _compact_roster_member(member: dict) -> dict:
+    """Roster 'list' view: keep the roster-relevant fields and drop the ~28 noisy
+    cr_* internals / *_updated_at timestamps. All 50 members with the full dict
+    was ~63K chars and overflowed the tool-result cap, dropping the whole members
+    list. The brain drills into a member's deep CR stats via get_member."""
+    return {k: member[k] for k in _ROSTER_LIST_KEYS if k in member}
+
+
 def _execute_get_clan_roster(arguments):
     """Execute the consolidated get_clan_roster tool."""
     aspect = arguments.get("aspect", "list")
@@ -859,7 +874,7 @@ def _execute_get_clan_roster(arguments):
             "note": ("donations_week / donations_received_week are THIS WEEK's "
                      "counts (CR resets them Monday); they are fully answerable "
                      "for any asker — not leadership-restricted."),
-            "members": db.list_members(),
+            "members": [_compact_roster_member(m) for m in db.list_members()],
         }
     elif aspect == "card_owners":
         from storage import cards as _cards_storage
