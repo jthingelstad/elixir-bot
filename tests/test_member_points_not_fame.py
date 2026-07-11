@@ -89,6 +89,11 @@ def test_get_war_season_standings_emits_points_not_fame():
         assert m["total_points"] > 0
         for bad in _FORBIDDEN_MEMBER_KEYS:
             assert bad not in m, f"member dict leaked '{bad}': {m}"
+        # Substring guard: NO member key may contain "fame" — this catches
+        # relapse vectors an exact-match list misses (e.g. war_fame_rank_*,
+        # a nested current_day fame). A member never has fame.
+        fame_keys = [k for k in m if "fame" in k]
+        assert not fame_keys, f"member dict leaked fame-substring keys: {fame_keys}"
 
 
 def test_get_war_season_standings_accepts_fame_alias_but_returns_points():
