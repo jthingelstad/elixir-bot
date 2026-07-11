@@ -606,7 +606,7 @@ def list_card_owners(
     if not name:
         return {"error": "card_name required"}
     rows = conn.execute(
-        """SELECT p.current_name AS member, cc.name AS card,
+        """SELECT COALESCE(p.display_name, p.current_name) AS member, cc.name AS card,
                   pcc.level + MAX(0, 16 - cc.max_level) AS display_level,
                   pcc.evolution_level
            FROM player_card_collection pcc

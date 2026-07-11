@@ -187,7 +187,7 @@ def compare_member_trend_windows(tag: str, window_days: int = 7, conn: Optional[
         }
 
     member_row = conn.execute(
-        "SELECT player_tag AS member_id, player_tag AS tag, current_name AS name FROM players WHERE player_tag = ?",
+        "SELECT player_tag AS member_id, player_tag AS tag, display_name AS name FROM players WHERE player_tag = ?",
         (_canon_tag(tag),),
     ).fetchone()
     member = dict(member_row) if member_row else {"tag": _canon_tag(tag), "name": _canon_tag(tag)}

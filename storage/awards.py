@@ -120,7 +120,7 @@ def list_awards(award_type: Optional[str] = None, season_id: Optional[int] = Non
     rows = conn.execute(
         "SELECT a.award_id, a.award_type, a.season_id, a.section_index, "
         "a.player_tag AS member_id, a.player_tag, a.rank, a.metric_value, a.metric_unit, "
-        "a.metadata_json, a.awarded_at, p.current_name AS player_name "
+        "a.metadata_json, a.awarded_at, COALESCE(p.display_name, p.current_name) AS player_name "
         "FROM awards a LEFT JOIN players p ON p.player_tag = a.player_tag "
         f"WHERE {' AND '.join(where)} "
         "ORDER BY a.season_id DESC, a.award_type ASC, a.rank ASC LIMIT ?",
@@ -136,7 +136,7 @@ def award_leaderboard(award_type: Optional[str] = None, conn: Optional[sqlite3.C
     where = "WHERE a.award_type = ?" if award_type else ""
     params = (award_type,) if award_type else ()
     rows = conn.execute(
-        "SELECT a.player_tag AS member_id, a.player_tag, p.current_name AS player_name, "
+        "SELECT a.player_tag AS member_id, a.player_tag, COALESCE(p.display_name, p.current_name) AS player_name, "
         "COUNT(*) AS count, MAX(a.season_id) AS latest_season_id "
         "FROM awards a LEFT JOIN players p ON p.player_tag = a.player_tag "
         f"{where} "
@@ -152,7 +152,7 @@ def get_awards_by_season(season_id: int, conn: Optional[sqlite3.Connection] = No
     rows = conn.execute(
         "SELECT a.award_id, a.award_type, a.season_id, a.section_index, "
         "a.player_tag AS member_id, a.player_tag, a.rank, a.metric_value, a.metric_unit, "
-        "a.metadata_json, a.awarded_at, p.current_name AS player_name "
+        "a.metadata_json, a.awarded_at, COALESCE(p.display_name, p.current_name) AS player_name "
         "FROM awards a LEFT JOIN players p ON p.player_tag = a.player_tag "
         "WHERE a.season_id = ? "
         "ORDER BY a.award_type ASC, a.rank ASC",
@@ -266,7 +266,7 @@ def get_iron_king_candidates(
         ceiling = ceiling_row["ceiling"]
         total_battle_days += ceiling // 4 if ceiling % 4 == 0 else 0
         rows = conn.execute(
-            "SELECT wp.player_tag AS tag, m.current_name AS name "
+            "SELECT wp.player_tag AS tag, COALESCE(m.display_name, m.current_name) AS name "
             "FROM war_participation wp JOIN players m ON m.player_tag = wp.player_tag "
             f"WHERE wp.season_id = ? AND wp.section_index = ? AND {_ACTIVE} "
             "AND wp.decks_used = ?",
@@ -311,7 +311,7 @@ def _season_donation_rows(
             GROUP BY d.player_tag, iso_week
         )
         SELECT m.player_tag AS tag,
-               m.current_name AS name,
+               COALESCE(m.display_name, m.current_name) AS name,
                m.player_tag AS member_id,
                SUM(wp.week_peak) AS total_donations
         FROM weekly_peaks wp

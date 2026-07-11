@@ -89,14 +89,11 @@ def _display_name(conn, tag: str, raw_name: str | None) -> str | None:
 
 
 def _upsert_identity(conn, tag: str, name: str | None, observed_at: str) -> None:
-    conn.execute(
-        """INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(player_tag) DO UPDATE SET
-               current_name = COALESCE(excluded.current_name, players.current_name),
-               last_seen_at = excluded.last_seen_at""",
-        (tag, name, observed_at, observed_at),
-    )
+    # Upsert current_name + the materialized, injection-safe display_name in one
+    # place (normalize-at-source) via the shared engine helper.
+    from engine.db import ensure_player, refresh_display_name
+
+    ensure_player(conn, tag, name, observed_at)
     if name:
         conn.execute(
             "INSERT OR IGNORE INTO player_aliases (player_tag, alias, source, observed_at) "
@@ -111,6 +108,10 @@ def _upsert_identity(conn, tag: str, name: str | None, observed_at: str) -> None
         from engine.nicknames import ensure_nickname
 
         ensure_nickname(conn, tag, name, observed_at)
+        # ensure_nickname may have set OR cleared the nickname (rename-to-readable);
+        # either changes the tier-1 input, so re-materialize display_name from the
+        # final state. Cheap, and always correct regardless of what changed.
+        refresh_display_name(conn, tag, name)
     except Exception:
         _log.exception("ensure_nickname failed for %s (%r)", tag, name)
 

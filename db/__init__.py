@@ -433,6 +433,14 @@ def set_member_nickname(player_tag: str, nickname: Optional[str], *,
             nickname_source=(source if clean else None),
             nickname_updated_at=(observed_at or _utcnow()),
         )
+        # Leader override changed tier 1 → re-materialize the player's display_name
+        # (normalize-at-source). Late import: engine.db imports from this module.
+        try:
+            from engine.db import refresh_display_name
+
+            refresh_display_name(conn, player_tag)
+        except Exception:
+            pass  # display_name is best-effort; a nickname set must never fail
         if owns:
             conn.commit()
     finally:

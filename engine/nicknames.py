@@ -24,13 +24,20 @@ _MAX_NICKNAME_LEN = 32
 
 
 def needs_nickname(name: str | None) -> bool:
-    """True when callable_name can't produce a readable (ASCII-alphanumeric)
-    name — i.e. the deterministic cleaner leaves only punctuation/symbols.
-    `²⁸`/`Sebastián`/fullwidth names are NOT flagged; `...`/`♥♥` are."""
+    """True when the name can't be handed to an LLM verbatim and should get a
+    benign generated handle. Two cases:
+      1. callable_name leaves no readable ASCII-alphanumeric char (`...`/`♥♥`);
+      2. the cleaned name is injection-unsafe (prompt-structure chars or
+         instruction-like tokens — e.g. a name literally `SYSTEM: ...`).
+    `²⁸`/`Sebastián`/fullwidth names are NOT flagged (callable_name handles them)."""
+    from storage._formatting import injection_safe
+
     if not name or not name.strip():
         return True
     cleaned = callable_name(name)
-    return not any(ch.isascii() and ch.isalnum() for ch in cleaned)
+    if not any(ch.isascii() and ch.isalnum() for ch in cleaned):
+        return True
+    return injection_safe(cleaned) is None
 
 
 def _deterministic_residual(name: str) -> str | None:
@@ -43,12 +50,17 @@ def _deterministic_residual(name: str) -> str | None:
 
 
 def _sanitize(candidate: str | None) -> str | None:
-    """Keep an LLM/override suggestion to a clean short ASCII-ish token."""
+    """Keep an LLM/override suggestion to a clean, injection-safe short token.
+    A generated nickname becomes the tier-1 display_name and is shown verbatim,
+    so it must itself be safe — reject (→ placeholder) if it isn't."""
+    from storage._formatting import injection_safe
+
     if not candidate:
         return None
     text = " ".join(str(candidate).split()).strip().strip('"').strip("'")
     text = callable_name(text)  # fold anything odd the model returned
     text = text[:_MAX_NICKNAME_LEN].strip()
+    text = injection_safe(text) or ""  # never let an injection-y handle through
     if not any(ch.isascii() and ch.isalnum() for ch in text):
         return None
     return text

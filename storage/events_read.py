@@ -196,7 +196,7 @@ def summarize_battle_modes(
             if (row["battles"] or 0) < min_battles:
                 continue
             top = conn.execute(
-                "SELECT b.player_tag AS tag, p.current_name AS name, COUNT(*) AS battles "
+                "SELECT b.player_tag AS tag, COALESCE(p.display_name, p.current_name) AS name, COUNT(*) AS battles "
                 "FROM battle_events b LEFT JOIN players p ON p.player_tag = b.player_tag "
                 f"WHERE {' AND '.join(where)} AND b.mode_group IS ? AND b.game_mode_name IS ? "
                 "GROUP BY b.player_tag ORDER BY battles DESC LIMIT ?",
