@@ -37,7 +37,7 @@ from agent.prompt_builders import (
     _war_recap_system,
     _weekly_digest_system,
 )
-from agent.tool_policy import READ_TOOLS, RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
+from agent.tool_policy import RESPONSE_SCHEMAS_BY_WORKFLOW, TOOLSETS_BY_WORKFLOW
 
 
 def _chat_with_tools(*args, **kwargs):
@@ -464,7 +464,7 @@ def generate_ask_elixir_daily(read: dict, *, tool_stats: dict | None = None):
 
 
 def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None,
-                       shadow: bool = False, on_event=None):
+                       on_event=None):
     """Run one awareness-loop turn. Receives the assembled Situation, returns
     a structured post plan: ``{"posts": [...], "skipped_reason": "..."}``.
 
@@ -477,10 +477,9 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None,
     so the caller can persist the awareness write budget usage in
     ``awareness_ticks``.
 
-    ``shadow`` (default False) preserves today's behavior. When True, the turn
-    runs with READ-ONLY tools (no write tools in the allowed set) so the model
-    physically cannot write, regardless of the awareness spec's
-    ``write_tools_allowed``. Used by the shadow-mode awareness loop.
+    The turn runs with the brain's full read + write tool surface
+    (``AWARENESS_TOOLS``) — writes are still bounded per tick by
+    ``AWARENESS_WRITE_BUDGET_PER_TICK`` in the tool-call loop.
     """
     # Strip `_`-prefixed internal fields (e.g., _raw_signal_count, _clan_tag)
     # before serializing — the agent does not need runtime bookkeeping.
@@ -492,7 +491,7 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None,
         "must be addressed.\n\n"
         f"```json\n{json.dumps(public_situation, indent=2, default=str)}\n```\n"
     )
-    allowed_tools = READ_TOOLS if shadow else TOOLSETS_BY_WORKFLOW["awareness"]
+    allowed_tools = TOOLSETS_BY_WORKFLOW["awareness"]
 
     def _tick(user_msg, max_tokens):
         return _chat_with_tools(
@@ -508,8 +507,8 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None,
             strict_json=True,
             # Always surface WHY a tick produced nothing (truncation, schema
             # error, timeout, max tool rounds) as a {"_error": ...} payload so
-            # we can retry a transient truncation here; the None-on-failure
-            # contract for non-shadow callers is re-applied below.
+            # we can retry a transient truncation here and the loop can classify
+            # a persistent failure (see the return below).
             return_errors=True,
             tool_stats=tool_stats,
             on_event=on_event,
@@ -545,11 +544,9 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None,
         )
         result = _tick(retry_msg, 16384)
 
-    # Preserve the external contract: non-shadow callers expect None on failure;
-    # shadow callers want the {"_error": ...} payload so the loop can classify
-    # the tick as failed (not deliberate silence).
-    if not shadow and isinstance(result, dict) and "_error" in result:
-        return None
+    # Return the result verbatim — including a {"_error": ...} payload on a
+    # persistent failure — so the loop's classify_plan can mark the tick failed
+    # (not deliberate silence) and surface the failure detail in the diagnostic.
     return result
 
 

@@ -1,9 +1,9 @@
 """The awareness loop — the heartbeat + deliberation.
 
 ``run_awareness_loop`` is the central deliberative turn: build the read, hand
-it to the benched brain (``run_awareness_tick``), persist the train of thought,
-and — in shadow mode — render a diagnostic to the #thinking channel via the
-caller-supplied ``post_fn``. It posts NOTHING to any member-facing channel.
+it to the brain (``run_awareness_tick``), persist the train of thought, deliver
+the plan's posts to the member-facing channels, and render a diagnostic to the
+leader-only #thinking channel. The brain is the clan's sole proactive poster.
 
 It never raises out of the scheduled path: every failure is logged and folded
 into the returned counters so a bad tick can't crash the scheduler thread.
@@ -16,19 +16,19 @@ import logging
 log = logging.getLogger("elixir")
 
 
-def run_awareness_loop(*, shadow: bool = True, progress_fn=None, deliver_fn=None) -> dict:
+def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
     """Run one awareness loop turn. Returns counters describing the outcome.
 
-    ``shadow`` gates member-facing posting. When True (default) the brain runs
-    and the only side effects are the persisted thought and the #thinking
-    diagnostic — nothing member-facing. When False, ``deliver_fn`` is invoked
-    with the plan to actually post to Discord.
+    The brain is the clan's sole proactive poster: it runs with its full read +
+    write tool surface, and when ``deliver_fn`` is supplied its plan is posted to
+    the member-facing channels.
 
-    ``deliver_fn(read, plan, loop_number) -> dict`` (live only) sends the plan's
-    posts and returns ``{"delivered", "failed", "reason", ...}``. A ``failed``
-    delivery downgrades the tick to ``failed`` so the cursor doesn't advance and
-    the signals re-surface next loop (fail-hard, catch-up). Absent/shadow, no
-    posting happens.
+    ``deliver_fn(read, plan) -> dict`` sends the plan's posts and returns
+    ``{"delivered", "failed", "reason", ...}``. A ``failed`` delivery downgrades
+    the tick to ``failed`` so the cursor doesn't advance and the signals
+    re-surface next loop (fail-hard, catch-up). When ``deliver_fn`` is absent
+    (CLI / tests) the brain still deliberates and the thought is persisted, but
+    no posting happens.
 
     ``progress_fn`` (optional) streams the tick's train of thought to Discord as
     it happens — a ``start`` event opens the #thinking thread, ``tool`` /
@@ -38,12 +38,11 @@ def run_awareness_loop(*, shadow: bool = True, progress_fn=None, deliver_fn=None
     tick still runs and the persisted thought remains the durable record.
     """
     from agent.workflows import run_awareness_tick
+    from runtime.awareness import diagnostic as diag_mod
     from runtime.awareness import read as read_mod
-    from runtime.awareness import shadow as shadow_mod
     from runtime.awareness import store
 
     counters = {
-        "shadow": shadow,
         "posts_planned": 0,
         "chose_silence": False,
         "tick_failed": False,
@@ -70,7 +69,7 @@ def run_awareness_loop(*, shadow: bool = True, progress_fn=None, deliver_fn=None
 
     # Open the live #thinking thread with the read before the brain deliberates,
     # so tool calls + any truncation stream in as they happen.
-    _progress({"type": "start", "read_summary": shadow_mod.read_summary(read)})
+    _progress({"type": "start", "read_summary": diag_mod.read_summary(read)})
 
     # tool_stats is mutated in place by the tool-calling loop; we read the
     # per-call trace back out for the log and the persisted thought. on_event
@@ -78,7 +77,7 @@ def run_awareness_loop(*, shadow: bool = True, progress_fn=None, deliver_fn=None
     tool_stats: dict = {}
     try:
         plan = run_awareness_tick(
-            read, shadow=True, tool_stats=tool_stats, on_event=_progress
+            read, tool_stats=tool_stats, on_event=_progress
         ) or {}
     except Exception as exc:
         log.exception("awareness loop: run_awareness_tick failed")
@@ -95,12 +94,12 @@ def run_awareness_loop(*, shadow: bool = True, progress_fn=None, deliver_fn=None
     outcome, reason = store.classify_plan(plan)
     counters["posts_planned"] = len(plan.get("posts") or [])
 
-    # Live delivery: post the plan to Discord. Shadow keeps posting nothing.
-    # A failed delivery (unroutable channel, send error, uncovered hard-post
-    # floor) downgrades the tick to failed — we mark the plan so classify +
-    # persist agree, the cursor (store.last_tick_at) doesn't advance, and the
-    # signals re-surface next loop. Fail-hard, no fallback.
-    if not shadow and outcome == "posted" and deliver_fn is not None:
+    # Live delivery: post the plan to Discord. A failed delivery (unroutable
+    # channel, send error, uncovered hard-post floor) downgrades the tick to
+    # failed — we mark the plan so classify + persist agree, the cursor
+    # (store.last_tick_at) doesn't advance, and the signals re-surface next
+    # loop. Fail-hard, no fallback.
+    if outcome == "posted" and deliver_fn is not None:
         try:
             result = deliver_fn(read, plan) or {}
         except Exception as exc:
@@ -127,9 +126,9 @@ def run_awareness_loop(*, shadow: bool = True, progress_fn=None, deliver_fn=None
 
     # QA H22: a revisit's job is to resurface a signal ONCE at due_at. Nothing
     # marked them done, so due revisits nagged the read every tick forever. On a
-    # non-failed live tick the brain HAS now seen them — mark them revisited so
+    # non-failed tick the brain HAS now seen them — mark them revisited so
     # they clear (if the brain wants another look it schedules a fresh revisit).
-    if not shadow and outcome != "failed":
+    if outcome != "failed":
         surfaced = [r.get("signal_key") for r in (read.get("due_revisits") or []) if r.get("signal_key")]
         if surfaced:
             try:
@@ -140,19 +139,19 @@ def run_awareness_loop(*, shadow: bool = True, progress_fn=None, deliver_fn=None
 
     loop_number = None
     try:
-        rec = store.persist_thought(read, plan, shadow=shadow, tool_trace=tool_trace)
+        rec = store.persist_thought(read, plan, tool_trace=tool_trace)
         counters["thought_id"] = rec["thought_id"]
         counters["loop_number"] = loop_number = rec["loop_number"]
     except Exception as exc:
         log.exception("awareness loop: persist_thought failed")
         counters["error"] = counters["error"] or f"persist_thought: {exc}"
 
-    # Finalize the #thinking diagnostic in BOTH modes — it's the observability
-    # record of what the brain saw and decided (in live mode it additionally
-    # posted). Rendering here never affects the member-facing outcome.
+    # Finalize the #thinking diagnostic — the observability record of what the
+    # brain saw, decided, and posted this tick. Rendering here never affects the
+    # member-facing outcome.
     try:
-        render = shadow_mod.build_shadow_render(
-            read, plan, tool_trace=tool_trace, loop_number=loop_number, shadow=shadow
+        render = diag_mod.build_diagnostic_render(
+            read, plan, tool_trace=tool_trace, loop_number=loop_number
         )
         # Finalize the live thread: outcome + verbatim decision, and stamp
         # the real loop number on the header/thread now that it's known.

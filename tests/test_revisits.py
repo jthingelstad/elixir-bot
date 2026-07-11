@@ -191,10 +191,10 @@ def test_awareness_loop_clears_surfaced_revisits(monkeypatch):
         patch("runtime.awareness.read.build_read", return_value=read),
         patch("agent.workflows.run_awareness_tick", return_value=silence_plan),
         patch("runtime.awareness.store.persist_thought", return_value={"thought_id": "t", "loop_number": 1}),
-        patch("runtime.awareness.shadow.build_shadow_render", return_value={"outcome": "silence"}),
+        patch("runtime.awareness.diagnostic.build_diagnostic_render", return_value={"outcome": "silence"}),
         patch("storage.revisits.mark_revisited", return_value=1) as mark,
     ):
-        counters = loop_mod.run_awareness_loop(shadow=False)
+        counters = loop_mod.run_awareness_loop()
 
     mark.assert_called_once_with(["war:demo"])
     assert counters.get("revisits_cleared") == 1

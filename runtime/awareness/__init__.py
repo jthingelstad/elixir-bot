@@ -1,16 +1,16 @@
 """The awareness loop — Elixir's central deliberative heartbeat.
 
-Shadow-mode v1: builds "the read" (the situation snapshot), hands it to the
-benched brain with write tools disabled, persists the train of thought, and
-writes a bot-native diagnostic to the leader-only #thinking channel. It posts
-NOTHING to any member-facing channel.
+Builds "the read" (the situation snapshot), hands it to the brain with its full
+read + write tool surface, persists the train of thought, delivers the plan's
+posts to the member-facing channels, and writes a bot-native diagnostic to the
+leader-only #thinking channel. The brain is the clan's sole proactive poster.
 """
 
 from __future__ import annotations
 
+from runtime.awareness.diagnostic import build_diagnostic_render
 from runtime.awareness.loop import run_awareness_loop
 from runtime.awareness.read import build_read
-from runtime.awareness.shadow import build_shadow_render
 from runtime.awareness.store import (
     ensure_awareness_schema,
     list_recent_thoughts,
@@ -21,7 +21,7 @@ from runtime.awareness.store import (
 __all__ = [
     "build_read",
     "run_awareness_loop",
-    "build_shadow_render",
+    "build_diagnostic_render",
     "ensure_awareness_schema",
     "persist_thought",
     "list_recent_thoughts",

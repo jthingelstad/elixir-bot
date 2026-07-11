@@ -1,15 +1,15 @@
-"""Shadow-mode rendering for the awareness loop.
+"""Diagnostic rendering for the awareness loop.
 
-In shadow mode the loop posts NOTHING to any member-facing channel. It writes a
-diagnostic to the private leader-only **#thinking** channel showing what the read
-looked like and what the brain *would* have posted — clearly labelled so no
-reader mistakes it for a live post.
+The loop writes a diagnostic to the private leader-only **#thinking** channel
+showing what the read looked like and what the brain posted this tick — the
+train of thought behind every live decision.
 
-This module is pure: ``build_shadow_render`` turns (read, plan, tool_trace) into a
-structured render (an embed summary + a threaded detail body). The actual Discord
-posting is done bot-native by the caller (runtime/app.py ``_awareness_post``),
-which owns the client and the event loop — this keeps the renderer testable and
-free of I/O. The old #elixir-log webhook path was retired 2026-07-09.
+This module is pure: ``build_diagnostic_render`` turns (read, plan, tool_trace)
+into a structured render (an embed summary + a threaded detail body). The actual
+Discord posting is done bot-native by the caller (runtime/app.py
+``_awareness_post``), which owns the client and the event loop — this keeps the
+renderer testable and free of I/O. The old #elixir-log webhook path was retired
+2026-07-09.
 """
 
 from __future__ import annotations
@@ -25,8 +25,7 @@ log = logging.getLogger("elixir")
 # prompt/response. Overridable for a different tailnet host / port.
 OBSERVATORY_URL = os.getenv("ELIXIR_OBSERVATORY_URL", "https://otto.tail09aaf9.ts.net:8444")
 
-_HEADER = "AWARENESS (SHADOW — nothing posted)"
-_HEADER_LIVE = "AWARENESS (live)"
+_HEADER = "AWARENESS (live)"
 _MAX_LEN = 1900
 _FIELD_MAX = 1024  # Discord embed field value cap
 
@@ -163,7 +162,7 @@ def read_summary(read: dict) -> str:
 def format_live_event(event: dict) -> str:
     """One line for a live tick event streamed into the #thinking thread as it
     happens — tool calls, truncation, retry. This is the runtime train of
-    thought (vs the end-of-tick summary in ``build_shadow_render``)."""
+    thought (vs the end-of-tick summary in ``build_diagnostic_render``)."""
     etype = event.get("type")
     if etype == "tool":
         name = event.get("tool") or "?"
@@ -182,9 +181,8 @@ def format_live_event(event: dict) -> str:
     return f"· {etype}"
 
 
-def build_shadow_render(
+def build_diagnostic_render(
     read: dict, plan: dict, *, tool_trace: list | None = None, loop_number=None,
-    shadow: bool = True,
 ) -> dict:
     """Turn (read, plan, tool_trace) into a structured render for #thinking.
 
@@ -214,7 +212,7 @@ def build_shadow_render(
     }
 
     return {
-        "header": f"🧠 {_HEADER if shadow else _HEADER_LIVE} · {label}",
+        "header": f"🧠 {_HEADER} · {label}",
         "outcome": outcome,
         "color": _COLORS.get(outcome, _COLORS["silence"]),
         "fields": fields,
@@ -224,4 +222,4 @@ def build_shadow_render(
     }
 
 
-__all__ = ["build_shadow_render", "read_summary", "format_live_event", "observatory_url"]
+__all__ = ["build_diagnostic_render", "read_summary", "format_live_event", "observatory_url"]

@@ -49,7 +49,7 @@ def test_signals_are_since_last_tick_not_a_window():
     from runtime.awareness import store
 
     # A prior thought fixes the cursor; an event before it is NOT new, one after IS.
-    store.persist_thought({"t": 1}, {"posts": []}, shadow=True)
+    store.persist_thought({"t": 1}, {"posts": []})
     last = store.last_tick_at()
     assert last  # cursor is set from the persisted thought
     _seed_player_event("old:1", "badge_earned", "2026-01-01T00:00:00Z")  # long before cursor
@@ -69,7 +69,7 @@ def test_game_context_keeps_recent_card_as_background_with_is_new():
     from runtime.awareness import read as read_mod
     from runtime.awareness import store
 
-    store.persist_thought({"t": 1}, {"posts": []}, shadow=True)  # sets the cursor
+    store.persist_thought({"t": 1}, {"posts": []})  # sets the cursor
     _seed_game_event("card_added:ronin", "card_added", "2999-01-02T00:00:00Z",
                      {"name": "Ronin", "rarity": "legendary", "elixir_cost": 5})
 

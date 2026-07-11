@@ -1,10 +1,10 @@
-"""Deliver the brain's post plan to Discord — the live counterpart to shadow.
+"""Deliver the brain's post plan to Discord.
 
-In shadow mode the awareness loop renders its plan to #thinking and posts
-nothing. In live mode ``deliver_posts`` takes the same ``plan["posts"]`` and
-actually sends each one to its channel, records it for the next tick's
-``channel_memory`` (dedup), and — for posts the brain flags as clan-chat-worthy
-— escalates an in-game relay HITL card.
+``deliver_posts`` takes ``plan["posts"]`` and sends each one to its channel,
+records it for the next tick's ``channel_memory`` (dedup), and — for posts the
+brain flags as clan-chat-worthy — escalates an in-game relay HITL card. The
+awareness loop always renders its plan to the #thinking diagnostic as well; that
+is the observability record, separate from this member-facing delivery.
 
 Design contract (locked with Jamie): **fail-hard, no fallback.** Any send
 failure or an uncovered hard-post floor fails the whole tick; the loop records

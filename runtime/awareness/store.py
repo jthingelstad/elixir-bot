@@ -4,7 +4,8 @@ Two v5.1 tables, created lazily on first use (no migration runner in v5.1 —
 same discipline as ``storage/incidents.py``):
 
 - ``awareness_thoughts`` — one row per loop turn: the read it reviewed, the
-  plan it produced, whether it chose silence, and the shadow flag.
+  plan it produced, and whether it chose silence. (The ``shadow`` column is a
+  retained legacy field — shadow mode was removed, the brain is fully live.)
 - ``watches`` — standing concerns Elixir is keeping an eye on (a durable home
   for the ``flag_member_watch`` surface).
 
@@ -37,7 +38,7 @@ CREATE TABLE IF NOT EXISTS awareness_thoughts (
     post_count INTEGER NOT NULL DEFAULT 0,
     skipped_reason TEXT,
     model TEXT,
-    shadow INTEGER NOT NULL DEFAULT 1
+    shadow INTEGER NOT NULL DEFAULT 0  -- legacy: shadow mode removed; always 0 (live)
 );
 CREATE INDEX IF NOT EXISTS idx_awareness_thoughts_at ON awareness_thoughts(at DESC);
 CREATE INDEX IF NOT EXISTS idx_awareness_thoughts_loop ON awareness_thoughts(loop_number DESC);
@@ -140,7 +141,6 @@ def persist_thought(
     read: dict,
     plan: dict,
     *,
-    shadow: bool = True,
     model: str | None = None,
     tool_trace: list | None = None,
     conn: Optional[sqlite3.Connection] = None,
@@ -167,9 +167,11 @@ def persist_thought(
         "SELECT COALESCE(MAX(loop_number), 0) + 1 FROM awareness_thoughts"
     ).fetchone() or [1])[0]
     conn.execute(
+        # `shadow` is a retained legacy column (shadow mode was removed — the
+        # brain is fully live); always 0. Kept so historical rows still read.
         "INSERT INTO awareness_thoughts (thought_id, loop_number, at, read_json, "
         "plan_json, tool_trace_json, chose_silence, post_count, skipped_reason, "
-        "model, shadow) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "model, shadow) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
         (
             thought_id,
             loop_number,
@@ -181,7 +183,6 @@ def persist_thought(
             post_count,
             skipped_reason,
             model,
-            1 if shadow else 0,
         ),
     )
     return {"thought_id": thought_id, "loop_number": loop_number}
