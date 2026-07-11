@@ -573,7 +573,7 @@ def test_update_message_summary_propagates_to_channel_state():
             channel_id="ch100",
             channel_name="river-race",
             channel_kind="text",
-            workflow="observation",
+            workflow="channel_update",
             conn=conn,
         )
         # Before update: channel_state should have truncated content

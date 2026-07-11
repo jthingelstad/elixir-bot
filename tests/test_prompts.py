@@ -323,7 +323,7 @@ def test_thresholds_does_not_trigger_substitution():
 
 
 def test_observation_prompt_includes_custom_emoji_guidance():
-    system_prompt = agent_prompts._observe_system()
+    system_prompt = agent_prompts._channel_lane_system("#elixir")
 
     assert "Use readable Discord-native formatting." in system_prompt
     assert "Keep most messages compact unless the task genuinely calls for more structure." in system_prompt

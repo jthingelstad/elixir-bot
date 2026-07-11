@@ -39,7 +39,7 @@ AWARENESS_WRITE_TOOL_NAMES = {
 
 AWARENESS_WRITE_BUDGET_PER_TICK = 3
 EXTERNAL_LOOKUP_TOOL_NAMES = {"cr_api"}
-_NO_EXTERNAL_LOOKUP_WORKFLOWS = {"observe", "observation", "reception", "roster_bios"}
+_NO_EXTERNAL_LOOKUP_WORKFLOWS = {"reception", "roster_bios"}
 
 TOOL_DEFINITIONS = []
 for _tool in TOOLS:
@@ -76,13 +76,6 @@ AWARENESS_TOOLS = READ_TOOLS + [
 _CHANNEL_SCHEMA = {"required": ["event_type", "summary", "content"]}
 
 _WORKFLOW_SPECS = (
-    WorkflowSpec(
-        "observation",
-        aliases=("observe",),
-        response_schema=_CHANNEL_SCHEMA,
-        tools=READ_TOOLS_NO_EXTERNAL,
-        max_tool_rounds=3,
-    ),
     WorkflowSpec("channel_update", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=6, model_family="chat"),
     WorkflowSpec("channel_update_leadership", response_schema=_CHANNEL_SCHEMA, tools=READ_TOOLS, max_tool_rounds=6, model_family="chat"),
     WorkflowSpec("interactive", response_schema=_CHANNEL_SCHEMA, tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=4, model_family="chat"),
@@ -113,8 +106,6 @@ _WORKFLOW_SPECS = (
     WorkflowSpec("intel_report", response_schema=_CHANNEL_SCHEMA, tools=INTEL_REPORT_TOOLS, max_tool_rounds=15, model_family="intensive"),
     WorkflowSpec("tournament_recap", response_schema={"required": ["content"]}, tools=TOURNAMENT_RECAP_TOOLS, max_tool_rounds=8, model_family="intensive"),
     WorkflowSpec("tournament_update", response_schema=_CHANNEL_SCHEMA, tools=TOURNAMENT_UPDATE_TOOLS, max_tool_rounds=4),
-    WorkflowSpec("war_recap", response_schema=_CHANNEL_SCHEMA, tools=[], max_tool_rounds=1, tools_allowed=False, model_family="chat"),
-    WorkflowSpec("season_awards", response_schema=_CHANNEL_SCHEMA, tools=[], max_tool_rounds=1, tools_allowed=False, model_family="chat"),
     WorkflowSpec(
         "awareness",
         response_schema={"required": ["posts"]},

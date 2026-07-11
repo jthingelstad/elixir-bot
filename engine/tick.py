@@ -102,7 +102,7 @@ def _current_clock(conn, now: datetime):
     return _anchored_clock(conn, cr_shaped, now, p.get("season_id"))
 
 
-def run_tick(conn, now: datetime | None = None, *, api, send_fn, compose_fn,
+def run_tick(conn, now: datetime | None = None, *, api, send_fn=None, compose_fn=None,
              editor_gate=None, deliver: bool = True) -> dict:
     """Run one engine tick.
 
