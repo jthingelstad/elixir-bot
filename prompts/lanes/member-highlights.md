@@ -60,7 +60,7 @@ The context envelope includes a `TIME / PHASE` block. For member highlights, war
 
 - War battle activity and River Race state — #river-race.
 - Clan joins, leaves, promotions, birthdays, and anniversaries — #clan-events.
-- Leadership actions or sensitive roster management — #leader-actions or #leaders.
+- Leadership actions or sensitive roster management — #actions or #leaders.
 - Recruiting copy — #recruiting.
 
 ## Guardrails

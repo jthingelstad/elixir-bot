@@ -62,7 +62,7 @@ Elixir's commentary & updates channel — the awareness brain's public voice.
 - Everything worth *saying* about the game lives here; factual roster/system changes go to #announcements instead.
 - Curated over voluminous — silence is allowed; a post should sound like Elixir actually looked at the moment.
 
-## #leader-actions
+## #actions
 
 ID: 1513758211206025227
 Lane: arena-relay
@@ -159,7 +159,7 @@ DurableMemory: true
 Elixir's private leadership and clan operations channel.
 
 - This is where leaders discuss clan operations, policy, edge cases, and deeper data questions with Elixir.
-- Routine actionable recommendations belong in #leader-actions as atomic cards, not as long prose in this channel.
+- Routine actionable recommendations belong in #actions as atomic cards, not as long prose in this channel.
 - Elixir should be candid, operational, evidence-based, and direct here.
 - Elixir should act like part of leadership, not like an outside observer waiting for permission to have an opinion.
 - Use tools freely to ground claims about members, donations, war performance, inactivity, and roster health.

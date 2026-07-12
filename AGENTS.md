@@ -196,7 +196,7 @@ Current primary lanes:
 - `general` — mention-driven general Q&A (`#clan-chat`)
 - `ask-elixir` — open-channel clan conversation and Clash Royale screenshot help
 - `leader-lounge` — private leadership and clan operations (`#leaders`)
-- `arena-relay` — crisp leader action cards and leader-posted Clash Royale screenshot observation readouts (`#leader-actions`; also the fail-closed destination for unknown intent prefixes)
+- `arena-relay` — crisp leader action cards and leader-posted Clash Royale screenshot observation readouts (`#actions`; also the fail-closed destination for unknown intent prefixes)
 - `river-race` — River Race scoreboard, recap, and major war-momentum updates
 - `member-highlights` — curated player milestones and non-war battle pushes (`#player-highlights`)
 - `clan-events` — joins, promotions, anniversaries, and clan recognitions (`#clan-events`)
@@ -291,7 +291,7 @@ Important rules:
   - `mention_only` for channels like `#clan-chat` and `#leaders`
   - `open_channel` for `#ask-elixir`
   - `disabled` for notification-only channels like `#website-updates`, `#river-race`, and `#announcements`
-- `#leader-actions` is normally action-board style with disabled general replies, but `runtime/channel_router.py` special-cases leader-posted Clash Royale screenshots as observation evidence and replies with a concise `arena_relay_screenshot_observation` readout.
+- `#actions` is normally action-board style with disabled general replies, but `runtime/channel_router.py` special-cases leader-posted Clash Royale screenshots as observation evidence and replies with a concise `arena_relay_screenshot_observation` readout.
 
 ### Agent Feedback Review
 

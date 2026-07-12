@@ -46,7 +46,7 @@ COMMAND_SPECS = {
     "member.set": AdminCommandSpec("member.set", ("member", "set"), "Set one member field.", leader_only=True, write=True, event_type="member_set"),
     "member.clear": AdminCommandSpec("member.clear", ("member", "clear"), "Clear one member field.", leader_only=True, write=True, event_type="member_clear"),
     "relay.status": AdminCommandSpec("relay.status", ("relay", "status"), "Show leader action recommendations and reaction decisions.", leader_only=True, event_type="relay_status_report"),
-    "relay.test-card": AdminCommandSpec("relay.test-card", ("relay", "test-card"), "Post a test #leader-actions leader action card for a real action type.", leader_only=True, write=True, event_type="relay_test_card"),
+    "relay.test-card": AdminCommandSpec("relay.test-card", ("relay", "test-card"), "Post a test #actions leader action card for a real action type.", leader_only=True, write=True, event_type="relay_test_card"),
     "activity.list": AdminCommandSpec("activity.list", ("activity", "list"), "List registered recurring activities.", event_type="activity_list"),
     "activity.show": AdminCommandSpec("activity.show", ("activity", "show"), "Show one recurring activity in detail.", event_type="activity_show"),
     "activity.run": AdminCommandSpec("activity.run", ("activity", "run"), "Run one registered activity now.", leader_only=True, write=True, event_type="activity_run"),

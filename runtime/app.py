@@ -1303,7 +1303,7 @@ async def _weekly_leadership_review():
     # The weekly review now speaks only through action cards — the promote/
     # demote candidacy cards raised above and posted here. The old narrative
     # "Weekly Leadership Review" digest was retired (Jamie, 2026-07-06):
-    # #leader-actions is cards-only; Elixir sends suggestions, not data dumps.
+    # #actions is cards-only; Elixir sends suggestions, not data dumps.
     try:
         await _post_pending_leader_action_cards(limit=6)
     except Exception:
@@ -1452,7 +1452,7 @@ async def _awareness_loop():
     persists the train of thought, and STREAMS a bot-native #thinking diagnostic.
 
     The brain is the SOLE proactive poster: it posts its plan to #announcements /
-    #elixir and escalates clan-chat-worthy posts as #leader-actions relay cards.
+    #elixir and escalates clan-chat-worthy posts as #actions relay cards.
     The engine's proactive delivery is off (see _engine_tick), so there's never a
     gap or a double-post."""
     from runtime.awareness import deliver as deliver_mod
@@ -1503,7 +1503,7 @@ async def _awareness_loop():
 
 async def _awareness_relay_to_clan_chat(post: dict, channel_name: str) -> bool:
     """Escalate a brain post the brain flagged (``relay_to_clan_chat``) into an
-    in-game relay HITL card in #leader-actions. The Discord post has ALREADY
+    in-game relay HITL card in #actions. The Discord post has ALREADY
     landed; this only offers a leader a copy/paste clan-chat version. Guarded by
     the leader-action post policy (backlog cap + same-objective cooldown) so the
     brain can't flood the board — but NOT the earned-frequency decline throttle,

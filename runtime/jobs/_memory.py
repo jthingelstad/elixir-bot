@@ -4,7 +4,7 @@ Assembles the week's memories, channel posts, and live clan state, hands
 them to the memory-synthesis LLM workflow, persists the resulting arc
 memories, and expires stale entries. The digest is stored as durable
 memory only. Derived-state memory contradictions are handled automatically;
-only genuine leader-judgment contradictions are eligible for #leader-actions.
+only genuine leader-judgment contradictions are eligible for #actions.
 """
 
 __all__ = [
@@ -722,7 +722,7 @@ def _apply_memory_synthesis_plan(plan: dict, *, week_id: str | None, dry_run: bo
 
 
 async def _post_memory_contradiction_cards(contradictions: list[dict]) -> int:
-    """Post one #leader-actions card per leader-judgment contradiction.
+    """Post one #actions card per leader-judgment contradiction.
 
     Metric and current-state contradictions are handled automatically by
     expiring the stale memory. Cards are reserved for cases Elixir cannot
@@ -795,7 +795,7 @@ async def _memory_synthesis_cycle():
     resulting arcs, and expires stale entries. There is no digest post.
     Metric/current-state contradictions are expired automatically and logged
     to #elixir-log; only human-judgment contradictions may create
-    #leader-actions cards.
+    #actions cards.
     """
     runtime_status.mark_job_start("memory_synthesis")
 

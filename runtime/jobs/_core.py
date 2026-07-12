@@ -369,7 +369,7 @@ async def _weekly_discord_invite_relay():
     fixed weekly Discord reminder. It now rotates through the evergreen_nudges
     inventory (Discord, FAQ, website) and — ONLY during a quiet period and within
     a strict rate cap — offers ONE as an in-game-relay leader-action card in
-    #leader-actions for a leader to paste. Runs daily; self-gates so it emits
+    #actions for a leader to paste. Runs daily; self-gates so it emits
     rarely and fills lulls instead of adding noise. The Discord invite is now
     just inventory item #1.
     """
@@ -500,7 +500,7 @@ async def _emit_evergreen_nudge_card(item: dict) -> bool:
 
 async def post_release_relay_card(clanchat_text: str, *, tag: str) -> bool:
     """Surface a new release's short clan-chat blurb as an in_game_relay leader-action
-    card in #leader-actions, for a leader to paste into the in-game clan chat. Called by
+    card in #actions, for a leader to paste into the in-game clan chat. Called by
     /clanops release after cut_release.py generates the three tiers; the copy is already
     written (no LLM call here) — we validate length, sign, and post the card."""
     from runtime.clan_chat_copy import sign_clan_chat_text
@@ -743,7 +743,7 @@ async def _weekly_member_report_cycle():
 
 
 async def _weekly_story_relay_card(recap_text: str) -> bool:
-    """Offer the recap's best beat as a clan-chat relay card in #leader-actions.
+    """Offer the recap's best beat as a clan-chat relay card in #actions.
 
     Most of the clan never reads Discord — the recap's strongest member
     story reaches them only if a leader pastes it into game chat. One card
