@@ -164,34 +164,49 @@ re-clear the margin *and* sustain 3 weeks to swap back.
   at the new role. Auto-withdraw: leaving the candidate set two weeks (promote)
   or one week (demote) pulls any open action.
 
-### 3.5 `kick_state` — the reactive path (Q1), unchanged by the band
-
 ### 3.3 `kick_state` — the reactive path (Q1)
 
-Driven by **days since last battle** (`D` below), evaluated every tick, using
-`CLAN.md`'s existing trophy-scaled formula reinterpreted battle-based (§1):
+Driven by **days since last battle** (`D` below), evaluated every tick.
+**Redesigned 2026-07-11** — flat thresholds, contribution grace scaled by
+roster fullness, no trophy buffer, no newcomer shield:
 
 ```
-none ──(D ≥ 3)──▶ watch ──(D ≥ max(7, trophies/1000 × 1.4))──▶ at_risk
-at_risk ──(+KICK_CONFIRM_DAYS with zero battles)──▶ recommended  [reactive]
+none ──(D ≥ 3)──▶ watch ──(D ≥ KICK_AT_RISK_DAYS (5))──▶ at_risk
+at_risk ──(D ≥ KICK_AT_RISK_DAYS + confirm_days)──▶ recommended  [reactive]
 any battle ──▶ none  (open recommendation auto-withdrawn)
+
+confirm_days = KICK_CONFIRM_DAYS (3)
+             + (round(KICK_CONTRIB_GRACE_MAX (4) × slack) if contributes else 0)
+slack        = max(0, ROSTER_CAP (50) − active_members) / ROSTER_CAP
+contributes  = _passes_war_floor OR _passes_ranked_floor   # the elder floor
 ```
 
-- `watch` at **3 days** is `CLAN.md`'s `inactivity_days` ("early attention, not
-  removal"). No action fires; it's visible in `get_clan_health(at_risk)`.
-- `at_risk` uses the existing trophy-scaled threshold verbatim (`CLAN.md`
-  Thresholds: a 5k-trophy member at 7 d, 10k at 14 d, 12.5k at 17.5 d —
-  "higher-trophy members have earned more rope").
+- `watch` at **3 days** is early attention, not removal — no action fires; it's
+  visible in `get_clan_health(at_risk)`.
+- `at_risk` at a **flat 5 days** (`KICK_AT_RISK_DAYS`). Trophies buy **no** leeway
+  — the old `max(7, trophies/1000 × 1.4)` buffer is removed (a high-trophy idle
+  member on a full roster still costs a slot).
+- **Contribution grace** replaces the trophy buffer: a member who passes the
+  **same floor that earns elder** (recent war participation *or* Champion ranked
+  — ranked counts equally, on live/last season, not a 3-season average) gets up
+  to **+4 confirm days**, but only *scaled by open-slot slack*. Full grace on an
+  empty roster; **zero at 50/50** — an idle member only costs a slot when the
+  clan is full. So the plain card is **8 days** (5 + 3); a contributor on a
+  near-empty roster stretches to ~12.
 - `at_risk → recommended` fires the **reactive** `kick_recommendation`
-  (`runtime.md` §2 step 5) through the policy gate, after
-  **`KICK_CONFIRM_DAYS` (7)** more battle-free days. `kick_state_since` tracks
+  (`runtime.md` §2 step 5) through the policy gate. `kick_state_since` tracks
   each entry.
-- **Guards:** members with `tenure_days < NEW_MEMBER_GRACE (14)` never pass
-  `watch` (reception period). Role elder+ never fires the reactive path — their
-  inactivity surfaces in the weekly review instead (kicking an elder is a
-  leadership conversation, not a bot escalation). An open
-  `flag_member_watch` decision case (leadership hold) suppresses
-  `recommended` until resolved.
+- **Guards:** role elder+ never fires the reactive path — their inactivity
+  surfaces in the weekly review instead (kicking an elder is a leadership
+  conversation, not a bot escalation). **The LOA exception:** an open **`Hold:`**
+  memory (`Hold:`/`Away:`/`LOA:` title — a member who *told leaders* they'll be
+  away, written via `flag_member_watch(away_until=…)`) suppresses `recommended`
+  until it expires. A brain `Watch:` *inference* note does **not** — it only
+  observes idleness; matching it (as the guard did pre-2026-07-11) self-defeated
+  the card by shielding the very members it flagged.
+- **No newcomer shield:** short-tenure members are held to the same clock as
+  everyone else — a brand-new account that never engages should engage *more*
+  early, not less. (`NEW_MEMBER_GRACE` removed.)
 - The executed kick feeds **C1**: a `done` `kick_recommendation` within 14 days
   suppresses the public `member_left` post (recognition.md §4).
 
@@ -220,11 +235,17 @@ re-deriving anything. `state_json` holds each machine's internals
 | `SWAP_MARGIN` | 0.05 | anti-flap deadband — a member displaces an elder only by out-scoring them this much |
 | `PROMOTE_QUALIFYING_WEEKS` | 3 | sustained weeks to promote / to swap out an outranked elder |
 | `DEMOTE_WEEKS` | 2 | abandonment demotion (faster); outranked demotion uses the 3-week promote cadence |
-| **Kick path (unchanged)** | | |
+| **Kick path (redesigned 2026-07-11)** | | |
 | `WAR_QUALIFY_RATE` | 0.75 | (legacy signal; retained for evidence rendering) |
 | `BATTLE_DAYS_MIN` | 8 (of 28) | ≈2 battle-days/week floor |
-| `KICK_CONFIRM_DAYS` | 7 | week of silence past the trophy-scaled threshold |
-| `NEW_MEMBER_GRACE` | 14 days | reception period; kick path suspended |
+| `KICK_WATCH_DAYS` | 3 | early attention; no action |
+| `KICK_AT_RISK_DAYS` | 5 | flat at-risk threshold (7 = in-game profile flag, 10 = clearly unmanaged) |
+| `KICK_CONFIRM_DAYS` | 3 | battle-free days past at-risk before a card (plain card = 8 days) |
+| `KICK_CONTRIB_GRACE_MAX` | 4 | max extra confirm days for an elder-floor contributor, **× open-slot slack** (0 at 50/50) |
+| `ROSTER_CAP` | 50 | full clan; the slack denominator |
+| ~~`NEW_MEMBER_GRACE`~~ | *removed* | no newcomer shield — same clock for everyone |
+| ~~trophy buffer~~ | *removed* | `max(7, trophies/1000×1.4)` gone; flat 5-day at-risk |
+| ~~`war_fame_3season_avg` grace~~ | *removed* | 3-season fame grace replaced by the live elder floor × slack |
 
 These move into `CLAN.md`'s Thresholds section (the precedent home) **at the
 cut**, alongside C5's prose update — `CLAN.md` is the live bot's prompt, so the

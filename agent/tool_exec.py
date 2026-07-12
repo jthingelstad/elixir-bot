@@ -1404,14 +1404,23 @@ def _execute_flag_member_watch(arguments):
     member_tag_input = arguments.get("member_tag")
     reason = (arguments.get("reason") or "").strip()
     expires_at = arguments.get("expires_at")
+    away_until = (arguments.get("away_until") or "").strip()
     case_type = (arguments.get("case_type") or "").strip()
 
     if not member_tag_input or not reason:
         return {"error": "flag_member_watch requires member_tag and reason"}
 
     resolved_tag = _resolve_member_tag(member_tag_input)
-    title = f"Watch: {resolved_tag}"
+    # A leave HOLD (member told leaders they're away) is a `Hold:` memory that
+    # pauses the inactivity/kick clock until `away_until` — distinct from a plain
+    # `Watch:` note, which only observes idleness and never grants grace. The
+    # kick engine's LOA guard (_has_leadership_hold) matches the `Hold:` prefix,
+    # NOT `Watch:`. Grace expires with the hold, so the clock resumes on return.
+    is_hold = bool(away_until)
+    title = f"{'Hold' if is_hold else 'Watch'}: {resolved_tag}"
     body = f"{reason}"
+    if is_hold:
+        expires_at = away_until
     try:
         memory = create_memory(
             title=title,
@@ -1429,7 +1438,11 @@ def _execute_flag_member_watch(arguments):
         log.warning("flag_member_watch failed: %s", exc)
         return {"error": "flag_member_watch_failed", "detail": str(exc)}
 
-    attach_tags(memory["memory_id"], ["watch-list"], actor="elixir:awareness-tool")
+    attach_tags(
+        memory["memory_id"],
+        ["leave-hold"] if is_hold else ["watch-list"],
+        actor="elixir:awareness-tool",
+    )
     case = None
     if case_type:
         try:
@@ -1447,8 +1460,10 @@ def _execute_flag_member_watch(arguments):
         "success": True,
         "memory_id": memory["memory_id"],
         "member_tag": resolved_tag,
-        "type": "watch",
+        "type": "hold" if is_hold else "watch",
     }
+    if is_hold:
+        result["away_until"] = away_until
     if case:
         result["case_id"] = case.get("case_id")
         result["case_key"] = case.get("case_key")

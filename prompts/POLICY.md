@@ -28,7 +28,7 @@ The cap is enforced by `get_promotion_candidates` as a maximum, not a target. Wh
 
 - Elder demotion risk is based on the same smoothed leaderboard as promotion, with hysteresis. A current Elder should be considered for demotion when they fall meaningfully outside the Elder group or fail sustained battle/war activity gates.
 - Removal is primarily about inactivity and absence.
-- For removal-candidate flagging, inactivity is trophy-scaled (computed in `storage/war_analytics.py`; surfaced via at-risk tooling).
-- When the clan has open slots and is still building its bench, leaders can be more flexible with removal decisions. Once the roster is full, removal calls tighten up.
+- For removal-candidate flagging (kick redesign 2026-07-11, in `engine/management.py`): a flat 5-day battle-free window is at-risk, an 8-day window proposes a removal card. Trophies buy no extra rope. The only leeway is contribution grace (clearing the Elder floor — recent war *or* Champion ranked) and it shrinks as the clan fills, reaching zero at a full roster.
+- When the clan has open slots and is still building its bench, that contribution grace gives contributors more patience. Once the roster is full, the grace is gone and an idle seat is an idle seat — removal calls tighten up. A member who has told leaders they'll be away is on a hold (grace until they return).
 - The `get_promotion_candidates` tool returns `demotion_candidates` alongside promotion recommendations — review both together.
 - Discuss promotions, demotions, and kicks only in private clan leadership channels.

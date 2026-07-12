@@ -833,6 +833,17 @@ TOOLS = [
                     "type": "string",
                     "description": "Optional ISO date or ISO datetime after which the flag should be ignored (e.g. '2026-04-30'). Omit for an open-ended flag.",
                 },
+                "away_until": {
+                    "type": "string",
+                    "description": (
+                        "Optional ISO date/datetime. Set ONLY when the member has TOLD leaders they'll "
+                        "be away (a leave of absence) — e.g. 'travelling, back after the 20th'. This "
+                        "records a leave HOLD that grants inactivity grace until the date: the kick "
+                        "clock is paused, no removal card fires. Do NOT set this for a member who is "
+                        "merely inactive with no word — that is a normal 'reason' watch, and their kick "
+                        "clock keeps running. A hold is an approved absence, not an observed one."
+                    ),
+                },
                 "case_type": {
                     "type": "string",
                     "enum": ["inactivity_review", "promotion_review", "demotion_review", "war_recovery"],

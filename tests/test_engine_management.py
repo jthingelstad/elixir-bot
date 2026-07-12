@@ -19,8 +19,15 @@ def test_ratified_constants():
     assert management.PROMOTE_TENURE_MIN == 28
     assert management.PROMOTE_QUALIFYING_WEEKS == 3  # elder band (2026-07-05)
     assert management.DEMOTE_WEEKS == 2               # demotion easier than promotion
-    assert management.KICK_CONFIRM_DAYS == 7
-    assert management.NEW_MEMBER_GRACE == 14
+    # Kick path (redesigned 2026-07-11): flat at_risk at 5 days, +3 confirm →
+    # card at 8; contribution grace is the elder floor scaled by open-slot slack,
+    # not a trophy buffer or 3-season fame average (both removed). No newcomer shield.
+    assert management.KICK_AT_RISK_DAYS == 5
+    assert management.KICK_CONFIRM_DAYS == 3
+    assert management.KICK_CONTRIB_GRACE_MAX == 4
+    assert management.ROSTER_CAP == 50
+    assert not hasattr(management, "NEW_MEMBER_GRACE")        # newcomer shield removed
+    assert not hasattr(management, "WAR_CONTRIB_FAME_BAR")    # 3-season fame grace removed
 
 
 def test_one_good_week_never_holding():
@@ -118,19 +125,19 @@ def test_kick_watch_at_three_days(engine_conn):
     assert _kick_state(engine_conn) == "watch"
 
 
-def test_kick_at_risk_trophy_scaled(engine_conn):
-    # 5000 trophies → threshold max(7, 5*1.4)=7 days; 8 days idle → at_risk
-    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=8)
+def test_kick_at_risk_flat_five_days(engine_conn):
+    # Flat 5-day at_risk — trophies no longer buy leeway (buffer removed).
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=6)
     management.run_tick_evaluators(engine_conn, now=NOW)
     assert _kick_state(engine_conn) == "at_risk"
-    # 10000 trophies → 14 days; 8 days idle → still watch
-    _seed_member(engine_conn, tag="#B", trophies=10000, last_battle_days_ago=8)
+    # A 10000-trophy member is treated identically: 6 days idle → at_risk.
+    _seed_member(engine_conn, tag="#B", trophies=10000, last_battle_days_ago=6)
     management.run_tick_evaluators(engine_conn, now=NOW)
-    assert _kick_state(engine_conn, "#B") == "watch"
+    assert _kick_state(engine_conn, "#B") == "at_risk"
 
 
 def test_kick_recommended_fires_transition(engine_conn):
-    # past at_risk threshold (7d) + KICK_CONFIRM_DAYS (7) → 15 days idle
+    # at_risk (5) + confirm (3) = 8-day card for a plain member with no grace.
     _seed_member(engine_conn, trophies=5000, last_battle_days_ago=15)
     transitions = management.run_tick_evaluators(engine_conn, now=NOW)
     assert _kick_state(engine_conn) == "recommended"
@@ -140,45 +147,59 @@ def test_kick_recommended_fires_transition(engine_conn):
     assert not any(t.get("player_tag") == "#A" for t in again)
 
 
-def _set_war_history(conn, tag, *, fame_avg=None, attendance=None):
+def _add_war_deck(conn, tag, *, days_ago=3):
+    """Give a member one finalized war day with a deck played inside the 14-day
+    floor window — enough to pass _passes_war_floor (the elder war floor)."""
+    obs = (NOW_DT - timedelta(days=days_ago)).strftime("%Y-%m-%dT12:00:00Z")
     conn.execute(
-        "UPDATE member_management SET war_fame_3season_avg = ?, "
-        "war_attendance_rate = ? WHERE player_tag = ?",
-        (fame_avg, attendance, tag))
+        "INSERT OR IGNORE INTO war_attendance_days (season_id, section_index, "
+        "war_day_index, player_tag, decks_used, decks_available, observed_at) "
+        "VALUES (133, 0, ?, ?, 4, 4, ?)", (days_ago, tag, obs))
+    conn.commit()
+
+
+def _set_ranked(conn, tag, *, league):
+    """Put a member at a ranked league (Champion=4+) so they pass the ranked
+    floor — the equal-footing alternative to the war floor."""
+    conn.execute(
+        "UPDATE player_current_state SET ranked_league = ? WHERE player_tag = ?",
+        (league, tag))
     conn.commit()
 
 
 def test_war_contributor_gets_extended_confirm_window(engine_conn):
-    # A plain member at 5000 trophies / 15 days idle → recommended (7+7).
-    # A durable war contributor (3-season fame over the bar) gets +7 confirm
-    # days, so at 15 days idle they are still only at_risk — the card waits.
-    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=15)
-    _set_war_history(engine_conn, "#A", fame_avg=7300.0, attendance=0.875)
+    # Grace = the elder war floor × open-slot slack. On a near-empty test roster
+    # slack≈1 → +4 confirm days, so the card threshold is 5+3+4 = 12. A war
+    # contributor idle 10 days is still only at_risk while a plain member (below)
+    # would already be recommended at 10.
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=10)
+    _add_war_deck(engine_conn, "#A")
     management.run_tick_evaluators(engine_conn, now=NOW)
     assert _kick_state(engine_conn) == "at_risk"
 
 
 def test_war_contributor_still_escalates_after_extended_window(engine_conn):
-    # Past the extended threshold (7 at_risk + 14 confirm = 21) the card fires.
-    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=22)
-    _set_war_history(engine_conn, "#A", fame_avg=7300.0, attendance=0.875)
+    # Past the extended threshold (5 at_risk + 3+4 confirm = 12) the card fires.
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=13)
+    _add_war_deck(engine_conn, "#A")
     transitions = management.run_tick_evaluators(engine_conn, now=NOW)
     assert _kick_state(engine_conn) == "recommended"
     assert any(t["player_tag"] == "#A" for t in transitions)
 
 
-def test_war_grace_qualifies_on_attendance_alone(engine_conn):
-    # Attendance over the bar earns the grace even with modest fame.
-    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=15)
-    _set_war_history(engine_conn, "#A", fame_avg=500.0, attendance=0.80)
+def test_ranked_play_earns_grace_equally(engine_conn):
+    # Ranked counts the same as war (as it does for earning elder): a Champion
+    # with zero clan wars, idle 10 days, still gets the extended confirm window.
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=10)
+    _set_ranked(engine_conn, "#A", league=5)
     management.run_tick_evaluators(engine_conn, now=NOW)
     assert _kick_state(engine_conn) == "at_risk"
 
 
-def test_weak_war_record_does_not_earn_grace(engine_conn):
-    # Below both bars → no grace → normal 15-day recommendation still fires.
-    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=15)
-    _set_war_history(engine_conn, "#A", fame_avg=1200.0, attendance=0.30)
+def test_weak_record_does_not_earn_grace(engine_conn):
+    # No war deck, sub-Champion ranked → no grace → plain 8-day card fires at 10.
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=10)
+    _set_ranked(engine_conn, "#A", league=2)
     management.run_tick_evaluators(engine_conn, now=NOW)
     assert _kick_state(engine_conn) == "recommended"
 
@@ -228,10 +249,48 @@ def test_kick_reset_auto_withdraws_open_action(engine_conn):
     assert "Auto-withdrawn" in row["decision_note"]
 
 
-def test_new_member_grace_never_past_watch(engine_conn):
+def test_newcomer_gets_no_shield(engine_conn):
+    # Newcomer shield removed (2026-07-11): a brand-new member who never engages
+    # is held to the same clock as everyone else — 10 days idle → card fires.
     _seed_member(engine_conn, joined_days_ago=10, last_battle_days_ago=10)
     management.run_tick_evaluators(engine_conn, now=NOW)
-    assert _kick_state(engine_conn) in ("none", "watch")
+    assert _kick_state(engine_conn) == "recommended"
+
+
+def _add_memory(conn, tag, *, title, expires_at=None, retired_at=None):
+    conn.execute(
+        "INSERT INTO memories (kind, title, body, member_tag, scope, created_by, "
+        "created_at, updated_at, expires_at, retired_at) VALUES ('inference', ?, "
+        "'x', ?, 'leadership', 'test', ?, ?, ?, ?)",
+        (title, tag, NOW, NOW, expires_at, retired_at))
+    conn.commit()
+
+
+def test_watch_inference_does_not_suppress_kick(engine_conn):
+    # Regression (2026-07-11): a `Watch:` inference note is the brain OBSERVING
+    # idleness — it must NOT shield the member from the very card it documents.
+    # (The old guard matched `Watch:%` and held xOMENKILLER at at_risk forever.)
+    _seed_member(engine_conn, last_battle_days_ago=10)
+    _add_memory(engine_conn, "#A", title="Watch: #A")
+    management.run_tick_evaluators(engine_conn, now=NOW)
+    assert _kick_state(engine_conn) == "recommended"
+
+
+def test_leave_hold_suppresses_kick(engine_conn):
+    # The LOA exception: an explicit `Hold:` memory (member told leaders they're
+    # away) caps the card at at_risk — grace until the hold expires.
+    _seed_member(engine_conn, last_battle_days_ago=10)
+    _add_memory(engine_conn, "#A", title="Hold: #A", expires_at="2026-08-01")
+    management.run_tick_evaluators(engine_conn, now=NOW)
+    assert _kick_state(engine_conn) == "at_risk"
+
+
+def test_expired_leave_hold_does_not_suppress(engine_conn):
+    # Once the leave window passes, the clock resumes and the card fires.
+    _seed_member(engine_conn, last_battle_days_ago=10)
+    _add_memory(engine_conn, "#A", title="Hold: #A", expires_at="2026-06-01")
+    management.run_tick_evaluators(engine_conn, now=NOW)
+    assert _kick_state(engine_conn) == "recommended"
 
 
 def test_elder_never_reactive_recommended(engine_conn):

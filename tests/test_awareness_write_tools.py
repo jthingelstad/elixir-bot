@@ -109,6 +109,32 @@ def test_flag_member_watch_creates_leadership_inference_memory(memdb):
     assert "watch-list" in (memory.get("tags") or [])
 
 
+def test_flag_member_watch_away_until_records_leave_hold(memdb):
+    # `away_until` = the member told leaders they'll be away → a `Hold:` memory
+    # (tagged 'leave-hold', expiring at away_until) that the kick engine honors
+    # as LOA grace. A plain watch never grants that grace.
+    db.snapshot_members(
+        [{"tag": "#ABC123", "name": "Vijay", "role": "member"}],
+    )
+
+    raw = tool_exec._execute_tool(
+        "flag_member_watch",
+        {"member_tag": "Vijay", "reason": "Told us he's travelling, back after the 20th",
+         "away_until": "2026-07-20"},
+        workflow="awareness",
+    )
+    result = json.loads(raw)
+    assert result["success"] is True
+    assert result["type"] == "hold"
+    assert result["away_until"] == "2026-07-20"
+
+    memory = list_memories(viewer_scope="leadership")[0]
+    assert memory["title"].startswith("Hold:")
+    assert memory["expires_at"].startswith("2026-07-20")
+    assert "leave-hold" in (memory.get("tags") or [])
+    assert "watch-list" not in (memory.get("tags") or [])
+
+
 def test_flag_member_watch_rejects_missing_args(memdb):
     raw = tool_exec._execute_tool(
         "flag_member_watch",
