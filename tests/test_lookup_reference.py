@@ -64,6 +64,39 @@ def test_resolve_loop_reference(engine_conn, _isolate_default_sqlite_db):
     assert out["read_health"]["hard_post_signal_count"] == 0
 
 
+def test_resolve_case_reference(engine_conn, _isolate_default_sqlite_db):
+    engine_conn.execute(
+        "INSERT INTO decision_cases "
+        "(case_id, case_key, case_type, status, title, target_player_name, "
+        " recommendation, rationale, opened_at, created_at, updated_at) "
+        "VALUES (12, 'kickreview:test', 'inactivity_review', 'open', "
+        " 'Kick review: pokemon', 'pokemon', 'Watch one more week', "
+        " 'idle 9.5 days on a full roster', ?, ?, ?)",
+        (NOW, NOW, NOW),
+    )
+    engine_conn.commit()
+    out = _execute_lookup_reference({"reference": "C12"})
+    assert out["kind"] == "decision_case"
+    assert out["case_id"] == 12
+    assert out["target_member"] == "pokemon"
+    assert out["status"] == "open"
+
+
+def test_resolve_memory_reference(_isolate_default_sqlite_db):
+    from memory_store import create_memory
+
+    mem = create_memory(
+        body="pokemon idle 9.5 days; watching for one more week before a kick card.",
+        source_type="leader_note", is_inference=False, confidence=1.0,
+        created_by="test", scope="leadership", title="Watch: pokemon",
+    )
+    out = _execute_lookup_reference({"reference": f"M{mem['memory_id']}"}, workflow="clanops")
+    assert out["kind"] == "memory"
+    assert out["memory_id"] == mem["memory_id"]
+    assert out["title"] == "Watch: pokemon"
+    assert "idle" in out["body"]
+
+
 def test_reference_error_cases(engine_conn, _isolate_default_sqlite_db):
     from runtime.awareness.store import ensure_awareness_schema
 
@@ -74,3 +107,5 @@ def test_reference_error_cases(engine_conn, _isolate_default_sqlite_db):
     # well-formed but nonexistent
     assert _execute_lookup_reference({"reference": "R9999"})["error"] == "not_found"
     assert _execute_lookup_reference({"reference": "L9999"})["error"] == "not_found"
+    assert _execute_lookup_reference({"reference": "C9999"})["error"] == "not_found"
+    assert _execute_lookup_reference({"reference": "M9999"}, workflow="clanops")["error"] == "not_found"
