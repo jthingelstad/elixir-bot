@@ -309,7 +309,7 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn=None, compose_fn
                     target_player_tag=t["player_tag"],
                     target_player_name=t.get("player_name"),
                     objective=t.get("objective")
-                    or f"Review kick candidacy for {t['player_tag']}",
+                    or f"Review kick candidacy for {t.get('player_name') or t['player_tag']}",
                     rationale=t.get("rationale") or json.dumps(t),
                     source_signal_key=f"engine:kick:{t['player_tag']}:{now_iso}",
                     source_signal_type="engine_kick_state",
@@ -329,7 +329,7 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn=None, compose_fn
                     action_type="kick_recommendation",
                     target_player_tag=r["player_tag"],
                     target_player_name=r.get("player_name"),
-                    objective=f"Review kick candidacy for {r['player_tag']}",
+                    objective=f"Review kick candidacy for {r.get('player_name') or r['player_tag']}",
                     rationale=r.get("rationale") or "Re-nominated after decline cooldown.",
                     source_signal_key=f"engine:kick-renominate:{r['player_tag']}:{now_iso}",
                     source_signal_type="engine_kick_state",

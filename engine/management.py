@@ -535,6 +535,7 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
     members = conn.execute(
         """SELECT mm.player_tag, mm.tenure_days, mm.role, mm.kick_state,
                   mm.kick_state_since, mm.state_json, p.last_seen_at,
+                  p.display_name, p.current_name,
                   (SELECT MAX(cm2.joined_at) FROM clan_memberships cm2
                    WHERE cm2.player_tag = mm.player_tag AND cm2.left_at IS NULL)
                   AS membership_joined_at
@@ -610,6 +611,7 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
             if new_state == "recommended":
                 fired.append({
                     "player_tag": tag,
+                    "player_name": m["display_name"] or m["current_name"] or tag,
                     "days_idle": round(days_idle, 1),
                     "from_state": state,
                 })
