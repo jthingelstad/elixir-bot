@@ -259,6 +259,7 @@ from runtime.jobs._core import (  # noqa: E402,F401
     _query_or_default,
     _summarize_member_rows,
     _weekly_clan_recap,
+    _weekly_elder_standing,
     _weekly_member_report_cycle,
     _weekly_discord_invite_relay,
 )

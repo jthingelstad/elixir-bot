@@ -623,6 +623,51 @@ async def _weekly_clan_recap():
     runtime_status.mark_job_success("weekly_clan_recap", "weekly recap posted")
 
 
+async def _weekly_elder_standing():
+    """Weekly public Elder Standing — the transparent Elder-track report to
+    #announcements (holding / rising / stepping-down, from the live band).
+    Standalone + grounding-guarded: warms via the LLM, falls back to the exact
+    deterministic render if the LLM output ever names someone not in the data."""
+    runtime_status.mark_job_start("weekly_elder_standing")
+    try:
+        channel_id = _get_singleton_channel_id("weekly_digest")  # = #announcements
+    except Exception as exc:
+        runtime_status.mark_job_failure("weekly_elder_standing", f"announcements channel config error: {exc}")
+        return
+    channel = _bot().get_channel(channel_id)
+    if not channel:
+        runtime_status.mark_job_failure("weekly_elder_standing", "announcements channel not found")
+        return
+
+    date_str = datetime.now(pytz.timezone("America/Chicago")).strftime("%A, %B %-d")
+
+    def _compose():
+        from runtime.elder_standing import compose_elder_standing_report
+        try:
+            return compose_elder_standing_report(date=date_str)
+        except Exception:
+            log.error("Elder standing compose failed", exc_info=True)
+            return "", "error"
+
+    text, source = await asyncio.to_thread(_compose)
+    if not text:
+        runtime_status.mark_job_success("weekly_elder_standing", "no report generated")
+        return
+    try:
+        await _post_to_elixir(channel, {"content": text})
+    except discord.Forbidden as exc:
+        detail = f"missing Discord permissions in #{getattr(channel, 'name', 'unknown')}"
+        runtime_status.mark_job_failure("weekly_elder_standing", detail)
+        raise RuntimeError(f"elder standing post failed: {detail}") from exc
+    await asyncio.to_thread(
+        db.save_message,
+        _channel_scope(channel), "assistant", text,
+        **_channel_msg_kwargs(channel), workflow="elder_standing",
+        event_type="weekly_elder_standing",
+    )
+    runtime_status.mark_job_success("weekly_elder_standing", f"elder standing posted (source={source})")
+
+
 async def _email_weekly_recap(recap_post: str) -> int:
     """BCC the weekly recap to clan members with a verified email (BCC so nobody
     sees anyone else's address). Discord custom emoji (`<:name:id>`) are stripped
