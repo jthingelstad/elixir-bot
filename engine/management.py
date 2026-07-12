@@ -387,7 +387,8 @@ def _elder_scores(conn, now: str, week_anchor: str) -> dict:
     bar is the clan itself; filter failures affect candidacy (§3.1), not the
     distribution."""
     members = conn.execute(
-        """SELECT mm.player_tag, mm.role, mm.tenure_days, COALESCE(p.display_name, p.current_name) AS current_name
+        """SELECT mm.player_tag, mm.role, mm.tenure_days, mm.donations_4wk_avg,
+                  COALESCE(p.display_name, p.current_name) AS current_name
            FROM member_management mm
            LEFT JOIN players p ON p.player_tag = mm.player_tag
            WHERE EXISTS (SELECT 1 FROM clan_memberships cm
@@ -405,7 +406,11 @@ def _elder_scores(conn, now: str, week_anchor: str) -> dict:
             "war_rate": _war_rate(conn, tag, now),
             "ranked_league": league,
             "ranked_battles": _ranked_battles(conn, tag, now, WAR_RATE_WINDOW),
-            "donations": _closed_week_donations(conn, tag, week_anchor) or 0,
+            # Trailing 4-week donation average (materialized by the projection),
+            # not a single closed week (2026-07-12): one week's snapshot swings on
+            # the donation reset — averaging 4 weeks is stable, and it matches the
+            # number the Elder Standing report and webapp already display.
+            "donations": m["donations_4wk_avg"] or 0,
         }
     war_vals = [r["war_rate"] for r in raw.values()]
     don_vals = [r["donations"] for r in raw.values()]
@@ -534,7 +539,7 @@ def elder_evidence(conn, tag: str, now: str | None = None) -> dict | None:
         "ranked_league_name": ranked_league_name(league) if league >= RANKED_FLOOR_LEAGUE else None,
         "ranked_battles": me.get("ranked_battles") or 0,
         "ranked_pct": round(me.get("ranked_pct") or 0.0, 2),
-        "donations_week": me.get("donations") or 0,
+        "donations_4wk_avg": round(me.get("donations") or 0),
         "competitive": round(me.get("competitive") or 0.0, 2),
     }
 

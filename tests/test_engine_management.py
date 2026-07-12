@@ -343,7 +343,8 @@ def _seed_ranked(conn, tag, *, role="member", tenure=120, donations=0,
                      (tag, _json.dumps({"league": ranked_league, "trophies": ranked_rating,
                       "last": {"league": last_league, "trophies": last_rating}}), NOW))
     conn.execute("INSERT INTO member_management (player_tag, computed_at, week_anchor, "
-                 "tenure_days, role) VALUES (?,?, '2026-06-22', ?, ?)", (tag, NOW, tenure, role))
+                 "tenure_days, role, donations_4wk_avg) VALUES (?,?, '2026-06-22', ?, ?, ?)",
+                 (tag, NOW, tenure, role, donations or None))
     if donations:
         conn.execute("INSERT INTO player_daily_metrics (player_tag, metric_date, "
                      "donations_week) VALUES (?, '2026-06-28', ?)", (tag, donations))
@@ -659,7 +660,7 @@ def test_elder_evidence_shape_and_none(engine_conn):
                  war_used=15, war_avail=16, war_days=3, donations=226)
     ev = management.elder_evidence(engine_conn, "#EV", now=NOW)
     assert ev and ev["ranked_league_name"] == "Ultimate Champion"
-    assert ev["war_deck_rate"] >= 0.9 and ev["donations_week"] == 226
+    assert ev["war_deck_rate"] >= 0.9 and ev["donations_4wk_avg"] == 226
     assert ev["rank"] and ev["elder_score"] > 0
     assert management.elder_evidence(engine_conn, "#GHOST", now=NOW) is None
 
