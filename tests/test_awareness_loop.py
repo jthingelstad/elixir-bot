@@ -51,6 +51,7 @@ def test_run_awareness_loop_without_deliver_fn_posts_nothing_member_facing(monke
     """With no deliver_fn, the loop persists a thought and hands a render to the
     #thinking diagnostic stream — and makes NO member-facing send (delivery only
     happens when a deliver_fn is supplied)."""
+    monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "0")  # isolate post-brain mechanics
     from runtime.awareness import loop as loop_mod
 
     plan = {
@@ -105,6 +106,7 @@ def test_run_awareness_loop_without_deliver_fn_posts_nothing_member_facing(monke
 def test_run_awareness_loop_live_delivers_the_plan(monkeypatch):
     """With a deliver_fn, the loop delivers the plan's posts live and records the
     delivery count."""
+    monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "0")  # isolate post-brain mechanics
     from runtime.awareness import loop as loop_mod
 
     plan = {
@@ -126,6 +128,7 @@ def test_run_awareness_loop_live_delivers_the_plan(monkeypatch):
 
 
 def test_run_awareness_loop_records_silence(monkeypatch):
+    monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "0")  # exercise brain-chosen silence
     from runtime.awareness import loop as loop_mod
 
     plan = {"posts": [], "skipped_reason": "nothing material changed"}
@@ -163,6 +166,7 @@ def test_classify_plan_distinguishes_failure_from_silence():
 def test_run_awareness_loop_records_tick_failure_not_silence(monkeypatch):
     """A tick that returns None (truncation/timeout/schema) is recorded as a
     failure — chose_silence stays False and the thought carries a ⚠️ marker."""
+    monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "0")  # reach the brain to fail it
     from runtime.awareness import loop as loop_mod
     from runtime.awareness.store import list_recent_thoughts
 
@@ -181,9 +185,10 @@ def test_run_awareness_loop_records_tick_failure_not_silence(monkeypatch):
     assert (thoughts[0]["skipped_reason"] or "").startswith("⚠️ tick failed")
 
 
-def test_run_awareness_loop_numbers_loops_and_captures_tool_trace():
+def test_run_awareness_loop_numbers_loops_and_captures_tool_trace(monkeypatch):
     """Each loop gets a stable, incrementing number, and the tools the brain
     reached for are captured into the render (header + threaded detail)."""
+    monkeypatch.setenv("ELIXIR_AWARENESS_GATE", "0")  # exercise the brain tool path
     from runtime.awareness import loop as loop_mod
 
     def _tick(read, *, tool_stats, on_event=None):

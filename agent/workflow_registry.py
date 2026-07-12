@@ -156,6 +156,11 @@ _WORKFLOW_SPECS = (
     # Weekly public Elder Standing report — standalone, no tools, composed from a
     # pre-materialized facts brief (runtime.elder_standing), grounding-guarded.
     WorkflowSpec("elder_standing", tools=[], tools_allowed=False, model_family="intensive"),
+    # Awareness cost gate (runtime.awareness.gate): a lightweight (Haiku) binary
+    # post-vs-silence triage that runs before the expensive Sonnet brain on
+    # soft-signal ticks. No tools, tiny prompt — it only gates, never posts.
+    WorkflowSpec("awareness_triage", tools=[], tools_allowed=False, max_tool_rounds=1,
+                 model_family="lightweight"),
     WorkflowSpec("site_promote_content", model_family="promotion"),
     # Release-notes announcement (agent/release_notes.py, ported from Oliver):
     # Elixir's first-person "what I can do now" post — chat-tier, no tools.
