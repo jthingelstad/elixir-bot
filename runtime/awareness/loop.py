@@ -39,6 +39,7 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
     """
     from agent.workflows import run_awareness_tick
     from runtime.awareness import diagnostic as diag_mod
+    from runtime.awareness import gate as gate_mod
     from runtime.awareness import read as read_mod
     from runtime.awareness import store
 
@@ -67,25 +68,49 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
         except Exception:
             log.debug("awareness loop: progress observer raised (ignored)", exc_info=True)
 
+    # Cost gate: decide whether this tick is worth the expensive brain BEFORE we
+    # spend it. A gated silence (no signals, or a lightweight-triage "stay quiet"
+    # verdict) synthesizes a deliberate-silence plan and skips the Sonnet call
+    # entirely — the read already carries everything needed to record the
+    # silence. Hard-posts and triage "post" verdicts fall through to the brain.
+    # The gate never raises (fails safe to deliberate); see runtime/awareness/gate.py.
+    gate_decision = gate_mod.decide(read)
+    counters["gate_tier"] = gate_decision.get("tier")
+
     # Open the live #thinking thread with the read before the brain deliberates,
     # so tool calls + any truncation stream in as they happen.
     _progress({"type": "start", "read_summary": diag_mod.read_summary(read)})
 
-    # tool_stats is mutated in place by the tool-calling loop; we read the
-    # per-call trace back out for the log and the persisted thought. on_event
-    # streams each tool call / truncation / retry into the open thread live.
-    tool_stats: dict = {}
-    try:
-        plan = run_awareness_tick(
-            read, tool_stats=tool_stats, on_event=_progress
-        ) or {}
-    except Exception as exc:
-        log.exception("awareness loop: run_awareness_tick failed")
-        counters["error"] = f"run_awareness_tick: {exc}"
-        plan = {}
-        # Still persist the thought so the degraded turn is visible.
+    persist_model = None
+    if not gate_decision.get("deliberate"):
+        # Deterministic / triage silence — no brain call this tick.
+        plan = {"posts": [], "skipped_reason": gate_decision.get("silence_reason") or "gated silence"}
+        tool_trace: list = []
+        persist_model = f"gate:{gate_decision.get('decider') or gate_decision.get('tier')}"
+        log.info(
+            "awareness gate: %s silence (tier=%s) — skipped brain: %s",
+            gate_decision.get("decider") or "gate", gate_decision.get("tier"),
+            gate_decision.get("silence_reason"),
+        )
+    else:
+        if gate_decision.get("tier") not in ("deliberate", "disabled"):
+            log.info("awareness gate: escalating to brain (tier=%s): %s",
+                     gate_decision.get("tier"), gate_decision.get("reason"))
+        # tool_stats is mutated in place by the tool-calling loop; we read the
+        # per-call trace back out for the log and the persisted thought. on_event
+        # streams each tool call / truncation / retry into the open thread live.
+        tool_stats: dict = {}
+        try:
+            plan = run_awareness_tick(
+                read, tool_stats=tool_stats, on_event=_progress
+            ) or {}
+        except Exception as exc:
+            log.exception("awareness loop: run_awareness_tick failed")
+            counters["error"] = f"run_awareness_tick: {exc}"
+            plan = {}
+            # Still persist the thought so the degraded turn is visible.
 
-    tool_trace = tool_stats.get("tool_trace") or []
+        tool_trace = tool_stats.get("tool_trace") or []
     counters["tool_calls"] = len(tool_trace)
 
     if not isinstance(plan, dict):
@@ -139,7 +164,7 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
 
     loop_number = None
     try:
-        rec = store.persist_thought(read, plan, tool_trace=tool_trace)
+        rec = store.persist_thought(read, plan, model=persist_model, tool_trace=tool_trace)
         counters["thought_id"] = rec["thought_id"]
         counters["loop_number"] = loop_number = rec["loop_number"]
     except Exception as exc:
