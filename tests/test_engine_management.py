@@ -168,12 +168,20 @@ def _add_war_deck(conn, tag, *, days_ago=3):
     conn.commit()
 
 
-def _set_ranked(conn, tag, *, league):
-    """Put a member at a ranked league (Champion=4+) so they pass the ranked
-    floor — the equal-footing alternative to the war floor."""
+def _set_ranked(conn, tag, *, league=5, battles=6, days_ago=12):
+    """Give a member ranked PARTICIPATION so they pass the participation-based
+    ranked floor. `days_ago` places the games inside the 14-day floor window but
+    (default 12) OLDER than a typical idle age, so it doesn't reset the kick
+    idle-clock. Set battles=0 for a member who should NOT clear the floor."""
     conn.execute(
         "UPDATE player_current_state SET ranked_league = ? WHERE player_tag = ?",
         (league, tag))
+    obs = (NOW_DT - timedelta(days=days_ago)).strftime("%Y-%m-%dT08:00:00Z")
+    bt = (NOW_DT - timedelta(days=days_ago)).strftime("%Y%m%dT080000.000Z")
+    for b in range(battles):
+        conn.execute("INSERT OR IGNORE INTO battle_events (dedup_key, player_tag, "
+                     "battle_time, observed_at, mode_group) VALUES (?,?,?,?, 'ranked')",
+                     (f"{tag}:rk:{b}", tag, bt, obs))
     conn.commit()
 
 
@@ -207,9 +215,9 @@ def test_ranked_play_earns_grace_equally(engine_conn):
 
 
 def test_weak_record_does_not_earn_grace(engine_conn):
-    # No war deck, sub-Champion ranked → no grace → plain 8-day card fires at 10.
+    # No war deck, no ranked participation → no grace → plain 8-day card at 10.
     _seed_member(engine_conn, trophies=5000, last_battle_days_ago=10)
-    _set_ranked(engine_conn, "#A", league=2)
+    _set_ranked(engine_conn, "#A", league=2, battles=0)
     management.run_tick_evaluators(engine_conn, now=NOW)
     assert _kick_state(engine_conn) == "recommended"
 
@@ -312,7 +320,8 @@ def test_elder_never_reactive_recommended(engine_conn):
 
 def _seed_ranked(conn, tag, *, role="member", tenure=120, donations=0,
                  war_used=0, war_avail=16, war_days=0, name=None,
-                 ranked_league=0, ranked_rating=0, last_league=0, last_rating=0):
+                 ranked_league=0, ranked_rating=0, last_league=0, last_rating=0,
+                 ranked_battles=0):
     """A rankable roster member for elder-band tests: role, tenure, closed-week
     donations (Sun 2026-06-28), and recent war attendance (used/avail split over
     `war_days` days inside the 14-day floor window; anchored ~2026-06-25)."""
@@ -344,6 +353,14 @@ def _seed_ranked(conn, tag, *, role="member", tenure=120, donations=0,
                      "war_day_index, player_tag, decks_used, decks_available, observed_at) "
                      "VALUES (133, 0, ?, ?, ?, ?, ?)",
                      (d, tag, war_used // max(war_days, 1), war_avail // max(war_days, 1), obs))
+    for b in range(ranked_battles):
+        # ranked participation: cluster 3–10 days back so it's inside both the
+        # 14-day floor window and the 28-day score window
+        obs = (NOW_DT - timedelta(days=3 + (b % 8))).strftime("%Y-%m-%dT12:00:00Z")
+        bt = (NOW_DT - timedelta(days=3 + (b % 8))).strftime("%Y%m%dT120000.000Z")
+        conn.execute("INSERT OR IGNORE INTO battle_events (dedup_key, player_tag, "
+                     "battle_time, observed_at, mode_group) VALUES (?,?,?,?, 'ranked')",
+                     (f"{tag}:rk:{b}", tag, bt, obs))
     conn.commit()
 
 
@@ -364,49 +381,54 @@ def test_war_floor_and_scores(engine_conn):
     assert scores["#W"]["score"] > scores["#N"]["score"]
 
 
-def test_ranked_floor_and_prestige(engine_conn):
-    # UC member with zero wars passes the competitive floor via ranked;
-    # a Master-tier member with zero wars fails both.
-    _seed_ranked(engine_conn, "#UC", war_days=0, ranked_league=7, ranked_rating=1867)
-    _seed_ranked(engine_conn, "#MAS", war_days=0, ranked_league=2, ranked_rating=600)
-    assert management._passes_ranked_floor(engine_conn, "#UC") is True
-    assert management._passes_ranked_floor(engine_conn, "#MAS") is False
-    assert management._passes_competitive_floor(engine_conn, "#UC", ANCHOR_NOW) is True
-    assert management._passes_competitive_floor(engine_conn, "#MAS", ANCHOR_NOW) is False
-    assert management._ranked_prestige(7, 1867) > 0.9
-    assert management._ranked_prestige(4, 0) == 0.5
-    assert management._ranked_prestige(2, 800) == 0.0
+def test_ranked_floor_is_participation(engine_conn):
+    # The ranked floor is PARTICIPATION now (2026-07-12), not league reached: a
+    # member who PLAYS ranked passes; a strong account sitting on an old climb
+    # without playing does NOT.
+    _seed_ranked(engine_conn, "#PLAYS", war_days=0, ranked_battles=8)
+    _seed_ranked(engine_conn, "#IDLE_UC", war_days=0, ranked_league=7, ranked_rating=1867,
+                 ranked_battles=0)  # elite league, but hasn't played ranked
+    assert management._passes_ranked_floor(engine_conn, "#PLAYS", ANCHOR_NOW) is True
+    assert management._passes_ranked_floor(engine_conn, "#IDLE_UC", ANCHOR_NOW) is False
+    assert management._passes_competitive_floor(engine_conn, "#PLAYS", ANCHOR_NOW) is True
+    assert management._passes_competitive_floor(engine_conn, "#IDLE_UC", ANCHOR_NOW) is False
 
 
-def test_competitive_is_max_of_war_and_ranked(engine_conn):
-    # A UC grinder with no clan wars is top-tier on the competitive term (via
-    # ranked prestige), just like a full-attendance war stalwart (via war
-    # percentile) — competitive = max(war_pct, ranked_prestige).
-    for i in range(8):                             # filler so percentiles mean something
-        _seed_ranked(engine_conn, f"#F{i}", war_used=2, war_avail=16, war_days=1, donations=50)
+def test_competitive_headroom_war_primary_ranked_muted(engine_conn):
+    # competitive = war_pct + RANKED_WEIGHT*ranked_pct*(1-war_pct): war-primary,
+    # ranked muted + participation-based, doing-both wins, bounded 0-1.
+    for i in range(6):                             # weak filler so percentiles mean something
+        _seed_ranked(engine_conn, f"#F{i}", war_used=1, war_avail=16, war_days=1, donations=50)
     _seed_ranked(engine_conn, "#WARDOG", war_used=16, war_avail=16, war_days=4, donations=200)
-    _seed_ranked(engine_conn, "#UCGRIND", war_days=0, ranked_league=7, ranked_rating=1900, donations=200)
+    _seed_ranked(engine_conn, "#WARONLY", war_used=8, war_avail=16, war_days=2, donations=200)
+    _seed_ranked(engine_conn, "#WARANDRK", war_used=8, war_avail=16, war_days=2,
+                 ranked_battles=40, donations=200)   # SAME war as WARONLY, plus ranked
+    _seed_ranked(engine_conn, "#RKONLY", war_days=0, ranked_battles=40, donations=200)
     scores = management._elder_scores(engine_conn, ANCHOR_NOW, ANCHOR)
-    assert scores["#UCGRIND"]["war_rate"] == 0
-    # max picked ranked prestige, not the near-zero war percentile
-    assert scores["#UCGRIND"]["competitive"] >= 0.9
-    assert scores["#UCGRIND"]["competitive"] > scores["#UCGRIND"]["war_pct"]
-    # the war stalwart is also top-tier on the competitive term
-    assert scores["#WARDOG"]["competitive"] >= 0.85
+    # doing BOTH beats the same war with no ranked (ranked fills the headroom)
+    assert scores["#WARANDRK"]["competitive"] > scores["#WARONLY"]["competitive"]
+    # ranked-only is muted — can't top the max-war stalwart
+    assert scores["#RKONLY"]["competitive"] < scores["#WARDOG"]["competitive"]
+    # ranked participation still earns real credit
+    assert scores["#RKONLY"]["competitive"] > 0
+    # never saturates past 1.0
+    assert all(s["competitive"] <= 1.0 for s in scores.values())
 
 
-def test_uc_elder_no_wars_is_protected(engine_conn):
-    # The OllieTurtle case: UC elder, zero clan-war decks → passes competitive
-    # floor via ranked → NOT demotable. A no-war no-ranked elder IS.
+def test_ranked_playing_elder_not_abandoned_idle_is(engine_conn):
+    # New philosophy: an elder who PLAYS ranked (participation) is NOT demotable
+    # for ABANDONMENT (they clear the floor). An elder who plays neither war nor
+    # ranked IS abandonment-demotable, even if the account once reached UC.
+    # (Ranked-only may still be OUTRANKED — that's a different, fair reason.)
     for i in range(11):
         _seed_ranked(engine_conn, f"#P{i}", war_used=8, war_avail=16, war_days=2, donations=200)
-    _seed_ranked(engine_conn, "#OLLIE", role="elder", war_days=0,
-                 ranked_league=7, ranked_rating=1867, donations=193)
-    _seed_ranked(engine_conn, "#DEADBEAT", role="elder", war_days=0,
-                 ranked_league=0, donations=100)
+    _seed_ranked(engine_conn, "#RANKER", role="elder", war_days=0,
+                 ranked_battles=12, donations=193)
+    _seed_ranked(engine_conn, "#IDLE", role="elder", war_days=0,
+                 ranked_league=7, ranked_rating=1867, ranked_battles=0, donations=100)
     scores, band = _band(engine_conn)
-    assert "#OLLIE" not in band["demotable"]       # UC protects the ranked grinder
-    assert "#DEADBEAT" in band["demotable"]         # both floors failed
+    assert band["demote_reasons"].get("#RANKER") != "abandoned"  # plays ranked → not abandonment
+    assert band["demote_reasons"].get("#IDLE") == "abandoned"    # plays nothing → abandonment
 
 
 def _band(conn):

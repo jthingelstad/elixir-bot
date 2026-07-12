@@ -25,9 +25,19 @@ PROMOTE_TENURE_MIN = 28       # four-week hard filter before elder consideration
 WAR_FLOOR_DAYS = 1           # mandatory war participation: ≥N played days ...
 WAR_FLOOR_WINDOW = 14        # ... in the last WAR_FLOOR_WINDOW days
 WAR_RATE_WINDOW = 28         # war_rate score window (decks used ÷ available)
-RANKED_FLOOR_LEAGUE = 4      # Champion — the ranked alternative to the war floor
+# Ranked is scored/floored by PARTICIPATION now, not league reached (2026-07-12):
+# every elder metric must be in the player's control and reward participation,
+# not account power. League/prestige was a backdoor for collection strength.
+RANKED_FLOOR_LEAGUE = 4      # Champion — kept only for DISPLAY (league name), not gating
+RANKED_FLOOR_BATTLES = 5     # mandatory ranked participation: ≥N ranked battles ...
+                             # ... in the last WAR_FLOOR_WINDOW days (the ranked alt to war)
 SCORE_W_WAR = 0.65           # war-weighted rank blend (core elder duty)
 SCORE_W_DONATION = 0.35      # "lead by example" — the lighter half
+# War is direct clan contribution (Fame + league progress); ranked only reps the
+# clan. So ranked participation is muted and fills part of the gap war leaves:
+# competitive = war_pct + RANKED_WEIGHT * ranked_pct * (1 - war_pct). War-primary,
+# ranked-secondary, doing-both rewarded, bounded 0-1 (no saturation).
+RANKED_WEIGHT = 0.40
 ELDER_BAND_FLOOR = 0.15      # elder share of the non-leadership roster ...
 ELDER_BAND_CEIL = 0.20       # ... a range to maintain, NOT a quota to fill
 WORTHINESS_MIN_PERCENTILE = 0.50   # below-floor promotions still need ≥ median score
@@ -319,25 +329,30 @@ def _ranked_standing(conn, tag) -> tuple[int, int]:
     return league, rating
 
 
-def _passes_ranked_floor(conn, tag) -> bool:
-    """Champion (league ≥ 4) on the best-of current/last season."""
-    league, _ = _ranked_standing(conn, tag)
-    return league >= RANKED_FLOOR_LEAGUE
+def _ranked_battles(conn, tag, now: str, window: int) -> int:
+    """Ranked battles played in the trailing `window` days — the ranked
+    PARTICIPATION signal (in the player's control), replacing league/prestige
+    (which was skill/account-power, not effort)."""
+    return conn.execute(
+        """SELECT COUNT(*) FROM battle_events
+           WHERE player_tag = ? AND mode_group = 'ranked'
+             AND julianday(observed_at) >= julianday(?) - ?""",
+        (tag, now, window),
+    ).fetchone()[0] or 0
 
 
-def _ranked_prestige(league: int, rating: int) -> float:
-    """ABSOLUTE 0–1 prestige from best-of league (not a percentile). Below
-    Champion → 0; UC scales the rating band 1200–2000 into the top +0.1."""
-    base = {4: 0.5, 5: 0.65, 6: 0.8, 7: 0.9}.get(league, 0.0)
-    if league >= 7:
-        base += min(0.1, max(0.0, (rating - 1200) / 800.0 * 0.1))
-    return base
+def _passes_ranked_floor(conn, tag, now: str) -> bool:
+    """Mandatory ranked participation: ≥ RANKED_FLOOR_BATTLES ranked battles in
+    the last WAR_FLOOR_WINDOW days (the ranked alternative to the war floor).
+    Participation, not league reached — a strong account no longer clears it by
+    sitting on an old climb."""
+    return _ranked_battles(conn, tag, now, WAR_FLOOR_WINDOW) >= RANKED_FLOOR_BATTLES
 
 
 def _passes_competitive_floor(conn, tag, now: str) -> bool:
     """The mandatory floor: war OR ranked. An elder is only auto-demoted for
     abandonment when BOTH fail (§3.1, §3.4)."""
-    return _passes_war_floor(conn, tag, now) or _passes_ranked_floor(conn, tag)
+    return _passes_war_floor(conn, tag, now) or _passes_ranked_floor(conn, tag, now)
 
 
 def _war_rate(conn, tag, now: str) -> float:
@@ -382,25 +397,28 @@ def _elder_scores(conn, now: str, week_anchor: str) -> dict:
     raw = {}
     for m in ranked:
         tag = m["player_tag"]
-        league, rating = _ranked_standing(conn, tag)
+        league, rating = _ranked_standing(conn, tag)  # league kept for display only
         raw[tag] = {
             "role": m["role"] or "member",
             "tenure": m["tenure_days"] or 0,
             "name": m["current_name"],
             "war_rate": _war_rate(conn, tag, now),
             "ranked_league": league,
-            "ranked_prestige": _ranked_prestige(league, rating),
+            "ranked_battles": _ranked_battles(conn, tag, now, WAR_RATE_WINDOW),
             "donations": _closed_week_donations(conn, tag, week_anchor) or 0,
         }
     war_vals = [r["war_rate"] for r in raw.values()]
     don_vals = [r["donations"] for r in raw.values()]
+    rk_vals = [r["ranked_battles"] for r in raw.values()]
     for r in raw.values():
         r["war_pct"] = _percentile(r["war_rate"], war_vals)
         r["donation_pct"] = _percentile(r["donations"], don_vals)
-        # competitive = the better of war-participation percentile and ABSOLUTE
-        # ranked prestige (§3.2): a Ranked specialist who skips clan war ranks
-        # on that specialism, not penalized for it.
-        r["competitive"] = max(r["war_pct"], r["ranked_prestige"])
+        r["ranked_pct"] = _percentile(r["ranked_battles"], rk_vals)
+        # competitive = war participation PRIMARY; ranked participation fills part
+        # of the gap war leaves (headroom), muted by RANKED_WEIGHT because war is
+        # direct clan contribution and ranked only reps the clan. War-maxed → ~1;
+        # ranked-only → caps low; doing both wins; bounded 0-1 (never saturates).
+        r["competitive"] = r["war_pct"] + RANKED_WEIGHT * r["ranked_pct"] * (1 - r["war_pct"])
         r["score"] = SCORE_W_WAR * r["competitive"] + SCORE_W_DONATION * r["donation_pct"]
     return raw
 
@@ -514,7 +532,8 @@ def elder_evidence(conn, tag: str, now: str | None = None) -> dict | None:
         "war_deck_rate": round(me.get("war_rate") or 0.0, 2),
         "ranked_league": league,
         "ranked_league_name": ranked_league_name(league) if league >= RANKED_FLOOR_LEAGUE else None,
-        "ranked_prestige": round(me.get("ranked_prestige") or 0.0, 2),
+        "ranked_battles": me.get("ranked_battles") or 0,
+        "ranked_pct": round(me.get("ranked_pct") or 0.0, 2),
         "donations_week": me.get("donations") or 0,
         "competitive": round(me.get("competitive") or 0.0, 2),
     }
@@ -580,15 +599,14 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
             new_state = "none"  # any battle → none; auto-withdraw (§3.3)
         else:
             # Contribution grace = the SAME floor that earns elder (recent war
-            # participation OR Champion ranked — ranked counts equally, and it's
-            # live/last-season, not a 3-season average). It only buys extra
-            # confirm days while there are open slots, fading to 0 when full — an
-            # idle member only costs a slot at a full roster. Watch/at_risk are
-            # unaffected, so they still surface on the watchlist; only the card
-            # is delayed.
+            # participation OR recent ranked participation — ranked counts
+            # equally). It only buys extra confirm days while there are open
+            # slots, fading to 0 when full — an idle member only costs a slot at
+            # a full roster. Watch/at_risk are unaffected, so they still surface
+            # on the watchlist; only the card is delayed.
             confirm_days = KICK_CONFIRM_DAYS
             if slack > 0 and (
-                _passes_war_floor(conn, tag, now) or _passes_ranked_floor(conn, tag)
+                _passes_war_floor(conn, tag, now) or _passes_ranked_floor(conn, tag, now)
             ):
                 confirm_days += round(KICK_CONTRIB_GRACE_MAX * slack)
             if days_idle >= KICK_AT_RISK_DAYS + confirm_days:
@@ -875,8 +893,9 @@ def run_weekly_review(conn, week_anchor: str, now: str | None = None) -> dict:
         band_evidence = (
             "not ranked (leadership)" if not sc else
             f"score {sc['score']:.2f} [competitive {sc['competitive']:.2f} "
-            f"(war {sc['war_pct']:.2f} / ranked {sc['ranked_prestige']:.2f}, "
-            f"league {sc['ranked_league']}), donations {sc['donation_pct']:.2f}], "
+            f"(war {sc['war_pct']:.2f} / ranked {sc['ranked_pct']:.2f} "
+            f"[{sc['ranked_battles']} btl], league {sc['ranked_league']}), "
+            f"donations {sc['donation_pct']:.2f}], "
             f"rank {rank} of {band['n']}, band {band['floor']}-{band['ceil']}, "
             f"elders {band['current_elders']}"
         )
