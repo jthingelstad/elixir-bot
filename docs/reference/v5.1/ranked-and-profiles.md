@@ -141,7 +141,8 @@ CREATE TABLE pol_season_results (       -- one row per player per season
   scoring as built; `ranked_pulse` stays accrual-only.
 - **Add:** ONE `clan:pol_season_closed` summary intent per season close — the
   clan's PoL podium (top-3 by league then rating from `pol_season_results`),
-  routed to clan-events like `season_awards`; ledger key
+  routed to clan-events (the awareness brain composes it — the old
+  `season_awards` LLM composer workflow was removed 2026-07-11); ledger key
   `pol_season:{season}`. No per-player season posts; the podium names them.
 - **Add (awards):** `pol_champ` rows (ranks 1–3) in the awards table at PoL
   season close — same `INSERT OR IGNORE` idempotency as war awards.

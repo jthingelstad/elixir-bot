@@ -107,16 +107,20 @@ types they own:
 
 ### Calendar sub-source (clock-driven, not API-diffed; evidence marks `source: calendar`)
 
-**Owner: the calendar emitter** — runs inside tick step 3 (`runtime.md` §2) on the
-**first tick of each America/Chicago day**, reading `player_metadata`
-(birth month/day), `clans` (founded date), and `clan_memberships` (anniversaries).
-No API call, no baseline; the date embedded in the dedup key is the idempotency.
+**Owner: the calendar emitter** (`engine/emitters/clan.py:emit_calendar`) — runs inside
+tick step 3 (`runtime.md` §2) on the **first tick of each America/Chicago day**, reading
+`player_metadata` (birth month/day **and `cr_account_age_years`**), `clans` (founded date),
+and `clan_memberships` (anniversaries). No API call. For most types the date embedded in the
+dedup key is the idempotency; `cr_account_anniversary` additionally gates on a stored baseline
+(`player_metadata.cr_years_celebrated`) so first sight sets the baseline silently instead of
+flooding a "hit N years" post. All are ACTIVE-members-only (except `clan_birthday`, clan-wide).
 
-| `event_type` | Dedup key | Payload | Carries |
+| `event_type` | Dedup key | Payload | Notes |
 |---|---|---|---|
-| `member_birthday` | `member_birthday:{tag}:{date}` | `{name}` | `:963` (reads `player_metadata` birth month/day) |
-| `clan_birthday` | `clan_birthday:{date}` | `{years}` | `:948` |
-| `join_anniversary` | `join_anniversary:{tag}:{date}` | `{name, years}` | `:985` (reads `clan_memberships`) |
+| `member_birthday` | `member_birthday:{tag}:{date}` | `{name}` | reads `player_metadata` birth month/day |
+| `clan_birthday` | `clan_birthday:{date}` | `{years}` | annual on the founding date, only when `years >= 1` (first fires 2027-02-04). **Hard-post floor** (a mandatory big celebration) — see `runtime/awareness/read.py:HARD_POST_EVENT_TYPES` |
+| `join_anniversary` | `join_anniversary:{tag}:{date}` | `{name, years, months}` (+ `is_annual` at the 12/24-month marks) | quarterly clan-tenure marks; `is_annual` flags the real 1yr/2yr anniversary |
+| `cr_account_anniversary` | `cr_account_anniversary:{tag}:{years}` | `{name, years}` | fires when a member's `cr_account_age_years` (the "years played" badge) ticks up vs `cr_years_celebrated` — celebrates "N years playing Clash Royale", not a real account birthday |
 
 `cohort_wave` (`:876`) is **not an event type in v5.1** — it aggregates other
 events (3+ members, same milestone, same Chicago day) and belongs to the
