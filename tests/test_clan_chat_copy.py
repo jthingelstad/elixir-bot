@@ -82,3 +82,30 @@ def test_generate_clan_chat_copy_uses_fallback_when_llm_violates_guardrails():
     assert result is not None
     assert result.used_fallback is True
     assert result.messages == [f"POAP KINGS keeps rolling this week. {clan_chat_copy.CLAN_CHAT_SIGNATURE_TEXT}"]
+
+
+def test_signed_valid_messages_accepts_plain_brain_copy():
+    out = clan_chat_copy.signed_valid_messages(
+        ["Andy just cracked 9,000 trophies, first time — nice climb 13 days in."]
+    )
+    assert out is not None and len(out) == 1
+    assert out[0].endswith(clan_chat_copy.CLAN_CHAT_SIGNATURE_TEXT)
+    assert "Andy" in out[0]
+
+
+def test_signed_valid_messages_accepts_single_string():
+    out = clan_chat_copy.signed_valid_messages("War week clinched — nice work everyone.")
+    assert out is not None and len(out) == 1
+
+
+def test_signed_valid_messages_rejects_markdown_and_links():
+    assert clan_chat_copy.signed_valid_messages(["**Bold** milestone"]) is None
+    assert clan_chat_copy.signed_valid_messages(["Join https://poapkings.com"]) is None
+    assert clan_chat_copy.signed_valid_messages(["ping <@123> now"]) is None
+
+
+def test_signed_valid_messages_empty_is_none_and_caps_at_two():
+    assert clan_chat_copy.signed_valid_messages([]) is None
+    assert clan_chat_copy.signed_valid_messages(["", "   "]) is None
+    out = clan_chat_copy.signed_valid_messages(["one", "two", "three"])
+    assert out is not None and len(out) == 2

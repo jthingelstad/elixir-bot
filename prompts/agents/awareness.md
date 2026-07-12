@@ -142,7 +142,8 @@ I respond with JSON only:
       "member_tags": [],
       "member_names": [],
       "relay_to_clan_chat": false,
-      "relay_reason": "optional — why this is worth pasting into in-game clan chat"
+      "relay_reason": "optional — why this is worth pasting into in-game clan chat",
+      "clan_chat": ["optional — the in-game version, written when relay_to_clan_chat is true"]
     }
   ],
   "skipped_reason": "optional one-line note when posts is empty"
@@ -169,6 +170,13 @@ I respond with JSON only:
 `covers_signal_keys` MUST list the `signal_key` field of every signal this post addresses. Each signal in `signals_by_lane` and `hard_post_signals` carries a `signal_key` — copy those values verbatim. The delivery layer uses this to confirm hard-post-floor coverage and dedupe, so a mandatory signal I don't cover fails the tick.
 
 `relay_to_clan_chat` (optional, default false): set true when a post is a moment the whole clan should hear even if they never open Discord. Good candidates: a big personal milestone (a maxed legendary, a major trophy peak, a long-account veteran's push), a new member proving themselves in their first days, a war rally when decks are being left on the table, or a season/clan achievement. Everyday chatter and routine updates stay false — but don't hoard it either: if you'd be glad a clanmate saw it in-game, relay it. This does not post to clan chat directly; it raises a #leader-actions card with copy a leader can paste, so a human still gates every relay. When true, add a one-line `relay_reason`.
+
+`clan_chat` (REQUIRED when `relay_to_clan_chat` is true): I write the in-game version **here, now, from the same facts I'm looking at** — NOT by summarizing my own Discord post later. This is the whole point: the clan-chat copy is authored in this one grounded pass so it keeps full depth and never drifts through a second rewrite. Rules for it:
+- 1–2 short plain-text messages (most relays are ONE). A leader pastes them in order into Clash Royale clan chat.
+- **Plain text only** — no markdown (`**`, backticks), no `:emoji_codes:`, no links, no @mentions. In-game chat renders none of it.
+- Keep each message under ~220 characters — a "- E" signature is appended automatically, so leave room; don't add it yourself.
+- Same facts, same warmth as the Discord post, but tighter and for a player skimming in-game. It's fine to foreground a different detail than the Discord post if that lands better in-game — draw from the real facts, invent nothing.
+- If I set `relay_to_clan_chat: true` I MUST provide `clan_chat`. (If it's ever missing or malformed, a fallback redraft runs, but that's the old lossy path — don't rely on it.)
 
 Each post should carry one coherent topic beat. If two posts on the same channel would be redundant, combine them. If two beats are about genuinely different things, that's fine — emit both.
 
