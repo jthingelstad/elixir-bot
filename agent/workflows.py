@@ -21,6 +21,7 @@ from agent.prompt_builders import (
     _clan_chat_copy_system,
     _clanops_system,
     _deck_review_system,
+    _elder_standing_system,
     _event_system,
     _help_system,
     _intel_report_system,
@@ -1086,6 +1087,21 @@ def generate_weekly_recap(read: dict, week_context: str, previous_message: str =
 
 
 _MEMBER_REPORT_BLOCKS = ("overview", "standouts", "meta", "closer")
+
+
+def generate_elder_standing(facts: str) -> str:
+    """Warm the weekly Elder Standing report from a facts-only brief (built by
+    runtime.elder_standing.facts_for_model). Returns the post text, or "" so the
+    caller falls back to the deterministic render. No tools; grounded strictly in
+    the brief (the caller also validates that every named member is real)."""
+    user_msg = (f"{facts}\n\nWrite this week's Elder Standing report now — the "
+                "sections in order, grounded ONLY in the members and numbers above. "
+                "No tables. Name only members listed above.")
+    return _generate_simple_message(
+        _elder_standing_system(), user_msg,
+        workflow="elder_standing", temperature=0.7, max_tokens=1200,
+        error_label="Elder standing",
+    ) or ""
 
 
 def generate_member_report(facts: str) -> dict:

@@ -153,6 +153,9 @@ _WORKFLOW_SPECS = (
     WorkflowSpec("weekly_digest", response_schema={"required": ["recap"]},
                  tools=INTERACTIVE_READ_TOOLS, max_tool_rounds=6, model_family="intensive"),
     WorkflowSpec("member_report", model_family="intensive"),
+    # Weekly public Elder Standing report — standalone, no tools, composed from a
+    # pre-materialized facts brief (runtime.elder_standing), grounding-guarded.
+    WorkflowSpec("elder_standing", tools=[], tools_allowed=False, model_family="intensive"),
     WorkflowSpec("site_promote_content", model_family="promotion"),
     # Release-notes announcement (agent/release_notes.py, ported from Oliver):
     # Elixir's first-person "what I can do now" post — chat-tier, no tools.

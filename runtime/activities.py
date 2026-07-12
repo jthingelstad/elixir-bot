@@ -65,7 +65,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         job_function="_weekly_leadership_review",
         schedule_kind="cron",
         schedule_config={
-            "day_of_week": _attr("WEEKLY_REVIEW_DAY", "mon"),
+            "day_of_week": _attr("WEEKLY_REVIEW_DAY", "tue"),
             "hour": _attr("WEEKLY_REVIEW_HOUR", 7),
             "minute": _attr("WEEKLY_REVIEW_MINUTE", 0),
             "timezone": "America/Chicago",
@@ -208,6 +208,26 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=(
             "Email: each member (To:, individual)",
+        ),
+        activity_role="communicator",
+    ),
+    ActivityDefinition(
+        activity_key="weekly-elder-standing",
+        owner_lane="announcements",
+        purpose="Publish the transparent weekly Elder Standing to #announcements — "
+        "who's holding Elder, who's rising toward it, and who's on the stepping-down "
+        "bubble, each with their participation. Runs Tuesday after the promo/demo "
+        "review has rolled the week.",
+        job_id="weekly-elder-standing",
+        job_function="_weekly_elder_standing",
+        schedule_kind="cron",
+        schedule_config={
+            "day_of_week": _attr("WEEKLY_ELDER_STANDING_DAY", "tue"),
+            "hour": _attr("WEEKLY_ELDER_STANDING_HOUR", 12),
+            "minute": 0,
+        },
+        delivery_targets=(
+            "Discord: #announcements",
         ),
         activity_role="communicator",
     ),
