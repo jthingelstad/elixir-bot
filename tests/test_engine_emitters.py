@@ -66,12 +66,22 @@ def test_unchanged_payload_emits_nothing(engine_conn):
     assert _events(engine_conn) == []
 
 
-def test_best_trophies_peak_every_100(engine_conn):
+def test_best_trophies_peak_every_250(engine_conn):
+    # Raised from 100 → 250 (2026-07-12) so tiny incremental peaks don't fire.
     _emit_profile(engine_conn, _profile(best=6890), NOW)
     _emit_profile(engine_conn, _profile(best=7010), LATER)
     events = _events(engine_conn)
-    assert ("best_trophies_peak", f"best_trophies_peak:{TAG}:6900") in events
     assert ("best_trophies_peak", f"best_trophies_peak:{TAG}:7000") in events
+    # 6900 is no longer a boundary at step 250
+    assert ("best_trophies_peak", f"best_trophies_peak:{TAG}:6900") not in events
+
+
+def test_best_trophies_peak_ignores_small_increment(engine_conn):
+    # The exact 24h-review case: 13,000 → 13,142 must NOT re-fire a peak.
+    _emit_profile(engine_conn, _profile(best=13000), NOW)
+    _emit_profile(engine_conn, _profile(best=13142), LATER)
+    peaks = [e for e in _events(engine_conn) if e[0] == "best_trophies_peak"]
+    assert peaks == []
 
 
 def test_arena_changed_emitted_with_prev(engine_conn):
