@@ -389,21 +389,28 @@ def synthesize_leader_action_feedback(context: dict):
     )
 
 
-def generate_ask_elixir_daily(read: dict, *, tool_stats: dict | None = None):
-    """Brain-composed #ask-elixir daily post: a rich, data-true feature-discovery
-    invitation. Given the full clan read, the brain surfaces one genuinely
-    interesting hook and invites members to explore it with answerable questions.
+def generate_ask_elixir_daily(read: dict, *, recent_topics: list | None = None,
+                              tool_stats: dict | None = None):
+    """Brain-composed #ask-elixir daily post: a feature-discovery invitation that
+    rotates through Elixir's capabilities (decks, cards, stats, donations, awards,
+    the Elder track, milestones, modes…) — NOT the same war hook every day. Given
+    the clan read plus the recent topics to avoid, it spotlights a fresh capability
+    area with a real hook and answerable sample questions.
 
     Returns ``{"post": str, "topic": str|None}`` on success, or ``None`` when
     there's no worthwhile hook / composition failed — the caller then posts
     nothing that day (no filler, fail-open-to-silence)."""
     public = {k: v for k, v in (read or {}).items() if not k.startswith("_")}
+    recent = ", ".join(str(t) for t in (recent_topics or []) if t) or "(none yet)"
     user_msg = (
-        "Here is the current clan situation. Compose today's #ask-elixir "
-        "feature-discovery post per your system prompt: one real, specific hook "
-        "from what's happening now, then an invitation with 2-3 answerable "
-        "sample questions. If there's genuinely no worthwhile hook today, return "
-        "no post.\n\n"
+        "Compose today's #ask-elixir feature-discovery post per your system "
+        "prompt. Pick a capability AREA I have NOT covered recently, find one "
+        "real, specific hook there (use tools to dig it up), then invite members "
+        "with 2-3 answerable questions.\n\n"
+        f"RECENT DAILY TOPICS (avoid these areas — pick something different): {recent}\n\n"
+        "Here is the current clan situation (the war numbers sit at the top, but "
+        "war is overused — reach past it into another area unless there's a "
+        "genuinely fresh war angle not in the recent topics):\n\n"
         f"```json\n{json.dumps(public, indent=2, default=str)}\n```\n"
     )
     result = _chat_with_tools(
