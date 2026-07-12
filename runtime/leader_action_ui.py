@@ -28,6 +28,10 @@ class LeaderActionTypeSpec:
     decline_label: str = "Decline"
     allow_copy_edit: bool = False
     copy_field_label: str = "Clash Copy"
+    # When set, the card is a two-way CLASSIFICATION (not binary done/decline):
+    # each tuple is (button_kind, label, emoji). Both choices resolve the card as
+    # done-with-a-classification. Used by departure_verification (Left vs Kicked).
+    classify_choices: tuple[tuple[str, str, str], ...] = ()
 
 
 ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
@@ -100,7 +104,21 @@ ACTION_SPECS: dict[str, LeaderActionTypeSpec] = {
         "Fixed",
         "Dismiss",
     ),
+    "departure_verification": LeaderActionTypeSpec(
+        "departure_verification",
+        "Departure — Leave or Kick?",
+        "🔍",
+        0x7F8C8D,
+        "Verified",
+        classify_choices=(
+            ("classify_leave", "Left", "🚶"),
+            ("classify_kick", "Kicked", "🚪"),
+        ),
+    ),
 }
+
+# Button kind → the classification value classify_departure records.
+_CLASSIFY_KIND_VALUE = {"classify_leave": "leave", "classify_kick": "kick"}
 
 
 def leader_action_spec(action_type: str | None) -> LeaderActionTypeSpec:
@@ -389,6 +407,42 @@ class NoteModal(discord.ui.Modal):
         await _apply_card_update(interaction, updated)
 
 
+class DepartureClassifyModal(discord.ui.Modal):
+    """Leader confirms LEAVE vs KICK for a departed member, with an optional
+    free-text comment on what happened (captured inline, not a separate note)."""
+
+    def __init__(self, action: dict, classification: str):
+        verb = "kick" if classification == "kick" else "leave"
+        super().__init__(title=f"Confirm {verb}: {action.get('target_player_name') or 'member'}"[:45])
+        self.action_id = int(action["action_id"])
+        self.classification = classification
+        self.comment = discord.ui.TextInput(
+            label="What happened? (optional)",
+            style=discord.TextStyle.paragraph,
+            max_length=300,
+            required=False,
+            placeholder="Optional. e.g. 'chat toxicity, warned twice' or 'left for another clan'.",
+        )
+        self.add_item(self.comment)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not await _ensure_leader(interaction):
+            return
+        comment = str(self.comment.value or "").strip()
+        updated = await asyncio.to_thread(
+            db.classify_departure,
+            self.action_id,
+            classification=self.classification,
+            discord_user_id=interaction.user.id,
+            comment=comment or None,
+        )
+        if not updated:
+            await _send_ephemeral(interaction, "Action not found.")
+            return
+        queue_leader_action_feedback_refresh(updated.get("action_type"))
+        await _apply_card_update(interaction, updated)
+
+
 class LeaderActionButton(discord.ui.Button):
     def __init__(self, action: dict, *, kind: str, label: str, style: discord.ButtonStyle, row: int, emoji: str | None = None, disabled: bool = False):
         self.action_id = int(action["action_id"])
@@ -432,6 +486,11 @@ class LeaderActionButton(discord.ui.Button):
         if self.kind == "note":
             await interaction.response.send_modal(NoteModal(action))
             return
+        if self.kind in _CLASSIFY_KIND_VALUE:
+            await interaction.response.send_modal(
+                DepartureClassifyModal(action, _CLASSIFY_KIND_VALUE[self.kind])
+            )
+            return
 
 
 class LeaderActionView(discord.ui.View):
@@ -442,6 +501,29 @@ class LeaderActionView(discord.ui.View):
         if not proposed:
             return
         copies = action_copy_messages(action)
+
+        if spec.classify_choices:
+            # Two-way classification card (e.g. departure_verification): render the
+            # choice buttons instead of done/decline. Both resolve the card.
+            for kind, label, emoji in spec.classify_choices:
+                self.add_item(LeaderActionButton(
+                    action,
+                    kind=kind,
+                    label=label,
+                    emoji=emoji,
+                    style=discord.ButtonStyle.primary,
+                    row=0,
+                    disabled=not proposed,
+                ))
+            self.add_item(LeaderActionButton(
+                action,
+                kind="note",
+                label="Add Note",
+                emoji="📝",
+                style=discord.ButtonStyle.secondary,
+                row=2,
+            ))
+            return
 
         self.add_item(LeaderActionButton(
             action,

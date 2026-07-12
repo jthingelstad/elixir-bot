@@ -65,6 +65,8 @@ __all__ = [
     "list_due_decision_cases",
     "resolve_decision_case",
     "reconcile_departed_member_cases",
+    "raise_departure_verification_cards",
+    "expire_departure_verification_cards",
     "reconcile_uncorroborated_member_cases",
     "sync_terminal_leader_action_cases",
     "link_leader_action_to_case",
@@ -351,11 +353,26 @@ _KICK_ATTRIBUTION_DAYS = 14
 
 
 def _departure_was_kick(conn, tag: str, left_at: str | None) -> bool:
-    """True when a member's departure is attributable to a kick — a ``done``
-    kick_recommendation within the attribution window before they left (same
-    rule as recognition's C1 kick-suppression). A kick means the leadership
-    action was ENACTED, which is meaningfully different from an organic leave.
+    """True when a member's departure is attributable to a kick.
+
+    A leader who verified the departure via a ``departure_verification`` card is
+    AUTHORITATIVE — the resulting ``clan_memberships.leave_source``
+    (``leader_verified_kick`` / ``leader_verified_leave``) overrides the
+    inference. Absent a verified signal, fall back to the C1 rule: a ``done``
+    kick_recommendation within the attribution window before they left. A kick
+    means the leadership action was ENACTED, meaningfully different from a leave.
     """
+    verified = conn.execute(
+        """SELECT leave_source FROM clan_memberships
+           WHERE UPPER(player_tag) = UPPER(?) AND left_at IS NOT NULL
+           ORDER BY left_at DESC, membership_id DESC LIMIT 1""",
+        (tag,),
+    ).fetchone()
+    src = (verified["leave_source"] if verified else None) or ""
+    if src == "leader_verified_kick":
+        return True
+    if src == "leader_verified_leave":
+        return False
     params: list = [tag]
     window = ""
     anchor = _parse_utc(left_at) if left_at else None
@@ -433,6 +450,149 @@ def reconcile_departed_member_cases(
             "outcome": outcome,
         })
     return reconciled
+
+
+# A departure is only carded if it was detected within this window — avoids
+# flooding #leader-actions with cards for historical leaves on first deploy.
+_DEPARTURE_CARD_LOOKBACK_DAYS = 2
+
+
+@managed_connection
+def raise_departure_verification_cards(
+    *,
+    now: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """For members who left recently with an unverified (inferred) leave_source,
+    either settle an already-enacted kick silently or raise a #leader-actions
+    card asking leaders to confirm LEAVE vs KICK (+ optional comment).
+
+    A leave and a kick are very different signals, but the roster diff can't tell
+    them apart — a member kicked for behavior (no kick card) looks like a leave.
+    Scope: all recent departures EXCEPT those already attributable to a ``done``
+    kick card (settled to ``leader_verified_kick``, no card — the kick is known).
+    The public goodbye is held until a leader verifies (see runtime/awareness)."""
+    from storage.leader_actions import create_leader_action_recommendation
+
+    current = _clean_text(now) or _db._utcnow()
+    anchor = _parse_utc(current) or datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_LOOKBACK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+    rows = conn.execute(
+        """SELECT cm.membership_id, cm.player_tag, cm.left_at,
+                  COALESCE(p.display_name, p.current_name, cm.player_tag) AS name,
+                  CAST(julianday(cm.left_at) - julianday(cm.joined_at) AS INTEGER) AS tenure_days
+           FROM clan_memberships cm
+           LEFT JOIN players p ON p.player_tag = cm.player_tag
+           WHERE cm.left_at IS NOT NULL
+             AND cm.leave_source = 'roster_diff'
+             AND cm.left_at >= ?""",
+        (cutoff,),
+    ).fetchall()
+    raised: list[dict] = []
+    for row in rows:
+        tag = row["player_tag"]
+        if _departure_was_kick(conn, tag, row["left_at"]):
+            # Already an enacted kick (done kick card in window) — record it
+            # authoritatively and raise no card; the kick is already known.
+            conn.execute(
+                "UPDATE clan_memberships SET leave_source = 'leader_verified_kick' "
+                "WHERE membership_id = ?",
+                (row["membership_id"],),
+            )
+            continue
+        signal_key = f"engine:departure:{tag}:{row['left_at']}"
+        exists = conn.execute(
+            """SELECT 1 FROM leader_action_recommendations
+               WHERE action_type = 'departure_verification'
+                 AND (source_signal_key = ?
+                      OR (UPPER(target_player_tag) = UPPER(?) AND status = 'proposed'))
+                 AND COALESCE(is_test, 0) = 0 LIMIT 1""",
+            (signal_key, tag),
+        ).fetchone()
+        if exists:
+            continue
+        name = row["name"]
+        tenure = row["tenure_days"]
+        tenure_txt = f"{tenure} days" if tenure is not None else "unknown tenure"
+        create_leader_action_recommendation(
+            action_type="departure_verification",
+            objective=f"Confirm departure: did {name} leave or get kicked?",
+            prompt_text=(
+                f"{name} is no longer in the clan (tenure {tenure_txt}). Elixir can't tell "
+                f"if they LEFT on their own or were KICKED — click one, and add a brief note "
+                f"if you know why. No public goodbye is posted until this is verified."
+            ),
+            rationale=f"Departure detected {row['left_at']}; leave_source unverified (roster_diff).",
+            target_player_tag=tag,
+            target_player_name=name,
+            source_signal_key=signal_key,
+            source_signal_type="engine_departure",
+            conn=conn,
+        )
+        raised.append({"player_tag": tag, "player_name": name, "left_at": row["left_at"]})
+    conn.commit()
+    return raised
+
+
+# Unanswered departure cards auto-settle to a benign unverified leave after this
+# many days, so the action board stays clean and no stale goodbye ever fires.
+_DEPARTURE_CARD_TIMEOUT_DAYS = 3
+
+
+@managed_connection
+def expire_departure_verification_cards(
+    *,
+    now: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
+    """Auto-settle departure_verification cards leaders never answered. After the
+    timeout, treat the departure as an (unverified) organic leave: mark
+    leave_source='leave_unverified' and close the card WITHOUT a public goodbye —
+    goodbyes only fire on a prompt, explicit LEAVE verification, so they stay
+    timely and honest."""
+    current = _clean_text(now) or _db._utcnow()
+    anchor = _parse_utc(current) or datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = (anchor - timedelta(days=_DEPARTURE_CARD_TIMEOUT_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+    rows = conn.execute(
+        """SELECT action_id, target_player_tag FROM leader_action_recommendations
+           WHERE action_type = 'departure_verification' AND status = 'proposed'
+             AND COALESCE(is_test, 0) = 0
+             AND COALESCE(proposed_at, created_at) <= ?""",
+        (cutoff,),
+    ).fetchall()
+    expired: list[dict] = []
+    for row in rows:
+        tag = row["target_player_tag"]
+        if tag:
+            conn.execute(
+                """UPDATE clan_memberships SET leave_source = 'leave_unverified'
+                   WHERE membership_id = (
+                       SELECT membership_id FROM clan_memberships
+                       WHERE UPPER(player_tag) = UPPER(?) AND left_at IS NOT NULL
+                         AND leave_source = 'roster_diff'
+                       ORDER BY left_at DESC, membership_id DESC LIMIT 1
+                   )""",
+                (tag,),
+            )
+        conn.execute(
+            """UPDATE leader_action_recommendations
+               SET status = 'done', decided_at = ?, decided_by_discord_user_id = 'system',
+                   decision_emoji = '⌛',
+                   decision_note = COALESCE(decision_note, ?),
+                   outcome_json = ?, updated_at = ?
+               WHERE action_id = ?""",
+            (
+                current,
+                "Auto-settled: no leader verification within the window; treated as "
+                "an organic leave. No public goodbye was posted.",
+                _json_dumps({"classification": "leave_unverified", "auto_settled": True}),
+                current,
+                row["action_id"],
+            ),
+        )
+        expired.append({"action_id": row["action_id"], "target_player_tag": tag})
+    conn.commit()
+    return expired
 
 
 @managed_connection

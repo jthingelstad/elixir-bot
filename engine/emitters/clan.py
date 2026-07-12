@@ -190,6 +190,39 @@ def emit_roster(conn, clan_tag, old, new, observed_at, window_start) -> int:
     return n
 
 
+# A verified LEAVE only earns a public goodbye within this window of the
+# departure — a stale confirmation days later doesn't warrant a sendoff.
+_VERIFIED_LEAVE_WINDOW_DAYS = 5
+
+
+def emit_verified_leave_events(conn, clan_tag, observed_at) -> int:
+    """Emit ``member_left_verified`` for departures a leader has confirmed were an
+    organic LEAVE (``clan_memberships.leave_source = 'leader_verified_leave'``).
+
+    The raw ``member_left`` is NOT a public-post trigger anymore — a farewell is
+    held until a leader verifies, so a member kicked for behavior never gets a
+    warm goodbye. This is the signal the awareness brain narrates. A confirmed
+    KICK emits nothing. Idempotent via the dedup key; bounded to recent leaves."""
+    base = datetime.fromisoformat(str(observed_at).replace("Z", "").replace("z", ""))
+    cutoff = (base - timedelta(days=_VERIFIED_LEAVE_WINDOW_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+    rows = conn.execute(
+        """SELECT cm.player_tag, cm.left_at,
+                  COALESCE(p.display_name, p.current_name, cm.player_tag) AS name,
+                  CAST(julianday(cm.left_at) - julianday(cm.joined_at) AS INTEGER) AS tenure_days
+           FROM clan_memberships cm
+           LEFT JOIN players p ON p.player_tag = cm.player_tag
+           WHERE cm.leave_source = 'leader_verified_leave' AND cm.left_at >= ?""",
+        (cutoff,),
+    ).fetchall()
+    n = 0
+    for row in rows:
+        n += _emit(conn, clan_tag, row["player_tag"], observed_at, None,
+                   "member_left_verified",
+                   f"member_left_verified:{row['player_tag']}:{row['left_at']}",
+                   {"name": row["name"], "tenure_days": row["tenure_days"]})
+    return n
+
+
 def _emit_donation_reset(conn, clan_tag, old_members, new_members, observed_at, window_start) -> int:
     """weekly_donation_leader — the roster emitter detects the CR Monday reset
     (donations collapse toward zero vs baseline) and computes the just-closed
