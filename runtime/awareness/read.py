@@ -95,6 +95,27 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _clock_block() -> dict:
+    """The absolute wall-clock, in UTC plus reference conversions for the two
+    largest member zones. POAP KINGS is an INTERNATIONAL clan — there is no single
+    "local" time — so this is deliberately UTC-anchored: it gives the brain the
+    unambiguous absolute frame (so it never misreads the raw UTC stamp as local)
+    and the day-of-week for cadence reasoning. `us_central`/`india` are reference
+    points (the two biggest member groups), NOT "the" local time — the shared clock
+    everyone experiences identically is the GAME clock (`time` block / period_ends_at).
+    """
+    from zoneinfo import ZoneInfo
+
+    now = _now()
+    ct = now.astimezone(ZoneInfo("America/Chicago"))
+    ist = now.astimezone(ZoneInfo("Asia/Kolkata"))
+    return {
+        "utc": now.strftime("%A %Y-%m-%d %H:%M UTC"),
+        "us_central_ref": ct.strftime("%A %Y-%m-%d %H:%M ") + ct.strftime("%Z"),
+        "india_ref": ist.strftime("%A %Y-%m-%d %H:%M IST"),
+    }
+
+
 # The signal feed is "what's new since the last tick" — not a rolling window.
 # Player / clan / war are pure deltas: only events new since the last tick, with
 # backfilled rows (seeded history) dropped. A hard floor bounds any single tick
@@ -565,6 +586,7 @@ def build_read(conn=None) -> dict:
 
         read = {
             "generated_at": _now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "clock": _load("clock", _clock_block, None),
             "time": _load("time", lambda: _time_block(conn, war), None),
             "standing": _load("standing", lambda: _standing_block(war), None),
             "war_season": _load(
