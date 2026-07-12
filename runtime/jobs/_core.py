@@ -243,12 +243,49 @@ def _build_ask_elixir_daily_insight_context(clan, war):
     return "\n".join(lines)
 
 
+def _recent_ask_elixir_topics(channel_id, limit: int = 10) -> list[str]:
+    """The capability areas the last ~10 daily posts covered, so today can pick a
+    DIFFERENT one (anti-repetition — the fix for war-every-day). Reads the saved
+    `topic` slug; a content-preview fallback tags an old untopic'd post 'war' when
+    it obviously was one."""
+    import json as _json
+
+    from engine import db as engine_db
+
+    conn = engine_db.connect()
+    try:
+        rows = conn.execute(
+            "SELECT content, raw_json FROM messages "
+            "WHERE channel_id = ? AND author_type = 'assistant' "
+            "AND event_type = 'daily_clan_insight' "
+            "ORDER BY created_at DESC LIMIT ?",
+            (str(channel_id), limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    topics: list[str] = []
+    for row in rows:
+        topic = None
+        try:
+            topic = (_json.loads(row["raw_json"] or "{}") or {}).get("topic")
+        except (TypeError, ValueError):
+            topic = None
+        if not topic:
+            preview = (row["content"] or "").lower()
+            if any(w in preview for w in ("war", "fame", "river race", "battle day", "boat")):
+                topic = "war (inferred)"
+        if topic:
+            topics.append(str(topic))
+    return topics
+
+
 async def _ask_elixir_daily_insight():
-    """Daily #ask-elixir post — brain-powered feature discovery (rebuilt
-    2026-07-10). The awareness brain reads the whole clan, surfaces one real,
-    interesting hook, and invites members to explore it with answerable
-    questions. No canned category rotation, no editor gate. Fail-open to
-    silence: a failed/empty compose posts nothing that day (no filler)."""
+    """Daily #ask-elixir post — feature discovery that ROTATES through Elixir's
+    capabilities (decks, cards, stats, donations, awards, the Elder track,
+    milestones, modes…), NOT the same war hook every day (reworked 2026-07-12).
+    The brain reads the clan + the recent topics to avoid, spotlights a fresh
+    capability area with a real hook, and invites members with answerable
+    questions. Fail-open to silence: a failed/empty compose posts nothing."""
     runtime_status.mark_job_start("daily_clan_insight")
     try:
         channel_id = _get_singleton_channel_id("ask-elixir")
@@ -261,6 +298,8 @@ async def _ask_elixir_daily_insight():
         runtime_status.mark_job_failure("daily_clan_insight", "ask-elixir channel not found")
         return
 
+    recent_topics = await asyncio.to_thread(_recent_ask_elixir_topics, channel_id)
+
     def _compose():
         """Build the clan read and compose the daily post. Runs in a thread;
         returns {"post", "topic"} or None. Never raises."""
@@ -268,7 +307,7 @@ async def _ask_elixir_daily_insight():
             from runtime.awareness import read as awareness_read
 
             read = awareness_read.build_read()
-            return elixir_agent.generate_ask_elixir_daily(read)
+            return elixir_agent.generate_ask_elixir_daily(read, recent_topics=recent_topics)
         except Exception:
             log.error("Ask Elixir daily compose failed", exc_info=True)
             return None
