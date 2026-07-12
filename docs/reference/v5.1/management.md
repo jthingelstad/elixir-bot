@@ -65,21 +65,21 @@ sizes the corps → hysteresis paces the moves.**
 
 - **Tenure:** `tenure_days ≥ PROMOTE_TENURE_MIN (28)`. Four weeks in the clan
   or you are not considered, period.
-- **Competitive-contribution floor (war OR ranked):** you must compete for the
-  clan's prestige in *some* arena — **either** played war on ≥1 finalized
-  battle day (decks used) in the last 14 days (`WAR_FLOOR_DAYS = 1`,
-  `WAR_FLOOR_WINDOW = 14`), **or** hold a meaningful Ranked standing:
-  **Champion league (4) or above** (`RANKED_FLOOR_LEAGUE = 4`), using the
-  **better of current and last-season league** so the monthly reset never
-  strips credit. Ratified 2026-07-05 (Jamie): "it is a point of pride to have
-  ranked players" — a Ultimate Champion who grinds Ranked instead of wars is
-  contributing to the clan's prestige, not shirking. A member who does neither
-  meaningful wars nor meaningful ranked is not elder material.
+- **Competitive-contribution floor (war OR ranked — PARTICIPATION):** you must
+  actively compete for the clan in *some* arena — **either** played war on ≥1
+  finalized battle day (decks used) in the last 14 days (`WAR_FLOOR_DAYS = 1`,
+  `WAR_FLOOR_WINDOW = 14`), **or** played ≥`RANKED_FLOOR_BATTLES (5)` ranked
+  battles in that same 14-day window. Reworked 2026-07-12 (Jamie): every Elder
+  metric must be in the player's control and reward *participation*, not account
+  power. The old floor was "reached Champion league" — a skill/collection ceiling
+  that let a strong account coast on an old climb without playing. Now a member
+  who neither plays war nor plays ranked recently is not elder material —
+  regardless of how high they once climbed.
 
 Members failing a filter are absent from the ranking. An elder who fails the
-competitive floor **entirely** (no wars AND no ranked standing) becomes a
-demotion candidate directly (§3.4) — but ranked standing alone satisfies it, so
-the UC grinder is protected.
+competitive floor **entirely** (played neither war nor ranked) becomes a
+demotion candidate directly (§3.4) — but recent ranked *play* satisfies it, so
+the active ranked specialist is protected.
 
 ### 3.2 The score (rank order among filtered members)
 
@@ -87,21 +87,24 @@ A blend of the member's **competitive contribution** and generosity, *within
 the current roster*:
 
 ```
-competitive = max(war_rate_percentile, ranked_prestige)
+competitive = war_pct + RANKED_WEIGHT · ranked_pct · (1 − war_pct)   # RANKED_WEIGHT = 0.40
 score       = 0.65 · competitive + 0.35 · donation_percentile
 ```
 
-- **war_rate** = decks used ÷ decks available over the trailing war weeks
-  (continuous — "more is better", a core way to compete for the clan).
-- **ranked_prestige** = an **absolute** 0–1 from the member's best-of
-  (current, last-season) Ranked league + rating — "reached Ultimate Champion"
-  is an achievement in absolute terms, not relative-to-clan. League map:
-  Champion (4) ≈ 0.5, Grand Champion (5) ≈ 0.65, Royal Champion (6) ≈ 0.8,
-  Ultimate Champion (7) ≈ 0.9–1.0 scaled by rating; below Champion → 0.
-- `competitive = max(...)`: you get credit for your **best** arena — a war
-  stalwart with no ranked and a UC grinder with no wars both land high; nobody
-  is punished for specializing. Ratified 2026-07-05 (Jamie's two knobs:
-  Champion floor + UC-weighted absolute prestige).
+- **war_pct** = percentile of war_rate (decks used ÷ available) — the PRIMARY
+  lane; war is direct clan contribution (Fame + clan-league progress).
+- **ranked_pct** = percentile of **ranked battles played** in the score window —
+  PARTICIPATION, not league reached (reworked 2026-07-12). Playing ranked reps
+  the clan but doesn't build it the way war does, so it's muted by
+  `RANKED_WEIGHT = 0.40` and only fills part of the *gap war leaves* (the
+  `(1 − war_pct)` headroom): war-maxed → ~1 already; ranked-only caps low
+  (~0.4·pct); doing **both** beats a single lane; bounded 0–1 (never saturates —
+  the earlier `max()`/prestige version pinned most active members at 1.0).
+- With pure-participation scoring, being **outranked** means "someone
+  participated more than you this week" (in your control), not "someone has a
+  stronger account." Concrete effect at the switch: a high-league / low-war elder
+  who was #1 on prestige dropped to mid-pack; the members actually grinding war +
+  ranked rose to the top.
 - **donations** = the closed-week donation volume ("lead by example"),
   percentile within the roster.
 - Percentiles compute over the active non-leadership roster each weekly review,
