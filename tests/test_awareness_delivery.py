@@ -94,6 +94,50 @@ def test_relay_failure_does_not_fail_the_post():
     assert result["delivered"] == 1
 
 
+def test_member_join_always_relays_even_without_brain_flag():
+    """A new-member join ALWAYS raises an in-game welcome relay, even if the brain
+    forgot to set relay_to_clan_chat — the deterministic backstop."""
+    relayed = []
+
+    def relay_fn(post, channel_name):
+        relayed.append(post.get("covers_signal_keys"))
+
+    # Brain welcomed BigNorton in #announcements but did NOT flag the relay.
+    plan = {"posts": [{
+        "channel": "announcements", "content": "Welcome BigNorton! 10,090 trophies.",
+        "covers_signal_keys": ["member_joined:#CV20JCY0V:t"],
+        "relay_to_clan_chat": False,
+    }]}
+    read = {"hard_post_signals": [
+        {"signal_key": "member_joined:#CV20JCY0V:t", "event_type": "member_joined"}
+    ]}
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            read, plan, post_fn=lambda *_: 5, record_fn=lambda **_: None, relay_fn=relay_fn)
+
+    assert result["failed"] is False
+    assert relayed == [["member_joined:#CV20JCY0V:t"]], "join must force a welcome relay"
+
+
+def test_non_join_post_without_flag_does_not_relay():
+    """A non-join post that the brain didn't flag must NOT be force-relayed — the
+    backstop is join-specific, not a blanket relay-everything."""
+    relayed = []
+    plan = {"posts": [{
+        "channel": "elixir", "content": "routine milestone",
+        "covers_signal_keys": ["card_level_milestone:#X:1"],
+        "relay_to_clan_chat": False,
+    }]}
+    read = {"hard_post_signals": [
+        {"signal_key": "member_joined:#OTHER:t", "event_type": "member_joined"}
+    ]}
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        deliver_mod.deliver_posts(
+            read, plan, post_fn=lambda *_: 5, record_fn=lambda **_: None,
+            relay_fn=lambda p, c: relayed.append(p))
+    assert relayed == [], "only the post covering the join relays, not unrelated posts"
+
+
 # ------------------------------------- record_awareness_post → channel_memory
 
 def test_recorded_post_shows_up_in_channel_memory(engine_conn):

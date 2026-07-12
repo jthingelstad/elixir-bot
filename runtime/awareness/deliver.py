@@ -33,6 +33,13 @@ log = logging.getLogger("elixir")
 # the prompt/output and fails the tick rather than leaking to a wrong channel.
 POSTABLE_CHANNELS = ("announcements", "elixir")
 
+# A new member is ALWAYS welcomed in-game, not just on Discord (Jamie, 2026-07-12):
+# whichever post covers the join signal force-raises a clan-chat welcome relay card
+# even if the brain didn't set relay_to_clan_chat. The prompt also mandates the
+# brain author the `clan_chat` welcome (with account detail) so the copy stays
+# grounded; this backstop guarantees the card exists regardless.
+JOIN_EVENT_TYPES = frozenset({"member_join", "member_joined"})
+
 
 def _post_content(post: dict) -> str:
     """Join a post's content into a single Discord-ready string. ``content`` may
@@ -63,6 +70,16 @@ def deliver_posts(
     lanes = engine_compose.channels()
     covered: set[str] = set()
     delivered = 0
+
+    # Signal keys of any member-join hard-post this tick. A post covering one of
+    # these always relays an in-game welcome (see JOIN_EVENT_TYPES).
+    join_signal_keys = {
+        s.get("signal_key")
+        for s in (read.get("hard_post_signals") or [])
+        if isinstance(s, dict)
+        and s.get("event_type") in JOIN_EVENT_TYPES
+        and s.get("signal_key")
+    }
 
     for post in posts:
         channel = post.get("channel")
@@ -106,7 +123,14 @@ def deliver_posts(
 
         # Clan-chat escalation rides a delivered post and never fails it — the
         # Discord post already landed; a relay hiccup is logged and dropped.
-        if relay_fn is not None and post.get("relay_to_clan_chat"):
+        # A new-member join ALWAYS relays a welcome, even if the brain didn't flag
+        # it — the clan welcomes every newcomer in-game.
+        should_relay = bool(post.get("relay_to_clan_chat"))
+        if not should_relay and join_signal_keys.intersection(covers):
+            should_relay = True
+            log.info("awareness deliver: forcing in-game welcome relay for join %s",
+                     sorted(join_signal_keys.intersection(covers)))
+        if relay_fn is not None and should_relay:
             try:
                 relay_fn(post, cfg.get("channel_name") or channel)
             except Exception:
