@@ -1600,6 +1600,68 @@ def _execute_record_leadership_followup(arguments):
     return result
 
 
+_REFERENCE_RE = re.compile(r"^\s*([rl])?\s*#?(\d+)\s*$", re.IGNORECASE)
+_REFERENCE_KIND_BY_LETTER = {"r": "leader_action", "l": "loop"}
+
+
+def _execute_lookup_reference(arguments):
+    """Resolve an 'R<n>' (leader action) or 'L<n>' (awareness loop) reference to
+    its record. Elixir authors these codes, so a leader who cites one in chat is
+    pointing at a real row — resolve it rather than guess."""
+    raw = str(arguments.get("reference") or "").strip()
+    match = _REFERENCE_RE.match(raw)
+    if not match:
+        return {
+            "error": "unparseable_reference",
+            "reference": raw,
+            "hint": "Expected a code like 'R137' (leader action) or 'L60' (loop).",
+        }
+    letter, number = match.group(1), int(match.group(2))
+    kind = (
+        _REFERENCE_KIND_BY_LETTER.get(letter.lower())
+        if letter
+        else (arguments.get("kind") or "").strip().lower() or None
+    )
+    if kind is None:
+        return {
+            "error": "ambiguous_reference",
+            "reference": raw,
+            "hint": "Bare number with no R/L prefix — pass kind='leader_action' or 'loop'.",
+        }
+
+    if kind == "leader_action":
+        action = db.get_leader_action_by_id(number)
+        if not action:
+            return {"error": "not_found", "reference": f"R{number}",
+                    "hint": f"No leader-action recommendation R{number} exists."}
+        return {
+            "reference": f"R{number}",
+            "kind": "leader_action",
+            "action_id": action.get("action_id"),
+            "action_type": action.get("action_type"),
+            "status": action.get("status"),
+            "target_member": action.get("target_player_name"),
+            "target_tag": action.get("target_player_tag"),
+            "objective": action.get("objective"),
+            "rationale": action.get("rationale"),
+            "clan_chat_copy": action.get("copy_current_text") or action.get("copy_original_text"),
+            "proposed_at": action.get("proposed_at"),
+            "decided_at": action.get("decided_at"),
+            "decided_by_discord_user_id": action.get("decided_by_discord_user_id"),
+            "decision_note": action.get("decision_note"),
+            "outcome": action.get("outcome"),
+        }
+
+    if kind == "loop":
+        loop = db.get_awareness_loop_by_number(number)
+        if not loop:
+            return {"error": "not_found", "reference": f"L{number}",
+                    "hint": f"No awareness loop L{number} exists yet."}
+        return {"reference": f"L{number}", "kind": "loop", **loop}
+
+    return {"error": "unknown_kind", "reference": raw, "kind": kind}
+
+
 # ── Main dispatch ─────────────────────────────────────────────────────────
 
 def _execute_tool(name, arguments, workflow=None):
@@ -1620,6 +1682,8 @@ def _execute_tool(name, arguments, workflow=None):
             result = _execute_get_member_war_detail(arguments)
         elif name == "get_awards":
             result = _execute_get_awards(arguments)
+        elif name == "lookup_reference":
+            result = _execute_lookup_reference(arguments)
         elif name == "get_river_race":
             result = _execute_get_river_race(arguments)
         elif name == "get_war_season":

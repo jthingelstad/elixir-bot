@@ -42,4 +42,57 @@ def list_runtime_job_status(*, conn=None) -> dict[str, dict]:
     return statuses
 
 
-__all__ = ["save_runtime_job_status", "list_runtime_job_status"]
+@managed_connection
+def get_awareness_loop_by_number(loop_number, *, conn=None) -> dict | None:
+    """Compact read of one awareness-loop tick (``awareness_thoughts`` by
+    ``loop_number``) for the agent's reference-lookup tool (an "L<n>" reference).
+    Projects the heavy ``read_json`` / ``plan_json`` down to the decision, the
+    reasoning, and what it posted — not the full read/plan blobs."""
+    row = conn.execute(
+        "SELECT loop_number, at, chose_silence, post_count, skipped_reason, model, "
+        "read_json, plan_json FROM awareness_thoughts WHERE loop_number = ?",
+        (int(loop_number),),
+    ).fetchone()
+    if not row:
+        return None
+
+    def _loads(value):
+        try:
+            return json.loads(value or "{}")
+        except (TypeError, ValueError):
+            return {}
+
+    read = _loads(row["read_json"])
+    plan = _loads(row["plan_json"])
+    posts = [
+        {
+            "channel": p.get("channel"),
+            "leads_with": p.get("leads_with"),
+            "summary": p.get("summary"),
+            "members": p.get("member_names") or [],
+        }
+        for p in (plan.get("posts") or [])
+    ]
+    chose_silence = bool(row["chose_silence"])
+    return {
+        "loop": f"L{row['loop_number']}",
+        "loop_number": row["loop_number"],
+        "at": row["at"],
+        "decision": "silence" if chose_silence else "posted",
+        "post_count": row["post_count"],
+        "reasoning": row["skipped_reason"] or plan.get("skipped_reason"),
+        "posts": posts,
+        "model": row["model"],
+        "read_health": {
+            "error": read.get("_error"),
+            "degraded": read.get("_degraded") or [],
+            "hard_post_signal_count": len(read.get("hard_post_signals") or []),
+        },
+    }
+
+
+__all__ = [
+    "save_runtime_job_status",
+    "list_runtime_job_status",
+    "get_awareness_loop_by_number",
+]
