@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Literal
 
 from agent.tool_defs import TOOLS
+
+
+def _awareness_max_rounds() -> int:
+    """Tool-round cap for the awareness brain. Cost scales ~linearly with rounds
+    (each round re-reads + re-caches the growing context), so this is the main
+    per-tick cost dial. 6 gives ample headroom for a grounded post (a join
+    welcome needs ~3) while trimming runaway 8-round exploration. Env-tunable so
+    cost/quality can be dialed without a deploy."""
+    try:
+        return max(1, int(os.getenv("ELIXIR_AWARENESS_MAX_ROUNDS", "6")))
+    except ValueError:
+        return 6
 
 ModelFamily = Literal["chat", "promotion", "lightweight", "intensive"]
 
@@ -110,7 +123,7 @@ _WORKFLOW_SPECS = (
         "awareness",
         response_schema={"required": ["posts"]},
         tools=AWARENESS_TOOLS,
-        max_tool_rounds=8,
+        max_tool_rounds=_awareness_max_rounds(),
         write_tools_allowed=True,
         model_family="chat",
     ),
