@@ -987,7 +987,24 @@ async def _ensure_role_action_clan_chat_copy(action: dict) -> dict:
     if action.get("copy_current_text") or action.get("copy_original_text"):
         return action  # already has copy (e.g. a re-post)
 
-    name = action.get("target_player_name") or action.get("target_player_tag") or "this member"
+    name = action.get("target_player_name")
+    if not name:
+        # Never leak a raw player tag into member-facing copy: resolve the
+        # display name from the roster when the card didn't carry one (legacy
+        # rows / sources that skip target_player_name). Falls back to a generic
+        # noun, never the #TAG.
+        tag = action.get("target_player_tag")
+        if tag:
+            try:
+                row = db.get_connection().execute(
+                    "SELECT display_name, current_name FROM players WHERE player_tag = ?",
+                    (tag,),
+                ).fetchone()
+                if row:
+                    name = row["display_name"] or row["current_name"]
+            except Exception:
+                log.warning("copy name lookup failed for %s", tag, exc_info=True)
+    name = name or "this member"
     rationale = action.get("rationale") or ""
     fallback = role_action_clan_chat_copy(
         action_type=atype, target_player_name=name, rationale=rationale,

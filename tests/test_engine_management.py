@@ -147,6 +147,16 @@ def test_kick_recommended_fires_transition(engine_conn):
     assert not any(t.get("player_tag") == "#A" for t in again)
 
 
+def test_kick_transition_carries_player_name(engine_conn):
+    # Regression (2026-07-12): the fired transition must carry the display name,
+    # not just the tag — else the leader-action card, objective, and clan-chat
+    # copy all fall back to the raw #TAG (r137/r138 shipped tag-only to leaders).
+    _seed_member(engine_conn, trophies=5000, last_battle_days_ago=15)
+    transitions = management.run_tick_evaluators(engine_conn, now=NOW)
+    fired = next(t for t in transitions if t["player_tag"] == "#A")
+    assert fired["player_name"] == "X"  # current_name from _seed_member, not "#A"
+
+
 def _add_war_deck(conn, tag, *, days_ago=3):
     """Give a member one finalized war day with a deck played inside the 14-day
     floor window — enough to pass _passes_war_floor (the elder war floor)."""
