@@ -128,13 +128,17 @@ Clan-management constants (ratified 2026-07-03; the transition rules live in
 - promote_tenure_min_days: 28
 - promote_qualifying_weeks: 4
 - demote_weeks: 4
-- kick_confirm_days: 7
-- new_member_grace_days: 14
+- kick_at_risk_days: 5          # flat at-risk threshold (kick redesign 2026-07-11)
+- kick_confirm_days: 3          # battle-free days past at-risk before a card → 8-day card
+- kick_contrib_grace_max: 4     # extra confirm days for an elder-floor contributor, × open-slot slack
 
 Notes on thresholds:
 - `inactivity_days` is an early attention signal, not an automatic removal rule.
 - Inactivity is measured from battles, not logins — v5.1 deliberately ignores `lastSeen`.
-- For removal-candidate flagging (the at-risk list), inactivity is trophy-scaled: the per-member threshold is `max(7 days, trophies/1000 × 1.4 days)`. So a 5k-trophy member is flagged after 7d, a 10k-trophy member after 14d, a 12.5k-trophy member after 17.5d. Higher-trophy members have earned more rope.
+- Removal-candidate flagging (kick redesign 2026-07-11): a member is **at risk after a flat 5 days** without a battle (7 days is when the in-game profile shows the inactivity flag; 10 is clearly unmanaged). A removal card is proposed to leaders after **8 days** (5 at-risk + 3 confirm). **Trophies buy no extra rope** — a high-trophy idle member on a full roster still costs a slot.
+- The only leeway is **contribution grace**: a member who clears the same bar that earns Elder (recent clan-war participation **or** Champion-league ranked — ranked counts equally) gets up to 4 extra confirm days, but that grace **shrinks as the clan fills and is zero at 50/50**. When there are open slots, a contributor gets more patience; when the roster is full, an idle seat is an idle seat.
+- **New members get no special shield** — everyone is on the same clock; a brand-new account should be engaging *more* at the start, not less.
+- **Leave of absence:** a member who tells leaders they'll be away is put on a *hold* (grace until they return) — their kick clock is paused. Someone merely silent with no word is not on hold.
 
 ## Current Stage
 

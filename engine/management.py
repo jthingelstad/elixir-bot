@@ -39,23 +39,25 @@ DEMOTE_WEEKS = 2             # abandonment demotion cadence (easier than promoti
 # enough that a hair-lead is ignored, small enough that a real overtake lands.
 SWAP_MARGIN = 0.05
 
-# --- Kick path + Layer-1 evidence signals (unchanged by the band)
+# --- Kick path: activity-first, scarcity-aware (redesign 2026-07-12) ---------
+# Idle escalates on a flat clock (no trophy buffer, no newcomer shield —
+# newcomers are judged from their own join anchor like everyone; if anything a
+# newcomer should be engaging MORE early). Resolves inside the 5–10 day window
+# so member status tracks reality instead of drifting for weeks.
 WAR_QUALIFY_RATE = 0.75      # legacy war_reliable signal — evidence rendering only
 BATTLE_DAYS_MIN = 8
-KICK_CONFIRM_DAYS = 7
-NEW_MEMBER_GRACE = 14
-KICK_WATCH_DAYS = 3          # CLAN.md inactivity_days
-# Durable war contributors earn a longer confirmation before a kick card is
-# proposed — softer than a hold (ratified 2026-07-08: "war contribution is
-# meaningful"). A member whose 3-season war fame OR sustained attendance clears
-# the bar gets +WAR_CONTRIB_GRACE_DAYS extra idle days before 'recommended'
-# fires. They still surface as watch/at_risk on the watchlist — this only
-# delays the auto-proposed card, it does not suppress it. Keys off the durable
-# 3-season history, not the live war_reliable layer (which decays after one
-# missed week, so a strong contributor on a short break would lose it instantly).
-WAR_CONTRIB_FAME_BAR = 4000.0   # 3-season avg fame marking a durable war body
-WAR_CONTRIB_ATTEND_BAR = 0.75   # ...or sustained war attendance rate
-WAR_CONTRIB_GRACE_DAYS = 7      # extra confirm days before the card proposes
+KICK_WATCH_DAYS = 3          # CLAN.md inactivity_days — the "getting quiet" line
+KICK_AT_RISK_DAYS = 5        # idle days → at_risk (concerning); flat, not trophy-scaled
+KICK_CONFIRM_DAYS = 3        # + this → recommended (card) ≈ day 8, before "10 looks unmanaged"
+ROSTER_CAP = 50             # CR clan cap; open_slots = ROSTER_CAP − active members
+# Contribution grace: a member who CURRENTLY clears the elder floor (recent war
+# participation OR Champion ranked — the SAME test that earns elder, so ranked
+# counts equally, and it's live/last-season, never a 3-season average) earns
+# extra runway before a card — but ONLY while there are open slots. An idle
+# member only costs a slot when the roster is full, so the grace fades linearly
+# with slack (open_slots/ROSTER_CAP) and is 0 at 50/50. Capped so a valued idle
+# member with open slots still can't drift much past ~12 days idle.
+KICK_CONTRIB_GRACE_MAX = 4  # max extra confirm days at a fully-open roster
 HOLD_WINDOW = 4              # Layer-1: 3-of-4 holds, 1-of-4 lapses
 HOLD_NEED = 3
 LAPSE_MAX = 1
@@ -532,18 +534,19 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
     fired: list[dict] = []
     members = conn.execute(
         """SELECT mm.player_tag, mm.tenure_days, mm.role, mm.kick_state,
-                  mm.kick_state_since, mm.state_json,
-                  mm.war_fame_3season_avg, mm.war_attendance_rate,
-                  pcs.trophies, p.last_seen_at,
+                  mm.kick_state_since, mm.state_json, p.last_seen_at,
                   (SELECT MAX(cm2.joined_at) FROM clan_memberships cm2
                    WHERE cm2.player_tag = mm.player_tag AND cm2.left_at IS NULL)
                   AS membership_joined_at
            FROM member_management mm
-           LEFT JOIN player_current_state pcs ON pcs.player_tag = mm.player_tag
            LEFT JOIN players p ON p.player_tag = mm.player_tag
            WHERE EXISTS (SELECT 1 FROM clan_memberships cm
                          WHERE cm.player_tag = mm.player_tag AND cm.left_at IS NULL)"""
     ).fetchall()
+    # Slot scarcity: an idle member only costs a slot when the clan is full, so
+    # the contribution grace fades with open slots — full grace when empty, zero
+    # at 50/50. members are exactly the active roster (open-membership rows above).
+    slack = max(0, ROSTER_CAP - len(members)) / ROSTER_CAP
     for m in members:
         tag = m["player_tag"]
         last_row = conn.execute(
@@ -574,29 +577,30 @@ def run_tick_evaluators(conn, now: str | None = None) -> list[dict]:
 
         if last_row and last_row[0] and state != "none" and days_idle < KICK_WATCH_DAYS:
             new_state = "none"  # any battle → none; auto-withdraw (§3.3)
-        elif (m["tenure_days"] or 0) < NEW_MEMBER_GRACE:
-            new_state = "none" if state in ("at_risk", "recommended") else state
         else:
-            trophies = m["trophies"] or 5000
-            at_risk_days = max(7.0, trophies / 1000.0 * 1.4)
-            # Durable war contributors get a longer confirmation before a card
-            # proposes (softer than a hold). Watch/at_risk are unaffected, so
-            # they still appear on the watchlist — only the card is delayed.
+            # Contribution grace = the SAME floor that earns elder (recent war
+            # participation OR Champion ranked — ranked counts equally, and it's
+            # live/last-season, not a 3-season average). It only buys extra
+            # confirm days while there are open slots, fading to 0 when full — an
+            # idle member only costs a slot at a full roster. Watch/at_risk are
+            # unaffected, so they still surface on the watchlist; only the card
+            # is delayed.
             confirm_days = KICK_CONFIRM_DAYS
-            if (m["war_fame_3season_avg"] or 0) >= WAR_CONTRIB_FAME_BAR or (
-                m["war_attendance_rate"] or 0
-            ) >= WAR_CONTRIB_ATTEND_BAR:
-                confirm_days += WAR_CONTRIB_GRACE_DAYS
-            if days_idle >= at_risk_days + confirm_days:
+            if slack > 0 and (
+                _passes_war_floor(conn, tag, now) or _passes_ranked_floor(conn, tag)
+            ):
+                confirm_days += round(KICK_CONTRIB_GRACE_MAX * slack)
+            if days_idle >= KICK_AT_RISK_DAYS + confirm_days:
                 new_state = "recommended"
-            elif days_idle >= at_risk_days:
+            elif days_idle >= KICK_AT_RISK_DAYS:
                 new_state = "at_risk"
             elif days_idle >= KICK_WATCH_DAYS:
                 new_state = "watch"
             else:
                 new_state = "none"
             # Guards: elder+ never fires the reactive path (§3.3);
-            # an open leadership watch memory suppresses 'recommended'.
+            # an open leadership watch memory (a member who told leaders they'll
+            # be away) suppresses 'recommended' → grace until it lapses.
             if new_state == "recommended" and (
                 (m["role"] or "member") in ELDER_PLUS or _has_leadership_hold(tag)
             ):
@@ -783,19 +787,32 @@ def renominate_after_cooldown(conn, now: str | None = None) -> list[dict]:
 
 
 def _has_leadership_hold(tag: str) -> bool:
-    """Open flag_member_watch hold: an active leadership watch memory for the
-    tag. v5.1 memory pass: memories live in the engine DB (memory.md D1), so
-    this reads `memories` directly — member_tag column, not the never-populated
-    link table. Fail-open to False so a memory hiccup never blocks the
-    pipeline silently — the policy gate still applies."""
+    """The LOA exception: True only when a member has an explicit *leave hold* —
+    a `Hold:`-titled memory recording that they told leaders they'll be away
+    (grace until it expires / they return).
+
+    NOT the same as a `Watch:` memory. `flag_member_watch` writes `Watch:` notes
+    as the brain's *inference* observations ("no battle activity in 10 days,
+    trending toward removal") — an inactivity flag, the OPPOSITE of an approved
+    leave. Matching those (as this guard used to) was self-defeating: the more
+    the brain noticed a member was idle, the more it shielded them from the kick
+    card documenting that idleness (2026-07-11: xOMENKILLER, 10d dark on a full
+    roster, held at at_risk by his own auto-written watch note). A leave hold is
+    a deliberate `Hold:`/`Away:`/`LOA:` signal, distinct from an observation.
+
+    v5.1 memory pass: memories live in the engine DB (memory.md D1); read
+    `memories` directly (member_tag column, not the never-populated link table).
+    Fail-open to False so a memory hiccup never blocks the pipeline silently —
+    the policy gate still applies."""
     try:
         from engine.db import connect
 
         mconn = connect()
         row = mconn.execute(
             """SELECT 1 FROM memories m
-               WHERE m.member_tag = ? AND m.title LIKE 'Watch:%'
-                 AND m.retired_at IS NULL
+               WHERE m.member_tag = ? AND m.retired_at IS NULL
+                 AND (m.title LIKE 'Hold:%' OR m.title LIKE 'Away:%'
+                      OR m.title LIKE 'LOA:%')
                  AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%S', 'now'))
                LIMIT 1""",
             (tag,),
