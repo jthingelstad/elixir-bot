@@ -996,9 +996,9 @@ TOOLS = [
         "description": (
             "Resolve one of Elixir's own shorthand reference codes and return its "
             "full record. Elixir emits these codes itself, so when a leader mentions "
-            "one in chat ('look at R137', 'why did L60 stay quiet?'), call this tool "
-            "to pull the real record BEFORE answering — never guess what a code means "
-            "or invent its contents.\n\n"
+            "one in chat ('look at R137', 'why did L60 stay quiet?', 'what's C12?'), "
+            "call this tool to pull the real record BEFORE answering — never guess "
+            "what a code means or invent its contents.\n\n"
             "Reference kinds (the leading letter selects the kind, case-insensitive):\n"
             "- R<n> — a leader-action recommendation: a kick / promotion / demotion / "
             "relay card Elixir raised to the leadership action board for a human to "
@@ -1008,9 +1008,17 @@ TOOLS = [
             "- L<n> — an awareness loop: one hourly deliberation tick. Returns whether "
             "it posted or stayed silent, its reasoning, what it posted (channel + "
             "summary + members), and read health (errors / degraded blocks / hard-post "
-            "signal count).\n\n"
-            "Accepts the code with the letter ('R137', 'L60') or a bare number plus an "
-            "explicit `kind`. Returns {error, hint} when the code doesn't resolve."
+            "signal count).\n"
+            "- C<n> — a decision case: the standing deliberation behind a member review "
+            "(the 'why over time' an R card is a snapshot of). Returns case_type, "
+            "status, title, target member, recommendation, rationale, priority, and the "
+            "open/due/resolved timeline.\n"
+            "- M<n> — a stored clan memory: a durable note Elixir wrote. Returns the "
+            "memory kind, title, body, summary, scope, subject member, status "
+            "(active/archived), author, and tags.\n\n"
+            "Accepts the code with the letter ('R137', 'L60', 'C12', 'M340') or a bare "
+            "number plus an explicit `kind`. Returns {error, hint} when the code "
+            "doesn't resolve."
         ),
         "input_schema": {
             "type": "object",
@@ -1018,14 +1026,15 @@ TOOLS = [
                 "reference": {
                     "type": "string",
                     "description": (
-                        "The reference code, e.g. 'R137' or 'L60'. The leading letter "
-                        "selects the kind (R = leader action, L = loop). A bare number "
-                        "is allowed when `kind` is given."
+                        "The reference code, e.g. 'R137', 'L60', 'C12', or 'M340'. The "
+                        "leading letter selects the kind (R = leader action, L = loop, "
+                        "C = decision case, M = memory). A bare number is allowed when "
+                        "`kind` is given."
                     ),
                 },
                 "kind": {
                     "type": "string",
-                    "enum": ["leader_action", "loop"],
+                    "enum": ["leader_action", "loop", "case", "memory"],
                     "description": (
                         "Explicit kind, only needed when `reference` is a bare number "
                         "with no letter prefix."

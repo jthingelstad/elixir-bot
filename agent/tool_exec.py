@@ -1600,21 +1600,28 @@ def _execute_record_leadership_followup(arguments):
     return result
 
 
-_REFERENCE_RE = re.compile(r"^\s*([rl])?\s*#?(\d+)\s*$", re.IGNORECASE)
-_REFERENCE_KIND_BY_LETTER = {"r": "leader_action", "l": "loop"}
+_REFERENCE_RE = re.compile(r"^\s*([rlcm])?\s*#?(\d+)\s*$", re.IGNORECASE)
+_REFERENCE_KIND_BY_LETTER = {
+    "r": "leader_action",
+    "l": "loop",
+    "c": "case",
+    "m": "memory",
+}
 
 
-def _execute_lookup_reference(arguments):
-    """Resolve an 'R<n>' (leader action) or 'L<n>' (awareness loop) reference to
-    its record. Elixir authors these codes, so a leader who cites one in chat is
-    pointing at a real row — resolve it rather than guess."""
+def _execute_lookup_reference(arguments, workflow=None):
+    """Resolve one of Elixir's own shorthand codes to its record: 'R<n>' (leader
+    action), 'L<n>' (awareness loop), 'C<n>' (decision case), 'M<n>' (memory).
+    Elixir authors these codes, so a leader who cites one in chat is pointing at a
+    real row — resolve it rather than guess."""
     raw = str(arguments.get("reference") or "").strip()
     match = _REFERENCE_RE.match(raw)
     if not match:
         return {
             "error": "unparseable_reference",
             "reference": raw,
-            "hint": "Expected a code like 'R137' (leader action) or 'L60' (loop).",
+            "hint": "Expected a code like 'R137' (leader action), 'L60' (loop), "
+                    "'C12' (case), or 'M340' (memory).",
         }
     letter, number = match.group(1), int(match.group(2))
     kind = (
@@ -1626,7 +1633,59 @@ def _execute_lookup_reference(arguments):
         return {
             "error": "ambiguous_reference",
             "reference": raw,
-            "hint": "Bare number with no R/L prefix — pass kind='leader_action' or 'loop'.",
+            "hint": "Bare number with no R/L/C/M prefix — pass kind="
+                    "'leader_action' | 'loop' | 'case' | 'memory'.",
+        }
+
+    if kind == "case":
+        case = db.get_decision_case_by_id(number)
+        if not case:
+            return {"error": "not_found", "reference": f"C{number}",
+                    "hint": f"No decision case C{number} exists."}
+        return {
+            "reference": f"C{number}",
+            "kind": "decision_case",
+            "case_id": case.get("case_id"),
+            "case_type": case.get("case_type"),
+            "status": case.get("status"),
+            "title": case.get("title"),
+            "target_member": case.get("target_player_name"),
+            "target_tag": case.get("target_player_tag"),
+            "recommendation": case.get("recommendation"),
+            "rationale": case.get("rationale"),
+            "priority": case.get("priority"),
+            "opened_at": case.get("opened_at"),
+            "due_at": case.get("due_at"),
+            "resolved_at": case.get("resolved_at"),
+            "resolution": case.get("resolution"),
+        }
+
+    if kind == "memory":
+        from memory_store import get_memory
+
+        mem = get_memory(
+            number,
+            viewer_scope=_memory_viewer_scope_for_workflow(workflow),
+            include_archived=True,
+        )
+        if not mem:
+            return {"error": "not_found", "reference": f"M{number}",
+                    "hint": f"No memory M{number} exists (or it's out of scope here)."}
+        return {
+            "reference": f"M{number}",
+            "kind": "memory",
+            "memory_id": mem.get("memory_id"),
+            "memory_kind": mem.get("kind"),
+            "title": mem.get("title"),
+            "body": mem.get("body"),
+            "summary": mem.get("summary"),
+            "scope": mem.get("scope"),
+            "member_tag": mem.get("member_tag"),
+            "status": mem.get("status"),
+            "created_by": mem.get("created_by"),
+            "created_at": mem.get("created_at"),
+            "updated_at": mem.get("updated_at"),
+            "tags": mem.get("tags"),
         }
 
     if kind == "leader_action":
@@ -1683,7 +1742,7 @@ def _execute_tool(name, arguments, workflow=None):
         elif name == "get_awards":
             result = _execute_get_awards(arguments)
         elif name == "lookup_reference":
-            result = _execute_lookup_reference(arguments)
+            result = _execute_lookup_reference(arguments, workflow=workflow)
         elif name == "get_river_race":
             result = _execute_get_river_race(arguments)
         elif name == "get_war_season":
