@@ -469,6 +469,47 @@ def _intent_content_preview(payload_json) -> str:
     return str(payload.get("content") or "")[:200]
 
 
+# Per-member spotlight cooldown window: members solo-highlighted this recently
+# should not be re-soloed for a routine milestone (the brain applies the rule).
+_SPOTLIGHT_LOOKBACK_HOURS = 72
+
+
+def _recent_member_spotlights(conn) -> list[dict]:
+    """Members already highlighted in a recent #elixir milestone / clan_event post,
+    newest per member, so the brain can apply a per-member cooldown instead of
+    re-soloing the same active players (the 24h review saw Andy spotlighted 3×,
+    Sandeep twice for a 142-trophy incremental peak). Sourced from the plan
+    history in ``awareness_thoughts``."""
+    rows = conn.execute(
+        "SELECT at, plan_json FROM awareness_thoughts "
+        "WHERE chose_silence = 0 AND at >= datetime('now', ?) "
+        "ORDER BY at DESC LIMIT 40",
+        (f"-{_SPOTLIGHT_LOOKBACK_HOURS} hour",),
+    ).fetchall()
+    seen: dict[str, dict] = {}
+    for r in rows:
+        try:
+            plan = json.loads(r["plan_json"] or "{}")
+        except (ValueError, TypeError):
+            continue
+        for p in plan.get("posts", []):
+            if p.get("leads_with") not in ("milestone", "clan_event"):
+                continue
+            names = p.get("member_names") or []
+            solo = len(names) == 1
+            for tag, name in zip(p.get("member_tags") or [], names):
+                if not tag or tag in seen:
+                    continue  # rows are DESC — first seen is the most recent
+                seen[tag] = {
+                    "member_tag": tag,
+                    "member_ref": name,
+                    "at": r["at"],
+                    "solo": solo,
+                    "summary": (p.get("summary") or "")[:100],
+                }
+    return list(seen.values())
+
+
 def _recent_agent_writes(limit: int = 10) -> list[dict]:
     """Recent leadership-scope memories Elixir authored, so the agent avoids
     re-flagging a watch or re-writing an arc it just recorded.
@@ -609,6 +650,8 @@ def build_read(conn=None) -> dict:
             "cake_days_today": _load("cake_days_today", lambda: _cake_days_today(conn), []),
             "decision_cases": _load("decision_cases", lambda: _decision_cases(conn), {"due": [], "open": []}),
             "channel_memory": _load("channel_memory", lambda: _channel_memory(conn), {}),
+            "recent_member_spotlights": _load(
+                "recent_member_spotlights", lambda: _recent_member_spotlights(conn), []),
             "recent_agent_writes": _load("recent_agent_writes", lambda: _recent_agent_writes(), []),
             "leader_action_board": _load(
                 "leader_action_board", lambda: _leader_action_board(conn),

@@ -16,7 +16,11 @@ CARD_UNLOCK_RARITIES = {"legendary", "champion"}  # detectors.py:239 UNLOCK_RARI
 CARD_LEVEL_MIN = 16          # detectors.py:187 MIN_LEVEL
 COLLECTION_LEVEL_STEP = 100  # detectors.py:297 STEP
 CAREER_WINS_STEP = 1000      # detectors.py:67 STEP
-BEST_TROPHIES_STEP = 100     # detectors.py:53
+# Trophy peaks fire every 250 (was 100). A 100-trophy step made a "new personal
+# best" fire on tiny increments — the 24h review saw the same climber posted for
+# 13,000 then 13,142 hours later. 250 is the deterministic minimum delta before a
+# peak re-surfaces; the brain applies a further per-member cooldown on top.
+BEST_TROPHIES_STEP = 250     # detectors.py:53 (raised from 100, 2026-07-12)
 # detectors.py:91 said 10 — the OLD Path of Legends scale. The mid-2025 rework
 # has seven leagues (7 = Ultimate Champion), so the carried constant meant
 # ultimate_champion_reached could never fire (found building ranked seasons,
