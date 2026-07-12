@@ -23,15 +23,20 @@ log = logging.getLogger("elixir_agent")
 WORKFLOWS_WITHOUT_CACHE: set[str] = set()
 
 # Workflows whose STABLE prefix (system prompt + tool defs) should use the 1-hour
-# cache TTL instead of the 5-minute default. The awareness loop runs hourly with a
-# ~14K-token system prompt that never changes between ticks; a 5m TTL expires in the
-# 60-min gap, so every tick re-creates it. With a 1h TTL the prefix survives to the
-# next tick (and TTL refreshes on each read), so it is cache-READ, not re-created —
-# a large net win at the hourly cadence. Anthropic caps TTL at 1h (no 2h option), so
-# this only pays off for cadences <= ~1h; the volatile message prefix stays at 5m.
-# NOTE: session/bursty workflows (interactive/clanops/deck_review) are intentionally
-# NOT here — they complete in one burst, so the cheaper 5m write is better for them.
-LONG_CACHE_TTL_WORKFLOWS: set[str] = {"awareness"}
+# cache TTL instead of the 5-minute default. The 1h TTL costs a 2x write premium and
+# only pays off when consecutive calls land within ~1h so the prefix is cache-READ on
+# the next call instead of re-created.
+#
+# Awareness was here (it ran hourly), but the cost gate (runtime/awareness/gate.py,
+# 2026-07-12) means the Sonnet brain now runs only on posts — sparsely, typically
+# MORE than 1h apart. At that cadence the 1h prefix always expires between ticks, so
+# the 2x write premium buys nothing (no cross-tick read) while the cheaper 5m default
+# still fully covers the within-tick multi-round loop (rounds are seconds apart). So
+# awareness is intentionally NOT here anymore — the 5m default is strictly cheaper for
+# a sparse cadence. Re-add it only if the brain returns to a dense <=1h cadence.
+# NOTE: session/bursty workflows (interactive/clanops/deck_review) were never here —
+# they complete in one burst, so the cheaper 5m write is better for them too.
+LONG_CACHE_TTL_WORKFLOWS: set[str] = set()
 
 # Per-workflow request timeouts (seconds) override the 60s default. Sonnet 4.6
 # on the weekly memory_synthesis batch (~75K input tokens) routinely completes

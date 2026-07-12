@@ -1217,13 +1217,15 @@ def test_create_chat_completion_caches_awareness():
             tools=[{"name": "noop", "description": "x", "input_schema": {"type": "object"}}],
         )
 
-    # The stable prefix (system + tools) uses the 1h TTL for awareness: the
-    # ~14K-token system prompt is identical across hourly ticks, so a 1h cache
-    # (refreshed on each tick's reads) survives the 60-min gap and is read, not
-    # re-created. Session/bursty workflows keep the 5m default.
+    # The stable prefix (system + tools) is cached at the 5m default. Awareness
+    # used the 1h TTL when it ran hourly, but the cost gate (2026-07-12) makes the
+    # Sonnet brain run sparsely (only on posts, >1h apart), so a 1h prefix always
+    # expires between ticks — the 2x write premium buys nothing. The 5m default
+    # still fully covers the within-tick multi-round loop (rounds seconds apart),
+    # which is where awareness caching earns its keep. It must still be cached.
     sys_block = create.call_args.kwargs["system"][0]
-    assert sys_block.get("cache_control") == {"type": "ephemeral", "ttl": "1h"}
-    assert create.call_args.kwargs["tools"][-1].get("cache_control") == {"type": "ephemeral", "ttl": "1h"}
+    assert sys_block.get("cache_control") == {"type": "ephemeral"}
+    assert create.call_args.kwargs["tools"][-1].get("cache_control") == {"type": "ephemeral"}
     # The volatile message prefix (the read) always stays at the 5m default — it
     # changes every tick and is only reused across the multi-round tool loop.
     last_msg = create.call_args.kwargs["messages"][-1]
