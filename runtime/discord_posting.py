@@ -132,7 +132,7 @@ async def compose_and_post(channel, *, lane: str, context: str, leadership: bool
 
     if channel is None:
         return False
-    # Cards-only invariant: #leader-actions carries ONLY interactive action
+    # Cards-only invariant: #actions carries ONLY interactive action
     # cards, never a composed narrative/digest. This is the choke point that
     # keeps data dumps and reminders out — action cards use post_leader_action_card
     # (channel.send) directly and are unaffected. Narrative for leaders belongs
@@ -143,7 +143,7 @@ async def compose_and_post(channel, *, lane: str, context: str, leadership: bool
         _la_id = (_prompts.discord_singleton_lane("arena-relay") or {}).get("id")
         if _la_id is not None and getattr(channel, "id", None) == _la_id:
             log.warning(
-                "compose_and_post: refused narrative post to #leader-actions "
+                "compose_and_post: refused narrative post to #actions "
                 "(cards-only invariant); lane=%s", lane,
             )
             return False

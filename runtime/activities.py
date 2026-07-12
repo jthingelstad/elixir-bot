@@ -49,7 +49,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         },
         delivery_targets=(
             "Discord reactive posts: #player-highlights, #clan-events, #river-race "
-            "(public); #leader-actions (leadership)",
+            "(public); #actions (leadership)",
         ),
         activity_role="observer+communicator",
         legacy_commands=("v5-reactive-tick",),
@@ -73,7 +73,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord: #leader-actions weekly review + recommendation cards",
+            "Discord: #actions weekly review + recommendation cards",
         ),
         activity_role="observer+communicator",
         legacy_commands=("leadership-actions",),
@@ -142,7 +142,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
         purpose="Evergreen housekeeping nudges (Discord, POAP KINGS FAQ, website): "
         "rotate the evergreen_nudges inventory and, ONLY during a quiet period and "
         "within a strict rate cap, offer ONE as an in-game-relay leader-action card "
-        "in #leader-actions. Runs daily; self-gates so it emits rarely.",
+        "in #actions. Runs daily; self-gates so it emits rarely.",
         job_id="weekly-discord-invite-relay",
         job_function="_weekly_discord_invite_relay",
         schedule_kind="cron",
@@ -153,7 +153,7 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord: #leader-actions in-game-relay nudge card (quiet periods only)",
+            "Discord: #actions in-game-relay nudge card (quiet periods only)",
         ),
         activity_role="communicator",
         legacy_commands=("discord-invite-relay",),

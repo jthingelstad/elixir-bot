@@ -542,7 +542,7 @@ def _recent_agent_writes(limit: int = 10) -> list[dict]:
 
 
 def _leader_action_board(conn) -> dict:
-    """Open #leader-actions cards (undecided asks) + recent decisions."""
+    """Open #actions cards (undecided asks) + recent decisions."""
     open_cards = leader_actions.list_leader_actions(status="proposed", limit=15, conn=conn)
     recent = leader_actions.list_leader_actions(limit=15, conn=conn)
     decided = [a for a in recent if (a.get("status") or "proposed") != "proposed"]

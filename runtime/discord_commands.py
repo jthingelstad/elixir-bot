@@ -148,7 +148,7 @@ def register_elixir_app_commands(bot) -> None:
         await send_interaction_text(interaction, content, ephemeral=True)
 
     async def _post_release_relay(text: str) -> str:
-        """Consume cut_release.py's clan-chat marker line, post the #leader-actions
+        """Consume cut_release.py's clan-chat marker line, post the #actions
         card, and strip the marker from the ephemeral reply."""
         marker = "::RELEASE_CLANCHAT::"
         kept: list[str] = []
@@ -161,7 +161,7 @@ def register_elixir_app_commands(bot) -> None:
                 try:
                     from runtime.jobs._core import post_release_relay_card
                     ok = await post_release_relay_card(clanchat, tag=tag)
-                    note = ("📋 Clan-chat card posted to #leader-actions." if ok
+                    note = ("📋 Clan-chat card posted to #actions." if ok
                             else "Clan-chat card not posted (arena-relay unavailable).")
                 except Exception:
                     app.log.exception("release relay card failed")
@@ -215,7 +215,7 @@ def register_elixir_app_commands(bot) -> None:
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=600)
             text = out.decode("utf-8", errors="replace").strip() or "(no output)"
             # On a real cut, cut_release.py emits the clan-chat blurb on a marker
-            # line; post it as a #leader-actions card and hide the marker from the
+            # line; post it as a #actions card and hide the marker from the
             # ephemeral reply.
             if publish and proc.returncode == 0:
                 text = await _post_release_relay(text)
@@ -328,7 +328,7 @@ def register_elixir_app_commands(bot) -> None:
             return
         await send_interaction_text(
             interaction,
-            f"Posted test {action_type} card as R{action.get('action_id')} in #leader-actions.",
+            f"Posted test {action_type} card as R{action.get('action_id')} in #actions.",
             use_followup=True,
         )
 

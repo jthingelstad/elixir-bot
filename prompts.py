@@ -97,7 +97,8 @@ LANE_ALIASES = {
     "recruiting_camp": "promote-the-clan",
     "recruiting-camp": "promote-the-clan",
     "arena_relay": "arena-relay",
-    "leader_actions": "arena-relay",
+    "actions": "arena-relay",           # channel renamed #leader-actions → #actions (2026-07-12)
+    "leader_actions": "arena-relay",    # kept: back-compat aliases for the old name
     "leader-actions": "arena-relay",
     "clanops": "leader-lounge",
     "leaders": "leader-lounge",
