@@ -291,6 +291,36 @@ def _clan_chat_action_reason(rationale: str) -> str:
     return clip_clan_chat_text(reason, limit=90).removesuffix("...").rstrip(" .,;:")
 
 
+_CLAN_CHAT_FORBIDDEN = ("http://", "https://", "www.", "Discord")
+
+
+def signed_valid_messages(
+    messages: Any,
+    *,
+    max_chars: int = CLAN_CHAT_DEFAULT_MAX_CHARS,
+    signature: dict[str, Any] | None = None,
+    forbidden_terms: tuple[str, ...] = _CLAN_CHAT_FORBIDDEN,
+) -> list[str] | None:
+    """Deterministically sign + validate author-supplied clan-chat messages (the
+    awareness brain writes these directly in its grounded pass — no second LLM
+    redraft). Returns up to 2 ready-to-paste signed messages, or None if they miss
+    the guardrails (markdown, links, mentions, length) so the caller can fall back.
+
+    `messages` may be a single string or a list; blanks are dropped, capped at 2."""
+    if isinstance(messages, str):
+        messages = [messages]
+    clean = [str(m).strip() for m in (messages or []) if str(m).strip()][:2]
+    if not clean:
+        return None
+    signed = [sign_clan_chat_text(m, limit=max_chars, signature=signature) for m in clean]
+    result = validate_clan_chat_messages(
+        signed, max_messages=2, max_chars=max_chars, forbidden_terms=forbidden_terms,
+    )
+    if result.messages and not result.violations:
+        return result.messages
+    return None
+
+
 def role_action_clan_chat_copy(
     *,
     action_type: str,
@@ -344,6 +374,7 @@ __all__ = [
     "generate_clan_chat_copy",
     "messages_from_agent_result",
     "role_action_clan_chat_copy",
+    "signed_valid_messages",
     "sign_clan_chat_text",
     "validate_clan_chat_messages",
 ]
