@@ -36,7 +36,10 @@ HARD_POST_EVENT_TYPES = frozenset({
     "member_leave",
     # concrete v5.1 event_stream types
     "member_joined",
-    "member_left",
+    # NB: raw "member_left" is deliberately NOT a hard-post — a departure's public
+    # goodbye is HELD until a leader verifies it was an organic leave (vs a kick).
+    # The verified-leave signal below is what earns a farewell; a kick earns none.
+    "member_left_verified",
     "week_finished",
     "season_closed",
     # The clan's OWN founding anniversary is a can't-miss celebration (unlike
@@ -59,6 +62,7 @@ _LANE_BY_EVENT_TYPE: dict[str, str] = {
     # clan_event
     "member_joined": "clan_event",
     "member_left": "clan_event",
+    "member_left_verified": "clan_event",
     "role_changed": "clan_event",
     "weekly_donation_leader": "clan_event",
     # clan_event — calendar "cake days" (also surfaced all-day via cake_days_today)

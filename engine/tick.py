@@ -216,6 +216,11 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn=None, compose_fn
         if not calendar_already_ran(conn, today):
             emitted += emit_calendar(conn, today)
             mark_calendar_ran(conn, today)
+        # A verified LEAVE (leader confirmed via a departure_verification card)
+        # emits member_left_verified — the held goodbye the brain may now narrate.
+        # A confirmed KICK emits nothing. Raw member_left is no longer a hard-post.
+        from engine.emitters.clan import emit_verified_leave_events
+        emitted += emit_verified_leave_events(conn, HOME_CLAN, now_iso)
         # Game-level stream: new /events + event badges from the sentinel store
         # (new cards emit from the daily catalog sync). Fail-soft — a sentinel
         # read must never sink the player/clan/war emit above; the emit:game
@@ -265,6 +270,8 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn=None, compose_fn
         # as stale recommendations to the awareness brain.
         from storage.cases import (
             reconcile_departed_member_cases,
+            expire_departure_verification_cards,
+            raise_departure_verification_cards,
             reconcile_uncorroborated_member_cases,
             sync_terminal_leader_action_cases,
         )
@@ -300,6 +307,20 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn=None, compose_fn
                 len(uncorroborated),
                 ", ".join(f"{c['target_player_name']}({c['case_type']})" for c in uncorroborated),
             )
+        # Departure verification: a leave and a kick are different signals the
+        # roster diff can't tell apart. Raise a #leader-actions card for recent
+        # unverified departures (settling already-enacted kicks silently), and
+        # auto-settle cards leaders never answered.
+        departure_cards = raise_departure_verification_cards(now=now_iso, conn=conn)
+        counters["departure_cards_raised"] = len(departure_cards)
+        if departure_cards:
+            log.info(
+                "raised %d departure-verification card(s): %s",
+                len(departure_cards),
+                ", ".join(f"{c['player_name']}" for c in departure_cards),
+            )
+        expired_departures = expire_departure_verification_cards(now=now_iso, conn=conn)
+        counters["departure_cards_expired"] = len(expired_departures)
         if transitions:
             from storage.leader_actions import create_leader_action_recommendation
 

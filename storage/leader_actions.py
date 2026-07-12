@@ -20,6 +20,9 @@ ACTION_DONE = "done"
 ACTION_DEFERRED = "deferred"
 ACTION_PROPOSED = "proposed"
 ACTION_REJECTED = "rejected"
+# Action types resolved by a two-way classification (not done/decline). Their
+# cards ignore the ✅/❌ reaction path and resolve only via their own buttons.
+_CLASSIFICATION_ACTION_TYPES = {"departure_verification"}
 ACTION_OUTCOME_DELAY_HOURS = {
     "in_game_relay": 24,
     "celebration_relay": 24,
@@ -984,6 +987,10 @@ def decide_leader_action_by_message(
     action = get_leader_action_by_message(source_message_id, conn=conn)
     if not action:
         return None
+    if action.get("action_type") in _CLASSIFICATION_ACTION_TYPES:
+        # Two-way classification cards (LEAVE vs KICK) resolve only via their
+        # buttons; a bare ✅/❌ reaction can't express which choice. Ignore it.
+        return None
     return decide_leader_action(
         action["action_id"],
         status=status,
@@ -1092,6 +1099,101 @@ def decide_leader_action(
             # not make the Discord reaction handler fail.
             pass
     return updated
+
+
+# Authoritative leave_source values written when a leader verifies a departure
+# (vs the inferred 'roster_diff'). See storage.cases._departure_was_kick, which
+# prefers these over the 14-day inference.
+LEAVE_SOURCE_VERIFIED = {"leave": "leader_verified_leave", "kick": "leader_verified_kick"}
+_CLASSIFY_EMOJI = {"leave": "🚶", "kick": "🚪"}
+
+
+@managed_connection
+def classify_departure(
+    action_id: int,
+    *,
+    classification: str,
+    discord_user_id: str | int,
+    comment: str | None = None,
+    decided_at: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Optional[dict]:
+    """Resolve a departure_verification card. The leader confirms the member
+    LEFT on their own (``classification='leave'``) or was KICKED (``'kick'``).
+
+    Writes the authoritative ``clan_memberships.leave_source`` (the member's row
+    always exists, unlike a decision case), marks the card done-with-classification,
+    and — when the leader added a comment on WHY — records it as a durable
+    leadership memory on that member. Open member-review cases reconcile against
+    the new leave_source on the next engine tick (see
+    ``storage.cases.reconcile_departed_member_cases``)."""
+    classification = (classification or "").strip().lower()
+    if classification not in LEAVE_SOURCE_VERIFIED:
+        raise ValueError(f"invalid departure classification: {classification}")
+    action = get_leader_action_by_id(action_id, conn=conn)
+    if not action:
+        return None
+    stamp = decided_at or _db._utcnow()
+    clean_comment = " ".join((comment or "").split()) or None
+    canon = _db._canon_tag(action.get("target_player_tag")) if action.get("target_player_tag") else None
+
+    if canon:
+        conn.execute(
+            """UPDATE clan_memberships SET leave_source = ?
+               WHERE membership_id = (
+                   SELECT membership_id FROM clan_memberships
+                   WHERE UPPER(player_tag) = UPPER(?) AND left_at IS NOT NULL
+                   ORDER BY left_at DESC, membership_id DESC LIMIT 1
+               )""",
+            (LEAVE_SOURCE_VERIFIED[classification], canon),
+        )
+
+    outcome = {
+        "evaluated_at": stamp,
+        "action_type": action.get("action_type"),
+        "status": ACTION_DONE,
+        "classification": classification,
+    }
+    conn.execute(
+        """UPDATE leader_action_recommendations
+           SET status = ?, decided_at = ?, decided_by_discord_user_id = ?,
+               decision_emoji = ?,
+               decision_note = COALESCE(?, decision_note),
+               decision_note_at = CASE WHEN ? IS NOT NULL THEN ? ELSE decision_note_at END,
+               decision_note_by_discord_user_id = CASE WHEN ? IS NOT NULL THEN ? ELSE decision_note_by_discord_user_id END,
+               outcome_json = ?, updated_at = ?
+           WHERE action_id = ?""",
+        (
+            ACTION_DONE, stamp, str(discord_user_id),
+            _CLASSIFY_EMOJI[classification],
+            clean_comment, clean_comment, stamp,
+            clean_comment, str(discord_user_id),
+            _json_dumps(outcome), stamp, action["action_id"],
+        ),
+    )
+
+    if clean_comment and canon:
+        try:
+            from memory_store import create_memory
+
+            verb = "was kicked from" if classification == "kick" else "left"
+            name = action.get("target_player_name") or canon
+            create_memory(
+                body=f"{name} {verb} the clan. Leader note: {clean_comment}",
+                source_type="leader_note",
+                is_inference=False,
+                confidence=1.0,
+                created_by=f"discord:{discord_user_id}",
+                scope="leadership",
+                title=f"Departure ({classification}): {name}",
+                member_tag=canon,
+                conn=conn,
+            )
+        except Exception:
+            log.warning("departure memory write failed for %s", canon, exc_info=True)
+
+    conn.commit()
+    return get_leader_action_by_id(action["action_id"], conn=conn)
 
 
 @managed_connection
@@ -1236,6 +1338,7 @@ __all__ = [
     "build_leader_action_feedback_synthesis_context",
     "build_leader_action_baseline",
     "auto_withdraw_leader_actions",
+    "classify_departure",
     "clear_leader_action_decision_by_message",
     "create_leader_action_recommendation",
     "decide_leader_action",
