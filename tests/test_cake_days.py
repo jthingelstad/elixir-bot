@@ -28,9 +28,12 @@ def _member(conn, tag, name, *, left_at=None):
 
 def test_cake_days_today_surfaces_active_members_all_day(engine_conn):
     today = db.chicago_today()
-    # Stamped at the very start of the day: cake_days_today is date-based, NOT
-    # gated on last_tick_at, so an event from hours ago still surfaces.
-    stamp = f"{today}T00:00:01Z"
+    # Stamp at noon-UTC on today's Chicago date — exactly what emit_calendar uses.
+    # cake_days_today keys off the Chicago date (surfaces all day); the clan_birthday
+    # hard-post assertion below reads the delta feed (since = max(last_tick, now-1day)),
+    # and a noon-UTC stamp stays inside that 1-day floor regardless of time-of-day —
+    # a T00:00:01Z stamp did not (it fell out of the window late in the UTC day).
+    stamp = f"{today}T12:00:00Z"
 
     engine_conn.execute(
         "INSERT INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "

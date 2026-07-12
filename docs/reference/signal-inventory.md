@@ -109,9 +109,10 @@ unless noted.
 | `inactive_members` | Friday leadership-only inactivity report. | `signal_log` key `inactive_members:<date>`; event identity derives from `type` plus signal date when present. |
 | `member_active_again` | Previously dormant member has fresh activity. | `signal_log_type=member_active_again:<tag>:<observed_at>`. |
 | `clan_war_trophies_record` | New all-time clan war trophy high. | `signal_log_type=clan_war_trophies_record:<date>`. |
-| `clan_birthday` | Clan founding month/day matches today. | `cake_day_announcements`. |
-| `join_anniversary` | Member join anniversary matches today. | `cake_day_announcements`. |
-| `member_birthday` | Stored member birthday matches today. | `cake_day_announcements`. |
+| `clan_birthday` | Clan founding month/day matches today (only when `years >= 1`). | v5.1: emitted by `engine/emitters/clan.py:emit_calendar` to `clan_events`; dedup `clan_birthday:{date}`. **Hard-post floor** (mandatory big celebration). |
+| `join_anniversary` | Member clan-tenure quarterly mark matches today. | `emit_calendar` → `clan_events`; dedup `join_anniversary:{tag}:{date}`; payload carries `is_annual` at the 1yr/2yr marks. |
+| `member_birthday` | Stored member birthday matches today. | `emit_calendar` → `clan_events`; dedup `member_birthday:{tag}:{date}`. |
+| `cr_account_anniversary` | Member's CR "years played" count ticks up. | `emit_calendar` → `clan_events`; dedup `cr_account_anniversary:{tag}:{years}`; payload `{name, years}`. Gates on `player_metadata.cr_years_celebrated`. |
 
 Available but not currently wired into the recurring heartbeat tick:
 
@@ -131,7 +132,6 @@ Source: `storage/player.py` from `snapshot_player_profile()` and
 | `career_wins_milestone` | Wins crossed a configured milestone. | milestone |
 | `best_trophies_peak` | New all-time best trophies. | milestone |
 | `challenge_performance_milestone` | Challenge max wins reached a milestone. | milestone |
-| `cr_account_anniversary` | Clash Royale account age anniversary. | milestone |
 | `new_card_unlocked` | New card in collection. | milestone |
 | `new_champion_unlocked` | New champion in collection. | milestone |
 | `card_level_milestone` | Card level crossed configured milestone. | milestone |

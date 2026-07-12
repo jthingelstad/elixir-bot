@@ -469,7 +469,7 @@ bookkeeping*.
 ### 13.3 The deterministic core (code, not LLM)
 
 - **Member-management projection.** One authoritative row per member with the metrics
-  leadership actually uses — role, tenure, donations/week, war participation & fame,
+  leadership actually uses — role, tenure, donations/week, war participation & points,
   and battle-based activity — built from the streams and refreshed weekly (donations
   and war reset weekly, so weekly is the natural grain).
 - **Engagement is measured from battle logs, not presence.** Logging in to claim
@@ -531,11 +531,11 @@ the v5.1 streams, not a new invention.
   when someone merely opens the game to claim rewards; that is not contribution.
   Engagement and idleness stay measured from battle logs, not logins.
 - **Durable war contributors get a longer confirmation before a kick card.** A
-  member whose 3-season war fame or sustained attendance clears the bar earns
+  member whose 3-season war points or sustained attendance clears the bar earns
   extra idle days before the reactive path proposes a `kick_recommendation`
   (`management.py` `WAR_CONTRIB_*`) — they still surface as watch/at_risk, the card
   is only delayed. War contribution is meaningful; the ladder reflects it.
-- **Donations reset weekly**; **war participation (decks used, fame)** is the
+- **Donations reset weekly**; **war participation (decks used, points)** is the
   strongest sustained-contribution signal. The projection is built around what battle
   and war data actually tell us.
 
@@ -730,14 +730,15 @@ Champ** and earns a **free Pass Royale** (~$15). Members care intensely and cons
 ask Elixir who's winning — which is a **math** question, so it lives in **code**, never
 the LLM:
 
-- A season-bounded standings table: per-member cumulative **fame** across all weeks,
+- A season-bounded standings table: per-member cumulative **points** across all weeks,
   plus decks used / attendance (including a perfect-attendance flag).
 - ~~**Criteria are policy and vary by season**~~ — **superseded by Q2**
-  (`open-questions.md`): War Champ is **always top fame**, no variant mechanism;
+  (`open-questions.md`): War Champ is **always top points** (a member's war
+  contribution is points; fame is a clan-only concept), no variant mechanism;
   the Free Pass **rotates** (never the same player in sequential seasons — falls
   to rank 2, champ keeps the honor).
 - Elixir answers "who's winning the Free Pass Royale / who's War Champ so far?" by
-  **reading** the standing — it never sums fame itself.
+  **reading** the standing — it never sums points itself.
 - At season close, code determines the War Champ → a season-close event → public
   recognition (a clear POAP KINGS honor) and a durable record.
 
@@ -751,7 +752,7 @@ closure and recognition (never guilt-driven).
 
 ### 16.5 War feeds clan management (bounded → persistent)
 
-War participation — decks used, fame — is the **strongest contribution signal** for
+War participation — decks used, points — is the **strongest contribution signal** for
 clan management (§13). So the bounded war stream **feeds the persistent
 member-management projection**: strong war performance is recognized publicly, and
 chronic war no-shows become a private management signal (the "war-reliable" evaluator).
