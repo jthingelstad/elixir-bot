@@ -4,6 +4,42 @@ This file tracks shipped features and capabilities in reverse chronological orde
 
 ---
 
+## Thrifty Thunderbird (2026-07-13)
+
+**Date:** 2026-07-13
+
+Since Panoramic Phoenix I got a lot cheaper, a lot more selective about when I speak, and a lot more aware of the competitions the clan actually runs. (21 commits.)
+
+## The story
+
+The throughline was **spend less, say the right things.** I was costing about $300/month — and most of that was me paying premium rates to hourly-deliberate my way to "stay quiet." So I put a gate in front of my expensive brain: a cheap model (and, for empty hours, plain code) now makes the post-vs-silence call, and I only spin up the full brain when there's genuinely something to compose. That plus a couple of caching/round trims took the bill down roughly **10×** with no drop in the quality of what I actually post.
+
+Cheaper wasn't the whole story, though — a review found I'd over-corrected into near-silence (one day I made *zero* discretionary posts), so I re-tuned the bar to celebrate the notable and mute the grind, and gave myself a heartbeat so a good day never scrolls past in silence. Then Jamie and I worked through what I *should* be surfacing: legendary badges (not routine card-maxes), a proper 22-week war-win streak, and the War Champ / Iron King / Rookie MVP races the clan competes in every season.
+
+## Features
+
+- **I cost about 10× less to run** — a gate now decides whether an hour is worth my expensive brain before I spend it. Empty hours are free; routine hours get a cheap check; only real moments get the full treatment. Same posts, a fraction of the cost.
+- **I celebrate the notable and mute the grind** — a *Legendary* badge, an arena climb, or a genuinely big milestone gets a post; a routine card-mastery bump doesn't. And I no longer go silent for a whole day — if it's been quiet and something real happened, I'll share it.
+- **New members get welcomed in the game, not just Discord** — every join now also raises a leader card with a ready-to-paste in-game welcome that names the newcomer's trophies and how they fit, so members who live in the game get a real greeting.
+- **I count our war-win streak for real** — "22 straight weeks at #1," pulled from the record, instead of a guess. And on a practice day when every clan sits at 0 fame, I no longer invent a rank — the race isn't ranked until someone scores.
+- **I follow the award competitions live, all season** — the **War Champ** points race (which the free pass is built on), **Iron King** (a participation award — I celebrate *everyone* who earns it, never crown just one), and **Rookie MVP** (first-war-season members). I see the full top-10 with points and ties, and I get pinged when a race's leader changes.
+- **The free pass rotates correctly** — it goes to the highest-ranked War Champ who didn't win it last month, so the crown can repeat while the pass moves.
+- **My #ask-elixir posts stopped being all-war-all-the-time** — I rotate through decks, donations, awards, the Elder track, and other modes so members learn the range of what I can do.
+- **Departures are handled with care** — a leave and a kick look identical in the roster, so I hold the public goodbye until a leader confirms it was an organic leave; a kick gets silence.
+- **The Elder track is public and participation-based** — a weekly Elder Standing report, scored on war/ranked/donations a member controls, not prestige.
+
+## Release Notes
+
+- **Awareness cost gate** (`runtime/awareness/gate.py`): skip (deterministic silence) / triage (lightweight post-vs-silence) / deliberate (full Sonnet brain). Triage can only gate, never post — Sonnet stays the sole author, so it's a cost change, not a quality change. `ELIXIR_AWARENESS_GATE=0` disables.
+- Per-tick trims: dropped awareness off the 1h cache TTL (sparse cadence makes the 2× write premium worthless) and capped tool rounds at 6 (`ELIXIR_AWARENESS_MAX_ROUNDS`).
+- **Milestone recalibration**: signals tiered notable-vs-routine; badges tag `badge_tier` (Legendary = one-off/no-level; routine = leveled mastery); per-member spotlight cooldown 72h→48h with notable tiers exempt; `posting_pulse` heartbeat (post on a 10h+ quiet stretch with a real signal). Notable signals + heartbeats route straight to the brain.
+- Every `member_join` force-raises an in-game welcome relay card in #actions (delivery-layer backstop + prompt-mandated grounded copy).
+- War-week win streak (`war_status.get_week_win_streak`) surfaced in the read; the weekly race is `race_ranked: false` (rank nulled) until a clan scores.
+- **Award races** (`storage.awards.get_award_races`) in the read: War Champ + Rookie MVP top-10 with points and tie-aware ranks; Iron King as an unranked participation list. Rookie MVP rescoped to first-war-season. Free-pass rotation rewritten to "highest War Champ not won last month." `war_champ_lead_change` / `rookie_mvp_lead_change` events emit on a leader change.
+- Renamed #leader-actions → #actions; clan-chat relay copy authored by the brain in one grounded pass; Elder band math ranked by participation with a trailing-4-week donation average; absolute international-aware clock; `lookup_reference` tool + C/M reference codes; dropped the ambiguous "session" from post voice.
+
+---
+
 ## Panoramic Phoenix (2026-07-11)
 
 **Date:** 2026-07-11
