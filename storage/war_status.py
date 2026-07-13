@@ -739,6 +739,36 @@ def get_war_history(n: int = 10, conn: Optional[sqlite3.Connection] = None) -> l
     return _rowdicts(rows)
 
 
+@managed_connection
+def get_week_win_streak(conn: Optional[sqlite3.Connection] = None) -> dict:
+    """Consecutive War-week #1 finishes, most-recent-first, from ``war_weeks``.
+
+    Only FINALIZED weeks count (our_rank set — the in-progress training/battle
+    period is still NULL). Returns ``{"streak", "weeks_tracked", "all_first",
+    "since"}``. POAP KINGS has won every war week it has ever played (clan wars
+    need 10+ members, so the clan's first ~10 memberless days had no war), so the
+    streak is effectively the clan's entire war history — but we report the
+    provable number, not the founding claim."""
+    rows = conn.execute(
+        "SELECT season_id, section_index, our_rank FROM war_weeks "
+        "WHERE our_rank IS NOT NULL ORDER BY season_id DESC, section_index DESC"
+    ).fetchall()
+    streak = 0
+    for row in rows:
+        if row["our_rank"] == 1:
+            streak += 1
+        else:
+            break
+    weeks_tracked = len(rows)
+    oldest = rows[-1] if rows else None
+    return {
+        "streak": streak,
+        "weeks_tracked": weeks_tracked,
+        "all_first": weeks_tracked > 0 and streak == weeks_tracked,
+        "since": (f"season {oldest['season_id']}" if oldest else None),
+    }
+
+
 def get_current_season_id(conn: Optional[sqlite3.Connection] = None) -> Optional[int]:
     current = get_current_war_status(conn=conn)
     return current.get("season_id") if current else None
@@ -879,18 +909,31 @@ def get_war_season_snapshot(conn: Optional[sqlite3.Connection] = None) -> dict |
             (season_id,),
         ).fetchone()
         phase = current.get("phase")
+        # The weekly fame race is only RANKED once a clan has scored. On a
+        # practice day every clan sits at 0 fame, so the API's rank is an
+        # arbitrary tiebreaker order (not a real standing) — don't surface it.
+        race_scored = any(
+            (s.get("fame") or 0) > 0 for s in (current.get("race_standings") or [])
+        )
+        win_streak = get_week_win_streak(conn=conn)
         summary_bits = [f"Season {season_id}"]
         if current.get("section_index") is not None:
             summary_bits.append(f"week {int(current['section_index']) + 1}")
         if phase:
             summary_bits.append(str(phase))
-        if current.get("race_rank"):
+        if current.get("race_rank") and race_scored:
             summary_bits.append(f"race rank {current['race_rank']}")
+        elif not race_scored:
+            summary_bits.append("race not yet ranked (no clan has scored)")
+        if win_streak.get("streak"):
+            summary_bits.append(f"{win_streak['streak']} straight weeks at #1")
         return {
             "season_id": season_id,
             "summary": ", ".join(summary_bits),
             "started_at": season["started_at"] if season else None,
             "last_observed_at": current.get("observed_at"),
+            "week_win_streak": win_streak,
+            "race_ranked": race_scored,
             "state": {
                 "season_id": season_id,
                 "week": current.get("week"),

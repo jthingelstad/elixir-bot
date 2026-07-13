@@ -390,11 +390,18 @@ def _standing_block(war: dict | None) -> dict | None:
         if us is not None:
             our_fame = us.get("fame") or 0
             leader_fame = race[0].get("fame") or 0
+            # The weekly fame race is only RANKED once a clan has scored. Until
+            # then (e.g. a practice day, every clan at 0 fame) the API's rank is
+            # an arbitrary tiebreaker order, NOT a standing — surface it as
+            # unranked so the brain never cites a phantom "rank N".
+            race_ranked = any((s.get("fame") or 0) > 0 for s in race)
             weekly = {
-                "rank": us.get("rank"),
+                "race_ranked": race_ranked,
+                "rank": us.get("rank") if race_ranked else None,
+                "unranked_reason": None if race_ranked else "no clan has scored yet — the race is not ranked until the first battle day closes",
                 "fame": our_fame,
                 "leader_fame": leader_fame,
-                "deficit_to_leader": (leader_fame - our_fame) if us.get("rank") != 1 else 0,
+                "deficit_to_leader": (leader_fame - our_fame) if (race_ranked and us.get("rank") != 1) else 0,
                 "finish_line": war.get("finish_line"),
                 "boat_scored": bool(war.get("boat_scored")),
                 # Fame projected at today's close = placement + boat-defense fame
@@ -405,7 +412,8 @@ def _standing_block(war: dict | None) -> dict | None:
                 "defenses_remaining": war.get("defenses_remaining"),
                 "clinches_finish_today": bool(war.get("clinches_finish_today")),
                 "scoreboard": [
-                    {"name": s.get("clan_name"), "fame": s.get("fame") or 0, "rank": s.get("rank")}
+                    {"name": s.get("clan_name"), "fame": s.get("fame") or 0,
+                     "rank": s.get("rank") if race_ranked else None}
                     for s in race
                 ],
             }
