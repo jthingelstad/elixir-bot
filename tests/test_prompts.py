@@ -187,6 +187,23 @@ def test_identity_block():
     block = prompts.identity_block()
     assert "Elixir's Soul" in block
     assert "Elixir's Purpose" in block
+    # the global pronoun policy rides in identity_block (every member-facing surface)
+    assert "they/them by default" in block
+
+
+def test_awareness_prompt_enforces_they_them_at_compose_time():
+    """Regression (#103): the poster wrote 'he/his' about King Levy even though
+    identity_block carried the pronoun rule — it was background, not compose-time.
+    The awareness agent prompt itself must state the they/them rule AND model no
+    gendered pronoun in its own examples (the model mirrors the prompt)."""
+    import re
+    agent_md = prompts.agent_prompt("awareness")
+    assert "they/them" in agent_md.lower()
+    # the prompt's OWN prose must not model he/him/his/she/her (member examples)
+    stray = re.findall(r'\b(he|him|his|she|her|hers)\b', agent_md, re.I)
+    assert not stray, f"awareness.md models gendered pronouns: {stray}"
+    # and it reaches the composed awareness system prompt
+    assert "they/them" in agent_prompts._awareness_system().lower()
 
 
 def test_thresholds():
