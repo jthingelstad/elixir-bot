@@ -84,6 +84,29 @@ def _soft_lane_signals(read: dict) -> list:
     return out
 
 
+_ARENA_EVENT_TYPES = {"arena_changed", "arena_up"}
+
+
+def _notable_soft_signals(read: dict) -> list:
+    """Soft signals that are notable enough to always deserve the full brain —
+    never gated to silence by the cheap triage. A Legendary badge (one-off) or an
+    arena climb is rare and cool; route it to deliberate so the brain composes it
+    per the milestone-discipline rules, rather than risk a triage mute."""
+    out = []
+    for s in _soft_lane_signals(read):
+        if not isinstance(s, dict):
+            continue
+        if s.get("event_type") == "badge_earned" and s.get("badge_tier") == "legendary":
+            out.append(s)
+        elif s.get("event_type") in _ARENA_EVENT_TYPES:
+            out.append(s)
+    return out
+
+
+def _is_quiet_stretch(read: dict) -> bool:
+    return bool((read.get("posting_pulse") or {}).get("is_quiet_stretch"))
+
+
 def _soft_context(read: dict) -> dict:
     """Standing, non-mandatory context that can justify a triage look but never
     an unconditional Sonnet run (each is populated on ~every tick)."""
@@ -112,11 +135,25 @@ def classify(read: dict) -> dict:
         **ctx,
     }
 
+    notable = _notable_soft_signals(read)
+    quiet = _is_quiet_stretch(read)
+    triggers["notable_soft_signals"] = len(notable)
+    triggers["quiet_stretch"] = quiet
+
     if hard:
         kinds = sorted({s.get("event_type") for s in hard if isinstance(s, dict)})
         return {"tier": "deliberate", "reason": f"hard-post signal(s): {', '.join(k for k in kinds if k)}", "triggers": triggers}
     if revisits:
         return {"tier": "deliberate", "reason": f"{len(revisits)} due revisit(s)", "triggers": triggers}
+    # Notable soft signals (Legendary badge, arena climb) always reach the brain —
+    # too rare/cool to risk a cheap-triage mute.
+    if notable:
+        kinds = sorted({s.get("event_type") for s in notable if isinstance(s, dict)})
+        return {"tier": "deliberate", "reason": f"notable signal(s): {', '.join(k for k in kinds if k)}", "triggers": triggers}
+    # Heartbeat: a long quiet stretch WITH something real to say → let the brain
+    # compose a warm roundup rather than flat-lining.
+    if quiet and soft_lanes:
+        return {"tier": "deliberate", "reason": f"quiet stretch ({len(soft_lanes)} soft signal(s) to surface)", "triggers": triggers}
 
     has_soft = bool(soft_lanes) or bool(ctx["cake_days"]) or bool(ctx["due_cases"]) or ctx["management_actionable"]
     if has_soft:
@@ -151,9 +188,11 @@ Decide SILENT when the signals are routine or already handled:
 - an anniversary/cake day that was already posted earlier today
 
 Decide POST only when something is genuinely fresh and worth a member seeing it now:
+- a **Legendary badge** (`badge_tier: "legendary"`) or an **arena climb** (`arena_name`) — these are notable, always worth a post
 - a new, uncovered milestone worth celebrating (outside cooldown), or several that form a roundup
 - a not-yet-posted cake day / anniversary
 - a newly-actionable item that clearly warrants a member-facing note this hour
+- it's been a long quiet stretch (`posting_pulse.is_quiet_stretch`) AND there's any real signal to surface — lean POST to keep a clan heartbeat
 
 When it is a close call between a marginal post and silence, choose SILENT. Over-posting has a real cost and Elixir values restraint. \
 The composing model will make the final call and may still stay silent — a POST from you only means "worth a closer look."
@@ -166,12 +205,15 @@ def _compact_read_for_triage(read: dict) -> str:
     def _slim_sig(s):
         if not isinstance(s, dict):
             return str(s)
-        return {k: s.get(k) for k in ("event_type", "subject_tag", "observed_at", "signal_key") if s.get(k)}
+        return {k: s.get(k) for k in
+                ("event_type", "subject_tag", "observed_at", "signal_key",
+                 "badge_tier", "badge_name", "arena_name") if s.get(k)}
 
     time_block = read.get("time") or {}
     payload = {
         "now": read.get("generated_at"),
         "war_phase": (time_block.get("war_day_label") or time_block.get("phase") or None),
+        "posting_pulse": read.get("posting_pulse") or {},
         "soft_signals": [_slim_sig(s) for s in _soft_lane_signals(read)],
         "cake_days_today": read.get("cake_days_today") or [],
         "due_decision_cases": [

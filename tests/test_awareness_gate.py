@@ -51,6 +51,59 @@ def test_classify_deliberate_on_due_revisit():
     assert cls["tier"] == "deliberate"
 
 
+def test_classify_deliberate_on_legendary_badge():
+    """A one-off Legendary badge is notable — it must reach the brain, never be
+    gated to silence by the cheap triage."""
+    sig = {"signal_key": "badge_earned:#Y:Chaos_S2", "event_type": "badge_earned",
+           "badge_tier": "legendary", "badge_name": "Chaos_S2"}
+    read = _empty_read(signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
+                                        "clan_event": [], "leadership": [], "system": []})
+    cls = gate.classify(read)
+    assert cls["tier"] == "deliberate"
+    assert "notable" in cls["reason"]
+
+
+def test_classify_deliberate_on_arena_climb():
+    sig = {"signal_key": "arena_changed:#Y:1", "event_type": "arena_changed", "arena_name": "Spirit Square"}
+    read = _empty_read(signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
+                                        "clan_event": [], "leadership": [], "system": []})
+    assert gate.classify(read)["tier"] == "deliberate"
+
+
+def test_classify_routine_badge_still_triage_not_deliberate():
+    """A leveled/routine badge is NOT notable — it stays in the cheap triage lane."""
+    sig = {"signal_key": "badge_earned:#Y:MasteryLog", "event_type": "badge_earned",
+           "badge_tier": "routine", "badge_name": "MasteryLog"}
+    read = _empty_read(signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
+                                        "clan_event": [], "leadership": [], "system": []})
+    assert gate.classify(read)["tier"] == "triage"
+
+
+def test_classify_heartbeat_quiet_stretch_deliberates():
+    """A long quiet stretch WITH a real soft signal → deliberate (compose a
+    heartbeat roundup), rather than gating to silence."""
+    sig = {"signal_key": "card_level_milestone:#Y:1", "event_type": "card_level_milestone"}
+    read = _empty_read(
+        signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
+                         "clan_event": [], "leadership": [], "system": []},
+        posting_pulse={"is_quiet_stretch": True, "hours_since_last_post": 12.0},
+    )
+    cls = gate.classify(read)
+    assert cls["tier"] == "deliberate"
+    assert "quiet stretch" in cls["reason"]
+
+
+def test_classify_not_quiet_routine_soft_stays_triage():
+    """Same routine signal, but NOT a quiet stretch → stays triage (cheap)."""
+    sig = {"signal_key": "card_level_milestone:#Y:1", "event_type": "card_level_milestone"}
+    read = _empty_read(
+        signals_by_lane={"milestone": [sig], "war": [], "battle_mode": [],
+                         "clan_event": [], "leadership": [], "system": []},
+        posting_pulse={"is_quiet_stretch": False, "hours_since_last_post": 2.0},
+    )
+    assert gate.classify(read)["tier"] == "triage"
+
+
 def test_classify_triage_on_soft_milestone():
     sig = {"signal_key": "card_level_milestone:#Y:1", "event_type": "card_level_milestone"}
     read = _empty_read(
