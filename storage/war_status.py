@@ -878,6 +878,19 @@ def get_season_window(
     }
 
 
+def _strip_ranks(standings: list | None, scored: bool) -> list:
+    """Copy a scoreboard, nulling each entry's ``rank`` when the race hasn't
+    scored — the API's order on an all-zero board is an arbitrary tiebreaker,
+    not a standing, and a raw ordinal there reads to the brain as a real rank."""
+    out = []
+    for s in standings or []:
+        row = dict(s)
+        if not scored:
+            row["rank"] = None
+        out.append(row)
+    return out
+
+
 def get_war_season_snapshot(conn: Optional[sqlite3.Connection] = None) -> dict | None:
     """Season-state snapshot for memory-synthesis, leadership reports, and
     get_elixir_state. Lean v5.1 rebuild of the retired storage.projects
@@ -946,14 +959,20 @@ def get_war_season_snapshot(conn: Optional[sqlite3.Connection] = None) -> dict |
                 if current.get("battle_day_number") is not None
                 else current.get("practice_day_number"),
                 "race": {
-                    # Two separate races, never mixed (see get_current_war_status):
+                    # Two separate races, never mixed (see get_current_war_status).
+                    # Each race's rank is a phantom until that race has scored — on
+                    # a practice day every clan sits at 0, so the API rank is an
+                    # arbitrary tiebreaker order, NOT a standing. Null it (and the
+                    # per-clan ranks) so the brain never cites "rank N" on an
+                    # unranked race — matches _standing_block in the awareness read.
                     "primary_metric": current.get("primary_metric"),
-                    "race_rank": current.get("race_rank"),
-                    "race_standings": current.get("race_standings") or [],
+                    "race_ranked": race_scored,
+                    "race_rank": current.get("race_rank") if race_scored else None,
+                    "race_standings": _strip_ranks(current.get("race_standings"), race_scored),
                     "fame": current.get("fame"),
                     "boat_scored": current.get("boat_scored"),
-                    "day_rank": current.get("day_rank"),
-                    "day_standings": current.get("day_standings") or [],
+                    "day_rank": current.get("day_rank") if current.get("day_scored") else None,
+                    "day_standings": _strip_ranks(current.get("day_standings"), bool(current.get("day_scored"))),
                     "period_points": current.get("period_points"),
                     "day_scored": current.get("day_scored"),
                     "projected_day_fame": current.get("projected_day_fame"),
