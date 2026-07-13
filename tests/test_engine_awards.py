@@ -137,6 +137,30 @@ def test_award_races_tie_aware_and_iron_king_unranked():
         conn.close()
 
 
+def test_war_champ_tie_breaks_on_cards_donated(engine_conn):
+    """Equal War Champ points are a genuine tie (both flagged, same rank), but the
+    leader/#1 is the higher season donor (Jamie's tiebreak)."""
+    c = engine_conn
+    c.execute("INSERT OR IGNORE INTO clans (clan_tag, name, first_seen_at, last_seen_at, is_home) "
+              "VALUES ('#J2RGCRVG','POAP KINGS','2026-02-04','2026-07-06',1)")
+    c.execute("INSERT INTO war_seasons (season_id, started_at, ended_at) VALUES (150, '2026-06-10', ?)", (AT,))
+    c.execute("INSERT INTO war_weeks (season_id, section_index, created_date, finish_time) "
+              "VALUES (150, 0, '2026-06-11', '2026-06-18')")
+    for tag, name, don in (("#HI", "HiDonor", 500), ("#LO", "LoDonor", 100)):
+        c.execute("INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+                  "VALUES (?, ?, '2026-02-01', '2026-07-06')", (tag, name))
+        c.execute("INSERT INTO clan_memberships (player_tag, joined_at, join_source) VALUES (?, '2026-03-01', 'test')", (tag,))
+        c.execute("INSERT INTO war_participation (season_id, section_index, player_tag, fame, decks_used, observed_at) "
+                  "VALUES (150, 0, ?, 2400, 16, ?)", (tag, AT))  # EQUAL points
+        c.execute("INSERT INTO player_daily_metrics (player_tag, metric_date, donations_week) VALUES (?, '2026-06-15', ?)", (tag, don))
+    c.commit()
+    champ = db.get_award_races(season_id=150, conn=c)["war_champ"]
+    assert [e["name"] for e in champ] == ["HiDonor", "LoDonor"]   # higher donor first
+    assert champ[0]["donations"] == 500 and champ[1]["donations"] == 100
+    assert champ[0]["rank"] == champ[1]["rank"] and champ[0]["tied"] and champ[1]["tied"]  # still a points tie
+    assert db.get_award_races(season_id=150, conn=c)["war_champ_leader"]["name"] == "HiDonor"
+
+
 def test_award_leaderboard_accepts_rank_and_limit():
     """QA H19: get_awards(mode='leaderboard') passed rank/limit that the storage
     fn didn't accept, so every call raised TypeError. Now it filters/caps."""

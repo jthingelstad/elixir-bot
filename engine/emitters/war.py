@@ -352,6 +352,14 @@ def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> i
     """Season death (§16.1): compute Q2's honor + rotation outcome into
     war_seasons and emit season_closed. Idempotent via the event dedup key."""
     standings = _season_standings(conn, season_id)
+    # Break War Champ #1 ties on cards DONATED (Jamie 2026-07-13): equal season
+    # points are decided by the higher season donor, so the champ + free-pass
+    # pick is deterministic. Falls back to points-only order when no donation
+    # data (dmap empty).
+    if standings:
+        from storage.awards import _season_donation_rows
+        dmap = {r["tag"]: (r["total_donations"] or 0) for r in _season_donation_rows(conn, season_id)}
+        standings.sort(key=lambda s: (-(s.get("points") or 0), -dmap.get(s["player_tag"], 0)))
     champ = standings[0]["player_tag"] if standings else None
     # War Champ vs free pass are deliberately separate (Jamie 2026-07-13): the
     # War Champ is always the rank-1 points finisher (can repeat month over

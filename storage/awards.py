@@ -585,14 +585,28 @@ def get_award_races(
     if season_id is None:
         return {"season_id": None, "war_champ": [], "iron_king": [], "rookie_mvp": [], "note": None}
 
+    # Season cards-donated per member — the War Champ #1 tiebreaker (Jamie
+    # 2026-07-13): equal points are still a TIE on the points race, but the
+    # official leader / free-pass pick is decided by cards donated.
+    donations = {r["tag"]: (r["total_donations"] or 0) for r in _season_donation_rows(conn, season_id)}
+
     champ = []
-    for entry in get_war_champ_standings(season_id=season_id, conn=conn)[: max(1, war_champ_limit)]:
+    for entry in get_war_champ_standings(season_id=season_id, conn=conn):
+        tag = _canon_tag(entry["tag"])
         champ.append({
-            "tag": _canon_tag(entry["tag"]),
+            "tag": tag,
             "name": entry.get("name"),
             "points": entry.get("total_points") or 0,
+            "donations": donations.get(tag, 0),
             "races_participated": entry.get("races_participated"),
         })
+    # Sort points-first, then the donation tiebreak — so the #1 (and free-pass
+    # basis) is deterministic even among a points tie.
+    champ.sort(key=lambda e: (-e["points"], -e["donations"]))
+    champ = champ[: max(1, war_champ_limit)]
+    # Ranks are tie-aware on POINTS (equal points share a rank + tied flag) so
+    # Elixir still says "tied at 2,400" — but within a tie the order (and the
+    # leader) reflects the donation tiebreak.
     _apply_tie_aware_ranks(champ, "points")
 
     iron_king = [
@@ -614,17 +628,44 @@ def get_award_races(
     ]
 
     leader = champ[0] if champ else None
+
+    # Free-pass reasoning: last month's holder (recorded per season) + who the
+    # pass is currently IN LINE for — the highest War Champ who did NOT win it
+    # last month (the rotation rule). Lets Elixir reason on the free pass live,
+    # not just at season close.
+    last_fp = conn.execute(
+        "SELECT s.free_pass_tag AS tag, s.season_id FROM war_seasons s "
+        "WHERE s.free_pass_tag IS NOT NULL AND s.season_id < ? "
+        "ORDER BY s.season_id DESC LIMIT 1",
+        (season_id,),
+    ).fetchone()
+    last_fp_tag = last_fp["tag"] if last_fp else None
+    free_pass_last = None
+    if last_fp_tag:
+        nm = conn.execute("SELECT COALESCE(display_name, current_name) n FROM players WHERE player_tag = ?",
+                          (last_fp_tag,)).fetchone()
+        free_pass_last = {"tag": _canon_tag(last_fp_tag), "name": (nm["n"] if nm else None),
+                          "season_id": last_fp["season_id"]}
+    in_line = next((e for e in champ if e["tag"] != _canon_tag(last_fp_tag or "")), leader)
+
     return {
         "season_id": season_id,
         "war_champ": champ,
         "war_champ_leader": leader,
+        "free_pass_last_season": free_pass_last,
+        "free_pass_in_line": in_line,   # projected holder if the season closed now
         "iron_king": iron_king,
         "rookie_mvp": rookie,
         "note": (
             "War Champ = season POINTS race (ranked; the free pass is built on it). "
-            "Iron King = PARTICIPATION (4/4 decks every battle day; unranked — anyone "
-            "who qualifies earns it, could be many). Rookie MVP = points race among "
-            "members in their FIRST war season. Ranks are tie-aware — say 'tied' when "
-            "tie_count>1, never invent an order between equal points."
+            "TIES on War Champ #1 break on cards DONATED (see each entry's `donations`) — "
+            "so equal points are a real tie to name, but the leader/free-pass pick is the "
+            "higher donor. free_pass_last_season = who held it last month (ineligible now); "
+            "free_pass_in_line = who'd get it if the season closed now (highest War Champ "
+            "who didn't hold it last month). Iron King = PARTICIPATION (4/4 decks every "
+            "battle day; unranked — anyone who qualifies earns it, could be many; never "
+            "crown one). Rookie MVP = points race among members in their FIRST war season. "
+            "Ranks are tie-aware — say 'tied' when tie_count>1, never invent an order "
+            "between equal points."
         ),
     }
