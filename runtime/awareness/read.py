@@ -692,6 +692,10 @@ def build_read(conn=None) -> dict:
             "war_season": _load(
                 "war_season", lambda: war_status.get_war_season_snapshot(conn=conn), None
             ),
+            "award_races": _load(
+                "award_races", lambda: db.get_award_races(conn=conn),
+                {"war_champ": [], "iron_king": [], "rookie_mvp": []},
+            ),
             "signals_by_lane": signals_by_lane,
             "hard_post_signals": hard_post_signals,
             "game_context": _load(

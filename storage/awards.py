@@ -45,6 +45,7 @@ __all__ = [
     "get_season_donation_leaderboard",
     "get_rookie_mvp_candidates",
     "get_season_awards_standings",
+    "get_award_races",
     "get_war_participant_candidates",
     "list_awards",
     "award_leaderboard",
@@ -382,17 +383,17 @@ def get_season_donation_leaderboard(
 @managed_connection
 def get_rookie_mvp_candidates(
     season_id: Optional[int] = None,
-    limit: int = 3,
+    limit: int = 10,
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
-    """Top-N fame among members whose current membership began during the
-    season (war_participation is live-upserted, so the in-progress week is
-    already included)."""
+    """Top-N points among members playing their FIRST clan-wars season — i.e.
+    with NO war_participation in any earlier season (Jamie 2026-07-13: a "rookie"
+    is a first-time war participant, not merely a mid-season joiner). Current
+    members only; war_participation is live-upserted so the in-progress week is
+    included. Ranks are tie-aware (competition ranking: equal points share a
+    rank), so callers can say "three tied at 1,600"."""
     season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
     if season_id is None:
-        return []
-    start, end = _season_bounds(conn, season_id)
-    if not start or not end:
         return []
     rows = conn.execute(
         f"""
@@ -403,29 +404,50 @@ def get_rookie_mvp_candidates(
         FROM war_participation wp
         JOIN players m ON m.player_tag = wp.player_tag
         JOIN clan_memberships cm
-          ON cm.player_tag = wp.player_tag
-         AND cm.left_at IS NULL
-         AND cm.joined_at >= ?
-         AND cm.joined_at < ?
+          ON cm.player_tag = wp.player_tag AND cm.left_at IS NULL
         WHERE wp.season_id = ? AND {_ACTIVE}
+          AND wp.player_tag NOT IN (
+              SELECT DISTINCT player_tag FROM war_participation WHERE season_id < ?
+          )
         GROUP BY wp.player_tag
         HAVING total_points > 0
         ORDER BY total_points DESC, races_participated DESC
         LIMIT ?
         """,
-        (_cr_time_to_iso(start) or start, _cr_time_to_iso(end) or end, int(season_id), max(1, int(limit))),
+        (int(season_id), int(season_id), max(1, int(limit))),
     ).fetchall()
-    return [
+    out = [
         {
             "tag": _canon_tag(r["tag"]),
             "name": r["name"],
             "member_id": _canon_tag(r["tag"]),
             "total_points": r["total_points"] or 0,
             "races_participated": r["races_participated"],
-            "rank": i + 1,
         }
-        for i, r in enumerate(rows)
+        for r in rows
     ]
+    _apply_tie_aware_ranks(out, "total_points")
+    return out
+
+
+def _apply_tie_aware_ranks(entries: list[dict], value_key: str) -> None:
+    """Assign competition ranks in place (1, 2, 2, 4 …): equal ``value_key``
+    share a rank, and each entry gets ``tied`` (bool) + ``tie_count`` so callers
+    can phrase ties correctly ("tied for 2nd, three-way at 2,400"). ``entries``
+    must already be sorted by ``value_key`` descending."""
+    counts: dict = {}
+    for e in entries:
+        counts[e.get(value_key)] = counts.get(e.get(value_key), 0) + 1
+    prev_value = object()
+    rank = 0
+    for i, e in enumerate(entries):
+        v = e.get(value_key)
+        if v != prev_value:
+            rank = i + 1
+            prev_value = v
+        e["rank"] = rank
+        e["tied"] = counts.get(v, 0) > 1
+        e["tie_count"] = counts.get(v, 0)
 
 
 @managed_connection
@@ -535,4 +557,74 @@ def get_season_awards_standings(
         "iron_kings": iron_kings,
         "donation_champs": donation_champs,
         "rookie_mvps": rookie_mvps,
+    }
+
+
+@managed_connection
+def get_award_races(
+    season_id: Optional[int] = None,
+    war_champ_limit: int = 10,
+    rookie_limit: int = 10,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict:
+    """The LIVE, in-progress award competitions, shaped for the awareness read so
+    Elixir can hype them mid-season (not just at season close).
+
+    Deliberately richer than get_season_awards_standings:
+      - ``war_champ`` / ``rookie_mvp``: the top ~10 (not just the podium) WITH
+        points and **tie-aware** ranks, so Elixir can spot up-and-comers who are
+        close and speak correctly about ties ("three tied for 2nd at 2,400").
+      - ``iron_king``: a PARTICIPATION list (not a podium) — everyone currently
+        on the 4/4-every-battle-day track. Any number can earn it; there is no
+        winner. Never rank or pick "the" Iron King.
+    ``war_champ_leader`` names who currently tops the points race — the free-pass
+    is built on this (see the free-pass rotation rule)."""
+    from storage.war_analytics import get_war_champ_standings
+
+    season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
+    if season_id is None:
+        return {"season_id": None, "war_champ": [], "iron_king": [], "rookie_mvp": [], "note": None}
+
+    champ = []
+    for entry in get_war_champ_standings(season_id=season_id, conn=conn)[: max(1, war_champ_limit)]:
+        champ.append({
+            "tag": _canon_tag(entry["tag"]),
+            "name": entry.get("name"),
+            "points": entry.get("total_points") or 0,
+            "races_participated": entry.get("races_participated"),
+        })
+    _apply_tie_aware_ranks(champ, "points")
+
+    iron_king = [
+        {
+            "tag": _canon_tag(c["tag"]),
+            "name": c.get("name"),
+            "perfect_days": c.get("perfect_days"),
+            "total_battle_days": c.get("total_battle_days"),
+            "on_track": True,
+        }
+        for c in get_iron_king_candidates(season_id=season_id, conn=conn)
+    ]
+
+    rookie = [
+        {"tag": r["tag"], "name": r.get("name"), "points": r.get("total_points") or 0,
+         "races_participated": r.get("races_participated"), "rank": r.get("rank"),
+         "tied": r.get("tied"), "tie_count": r.get("tie_count")}
+        for r in get_rookie_mvp_candidates(season_id=season_id, limit=rookie_limit, conn=conn)
+    ]
+
+    leader = champ[0] if champ else None
+    return {
+        "season_id": season_id,
+        "war_champ": champ,
+        "war_champ_leader": leader,
+        "iron_king": iron_king,
+        "rookie_mvp": rookie,
+        "note": (
+            "War Champ = season POINTS race (ranked; the free pass is built on it). "
+            "Iron King = PARTICIPATION (4/4 decks every battle day; unranked — anyone "
+            "who qualifies earns it, could be many). Rookie MVP = points race among "
+            "members in their FIRST war season. Ranks are tie-aware — say 'tied' when "
+            "tie_count>1, never invent an order between equal points."
+        ),
     }
