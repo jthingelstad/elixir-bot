@@ -120,6 +120,34 @@ def test_day_one_boat_not_scored():
     assert sb["today"]["period_points"] == 3000
 
 
+def test_unranked_race_when_no_clan_has_scored():
+    """A practice day / start of week: every clan at 0 fame → the race is NOT
+    ranked. The brain must not read the API's arbitrary tiebreaker order as a
+    standing (the real 'rank 3' bug). rank is null, race_ranked is false."""
+    practice = {
+        "#RIV": {"name": "R.E.I.C.H", "fame": 0, "period_points": 0},
+        "#GRV": {"name": "Graveborn", "fame": 0, "period_points": 0},
+        "#US": {"name": "POAP KINGS", "fame": 0, "period_points": 0},
+    }
+    war = _status(practice, period_type="training", period_index=1)
+    weekly = _standing_block(war)["weekly"]
+    assert weekly["race_ranked"] is False
+    assert weekly["rank"] is None
+    assert weekly["unranked_reason"]
+    # Every scoreboard rank is nulled too — none of them mean anything yet.
+    assert all(c["rank"] is None for c in weekly["scoreboard"])
+
+
+def test_ranked_race_keeps_rank_once_a_clan_scores():
+    scored = {
+        "#US": {"name": "POAP KINGS", "fame": 6870, "period_points": 0},
+        "#RIV": {"name": "R.E.I.C.H", "fame": 3600, "period_points": 0},
+    }
+    weekly = _standing_block(_status(scored, period_index=5))["weekly"]
+    assert weekly["race_ranked"] is True
+    assert weekly["rank"] == 1
+
+
 def test_no_daily_action_suppresses_meaningless_day_rank():
     # Start of a fresh day: all period points 0. day_scored must be False so the
     # brain never reads a 0-0-0 tie as "losing today".
@@ -179,6 +207,41 @@ def test_war_season_snapshot_exposes_live_race(engine_conn):
     assert snap["state"]["day_number"] is not None
     # The old buggy keys must be gone.
     assert "standings" not in race and "our_fame" not in race
+
+
+def test_week_win_streak_counts_consecutive_firsts(engine_conn):
+    """The War-week #1 streak is the raw material for the recap's '22 straight
+    weeks' claim — count consecutive our_rank==1 from the newest finalized week
+    back, ignoring the in-progress (NULL-rank) period."""
+    for s in (100, 101):
+        engine_conn.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (?, '2026-01-01')", (s,))
+    rows = [
+        (100, 0, 1), (100, 1, 1), (100, 2, 1),   # season 100: three #1s
+        (101, 0, 1), (101, 1, 1),                 # season 101: two #1s
+        (101, 2, None),                           # in-progress week — not counted
+    ]
+    for season, section, rank in rows:
+        engine_conn.execute(
+            "INSERT INTO war_weeks (season_id, section_index, our_rank) VALUES (?,?,?)",
+            (season, section, rank),
+        )
+    streak = war_status.get_week_win_streak(conn=engine_conn)
+    assert streak["streak"] == 5
+    assert streak["weeks_tracked"] == 5
+    assert streak["all_first"] is True
+
+
+def test_week_win_streak_breaks_on_a_non_first(engine_conn):
+    engine_conn.execute("INSERT INTO war_seasons (season_id, started_at) VALUES (200, '2026-01-01')")
+    for season, section, rank in [(200, 0, 1), (200, 1, 2), (200, 2, 1), (200, 3, 1)]:
+        engine_conn.execute(
+            "INSERT INTO war_weeks (season_id, section_index, our_rank) VALUES (?,?,?)",
+            (season, section, rank),
+        )
+    streak = war_status.get_week_win_streak(conn=engine_conn)
+    assert streak["streak"] == 2          # only the two most-recent #1s
+    assert streak["weeks_tracked"] == 4
+    assert streak["all_first"] is False
 
 
 def test_perfect_attendance_excludes_in_progress_day(engine_conn):
