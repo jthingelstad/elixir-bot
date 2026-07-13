@@ -19,7 +19,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
 import db
-from storage import cases, events_read, leader_actions, revisits, war_status
+from storage import cases, events_read, leader_actions, revisits, war_analytics, war_status
 
 log = logging.getLogger("elixir")
 
@@ -698,6 +698,12 @@ def build_read(conn=None) -> dict:
             "award_races": _load(
                 "award_races", lambda: db.get_award_races(conn=conn),
                 {"war_champ": [], "iron_king": [], "rookie_mvp": []},
+            ),
+            # Season-by-season War Champ + free-pass lineage (rolling 6), so a
+            # war-week/season recap or a free-pass designation reflects the deep
+            # history, not just the current season.
+            "war_history": _load(
+                "war_history", lambda: war_analytics.get_war_season_history(conn=conn), None
             ),
             "signals_by_lane": signals_by_lane,
             "hard_post_signals": hard_post_signals,
