@@ -27,12 +27,42 @@ _EXPECTED_KEYS = {
 }
 
 
+def test_compact_signal_tiers_badges_and_arena():
+    """A one-off badge (no level) → legendary tier; a leveled badge → routine;
+    arena changes carry the arena name — so the brain can sort notable vs grind."""
+    from runtime.awareness.read import _compact_signal
+
+    leg = _compact_signal({"event_type": "badge_earned", "subject_tag": "#A",
+                           "payload": {"badge_name": "Chaos_S2", "level": None}})
+    assert leg["badge_tier"] == "legendary" and leg["badge_name"] == "Chaos_S2"
+
+    routine = _compact_signal({"event_type": "badge_earned", "subject_tag": "#A",
+                               "payload": {"badge_name": "MasteryLog", "level": 1}})
+    assert routine["badge_tier"] == "routine"
+
+    arena = _compact_signal({"event_type": "arena_changed", "subject_tag": "#A",
+                             "payload": {"arena_name": "Spirit Square"}})
+    assert arena["arena_name"] == "Spirit Square"
+
+
+def test_posting_pulse_flags_quiet_stretch():
+    """posting_pulse marks a long silence so the brain can keep a heartbeat."""
+    from runtime.awareness.read import _posting_pulse, _HEARTBEAT_QUIET_HOURS
+
+    pulse = _posting_pulse(db.get_connection())
+    # Empty DB → no prior post → hours None, not a quiet stretch (nothing to be quiet about).
+    assert pulse["hours_since_last_post"] is None
+    assert pulse["is_quiet_stretch"] is False
+    assert pulse["quiet_threshold_hours"] == _HEARTBEAT_QUIET_HOURS
+
+
 def test_build_read_returns_expected_keys_on_empty_db():
     from runtime.awareness.read import build_read
 
     read = build_read()
     assert isinstance(read, dict)
     assert _EXPECTED_KEYS <= set(read.keys())
+    assert "posting_pulse" in read
     # Every block degrades independently — nothing raised.
     assert isinstance(read.get("_degraded"), list)
     # Grouped signal lanes always present as a dict.

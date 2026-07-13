@@ -285,7 +285,7 @@ def _lane_for(event: dict) -> str:
 
 
 def _compact_signal(event: dict) -> dict:
-    return {
+    compact = {
         "signal_key": _signal_key(event),
         "event_type": event.get("event_type"),
         "stream": event.get("stream"),
@@ -293,6 +293,18 @@ def _compact_signal(event: dict) -> dict:
         "observed_at": event.get("observed_at"),
         "scope": event.get("scope"),
     }
+    # Tier the signal so the brain can tell a notable moment from routine grind
+    # without re-deriving it. Badges: a one-off badge (no level) is a Legendary
+    # badge — the game's "notable achievement" tier — vs a leveled mastery /
+    # progression bump, which is routine. Arena changes carry the new arena.
+    payload = event.get("payload") or {}
+    et = event.get("event_type")
+    if et == "badge_earned":
+        compact["badge_name"] = payload.get("badge_name") or payload.get("name")
+        compact["badge_tier"] = "legendary" if payload.get("level") is None else "routine"
+    elif et in ("arena_changed", "arena_up"):
+        compact["arena_name"] = payload.get("arena_name")
+    return compact
 
 
 # --------------------------------------------------------------------- blocks
@@ -470,8 +482,11 @@ def _intent_content_preview(payload_json) -> str:
 
 
 # Per-member spotlight cooldown window: members solo-highlighted this recently
-# should not be re-soloed for a routine milestone (the brain applies the rule).
-_SPOTLIGHT_LOOKBACK_HOURS = 72
+# should not be re-soloed for a ROUTINE milestone (the brain applies the rule).
+# 48h (was 72h): 72h stacked with roundup-preference into ~zero discretionary
+# posts for a day (2026-07-12 audit); notable tiers (Legendary badge, arena
+# climb, first-legendary) are cooldown-EXEMPT per the awareness prompt.
+_SPOTLIGHT_LOOKBACK_HOURS = 48
 
 
 def _recent_member_spotlights(conn) -> list[dict]:
@@ -508,6 +523,38 @@ def _recent_member_spotlights(conn) -> list[dict]:
                     "summary": (p.get("summary") or "")[:100],
                 }
     return list(seen.values())
+
+
+# Clan heartbeat: hours since Elixir last posted anything member-facing. The
+# brain uses this to avoid flat-lining — a long quiet stretch with any notable
+# signal in the read should lean toward a warm roundup (see the awareness prompt).
+_HEARTBEAT_QUIET_HOURS = 10
+
+
+def _posting_pulse(conn) -> dict:
+    """When did Elixir last post, and how long ago. Sourced from the fulfilled
+    awareness:post intents (the durable posting record). ``hours_since_last_post``
+    is None on the very first run (no prior post)."""
+    row = conn.execute(
+        "SELECT MAX(created_at) FROM communication_intents "
+        "WHERE intent_type = 'awareness:post' AND status = 'fulfilled'"
+    ).fetchone()
+    last = row[0] if row and row[0] else None
+    hours = None
+    if last:
+        try:
+            dt = datetime.fromisoformat(str(last).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            hours = round((_now() - dt).total_seconds() / 3600.0, 1)
+        except (ValueError, TypeError):
+            hours = None
+    return {
+        "last_post_at": last,
+        "hours_since_last_post": hours,
+        "quiet_threshold_hours": _HEARTBEAT_QUIET_HOURS,
+        "is_quiet_stretch": bool(hours is not None and hours >= _HEARTBEAT_QUIET_HOURS),
+    }
 
 
 def _recent_agent_writes(limit: int = 10) -> list[dict]:
@@ -652,6 +699,7 @@ def build_read(conn=None) -> dict:
             "channel_memory": _load("channel_memory", lambda: _channel_memory(conn), {}),
             "recent_member_spotlights": _load(
                 "recent_member_spotlights", lambda: _recent_member_spotlights(conn), []),
+            "posting_pulse": _load("posting_pulse", lambda: _posting_pulse(conn), {}),
             "recent_agent_writes": _load("recent_agent_writes", lambda: _recent_agent_writes(), []),
             "leader_action_board": _load(
                 "leader_action_board", lambda: _leader_action_board(conn),
