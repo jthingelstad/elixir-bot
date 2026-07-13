@@ -209,6 +209,32 @@ def test_war_season_snapshot_exposes_live_race(engine_conn):
     assert "standings" not in race and "our_fame" not in race
 
 
+def test_war_season_snapshot_nulls_ranks_on_unranked_race(engine_conn):
+    """The 'six straight weeks / rank 3 showing' incident: on a practice day every
+    clan sits at 0 fame, but state.race passed the API's raw tiebreaker order
+    through as race_rank/day_rank/standings ranks, so the brain cited a phantom
+    'rank 3'. The whole race block must read unranked (nulls) until a clan scores,
+    matching _standing_block — and the streak must be present so it can say
+    '22 straight weeks' instead of inventing a number."""
+    practice = {
+        "#RIV": {"name": "R.E.I.C.H", "fame": 0, "period_points": 0},
+        "#GRV": {"name": "Graveborn", "fame": 0, "period_points": 0},
+        "#US": {"name": "POAP KINGS", "fame": 0, "period_points": 0},
+    }
+    with patch.object(war_status, "_live_race",
+                      return_value=(_projection(practice, period_type="training", period_index=1),
+                                    "2026-07-13T10:00:00Z")):
+        snap = war_status.get_war_season_snapshot(conn=engine_conn)
+    race = snap["state"]["race"]
+    assert race["race_ranked"] is False
+    assert race["race_rank"] is None and race["day_rank"] is None
+    assert all(s["rank"] is None for s in race["race_standings"])
+    assert all(s["rank"] is None for s in race["day_standings"])
+    assert snap["race_ranked"] is False
+    assert "not yet ranked" in snap["summary"] and "rank 3" not in snap["summary"]
+    assert "week_win_streak" in snap  # the streak the brain cites instead of guessing
+
+
 def test_week_win_streak_counts_consecutive_firsts(engine_conn):
     """The War-week #1 streak is the raw material for the recap's '22 straight
     weeks' claim — count consecutive our_rank==1 from the newest finalized week
