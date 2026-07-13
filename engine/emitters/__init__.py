@@ -66,6 +66,7 @@ def emit(conn, entity_kind: str, entity_tag: str, aspect: str, new_payload: dict
         ("player", "ranked"): player.emit_ranked,
         ("clan", "roster"): clan.emit_roster,
         ("clan", "clan_entity"): clan.emit_clan_entity,
+        ("clan", "award_races"): war.emit_award_races,
         ("riverrace", "race"): war.emit_race,
     }
     fn = dispatch.get((entity_kind, aspect))

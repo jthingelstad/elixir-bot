@@ -65,6 +65,9 @@ _LANE_BY_EVENT_TYPE: dict[str, str] = {
     "member_left_verified": "clan_event",
     "role_changed": "clan_event",
     "weekly_donation_leader": "clan_event",
+    # award-race lead changes (War Champ / Rookie MVP) — see award_races block
+    "war_champ_lead_change": "clan_event",
+    "rookie_mvp_lead_change": "clan_event",
     # clan_event — calendar "cake days" (also surfaced all-day via cake_days_today)
     "member_birthday": "clan_event",
     "clan_birthday": "clan_event",

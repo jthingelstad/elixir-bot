@@ -324,14 +324,47 @@ def _last_free_pass_tag(conn, before_season: int) -> str | None:
     return row["player_tag"] if row else None
 
 
+def emit_award_races(conn, entity_tag, old: dict, new: dict, observed_at, window_start) -> int:
+    """Award-race lead changes → clan_events, so the ongoing competitions are
+    event-driven, not just ambient in the read (Jamie 2026-07-13). Fires when the
+    member topping the War Champ points race changes (the free pass is built on
+    it) or the Rookie MVP leader changes. First-sight emits nothing (the emit()
+    baseline handles that). Deduped per season + new leader, so a lead that keeps
+    flipping between two members won't spam — each new leader fires once."""
+    n = 0
+    season_id = (new or {}).get("season_id")
+    for key, event_type in (("war_champ_leader", "war_champ_lead_change"),
+                            ("rookie_mvp_leader", "rookie_mvp_lead_change")):
+        prev = (old or {}).get(key) or {}
+        curr = (new or {}).get(key) or {}
+        prev_tag, curr_tag = prev.get("tag"), curr.get("tag")
+        if curr_tag and curr_tag != prev_tag:
+            n += _emit(
+                conn, season_id, None, observed_at, window_start, event_type,
+                f"{event_type}:{season_id}:{curr_tag}",
+                {"season_id": season_id, "new_leader": curr, "prev_leader": prev or None,
+                 "metric_unit": "points"},
+            )
+    return n
+
+
 def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> int:
     """Season death (§16.1): compute Q2's honor + rotation outcome into
     war_seasons and emit season_closed. Idempotent via the event dedup key."""
     standings = _season_standings(conn, season_id)
     champ = standings[0]["player_tag"] if standings else None
-    free_pass = champ
-    if champ and _last_free_pass_tag(conn, season_id) == champ and len(standings) > 1:
-        free_pass = standings[1]["player_tag"]  # rotation: falls to rank 2 (Q2)
+    # War Champ vs free pass are deliberately separate (Jamie 2026-07-13): the
+    # War Champ is always the rank-1 points finisher (can repeat month over
+    # month), but the free pass goes to the HIGHEST-RANKED champ who did NOT win
+    # the free pass last month. So if rank 1 held it last month, the pass drops
+    # to rank 2 (or the next eligible) while rank 1 still takes the War Champ
+    # crown. Express the rule directly: skip last month's holder, take the
+    # highest remaining.
+    last_free_pass = _last_free_pass_tag(conn, season_id)
+    free_pass = next(
+        (s["player_tag"] for s in standings if s["player_tag"] != last_free_pass),
+        champ,
+    )
     # #166: take final_rank from the finished last week's stored rank
     # (_finalize_week ran first in the same rollover). The snapshot handed to
     # close_season can be the degenerate post-battle reset — trusting it is

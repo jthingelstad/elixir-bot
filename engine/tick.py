@@ -221,6 +221,23 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn=None, compose_fn
         # A confirmed KICK emits nothing. Raw member_left is no longer a hard-post.
         from engine.emitters.clan import emit_verified_leave_events
         emitted += emit_verified_leave_events(conn, HOME_CLAN, now_iso)
+        # Award-race lead changes (War Champ / Rookie MVP) → clan_events, so the
+        # season-long competitions are event-driven. Fail-soft: an awards read
+        # must never sink the core emit above. Only while a season is active.
+        if clock and clock.season_id is not None:
+            try:
+                import db as _db
+                races = _db.get_award_races(conn=conn)
+                champ = races.get("war_champ_leader")
+                rookie = (races.get("rookie_mvp") or [None])[0]
+                payload = {
+                    "season_id": clock.season_id,
+                    "war_champ_leader": {k: champ.get(k) for k in ("tag", "name", "points")} if champ else None,
+                    "rookie_mvp_leader": {k: rookie.get(k) for k in ("tag", "name", "points")} if rookie else None,
+                }
+                emitted += emit(conn, "clan", HOME_CLAN, "award_races", payload, now_iso)
+            except Exception:
+                log.warning("emit award_races failed (non-fatal)", exc_info=True)
         # Game-level stream: new /events + event badges from the sentinel store
         # (new cards emit from the daily catalog sync). Fail-soft — a sentinel
         # read must never sink the player/clan/war emit above; the emit:game
