@@ -30,6 +30,13 @@ def _seed_season(conn, *, full_attendance: bool = False):
         "INSERT INTO war_seasons (season_id, started_at, ended_at, final_rank, weeks, "
         "war_champ_tag, free_pass_tag) VALUES (?, '2026-06-10', ?, 1, 2, '#A', '#B')",
         (SEASON, AT))  # rotation applied: champ #A, pass falls to #B
+    # Prior-season war history for the veterans (#A/#B/#C) so they are NOT
+    # first-war-season rookies. #R has no prior war → the only Rookie MVP.
+    conn.execute("INSERT OR IGNORE INTO war_seasons (season_id, started_at) VALUES (132, '2026-05-10')")
+    for tag in ("#A", "#B", "#C"):
+        conn.execute(
+            "INSERT INTO war_participation (season_id, section_index, player_tag, "
+            "fame, decks_used, observed_at) VALUES (132, 0, ?, 1000, 16, ?)", (tag, AT))
     for section in (3, 4):
         conn.execute(
             "INSERT INTO war_weeks (season_id, section_index, created_date, finish_time) "
@@ -81,7 +88,7 @@ def test_grant_season_awards_full_slate():
         assert grants["iron_king_skipped"] == "insufficient attendance data"
 
         assert [e["tag"] for e in grants["donation_champs"]] == ["#C", "#A", "#B"]
-        assert [e["tag"] for e in grants["rookie_mvps"]] == ["#R"]  # mid-season joiner only
+        assert [e["tag"] for e in grants["rookie_mvps"]] == ["#R"]  # first-war-season only
         assert grants["war_participants"] == 4  # A, B, C, R (fame > 0)
 
         # ledger keys claimed per recognition.md §5
@@ -93,6 +100,39 @@ def test_grant_season_awards_full_slate():
         # idempotent: re-run grants nothing
         again = engine_awards.grant_season_awards(conn, SEASON, AT)
         assert again["granted"] == 0
+    finally:
+        conn.close()
+
+
+def test_tie_aware_ranks_share_a_rank_and_flag_ties():
+    """Competition ranking (1,2,2,4) with tie flags — so Elixir can say
+    'three tied for 2nd' instead of inventing an order between equal points."""
+    from storage.awards import _apply_tie_aware_ranks
+    rows = [{"points": 2700}, {"points": 2400}, {"points": 2400},
+            {"points": 2400}, {"points": 2150}]
+    _apply_tie_aware_ranks(rows, "points")
+    assert [r["rank"] for r in rows] == [1, 2, 2, 2, 5]
+    assert [r["tied"] for r in rows] == [False, True, True, True, False]
+    assert rows[1]["tie_count"] == 3
+
+
+def test_award_races_tie_aware_and_iron_king_unranked():
+    """get_award_races: War Champ top-N tie-aware with points; Iron King is a
+    participation list (no ranks); Rookie MVP is first-war-season only."""
+    conn = db.get_connection()
+    try:
+        _seed_season(conn, full_attendance=True)
+        races = db.get_award_races(season_id=SEASON, conn=conn)
+        champ = races["war_champ"]
+        # #A 6000, #B 5000, #C 4000, #R 1800 — all distinct here, but points present
+        assert champ[0]["name"] == "Alpha" and champ[0]["points"] == 6000
+        assert races["war_champ_leader"]["tag"] == "#A"
+        # Iron King = participation list (full-attendance seed → #A/#B perfect),
+        # every entry on_track, no rank/podium field.
+        assert races["iron_king"] and all(e["on_track"] for e in races["iron_king"])
+        assert all("rank" not in e for e in races["iron_king"])
+        # Rookie MVP: only the first-war-season member (#R).
+        assert [r["tag"] for r in races["rookie_mvp"]] == ["#R"]
     finally:
         conn.close()
 
