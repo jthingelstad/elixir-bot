@@ -12,10 +12,77 @@ reset guard (merge_baseline), and the finalizer/close_season hardening.
 from __future__ import annotations
 
 from engine.emitters import emit
-from engine.emitters.war import merge_baseline
+from engine.emitters.war import close_season, emit_award_races, merge_baseline
 
 TAG = "#J2RGCRVG"
 RIVAL = "#RIVAL01"
+
+
+def _seed_free_pass_case(conn, *, last_free_pass):
+    """Season 140 points order: Ace 6000 > Bee 4000 > Cid 2000. Optionally seed
+    last month's (season 139) free-pass holder."""
+    for tag, name in (("#ACE", "Ace"), ("#BEE", "Bee"), ("#CID", "Cid")):
+        conn.execute(
+            "INSERT OR IGNORE INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+            "VALUES (?, ?, '2026-01-01', '2026-02-28')", (tag, name))
+    conn.execute("INSERT OR IGNORE INTO war_seasons (season_id, started_at) VALUES (139, '2026-01-01')")
+    conn.execute("INSERT OR IGNORE INTO war_seasons (season_id, started_at) VALUES (140, '2026-02-01')")
+    conn.execute("INSERT INTO war_weeks (season_id, section_index, our_rank) VALUES (140, 0, 1)")
+    for tag, pts in (("#ACE", 6000), ("#BEE", 4000), ("#CID", 2000)):
+        conn.execute(
+            "INSERT INTO war_participation (season_id, section_index, player_tag, fame, decks_used, observed_at) "
+            "VALUES (140, 0, ?, ?, 16, '2026-02-15T00:00:00Z')", (tag, pts))
+    if last_free_pass:
+        from storage.awards import insert_award
+        insert_award(award_type="free_pass", season_id=139, player_tag=last_free_pass, conn=conn)
+
+
+def test_free_pass_rotates_off_last_months_holder(engine_conn):
+    """Jamie's rule: rank-1 champ can repeat, but the free pass goes to the
+    highest-ranked champ who did NOT win it last month. Ace won it last month →
+    Ace still wins War Champ, but the pass drops to Bee (rank 2)."""
+    _seed_free_pass_case(engine_conn, last_free_pass="#ACE")
+    close_season(engine_conn, 140, {}, "2026-02-28T00:00:00Z")
+    row = engine_conn.execute(
+        "SELECT war_champ_tag, free_pass_tag FROM war_seasons WHERE season_id=140").fetchone()
+    assert row["war_champ_tag"] == "#ACE"   # champ = rank-1 points, unchanged
+    assert row["free_pass_tag"] == "#BEE"   # pass rotates to rank 2
+
+
+def test_free_pass_stays_with_champ_if_they_didnt_hold_it(engine_conn):
+    """If last month's holder was someone else (Cid), rank-1 Ace takes both."""
+    _seed_free_pass_case(engine_conn, last_free_pass="#CID")
+    close_season(engine_conn, 140, {}, "2026-02-28T00:00:00Z")
+    row = engine_conn.execute(
+        "SELECT war_champ_tag, free_pass_tag FROM war_seasons WHERE season_id=140").fetchone()
+    assert row["war_champ_tag"] == "#ACE" and row["free_pass_tag"] == "#ACE"
+
+
+def _award_events(conn, event_type):
+    return conn.execute(
+        "SELECT COUNT(*) FROM war_events WHERE event_type = ?", (event_type,)
+    ).fetchone()[0]
+
+
+def test_award_race_lead_change_emits_once_per_new_leader(engine_conn):
+    """A new War Champ points leader fires war_champ_lead_change; an unchanged
+    leader fires nothing; the dedup key is per new leader."""
+    engine_conn.execute("INSERT OR IGNORE INTO war_seasons (season_id, started_at) VALUES (140, '2026-02-01')")
+    old = {"season_id": 140, "war_champ_leader": {"tag": "#ACE", "name": "Ace", "points": 3000}}
+    new = {"season_id": 140, "war_champ_leader": {"tag": "#BEE", "name": "Bee", "points": 3500}}
+    at = "2026-02-15T00:00:00Z"
+    assert emit_award_races(engine_conn, "#J2RGCRVG", old, new, at, at) == 1
+    assert _award_events(engine_conn, "war_champ_lead_change") == 1
+    # Same leader again → no new event.
+    assert emit_award_races(engine_conn, "#J2RGCRVG", new, new, at, at) == 0
+    assert _award_events(engine_conn, "war_champ_lead_change") == 1
+
+
+def test_award_race_no_event_without_a_leader(engine_conn):
+    """No current leader (empty race) → nothing emitted."""
+    engine_conn.execute("INSERT OR IGNORE INTO war_seasons (season_id, started_at) VALUES (140, '2026-02-01')")
+    payload = {"season_id": 140, "war_champ_leader": None, "rookie_mvp_leader": None}
+    assert emit_award_races(engine_conn, "#J2RGCRVG", payload, payload, "2026-02-15T00:00:00Z", "2026-02-15T00:00:00Z") == 0
 
 
 def _race(season, section, our_fame, *, period_type="colosseum", period_index=22,
