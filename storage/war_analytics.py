@@ -365,6 +365,87 @@ def get_war_champ_standings(season_id: Optional[str] = None, conn: Optional[sqli
 
 
 @managed_connection
+def get_war_season_history(limit: int = 6, conn: Optional[sqlite3.Connection] = None) -> dict | None:
+    """The season-by-season War Champ + free-pass lineage, newest first — the
+    deep history that lets Elixir place a war-week/season recap or a free-pass
+    designation in context ("28 held it last month; before that Atternam, 28,
+    raquaza, King Levy") instead of speaking only to the current season.
+
+    Every field is a stored value: ``war_seasons.war_champ_tag`` /
+    ``free_pass_tag`` (written at season close), joined to ``players`` only to
+    humanize the tag. ``rotation_applied`` is true when the free pass fell off
+    the champ to the next eligible member (the champ held it the prior month).
+    Rolling window of the ``limit`` most-recent closed seasons so the block
+    never grows unbounded. Returns None until at least one season has a champ."""
+    rows = conn.execute(
+        """SELECT s.season_id, s.final_rank, s.war_champ_tag, s.free_pass_tag,
+                  wc.display_name AS champ_dn, wc.current_name AS champ_cn,
+                  fp.display_name AS pass_dn, fp.current_name AS pass_cn
+             FROM war_seasons s
+             LEFT JOIN players wc ON wc.player_tag = s.war_champ_tag
+             LEFT JOIN players fp ON fp.player_tag = s.free_pass_tag
+            WHERE s.war_champ_tag IS NOT NULL OR s.free_pass_tag IS NOT NULL
+            ORDER BY s.season_id DESC
+            LIMIT ?""",
+        (max(1, limit),),
+    ).fetchall()
+    if not rows:
+        return None
+
+    seasons = []
+    holds: dict[str, list[int]] = {}
+    for r in rows:
+        champ = (
+            {"tag": _canon_tag(r["war_champ_tag"]), "name": r["champ_dn"] or r["champ_cn"]}
+            if r["war_champ_tag"] else None
+        )
+        pass_tag = r["free_pass_tag"]
+        free_pass = (
+            {"tag": _canon_tag(pass_tag), "name": r["pass_dn"] or r["pass_cn"]}
+            if pass_tag else None
+        )
+        if pass_tag:
+            holds.setdefault(_canon_tag(pass_tag), []).append(int(r["season_id"]))
+        seasons.append({
+            "season_id": int(r["season_id"]),
+            "final_rank": r["final_rank"],
+            "war_champ": champ,
+            "free_pass": free_pass,
+            # the free pass rotated off the champ when the two tags differ
+            "rotation_applied": bool(
+                pass_tag and r["war_champ_tag"] and pass_tag != r["war_champ_tag"]
+            ),
+        })
+
+    # members who've held the free pass more than once (in this window) — the
+    # "repeat holder" story worth calling out on a designation.
+    repeat_holders = {
+        _name_for(conn, tag): sorted(ss)
+        for tag, ss in holds.items() if len(ss) > 1
+    }
+    return {
+        "seasons": seasons,
+        "seasons_shown": len(seasons),
+        "repeat_free_pass_holders": repeat_holders,
+        "note": (
+            "War Champ + free-pass winner per season, newest first (rolling "
+            f"{max(1, limit)}). All from war_seasons (stored at close). Use for "
+            "historical depth on war-week/season recaps and free-pass "
+            "designations — always rotation-aware, walk the fuller lineage only "
+            "when it's a real story (a repeat holder, a first-timer, the streak)."
+        ),
+    }
+
+
+def _name_for(conn, tag: str) -> str:
+    row = conn.execute(
+        "SELECT COALESCE(display_name, current_name) AS n FROM players WHERE player_tag = ?",
+        (tag,),
+    ).fetchone()
+    return (row["n"] if row and row["n"] else tag)
+
+
+@managed_connection
 def get_perfect_war_participants(season_id: Optional[str] = None, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
     """Members with perfect attendance: every deck used on every finalized
     battle day (war_attendance_days; Iron King definition)."""

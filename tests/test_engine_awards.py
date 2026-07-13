@@ -137,6 +137,44 @@ def test_award_races_tie_aware_and_iron_king_unranked():
         conn.close()
 
 
+def test_war_season_history_is_the_free_pass_lineage(engine_conn):
+    """The deep history Elixir reflects on a season recap / free-pass
+    designation: season-by-season champ + free-pass winner, newest first,
+    rotation flagged, repeat holders surfaced, capped to the rolling window —
+    every name resolved from stored war_seasons tags, never invented."""
+    from storage.war_analytics import get_war_season_history
+    c = engine_conn
+    for tag, name in (("#LEVY", "King Levy"), ("#RAQ", "raquaza"),
+                      ("#28", "28"), ("#ATT", "Atternam"), ("#NEW", "Newbie")):
+        c.execute("INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+                  "VALUES (?, ?, '2026-01-01', '2026-07-06')", (tag, name))
+    # champ==free_pass except S133 where it ROTATED off the champ (#28 held S131)
+    seasons = [
+        (129, 1, "#LEVY", "#LEVY"),
+        (130, 1, "#RAQ", "#RAQ"),
+        (131, 1, "#28", "#28"),
+        (132, 1, "#ATT", "#ATT"),
+        (133, 1, "#28", "#ATT"),   # champ #28 held it last month → rotates to #ATT
+    ]
+    for sid, rank, champ, fp in seasons:
+        c.execute("INSERT INTO war_seasons (season_id, started_at, final_rank, war_champ_tag, free_pass_tag) "
+                  "VALUES (?, '2026-01-01', ?, ?, ?)", (sid, rank, champ, fp))
+    c.commit()
+
+    hist = get_war_season_history(conn=c)
+    assert [s["season_id"] for s in hist["seasons"]] == [133, 132, 131, 130, 129]  # newest first
+    assert hist["seasons"][0]["war_champ"]["name"] == "28"       # tag resolved to name
+    assert hist["seasons"][0]["free_pass"]["name"] == "Atternam"
+    assert hist["seasons"][0]["rotation_applied"] is True        # champ != free pass
+    assert hist["seasons"][1]["rotation_applied"] is False       # S132 champ took it
+    # Atternam held the free pass in 132 and 133 → repeat holder.
+    assert hist["repeat_free_pass_holders"] == {"Atternam": [132, 133]}
+
+    # rolling window caps the lineage
+    assert get_war_season_history(limit=2, conn=c)["seasons_shown"] == 2
+    assert [s["season_id"] for s in get_war_season_history(limit=2, conn=c)["seasons"]] == [133, 132]
+
+
 def test_war_champ_tie_breaks_on_cards_donated(engine_conn):
     """Equal War Champ points are a genuine tie (both flagged, same rank), but the
     leader/#1 is the higher season donor (Jamie's tiebreak)."""
