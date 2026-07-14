@@ -290,6 +290,31 @@ def test_run_awareness_tick_uses_the_write_surface():
     assert allowed_names & write_names
 
 
+def test_run_awareness_tick_serializes_the_full_read_compactly():
+    """Prompt compaction removes formatting tokens without dropping data."""
+    import agent.workflows as workflows
+
+    captured = {}
+    situation = {
+        "time": {"period": "warDay", "remaining": None},
+        "hard_post_signals": [],
+        "_raw_signal_count": 9,
+    }
+
+    def _capture(_system, user_msg, **_kwargs):
+        captured["user_msg"] = user_msg
+        return {"posts": []}
+
+    with patch.object(workflows, "_chat_with_tools", side_effect=_capture):
+        workflows.run_awareness_tick(situation)
+
+    prompt = captured["user_msg"]
+    assert '"time":{"period":"warDay","remaining":null}' in prompt
+    assert '"hard_post_signals":[]' in prompt
+    assert "_raw_signal_count" not in prompt
+    assert '\n  "time"' not in prompt
+
+
 # ---------------------------------------------------------------------------
 # run_awareness_tick — truncation is transient over-generation, retry once
 # ---------------------------------------------------------------------------

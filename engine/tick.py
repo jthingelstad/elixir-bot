@@ -103,16 +103,18 @@ def _current_clock(conn, now: datetime):
 
 
 def run_tick(conn, now: datetime | None = None, *, api, send_fn=None, compose_fn=None,
-             editor_gate=None, deliver: bool = True) -> dict:
+             editor_gate=None, deliver: bool = False) -> dict:
     """Run one engine tick.
 
     ``deliver`` gates the proactive posting path (steps 6–7: RECOGNIZE +
     DELIVER). When False, the engine still polls, projects, runs MANAGE and
     leader-actions, and emits the event stream the awareness brain reads — it
     just stops raising communication intents and composing/sending posts. The
-    scheduled runtime always passes deliver=False: the awareness brain is the
-    sole proactive poster, so there's no double-posting and no unbounded
-    pending-intent backlog (only consume() expires intents)."""
+    scheduled runtime uses the default ``deliver=False``: the awareness brain
+    is the sole proactive poster, so there's no double-posting and no unbounded
+    pending-intent backlog (only consume() expires intents). The legacy
+    recognizer/delivery path remains available only as an explicit shadow seam
+    for migration tests via ``deliver=True``."""
     now = now or datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     counters: dict = {}

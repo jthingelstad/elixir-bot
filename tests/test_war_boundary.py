@@ -21,10 +21,18 @@ RIVAL = "#RIVAL01"
 def _seed_free_pass_case(conn, *, last_free_pass):
     """Season 140 points order: Ace 6000 > Bee 4000 > Cid 2000. Optionally seed
     last month's (season 139) free-pass holder."""
+    conn.execute(
+        "INSERT OR IGNORE INTO clans "
+        "(clan_tag, name, first_seen_at, last_seen_at, is_home) "
+        "VALUES ('#J2RGCRVG', 'POAP KINGS', '2026-01-01', '2026-02-28', 1)"
+    )
     for tag, name in (("#ACE", "Ace"), ("#BEE", "Bee"), ("#CID", "Cid")):
         conn.execute(
             "INSERT OR IGNORE INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
             "VALUES (?, ?, '2026-01-01', '2026-02-28')", (tag, name))
+        conn.execute(
+            "INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
+            "VALUES (?, '2026-01-01', 'test')", (tag,))
     conn.execute("INSERT OR IGNORE INTO war_seasons (season_id, started_at) VALUES (139, '2026-01-01')")
     conn.execute("INSERT OR IGNORE INTO war_seasons (season_id, started_at) VALUES (140, '2026-02-01')")
     conn.execute("INSERT INTO war_weeks (season_id, section_index, our_rank) VALUES (140, 0, 1)")
@@ -35,6 +43,10 @@ def _seed_free_pass_case(conn, *, last_free_pass):
     if last_free_pass:
         from storage.awards import insert_award
         insert_award(award_type="free_pass", season_id=139, player_tag=last_free_pass, conn=conn)
+        conn.execute(
+            "UPDATE war_seasons SET free_pass_tag = ? WHERE season_id = 139",
+            (last_free_pass,),
+        )
 
 
 def test_free_pass_rotates_off_last_months_holder(engine_conn):

@@ -65,7 +65,9 @@ def test_offline_end_to_end(tmp_path, v51_schema_template):
     eng.apply("player_battlelog", "#A", _battlelog(), "2026-07-01T10:02:00Z")
     # second observation: collection level crosses 1700 (bypass → posts)
     eng.apply("player", "#A", _profile("#A", "Al", 45, 4991, collection_level=1712), "2026-07-01T11:00:00Z")
-    counters = eng.finish()
+    # The retired deterministic poster remains available only as an explicit
+    # shadow seam; awareness-only is the production/offline default.
+    counters = eng.finish(legacy_proactive=True)
 
     conn = eng.conn
     # events: collection_level_milestone emitted exactly once
@@ -93,6 +95,24 @@ def test_offline_end_to_end(tmp_path, v51_schema_template):
     assert conn.execute(
         "SELECT COUNT(*) FROM clan_events WHERE event_type='member_joined'"
     ).fetchone()[0] == 1
+
+
+def test_offline_finish_defaults_to_awareness_only(tmp_path, v51_schema_template):
+    import shutil
+
+    db_path = str(tmp_path / "offline-awareness.db")
+    shutil.copy(v51_schema_template, db_path)
+    eng = OfflineEngine(db_path)
+    eng.apply("player", "#A", _profile("#A", "Al", 44, 4990, collection_level=1673),
+              "2026-07-01T10:00:00Z")
+    eng.apply("player", "#A", _profile("#A", "Al", 45, 4990, collection_level=1712),
+              "2026-07-01T11:00:00Z")
+
+    counters = eng.finish()
+
+    assert counters["proactive_mode"] == "awareness_only"
+    assert eng.conn.execute("SELECT COUNT(*) FROM recognition_ledger").fetchone()[0] == 0
+    assert eng.conn.execute("SELECT COUNT(*) FROM communication_intents").fetchone()[0] == 0
 
 
 def test_offline_replay_idempotent(tmp_path, v51_schema_template):

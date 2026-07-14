@@ -138,6 +138,183 @@ def test_non_join_post_without_flag_does_not_relay():
     assert relayed == [], "only the post covering the join relays, not unrelated posts"
 
 
+def test_copy_policy_blocks_gendered_member_pronoun_before_send():
+    sent = []
+    plan = {"posts": [{
+        "channel": "elixir",
+        "leads_with": "milestone",
+        "content": "King Levy broke his old ceiling.",
+        "covers_signal_keys": ["best_trophies_peak:#LEVY:13000"],
+    }]}
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {}, plan, post_fn=lambda *args: sent.append(args),
+            record_fn=lambda **_: None,
+        )
+
+    assert result["failed"] is True
+    assert "gendered_member_pronoun" in result["reason"]
+    assert sent == []
+
+
+def test_copy_policy_repairs_once_then_sends_corrected_plan():
+    sent = []
+    repairs = []
+    plan = {"posts": [{
+        "channel": "elixir",
+        "leads_with": "milestone",
+        "content": "King Levy broke his old ceiling.",
+        "covers_signal_keys": ["best_trophies_peak:#LEVY:13000"],
+    }]}
+
+    def repair_fn(read, rejected, violations):
+        repairs.append((rejected, violations))
+        return {"posts": [{
+            **rejected["posts"][0],
+            "content": "King Levy broke their old ceiling.",
+        }]}
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {}, plan,
+            post_fn=lambda channel_id, copy: sent.append((channel_id, copy)) or 44,
+            record_fn=lambda **_: None,
+            repair_fn=repair_fn,
+        )
+
+    assert result["failed"] is False
+    assert len(repairs) == 1
+    assert sent == [(222, "King Levy broke their old ceiling.")]
+
+
+def test_copy_policy_failed_repair_still_fails_closed():
+    sent = []
+    plan = {"posts": [{
+        "channel": "elixir", "leads_with": "milestone",
+        "content": "She reached a new best.",
+    }]}
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {}, plan, post_fn=lambda *args: sent.append(args),
+            record_fn=lambda **_: None,
+            repair_fn=lambda *_: plan,
+        )
+
+    assert result["failed"] is True
+    assert sent == []
+
+
+def test_copy_policy_repair_cannot_change_signal_coverage():
+    sent = []
+    plan = {"posts": [{
+        "channel": "elixir", "leads_with": "milestone",
+        "content": "She reached a new best.",
+        "covers_signal_keys": ["peak:#A:1"],
+    }]}
+
+    def unsafe_repair(*_):
+        return {"posts": [{
+            **plan["posts"][0],
+            "content": "They reached a new best.",
+            "covers_signal_keys": [],
+        }]}
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {}, plan, post_fn=lambda *args: sent.append(args),
+            record_fn=lambda **_: None, repair_fn=unsafe_repair,
+        )
+
+    assert result["failed"] is True
+    assert "changed_covers_signal_keys" in result["reason"]
+    assert sent == []
+
+
+def test_copy_policy_blocks_current_rank_when_race_is_unranked():
+    sent = []
+    read = {"war_season": {"race_ranked": False}}
+    plan = {"posts": [{
+        "channel": "elixir", "leads_with": "war",
+        "content": "Don't read anything into today's rank 3 showing.",
+    }]}
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            read, plan, post_fn=lambda *args: sent.append(args),
+            record_fn=lambda **_: None,
+        )
+
+    assert result["failed"] is True
+    assert "current_rank_while_unranked" in result["reason"]
+    assert sent == []
+
+
+def test_copy_policy_blocks_plain_we_are_third_when_race_is_unranked():
+    plan = {"posts": [{
+        "channel": "elixir", "leads_with": "war",
+        "content": "We're 3rd and pushing for the top.",
+    }]}
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {"war_season": {"race_ranked": False}}, plan,
+            post_fn=lambda *_: 77, record_fn=lambda **_: None,
+        )
+
+    assert result["failed"] is True
+    assert "current_rank_while_unranked" in result["reason"]
+
+
+def test_copy_policy_repair_cannot_change_or_drop_factual_numbers():
+    plan = {"posts": [{
+        "channel": "elixir", "leads_with": "milestone",
+        "content": "She crossed 13,000 trophies.",
+    }]}
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {}, plan, post_fn=lambda *_: 77, record_fn=lambda **_: None,
+            repair_fn=lambda *_: {"posts": [{
+                **plan["posts"][0], "content": "They crossed 12,000 trophies.",
+            }]},
+        )
+
+    assert result["failed"] is True
+    assert "introduced_number" in result["reason"]
+
+
+def test_copy_policy_rank_repair_may_remove_only_bad_rank_number():
+    plan = {"posts": [{
+        "channel": "elixir", "leads_with": "war",
+        "content": "We're 3rd today after 22 straight weeks at #1.",
+    }]}
+
+    def repair(*_):
+        return {"posts": [{
+            **plan["posts"][0],
+            "content": "Scoring has not started after 22 straight weeks at #1.",
+        }]}
+
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {"war_season": {"race_ranked": False}}, plan,
+            post_fn=lambda *_: 77, record_fn=lambda **_: None, repair_fn=repair,
+        )
+
+    assert result["failed"] is False
+
+
+def test_copy_policy_allows_historical_rank_streak_when_current_race_is_unranked():
+    plan = {"posts": [{
+        "channel": "elixir", "leads_with": "war",
+        "content": "POAP KINGS has finished 22 straight war weeks at #1.",
+    }]}
+    with patch.object(deliver_mod.engine_compose, "channels", return_value=_LANES):
+        result = deliver_mod.deliver_posts(
+            {"war_season": {"race_ranked": False}}, plan,
+            post_fn=lambda *_: 77, record_fn=lambda **_: None,
+        )
+
+    assert result["failed"] is False
+
+
 # ------------------------------------- record_awareness_post → channel_memory
 
 def test_recorded_post_shows_up_in_channel_memory(engine_conn):
