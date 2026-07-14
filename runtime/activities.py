@@ -35,10 +35,10 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
     ActivityDefinition(
         activity_key="engine-tick",
         owner_lane="player-highlights",
-        purpose="The v5.1 engine tick (runtime.md §2): adaptive-budget poll → "
-        "battle mirror → emit → project → manage → recognize → deliver. "
-        "Replaces v5-reactive-tick, war-poll, player-progression, and "
-        "award-detection's daily scan (awards fire on season_closed).",
+        purpose="The v5.1 production data tick (runtime.md §2): adaptive-budget "
+        "poll → battle mirror → emit → project → manage. It refreshes the "
+        "streams/projections the awareness loop reads; the retired deterministic "
+        "recognizer/delivery path is not run. Awards fire on season_closed.",
         job_id="engine-tick",
         job_function="_engine_tick",
         schedule_kind="interval",
@@ -48,10 +48,10 @@ _ACTIVITIES: tuple[ActivityDefinition, ...] = (
             "coalesce": True,
         },
         delivery_targets=(
-            "Discord reactive posts: #player-highlights, #clan-events, #river-race "
-            "(public); #actions (leadership)",
+            "Storage: event streams, projections, management state; leadership "
+            "action cards only when management transitions require them",
         ),
-        activity_role="observer+communicator",
+        activity_role="observer",
         legacy_commands=("v5-reactive-tick",),
     ),
     ActivityDefinition(
