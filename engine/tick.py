@@ -12,7 +12,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from engine import baselines, ingest, management, polling, projections
+from engine import baselines, ingest, management, observations, polling, projections
 from engine.clock import infer_season_id, period_anchor_from_events, war_clock
 from engine.db import canon_tag, chicago_today, ensure_clan, ensure_player, utcnow
 from engine.emitters import emit
@@ -29,6 +29,78 @@ log = logging.getLogger("engine.tick")
 
 HOME_CLAN = "#J2RGCRVG"
 TRAINING_RIVERRACE_POLL_SECONDS = 3600  # hourly on training days (runtime.md §4)
+
+_OBSERVATION_COUNTER_PREFIX = {
+    "clan": "clan",
+    "currentriverrace": "race",
+    "player": "profile",
+    "player_battlelog": "battlelog",
+}
+
+
+def _count_admission(counters: dict, result, contract_rejections: dict) -> bool:
+    """Count one admission decision and retain contract failures for one
+    endpoint-level incident per tick.  Transport failures already have CR API
+    telemetry, so the engine records them in counters without duplicating an
+    incident for every unavailable member endpoint."""
+    prefix = _OBSERVATION_COUNTER_PREFIX[result.endpoint]
+    if result.accepted:
+        counters["observations_accepted"] = counters.get("observations_accepted", 0) + 1
+        counters[f"{prefix}_observations_accepted"] = (
+            counters.get(f"{prefix}_observations_accepted", 0) + 1
+        )
+        return True
+    counters["observation_rejections"] = counters.get("observation_rejections", 0) + 1
+    counters[f"{prefix}_observation_rejections"] = (
+        counters.get(f"{prefix}_observation_rejections", 0) + 1
+    )
+    if result.transport_failure:
+        counters["observation_transport_failures"] = (
+            counters.get("observation_transport_failures", 0) + 1
+        )
+        counters[f"{prefix}_observation_transport_failures"] = (
+            counters.get(f"{prefix}_observation_transport_failures", 0) + 1
+        )
+    else:
+        counters["observation_contract_rejections"] = (
+            counters.get("observation_contract_rejections", 0) + 1
+        )
+        counters[f"{prefix}_observation_contract_rejections"] = (
+            counters.get(f"{prefix}_observation_contract_rejections", 0) + 1
+        )
+        contract_rejections.setdefault(result.endpoint, []).append(
+            {"entity_key": result.entity_key, "errors": list(result.errors)}
+        )
+    return False
+
+
+def _record_contract_rejections(conn, contract_rejections: dict) -> None:
+    """Collapse a malformed endpoint batch into one queryable warning."""
+    if not contract_rejections:
+        return
+    from storage.incidents import record_incident
+
+    for endpoint, rejected in contract_rejections.items():
+        component = f"engine.observation.{endpoint}"
+        already_open = conn.execute(
+            "SELECT 1 FROM runtime_incidents WHERE component = ? "
+            "AND summary = 'CR observation rejected by admission boundary' "
+            "AND resolved_at IS NULL LIMIT 1",
+            (component,),
+        ).fetchone()
+        if already_open is not None:
+            continue
+        record_incident(
+            component,
+            "CR observation rejected by admission boundary",
+            context={
+                "count": len(rejected),
+                "observations": rejected[:10],
+                "truncated": len(rejected) > 10,
+            },
+            severity="error",
+            conn=conn,
+        )
 
 
 def _guard(counters: dict, step: str, conn=None):
@@ -132,9 +204,16 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
         conn.commit()
 
     with _guard(counters, "poll", conn):
-        clan_payload = api.get_clan()
+        contract_rejections: dict[str, list[dict]] = {}
+        raw_clan_payload = api.get_clan()
+        result = observations.admit("clan", HOME_CLAN, raw_clan_payload)
+        if _count_admission(counters, result, contract_rejections):
+            clan_payload = raw_clan_payload
         if _riverrace_due(conn, clock, now):
-            race_payload = api.get_current_war()
+            raw_race_payload = api.get_current_war()
+            result = observations.admit("currentriverrace", HOME_CLAN, raw_race_payload)
+            if _count_admission(counters, result, contract_rejections):
+                race_payload = raw_race_payload
         if clan_payload:
             ensure_clan(conn, HOME_CLAN, clan_payload.get("name"), now_iso, is_home=True)
         roster_tags = []
@@ -169,15 +248,22 @@ def run_tick(conn, now: datetime | None = None, *, api) -> dict:
             # payload on its own connection during the call, so the tick must
             # not hold a write transaction across the HTTP round-trip
             # (that's a 30 s busy-timeout stall per call — observed live).
-            ensure_player(conn, tag, None, now_iso)
             conn.commit()
             if endpoint == "battlelog":
-                battlelogs[tag] = api.get_player_battle_log(tag) or []
-                polling.note_polled(conn, tag, "battlelog", now_iso)
+                raw_battlelog = api.get_player_battle_log(tag)
+                result = observations.admit("player_battlelog", tag, raw_battlelog)
+                if _count_admission(counters, result, contract_rejections):
+                    battlelogs[tag] = raw_battlelog
+                    polling.note_poll_succeeded(conn, tag, "battlelog", now_iso)
             else:
-                player_payloads[tag] = api.get_player(tag) or {}
-                polling.note_polled(conn, tag, "profile", now_iso)
+                raw_player_payload = api.get_player(tag)
+                result = observations.admit("player", tag, raw_player_payload)
+                if _count_admission(counters, result, contract_rejections):
+                    player_payloads[tag] = raw_player_payload
+                    polling.note_poll_succeeded(conn, tag, "profile", now_iso)
             conn.commit()
+        _record_contract_rejections(conn, contract_rejections)
+        conn.commit()
 
     # refresh the clock from the fresh race payload before ingest needs it
     if race_payload:

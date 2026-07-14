@@ -12,7 +12,7 @@ import json
 import os
 from datetime import datetime, timezone
 
-from engine import ingest, projections
+from engine import ingest, observations, projections
 from engine.clock import infer_season_id, war_clock
 from engine.db import canon_tag, connect, ensure_player
 from engine.emitters import emit
@@ -70,6 +70,14 @@ class OfflineEngine:
             self._count("bad_payload")
             return
         now = datetime.fromisoformat(fetched_at.replace("Z", "+00:00")).astimezone(timezone.utc)
+        expected_key = HOME_CLAN if endpoint in {"clan", "currentriverrace"} else entity_key
+        if endpoint in {"clan", "currentriverrace", "player", "player_battlelog"}:
+            result = observations.admit(endpoint, expected_key, payload)
+            if not result.accepted:
+                self._count("observation_rejections")
+                self._count(f"{endpoint}_observation_rejections")
+                return
+            self._count("observations_accepted")
         if endpoint == "clan":
             self._count("clan_polls")
             for aspect, aspect_payload in project_clan_aspects(payload).items():

@@ -38,6 +38,10 @@ not the tick rate, controls API spend). Single process, single writer; APSchedul
 tick(now):
   1. POLL      — spend the per-tick API budget per the §4 scheduler.
                  Every response → raw_api_payloads (L1). Nothing else touches the API.
+                 Before durable mutation, engine.observations admits the decoded
+                 response against its endpoint shape and requested entity identity.
+                 Rejection leaves baselines/projections/events and success freshness
+                 unchanged; counters + contract incidents explain the silence.
   2. INGEST    — battle mirror: new battles → battle_events (dedup-keyed inserts).
                  War keys are resolved from the battle's OWN battle_time against
                  the season/section calendar (war_weeks + the live race baseline),
@@ -132,6 +136,11 @@ CREATE TABLE poll_state (
     updated_at TEXT NOT NULL
 );
 ```
+
+`last_battlelog_poll` and `last_profile_poll` mean **last admitted successful
+observation**, not last attempt. A transport failure or rejected payload stays
+due according to the previous success time. A legitimate empty battlelog is an
+admitted success.
 
 **Temperature (per player):**
 

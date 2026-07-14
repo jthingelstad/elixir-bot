@@ -556,7 +556,8 @@ constraint.
   projector tracks its position here. Durable. `ingest_cursor` and
   `projection_tracking` fold in and drop.
 - `poll_state` — per-player adaptive-polling state (temperature, heat counter,
-  last-poll timestamps). DDL and semantics in `runtime.md` §4; listed here so the
+  last-successful-observation timestamps). Rejected/missing responses do not
+  advance freshness. DDL and semantics in `runtime.md` §4; listed here so the
   layer map is complete. Rebuildable (seeds warm), not durable-precious.
 - Tournaments star (`tournaments`, `tournament_battles`, `tournament_participants`) —
   carried; `tournament_battles.player1_member_id`/`player2_member_id` drop (tags

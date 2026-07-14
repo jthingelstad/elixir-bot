@@ -14,8 +14,19 @@ def _clan(members):
         "tag": "#J2RGCRVG", "name": "POAP KINGS", "clanScore": 60000,
         "clanWarTrophies": 900,
         "memberList": [
-            {"tag": t, "name": n, "role": "member", "trophies": 5000, "donations": d}
-            for t, n, d in members],
+            {
+                "tag": t,
+                "name": n,
+                "role": "member",
+                "trophies": 5000,
+                "donations": d,
+                "donationsReceived": 0,
+                "expLevel": 40,
+                "clanRank": index + 1,
+                "previousClanRank": index + 1,
+            }
+            for index, (t, n, d) in enumerate(members)
+        ],
     })
 
 
@@ -29,7 +40,12 @@ def _profile(tag, name, level, wins, collection_level=None):
         "tag": tag, "name": name, "expLevel": level, "wins": wins,
         "bestTrophies": 6000, "trophies": 5500,
         "arena": {"id": 54000012, "name": "Spooky Town"},
-        "badges": badges, "cards": [],
+        "badges": badges,
+        "cards": [{"id": 26000000, "name": "Knight", "rarity": "common",
+                   "level": 14, "maxLevel": 16}],
+        "currentPathOfLegendSeasonResult": {},
+        "lastPathOfLegendSeasonResult": {},
+        "bestPathOfLegendSeasonResult": {},
     })
 
 
