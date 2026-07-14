@@ -15,14 +15,13 @@ Semantics ported from the retired heartbeat/_awards.py + storage/awards.py
                  has data from week 4 day 2 — the guard skips with a reason)
 - donation_champ — top-3 by summed weekly donation peaks (Sunday-robust MAX
                  per ISO week, summed across the season window)
-- rookie_mvp   — top-3 season points among members whose open membership began
-                 during the season
+- rookie_mvp   — top-3 season points among members in their first war season
 - war_participant — every member with season points > 0; SILENT (rows only —
                  the old engine deliberately never posted these)
 
-The single "season awards" summary intent (volume principle: one post, not
-one per award) is raised by grant_season_awards' caller via the payload this
-returns; ledger keys follow recognition.md §5 (award:{type}:{season}:{tag}).
+The awareness brain reads the durable rows plus the season_closed event and
+owns all member-facing narration. Ledger keys remain durable award-grant
+claims (award:{type}:{season}:{tag}); no legacy summary intent is raised.
 """
 
 from __future__ import annotations
@@ -47,27 +46,6 @@ def _name(conn, tag: str) -> str | None:
     return row[0] if row else None
 
 
-def _season_date_bounds(conn, season_id: int) -> tuple[str | None, str | None]:
-    """[start, end) dates for the season, from war_weeks (fallback war_seasons)."""
-    row = conn.execute(
-        """SELECT MIN(COALESCE(created_date, finish_time)) AS start,
-                  MAX(COALESCE(finish_time, created_date)) AS end
-           FROM war_weeks WHERE season_id = ?""",
-        (season_id,),
-    ).fetchone()
-    start, end = (row["start"], row["end"]) if row else (None, None)
-    if not start or not end:
-        srow = conn.execute(
-            "SELECT started_at, ended_at FROM war_seasons WHERE season_id = ?",
-            (season_id,),
-        ).fetchone()
-        if srow:
-            start = start or srow["started_at"]
-            end = end or srow["ended_at"]
-    return (str(start)[:10] if start else None,
-            str(end)[:10] if end else None)
-
-
 def _grant(conn, *, award_type: str, season_id: int, player_tag: str,
            rank: int = 1, metric_value=None, metric_unit=None,
            metadata: dict | None = None, awarded_at: str) -> bool:
@@ -81,8 +59,8 @@ def _grant(conn, *, award_type: str, season_id: int, player_tag: str,
          json.dumps(metadata, default=str) if metadata else None, awarded_at),
     )
     if cur.rowcount:
-        # recognition.md §5: award grants claim ledger keys (dedup discipline;
-        # intentless claims are legitimate — the summary intent covers voice).
+        # recognition.md §5: award grants claim ledger keys for durable dedup.
+        # These claims are intentionally intentless; awareness owns narration.
         from engine.recognition import ledger
 
         ledger.claim(
@@ -92,56 +70,41 @@ def _grant(conn, *, award_type: str, season_id: int, player_tag: str,
     return bool(cur.rowcount)
 
 
-def _war_champ_podium(conn, season_id: int, awarded_at: str) -> list[dict]:
-    rows = conn.execute(
-        """SELECT player_tag, SUM(COALESCE(fame, 0)) AS total_points,
-                  COUNT(*) AS races
-           FROM war_participation WHERE season_id = ?
-           GROUP BY player_tag HAVING total_points > 0
-           ORDER BY total_points DESC, player_tag""",
-        (season_id,),
-    ).fetchall()
+def _war_champ_podium(conn, season_id: int, awarded_at: str, outcome: dict) -> list[dict]:
+    rows = outcome["standings"][:PODIUM]
     out = []
-    rank = 0
     for r in rows:
-        if not _active(conn, r["player_tag"]):
-            continue
-        rank += 1
-        if rank > PODIUM:
-            break
+        rank = r["official_rank"]
         granted = _grant(
             conn, award_type="war_champ", season_id=season_id,
-            player_tag=r["player_tag"], rank=rank,
-            metric_value=r["total_points"], metric_unit="points",
-            metadata={"races_participated": r["races"],
-                      "avg_points": round(r["total_points"] / r["races"], 1) if r["races"] else None},
+            player_tag=r["tag"], rank=rank,
+            metric_value=r["points"], metric_unit="points",
+            metadata={"races_participated": r["races_participated"],
+                      "donations_tiebreak": r["donations"],
+                      "points_rank": r["rank"], "tied_on_points": r["tied"],
+                      "avg_points": round(r["points"] / r["races_participated"], 1)
+                      if r["races_participated"] else None},
             awarded_at=awarded_at,
         )
         if granted:
-            out.append({"rank": rank, "tag": r["player_tag"],
-                        "name": _name(conn, r["player_tag"]),
-                        "metric_value": r["total_points"], "metric_unit": "points"})
+            out.append({"rank": rank, "tag": r["tag"],
+                        "name": r["name"],
+                        "metric_value": r["points"], "metric_unit": "points"})
     return out
 
 
-def _free_pass(conn, season_id: int, awarded_at: str) -> list[dict]:
-    row = conn.execute(
-        "SELECT war_champ_tag, free_pass_tag FROM war_seasons WHERE season_id = ?",
-        (season_id,),
-    ).fetchone()
-    if not row or not row["free_pass_tag"]:
+def _free_pass(conn, season_id: int, awarded_at: str, outcome: dict) -> list[dict]:
+    selected = outcome["free_pass"]
+    if not selected:
         return []
-    tag = row["free_pass_tag"]
-    points = conn.execute(
-        "SELECT SUM(COALESCE(fame,0)) FROM war_participation WHERE season_id = ? AND player_tag = ?",
-        (season_id, tag),
-    ).fetchone()[0]
-    rotated = bool(row["war_champ_tag"] and row["war_champ_tag"] != tag)
+    tag = selected["tag"]
+    points = selected["points"]
+    rotated = outcome["rotation_applied"]
     granted = _grant(
         conn, award_type="free_pass", season_id=season_id, player_tag=tag,
         rank=1, metric_value=points, metric_unit="points",
         metadata={"rotation_applied": rotated,
-                  "war_champ_tag": row["war_champ_tag"]},
+                  "war_champ_tag": outcome["war_champ_tag"]},
         awarded_at=awarded_at,
     )
     if granted:
@@ -195,98 +158,69 @@ def _iron_king(conn, season_id: int, awarded_at: str) -> tuple[list[dict], str |
     return out, None
 
 
-def _donation_champs(conn, season_id: int, awarded_at: str) -> list[dict]:
-    start, end = _season_date_bounds(conn, season_id)
-    if not start or not end:
-        return []
-    rows = conn.execute(
-        """WITH weekly_peaks AS (
-               SELECT player_tag, strftime('%Y-%W', metric_date) AS wk,
-                      MAX(COALESCE(donations_week, 0)) AS peak
-               FROM player_daily_metrics
-               WHERE metric_date BETWEEN ? AND ?
-               GROUP BY player_tag, wk)
-           SELECT player_tag, SUM(peak) AS total
-           FROM weekly_peaks GROUP BY player_tag
-           HAVING total > 0 ORDER BY total DESC, player_tag""",
-        (start, end),
-    ).fetchall()
+def _donation_champs(conn, season_id: int, awarded_at: str, outcome: dict) -> list[dict]:
     out = []
-    rank = 0
-    for r in rows:
-        if not _active(conn, r["player_tag"]):
-            continue
-        rank += 1
-        if rank > PODIUM:
-            break
+    for entry in outcome["donation_champs"][:PODIUM]:
+        tag = entry["tag"]
+        total = entry["total_donations"]
+        rank = entry["official_rank"]
         if _grant(conn, award_type="donation_champ", season_id=season_id,
-                  player_tag=r["player_tag"], rank=rank,
-                  metric_value=r["total"], metric_unit="donations",
+                  player_tag=tag, rank=rank,
+                  metric_value=total, metric_unit="donations",
                   awarded_at=awarded_at):
-            out.append({"rank": rank, "tag": r["player_tag"],
-                        "name": _name(conn, r["player_tag"]),
-                        "metric_value": r["total"], "metric_unit": "donations"})
+            out.append({"rank": rank, "tag": tag,
+                        "name": entry["name"],
+                        "metric_value": total, "metric_unit": "donations"})
     return out
 
 
-def _rookie_mvps(conn, season_id: int, awarded_at: str) -> list[dict]:
-    start, end = _season_date_bounds(conn, season_id)
-    if not start or not end:
-        return []
-    rows = conn.execute(
-        """SELECT wp.player_tag, SUM(COALESCE(wp.fame, 0)) AS total_points,
-                  COUNT(*) AS races
-           FROM war_participation wp
-           JOIN clan_memberships cm ON cm.player_tag = wp.player_tag
-                AND cm.left_at IS NULL AND cm.joined_at >= ? AND cm.joined_at < ?
-           WHERE wp.season_id = ?
-           GROUP BY wp.player_tag HAVING total_points > 0
-           ORDER BY total_points DESC, races DESC, wp.player_tag""",
-        (start, end, season_id),
-    ).fetchall()
+def _rookie_mvps(conn, season_id: int, awarded_at: str, outcome: dict) -> list[dict]:
     out = []
-    for i, r in enumerate(rows[:PODIUM]):
+    for entry in outcome["rookie_mvps"][:PODIUM]:
+        rank = entry["official_rank"]
         if _grant(conn, award_type="rookie_mvp", season_id=season_id,
-                  player_tag=r["player_tag"], rank=i + 1,
-                  metric_value=r["total_points"], metric_unit="points",
-                  metadata={"races_participated": r["races"]},
+                  player_tag=entry["tag"], rank=rank,
+                  metric_value=entry["total_points"], metric_unit="points",
+                  metadata={"races_participated": entry["races_participated"],
+                            "points_rank": entry["rank"],
+                            "tied_on_points": entry["tied"]},
                   awarded_at=awarded_at):
-            out.append({"rank": i + 1, "tag": r["player_tag"],
-                        "name": _name(conn, r["player_tag"]),
-                        "metric_value": r["total_points"], "metric_unit": "points"})
+            out.append({"rank": rank, "tag": entry["tag"],
+                        "name": entry["name"],
+                        "metric_value": entry["total_points"], "metric_unit": "points"})
     return out
 
 
-def _war_participants(conn, season_id: int, awarded_at: str) -> int:
+def _war_participants(conn, season_id: int, awarded_at: str, outcome: dict) -> int:
     """Silent accrual — rows only, never posted (carried behavior)."""
-    rows = conn.execute(
-        """SELECT player_tag, SUM(COALESCE(fame, 0)) AS total_points
-           FROM war_participation WHERE season_id = ?
-           GROUP BY player_tag HAVING total_points > 0""",
-        (season_id,),
-    ).fetchall()
     n = 0
-    for r in rows:
-        if _active(conn, r["player_tag"]) and _grant(
+    for entry in outcome["war_participants"]:
+        if _grant(
             conn, award_type="war_participant", season_id=season_id,
-            player_tag=r["player_tag"], rank=1,
-            metric_value=r["total_points"], metric_unit="points",
+            player_tag=entry["tag"], rank=1,
+            metric_value=entry["points"], metric_unit="points",
             awarded_at=awarded_at,
         ):
             n += 1
     return n
 
 
-def grant_season_awards(conn, season_id: int, awarded_at: str) -> dict:
+def grant_season_awards(
+    conn, season_id: int, awarded_at: str, *, outcome: dict | None = None,
+) -> dict:
     """Grant every award type for a closed season. Idempotent (UNIQUE +
     INSERT OR IGNORE): re-running grants nothing new. Returns counters plus
-    the podium payload for the single season-awards summary intent."""
-    champ = _war_champ_podium(conn, season_id, awarded_at)
-    fp = _free_pass(conn, season_id, awarded_at)
+    the podium payload the awareness read can narrate."""
+    if outcome is None:
+        from engine.award_outcomes import compute_season_award_outcome
+
+        outcome = compute_season_award_outcome(conn, season_id)
+    champ = _war_champ_podium(conn, season_id, awarded_at, outcome)
+    fp = _free_pass(conn, season_id, awarded_at, outcome)
     iron, iron_skip = _iron_king(conn, season_id, awarded_at)
-    donations = _donation_champs(conn, season_id, awarded_at)
-    rookies = _rookie_mvps(conn, season_id, awarded_at)
-    participants = _war_participants(conn, season_id, awarded_at)
+    donations = _donation_champs(conn, season_id, awarded_at, outcome)
+    rookies = _rookie_mvps(conn, season_id, awarded_at, outcome)
+    participants = _war_participants(conn, season_id, awarded_at, outcome)
     return {
         "season_id": season_id,
         "war_champ": champ,

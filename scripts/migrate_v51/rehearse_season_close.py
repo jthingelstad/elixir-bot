@@ -1,122 +1,133 @@
-"""Season-close rehearsal against a scratchpad copy — drives emit_race exactly
-as the tick would, through the Sunday sequence: final colosseum day, then the
-rollover observation (§16.1: the birth of s134 IS the death of s133)."""
-import json
-import sys
+"""Current-data-relative season-close rehearsal.
+
+Runs against a scratch database (normally the replay gate's copy), selects the
+latest open season with real participation, closes it twice, and verifies the
+awareness-era contract:
+
+* the season and durable award rows finalize once;
+* a ``season_closed`` stream event exists exactly once;
+* no retired deterministic communication intent is enqueued;
+* the awareness read can see the new season-close signal; and
+* repeating the close creates no duplicate event or award rows.
+
+Unlike the original migration-day script, this contains no fixed dates, season
+IDs, player tags, or historical award expectations. It stays useful as the live
+database advances.
+"""
+
+from __future__ import annotations
+
 import os
-sys.path.insert(0, "/Users/otto/Projects/elixir-bot")
-os.environ["ELIXIR_DB_PATH"] = sys.argv[1]
+import sys
+from datetime import datetime, timezone
 
-from engine.db import connect
-from engine.clock import infer_season_id
-from engine.emitters import emit
-from engine.emitters.war import project_race_aspect
-from engine import recognition
-from engine.recognition.compose import render_intent
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, _REPO)
 
-DB = sys.argv[1]
-HOME = "#J2RGCRVG"
-conn = connect(DB)
 
-base = json.loads(conn.execute(
-    "SELECT payload_json FROM state_baselines WHERE entity_kind='riverrace'").fetchone()[0])
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: rehearse_season_close.py /path/to/scratch.db", file=sys.stderr)
+        return 2
 
-def cr_shaped(section, period, ptype, fame, participants):
-    return {
-        "sectionIndex": section, "periodIndex": period, "periodType": ptype,
-        "clan": {"tag": HOME, "fame": fame, "participants": participants},
-        "clans": [{"tag": HOME, "fame": fame, "clanScore": 620},
-                  {"tag": "#GRPCVYGP", "fame": 0, "clanScore": 617},
-                  {"tag": "#J29PVQL0", "fame": 120, "clanScore": 618}],
+    db_path = os.path.abspath(sys.argv[1])
+    os.environ["ELIXIR_DB_PATH"] = db_path
+
+    from engine.db import connect
+    from engine.emitters.war import close_season
+    from runtime.awareness.read import build_read
+
+    conn = connect(db_path)
+    row = conn.execute(
+        """SELECT s.season_id
+             FROM war_seasons s
+            WHERE s.ended_at IS NULL
+              AND EXISTS (
+                    SELECT 1 FROM war_participation wp
+                     WHERE wp.season_id = s.season_id
+              )
+            ORDER BY s.season_id DESC LIMIT 1"""
+    ).fetchone()
+    if row is None:
+        print("SKIP: no open season with participation to rehearse")
+        conn.close()
+        return 0
+
+    season_id = int(row["season_id"])
+    observed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    event_key = f"season_closed:{season_id}"
+
+    before_awards = conn.execute(
+        "SELECT COUNT(*) FROM awards WHERE season_id = ?", (season_id,)
+    ).fetchone()[0]
+    before_intents = conn.execute("SELECT COUNT(*) FROM communication_intents").fetchone()[0]
+
+    first_events = close_season(conn, season_id, {}, observed_at)
+    conn.commit()
+    after_first_awards = conn.execute(
+        "SELECT COUNT(*) FROM awards WHERE season_id = ?", (season_id,)
+    ).fetchone()[0]
+    second_events = close_season(conn, season_id, {}, observed_at)
+    conn.commit()
+    after_second_awards = conn.execute(
+        "SELECT COUNT(*) FROM awards WHERE season_id = ?", (season_id,)
+    ).fetchone()[0]
+
+    season = conn.execute(
+        "SELECT ended_at, war_champ_tag, free_pass_tag FROM war_seasons WHERE season_id = ?",
+        (season_id,),
+    ).fetchone()
+    event_count = conn.execute(
+        "SELECT COUNT(*) FROM war_events WHERE dedup_key = ?", (event_key,)
+    ).fetchone()[0]
+    intent_count = conn.execute("SELECT COUNT(*) FROM communication_intents").fetchone()[0]
+    awards = dict(
+        conn.execute(
+            "SELECT award_type, COUNT(*) FROM awards WHERE season_id = ? GROUP BY award_type",
+            (season_id,),
+        ).fetchall()
+    )
+
+    read = build_read(conn=conn)
+    surfaced = [
+        signal
+        for signals in (read.get("signals_by_lane") or {}).values()
+        for signal in (signals or [])
+        if isinstance(signal, dict)
+        and signal.get("event_type") == "season_closed"
+        and str(signal.get("subject_tag")) == str(season_id)
+    ]
+    surfaced.extend(
+        signal
+        for signal in (read.get("hard_post_signals") or [])
+        if isinstance(signal, dict)
+        and signal.get("event_type") == "season_closed"
+        and str(signal.get("subject_tag")) == str(season_id)
+    )
+
+    gates = {
+        "season finalized": bool(season and season["ended_at"]),
+        "war champ recorded": bool(season and season["war_champ_tag"]),
+        "free pass recorded": bool(season and season["free_pass_tag"]),
+        "season_closed emitted once": first_events == 1 and second_events == 0 and event_count == 1,
+        "war champ podium present": 1 <= awards.get("war_champ", 0) <= 3,
+        "free pass exactly once": awards.get("free_pass", 0) == 1,
+        "awards idempotent": after_first_awards >= before_awards
+        and after_second_awards == after_first_awards,
+        "no legacy intent enqueued": intent_count == before_intents,
+        "awareness read sees season close": bool(surfaced),
     }
 
-# participants reconstructed from the stored projection (CR-shaped-ish)
-participants = [
-    {"tag": t, "name": (p or {}).get("name"), "fame": (p or {}).get("fame"),
-     "repairPoints": (p or {}).get("repair_points"),
-     "boatAttacks": (p or {}).get("boat_attacks"),
-     "decksUsed": (p or {}).get("decks_used"),
-     "decksUsedToday": (p or {}).get("decks_used_today")}
-    for t, p in (base.get("participants") or {}).items()
-]
+    print(f"season-close rehearsal: season {season_id} at {observed_at}")
+    print(f"awards: {awards}")
+    print("\n=== GATES ===")
+    ok = True
+    for label, passed in gates.items():
+        print(f"  [{'PASS' if passed else 'FAIL'}] {label}")
+        ok = ok and passed
+    conn.close()
+    return 0 if ok else 1
 
-def drive(payload, at):
-    sid = infer_season_id(conn, payload)
-    aspect = project_race_aspect(payload, sid)
-    n = emit(conn, "riverrace", HOME, "race", aspect, at)
-    conn.commit()
-    return sid, n
 
-# A) final colosseum battle day (day 4 of 4: period 34), fame progresses
-sid_a, n_a = drive(cr_shaped(4, 34, "colosseum", 30000, participants), "2026-07-05T10:05:00Z")
-print(f"A: final-day emit — inferred season {sid_a}, events {n_a}")
-
-# B) THE ROLLOVER — new season observed: section 0, training, period 0
-sid_b, n_b = drive(cr_shaped(0, 0, "training", 0, participants), "2026-07-06T10:05:00Z")
-print(f"B: rollover emit — inferred season {sid_b} (must be 134), events {n_b}")
-
-# C) idempotence: same rollover payload again
-sid_c, n_c = drive(cr_shaped(0, 0, "training", 0, participants), "2026-07-06T10:15:00Z")
-awards_before = conn.execute("SELECT COUNT(*) FROM awards WHERE season_id=133").fetchone()[0]
-sid_c2, n_c2 = drive(cr_shaped(0, 0, "training", 0, participants), "2026-07-06T10:25:00Z")
-awards_after = conn.execute("SELECT COUNT(*) FROM awards WHERE season_id=133").fetchone()[0]
-print(f"C: idempotence — re-emits produced {n_c + n_c2} events, awards {awards_before}->{awards_after}")
-
-# D) war recognizer over the new events (rolled clock: training, s134)
-clock = {"phase": "training", "season_id": 134, "section_index": 0,
-         "is_colosseum_week": False, "pace_status": "training",
-         "hours_left_in_period": 20.0, "race_finished": False, "day_index": 0}
-rec = recognition.run_recognizers(conn, clock, "2026-07-06T10:06:00Z")
-conn.commit()
-print("D: recognizer counters:", rec)
-
-print("\n=== GATES ===")
-g = {}
-rows = {r[0] for r in conn.execute("SELECT dedup_key FROM war_events")}
-g["week_finished:133:4"] = "week_finished:133:4" in rows
-g["season_closed:133"] = "season_closed:133" in rows
-g["season_started:134"] = "season_started:134" in rows
-s = conn.execute("SELECT ended_at, final_rank, weeks, war_champ_tag, free_pass_tag FROM war_seasons WHERE season_id=133").fetchone()
-top = conn.execute("SELECT player_tag, SUM(fame) f FROM war_participation WHERE season_id=133 GROUP BY 1 ORDER BY f DESC LIMIT 2").fetchall()
-g["s133 finalized"] = bool(s and s[0])
-g["champ == top fame"] = bool(s and s[3] == top[0][0])
-g["rotation vs s132 (#VQCYJQY0P)"] = bool(s and (s[4] == s[3]) == (s[3] != "#VQCYJQY0P"))
-aw = {r[0]: (r[1], r[2]) for r in conn.execute(
-    "SELECT award_type, COUNT(*), GROUP_CONCAT(player_tag || ':r' || rank) FROM awards WHERE season_id=133 GROUP BY 1")}
-g["war_champ podium x3"] = aw.get("war_champ", (0,))[0] == 3
-g["free_pass x1"] = aw.get("free_pass", (0,))[0] == 1
-g["donation_champ present"] = "donation_champ" in aw
-# awards.py grants war_participant only to ACTIVE members (open membership).
-# The table also carries mid-season rows migrated from v5 (awarded 06-15,
-# some for players who left since), so equality can't hold — the invariant
-# that matters is coverage: nobody active with fame>0 is missed.
-missing = conn.execute(
-    """SELECT COUNT(*) FROM (
-         SELECT wp.player_tag FROM war_participation wp
-         WHERE wp.season_id=133
-           AND EXISTS (SELECT 1 FROM clan_memberships m
-                       WHERE m.player_tag = wp.player_tag AND m.left_at IS NULL)
-         GROUP BY wp.player_tag HAVING SUM(wp.fame)>0)
-       WHERE player_tag NOT IN (
-         SELECT player_tag FROM awards
-         WHERE season_id=133 AND award_type='war_participant')""").fetchone()[0]
-g["war_participant covers active fame>0"] = missing == 0
-g["iron_king absent"] = "iron_king" not in aw
-led = conn.execute("SELECT COUNT(*), COUNT(DISTINCT recognition_key) FROM recognition_ledger").fetchone()
-g["ledger no dupes"] = led[0] == led[1]
-intents = conn.execute(
-    "SELECT intent_id, intent_type, lane, payload_json FROM communication_intents WHERE intent_type IN ('war:season_closed','clan:season_awards') OR intent_type LIKE '%season%'").fetchall()
-g["season_closed intent"] = any("season_closed" in (i[1] or "") for i in intents)
-g["season_awards intent -> clan-events"] = any(i[1] == "clan:season_awards" and i[2] == "clan-events" for i in intents)
-for k, v in g.items():
-    print(f"  [{'PASS' if v else 'FAIL'}] {k}")
-print("\nrows detail:", json.dumps(aw, indent=1))
-print("s133:", dict(zip(("ended_at","final_rank","weeks","champ","free_pass"), s)) if s else None)
-print("standings top2:", [tuple(t) for t in top])
-
-print("\n=== FALLBACK COPY ===")
-for i in intents:
-    row = conn.execute("SELECT * FROM communication_intents WHERE intent_id=?", (i[0],)).fetchone()
-    print(f"[{i[1]} -> {i[2]}]")
-    print(" ", render_intent(row))
-conn.close()
+if __name__ == "__main__":
+    raise SystemExit(main())

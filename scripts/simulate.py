@@ -1,11 +1,13 @@
 """Time-travel simulator — a synthetic war week through the REAL tick
 (testing lever 2).
 
-Drives engine.tick.run_tick — all seven steps, including poll planning, heat,
-the anchored war clock, management, recognition and delivery — against a
-fresh scratch DB with a fake CR API and a frozen, fast-forwarded clock. Time
-is fully synthetic: N days pass in seconds, every timestamp derives from
---start, nothing touches the network, Discord, the LLM, or the live DB.
+Drives the production engine.tick.run_tick path — poll planning, heat, the
+anchored war clock, emission, projection, and management — against a fresh
+scratch DB with a fake CR API and a frozen, fast-forwarded clock. Proactive
+recognition/delivery is deliberately disabled, matching production: the
+awareness brain is the sole posting owner. Time is fully synthetic: N days
+pass in seconds, every timestamp derives from --start, nothing touches the
+network, Discord, the LLM, or the live DB.
 
 The world it simulates (deterministic; no randomness):
   - one river-race section with the ratified rhythm — 3 training days then
@@ -22,12 +24,12 @@ What it gates:
   - war_day_opened fires exactly once per battle day, labelled correctly
     ("battle day N of 4" — the raw-index leak class), observed at the first
     tick after the skewed boundary
-  - membership events fire exactly once each; the join raises a welcome
-    intent through delivery
+  - membership events fire exactly once each and the awareness read sees the
+    hard-post event stream
   - training-day race polling is hourly, battle-day polling every tick
   - war_participation accrues fame for the fighters and nobody else
-  - ledger stays duplicate-free; global DB invariants hold; intent volume
-    stays bounded (the R108-R114 flood class)
+  - the retired legacy recognition/delivery path raises no ledger claims or
+    communication intents; global DB invariants hold
 
 Usage:
     ./venv/bin/python scripts/simulate.py                 # 7 days, 30-min ticks
@@ -237,8 +239,6 @@ def main() -> int:
 
     import engine.tick as tick_mod
     from engine.db import connect
-    from engine.recognition.compose import render_intent
-
     conn = connect(db_path)
     # season inference needs one logged (season, section) waypoint
     conn.execute(
@@ -253,12 +253,6 @@ def main() -> int:
     conn.commit()
 
     world = SimWorld(start, reset_hh, reset_mm)
-    posts: list[tuple[str, str]] = []
-
-    def send_fn(lane, copy):
-        posts.append((lane, copy))
-        return f"sim-{len(posts)}"
-
     # freeze the Chicago day to sim time (calendar emitter, rollups)
     tick_mod.chicago_today = lambda: (world.now - timedelta(hours=5)).strftime("%Y-%m-%d")
 
@@ -269,8 +263,7 @@ def main() -> int:
     for i in range(ticks):
         world.now = start + timedelta(minutes=args.tick_minutes * i)
         counters = tick_mod.run_tick(
-            conn, world.now, api=world, send_fn=send_fn,
-            compose_fn=lambda intent: render_intent(intent),
+            conn, world.now, api=world,
         )
         errors.extend(
             (world.now.strftime("%m-%dT%H:%M"), k, v)
@@ -314,12 +307,6 @@ def main() -> int:
         (LEAVER,)).fetchone()[0]
     g["one member_joined (day-2 joiner)"] = joins == 1
     g["one member_left (day-5 leaver)"] = leaves == 1
-    welcome = conn.execute(
-        "SELECT COUNT(*) FROM communication_intents "
-        "WHERE intent_type IN ('clan:member_joined', 'welcome:member_joined')"
-    ).fetchone()[0]
-    g["exactly one welcome intent for the joiner"] = welcome == 1
-
     lev = conn.execute(
         "SELECT COUNT(*) FROM player_events WHERE event_type='collection_level_milestone' AND player_tag=?",
         (LEVELER,)).fetchone()[0]
@@ -353,13 +340,20 @@ def main() -> int:
             "AND dedup_key=?", (f"week_finished:{SEASON}:{SECTION}",)).fetchone()[0]
         g["week_finished emitted at section rollover"] = wf == 1
 
-    dupes = conn.execute(
-        "SELECT COUNT(*) - COUNT(DISTINCT recognition_key) FROM recognition_ledger"
-    ).fetchone()[0]
-    g["zero duplicate ledger claims"] = dupes == 0
-
+    n_ledger = conn.execute("SELECT COUNT(*) FROM recognition_ledger").fetchone()[0]
     n_intents = conn.execute("SELECT COUNT(*) FROM communication_intents").fetchone()[0]
-    g["intent volume bounded (< 4/day)"] = n_intents < 4 * args.days
+    g["zero legacy recognition claims"] = n_ledger == 0
+    g["zero legacy communication intents"] = n_intents == 0
+
+    # The simulator stops at the LLM/network boundary, but it must prove the
+    # awareness owner can see the hard stream events the engine produced.
+    from runtime.awareness.read import build_read
+
+    awareness_read = build_read(conn=conn)
+    hard_types = {s.get("event_type") for s in awareness_read["hard_post_signals"]}
+    g["awareness read sees hard-post stream events"] = bool(
+        hard_types & {"member_joined", "week_finished"}
+    )
 
     try:
         from tests.conftest import assert_db_invariants
@@ -370,15 +364,12 @@ def main() -> int:
         g["global DB invariants"] = False
 
     print(f"\nsim ran {args.start} -> {end.strftime('%Y-%m-%dT%H:%M:%SZ')}; "
-          f"{n_intents} intents, {len(posts)} posts, {battles} battles")
+          f"{n_ledger} legacy claims, {n_intents} legacy intents, {battles} battles")
     print("\n=== GATES ===")
     ok = True
     for k, v in g.items():
         print(f"  [{'PASS' if v else 'FAIL'}] {k}")
         ok = ok and v
-    print("\nposts composed:")
-    for lane, copy in posts:
-        print(f"  [{lane}] {copy[:110].replace(chr(10), ' / ')}")
     if args.keep or not ok:
         print(f"\nsim DB kept at {db_path}")
     return 0 if ok else 1

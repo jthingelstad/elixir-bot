@@ -458,7 +458,9 @@ def run_awareness_tick(situation: dict, *, tool_stats: dict | None = None,
         "where, following the lane rules in your system prompt. Silence is an "
         "allowed outcome. Hard-post-floor signals (in `hard_post_signals`) "
         "must be addressed.\n\n"
-        f"```json\n{json.dumps(public_situation, indent=2, default=str)}\n```\n"
+        # Compact JSON preserves the complete read while avoiding thousands of
+        # formatting-only prompt characters on every awareness turn.
+        f"```json\n{json.dumps(public_situation, separators=(',', ':'), default=str)}\n```\n"
     )
     allowed_tools = TOOLSETS_BY_WORKFLOW["awareness"]
 
@@ -525,6 +527,39 @@ def _is_truncation_error(result) -> bool:
         isinstance(result, dict)
         and isinstance(result.get("_error"), dict)
         and result["_error"].get("kind") == "truncation"
+    )
+
+
+def repair_awareness_plan(situation: dict, plan: dict, violations: list[str]):
+    """One no-tools repair for a plan rejected by deterministic copy policy.
+
+    The repair model may change wording only. Channel choice, coverage keys,
+    factual values, and relay decisions must survive unchanged; delivery runs
+    the deterministic validator again and fails closed if this attempt misses.
+    """
+    system = (
+        "You repair a structured Discord post plan that failed deterministic copy policy. "
+        "Return JSON only with the same awareness plan shape. Preserve every channel, "
+        "covers_signal_keys value, leads_with value, factual number, member identity, and "
+        "relay decision. Change only the minimum wording needed to clear the violations. "
+        "Refer to every member with they/them/their or repeat the member name; never guess "
+        "gender. If the race is explicitly unranked, remove any claim about its current "
+        "numeric rank without inventing a replacement. Do not add posts, facts, or tools."
+    )
+    truth = {
+        "race_ranked": (situation.get("war_season") or {}).get("race_ranked"),
+        "violations": violations,
+        "plan": plan,
+    }
+    return _chat_with_tools(
+        system,
+        "Repair this plan:\n" + json.dumps(truth, indent=2, default=str),
+        workflow="awareness_repair",
+        allowed_tools=[],
+        response_schema=RESPONSE_SCHEMAS_BY_WORKFLOW["awareness_repair"],
+        strict_json=True,
+        return_errors=True,
+        max_tokens=4096,
     )
 
 
@@ -1251,6 +1286,7 @@ __all__ = [
     "generate_intel_report",
     "run_memory_synthesis",
     "run_awareness_tick",
+    "repair_awareness_plan",
     "generate_ask_elixir_daily",
     "respond_in_reception",
     "respond_in_channel",

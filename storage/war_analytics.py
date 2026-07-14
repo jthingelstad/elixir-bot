@@ -419,10 +419,10 @@ def get_war_season_history(limit: int = 6, conn: Optional[sqlite3.Connection] = 
 
     # members who've held the free pass more than once (in this window) — the
     # "repeat holder" story worth calling out on a designation.
-    repeat_holders = {
-        _name_for(conn, tag): sorted(ss)
-        for tag, ss in holds.items() if len(ss) > 1
-    }
+    repeat_holders = [
+        {"tag": tag, "name": _name_for(conn, tag), "season_ids": sorted(ss)}
+        for tag, ss in sorted(holds.items()) if len(ss) > 1
+    ]
     return {
         "seasons": seasons,
         "seasons_shown": len(seasons),

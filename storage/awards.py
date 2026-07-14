@@ -195,11 +195,6 @@ def get_awards_by_season(season_id: int, conn: Optional[sqlite3.Connection] = No
 
 # -- season helpers ----------------------------------------------------------
 
-def _cr_time_to_date(value: Optional[str]) -> Optional[str]:
-    dt = _parse_cr_time(value)
-    return dt.strftime("%Y-%m-%d") if dt else None
-
-
 def _cr_time_to_iso(value: Optional[str]) -> Optional[str]:
     dt = _parse_cr_time(value)
     return dt.strftime("%Y-%m-%dT%H:%M:%S") if dt else None
@@ -214,11 +209,6 @@ def _season_bounds(conn, season_id: int) -> tuple[Optional[str], Optional[str]]:
     if not row or not row["start_date"]:
         return None, None
     return row["start_date"], row["end_date"]
-
-
-def _season_metric_date_bounds(conn, season_id: int) -> tuple[Optional[str], Optional[str]]:
-    start, end = _season_bounds(conn, season_id)
-    return _cr_time_to_date(start), _cr_time_to_date(end)
 
 
 @managed_connection
@@ -323,39 +313,14 @@ def _season_donation_rows(
     season_id: int,
     *,
     limit: Optional[int] = None,
-) -> list[sqlite3.Row]:
-    start, end = _season_metric_date_bounds(conn, season_id)
-    if not start or not end:
-        return []
-    params: list = [start, end]
-    limit_clause = ""
-    if limit is not None:
-        limit_clause = "LIMIT ?"
-        params.append(int(limit))
-    return conn.execute(
-        f"""
-        WITH weekly_peaks AS (
-            SELECT d.player_tag,
-                   strftime('%Y-%W', d.metric_date) AS iso_week,
-                   MAX(COALESCE(d.donations_week, 0)) AS week_peak
-            FROM player_daily_metrics d
-            WHERE d.metric_date BETWEEN ? AND ?
-            GROUP BY d.player_tag, iso_week
-        )
-        SELECT m.player_tag AS tag,
-               COALESCE(m.display_name, m.current_name) AS name,
-               m.player_tag AS member_id,
-               SUM(wp.week_peak) AS total_donations
-        FROM weekly_peaks wp
-        JOIN players m ON m.player_tag = wp.player_tag
-        WHERE {_ACTIVE}
-        GROUP BY wp.player_tag
-        HAVING total_donations > 0
-        ORDER BY total_donations DESC, m.current_name COLLATE NOCASE
-        {limit_clause}
-        """,
-        tuple(params),
-    ).fetchall()
+) -> list[dict]:
+    from engine.award_outcomes import compute_season_award_outcome
+
+    out = [
+        {**entry, "member_id": entry["tag"]}
+        for entry in compute_season_award_outcome(conn, season_id)["donation_champs"]
+    ]
+    return out[: int(limit)] if limit is not None else out
 
 
 @managed_connection
@@ -374,9 +339,11 @@ def get_season_donation_leaderboard(
             "name": r["name"],
             "member_id": r["member_id"],
             "total_donations": r["total_donations"],
-            "rank": i + 1,
+            "rank": r["official_rank"],
+            "tied": r["tied"],
+            "tie_count": r["tie_count"],
         }
-        for i, r in enumerate(rows)
+        for r in rows
     ]
 
 
@@ -395,39 +362,14 @@ def get_rookie_mvp_candidates(
     season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
     if season_id is None:
         return []
-    rows = conn.execute(
-        f"""
-        SELECT wp.player_tag AS tag,
-               MAX(m.current_name) AS name,
-               SUM(COALESCE(wp.fame, 0)) AS total_points,
-               COUNT(*) AS races_participated
-        FROM war_participation wp
-        JOIN players m ON m.player_tag = wp.player_tag
-        JOIN clan_memberships cm
-          ON cm.player_tag = wp.player_tag AND cm.left_at IS NULL
-        WHERE wp.season_id = ? AND {_ACTIVE}
-          AND wp.player_tag NOT IN (
-              SELECT DISTINCT player_tag FROM war_participation WHERE season_id < ?
-          )
-        GROUP BY wp.player_tag
-        HAVING total_points > 0
-        ORDER BY total_points DESC, races_participated DESC
-        LIMIT ?
-        """,
-        (int(season_id), int(season_id), max(1, int(limit))),
-    ).fetchall()
-    out = [
-        {
-            "tag": _canon_tag(r["tag"]),
-            "name": r["name"],
-            "member_id": _canon_tag(r["tag"]),
-            "total_points": r["total_points"] or 0,
-            "races_participated": r["races_participated"],
-        }
-        for r in rows
+    from engine.award_outcomes import compute_season_award_outcome
+
+    return [
+        {**entry, "member_id": entry["tag"]}
+        for entry in compute_season_award_outcome(conn, season_id)["rookie_mvps"][
+            : max(1, int(limit))
+        ]
     ]
-    _apply_tie_aware_ranks(out, "total_points")
-    return out
 
 
 def _apply_tie_aware_ranks(entries: list[dict], value_key: str) -> None:
@@ -486,7 +428,7 @@ def get_season_awards_standings(
     conn: Optional[sqlite3.Connection] = None,
 ) -> dict:
     """Current standings for the season awards in signal-payload shape."""
-    from storage.war_analytics import get_war_champ_standings
+    from engine.award_outcomes import compute_season_award_outcome
 
     season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
     empty = {
@@ -500,16 +442,18 @@ def get_season_awards_standings(
         return empty
 
     war_champ = []
-    for i, entry in enumerate(get_war_champ_standings(season_id=season_id, conn=conn)[:3]):
+    outcome = compute_season_award_outcome(conn, season_id)
+    for entry in outcome["standings"][:3]:
         war_champ.append({
-            "rank": i + 1,
+            "rank": entry["official_rank"],
             "tag": entry["tag"],
             "name": entry.get("name"),
-            "metric_value": entry.get("total_points"),
+            "metric_value": entry.get("points"),
             "metric_unit": "points",
             "metadata": {
                 "races_participated": entry.get("races_participated"),
-                "avg_points": entry.get("avg_points"),
+                "donations_tiebreak": entry.get("donations"),
+                "points_rank": entry.get("rank"),
             },
         })
 
@@ -528,9 +472,9 @@ def get_season_awards_standings(
         })
 
     donation_champs = []
-    for entry in get_season_donation_leaderboard(season_id=season_id, conn=conn):
+    for entry in outcome["donation_champs"][:3]:
         donation_champs.append({
-            "rank": entry["rank"],
+            "rank": entry["official_rank"],
             "tag": entry["tag"],
             "name": entry.get("name"),
             "metric_value": entry.get("total_donations"),
@@ -539,9 +483,9 @@ def get_season_awards_standings(
         })
 
     rookie_mvps = []
-    for entry in get_rookie_mvp_candidates(season_id=season_id, conn=conn):
+    for entry in outcome["rookie_mvps"][:3]:
         rookie_mvps.append({
-            "rank": entry["rank"],
+            "rank": entry["official_rank"],
             "tag": entry["tag"],
             "name": entry.get("name"),
             "metric_value": entry.get("total_points"),
@@ -579,35 +523,14 @@ def get_award_races(
         winner. Never rank or pick "the" Iron King.
     ``war_champ_leader`` names who currently tops the points race — the free-pass
     is built on this (see the free-pass rotation rule)."""
-    from storage.war_analytics import get_war_champ_standings
+    from engine.award_outcomes import compute_season_award_outcome
 
     season_id = season_id if season_id is not None else get_current_season_id(conn=conn)
     if season_id is None:
         return {"season_id": None, "war_champ": [], "iron_king": [], "rookie_mvp": [], "note": None}
 
-    # Season cards-donated per member — the War Champ #1 tiebreaker (Jamie
-    # 2026-07-13): equal points are still a TIE on the points race, but the
-    # official leader / free-pass pick is decided by cards donated.
-    donations = {r["tag"]: (r["total_donations"] or 0) for r in _season_donation_rows(conn, season_id)}
-
-    champ = []
-    for entry in get_war_champ_standings(season_id=season_id, conn=conn):
-        tag = _canon_tag(entry["tag"])
-        champ.append({
-            "tag": tag,
-            "name": entry.get("name"),
-            "points": entry.get("total_points") or 0,
-            "donations": donations.get(tag, 0),
-            "races_participated": entry.get("races_participated"),
-        })
-    # Sort points-first, then the donation tiebreak — so the #1 (and free-pass
-    # basis) is deterministic even among a points tie.
-    champ.sort(key=lambda e: (-e["points"], -e["donations"]))
-    champ = champ[: max(1, war_champ_limit)]
-    # Ranks are tie-aware on POINTS (equal points share a rank + tied flag) so
-    # Elixir still says "tied at 2,400" — but within a tie the order (and the
-    # leader) reflects the donation tiebreak.
-    _apply_tie_aware_ranks(champ, "points")
+    outcome = compute_season_award_outcome(conn, season_id)
+    champ = outcome["standings"][: max(1, war_champ_limit)]
 
     iron_king = [
         {
@@ -624,29 +547,12 @@ def get_award_races(
         {"tag": r["tag"], "name": r.get("name"), "points": r.get("total_points") or 0,
          "races_participated": r.get("races_participated"), "rank": r.get("rank"),
          "tied": r.get("tied"), "tie_count": r.get("tie_count")}
-        for r in get_rookie_mvp_candidates(season_id=season_id, limit=rookie_limit, conn=conn)
+        for r in outcome["rookie_mvps"][: max(1, rookie_limit)]
     ]
 
-    leader = champ[0] if champ else None
-
-    # Free-pass reasoning: last month's holder (recorded per season) + who the
-    # pass is currently IN LINE for — the highest War Champ who did NOT win it
-    # last month (the rotation rule). Lets Elixir reason on the free pass live,
-    # not just at season close.
-    last_fp = conn.execute(
-        "SELECT s.free_pass_tag AS tag, s.season_id FROM war_seasons s "
-        "WHERE s.free_pass_tag IS NOT NULL AND s.season_id < ? "
-        "ORDER BY s.season_id DESC LIMIT 1",
-        (season_id,),
-    ).fetchone()
-    last_fp_tag = last_fp["tag"] if last_fp else None
-    free_pass_last = None
-    if last_fp_tag:
-        nm = conn.execute("SELECT COALESCE(display_name, current_name) n FROM players WHERE player_tag = ?",
-                          (last_fp_tag,)).fetchone()
-        free_pass_last = {"tag": _canon_tag(last_fp_tag), "name": (nm["n"] if nm else None),
-                          "season_id": last_fp["season_id"]}
-    in_line = next((e for e in champ if e["tag"] != _canon_tag(last_fp_tag or "")), leader)
+    leader = outcome["war_champ"]
+    free_pass_last = outcome["last_free_pass"]
+    in_line = outcome["free_pass"]
 
     return {
         "season_id": season_id,

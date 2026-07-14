@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 
 from engine.recognition import compose as engine_compose
+from runtime.awareness.policy import validate_plan, validate_repair
 
 log = logging.getLogger("elixir")
 
@@ -57,6 +58,7 @@ def deliver_posts(
     post_fn,
     record_fn,
     relay_fn=None,
+    repair_fn=None,
     loop_number: int | None = None,
 ) -> dict:
     """Deliver every post in ``plan``. Returns a result dict:
@@ -66,6 +68,29 @@ def deliver_posts(
     raises or returns no message id, or a hard-post-floor signal left uncovered.
     A post that lands is recorded immediately, so a mid-plan failure still leaves
     the already-sent posts in channel_memory (the brain won't repeat them)."""
+    violations = validate_plan(read, plan)
+    if violations and repair_fn is not None:
+        log.warning("awareness copy policy rejected plan; attempting one repair: %s", violations)
+        original_plan = plan
+        try:
+            repaired = repair_fn(read, plan, violations)
+        except Exception:
+            log.exception("awareness copy policy repair raised")
+            repaired = None
+        if isinstance(repaired, dict):
+            violations = validate_repair(original_plan, repaired) + validate_plan(read, repaired)
+            if not violations:
+                # Keep persistence/diagnostics aligned with what actually
+                # reaches Discord instead of retaining the rejected draft.
+                original_plan.clear()
+                original_plan.update(repaired)
+                plan = original_plan
+    if violations:
+        reason = "copy policy violation after repair: " + ", ".join(violations)
+        log.error("awareness deliver: %s — failing tick before send", reason)
+        return {"delivered": 0, "failed": True, "reason": reason,
+                "uncovered_hard": []}
+
     posts = plan.get("posts") or []
     lanes = engine_compose.channels()
     covered: set[str] = set()

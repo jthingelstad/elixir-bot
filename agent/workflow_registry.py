@@ -128,6 +128,14 @@ _WORKFLOW_SPECS = (
         model_family="chat",
     ),
     WorkflowSpec(
+        "awareness_repair",
+        response_schema={"required": ["posts"]},
+        tools=[],
+        max_tool_rounds=0,
+        tools_allowed=False,
+        model_family="chat",
+    ),
+    WorkflowSpec(
         "ask_elixir_daily",
         response_schema={"required": ["post"]},
         tools=INTERACTIVE_READ_TOOLS,

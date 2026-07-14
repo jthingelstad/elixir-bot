@@ -25,7 +25,7 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 - `elixir.py` — Main bot: Discord events, APScheduler, channel routing
 - `elixir_agent.py` — Stable public LLM entrypoint; routes observation, channel replies, and content generation through the `agent/` package
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log). The **only** API ingress; every response is appended to `raw_api_payloads` under its true endpoint name
-- `engine/` — The v5.1 engine (spec: `docs/reference/v5.1/`): `tick.py` (the 7-step orchestrator), `clock.py` (war clock), `ingest.py` (battle mirror), `baselines.py` + `emitters/` (state-diff event emission), `recognition/` (deterministic scorer + shared ledger + per-stream recognizers + compose guards), `delivery.py` (at-least-once intent consumer), `management.py` (clan-management state machines), `polling.py` (adaptive budget scheduler), `projections.py` (read models), `offline.py` (rehearsal/replay engine — no API, no Discord)
+- `engine/` — The v5.1 engine (spec: `docs/reference/v5.1/`): `tick.py` (the five-step production data path plus explicit legacy recognizer shadow), `clock.py` (war clock), `ingest.py` (battle mirror), `baselines.py` + `emitters/` (state-diff event emission), `recognition/` (retained deterministic scorer/ledger shadow), `delivery.py` (retained at-least-once legacy intent consumer), `management.py` (clan-management state machines), `polling.py` (adaptive budget scheduler), `projections.py` (read models), `offline.py` (rehearsal/replay engine — no API, no Discord)
 - `db/` — SQLite access package: connection discipline, identity helpers, and the storage facade
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
@@ -45,24 +45,23 @@ One data flow, spec'd in `docs/reference/v5.1/`:
 
 - **One ingress:** `cr_api` → `raw_api_payloads` (14-day rolling analysis buffer, never the system of record).
 - **Four event streams:** `battle_events` (native — battles mirror in with exact timestamps; war keys resolved from the battle's own time), `player_events`, `clan_events`, `war_events` (emitted — each poll diffs against its `state_baselines` row; first sight emits nothing; dedup keys make re-processing safe).
-- **Deterministic recognition:** the ported scorer (threshold 80, 14-day accrual, bypass tiers, same-tick coalescing, cohort waves — constants are law, see `engine/recognition/scorer.py`) decides *worthiness*; the durable `recognition_ledger` decides *uniqueness* (every moment claims a deterministic key; first claim wins — one real moment, one post, cross-stream).
-- **Composition:** per-stream context (`engine/recognition/compose.py`) + the LLM voice, with the meta-marker guard falling back to a deterministic renderer; lane routing fails closed to leadership.
-- **Delivery:** at-least-once via `communication_intents` — compose, send, *then* mark fulfilled; failures retry next tick; intents expire at 6 h.
+- **One proactive owner:** the unified awareness loop reads the event streams and current projections, decides worthiness and framing in one turn, and posts with hard-floor coverage. The ported deterministic recognizers/delivery consumer remain explicit migration-shadow seams only; production `run_tick` does not run them.
+- **Composition policy:** the awareness workflow owns voice and routing. Deterministic code validates the complete plan before any send (including member pronouns and unranked-war claims), permits one wording-only repair, then fails closed so the event resurfaces next loop. There is no member-facing template fallback.
+- **Delivery:** awareness sends first, then records fulfilled `awareness:post` intents as channel memory/dedup context. A send or hard-floor miss fails the tick without advancing the awareness cursor. Legacy pending/failed intents retain their at-least-once consumer for migration/shadow use.
 - **Clan management:** `engine/management.py` per `docs/reference/v5.1/management.md` — Layer-1 evaluators (sustained donor / war-reliable / battle-active, 3-of-4-week hysteresis) feed promote/demote/kick candidacy machines. Kick-risk is reactive (fires a leader action through the policy gate mid-tick); promote/demote surface in the Monday 7:00 CT weekly review, which is also the only place the weekly counters roll. Engagement is measured from battles — `lastSeen`/logins are deliberately ignored.
 - **Adaptive polling:** `poll_state` temperatures (battles → hot; clan-poll deltas → warm; decay to cold) drive a budget of 40 per-player calls/tick, hottest first, with fairness floors (battlelog ≤6 h, profile ≤24 h for everyone). The clan and riverrace calls are cheap fixed overhead outside the budget.
 
 ### Engine Tick Contract
 
-`engine.tick.run_tick(conn, api=…, send_fn=…, compose_fn=…)` runs the seven
-steps (poll → ingest → emit → project → manage → recognize → deliver) with
-per-step guards — a failing step logs, records its error in the counters, and
-the tick continues. Counters land in `runtime_job_status` (`engine_tick` row)
-every tick; suppressed recognitions record their reason in the ledger, so
-silence is always explainable. On startup, missing stream cursors initialize
-at the current stream head (replay is safe but wasteful — the durable ledger
-already holds every claim). The engine is dependency-injected: the offline
-rehearsal (`engine/offline.py`, driven by `scripts/migrate_v51/rehearsal.py`)
-reuses steps 2–7 with stub API/send/compose.
+`engine.tick.run_tick(conn, api=…)` runs the production five-step data path
+(poll → ingest → emit → project → manage) with per-step guards — a failing step
+logs, records its error in the counters, and the tick continues. The emitted
+streams and projections are the awareness loop's read. `deliver=False` is the
+default and production contract; `deliver=True` explicitly exercises the
+retired recognize → legacy-intent-deliver path for migration tests only. The
+offline engine follows the same awareness-only default, with
+`legacy_proactive=True` as its explicit shadow seam. Counters land in
+`runtime_job_status` (`engine_tick` row) every tick.
 
 ## Environment
 
@@ -102,8 +101,8 @@ regenerate it after any deliberate dependency upgrade.
 
 Unit tests target one delta with minimal dicts; these three run the engine against reality and catch what hand-built fixtures can't. Run the first two before deploying engine changes:
 
-1. **Replay gate** — `./venv/bin/python scripts/replay_gate.py`. Snapshots the live DB, clears baselines, replays the real raw-payload window through the offline engine. A correct engine re-derives its own history to ~zero new rows (dedup absorbs everything); new events mean current code disagrees with what live did. Ends with the season-close rehearsal + global invariants. All gates must PASS.
-2. **Time-travel simulator** — `./venv/bin/python scripts/simulate.py`. A deterministic synthetic war week (skewed 09:37Z reset, a join, a leave, a level-up, war battles, section rollover) through the REAL `run_tick` at ~2 s/simulated-week. Its gates encode the live incident classes: intent floods, raw-index day labels, drift anchoring, poll starvation. Its first run found three real engine bugs (cold-start FK failures, missing step rollback re-emitting joins every tick, membership-less players never polled).
+1. **Replay gate** — `./venv/bin/python scripts/replay_gate.py`. Snapshots the live DB, clears baselines, and replays the real raw-payload window twice through the awareness-only offline engine. Pass 1 inventories historical drift (current code may derive events an older deployment missed); pass 2 is the hard gate and must add exactly zero events, battles, legacy claims, or legacy intents under the same code. Ends with the current-data-relative season-close rehearsal + global invariants. All gates must PASS.
+2. **Time-travel simulator** — `./venv/bin/python scripts/simulate.py`. A deterministic synthetic war week (skewed 09:37Z reset, a join, a leave, a level-up, war battles, section rollover) through the production `run_tick` path at ~2 s/simulated-week. It proves event correctness, drift anchoring, poll fairness, zero legacy claims/intents, and that the awareness read sees hard-post stream events.
 3. **Real-payload fixtures** — `tests/fixtures/cr/*.json`, loaded via `load_cr_fixture` (tests/conftest.py) and asserted by `tests/test_cr_fixture_shapes.py`. When Supercell drifts a payload shape, these fail with a clear diff. Refresh stale fixtures by re-exporting from `raw_api_payloads` — never hand-edit them.
 
 `assert_db_invariants` (tests/conftest.py) is the shared floor under all of it — an autouse sweep after every test, plus a gate inside both scripts: unique open memberships, one ledger claim per key, FTS mirror in sync, no space-format timestamps, known lanes/statuses only.
@@ -159,7 +158,7 @@ The engine DB follows the layered retention model (`docs/reference/v5.1/schema.m
 - L4 rollups (durable): `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`, `clan_daily_battle_rollups`
 - L5 identity & tenure (durable): `players`, `player_metadata`, `player_aliases`, `clans`, `discord_users`, `discord_links`, `clan_memberships` — **the CR tag is the key everywhere**; "is X a member" = has an open `clan_memberships` row
 - L6 projections (disposable, rebuilt from streams): `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management`
-- Recognition & delivery: `recognition_ledger` (durable — reset it and Elixir double-posts), `communication_intents`
+- Proactive history + legacy shadow: `communication_intents` records fulfilled awareness posts for channel memory and still houses any legacy queue rows; `recognition_ledger` retains durable award claims and the disabled deterministic recognizer's history. Neither is disposable.
 - Clan management: `leader_action_recommendations`, `decision_cases`, `revisits`
 - Bounded war stream: `war_seasons` (durable), `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`
 - Awards (durable): `awards` — `war_champ` is a ranked podium (season points); `iron_king` is PARTICIPATION (4/4 decks every battle day — unranked, any number earn it, never crown one); `rookie_mvp` = members in their FIRST war season; `free_pass` rotates to the highest-ranked War Champ who did NOT win it last month (`engine/emitters/war.py:close_season`). The LIVE in-progress races are computed on demand via `storage.awards.get_award_races` (top-10, points, tie-aware) and surfaced in the awareness read as `award_races`; `war_champ_lead_change` / `rookie_mvp_lead_change` events emit on a leader change.
@@ -189,7 +188,7 @@ legacy visibility surface. Don't add site-publish behavior back into the bot.
 
 Elixir has one identity and several executable workflows. Discord destinations are **lanes**, not independent agents.
 
-Core rule: one signal is not one post. A stream event enters recognition (score → ledger claim → intent); Elixir then decides which lane, if any, should receive a communication.
+Core rule: one signal is not one post. The awareness loop reads the whole current situation, decides which moments deserve communication, and may combine several events into one post while proving coverage for every hard-post signal.
 
 Current primary lanes:
 - `reception` — onboarding and verification (`#welcome`)
@@ -205,7 +204,7 @@ Current primary lanes:
 - `poapkings-com` — legacy website-visibility lane (see Website Note)
 
 Current executable agents/workflows:
-- `awareness`/compose — the voice workflow the engine tick drives: given a recognized moment's context (subject history, recent wins, naming from the identity layer), it composes lane copy; the meta-marker guard falls back to the deterministic renderer.
+- `awareness` — the sole proactive voice workflow: it reads current streams, projections, history, and channel memory, then returns one structured post plan. Deterministic copy policy permits one wording-only repair and otherwise fails closed before Discord.
 - `interactive` — public read-only conversation in member-facing lanes.
 - `clanops` — private leadership conversation with gated write tools.
 - `reception` — constrained onboarding and identity-verification replies.
@@ -250,7 +249,7 @@ Principle: **Prompts define what Elixir says and why. Code defines when, where, 
 
 ### What stays in code
 
-Activity scheduling, channel routing, stream emission and recognition scoring (deterministic — never LLM judgment), outcome fan-out, delivery dedupe, tool execution, JSON response contracts, memory enforcement, nickname matching, LLM parameters, Elixir data normalization, and in-game clan chat copy guardrails.
+Activity scheduling, channel routing, stream emission, hard-post floors, copy-policy invariants, outcome fan-out, delivery bookkeeping, tool execution, JSON response contracts, memory enforcement, nickname matching, LLM parameters, Elixir data normalization, and in-game clan chat copy guardrails. The awareness model makes editorial worthiness judgments; code still owns factual and delivery invariants.
 
 ## Memory Model
 
@@ -264,7 +263,7 @@ Important rules:
 - `leader-lounge` can read public plus leadership durable memory
 - `reception` should stay focused on onboarding context and avoid unrelated clan-event noise
 - one source signal can create multiple channel outcomes, but durable memory records must stay scope-safe and must not let leadership copy overwrite public memory
-- delivery state is tracked per intent (`communication_intents`) so retries never double-post — the recognition ledger guarantees one intent per moment
+- successful awareness posts are recorded as fulfilled intents for channel memory; failed awareness ticks do not advance their read cursor, so uncovered signals resurface with already-landed posts available for dedup
 
 ## Agent Loop Guardrails (Current)
 
@@ -344,7 +343,7 @@ War tools include `war_player_type` (regular/occasional/rare/never) per member. 
 
 Almost every message Elixir sends is LLM-generated. Events, scheduled activities, and channel replies pass context to the LLM, which crafts the message using Elixir's identity from `SOUL.md` + `PURPOSE.md`, channel contract from `DISCORD.md`, lane behavior from `lanes/*.md`, and workflow-specific guidance from `agents/*.md` where applicable.
 
-Exceptions: preauthored system-signal announcements may be written directly in code, and recognition posts fall back to the deterministic renderer when the LLM returns meta-text instead of copy — deterministic wording beats posting diagnostics.
+Exceptions: preauthored system-signal announcements may be written directly in code. Awareness posts have no deterministic member-facing fallback: invalid copy gets one bounded LLM wording repair, then the tick fails closed and retries from evidence on the next loop.
 
 ### Portability
 

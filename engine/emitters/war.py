@@ -300,30 +300,6 @@ def _upsert_participation(conn, state: dict, observed_at: str) -> None:
             )
 
 
-def _season_standings(conn, season_id: int) -> list[dict]:
-    rows = conn.execute(
-        """SELECT player_tag, SUM(COALESCE(fame, 0)) AS total_points,
-                  SUM(COALESCE(decks_used, 0)) AS decks_used
-           FROM war_participation WHERE season_id = ?
-           GROUP BY player_tag ORDER BY total_points DESC, player_tag""",
-        (season_id,),
-    ).fetchall()
-    return [
-        {"player_tag": r["player_tag"], "points": r["total_points"],
-         "decks_used": r["decks_used"], "rank": i + 1}
-        for i, r in enumerate(rows)
-    ]
-
-
-def _last_free_pass_tag(conn, before_season: int) -> str | None:
-    row = conn.execute(
-        """SELECT player_tag FROM awards WHERE award_type = 'free_pass'
-           AND season_id < ? ORDER BY season_id DESC LIMIT 1""",
-        (before_season,),
-    ).fetchone()
-    return row["player_tag"] if row else None
-
-
 def emit_award_races(conn, entity_tag, old: dict, new: dict, observed_at, window_start) -> int:
     """Award-race lead changes → clan_events, so the ongoing competitions are
     event-driven, not just ambient in the read (Jamie 2026-07-13). Fires when the
@@ -351,28 +327,12 @@ def emit_award_races(conn, entity_tag, old: dict, new: dict, observed_at, window
 def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> int:
     """Season death (§16.1): compute Q2's honor + rotation outcome into
     war_seasons and emit season_closed. Idempotent via the event dedup key."""
-    standings = _season_standings(conn, season_id)
-    # Break War Champ #1 ties on cards DONATED (Jamie 2026-07-13): equal season
-    # points are decided by the higher season donor, so the champ + free-pass
-    # pick is deterministic. Falls back to points-only order when no donation
-    # data (dmap empty).
-    if standings:
-        from storage.awards import _season_donation_rows
-        dmap = {r["tag"]: (r["total_donations"] or 0) for r in _season_donation_rows(conn, season_id)}
-        standings.sort(key=lambda s: (-(s.get("points") or 0), -dmap.get(s["player_tag"], 0)))
-    champ = standings[0]["player_tag"] if standings else None
-    # War Champ vs free pass are deliberately separate (Jamie 2026-07-13): the
-    # War Champ is always the rank-1 points finisher (can repeat month over
-    # month), but the free pass goes to the HIGHEST-RANKED champ who did NOT win
-    # the free pass last month. So if rank 1 held it last month, the pass drops
-    # to rank 2 (or the next eligible) while rank 1 still takes the War Champ
-    # crown. Express the rule directly: skip last month's holder, take the
-    # highest remaining.
-    last_free_pass = _last_free_pass_tag(conn, season_id)
-    free_pass = next(
-        (s["player_tag"] for s in standings if s["player_tag"] != last_free_pass),
-        champ,
-    )
+    from engine.award_outcomes import compute_season_award_outcome
+
+    outcome = compute_season_award_outcome(conn, season_id)
+    standings = outcome["standings"]
+    champ = outcome["war_champ_tag"]
+    free_pass = outcome["free_pass_tag"]
     # #166: take final_rank from the finished last week's stored rank
     # (_finalize_week ran first in the same rollover). The snapshot handed to
     # close_season can be the degenerate post-battle reset — trusting it is
@@ -398,26 +358,17 @@ def close_season(conn, season_id: int, final_state: dict, observed_at: str) -> i
               {"final_rank": final_rank, "weeks": weeks,
                "war_champ_tag": champ, "free_pass_tag": free_pass,
                "standings_top": standings[:3]})
-    # Q5: awards fire on the season-death event — grant the durable rows in
-    # the same transaction, then raise ONE summary intent (volume principle:
-    # one clan-events post for the whole slate, not one per award). The
-    # season_closed recap intent is separate (the war recognizer owns it).
+    # Q5: awards fire on the season-death event and land durably in the same
+    # transaction. The awareness brain is the sole proactive poster; it reads
+    # season_closed + the award rows on its next turn. Do not enqueue a legacy
+    # communication intent here: production deliberately no longer consumes
+    # the deterministic recognition/delivery pipeline.
     try:
         from engine import awards as engine_awards
-        from engine import delivery
-        from engine.recognition import ledger
 
-        grants = engine_awards.grant_season_awards(conn, season_id, observed_at)
-        if grants["granted"] and ledger.claim(
-            conn, f"season_awards:{season_id}", "war",
-            [f"season_closed:{season_id}"], 0,
-        ):
-            intent_id = delivery.raise_intent(
-                conn, f"season_awards:{season_id}", "clan:season_awards",
-                "clan-events", "public",
-                {"event_type": "season_awards", **grants}, observed_at,
-            )
-            ledger.attach_intent(conn, f"season_awards:{season_id}", intent_id)
+        engine_awards.grant_season_awards(
+            conn, season_id, observed_at, outcome=outcome,
+        )
     except Exception:  # award failure must never lose the season_closed event
         import logging
 

@@ -113,7 +113,10 @@ def run_rehearsal(source_path: str, target_path: str, days: int) -> int:
     for endpoint, entity_key, payload_json, fetched_at in replay_stream(source, days):
         eng.apply(endpoint, entity_key, payload_json, fetched_at)
         n += 1
-    counters = eng.finish()
+    # Historical migration rehearsal explicitly exercises the retired
+    # deterministic recognizer. Normal replay mirrors production and leaves
+    # this off; see scripts/replay_gate.py.
+    counters = eng.finish(legacy_proactive=True)
     print(f"replayed {n} payloads into {target_path}")
     for key, val in sorted(counters.items()):
         print(f"  {key}: {val}")

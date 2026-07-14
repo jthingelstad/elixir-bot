@@ -61,13 +61,22 @@ tick(now):
                  State updates only — the weekly grain (week_anchor,
                  promote_qualifying_weeks) rolls in weekly-leadership-review (§3),
                  never mid-week.
-  6. RECOGNIZE — per-stream recognizers over events since their cursors:
-                 score → coalesce → ledger claim → raise communication_intents
-                 (recognition.md).
-  7. DELIVER   — the intent consumer (§5).
+  6. RECOGNIZE — MIGRATION SHADOW ONLY (`deliver=True`): per-stream recognizers
+                 over events since their cursors: score → coalesce → ledger
+                 claim → raise communication_intents (recognition.md).
+  7. DELIVER   — MIGRATION SHADOW ONLY: the legacy intent consumer (§5).
 ```
 
-Steps 2–6 each track a position in `stream_cursors` (`consumer_key`, e.g.
+**Current production amendment (2026-07-13):** `run_tick` defaults to
+`deliver=False` and production runs steps 1–5 only. The unified awareness loop
+is the sole proactive owner: it reads the emitted streams and projections,
+makes one whole-situation editorial decision, validates the complete plan in
+deterministic code, and posts with hard-floor coverage. Steps 6–7 remain
+available only through explicit `deliver=True` / `legacy_proactive=True` seams
+for migration tests. This amendment supersedes the proactive runtime described
+in `recognition.md` without deleting that historical algorithm.
+
+Stateful stream consumers track positions in `stream_cursors` (`consumer_key`, e.g.
 `emit:player:cards`, `recognize:battle`, `project:form`). **Cursor semantics,
 per stream:** `cursor_int` = the last processed insertion id — `event_id` for
 `player_events` / `clan_events` / `war_events`, and the implicit SQLite `rowid`
@@ -81,8 +90,9 @@ running** skips it, records the poison event to `prompt_failures`
 (`failure_type='engine_poison'`), and moves on — one bad payload must not stall
 the stream (new guard; today a bad notification can wedge a follower).
 
-**The war clock** (§16.2) is computed in step 4 from the `riverrace` baseline —
-pure function, no table — and handed to the war recognizer and composer.
+**The war clock** (§16.2) is computed from the `riverrace` baseline — a pure
+function, no table — and feeds emission, the awareness read, and (only when
+explicitly enabled) the legacy war recognizer/composer.
 **Day-boundary anchoring (carried learning, pre-v5.1 issue #20; restored
 2026-07-04):** CR's reset hour skews off the nominal 10:00Z and drifts per
 season — the clock anchors each 24h period on the `war_day_opened` event's
@@ -165,7 +175,19 @@ runs an order of magnitude lower while hot coverage improves from 30 min to
 producing >30 battles between polls loses history — 10-min hot polling makes
 that practically unreachable.
 
-## 5. Delivery — the at-least-once contract (§17.3)
+## 5. Delivery contracts
+
+### 5.1 Production awareness delivery
+
+Awareness validates the complete post plan before any send. A rejected plan
+gets exactly one no-tools, wording-only repair; routing, signal coverage, relay
+decisions, and factual numbers are immutable. If validation still fails, if a
+send fails, or if a hard-post signal is uncovered, the awareness tick fails and
+its cursor does not advance. The same evidence resurfaces next loop. Successful
+posts are recorded as fulfilled `awareness:post` intents after send so the next
+read has channel-memory dedup context. There is no template fallback.
+
+### 5.2 Legacy intent consumer — migration shadow (§17.3)
 
 Carried semantics, new table (`communication_intents`, `schema.md` §7.2):
 
@@ -185,16 +207,16 @@ Carried semantics, new table (`communication_intents`, `schema.md` §7.2):
 
 Duplicate-protection at the boundary: the ledger guarantees one *intent* per
 moment; at-least-once delivery means a crash between send and mark can still
-double-post once. Accepted (hobby project; same contract as today) — noted so
+double-post once. Accepted for the retained shadow contract — noted so
 nobody "fixes" it into fulfil-before-send, which silently loses posts instead.
 
 ## 6. Startup
 
 1. Run migrations (`schema.md`); verify `stream_cursors` covers every registered
    consumer. A missing cursor initializes at the **current stream head**, not
-   zero: replaying history is *safe* (the durable ledger already holds every
-   claim, so nothing double-posts) but *wasteful* (the whole tick re-processes
-   old events for no effect) — so skip it.
+   zero: replaying history is *safe* for idempotent engine consumers but
+   *wasteful* — so skip it. Awareness maintains its own tick/cursor history and
+   records successful posts in channel memory.
 2. Queue startup system signals idempotently (Q7 carry;
    `runtime/system_signals.py`).
 3. Post the build-hash check-in to the `#elixir-log` webhook (carried, AGENTS.md).

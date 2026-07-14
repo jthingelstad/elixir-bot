@@ -2,21 +2,24 @@
 
 Snapshots the live DB to a scratch copy, clears state_baselines, and replays
 the engine's own raw-payload window (raw_api_payloads, since go-live) back
-through the offline engine. Because every dedup key is derived from payload
-content + observation time, a correct engine re-derives (a subset of) the
-events it already emitted and produces ~ZERO new rows:
+through the awareness-only offline engine twice.
+
+Pass 1 is a DRIFT INVENTORY: current code may legitimately derive events that
+older deployed code missed. Those rows are reported for cold review, but are
+not an idempotence failure merely because the implementation improved.
+
+Pass 2 is the GATE: after clearing baselines again, the exact same code and
+payloads must produce ZERO additional events, battles, legacy ledger claims,
+or communication intents. Because every dedup key is derived from payload
+content + observation time, any second-pass delta is a current-code defect:
 
     first payload per (entity, aspect)  -> re-seeds the baseline (first sight
                                            emits nothing — emitters contract)
     every later payload                 -> re-derives the original diffs;
                                            INSERT OR IGNORE dedups them away
 
-So "new events after replay" is the drift alarm: it means current emitter
-code, run over the exact payloads the live engine saw, disagrees with what
-the live engine did. Small deltas are expected right after an emitter FIX
-(the fix re-derives keys the buggy code missed) — the gate prints a per-type
-breakdown so that judgment call takes ten seconds, and thresholds keep the
-alarm from being noise.
+This separates "the code got better than history" from "the current code is
+not idempotent" instead of hiding both behind an arbitrary slop threshold.
 
 Finishes with the season-close rehearsal (scripts/migrate_v51/
 rehearse_season_close.py) on the same scratch copy when the latest season is
@@ -42,11 +45,6 @@ _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO)
 
 EVENT_TABLES = ("player_events", "clan_events", "war_events")
-NEW_EVENTS_MAX = 12   # slop for freshly-fixed emitters re-deriving missed keys
-NEW_CLAIMS_MAX = 6
-NEW_INTENTS_MAX = 6
-
-
 def snapshot(live_path: str, scratch_path: str) -> None:
     """Consistent copy while the bot is live (WAL) — sqlite backup API."""
     src = sqlite3.connect(f"file:{live_path}?mode=ro", uri=True)
@@ -81,6 +79,23 @@ def max_rowids(conn) -> dict:
         t: conn.execute(f"SELECT COALESCE(MAX(rowid), 0) FROM {t}").fetchone()[0]
         for t in EVENT_TABLES
     }
+
+
+def replay_rows(eng, rows) -> None:
+    for i, (endpoint, entity_key, payload_json, fetched_at) in enumerate(rows):
+        eng.apply(endpoint, entity_key, payload_json, fetched_at)
+        if i and i % 2000 == 0:
+            print(f"  ... {i}/{len(rows)}")
+
+
+def print_event_deltas(conn, rowid_mark: dict) -> None:
+    for table in EVENT_TABLES:
+        for row in conn.execute(
+            f"SELECT event_type, COUNT(*), MIN(dedup_key) FROM {table} "
+            "WHERE rowid > ? GROUP BY event_type",
+            (rowid_mark[table],),
+        ):
+            print(f"  {table}.{row[0]}: {row[1]}  e.g. {row[2]}")
 
 
 def main() -> int:
@@ -118,8 +133,8 @@ def main() -> int:
         window_start = max(window_start, floor)
     print(f"replay window: {window_start} -> now (engine go-live {go_live})")
 
-    before = counts(conn)
-    rowid_mark = max_rowids(conn)
+    historical = counts(conn)
+    historical_rowids = max_rowids(conn)
 
     # Clear baselines so the first replayed payload per (entity, aspect)
     # re-seeds silently; without this the current baseline (today's state)
@@ -133,38 +148,51 @@ def main() -> int:
            ORDER BY fetched_at ASC, payload_id ASC""",
         (window_start,),
     ).fetchall()
-    print(f"replaying {len(rows)} payloads...")
-    for i, (endpoint, entity_key, payload_json, fetched_at) in enumerate(rows):
-        eng.apply(endpoint, entity_key, payload_json, fetched_at)
-        if i and i % 2000 == 0:
-            print(f"  ... {i}/{len(rows)}")
+    print(f"pass 1/2 — historical drift inventory over {len(rows)} payloads...")
+    replay_rows(eng, rows)
+    eng.finish()
+    current = counts(conn)
+
+    print("\n=== HISTORICAL DRIFT (informational: live history -> current code) ===")
+    for key in historical:
+        print(
+            f"  {key:16s} {historical[key]:7d} -> {current[key]:7d}  "
+            f"(+{current[key] - historical[key]})"
+        )
+
+    historical_drift = sum(current[t] - historical[t] for t in EVENT_TABLES)
+    if historical_drift:
+        print("\ncurrent code derives these events that live history missed:")
+        print_event_deltas(conn, historical_rowids)
+
+    # The real idempotence test: close the first connection, clear baselines,
+    # and run the exact same payloads through a fresh awareness-only engine.
+    conn.close()
+    eng = OfflineEngine(scratch)
+    conn = eng.conn
+    before = counts(conn)
+    rowid_mark = max_rowids(conn)
+    conn.execute("DELETE FROM state_baselines")
+    conn.commit()
+    print(f"\npass 2/2 — current-code idempotence over {len(rows)} payloads...")
+    replay_rows(eng, rows)
     eng.finish()
     after = counts(conn)
 
-    print("\n=== REPLAY DELTAS (before -> after) ===")
-    for k in before:
-        print(f"  {k:16s} {before[k]:7d} -> {after[k]:7d}  (+{after[k] - before[k]})")
+    print("\n=== IDEMPOTENCE DELTAS (must all be zero) ===")
+    for key in before:
+        print(f"  {key:16s} {before[key]:7d} -> {after[key]:7d}  (+{after[key] - before[key]})")
 
     new_events = sum(after[t] - before[t] for t in EVENT_TABLES)
     if new_events:
-        print("\nnew events by type:")
-        for t in EVENT_TABLES:
-            for r in conn.execute(
-                f"SELECT event_type, COUNT(*), MIN(dedup_key) FROM {t} "
-                "WHERE rowid > ? GROUP BY event_type",
-                (rowid_mark[t],),
-            ):
-                print(f"  {t}.{r[0]}: {r[1]}  e.g. {r[2]}")
+        print("\nnon-idempotent events by type:")
+        print_event_deltas(conn, rowid_mark)
 
     gates: dict[str, bool] = {}
-    gates[f"new events <= {NEW_EVENTS_MAX} (idempotence)"] = new_events <= NEW_EVENTS_MAX
+    gates["second-pass new events == 0"] = new_events == 0
     gates["new battle rows == 0"] = after["battle_events"] == before["battle_events"]
-    gates[f"new ledger claims <= {NEW_CLAIMS_MAX}"] = (
-        after["ledger"] - before["ledger"] <= NEW_CLAIMS_MAX
-    )
-    gates[f"new intents <= {NEW_INTENTS_MAX}"] = (
-        after["intents"] - before["intents"] <= NEW_INTENTS_MAX
-    )
+    gates["new legacy ledger claims == 0"] = after["ledger"] == before["ledger"]
+    gates["new legacy intents == 0"] = after["intents"] == before["intents"]
     dupes = conn.execute(
         "SELECT COUNT(*) - COUNT(DISTINCT recognition_key) FROM recognition_ledger"
     ).fetchone()[0]
