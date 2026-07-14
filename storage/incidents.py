@@ -24,33 +24,15 @@ from typing import Any, Optional
 
 log = logging.getLogger("elixir.incidents")
 
-INCIDENTS_DDL = """
-CREATE TABLE IF NOT EXISTS runtime_incidents (
-    incident_id INTEGER PRIMARY KEY,
-    at TEXT NOT NULL,
-    component TEXT NOT NULL,          -- where it happened (e.g. 'threads', 'delivery.audit')
-    severity TEXT NOT NULL DEFAULT 'error' CHECK (severity IN ('warn','error')),
-    summary TEXT NOT NULL,            -- one-line human summary (the exception message)
-    detail TEXT,                      -- full traceback when an exception was caught
-    context_json TEXT,               -- the data being processed (tags, ids) for triage
-    resolved_at TEXT                 -- set when acknowledged/fixed; NULL = open
-);
-CREATE INDEX IF NOT EXISTS idx_incidents_open ON runtime_incidents(resolved_at, at DESC);
-CREATE INDEX IF NOT EXISTS idx_incidents_component ON runtime_incidents(component, at DESC);
-"""
-
-
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def ensure_incidents_schema(conn: sqlite3.Connection) -> None:
-    have = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_incidents'"
-    ).fetchone()
-    if not have:
-        conn.executescript(INCIDENTS_DDL)
-        conn.commit()
+    """Compatibility assertion; db.schema owns incident-ledger creation."""
+    from db.schema import require_columns
+
+    require_columns(conn, "runtime_incidents", {"incident_id", "component", "resolved_at"})
 
 
 def record_incident(
@@ -89,7 +71,8 @@ def record_incident(
                 (_utcnow(), component, severity if severity in ("warn", "error") else "error",
                  summary[:500], detail, ctx),
             )
-            conn.commit()
+            if own:
+                conn.commit()
         finally:
             if own:
                 conn.close()

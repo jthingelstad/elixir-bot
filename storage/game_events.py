@@ -7,9 +7,7 @@ the real-world change — so one change that surfaces as several detections
 becomes one post. `backfilled=1` marks reconstructed history that is recorded
 for the record and Elixir's voice but is never announced.
 
-Schema lives here (lazy CREATE, evergreen_nudges pattern): live DBs gain the
-table and the `card_catalog.first_seen_at` back-column on first access; fresh
-builds get them from scripts/migrate_v51/schema_v51.py.
+Schema lives in db.schema; this module validates the game-stream contract.
 """
 from __future__ import annotations
 
@@ -30,45 +28,16 @@ _ISO = "%Y-%m-%dT%H:%M:%SZ"
 #                        first member seen wearing it (image: iconUrls.large)
 EVENT_TYPES = ("card_added", "event_started", "event_badge_earned")
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS game_events (
-    event_id     INTEGER PRIMARY KEY,
-    dedup_key    TEXT NOT NULL UNIQUE,
-    event_type   TEXT NOT NULL,
-    change_key   TEXT NOT NULL,
-    subject_tag  TEXT,
-    observed_at  TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    scope        TEXT NOT NULL DEFAULT 'public' CHECK (scope IN ('public','leadership')),
-    backfilled   INTEGER NOT NULL DEFAULT 0,
-    created_at   TEXT NOT NULL
-)"""
-
-_INDEXES = (
-    "CREATE INDEX IF NOT EXISTS idx_game_events_change ON game_events(change_key, observed_at)",
-    "CREATE INDEX IF NOT EXISTS idx_game_events_type ON game_events(event_type, observed_at DESC)",
-)
-
-
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime(_ISO)
 
 
 def ensure_schema(conn) -> None:
-    """Lazy CREATE + the `card_catalog.first_seen_at` back-column. Idempotent —
-    safe to call on every access. card_catalog is carried verbatim from the
-    archive, so it needs a first-seen stamp to tell a genuinely-new card apart
-    from the daily sync's UPSERT."""
-    conn.execute(_SCHEMA)
-    for stmt in _INDEXES:
-        conn.execute(stmt)
-    from db import _existing_tables, _table_columns
-    if ("card_catalog" in _existing_tables(conn)
-            and "first_seen_at" not in _table_columns(conn, "card_catalog")):
-        conn.execute("ALTER TABLE card_catalog ADD COLUMN first_seen_at TEXT")
-        conn.execute(
-            "UPDATE card_catalog SET first_seen_at = synced_at WHERE first_seen_at IS NULL"
-        )
+    """Compatibility assertion; db.schema owns creation and backfill."""
+    from db.schema import require_columns
+
+    require_columns(conn, "game_events", {"event_id", "dedup_key", "change_key"})
+    require_columns(conn, "card_catalog", {"first_seen_at"})
 
 
 def insert_game_event(conn, *, dedup_key: str, event_type: str, change_key: str,

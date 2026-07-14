@@ -25,7 +25,7 @@ Rollback before close-out = old git ref + copy the archive back + relaunch.
 - `elixir.py` — Main bot: Discord events, APScheduler, channel routing
 - `elixir_agent.py` — Stable public LLM entrypoint; routes observation, channel replies, and content generation through the `agent/` package
 - `cr_api.py` — Clash Royale API client (clan roster, war status, river race log). The **only** API ingress; every response is appended to `raw_api_payloads` under its true endpoint name
-- `engine/` — The v5.1 engine (spec: `docs/reference/v5.1/`): `tick.py` (the five-step production data path plus explicit legacy recognizer shadow), `clock.py` (war clock), `ingest.py` (battle mirror), `baselines.py` + `emitters/` (state-diff event emission), `recognition/` (retained deterministic scorer/ledger shadow), `delivery.py` (retained at-least-once legacy intent consumer), `management.py` (clan-management state machines), `polling.py` (adaptive budget scheduler), `projections.py` (read models), `offline.py` (rehearsal/replay engine — no API, no Discord)
+- `engine/` — The v5.1 data engine (spec: `docs/reference/v5.1/`): `tick.py` (the five-step production materializer), `clock.py` (war clock), `ingest.py` (battle mirror), `baselines.py` + `emitters/` (state-diff event emission), `change_sets.py` (invariant-checked multi-table transitions), `management.py` (clan-management state machines), `polling.py` (adaptive budget scheduler), `projections.py` (read models), `offline.py` (rehearsal/replay engine — no API, no Discord). `recognition/` + `delivery.py` are retired proactive machinery, reachable only through `legacy_proactive.py` in explicit offline rehearsals.
 - `db/` — SQLite access package: connection discipline, identity helpers, and the storage facade
 - `cr_knowledge.py` — Static Clash Royale + POAP KINGS game knowledge
 - `prompts.py` — Loads and caches external prompt/config files from `prompts/`
@@ -47,7 +47,7 @@ One data flow, spec'd in `docs/reference/v5.1/`:
 - **Four event streams:** `battle_events` (native — battles mirror in with exact timestamps; war keys resolved from the battle's own time), `player_events`, `clan_events`, `war_events` (emitted — each poll diffs against its `state_baselines` row; first sight emits nothing; dedup keys make re-processing safe).
 - **One proactive owner:** the unified awareness loop reads the event streams and current projections, decides worthiness and framing in one turn, and posts with hard-floor coverage. The ported deterministic recognizers/delivery consumer remain explicit migration-shadow seams only; production `run_tick` does not run them.
 - **Composition policy:** the awareness workflow owns voice and routing. Deterministic code validates the complete plan before any send (including member pronouns and unranked-war claims), permits one wording-only repair, then fails closed so the event resurfaces next loop. There is no member-facing template fallback.
-- **Delivery:** awareness sends first, then records fulfilled `awareness:post` intents as channel memory/dedup context. A send or hard-floor miss fails the tick without advancing the awareness cursor. Legacy pending/failed intents retain their at-least-once consumer for migration/shadow use.
+- **Delivery:** awareness sends first, then records the post in `awareness_posts` as channel-memory/dedup context. A send or hard-floor miss fails the turn without advancing its per-stream cursor checkpoints. `communication_intents` and its at-least-once consumer are legacy offline seams only.
 - **Clan management:** `engine/management.py` per `docs/reference/v5.1/management.md` — Layer-1 evaluators (sustained donor / war-reliable / battle-active, 3-of-4-week hysteresis) feed promote/demote/kick candidacy machines. Kick-risk is reactive (fires a leader action through the policy gate mid-tick); promote/demote surface in the Monday 7:00 CT weekly review, which is also the only place the weekly counters roll. Engagement is measured from battles — `lastSeen`/logins are deliberately ignored.
 - **Adaptive polling:** `poll_state` temperatures (battles → hot; clan-poll deltas → warm; decay to cold) drive a budget of 40 per-player calls/tick, hottest first, with fairness floors (battlelog ≤6 h, profile ≤24 h for everyone). The clan and riverrace calls are cheap fixed overhead outside the budget.
 
@@ -56,11 +56,12 @@ One data flow, spec'd in `docs/reference/v5.1/`:
 `engine.tick.run_tick(conn, api=…)` runs the production five-step data path
 (poll → ingest → emit → project → manage) with per-step guards — a failing step
 logs, records its error in the counters, and the tick continues. The emitted
-streams and projections are the awareness loop's read. `deliver=False` is the
-default and production contract; `deliver=True` explicitly exercises the
-retired recognize → legacy-intent-deliver path for migration tests only. The
-offline engine follows the same awareness-only default, with
-`legacy_proactive=True` as its explicit shadow seam. Counters land in
+streams and projections are the awareness loop's read. The production
+entrypoint has no compose/send arguments and cannot enable the retired poster.
+The offline engine follows the
+same awareness-only default, with `legacy_proactive=True` as its explicit
+adapter seam. Emitter change sets must satisfy their event/table postconditions
+before a baseline advances. Counters land in
 `runtime_job_status` (`engine_tick` row) every tick.
 
 ## Environment
@@ -146,7 +147,7 @@ venv/bin/python scripts/clean.py --db
 SQLite at `elixir-v51.db` (overridable via `ELIXIR_DB_PATH`; gitignored).
 Three database files exist, with distinct roles:
 
-- **`elixir-v51.db`** — the operational engine DB: 49 engine tables + 4 conversation tables (53 designed). The baseline schema source of truth is `scripts/migrate_v51/schema_v51.py`; `db.get_connection()` **refuses** databases that do not carry the v5.1 spine — this build never rebuilds or migrates a database in place.
+- **`elixir-v51.db`** — the operational engine DB. The clean-break baseline source is `scripts/migrate_v51/schema_v51.py`; ordered post-cut evolution lives in `db/schema.py`. `db.get_connection()` refuses databases without the v5.1 spine, migrates compatible v5.1 databases forward, and is the sole initializer.
 - Durable memory lives IN the engine DB since 2026-07-04 (the v5.1 memory pass, `docs/reference/v5.1/memory.md`): `memories` + `memory_tags` + `memory_log` + `memories_fts`, accessed through the `memory_store` seam. The old `elixir-v5-memory.db` is archived (`elixir-v5-memory-archive-2026H2.db`, read-only); `ELIXIR_V5_MEMORY_DB` is retired. **One database for all runtime activity.**
 - **`elixir-v5-archive-2026H2.db`** — the pre-cut cold archive. Read-only (chmod 444), never written; open with `file:…?immutable=1`. Everything historical lives here.
 
@@ -158,7 +159,8 @@ The engine DB follows the layered retention model (`docs/reference/v5.1/schema.m
 - L4 rollups (durable): `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`, `clan_daily_battle_rollups`
 - L5 identity & tenure (durable): `players`, `player_metadata`, `player_aliases`, `clans`, `discord_users`, `discord_links`, `clan_memberships` — **the CR tag is the key everywhere**; "is X a member" = has an open `clan_memberships` row
 - L6 projections (disposable, rebuilt from streams): `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management`
-- Proactive history + legacy shadow: `communication_intents` records fulfilled awareness posts for channel memory and still houses any legacy queue rows; `recognition_ledger` retains durable award claims and the disabled deterministic recognizer's history. Neither is disposable.
+- Awareness control: per-stream positions in `stream_cursors`, plus `awareness_thoughts`, `awareness_posts`, and `watches`
+- Legacy proactive history (offline only): `communication_intents`; `recognition_ledger` retains intentless award claims plus the retired recognizer's history
 - Clan management: `leader_action_recommendations`, `decision_cases`, `revisits`
 - Bounded war stream: `war_seasons` (durable), `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days`
 - Awards (durable): `awards` — `war_champ` is a ranked podium (season points); `iron_king` is PARTICIPATION (4/4 decks every battle day — unranked, any number earn it, never crown one); `rookie_mvp` = members in their FIRST war season; `free_pass` rotates to the highest-ranked War Champ who did NOT win it last month (`engine/emitters/war.py:close_season`). The LIVE in-progress races are computed on demand via `storage.awards.get_award_races` (top-10, points, tie-aware) and surfaced in the awareness read as `award_races`; `war_champ_lead_change` / `rookie_mvp_lead_change` events emit on a leader change.
@@ -169,11 +171,13 @@ All `db` module functions accept an optional `conn` parameter — pass one in te
 
 ### Schema changes
 
-There is no in-place migration runner anymore. The v5.1 baseline in
-`scripts/migrate_v51/schema_v51.py` is the schema source of truth; a future
-schema change means extending that module and applying it deliberately
-(`db/_migrations.py` is the retired pre-v5.1 history, kept for reference
-only — nothing imports it). Backups: `scripts/backup_db.py` covers the
+The clean-break v5.1 baseline in `scripts/migrate_v51/schema_v51.py` is
+migration 0. All post-cut forward changes are ordered and versioned in
+`db/schema.py`; `db.get_connection()` applies them before returning. Runtime
+and domain modules may validate required columns but must never issue `CREATE`
+or `ALTER`. `db/_migrations.py` is the retired pre-v5.1 history, kept for
+reference only. The committed fresh-schema fingerprint test changes with every
+intentional schema change. Backups: `scripts/backup_db.py` covers the
 operational DB only — single database since the memory pass (the archive needs no backup — it never
 changes).
 
@@ -226,7 +230,7 @@ Each activity declares:
 
 Read the exact, current list (keys, schedules, executors, enabled state) from `runtime/activities.py` — don't trust a hand-maintained copy here, which drifts. The shape today:
 
-- **The engine heartbeat is `engine-tick`** (`_engine_tick`, every 10 minutes, `max_instances=1`): one `engine.tick.run_tick` pass — poll → ingest → emit → project → manage → recognize → deliver — plus leader-action card posting and the clan-chat relay tradition. It replaced the deleted `v5-reactive-tick`, `war-poll`, `player-progression`, and `award-detection` activities (awards now grant on the war stream's `season_closed` event; polling is the adaptive scheduler's job).
+- **The engine heartbeat is `engine-tick`** (`_engine_tick`, every 10 minutes, `max_instances=1`): one `engine.tick.run_tick` pass — poll → ingest → emit → project → manage — plus leader-action card posting. It replaced the deleted `v5-reactive-tick`, `war-poll`, `player-progression`, and `award-detection` activities (awards now grant on the war stream's `season_closed` event; polling is the adaptive scheduler's job). The separate awareness activity consumes events and owns proactive posting.
 - **Clan management:** `weekly-leadership-review` (Mon 7:00 CT — rolls the weekly hysteresis grain, surfaces promote/demote candidacies as leader actions, posts one review) and `action-outcome-refresh` (daily 9:30 CT — leader-action outcome evaluation + feedback-synthesis re-queue). The old `leadership-action-scan` is **gone**; its scan/creation role lives in the engine's reactive kick path.
 - **War:** `war-attendance-snapshot` (daily 4:15 CT — finalizes `war_attendance_days` just before the ~09:15 UTC war-day boundary; evaluators read finalized days only).
 - **Scheduled posts / reports:** `daily-clan-insight` (`#ask-elixir` hidden fact), `weekly-recap` (public recap), `weekly-discord-invite-relay`, `promotion-content` (`#recruiting`), `clan-wars-intel`.

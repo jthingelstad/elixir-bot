@@ -20,21 +20,11 @@ import logging
 
 log = logging.getLogger("elixir.engine.editor")
 
-EDITOR_VERDICTS_DDL = """
-CREATE TABLE IF NOT EXISTS editor_verdicts (
-    verdict_id INTEGER PRIMARY KEY,
-    intent_id INTEGER NOT NULL,
-    verdict TEXT NOT NULL CHECK (verdict IN ('pass','revise','fallback','error')),
-    dimensions_json TEXT,
-    original_copy TEXT, final_copy TEXT,
-    at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_editor_verdicts_intent ON editor_verdicts(intent_id);
-"""
-
-
 def ensure_editor_schema(conn) -> None:
-    conn.executescript(EDITOR_VERDICTS_DDL)
+    """Compatibility assertion; db.schema owns editor-history creation."""
+    from db.schema import require_columns
+
+    require_columns(conn, "editor_verdicts", {"verdict_id", "intent_id"})
 
 
 # ------------------------------------------------- editorial rubric memories

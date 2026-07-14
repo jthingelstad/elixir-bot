@@ -95,12 +95,10 @@ from storage.cards import (
 
 
 def _ensure_last_seen_api_column(conn) -> None:
-    """Lazy ALTER: add player_current_state.last_seen_api on live DBs cut before
-    the column existed (v5.1 has no forward-migration runner — fresh builds get
-    it from schema_v51 NEW_DDL). Idempotent; safe to call every snapshot."""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(player_current_state)")}
-    if "last_seen_api" not in cols:
-        conn.execute("ALTER TABLE player_current_state ADD COLUMN last_seen_api TEXT")
+    """Compatibility assertion; db.schema owns the column migration."""
+    from db.schema import require_columns
+
+    require_columns(conn, "player_current_state", {"last_seen_api"})
 
 
 @managed_connection

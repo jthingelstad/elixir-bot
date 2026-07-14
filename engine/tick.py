@@ -1,7 +1,7 @@
-"""The v5.1 engine tick — runtime.md §2's seven steps, one function.
+"""The v5.1 materialization tick — runtime.md §2's five steps, one function.
 
-Dependency-injected: `api` (cr_api-shaped), `send_fn`/`compose_fn` (delivery),
-so the offline rehearsal reuses steps 2–7 with no network and no Discord.
+Dependency-injected: `api` (cr_api-shaped), so offline rehearsal reuses the
+data path with no network or Discord.
 Single process, single writer; each step is guarded — a step that throws logs
 and the tick continues (idempotent dedup keys make re-processing safe).
 """
@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
 from datetime import datetime, timezone
 
-from engine import baselines, delivery, ingest, management, polling, projections, recognition
+from engine import baselines, ingest, management, polling, projections
 from engine.clock import infer_season_id, period_anchor_from_events, war_clock
 from engine.db import canon_tag, chicago_today, ensure_clan, ensure_player, utcnow
 from engine.emitters import emit
@@ -102,19 +101,14 @@ def _current_clock(conn, now: datetime):
     return _anchored_clock(conn, cr_shaped, now, p.get("season_id"))
 
 
-def run_tick(conn, now: datetime | None = None, *, api, send_fn=None, compose_fn=None,
-             editor_gate=None, deliver: bool = False) -> dict:
-    """Run one engine tick.
+def run_tick(conn, now: datetime | None = None, *, api) -> dict:
+    """Poll → ingest → emit → project → manage.
 
-    ``deliver`` gates the proactive posting path (steps 6–7: RECOGNIZE +
-    DELIVER). When False, the engine still polls, projects, runs MANAGE and
-    leader-actions, and emits the event stream the awareness brain reads — it
-    just stops raising communication intents and composing/sending posts. The
-    scheduled runtime uses the default ``deliver=False``: the awareness brain
-    is the sole proactive poster, so there's no double-posting and no unbounded
-    pending-intent backlog (only consume() expires intents). The legacy
-    recognizer/delivery path remains available only as an explicit shadow seam
-    for migration tests via ``deliver=True``."""
+    This production entrypoint cannot compose or deliver proactive posts. The
+    awareness loop consumes its event streams independently; the retired
+    recognizer/intent pipeline is reachable only through engine.legacy_proactive
+    in explicit offline rehearsals.
+    """
     now = now or datetime.now(timezone.utc)
     now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     counters: dict = {}
@@ -377,26 +371,6 @@ def run_tick(conn, now: datetime | None = None, *, api, send_fn=None, compose_fn
                 )
         conn.commit()
 
-    # -- steps 6/7: RECOGNIZE + DELIVER — proactive posting. Skipped entirely
-    # when the awareness brain owns posting (deliver=False): no intents raised,
-    # nothing composed or sent. Everything above (poll, project, MANAGE,
-    # leader-actions, event emit) still runs, so the brain's read is intact.
-    if deliver:
-        # -- step 6: RECOGNIZE — score → coalesce → claim → raise intents
-        with _guard(counters, "recognize", conn):
-            clock_dict = asdict(clock) if clock is not None else None
-            rec = recognition.run_recognizers(conn, clock_dict, now_iso)
-            counters.update({f"recognize_{k}": v for k, v in rec.items()})
-            conn.commit()
-
-        # -- step 7: DELIVER — at-least-once
-        with _guard(counters, "deliver", conn):
-            d = delivery.consume(conn, send_fn, compose_fn, now_iso,
-                                 editor_gate=editor_gate)
-            counters.update({f"deliver_{k}": v for k, v in d.items()})
-            conn.commit()
-    else:
-        counters["proactive_posting"] = "disabled"
-
+    counters["proactive_posting"] = "awareness_only"
     counters["tick_completed_at"] = utcnow()
     return counters

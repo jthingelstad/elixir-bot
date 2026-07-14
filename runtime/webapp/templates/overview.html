@@ -59,7 +59,7 @@
   </div>
 
   <div class="card">
-    <h2 style="margin-top:0;">Intents</h2>
+    <h2 style="margin-top:0;">Legacy intents (offline)</h2>
     <dl class="kv">
       <dt>pending</dt><dd>{{ intents.pending }}</dd>
       <dt>failed</dt><dd class="{{ 'err' if intents.failed else '' }}">{{ intents.failed }}</dd>
@@ -72,7 +72,7 @@
   <div class="card">
     <h2 style="margin-top:0;">Errors (24h)</h2>
     <dl class="kv">
-      <dt>failed/expired intents</dt><dd class="{{ 'err' if errors.failed_intents_24h else '' }}">{{ errors.failed_intents_24h }}</dd>
+      <dt>legacy failed/expired</dt><dd>{{ errors.failed_intents_24h }}</dd>
       <dt>prompt failures</dt><dd class="{{ 'err' if errors.prompt_failures_24h else '' }}">{{ errors.prompt_failures_24h }}</dd>
     </dl>
     {% for job, err in errors.job_errors.items() %}

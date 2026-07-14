@@ -324,13 +324,41 @@ def test_recorded_post_shows_up_in_channel_memory(engine_conn):
         message_id=42, loop_number=7, conn=engine_conn)
 
     mem = read_mod._channel_memory(engine_conn)
-    elixir_intents = mem["elixir"]["recent_intents"]
-    assert len(elixir_intents) == 1
-    assert elixir_intents[0]["intent_type"] == "awareness:post"
-    assert elixir_intents[0]["posted"] is True
-    assert "11-win run" in elixir_intents[0]["preview"]
+    elixir_posts = mem["elixir"]["recent_posts"]
+    assert len(elixir_posts) == 1
+    assert elixir_posts[0]["posted"] is True
+    assert "11-win run" in elixir_posts[0]["preview"]
     # The other channel stays empty.
-    assert mem["announcements"]["recent_intents"] == []
+    assert mem["announcements"]["recent_posts"] == []
+    assert engine_conn.execute(
+        "SELECT COUNT(*) FROM communication_intents"
+    ).fetchone()[0] == 0
+
+
+def test_recorded_post_is_idempotent_by_discord_message_id(engine_conn):
+    store.record_awareness_post(
+        lane="elixir", content="first receipt", message_id=42, conn=engine_conn)
+    store.record_awareness_post(
+        lane="announcements", content="retry receipt", message_id=42, conn=engine_conn)
+
+    rows = engine_conn.execute(
+        "SELECT lane, content_preview FROM awareness_posts"
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [("elixir", "first receipt")]
+
+
+def test_post_receipt_failure_is_fail_soft_but_records_incident(engine_conn):
+    store.record_awareness_post(
+        lane="elixir", content="already sent", covers=[object()],
+        message_id=99, conn=engine_conn)
+
+    incident = engine_conn.execute(
+        "SELECT component, summary FROM runtime_incidents "
+        "WHERE component = 'awareness.record_post'"
+    ).fetchone()
+    assert incident is not None
+    assert incident[0] == "awareness.record_post"
+    assert "TypeError" in incident[1]
 
 
 # --------------------------------------- last_tick_at excludes failed ticks

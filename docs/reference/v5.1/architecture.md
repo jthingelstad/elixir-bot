@@ -16,6 +16,19 @@
 >
 > **Owner:** Jamie · **Last worked:** 2026-07-02
 
+> **Implementation amendment (2026-07-14):** the clean break is complete and
+> production now has two explicit runtime stages. `engine.tick.run_tick` is a
+> five-step materializer (poll → ingest → emit → project → manage). The unified
+> awareness loop is the sole proactive consumer: it reads emitted streams by
+> durable per-stream cursors, plans across the whole situation, sends, records
+> `awareness_posts`, and atomically acknowledges cursor checkpoints with its
+> thought. The deterministic recognizer/`communication_intents` delivery chain
+> is isolated behind `engine.legacy_proactive` for offline rehearsal only.
+> Multi-table roster and season-close transitions are derived as explicit
+> change sets and must satisfy postconditions before their baselines advance.
+> Post-cut schema changes are ordered in `db/schema.py`; runtime modules do not
+> mutate schema on first use.
+
 ---
 
 ## 0. Purpose

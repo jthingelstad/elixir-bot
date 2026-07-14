@@ -1,6 +1,7 @@
 """OfflineEngine end-to-end on a tiny synthetic payload sequence."""
 from __future__ import annotations
 
+import inspect
 import json
 import sqlite3
 
@@ -162,10 +163,10 @@ def test_tick_ingest_commit_survives_later_emit_failure(tmp_path, v51_schema_tem
         counters = run_tick(
             conn,
             api=Api(),
-            send_fn=lambda *a, **k: None,
-            compose_fn=lambda *a, **k: "",
         )
         assert "emit_error" in counters
         assert conn.execute("SELECT COUNT(*) FROM battle_events").fetchone()[0] == 1
     finally:
         conn.close()
+def test_production_tick_has_no_legacy_delivery_switch():
+    assert set(inspect.signature(run_tick).parameters) == {"conn", "now", "api"}

@@ -180,53 +180,6 @@ def _isolate_default_sqlite_db(tmp_path, monkeypatch, v51_schema_template):
             conn.close()
 
 
-@pytest.fixture(scope="session")
-def v51_full_ddl(v51_schema_template):
-    """The full 53-table DDL (new + carried), harvested from the template."""
-    conn = sqlite3.connect(f"file:{v51_schema_template}?mode=ro", uri=True)
-    rows = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL "
-        "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'clan_memory_vec%' "
-        # memories_fts shadow tables are (re)created by the virtual-table
-        # CREATE itself — dumping their DDL too makes the replay collide.
-        "AND name NOT LIKE 'memories_fts_%'"
-    ).fetchall()
-    conn.close()
-    return ";\n".join(r[0] for r in rows)
-
-
-@pytest.fixture(autouse=True)
-def _seed_empty_dbs_on_get_connection(monkeypatch, v51_full_ddl):
-    """WORKAROUND for a db/__init__.py ordering bug (recorded in the Phase-8
-    report): `_enable_sqlite_vec` creates `clan_memory_vec` on the connection
-    BEFORE `get_connection`'s spine/empty check, so an empty DB is seen as
-    "vec tables only" and refused — the intended empty-DB NEW_DDL path
-    (db/__init__.py:535) is unreachable. Until that ordering is fixed, seed
-    the full v5.1 schema into empty targets so legacy fixtures behave as the
-    empty-DB path intends. Remove this fixture when db/ is fixed."""
-    import db as _db
-
-    real = _db.get_connection
-
-    def patched(db_path=None):
-        path = os.fspath(db_path or _db.DB_PATH)
-        if path == ":memory:":
-            conn = sqlite3.connect(path)
-            conn.executescript(v51_full_ddl)
-            conn.commit()
-            _db._configure_connection(conn, path)
-            return conn
-        if not os.path.exists(path) or os.path.getsize(path) == 0:
-            conn = sqlite3.connect(path)
-            conn.executescript(v51_full_ddl)
-            conn.commit()
-            conn.close()
-        return real(path)
-
-    monkeypatch.setattr(_db, "get_connection", patched)
-    yield
-
-
 @pytest.fixture(autouse=True)
 def _isolate_memory_db(tmp_path, monkeypatch):
     """Route the durable-memory store away from the live elixir-v5-memory.db.

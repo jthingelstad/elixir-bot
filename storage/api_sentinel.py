@@ -182,17 +182,10 @@ def build_api_sentinel_observations(endpoint: str, entity_key: str | None, paylo
 
 
 def _ensure_first_entity_key(conn: sqlite3.Connection) -> None:
-    """Lazily add api_sentinel_observations.first_entity_key (the v5.1 lazy-column
-    pattern). Set on insert, never overwritten on touch — it records who was
-    FIRST seen with a first-seen key, which entity_key alone doesn't preserve.
-    Existing rows seed from entity_key (best-effort; historical rows may already
-    have drifted, but those are never announced)."""
-    from db import _table_columns
+    """Compatibility assertion; db.schema owns this column and its backfill."""
+    from db.schema import require_columns
 
-    if "first_entity_key" not in _table_columns(conn, "api_sentinel_observations"):
-        conn.execute("ALTER TABLE api_sentinel_observations ADD COLUMN first_entity_key TEXT")
-        conn.execute("UPDATE api_sentinel_observations SET first_entity_key = entity_key "
-                     "WHERE first_entity_key IS NULL")
+    require_columns(conn, "api_sentinel_observations", {"first_entity_key"})
 
 
 def _insert_or_touch_observation(conn: sqlite3.Connection, observation: dict, now: str) -> dict | None:

@@ -221,21 +221,6 @@ def test_tick_history_persists_and_orders():
 
 # ---------------------------------------------------------------- safe ops
 
-def test_intent_retry_flips_failed_to_pending():
-    _seed_claim_and_intent()
-    assert webapp_ops.retry_intent(7) is True
-    conn = db.get_connection()
-    try:
-        row = conn.execute(
-            "SELECT status, last_error FROM communication_intents WHERE intent_id = 7"
-        ).fetchone()
-        assert row["status"] == "pending"
-        assert row["last_error"] is None
-    finally:
-        conn.close()
-    assert webapp_ops.retry_intent(7) is False  # pending is not retryable
-
-
 def test_weekly_review_dryrun_rolls_back():
     conn = db.get_connection()
     try:
@@ -312,10 +297,9 @@ def test_ops_routes_same_origin_guard():
         assert r.status == 403
         # and the legitimate same-origin form post still works
         ok = f"http://{client.host}:{client.port}"
-        r = await client.post("/ops/intent/99999/retry",
-                              headers={**LOGIN, "Origin": ok})
+        r = await client.post("/ops/tick", headers={**LOGIN, "Origin": ok})
         # passes the origin gate (redirect followed to the flash page)
-        assert r.status == 200 and "not retryable" in await r.text()
+        assert r.status == 200 and "tick scheduled" in await r.text()
 
     _client_run(body)
 

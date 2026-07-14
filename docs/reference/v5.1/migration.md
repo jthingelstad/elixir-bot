@@ -60,6 +60,12 @@ singletons), the DDL source is an **export from the archive**
 tables. `ELIXIR_DB_PATH` points at the new file. The old file is never migrated
 in place — transforms read the archive, write the new DB.
 
+**Post-cut evolution (2026-07-14 amendment):** migration 0 remains the clean
+break. Compatible v5.1 databases then advance through the ordered migrations in
+`db/schema.py`, keyed by `PRAGMA user_version`; pre-v5.1 databases are still
+refused. Runtime modules never lazily `CREATE` or `ALTER`. Fresh builds run the
+same forward path and are locked by a committed schema fingerprint test.
+
 ## Phase 3 — Durable carry-forward (transform, not copy — feedback New-6)
 
 All transforms are one-time scripts (`scripts/migrate_v51/*.py`), each idempotent

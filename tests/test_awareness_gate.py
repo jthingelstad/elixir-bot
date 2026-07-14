@@ -141,9 +141,8 @@ def _anniversary_read(*, posted: bool):
                          "milestone": [], "leadership": [], "system": []},
     )
     if posted:
-        read["channel_memory"] = {"announcements": {"recent_intents": [{
-            "intent_type": "awareness:post", "status": "fulfilled", "posted": True,
-            "created_at": "2026-07-14T05:05:45Z",
+        read["channel_memory"] = {"announcements": {"recent_posts": [{
+            "posted": True, "posted_at": "2026-07-14T05:05:45Z",
             "preview": "**3 months in.** kiruba and ryguy67 both hit the 3-month mark today."}]}}
     return read
 

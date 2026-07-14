@@ -1,8 +1,8 @@
 """OfflineEngine — the rehearsal seam (migration.md Phase 0 item 4 / Phase 6).
 
-Replays archived raw payloads through ingest → emit → project, then runs
-recognition + delivery once at finish() with a stub sender (no API, no
-Discord, no LLM — composition falls back to the deterministic renderer).
+Replays archived raw payloads through ingest → emit → project. An explicit
+legacy flag can invoke the isolated retired proactive adapter once at finish()
+with a stub sender (no API, Discord, or LLM).
 scripts/migrate_v51/rehearsal.py drives this.
 """
 
@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict
 from datetime import datetime, timezone
 
-from engine import delivery, ingest, projections, recognition
+from engine import ingest, projections
 from engine.clock import infer_season_id, war_clock
 from engine.db import canon_tag, connect, ensure_player
 from engine.emitters import emit
@@ -114,8 +113,8 @@ class OfflineEngine:
     ) -> dict:
         """Finish projections and optionally exercise the retired poster.
 
-        Production runs :func:`engine.tick.run_tick` with ``deliver=False``:
-        the awareness brain is the sole proactive poster. Offline replay must
+        Production :func:`engine.tick.run_tick` has no delivery surface: the
+        awareness brain is the sole proactive poster. Offline replay must
         mirror that architecture by default or it drains years of deliberately
         dormant recognizer cursors and manufactures legacy ledger claims and
         communication intents that production would never create.
@@ -140,9 +139,12 @@ class OfflineEngine:
         rec: dict = {}
         d: dict = {}
         if legacy_proactive:
-            clock_dict = asdict(self.clock) if self.clock is not None else None
-            rec = recognition.run_recognizers(self.conn, clock_dict, now_iso)
-            d = delivery.consume(self.conn, send_fn, compose_fn, now_iso)
+            from engine import legacy_proactive as legacy
+
+            rec, d = legacy.run(
+                self.conn, self.clock, now_iso,
+                send_fn=send_fn, compose_fn=compose_fn,
+            )
         self.conn.commit()
         out = dict(self.counters)
         out.update({f"recognize_{k}": v for k, v in rec.items()})

@@ -86,20 +86,6 @@ def test_tick_errors_flags_recent_job_failure(conn):
     assert len(problems) == 1 and "recorded a failure" in problems[0]
 
 
-def test_stuck_intents_only_counts_old_pending_or_failed(conn):
-    conn.executemany(
-        "INSERT INTO communication_intents (status, created_at) VALUES (?, ?)",
-        [
-            ("pending", _now(conn, "-3 hours")),     # stuck
-            ("failed", _now(conn, "-1 day")),        # stuck
-            ("pending", _now(conn, "-10 minutes")),  # fresh — fine
-            ("fulfilled", _now(conn, "-1 day")),     # terminal — fine
-            ("expired", _now(conn, "-1 day")),       # terminal — fine
-        ],
-    )
-    assert health.check_stuck_intents(conn) == ["2 intent(s) stuck pending/failed for >2h"]
-
-
 def test_ledger_duplicates(conn):
     conn.executemany(
         "INSERT INTO recognition_ledger (recognition_key) VALUES (?)",

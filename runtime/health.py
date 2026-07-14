@@ -48,15 +48,6 @@ def check_tick_errors(conn) -> list[str]:
     return problems
 
 
-def check_stuck_intents(conn) -> list[str]:
-    n = conn.execute("""
-        SELECT COUNT(*) FROM communication_intents
-        WHERE status IN ('pending', 'failed')
-          AND created_at < strftime('%Y-%m-%dT%H:%M:%S', 'now', '-2 hours')
-    """).fetchone()[0]
-    return [f"{n} intent(s) stuck pending/failed for >2h"] if n else []
-
-
 def check_ledger_duplicates(conn) -> list[str]:
     total, distinct = conn.execute(
         "SELECT COUNT(*), COUNT(DISTINCT recognition_key) FROM recognition_ledger"
@@ -132,9 +123,7 @@ def check_output_silence(conn) -> list[str]:
     recommended but never posted."""
     problems = []
     # (a) total output silence — the Pulse alone posts every ~8h, so 14h dark is wrong.
-    row = conn.execute(
-        "SELECT MAX(fulfilled_at) FROM communication_intents WHERE status='fulfilled'"
-    ).fetchone()
+    row = conn.execute("SELECT MAX(posted_at) FROM awareness_posts").fetchone()
     last = row[0] if row else None
     if last:
         hrs = conn.execute(
@@ -165,8 +154,7 @@ def _cutoff_iso(conn, offset: str) -> str:
 
 def run_all(conn, previous_size: int | None = None) -> tuple[list[str], int]:
     problems: list[str] = []
-    for check in (check_tick_errors, check_stuck_intents,
-                  check_ledger_duplicates, check_poll_starvation,
+    for check in (check_tick_errors, check_ledger_duplicates, check_poll_starvation,
                   check_memory_writes, check_new_incidents, check_output_silence):
         try:
             problems.extend(check(conn))

@@ -61,20 +61,17 @@ tick(now):
                  State updates only — the weekly grain (week_anchor,
                  promote_qualifying_weeks) rolls in weekly-leadership-review (§3),
                  never mid-week.
-  6. RECOGNIZE — MIGRATION SHADOW ONLY (`deliver=True`): per-stream recognizers
-                 over events since their cursors: score → coalesce → ledger
-                 claim → raise communication_intents (recognition.md).
-  7. DELIVER   — MIGRATION SHADOW ONLY: the legacy intent consumer (§5).
 ```
 
-**Current production amendment (2026-07-13):** `run_tick` defaults to
-`deliver=False` and production runs steps 1–5 only. The unified awareness loop
-is the sole proactive owner: it reads the emitted streams and projections,
-makes one whole-situation editorial decision, validates the complete plan in
-deterministic code, and posts with hard-floor coverage. Steps 6–7 remain
-available only through explicit `deliver=True` / `legacy_proactive=True` seams
-for migration tests. This amendment supersedes the proactive runtime described
-in `recognition.md` without deleting that historical algorithm.
+**Current production amendment (2026-07-14):** `run_tick` exposes only steps
+1–5. It accepts no compose/send callback and cannot enable the retired poster.
+The unified awareness loop is the sole proactive owner: it reads the emitted
+streams and projections by durable per-stream cursors, makes one whole-situation
+editorial decision, validates the complete plan in deterministic code, and
+posts with hard-floor coverage. The retired scorer/intent consumer is isolated
+behind `engine.legacy_proactive` and can be reached only by an explicit offline
+`legacy_proactive=True` rehearsal. This amendment supersedes the proactive
+runtime described in `recognition.md` without deleting that historical algorithm.
 
 Stateful stream consumers track positions in `stream_cursors` (`consumer_key`, e.g.
 `emit:player:cards`, `recognize:battle`, `project:form`). **Cursor semantics,
@@ -184,12 +181,13 @@ gets exactly one no-tools, wording-only repair; routing, signal coverage, relay
 decisions, and factual numbers are immutable. If validation still fails, if a
 send fails, or if a hard-post signal is uncovered, the awareness tick fails and
 its cursor does not advance. The same evidence resurfaces next loop. Successful
-posts are recorded as fulfilled `awareness:post` intents after send so the next
-read has channel-memory dedup context. There is no template fallback.
+posts are recorded in the purpose-built `awareness_posts` ledger after send so
+the next read has channel-memory dedup context. Thought persistence and consumed
+stream checkpoints commit together. There is no template fallback.
 
 ### 5.2 Legacy intent consumer — migration shadow (§17.3)
 
-Carried semantics, new table (`communication_intents`, `schema.md` §7.2):
+Offline-only carried semantics (`communication_intents`, `schema.md` §7.2):
 
 1. Select `pending`/`failed` intents, oldest first.
 2. `expires_at` passed (**6 h** from raise, carried from
@@ -212,11 +210,11 @@ nobody "fixes" it into fulfil-before-send, which silently loses posts instead.
 
 ## 6. Startup
 
-1. Run migrations (`schema.md`); verify `stream_cursors` covers every registered
-   consumer. A missing cursor initializes at the **current stream head**, not
-   zero: replaying history is *safe* for idempotent engine consumers but
-   *wasteful* — so skip it. Awareness maintains its own tick/cursor history and
-   records successful posts in channel memory.
+1. `db.get_connection()` verifies the clean-break v5.1 spine, applies ordered
+   post-cut migrations from `db/schema.py`, and validates the current schema
+   contract. Missing awareness cursors bridge from the last successful thought;
+   a truly fresh awareness consumer starts at zero so no unreviewed stream row
+   can be silently skipped.
 2. Queue startup system signals idempotently (Q7 carry;
    `runtime/system_signals.py`).
 3. Post the build-hash check-in to the `#elixir-log` webhook (carried, AGENTS.md).
@@ -226,11 +224,11 @@ nobody "fixes" it into fulfil-before-send, which silently loses posts instead.
 ## 7. Telemetry
 
 Carried requirements (AGENTS.md agent-loop guardrails): per-tick log line with
-counts per step (polled/ingested/emitted/projected/recognized/claimed/delivered/
+counts per materialization step (polled/ingested/emitted/projected/managed/
 failed), per-workflow LLM telemetry to `llm_calls`, failures to
-`prompt_failures`. New: the tick writes one `runtime_job_status` row per step
-group so `system-status` can show engine health per stage, and every suppressed
-recognition records its reason (recognition.md §1) — silence must be explainable.
+`prompt_failures`. The tick writes one `runtime_job_status` row per step group;
+awareness persists each thought, outcome, tool trace, cursor checkpoint, and
+successful post so silence and retry state remain explainable.
 
 ## 8. Decisions this doc makes — ✅ all ratified (Jamie, 2026-07-03)
 

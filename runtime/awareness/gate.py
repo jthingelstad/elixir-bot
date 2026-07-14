@@ -131,15 +131,13 @@ def _cake_day_already_posted(read: dict, cake: dict) -> bool:
     if not name:
         return False
     for lane in (read.get("channel_memory") or {}).values():
-        for intent in (lane.get("recent_intents") or []) if isinstance(lane, dict) else []:
-            if intent.get("intent_type") != "awareness:post":
+        for post in (lane.get("recent_posts") or []) if isinstance(lane, dict) else []:
+            if not post.get("posted"):
                 continue
-            if not (intent.get("posted") or intent.get("status") == "fulfilled"):
-                continue
-            created = intent.get("created_at") or ""
+            created = post.get("posted_at") or ""
             if date and not created.startswith(date):
                 continue
-            if name in (intent.get("preview") or "").lower():
+            if name in (post.get("preview") or "").lower():
                 return True
     return False
 

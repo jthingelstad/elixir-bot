@@ -10,13 +10,22 @@ from __future__ import annotations
 
 import db
 from memory_store import (
-    MEMORY_SCHEMA_SQL,  # noqa: F401  (public export pinned by this test file)
     create_memory,
     get_memory,
     get_memory_connection,
     search_memories,
     upsert_embedding,
 )
+
+
+def test_memory_schema_is_owned_by_central_contract():
+    conn = db.get_connection()
+    try:
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'"
+        ).fetchone()
+    finally:
+        conn.close()
 
 
 def test_default_writes_land_in_engine_db():

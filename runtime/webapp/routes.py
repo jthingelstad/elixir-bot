@@ -250,18 +250,6 @@ async def ops_tick(request: web.Request) -> web.Response:
     raise web.HTTPFound(f"/?ok={note}")
 
 
-async def ops_intent_retry(request: web.Request) -> web.Response:
-    if not _same_origin(request):
-        raise web.HTTPForbidden(text="bad origin")
-    try:
-        intent_id = int(request.match_info["intent_id"])
-    except (TypeError, ValueError):
-        raise web.HTTPBadRequest(text="bad intent id")
-    ok = await asyncio.to_thread(ops.retry_intent, intent_id)
-    note = f"intent {intent_id} reset to pending" if ok else f"intent {intent_id} not retryable"
-    raise web.HTTPFound(f"/recognition?ok={note}")
-
-
 async def ops_review_dryrun(request: web.Request) -> web.Response:
     if not _same_origin(request):
         raise web.HTTPForbidden(text="bad origin")
@@ -319,7 +307,6 @@ def add_routes(app: web.Application) -> None:
         web.get("/chat/messages", chat_get),
         web.post("/chat", chat_post),
         web.post("/ops/tick", ops_tick),
-        web.post("/ops/intent/{intent_id}/retry", ops_intent_retry),
         web.post("/ops/weekly-review/dryrun", ops_review_dryrun),
         web.post("/ops/member/{tag}/email", ops_member_email),
     ])

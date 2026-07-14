@@ -1,14 +1,13 @@
-"""Persistence for the awareness loop: the train of thought + standing watches.
-
-Two v5.1 tables, created lazily on first use (no migration runner in v5.1 —
-same discipline as ``storage/incidents.py``):
+"""Persistence for the awareness loop: thoughts, posts, and standing watches.
 
 - ``awareness_thoughts`` — one row per loop turn: the read it reviewed, the
   plan it produced, and whether it chose silence. (The ``shadow`` column is a
   retained legacy field — shadow mode was removed, the brain is fully live.)
+- ``awareness_posts`` — the durable member-facing delivery history.
 - ``watches`` — standing concerns Elixir is keeping an eye on (a durable home
   for the ``flag_member_watch`` surface).
 
+Schema is versioned centrally in ``db.schema``. This module never issues DDL.
 Writers follow the ``managed_connection`` borrow/own pattern and never commit a
 borrowed connection.
 """
@@ -23,39 +22,9 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from db import managed_connection
+from db.schema import require_columns
 
 log = logging.getLogger("elixir")
-
-AWARENESS_DDL = """
-CREATE TABLE IF NOT EXISTS awareness_thoughts (
-    thought_id TEXT PRIMARY KEY,
-    loop_number INTEGER,
-    at TEXT NOT NULL,
-    read_json TEXT,
-    plan_json TEXT,
-    tool_trace_json TEXT,
-    chose_silence INTEGER NOT NULL DEFAULT 0,
-    post_count INTEGER NOT NULL DEFAULT 0,
-    skipped_reason TEXT,
-    model TEXT,
-    shadow INTEGER NOT NULL DEFAULT 0  -- legacy: shadow mode removed; always 0 (live)
-);
-CREATE INDEX IF NOT EXISTS idx_awareness_thoughts_at ON awareness_thoughts(at DESC);
-CREATE INDEX IF NOT EXISTS idx_awareness_thoughts_loop ON awareness_thoughts(loop_number DESC);
-
-CREATE TABLE IF NOT EXISTS watches (
-    watch_id TEXT PRIMARY KEY,
-    opened_at TEXT NOT NULL,
-    subject_tag TEXT,
-    subject_label TEXT,
-    reason TEXT,
-    status TEXT NOT NULL DEFAULT 'open',
-    expires_at TEXT,
-    last_seen_at TEXT,
-    resolved_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_watches_status ON watches(status, opened_at DESC);
-"""
 
 AWARENESS_EVENT_STREAMS = {
     "player": "player_events",
@@ -101,27 +70,10 @@ def classify_plan(plan) -> tuple[str, str | None]:
 
 
 def ensure_awareness_schema(conn: sqlite3.Connection) -> None:
-    have = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='awareness_thoughts'"
-    ).fetchone()
-    if not have:
-        conn.executescript(AWARENESS_DDL)
-        conn.commit()
-        return
-    # Best-effort forward-add for columns introduced after the table existed
-    # (no migration runner in v5.1 — same lazy discipline as the DDL itself).
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(awareness_thoughts)").fetchall()}
-    added_loop_number = "loop_number" not in cols
-    for col, decl in (("loop_number", "INTEGER"), ("tool_trace_json", "TEXT")):
-        if col not in cols:
-            conn.execute(f"ALTER TABLE awareness_thoughts ADD COLUMN {col} {decl}")
-    if added_loop_number:
-        # Backfill pre-existing rows from insertion order (rowid) so the loop
-        # sequence is continuous and new loops don't restart at #1.
-        conn.execute(
-            "UPDATE awareness_thoughts SET loop_number = rowid WHERE loop_number IS NULL"
-        )
-    conn.commit()
+    """Compatibility name: validate; db.get_connection owns all evolution."""
+    require_columns(conn, "awareness_thoughts", {"loop_number", "tool_trace_json"})
+    require_columns(conn, "awareness_posts", {"lane", "posted_at", "content_preview"})
+    require_columns(conn, "watches", {"watch_id", "status"})
 
 
 def ensure_event_cursors(conn: sqlite3.Connection) -> tuple[dict[str, int], bool]:
@@ -298,36 +250,35 @@ def record_awareness_post(
     loop_number: int | None = None,
     conn: sqlite3.Connection = None,
 ) -> None:
-    """Record a delivered brain post as a **fulfilled** ``communication_intents``
-    row so the next read's ``channel_memory`` sees what was just said and the
-    brain doesn't repeat itself.
+    """Record a delivered brain post in its purpose-built durable ledger.
 
-    We reuse the engine's intents table (no new store): once the engine stops
-    raising intents, this becomes the ONLY writer, and ``read._channel_memory``
-    reads the ``payload_json`` content preview back out. Best-effort — a failure
-    here must not fail an already-delivered Discord post, so it swallows and
-    logs rather than raising."""
-    now = _utcnow()
-    preview = (content or "")[:800]
-    payload = json.dumps(
-        {
-            "content": preview,
-            "covers_signal_keys": list(covers or []),
-            "loop_number": loop_number,
-        },
-        default=str,
-    )
+    Best-effort: a persistence failure must not turn an already-delivered
+    Discord post into a retry that double-posts it.
+    """
     try:
+        now = _utcnow()
+        preview = (content or "")[:800]
         conn.execute(
-            "INSERT INTO communication_intents (recognition_key, intent_type, lane, "
-            "scope, payload_json, status, attempts, created_at, expires_at, "
-            "fulfilled_at, discord_message_id) "
-            "VALUES (NULL, 'awareness:post', ?, 'public', ?, 'fulfilled', 1, ?, ?, ?, ?)",
-            (lane, payload, now, now, now,
+            "INSERT INTO awareness_posts "
+            "(lane, content_preview, covers_json, loop_number, posted_at, "
+            "discord_message_id) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(discord_message_id) DO NOTHING",
+            (lane, preview, json.dumps(list(covers or [])), loop_number, now,
              str(message_id) if message_id is not None else None),
         )
-    except sqlite3.Error:
+    except Exception as exc:
         log.exception("record_awareness_post: failed to record %s post", lane)
+        # The post is already visible in Discord, so this remains fail-soft to
+        # avoid a retry duplicate. The incident ledger makes the lost local
+        # receipt visible to health monitoring and operators.
+        from storage.incidents import record_incident
+
+        record_incident(
+            "awareness.record_post",
+            exc,
+            context={"lane": lane, "discord_message_id": message_id},
+            conn=conn,
+        )
 
 
 @managed_connection

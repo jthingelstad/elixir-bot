@@ -10,6 +10,13 @@
 > `open-questions.md` (Q1–Q8, C1–C6). Where this doc and `architecture.md` disagree,
 > this doc wins for implementation (README convention).
 
+> **Implementation amendment (2026-07-14):** migration 0 below remains the
+> clean-break baseline. Ordered post-cut changes now live in `db/schema.py` and
+> are applied only by `db.get_connection()`. Production awareness uses
+> `awareness_thoughts`, `awareness_posts`, `watches`, and per-stream rows in
+> `stream_cursors`; `communication_intents` is retained for offline legacy
+> rehearsals and history, not as the production post ledger.
+
 ## 1. Conventions
 
 - **Keys (§7):** if the CR API identifies it with a tag, the tag is the key
@@ -60,7 +67,8 @@ tables unchanged and is not redesigned here.
 | L4 Rollups (durable) | `player_daily_metrics`, `player_daily_battle_rollups`, `clan_daily_metrics`, `clan_daily_battle_rollups` | 4 |
 | L5 Identity & tenure (durable) | `players`, `player_metadata`, `player_aliases`, `clans`, `discord_users`, `discord_links`, `clan_memberships` | 7 |
 | L6 Projections / read models | `player_current_state`, `player_card_collection`, `player_recent_form`, `member_management` | 4 |
-| Recognition & delivery | `recognition_ledger`, `communication_intents` | 2 |
+| Awareness runtime | `awareness_thoughts`, `awareness_posts`, `watches` | 3 |
+| Legacy recognition & delivery (offline) | `recognition_ledger`, `communication_intents` | 2 |
 | Clan management | `leader_action_recommendations`, `decision_cases`, `revisits` | 3 |
 | Bounded stream: war | `war_seasons`, `war_weeks`, `war_week_clans`, `war_participation`, `war_attendance_days` | 5 |
 | Bounded stream: tournaments | `tournaments`, `tournament_battles`, `tournament_participants` | 3 |
@@ -399,7 +407,7 @@ CREATE TABLE recognition_ledger (
 First claim wins via the PK; the second stream's `INSERT` conflicts and backs off.
 Never purged (reset ⇒ double-posts, §14.2).
 
-### 7.2 `communication_intents` — the single implementation
+### 7.2 `communication_intents` — retained offline legacy queue
 
 Replaces both `storage/communication_intents.py` (Gen B, ~29 KB) and
 `event_core/domain/communication_intent.py` (Gen C) — Part I §1's duplicated concept
@@ -423,8 +431,19 @@ CREATE INDEX idx_intents_pending ON communication_intents(status, expires_at) WH
 ```
 
 At-least-once contract (§17.3): mark `fulfilled` only on confirmed send; `failed`
-retries next tick; past `expires_at` → `expired` (drop stale). `runtime.md` owns the
-loop; this table is its state.
+retries on the next explicit legacy pass; past `expires_at` → `expired` (drop
+stale). Production does not raise or consume these rows. `engine.legacy_proactive`
+owns the only executable adapter into this historical contract.
+
+### 7.2a Awareness runtime state — the production consumer
+
+`awareness_thoughts` records each deliberative turn and outcome. Per-stream
+`stream_cursors` record the monotonic event ids consumed by that turn; thought
+and cursor checkpoints advance in one transaction only after deliberate silence
+or successful live delivery. `awareness_posts` stores delivered copy, lane,
+covered signals, loop number, timestamp, and Discord message id for channel
+memory and heartbeat reads. `watches` holds the workflow's standing concerns.
+These tables are created by schema migration v1, not lazily by runtime code.
 
 ### 7.3 Clan management & leader actions
 

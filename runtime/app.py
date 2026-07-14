@@ -1128,8 +1128,7 @@ async def _relay_engine_clan_chat_actions(fulfilled_intents: list) -> int:
 
 
 async def _engine_tick():
-    """The v5.1 engine tick (runtime.md §2): poll → mirror → emit → project →
-    manage → recognize → deliver, then leader-action cards + telemetry."""
+    """The v5.1 data tick: poll → mirror → emit → project → manage."""
     import cr_api as _cr_api
 
     from engine import db as engine_db
@@ -1137,51 +1136,15 @@ async def _engine_tick():
     from engine.recognition import compose as engine_compose
 
     runtime_status.mark_job_start("engine_tick")
-    loop = asyncio.get_running_loop()
-
-    def send_fn(lane: str, copy: str, thread_id: int | None = None,
-                image_url: str | None = None):
-        lanes = engine_compose.channels()
-        ch = lanes.get(lane) or lanes.get("arena-relay")
-        if not ch:
-            raise RuntimeError(f"engine send: lane {lane!r} unresolved and no fail-closed lane")
-        # Thread routing (channels.md §2): the thread is a delivery ADDRESS —
-        # try it first, fall back to the lane channel (never block on a room).
-        if thread_id:
-            future = asyncio.run_coroutine_threadsafe(
-                _engine_send(int(thread_id), copy, image_url), loop
-            )
-            message_id = future.result(timeout=120)
-            if message_id is not None:
-                return message_id
-            log.warning("engine send: thread %s failed; falling back to lane %s", thread_id, lane)
-        future = asyncio.run_coroutine_threadsafe(
-            _engine_send(ch["channel_id"], copy, image_url), loop
-        )
-        message_id = future.result(timeout=120)
-        if message_id is None:
-            raise RuntimeError(f"engine send: post to lane {lane!r} failed")
-        return message_id
-
     def _run():
         conn = engine_db.connect()
         try:
-            # The awareness brain is the SOLE proactive poster, so the engine
-            # skips RECOGNIZE + DELIVER entirely — no intents, no compose, no
-            # send. The editor gate retired with the delivery path.
-            counters = engine_tick_mod.run_tick(
-                conn, api=_cr_api, send_fn=send_fn, deliver=False,
-            )
-            fulfilled = conn.execute(
-                """SELECT * FROM communication_intents
-                   WHERE status = 'fulfilled' AND fulfilled_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-15 minutes')"""
-            ).fetchall()
-            return counters, fulfilled
+            return engine_tick_mod.run_tick(conn, api=_cr_api)
         finally:
             conn.close()
 
     try:
-        counters, fulfilled = await asyncio.to_thread(_run)
+        counters = await asyncio.to_thread(_run)
     except Exception as exc:
         runtime_status.mark_job_failure("engine_tick", str(exc))
         log.exception("engine tick failed")
@@ -1190,9 +1153,6 @@ async def _engine_tick():
         cards = await _post_pending_leader_action_cards()
         if cards:
             counters["leader_action_cards"] = cards
-        relayed = await _relay_engine_clan_chat_actions(fulfilled)
-        if relayed:
-            counters["clan_chat_relays"] = relayed
         # Bounded-event thread lifecycle (channels.md §2) — best-effort by
         # contract; a room failure never touches the ceremony.
         from engine import db as _engine_db
@@ -1206,9 +1166,6 @@ async def _engine_tick():
             )
             if born:
                 counters["war_week_thread_born"] = born
-        closed = await _threads.close_war_week_threads(bot, _engine_db.connect, fulfilled)
-        if closed:
-            counters["war_week_threads_closed"] = closed
     except Exception:
         log.exception("engine tick post-steps failed")
     log.info("engine tick: %s", counters)
