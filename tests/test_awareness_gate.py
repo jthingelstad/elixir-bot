@@ -126,6 +126,56 @@ def test_classify_triage_on_standing_context_only():
         assert cls["tier"] == "triage", over
 
 
+def _anniversary_read(*, posted: bool):
+    """A read with a join-anniversary sitting in cake_days_today AND the
+    clan_event lane. When ``posted`` is true, channel_memory carries a fulfilled
+    post that already named the member today (the over-escalation setup)."""
+    cake = {"type": "join_anniversary", "name": "kiruba", "subject_tag": "#KIR",
+            "signal_key": "join_anniversary:#KIR:2026-07-14", "months": 3, "is_annual": False}
+    lane_sig = {"event_type": "join_anniversary", "subject_tag": "#KIR",
+                "signal_key": "join_anniversary:#KIR:2026-07-14"}
+    read = _empty_read(
+        generated_at="2026-07-14T11:05:00Z",
+        cake_days_today=[cake],
+        signals_by_lane={"clan_event": [lane_sig], "war": [], "battle_mode": [],
+                         "milestone": [], "leadership": [], "system": []},
+    )
+    if posted:
+        read["channel_memory"] = {"announcements": {"recent_intents": [{
+            "intent_type": "awareness:post", "status": "fulfilled", "posted": True,
+            "created_at": "2026-07-14T05:05:45Z",
+            "preview": "**3 months in.** kiruba and ryguy67 both hit the 3-month mark today."}]}}
+    return read
+
+
+def test_already_posted_cake_day_does_not_escalate():
+    """The over-escalation leak (#120): an anniversary already posted earlier today
+    keeps re-triggering the gate. It must be filtered from BOTH the cake context
+    and the clan_event lane so it can't push a triage into a wasted Sonnet run."""
+    read = _anniversary_read(posted=True)
+    assert gate._fresh_cake_days(read) == []                      # filtered from cake context
+    assert gate._soft_lane_signals(read) == []                    # filtered from the lane too
+    cls = gate.classify(read)
+    assert cls["tier"] == "skip"                                  # nothing fresh left → free silence
+    assert "cake" not in cls["reason"].lower()
+    # and the triage (if it ran) would see no cake day to re-post
+    import json
+    triage_payload = json.loads(gate._compact_read_for_triage(read))
+    assert triage_payload["cake_days_today"] == []
+    assert triage_payload["soft_signals"] == []
+
+
+def test_fresh_cake_day_still_reaches_triage():
+    """The fix must NOT suppress a genuine, not-yet-posted anniversary — with no
+    prior post today it stays a live cake day the gate can act on."""
+    read = _anniversary_read(posted=False)
+    assert [c["name"] for c in gate._fresh_cake_days(read)] == ["kiruba"]
+    assert gate.classify(read)["tier"] == "triage"
+    import json
+    triage_payload = json.loads(gate._compact_read_for_triage(read))
+    assert len(triage_payload["cake_days_today"]) == 1
+
+
 def test_hard_post_not_double_counted_as_soft():
     """A hard-post is mirrored into signals_by_lane; it must not also register as
     a soft-lane signal (which would be a redundant classification)."""
