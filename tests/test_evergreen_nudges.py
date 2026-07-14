@@ -20,13 +20,10 @@ def _iso(dt):
 
 
 def _public_post(conn, fulfilled_at, key="k1"):
-    # recognition_key is nullable (FK to recognition_ledger) — omit it; the quiet
-    # check only reads scope + fulfilled_at.
     conn.execute(
-        "INSERT INTO communication_intents (intent_type, lane, scope, payload_json, "
-        "status, attempts, created_at, expires_at, fulfilled_at) "
-        "VALUES ('celebrate', 'member-highlights', 'public', '{}', 'fulfilled', 0, ?, ?, ?)",
-        (fulfilled_at, fulfilled_at, fulfilled_at),
+        "INSERT INTO awareness_posts "
+        "(lane, content_preview, covers_json, posted_at) VALUES (?, ?, '[]', ?)",
+        ("elixir", key, fulfilled_at),
     )
     conn.commit()
 
@@ -45,7 +42,7 @@ def test_quiet_period_detection(engine_conn):
     assert is_quiet_period(c, NOW) is True  # no posts at all → quiet
     _public_post(c, _iso(NOW - timedelta(days=1)), key="recent")
     assert is_quiet_period(c, NOW, quiet_days=3) is False  # posted yesterday
-    c.execute("DELETE FROM communication_intents")
+    c.execute("DELETE FROM awareness_posts")
     _public_post(c, _iso(NOW - timedelta(days=5)), key="old")
     c.commit()
     assert is_quiet_period(c, NOW, quiet_days=3) is True  # last post 5d ago

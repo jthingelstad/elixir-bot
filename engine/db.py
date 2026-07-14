@@ -25,12 +25,10 @@ def db_path() -> str:
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(path or db_path())
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA busy_timeout=30000")
-    return conn
+    """Open through the sole initializer so schema evolution cannot be bypassed."""
+    import db
+
+    return db.get_connection(path or db_path())
 
 
 def utcnow() -> str:
@@ -44,12 +42,10 @@ def payload_hash(payload) -> str:
 
 
 def _ensure_display_name_column(conn) -> None:
-    """Lazy idempotent add of players.display_name for live DBs cut before it
-    existed (v5.1 has no forward-migration runner — see docs). Fresh builds get
-    it from schema_v51. Cheap: PRAGMA reads the cached schema."""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(players)")}
-    if "display_name" not in cols:
-        conn.execute("ALTER TABLE players ADD COLUMN display_name TEXT")
+    """Compatibility assertion; db.schema owns the column migration."""
+    from db.schema import require_columns
+
+    require_columns(conn, "players", {"display_name"})
 
 
 def refresh_display_name(conn, player_tag: str, name: str | None = None) -> str:

@@ -1,9 +1,9 @@
-"""Safe ops for the Observatory (the approved plan's three, nothing more).
+"""Safe ops for the Observatory.
 
 Each is deliberately narrow: run a tick now (through the scheduler so
-max_instances=1 still guards), retry a failed/expired intent (delivery picks
-it up next tick), and a weekly-review dry-run (transaction + ROLLBACK — the
-real review mutates week_anchor and counters)."""
+max_instances=1 still guards), and a weekly-review dry-run (transaction +
+ROLLBACK — the real review mutates week_anchor and counters). The legacy intent
+queue is offline-only and has no production retry operation."""
 
 from __future__ import annotations
 
@@ -25,25 +25,6 @@ def schedule_tick_now() -> str:
         app._engine_tick, trigger="date", id=job_id, misfire_grace_time=60
     )
     return job_id
-
-
-def retry_intent(intent_id: int) -> bool:
-    """failed/expired → pending with a fresh 6h expiry; next tick delivers."""
-    conn = db.get_connection()
-    try:
-        expires = (datetime.now(timezone.utc) + timedelta(hours=6)).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
-        cur = conn.execute(
-            """UPDATE communication_intents
-               SET status='pending', expires_at=?, last_error=NULL
-               WHERE intent_id=? AND status IN ('failed','expired')""",
-            (expires, int(intent_id)),
-        )
-        conn.commit()
-        return cur.rowcount > 0
-    finally:
-        conn.close()
 
 
 class _NoCommitConnection:

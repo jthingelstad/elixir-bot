@@ -351,14 +351,10 @@ def _clan_founded(conn) -> str | None:
 
 
 def _ensure_cr_years_column(conn) -> None:
-    """Lazy schema for the CR-account-anniversary baseline (v5.1 has no
-    forward-migration runner; fresh builds get it from schema_v51). Idempotent —
-    ``cr_years_celebrated`` holds the last years-played value we celebrated, so
-    first sight sets a silent baseline instead of flooding a 'hit N years' post
-    for every already-known member."""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(player_metadata)")}
-    if "cr_years_celebrated" not in cols:
-        conn.execute("ALTER TABLE player_metadata ADD COLUMN cr_years_celebrated INTEGER")
+    """Validate the centrally migrated CR-anniversary baseline column."""
+    from db.schema import require_columns
+
+    require_columns(conn, "player_metadata", {"cr_years_celebrated"})
 
 
 def emit_calendar(conn, today_chicago: str) -> int:

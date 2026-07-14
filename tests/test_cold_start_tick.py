@@ -63,12 +63,7 @@ def test_cold_start_tick_survives_empty_db(tmp_path):
         assert conn.execute("SELECT COUNT(*) FROM clans").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM players").fetchone()[0] == 0
 
-        sent = []
-        counters = tick_mod.run_tick(
-            conn, NOW, api=_ColdApi(),
-            send_fn=lambda lane, copy, *a: sent.append((lane, copy)),
-            compose_fn=lambda intent: "x",
-        )
+        counters = tick_mod.run_tick(conn, NOW, api=_ColdApi())
 
         # It completed and every step reported (no *_error keys = no swallowed
         # FK/exception in any step).

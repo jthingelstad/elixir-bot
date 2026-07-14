@@ -5,14 +5,14 @@ Creates elixir-v51.db: hand-written DDL for every NEW or CHANGED table
 DDL export from the read-only archive for carried-as-is tables (README/schema
 convention: carried tables ship via the archive's live DDL).
 
-This module is the `_migration_0` source of truth for the new engine.
+This module is the `_migration_0` source of truth for the new engine. Explicit
+forward changes live in ``db.schema`` and are applied after this baseline.
 
 Usage:
     ./venv/bin/python scripts/migrate_v51/schema_v51.py \
         --db elixir-v51.db --archive elixir-v5-archive-2026H2.db
 
-Expected table count: 57 designed tables (51 engine incl. tick_history +
-editor_verdicts, 3 conversation set, 3 memory — memory.md D1).
+Expected table count: 68 designed tables after the current forward migration.
 """
 
 from __future__ import annotations
@@ -22,6 +22,10 @@ import os
 import re
 import sqlite3
 import sys
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 # ------------------------------------------------------------------ new DDL
 # Sources: schema.md §3 (identity), §4 (ingest), §5 (streams), §6 (rollups &
@@ -692,7 +696,7 @@ CARRIED_VERBATIM = [
     "memory_episodes",
 ]
 
-EXPECTED_TABLE_COUNT = 65  # 55 engine (+ runtime_incidents + post_quality_runs + evergreen_nudges + game_events + email_verifications) + 3 conversation + 3 memory + 1 fts-excluded
+EXPECTED_TABLE_COUNT = 68
 
 
 _DEAD_MEMBERS_FK = re.compile(
@@ -750,7 +754,9 @@ def build(db_path: str, archive_path: str | None) -> None:
     for stmt in carried_ddl(archive_path):
         new.execute(stmt)
     new.executescript(NEW_DDL)
-    new.commit()
+    from db.schema import apply_schema_migrations
+
+    apply_schema_migrations(new)
     count = new.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
         "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'memories_fts%'"

@@ -29,14 +29,14 @@ KIND_MAP = {
 
 
 def run(db_path: str, memory_db_path: str) -> int:
-    from memory_store import MEMORY_SCHEMA_SQL
+    from db.schema import apply_schema_migrations
 
     old = sqlite3.connect(f"file:{memory_db_path}?mode=ro", uri=True)
     old.row_factory = sqlite3.Row
     new = sqlite3.connect(db_path)
     new.row_factory = sqlite3.Row
     new.execute("PRAGMA busy_timeout = 30000")
-    new.executescript(MEMORY_SCHEMA_SQL)
+    apply_schema_migrations(new)
 
     # Idempotency: clear-and-reload (memory_log of the migration reload too).
     new.execute("DELETE FROM memory_tags")

@@ -794,19 +794,10 @@ def list_prompt_failures(limit: int = 20, workflow: Optional[str] = None, conn: 
 
 
 def _ensure_llm_blob_columns(conn: sqlite3.Connection) -> None:
-    """Lazy forward-add of the prompt/response capture columns (no migration
-    runner in v5.1 — same discipline as runtime/awareness/store). The PRAGMA
-    check is cheap and connection-scoped, so it's correct even if the process
-    ever reconnects to a DB that predates these columns (and across the
-    per-test isolated DBs); the ALTER only fires when a column is actually
-    missing."""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(llm_calls)").fetchall()}
-    missing = [c for c in ("prompt_json", "response_json") if c not in cols]
-    if not missing:
-        return
-    for col in missing:
-        conn.execute(f"ALTER TABLE llm_calls ADD COLUMN {col} TEXT")
-    conn.commit()
+    """Compatibility assertion; db.schema owns the blob-column migration."""
+    from db.schema import require_columns
+
+    require_columns(conn, "llm_calls", {"prompt_json", "response_json"})
 
 
 @managed_connection

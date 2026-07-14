@@ -25,7 +25,7 @@ log = logging.getLogger("elixir_db")
 PACKAGE_DIR = os.path.dirname(__file__)
 PROJECT_ROOT = os.path.dirname(PACKAGE_DIR)
 
-_DEFAULT_DB_PATH = os.path.join(PROJECT_ROOT, "elixir-v5.db")
+_DEFAULT_DB_PATH = os.path.join(PROJECT_ROOT, "elixir-v51.db")
 
 
 def _resolve_db_path() -> str:
@@ -33,8 +33,8 @@ def _resolve_db_path() -> str:
 
     Lazy resolution avoids the import-order trap: ELIXIR_DB_PATH is set by
     load_dotenv(), which can run AFTER `import db`. A frozen module constant
-    would capture the pre-dotenv default. The post-consolidation default is
-    elixir-v5.db (the single operational DB); elixir.db is retired.
+    would capture the pre-dotenv default. The v5.1 operational default is
+    elixir-v51.db; the pre-cut elixir-v5.db is retired.
     """
     return os.getenv("ELIXIR_DB_PATH", _DEFAULT_DB_PATH)
 
@@ -56,8 +56,8 @@ LLM_PROMPT_RETENTION_DAYS = 14
 LLM_CALL_RETENTION_DAYS = 90
 CONVERSATION_MAX_PER_SCOPE = 20
 
-# The v5.1 spine — used only to REFUSE a wrong database, never to rebuild one
-# (docs/v5.1/migration.md: the old truth is archived, not destroyed).
+# The v5.1 spine — used to refuse a wrong database before the bounded forward
+# migrations in db.schema run (the pre-v5.1 truth is archived, not destroyed).
 _V51_SCHEMA_CORE = {
     "players": {
         "player_tag",
@@ -520,46 +520,9 @@ def _schema_is_compatible(conn: sqlite3.Connection) -> bool:
     return True
 
 
-# Legacy migrations (db/_migrations.py) no longer run: the v5.1 baseline is
-# scripts/migrate_v51/schema_v51.py and the connection layer refuses non-v5.1
-# databases instead of migrating in place (docs/v5.1/migration.md Phase 2).
-
-
-def _enable_sqlite_vec(conn: sqlite3.Connection) -> None:
-    try:
-        import sqlite_vec
-    except ImportError as exc:
-        raise RuntimeError(
-            "sqlite-vec is required but not installed. Run `venv/bin/python -m pip install -r requirements.txt`."
-        ) from exc
-
-    try:
-        conn.enable_load_extension(True)
-    except Exception:
-        log.debug("sqlite enable_load_extension not available, sqlite_vec.load() may still work")
-
-    try:
-        sqlite_vec.load(conn)
-        # v5.1: clan_memory_vec belongs to the memory DB only. Creating it
-        # unconditionally polluted the engine DB with vec shadow tables and
-        # made the empty-DB spine check unreachable — only create it where
-        # the clan_memories spine lives.
-        if "clan_memories" in _existing_tables(conn):
-            conn.execute(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS clan_memory_vec USING vec0(memory_id INTEGER PRIMARY KEY, embedding float[1536])"
-            )
-        if "clan_memory_index_status" in _existing_tables(conn):
-            conn.execute(
-                "UPDATE clan_memory_index_status SET value = '1' WHERE key = 'sqlite_vec_enabled'"
-            )
-            conn.commit()
-    except Exception as exc:
-        raise RuntimeError(f"sqlite-vec is required but failed to load: {exc}") from exc
-    finally:
-        try:
-            conn.enable_load_extension(False)
-        except Exception:
-            pass
+# Legacy migrations (db/_migrations.py) no longer run. The clean-break v5.1
+# baseline is scripts/migrate_v51/schema_v51.py; bounded post-cut forward
+# migrations live exclusively in db.schema.
 
 
 def _configure_connection(conn: sqlite3.Connection, path: str) -> None:
@@ -575,32 +538,37 @@ def _configure_connection(conn: sqlite3.Connection, path: str) -> None:
         # side-writers (cr_api raw-payload persistence, tool paths) must wait
         # instead of failing with 'database is locked'.
         conn.execute("PRAGMA busy_timeout = 30000")
-    _enable_sqlite_vec(conn)
-
-
 def get_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     path = os.fspath(db_path or _resolve_db_path())
     conn = sqlite3.connect(path)
-    _configure_connection(conn, path)
-    if not _schema_is_compatible(conn):
+    # Inspect a possibly mispointed database before enabling WAL or changing
+    # any other persistent pragma. Refusing a pre-v5.1 database must be a
+    # genuinely read-only decision.
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    tables = _existing_tables(conn)
+    if tables and not _schema_is_compatible(conn):
         tables = sorted(_existing_tables(conn))
         conn.close()
         raise RuntimeError(
             f"Database at {path} does not carry the v5.1 spine (tables: "
             f"{', '.join(tables[:12]) or '<none>'}…). Refusing to start — this build "
-            f"never rebuilds or migrates a database in place. Point ELIXIR_DB_PATH at "
+            f"never upgrades a pre-v5.1 database in place. Point ELIXIR_DB_PATH at "
             f"the v5.1 database (elixir-v51.db) or restore it from the archive per "
             f"docs/v5.1/migration.md."
         )
-    if not _existing_tables(conn):
-        # Empty DB (tests, scratch work): lay down the v5.1 engine spine.
-        # Carried-table DDL comes from the archive at migration time; fixtures
-        # that need those tables create them explicitly (Phase 8 convention).
-        from scripts.migrate_v51.schema_v51 import NEW_DDL
+    _configure_connection(conn, path)
+    if not tables:
+        # Empty DB (tests, scratch work): build the complete baseline, including
+        # frozen carried-table DDL, then run the same forward migrations as prod.
+        from scripts.migrate_v51.schema_v51 import NEW_DDL, carried_ddl
 
+        for statement in carried_ddl(None):
+            conn.execute(statement)
         conn.executescript(NEW_DDL)
-        conn.commit()
-    _enable_sqlite_vec(conn)
+    from db.schema import apply_schema_migrations
+
+    apply_schema_migrations(conn)
     return conn
 
 

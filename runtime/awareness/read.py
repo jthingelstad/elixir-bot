@@ -88,10 +88,8 @@ _LANE_BY_STREAM: dict[str, str] = {
 
 _LANE_KEYS = ("war", "battle_mode", "milestone", "clan_event", "leadership", "system")
 
-# Channels whose recent traffic we surface as channel_memory, keyed by the
-# communication_intents.lane value the delivery layer writes. The brain posts to
-# only these two; each delivered post is recorded as a fulfilled "awareness:post"
-# intent (store.record_awareness_post) whose payload carries the content preview.
+# Channels whose recent traffic we surface as channel_memory. The brain posts
+# only here; each delivered post is recorded in awareness_posts.
 _CHANNEL_LANES = (
     "announcements",
     "elixir",
@@ -468,44 +466,26 @@ def _standing_block(war: dict | None) -> dict | None:
 
 
 def _channel_memory(conn) -> dict:
-    """Recent per-lane traffic (communication intents + editor verdicts) so the
-    agent knows what each channel has already heard from it."""
+    """Recent per-lane awareness posts, so the agent avoids repeating itself."""
     out: dict[str, dict] = {}
     for lane in _CHANNEL_LANES:
-        intents = [dict(r) for r in conn.execute(
-            "SELECT intent_type, status, created_at, discord_message_id, payload_json "
-            "FROM communication_intents WHERE lane = ? "
-            "ORDER BY created_at DESC LIMIT 5",
+        posts = [dict(r) for r in conn.execute(
+            "SELECT posted_at, discord_message_id, content_preview "
+            "FROM awareness_posts WHERE lane = ? "
+            "ORDER BY posted_at DESC LIMIT 5",
             (lane,),
         ).fetchall()]
         out[lane] = {
-            "recent_intents": [
+            "recent_posts": [
                 {
-                    "intent_type": r.get("intent_type"),
-                    "status": r.get("status"),
-                    "created_at": r.get("created_at"),
+                    "posted_at": r.get("posted_at"),
                     "posted": bool(r.get("discord_message_id")),
-                    # The content preview lives in the payload now that the brain
-                    # is the writer — this is what tells it "here's what I already
-                    # said on this channel" so it doesn't repeat an angle.
-                    "preview": _intent_content_preview(r.get("payload_json")),
+                    "preview": str(r.get("content_preview") or "")[:200],
                 }
-                for r in intents
+                for r in posts
             ],
         }
     return out
-
-
-def _intent_content_preview(payload_json) -> str:
-    """Pull the content preview out of an awareness:post intent payload (best
-    effort; empty string for legacy intents without a content field)."""
-    if not payload_json:
-        return ""
-    try:
-        payload = json.loads(payload_json)
-    except (ValueError, TypeError):
-        return ""
-    return str(payload.get("content") or "")[:200]
 
 
 # Per-member spotlight cooldown window: members solo-highlighted this recently
@@ -560,12 +540,9 @@ _HEARTBEAT_QUIET_HOURS = 10
 
 def _posting_pulse(conn) -> dict:
     """When did Elixir last post, and how long ago. Sourced from the fulfilled
-    awareness:post intents (the durable posting record). ``hours_since_last_post``
+    awareness_posts ledger. ``hours_since_last_post``
     is None on the very first run (no prior post)."""
-    row = conn.execute(
-        "SELECT MAX(created_at) FROM communication_intents "
-        "WHERE intent_type = 'awareness:post' AND status = 'fulfilled'"
-    ).fetchone()
+    row = conn.execute("SELECT MAX(posted_at) FROM awareness_posts").fetchone()
     last = row[0] if row and row[0] else None
     hours = None
     if last:

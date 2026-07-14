@@ -17,19 +17,6 @@ __all__ = [
 
 _ISO = "%Y-%m-%dT%H:%M:%SZ"
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS evergreen_nudges (
-    nudge_key      TEXT PRIMARY KEY,
-    topic          TEXT NOT NULL,
-    context        TEXT NOT NULL,
-    forbidden_terms_json TEXT,
-    cooldown_days  INTEGER NOT NULL DEFAULT 30,
-    enabled        INTEGER NOT NULL DEFAULT 1,
-    last_sent_at   TEXT,
-    send_count     INTEGER NOT NULL DEFAULT 0,
-    created_at     TEXT NOT NULL
-)"""
-
 # Starter inventory (Jamie: Discord, FAQ, website). Clash chat strips links, so
 # the copy names POAPKINGS.COM as plain text and points to the Members page;
 # "Discord" is kept out of the invite copy (Clash filters the word).
@@ -76,9 +63,10 @@ def _parse(ts):
 
 
 def ensure_schema(conn) -> None:
-    """Lazy CREATE + seed (pol_seasons pattern): live DBs gain the table and the
-    starter inventory on first access; fresh builds get the table from schema_v51."""
-    conn.execute(_SCHEMA)
+    """Validate the central schema, then seed the domain inventory."""
+    from db.schema import require_columns
+
+    require_columns(conn, "evergreen_nudges", {"nudge_key", "last_sent_at"})
     if not conn.execute("SELECT 1 FROM evergreen_nudges LIMIT 1").fetchone():
         now = _now(None).strftime(_ISO)
         for item in SEED_NUDGES:
@@ -94,12 +82,9 @@ def ensure_schema(conn) -> None:
 
 def is_quiet_period(conn, now=None, *, quiet_days: int = 3) -> bool:
     """True when Elixir hasn't made a public post in `quiet_days`. The reliable
-    signal is the latest fulfilled public communication_intent (channel_state is
-    not consistently updated)."""
-    row = conn.execute(
-        "SELECT MAX(fulfilled_at) FROM communication_intents "
-        "WHERE scope = 'public' AND fulfilled_at IS NOT NULL"
-    ).fetchone()
+    signal is the latest awareness post (channel_state is not consistently
+    updated; legacy communication intents are offline-only)."""
+    row = conn.execute("SELECT MAX(posted_at) FROM awareness_posts").fetchone()
     last = row[0] if row else None
     if not last:
         return True

@@ -60,33 +60,12 @@ def _obs_date(observed_at: str) -> date:
 
 # ------------------------------------------------------------------ lifecycle
 
-# NOTE: plain execute (not executescript — its implicit COMMIT would split
-# the tick's transaction mid-step).
-_SCHEMA = (
-    """CREATE TABLE IF NOT EXISTS pol_seasons (
-        pol_season_id TEXT PRIMARY KEY,
-        started_at TEXT, ended_at TEXT,
-        closed INTEGER NOT NULL DEFAULT 0
-    )""",
-    """CREATE TABLE IF NOT EXISTS pol_season_results (
-        pol_season_id TEXT NOT NULL REFERENCES pol_seasons(pol_season_id),
-        player_tag TEXT NOT NULL,
-        league INTEGER, rating INTEGER, global_rank INTEGER,
-        battles INTEGER, wins INTEGER,
-        observed_at TEXT NOT NULL,
-        PRIMARY KEY (pol_season_id, player_tag)
-    )""",
-)
-
-
 def _ensure_schema(conn) -> None:
-    """Lazy CREATEs (editor_verdicts pattern): live DBs gain the tables on
-    first ranked observation; fresh builds get them from schema_v51."""
-    if not conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pol_seasons'"
-    ).fetchone():
-        for stmt in _SCHEMA:
-            conn.execute(stmt)
+    """Compatibility assertion; db.schema owns ranked-season creation."""
+    from db.schema import require_columns
+
+    require_columns(conn, "pol_seasons", {"pol_season_id", "closed"})
+    require_columns(conn, "pol_season_results", {"pol_season_id", "player_tag"})
 
 
 def ensure_open_season(conn, observed_at: str) -> str:

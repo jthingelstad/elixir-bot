@@ -39,16 +39,15 @@ def test_snapshot_without_last_seen_is_null(engine_conn):
     assert cur["last_seen_api"] is None
 
 
-def test_ensure_last_seen_api_column_adds_when_missing():
+def test_last_seen_schema_check_refuses_unmigrated_connection():
     conn = sqlite3.connect(":memory:")
     conn.execute(
         "CREATE TABLE player_current_state (player_tag TEXT PRIMARY KEY, observed_at TEXT)"
     )
-    _ensure_last_seen_api_column(conn)
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(player_current_state)")}
-    assert "last_seen_api" in cols
-    # idempotent — a second call is a no-op, not an error
-    _ensure_last_seen_api_column(conn)
+    import pytest
+
+    with pytest.raises(RuntimeError, match="open it through db.get_connection"):
+        _ensure_last_seen_api_column(conn)
 
 
 def test_in_game_idle_days_from_last_seen():

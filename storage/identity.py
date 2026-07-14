@@ -275,21 +275,14 @@ def is_valid_email(value: str) -> bool:
 
 
 def _ensure_email_schema(conn) -> None:
-    """Lazy schema for live DBs cut before the email columns/table existed (v5.1
-    has no forward-migration runner; fresh builds get these from schema_v51).
-    Idempotent — safe to call on every email read/write."""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(player_metadata)")}
-    if "email" not in cols:
-        conn.execute("ALTER TABLE player_metadata ADD COLUMN email TEXT DEFAULT ''")
-    if "email_verified_at" not in cols:
-        conn.execute("ALTER TABLE player_metadata ADD COLUMN email_verified_at TEXT")
-    if "email_source" not in cols:
-        conn.execute("ALTER TABLE player_metadata ADD COLUMN email_source TEXT DEFAULT ''")
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS email_verifications ("
-        "player_tag TEXT PRIMARY KEY REFERENCES players(player_tag) ON DELETE CASCADE, "
-        "pending_email TEXT NOT NULL, code_hash TEXT NOT NULL, expires_at TEXT NOT NULL, "
-        "attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)"
+    """Compatibility assertion; db.schema owns contact-identity evolution."""
+    from db.schema import require_columns
+
+    require_columns(
+        conn, "player_metadata", {"email", "email_verified_at", "email_source"},
+    )
+    require_columns(
+        conn, "email_verifications", {"player_tag", "code_hash", "expires_at"},
     )
 
 
@@ -528,13 +521,25 @@ def get_system_status(conn: Optional[sqlite3.Connection] = None) -> dict:
     ).fetchone()
     awareness_7d = conn.execute(
         """
-        SELECT COUNT(*) AS ticks,
-               COUNT(*) AS signals_in,
-               SUM(CASE WHEN status = 'fulfilled' THEN 1 ELSE 0 END) AS posts_delivered,
-               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS fallback_failed,
-               SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS failed_ticks
-        FROM communication_intents
-        WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-7 days')
+        SELECT
+            (SELECT COUNT(*) FROM awareness_thoughts
+             WHERE at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')) AS ticks,
+            (SELECT COALESCE(SUM(json_array_length(lane.value)), 0)
+             FROM awareness_thoughts AS thought,
+                  json_each(CASE
+                      WHEN json_valid(thought.read_json)
+                      THEN COALESCE(json_extract(thought.read_json, '$.signals_by_lane'), '{}')
+                      ELSE '{}'
+                  END) AS lane
+             WHERE thought.at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')) AS signals_in,
+            (SELECT COUNT(*) FROM awareness_posts
+             WHERE posted_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')) AS posts_delivered,
+            (SELECT COUNT(*) FROM awareness_thoughts
+             WHERE at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
+               AND skipped_reason LIKE '⚠️ tick failed: delivery%') AS delivery_failed,
+            (SELECT COUNT(*) FROM awareness_thoughts
+             WHERE at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
+               AND skipped_reason LIKE '⚠️ tick failed:%') AS failed_ticks
         """
     ).fetchone()
     memory_index_status = _memory_vec

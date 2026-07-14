@@ -28,11 +28,6 @@
     <dt>last error</dt><dd class="{{ 'err' if intent.last_error else '' }}">{{ intent.last_error or '–' }}</dd>
     <dt>discord message</dt><dd>{{ intent.discord_message_id or '–' }}</dd>
   </dl>
-  {% if intent.status in ('failed', 'expired') %}
-    <form class="inline" method="post" action="/ops/intent/{{ intent.intent_id }}/retry" style="margin-top:.6rem;">
-      <button class="btn ghost" type="submit">Retry delivery</button>
-    </form>
-  {% endif %}
 </div>
 <h2>Intent payload (presentation-free facts)</h2>
 <pre>{{ intent.payload | tojson_pretty }}</pre>

@@ -14,11 +14,6 @@ from datetime import datetime, timezone
 
 _TICKS: collections.deque = collections.deque(maxlen=288)  # ~48h at 10-min ticks
 
-_DDL = """CREATE TABLE IF NOT EXISTS tick_history (
-    tick_id INTEGER PRIMARY KEY,
-    recorded_at TEXT NOT NULL,
-    counters_json TEXT NOT NULL
-)"""
 _RETENTION_DAYS = 30
 
 
@@ -30,10 +25,11 @@ def record_tick(counters: dict) -> None:
     _TICKS.appendleft(entry)
     try:
         import db
+        from db.schema import require_columns
 
         conn = db.get_connection()
         try:
-            conn.execute(_DDL)
+            require_columns(conn, "tick_history", {"tick_id", "counters_json"})
             conn.execute(
                 "INSERT INTO tick_history (recorded_at, counters_json) VALUES (?, ?)",
                 (entry["recorded_at"], json.dumps(entry, default=str)),

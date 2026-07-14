@@ -62,67 +62,6 @@ SOURCE_TYPES = set(_KIND_MAP)  # legacy export
 SCOPES = {"public", "leadership", "system_internal"}
 STATUSES = {"active", "archived", "deleted"}
 
-MEMORY_SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS memories (
-    memory_id INTEGER PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN
-        ('leader_note','inference','system','synthesis','conversation_digest')),
-    title TEXT NOT NULL,
-    body TEXT NOT NULL,
-    summary TEXT,
-    scope TEXT NOT NULL DEFAULT 'public' CHECK (scope IN ('public','leadership')),
-    confidence REAL NOT NULL DEFAULT 0.9,
-    member_tag TEXT,
-    channel_key TEXT,
-    source_event_key TEXT,
-    created_by TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    expires_at TEXT,
-    retired_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_memories_member ON memories(member_tag, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_memories_event ON memories(source_event_key);
-
-CREATE TABLE IF NOT EXISTS memory_tags (
-    memory_id INTEGER NOT NULL REFERENCES memories(memory_id) ON DELETE CASCADE,
-    tag TEXT NOT NULL,
-    PRIMARY KEY (memory_id, tag)
-);
-CREATE INDEX IF NOT EXISTS idx_memory_tags_tag ON memory_tags(tag);
-
-CREATE TABLE IF NOT EXISTS memory_log (
-    log_id INTEGER PRIMARY KEY,
-    memory_id INTEGER NOT NULL,
-    action TEXT NOT NULL,
-    actor TEXT NOT NULL,
-    at TEXT NOT NULL,
-    diff_json TEXT
-);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-    title, summary, body,
-    content='memories',
-    content_rowid='memory_id'
-);
-CREATE TRIGGER IF NOT EXISTS memories_fts_ai AFTER INSERT ON memories BEGIN
-    INSERT INTO memories_fts(rowid, title, summary, body)
-    VALUES (new.memory_id, new.title, new.summary, new.body);
-END;
-CREATE TRIGGER IF NOT EXISTS memories_fts_ad AFTER DELETE ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, title, summary, body)
-    VALUES('delete', old.memory_id, old.title, old.summary, old.body);
-END;
-CREATE TRIGGER IF NOT EXISTS memories_fts_au AFTER UPDATE ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, title, summary, body)
-    VALUES('delete', old.memory_id, old.title, old.summary, old.body);
-    INSERT INTO memories_fts(rowid, title, summary, body)
-    VALUES (new.memory_id, new.title, new.summary, new.body);
-END;
-"""
-
-
 def _utcnow() -> str:
     # Engine Z-convention (cold review #8): the table briefly held three
     # timestamp formats on day one; scripts/migrate_v51/fix_memories_ts.py
@@ -156,17 +95,18 @@ def get_memory_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
 
 
 def ensure_memory_schema(conn: sqlite3.Connection) -> None:
-    """Idempotent CREATEs — the live DB gains the tables on first touch;
-    fresh builds get them from schema_v51."""
-    have = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memories'"
-    ).fetchone()
-    have_fts = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE name='memories_fts'"
-    ).fetchone()
-    if not (have and have_fts):
-        conn.executescript(MEMORY_SCHEMA_SQL)
-        conn.commit()
+    """Compatibility assertion; db.schema owns memory-system creation."""
+    from db.schema import require_columns
+
+    require_columns(conn, "memories", {"memory_id", "kind", "scope"})
+    require_columns(conn, "memory_tags", {"memory_id", "tag"})
+    require_columns(conn, "memory_log", {"log_id", "memory_id"})
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name = 'memories_fts'"
+    ).fetchone():
+        raise RuntimeError(
+            "database schema contract missing memories_fts; open through db.get_connection()"
+        )
 
 
 def managed_memory_connection(fn: Callable) -> Callable:

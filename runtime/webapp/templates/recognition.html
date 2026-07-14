@@ -3,7 +3,7 @@
 {% block content %}
 <h1>Recognition — the decision trail</h1>
 {% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
-<p class="muted">Every recognized moment claims a key here — posted or suppressed. Suppressions carry their reason
+<p class="muted">Offline legacy recognition history plus durable award claims. Suppressions carry their reason
 (the "why didn't you post X?" answer). Lanes: <code>member-highlights</code> → #player-highlights ·
 <code>clan-events</code> → #clan-events · <code>river-race</code> → #river-race ·
 <code>arena-relay</code> → #actions (leadership; unknown types fail closed here).</p>
@@ -40,13 +40,7 @@
           {% endif %}
         </td>
         <td>{{ c.lane or '' }}</td>
-        <td>
-          {% if c.intent_status in ('failed', 'expired') %}
-            <form class="inline" method="post" action="/ops/intent/{{ c.intent_id }}/retry">
-              <button class="btn ghost" type="submit">retry</button>
-            </form>
-          {% endif %}
-        </td>
+        <td></td>
       </tr>
     {% else %}
       <tr><td colspan="7" class="muted">No claims match.</td></tr>

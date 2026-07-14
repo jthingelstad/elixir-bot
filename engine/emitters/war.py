@@ -149,13 +149,10 @@ def merge_baseline(old: dict, new: dict) -> dict:
 
 
 def _ensure_war_weeks_defense_column(conn) -> None:
-    """Lazy add war_weeks.defense_fame (v5.1 has no forward-migration runner).
-    Persists the week's boat-defense fame (the API's per-day
-    progressEarnedFromDefenses, summed) so it survives the season rolling off
-    the live periodLogs — placement portion = our_fame - defense_fame."""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(war_weeks)")}
-    if "defense_fame" not in cols:
-        conn.execute("ALTER TABLE war_weeks ADD COLUMN defense_fame INTEGER")
+    """Validate the centrally migrated boat-defense persistence column."""
+    from db.schema import require_columns
+
+    require_columns(conn, "war_weeks", {"defense_fame"})
 
 
 def _week_defense_fame(state: dict) -> int | None:
