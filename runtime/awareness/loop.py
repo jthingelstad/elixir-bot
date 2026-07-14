@@ -164,9 +164,24 @@ def run_awareness_loop(*, progress_fn=None, deliver_fn=None) -> dict:
 
     loop_number = None
     try:
-        rec = store.persist_thought(read, plan, model=persist_model, tool_trace=tool_trace)
+        # A deliberate silence has fully disposed of the batch. A posted plan
+        # consumes it only when live delivery was actually available and
+        # succeeded; CLI/test deliberation without a deliver_fn must not make
+        # member-facing signals disappear. Thought + cursor movement commit in
+        # one store transaction, so a crash cannot acknowledge an unrecorded turn.
+        cursor_positions = None
+        if outcome == "silence" or (outcome == "posted" and deliver_fn is not None):
+            cursor_positions = read.get("_event_cursor_checkpoints") or None
+        rec = store.persist_thought(
+            read,
+            plan,
+            model=persist_model,
+            tool_trace=tool_trace,
+            cursor_positions=cursor_positions,
+        )
         counters["thought_id"] = rec["thought_id"]
         counters["loop_number"] = loop_number = rec["loop_number"]
+        counters["event_cursors_advanced"] = bool(cursor_positions)
     except Exception as exc:
         log.exception("awareness loop: persist_thought failed")
         counters["error"] = counters["error"] or f"persist_thought: {exc}"

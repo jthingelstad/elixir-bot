@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import db
 from storage import cases, events_read, leader_actions, revisits, war_analytics, war_status
@@ -123,46 +123,62 @@ def _clock_block() -> dict:
     }
 
 
-# The signal feed is "what's new since the last tick" — not a rolling window.
-# Player / clan / war are pure deltas: only events new since the last tick, with
-# backfilled rows (seeded history) dropped. A hard floor bounds any single tick
-# to ~1 day of catch-up so a long downtime can't flood one tick with a backlog.
+# The signal feed is a durable, oldest-first event-id backlog — not a rolling
+# timestamp window. Player / clan / war are pure deltas; game events share the
+# same acknowledgement boundary but also remain standing background context.
 # GAME events are handled separately (see _game_context) — a new card / seasonal
 # event is not a one-tick blip; the brain needs it as standing background so it
 # can both announce "Ronin just appeared" AND, weeks later, recognize a member
 # unlocking that new card.
 _SIGNAL_STREAMS = ("player", "clan", "war")
-_SIGNAL_CATCHUP_FLOOR_DAYS = 1
 _SIGNAL_LIMIT = 80
 _GAME_CONTEXT_DAYS = 28
 
 
-def _signals(conn) -> list[dict]:
+def _pending_event_batch(conn) -> dict:
     from runtime.awareness import store
-    floor = (_now() - timedelta(days=_SIGNAL_CATCHUP_FLOOR_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    last_at = store.last_tick_at(conn=conn)
-    since = max(last_at, floor) if last_at else floor
-    return events_read.list_recent_events(
-        since=since,
-        streams=_SIGNAL_STREAMS,
-        exclude_backfilled=True,
+
+    positions, initialized = store.ensure_event_cursors(conn)
+    batch = events_read.list_events_after_cursors(
+        positions,
+        streams=("player", "clan", "war", "game"),
         limit=_SIGNAL_LIMIT,
         conn=conn,
     )
+    batch["initialized"] = initialized
+    return batch
 
 
-def _game_context(conn) -> dict:
+def _signals(conn, pending_events: list[dict] | None = None) -> list[dict]:
+    if pending_events is None:
+        pending_events = _pending_event_batch(conn)["events"]
+    return [
+        event
+        for event in pending_events
+        if event.get("stream") in _SIGNAL_STREAMS and not event.get("backfilled")
+    ]
+
+
+def _game_context(conn, pending_events: list[dict] | None = None) -> dict:
     """Standing game-world background: recently-added cards and recent game
-    events, over a wider window than the delta feed. Each carries ``is_new``
-    (first seen since the last tick) so the brain can announce a just-appeared
-    card once, then keep the card as context for weeks — e.g. spotting members
-    unlocking it. Backfilled rows are INCLUDED here (unlike the delta feed);
-    ``is_new`` keys off recency, so seeded history reads as context, not news."""
-    from runtime.awareness import store
-    last_at = store.last_tick_at(conn=conn)
+    events, over a wider window than the delta feed. ``is_new`` comes from the
+    durable game-stream cursor, not wall-clock comparison, so an outage cannot
+    age a change out before the brain sees it. Backfilled rows remain context
+    but are never marked new."""
+    if pending_events is None:
+        pending_events = _pending_event_batch(conn)["events"]
+    pending_game = {
+        e.get("dedup_key"): e
+        for e in pending_events
+        if e.get("stream") == "game" and not e.get("backfilled")
+    }
     rows = events_read.list_recent_events(
         days=_GAME_CONTEXT_DAYS, streams=("game",), limit=40, conn=conn,
     )
+    known = {e.get("dedup_key") for e in rows}
+    # A long outage may leave an unconsumed game event outside the 28-day
+    # standing window. Keep it in this turn so durable means truly durable.
+    rows.extend(e for key, e in pending_game.items() if key not in known)
 
     def _entry(e: dict) -> dict:
         payload = e.get("payload") or {}
@@ -172,7 +188,7 @@ def _game_context(conn) -> dict:
             "rarity": payload.get("rarity"),
             "elixir_cost": payload.get("elixir_cost"),
             "seen_at": observed[:10],
-            "is_new": bool(last_at and observed > last_at),
+            "is_new": e.get("dedup_key") in pending_game,
         }
 
     cards = [_entry(e) for e in rows if e.get("event_type") == "card_added"]
@@ -677,7 +693,19 @@ def build_read(conn=None) -> dict:
     try:
         war = _load("war_status", lambda: war_status.get_current_war_status(conn=conn), None)
 
-        events = _load("signals", lambda: _signals(conn), [])
+        pending = _load(
+            "event_backlog",
+            lambda: _pending_event_batch(conn),
+            {
+                "events": [],
+                "checkpoints": {},
+                "heads": {},
+                "remaining_by_stream": {},
+                "has_more": False,
+                "initialized": False,
+            },
+        )
+        events = _signals(conn, pending.get("events") or [])
         signals_by_lane: dict[str, list[dict]] = {key: [] for key in _LANE_KEYS}
         hard_post_signals: list[dict] = []
         for event in events:
@@ -708,7 +736,7 @@ def build_read(conn=None) -> dict:
             "signals_by_lane": signals_by_lane,
             "hard_post_signals": hard_post_signals,
             "game_context": _load(
-                "game_context", lambda: _game_context(conn),
+                "game_context", lambda: _game_context(conn, pending.get("events") or []),
                 {"recent_cards": [], "recent_events": [], "window_days": _GAME_CONTEXT_DAYS},
             ),
             "mode_pulse": _load(
@@ -735,6 +763,16 @@ def build_read(conn=None) -> dict:
         }
         read["_degraded"] = degraded
         read["_signal_count"] = len(events)
+        read["_event_cursor_checkpoints"] = pending.get("checkpoints") or {}
+        read["_event_backlog"] = {
+            "has_more": bool(pending.get("has_more")),
+            "remaining_by_stream": pending.get("remaining_by_stream") or {},
+        }
+        # The first post-cutover read may initialize stream_cursors from the
+        # last successful historical thought. Persist that bridge before this
+        # connection closes; subsequent advancement stays atomic with thoughts.
+        if own and pending.get("initialized"):
+            conn.commit()
         if degraded:
             log.info("build_read: %d block(s) degraded: %s", len(degraded), ", ".join(degraded))
         return read
