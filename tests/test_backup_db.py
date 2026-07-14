@@ -3,7 +3,7 @@ complete .gz — never temp turds, even if interrupted (live bug 2026-07-05)."""
 import gzip
 import sqlite3
 
-from scripts.backup_db import create_backup
+from scripts.backup_db import _databases, create_backup
 
 
 def test_backup_leaves_no_temp_files_in_dest(tmp_path):
@@ -24,3 +24,13 @@ def test_backup_leaves_no_temp_files_in_dest(tmp_path):
     # and it's a real gzip of a real sqlite backup
     with gzip.open(dest / files[0], "rb") as f:
         assert f.read(16).startswith(b"SQLite format 3")
+
+
+def test_restart_backup_targets_only_the_v51_operational_db(tmp_path, monkeypatch):
+    operational = tmp_path / "elixir-v51.db"
+    monkeypatch.setenv("ELIXIR_DB_PATH", str(operational))
+    # The retired setting may survive in an old shell; it must not resurrect a
+    # second required runtime database or block restart.
+    monkeypatch.setenv("ELIXIR_V5_MEMORY_DB", str(tmp_path / "missing-memory.db"))
+
+    assert _databases() == [("elixir-v51", operational, True)]

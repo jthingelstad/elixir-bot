@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Backup the Elixir databases with compression and tiered retention pruning.
+"""Backup Elixir's operational database with compression and retention pruning.
 
-The CLI entry point (used by the restart script) snapshots every live database:
-the operational elixir-v51.db plus the durable memory store (clan_memories).
-Each database gets its own filename prefix so retention is tracked
-independently. Uses sqlite3.Connection.backup() for a safe online snapshot —
-no need to stop the bot.
+The CLI entry point (used by the restart script) snapshots ``elixir-v51.db``.
+Durable memory moved into that database in the v5.1 memory pass; the retired
+``elixir-v5-memory.db`` archive is read-only and is not a runtime backup target.
+Uses sqlite3.Connection.backup() for a safe online snapshot — no need to stop
+the bot.
 
 create_backup() / prune_backups() default to the operational DB; pass
 `prefix=`/`db_path=` to target another store.
@@ -19,7 +19,6 @@ Retention tiers (weekly backup cadence assumed), applied per prefix:
 Environment variables
   ELIXIR_DB_PATH       operational database (default: <project>/elixir-v51.db)
   ELIXIR_BACKUP_DIR    destination dir      (default: ~/elixir-backups)
-  ELIXIR_V5_MEMORY_DB  memory database      (default: <project>/elixir-v5-memory.db)
 """
 
 from __future__ import annotations
@@ -60,15 +59,9 @@ def _filename_re(prefix: str) -> re.Pattern:
 
 def _databases() -> list[tuple[str, Path, bool]]:
     """(filename_prefix, source_path, required) for every DB the restart backup
-    covers. v5.1: the operational DB is ELIXIR_DB_PATH (elixir-v51.db) and the
-    memory DB holds clan_memories (non-derivable). The Gen C event store
-    (elixir-v5-events.db) retired at the cut — the archive keeps it."""
-    memory_default = _PROJECT_ROOT / "elixir-v5-memory.db"
-    memory_path = Path(os.environ.get("ELIXIR_V5_MEMORY_DB") or memory_default)
-    return [
-        ("elixir-v51", _db_path(), True),
-        ("elixir-v5-memory", memory_path, True),
-    ]
+    covers. v5.1 has one operational database; pre-cut stores are immutable
+    archives and need no recurring backup."""
+    return [("elixir-v51", _db_path(), True)]
 
 # Retention thresholds in days.
 _KEEP_ALL_DAYS = 28

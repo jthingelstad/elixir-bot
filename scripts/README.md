@@ -36,12 +36,13 @@ job.
 python scripts/backup_db.py
 ```
 
-- Output: `~/elixir-backups/elixir-YYYY-MM-DD-HHMMSS.db.gz` (gzip level 6)
+- Source: the single operational database (engine + durable memory)
+- Output: `~/elixir-backups/elixir-v51-YYYY-MM-DD-HHMMSS.db.gz` (gzip level 6)
 - Integrity-checks the snapshot before compressing
 - Retention: keep-all ≤28d · monthly 29–90d · quarterly 91–365d · delete >365d
 
 Override via env:
-- `ELIXIR_DB_PATH` — source database (default: `<repo>/elixir.db`)
+- `ELIXIR_DB_PATH` — source database (default: `<repo>/elixir-v51.db`)
 - `ELIXIR_BACKUP_DIR` — destination dir (default: `~/elixir-backups`)
 
 ### `elixir_state.py`
