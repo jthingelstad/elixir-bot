@@ -5,8 +5,11 @@ projections.refresh_player_state (live incident 2026-07-04)."""
 from __future__ import annotations
 
 import db
+import pytest
+
 from engine import awards as engine_awards
 from engine import projections
+from engine.change_sets import ChangeSetInvariantError
 
 AT = "2026-07-06T10:00:00Z"
 SEASON = 133
@@ -105,6 +108,56 @@ def test_grant_season_awards_full_slate():
         assert again["granted"] == 0
     finally:
         conn.close()
+
+
+def test_season_close_award_failure_rolls_back_as_one_transition(
+    engine_conn, monkeypatch,
+):
+    from engine.emitters.war import close_season
+
+    _seed_season(engine_conn)
+    engine_conn.execute(
+        "UPDATE war_seasons SET ended_at = NULL WHERE season_id = ?", (SEASON,)
+    )
+    engine_conn.commit()
+
+    def fail_awards(*args, **kwargs):
+        raise RuntimeError("injected award failure")
+
+    monkeypatch.setattr(engine_awards, "grant_season_awards", fail_awards)
+    with pytest.raises(RuntimeError, match="injected award failure"):
+        close_season(engine_conn, SEASON, {}, AT)
+    engine_conn.rollback()
+
+    ended_at = engine_conn.execute(
+        "SELECT ended_at FROM war_seasons WHERE season_id = ?", (SEASON,)
+    ).fetchone()[0]
+    event_count = engine_conn.execute(
+        "SELECT COUNT(*) FROM war_events WHERE dedup_key = ?",
+        (f"season_closed:{SEASON}",),
+    ).fetchone()[0]
+    assert ended_at is None
+    assert event_count == 0
+
+
+def test_season_close_invariant_catches_silent_award_omission(
+    engine_conn, monkeypatch,
+):
+    from engine.emitters.war import close_season
+
+    _seed_season(engine_conn)
+    engine_conn.execute(
+        "UPDATE war_seasons SET ended_at = NULL WHERE season_id = ?", (SEASON,)
+    )
+    engine_conn.commit()
+    monkeypatch.setattr(engine_awards, "grant_season_awards", lambda *args, **kwargs: {})
+
+    with pytest.raises(ChangeSetInvariantError, match="awards missing"):
+        close_season(engine_conn, SEASON, {}, AT)
+    engine_conn.rollback()
+    assert engine_conn.execute(
+        "SELECT ended_at FROM war_seasons WHERE season_id = ?", (SEASON,)
+    ).fetchone()[0] is None
 
 
 def test_tie_aware_ranks_share_a_rank_and_flag_ties():

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
+from engine.change_sets import ChangeSetInvariantError, derive_roster_change_set
 from engine.emitters import emit
 from engine.emitters.clan import emit_calendar, project_clan_aspects
 from engine.emitters.player import project_player_aspects
@@ -160,6 +163,62 @@ def test_roster_join_leave_role_change_maintain_memberships(engine_conn):
         "SELECT payload_json FROM clan_events WHERE event_type='role_changed'"
     ).fetchone()[0])["direction"]
     assert direction == "promoted"
+
+
+def test_roster_change_set_derivation_is_pure_and_deterministic():
+    changes = derive_roster_change_set(
+        {
+            "#B": {"name": "Bo", "role": "elder"},
+            "#A": {"name": "Al", "role": "member"},
+        },
+        {
+            "#C": {"name": "Cy", "role": "member"},
+            "#A": {"name": "Al", "role": "elder"},
+        },
+        LATER,
+        role_rank={"member": 0, "elder": 1},
+    )
+    assert [entry.player_tag for entry in changes.joins] == ["#C"]
+    assert [entry.player_tag for entry in changes.leaves] == ["#B"]
+    assert [entry.player_tag for entry in changes.role_transitions] == ["#A"]
+    assert changes.role_transitions[0].direction == "promoted"
+
+
+def test_roster_invariant_failure_keeps_baseline_retryable(engine_conn, monkeypatch):
+    initial = _roster([("#A", "Al", "member", 0)])
+    changed = _roster([("#B", "Bo", "member", 0)])
+    _emit_roster(engine_conn, initial, NOW)
+    engine_conn.execute(
+        "INSERT INTO players (player_tag, current_name, first_seen_at, last_seen_at) "
+        "VALUES ('#A', 'Al', '2026-03-01', ?)",
+        (NOW,),
+    )
+    engine_conn.execute(
+        "INSERT INTO clan_memberships (player_tag, joined_at, join_source) "
+        "VALUES ('#A', '2026-03-01', 'transform')"
+    )
+    engine_conn.commit()
+
+    from engine.emitters import clan
+
+    monkeypatch.setattr(clan, "_emit", lambda *args, **kwargs: 0)
+    with pytest.raises(ChangeSetInvariantError, match="roster change set invariant"):
+        _emit_roster(engine_conn, changed, LATER)
+    engine_conn.rollback()
+
+    baseline = engine_conn.execute(
+        "SELECT payload_json, observed_at FROM state_baselines "
+        "WHERE entity_kind='clan' AND entity_tag='#J2RGCRVG' AND aspect='roster'"
+    ).fetchone()
+    assert baseline["observed_at"] == NOW
+    assert set(json.loads(baseline["payload_json"])["members"]) == {"#A"}
+    open_tags = {
+        row[0]
+        for row in engine_conn.execute(
+            "SELECT player_tag FROM clan_memberships WHERE left_at IS NULL"
+        )
+    }
+    assert open_tags == {"#A"}
 
 
 def test_weekly_donation_leader_reset_top3(engine_conn):

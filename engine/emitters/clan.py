@@ -18,6 +18,11 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta
 
+from engine.change_sets import (
+    ChangeSetInvariantError,
+    RosterChangeSet,
+    derive_roster_change_set,
+)
 from engine.db import canon_tag, utcnow
 from engine.emitters import insert_stream_event
 
@@ -116,77 +121,123 @@ def _upsert_identity(conn, tag: str, name: str | None, observed_at: str) -> None
         _log.exception("ensure_nickname failed for %s (%r)", tag, name)
 
 
-def emit_roster(conn, clan_tag, old, new, observed_at, window_start) -> int:
+def _apply_roster_change_set(
+    conn, clan_tag: str, changes: RosterChangeSet, window_start: str | None,
+) -> int:
+    """Apply one already-derived roster transition inside the caller's transaction."""
     n = 0
-    old_members = old.get("members") or {}
-    new_members = new.get("members") or {}
-
-    for tag, info in new_members.items():
-        _upsert_identity(conn, tag, (info or {}).get("name"), observed_at)
-
-    # member_joined — also opens the membership row (events.md §4)
-    for tag, info in new_members.items():
-        if tag in old_members:
-            continue
-        info = info or {}
-        n += _emit(conn, clan_tag, tag, observed_at, window_start, "member_joined",
-                   f"member_joined:{tag}:{observed_at}",
-                   {"name": _display_name(conn, tag, info.get("name")),
-                    "trophies": info.get("trophies"),
-                    "role": info.get("role"), "exp_level": info.get("exp_level")})
+    for join in changes.joins:
+        info = join.info
+        n += _emit(
+            conn, clan_tag, join.player_tag, changes.observed_at, window_start,
+            "member_joined", join.dedup_key,
+            {"name": _display_name(conn, join.player_tag, info.get("name")),
+             "trophies": info.get("trophies"),
+             "role": info.get("role"), "exp_level": info.get("exp_level")},
+        )
         open_row = conn.execute(
-            "SELECT 1 FROM clan_memberships WHERE player_tag = ? AND left_at IS NULL",
-            (tag,),
+            "SELECT 1 FROM clan_memberships "
+            "WHERE player_tag = ? AND clan_tag = ? AND left_at IS NULL",
+            (join.player_tag, clan_tag),
         ).fetchone()
         if open_row is None:
             conn.execute(
                 "INSERT INTO clan_memberships (player_tag, clan_tag, joined_at, join_source) "
                 "VALUES (?, ?, ?, 'roster_diff')",
-                (tag, clan_tag, observed_at),
+                (join.player_tag, clan_tag, changes.observed_at),
             )
 
-    # member_left — closes the membership row; kick-suppression is
-    # RECOGNITION's job (C1) — the event always exists.
-    for tag, info in old_members.items():
-        if tag in new_members:
-            continue
-        info = info or {}
+    for leave in changes.leaves:
+        info = leave.info
         tenure = conn.execute(
             "SELECT CAST(julianday(?) - julianday(joined_at) AS INTEGER) "
-            "FROM clan_memberships WHERE player_tag = ? AND left_at IS NULL",
-            (observed_at, tag),
+            "FROM clan_memberships "
+            "WHERE player_tag = ? AND clan_tag = ? AND left_at IS NULL",
+            (changes.observed_at, leave.player_tag, clan_tag),
         ).fetchone()
-        n += _emit(conn, clan_tag, tag, observed_at, window_start, "member_left",
-                   f"member_left:{tag}:{observed_at}",
-                   {"name": _display_name(conn, tag, info.get("name")),
-                    "role": info.get("role"),
-                    "trophies": info.get("trophies"),
-                    "tenure_days": tenure[0] if tenure and tenure[0] is not None else None})
+        n += _emit(
+            conn, clan_tag, leave.player_tag, changes.observed_at, window_start,
+            "member_left", leave.dedup_key,
+            {"name": _display_name(conn, leave.player_tag, info.get("name")),
+             "role": info.get("role"),
+             "trophies": info.get("trophies"),
+             "tenure_days": tenure[0] if tenure and tenure[0] is not None else None},
+        )
         conn.execute(
             "UPDATE clan_memberships SET left_at = ?, leave_source = 'roster_diff' "
-            "WHERE player_tag = ? AND left_at IS NULL",
-            (observed_at, tag),
+            "WHERE player_tag = ? AND clan_tag = ? AND left_at IS NULL",
+            (changes.observed_at, leave.player_tag, clan_tag),
         )
 
-    # role_changed — promotions AND demotions are first-class events; the
-    # public-post decision is recognition's (demotions never post, §4).
-    for tag, info in new_members.items():
-        prev = old_members.get(tag)
-        if not prev:
-            continue
-        old_role, new_role = (prev.get("role") or ""), ((info or {}).get("role") or "")
-        if old_role and new_role and old_role != new_role:
-            direction = (
-                "promoted"
-                if _ROLE_RANK.get(new_role, -1) > _ROLE_RANK.get(old_role, -1)
-                else "demoted"
+    for role in changes.role_transitions:
+        n += _emit(
+            conn, clan_tag, role.player_tag, changes.observed_at, window_start,
+            "role_changed", role.dedup_key,
+            {"new_role": role.new_role, "prev_role": role.previous_role,
+             "direction": role.direction},
+        )
+    return n
+
+
+def _verify_roster_change_set(conn, clan_tag: str, changes: RosterChangeSet) -> None:
+    """Refuse baseline advancement unless events and membership truth agree."""
+    failures: list[str] = []
+    for join in changes.joins:
+        event = conn.execute(
+            "SELECT 1 FROM clan_events WHERE dedup_key = ? AND event_type = 'member_joined'",
+            (join.dedup_key,),
+        ).fetchone()
+        memberships = conn.execute(
+            "SELECT COUNT(*) FROM clan_memberships "
+            "WHERE player_tag = ? AND clan_tag = ? AND left_at IS NULL",
+            (join.player_tag, clan_tag),
+        ).fetchone()[0]
+        if event is None or memberships != 1:
+            failures.append(
+                f"join {join.player_tag} event={event is not None} open={memberships}"
             )
-            n += _emit(conn, clan_tag, tag, observed_at, window_start, "role_changed",
-                       f"role_changed:{tag}:{new_role}:{observed_at}",
-                       {"new_role": new_role, "prev_role": old_role,
-                        "direction": direction})
+    for leave in changes.leaves:
+        event = conn.execute(
+            "SELECT 1 FROM clan_events WHERE dedup_key = ? AND event_type = 'member_left'",
+            (leave.dedup_key,),
+        ).fetchone()
+        memberships = conn.execute(
+            "SELECT COUNT(*) FROM clan_memberships "
+            "WHERE player_tag = ? AND clan_tag = ? AND left_at IS NULL",
+            (leave.player_tag, clan_tag),
+        ).fetchone()[0]
+        if event is None or memberships:
+            failures.append(
+                f"leave {leave.player_tag} event={event is not None} open={memberships}"
+            )
+    for role in changes.role_transitions:
+        event = conn.execute(
+            "SELECT 1 FROM clan_events WHERE dedup_key = ? AND event_type = 'role_changed'",
+            (role.dedup_key,),
+        ).fetchone()
+        if event is None:
+            failures.append(f"role {role.player_tag} event=False")
+    if failures:
+        raise ChangeSetInvariantError(
+            "roster change set invariant failed: " + "; ".join(failures)
+        )
+
+
+def emit_roster(conn, clan_tag, old, new, observed_at, window_start) -> int:
+    old_members = old.get("members") or {}
+    new_members = new.get("members") or {}
+    changes = derive_roster_change_set(
+        old_members, new_members, observed_at, role_rank=_ROLE_RANK,
+    )
+
+    for tag in sorted(new_members):
+        info = new_members[tag] or {}
+        _upsert_identity(conn, tag, info.get("name"), observed_at)
+
+    n = _apply_roster_change_set(conn, clan_tag, changes, window_start)
 
     n += _emit_donation_reset(conn, clan_tag, old_members, new_members, observed_at, window_start)
+    _verify_roster_change_set(conn, clan_tag, changes)
     return n
 
 
