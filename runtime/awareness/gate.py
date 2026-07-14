@@ -64,21 +64,30 @@ def _due_revisits(read: dict) -> list:
     return [r for r in (read.get("due_revisits") or []) if r]
 
 
+_CAKE_EVENT_TYPES = {"join_anniversary", "member_birthday", "cr_account_anniversary"}
+
+
 def _soft_lane_signals(read: dict) -> list:
     """Lane signals that are not themselves hard-post signals.
 
     Hard-post events are also mirrored into ``signals_by_lane``; a hard-post is
     already handled by the deliberate tier, so here we count only the soft
-    remainder (milestones, non-mandatory clan/battle events, etc.).
+    remainder (milestones, non-mandatory clan/battle events, etc.). An anniversary
+    already celebrated in a post today is dropped too — it also lands in the
+    clan_event lane, and left in it keeps re-nudging the gate (over-escalation leak).
     """
     lanes = read.get("signals_by_lane") or {}
     hard_keys = {s.get("signal_key") for s in _hard_post(read) if isinstance(s, dict)}
+    posted_cake = _posted_cake_tags(read)
     out = []
     for sigs in lanes.values():
         if not isinstance(sigs, list):
             continue
         for s in sigs:
             if isinstance(s, dict) and s.get("signal_key") in hard_keys:
+                continue
+            if (isinstance(s, dict) and s.get("event_type") in _CAKE_EVENT_TYPES
+                    and s.get("subject_tag") in posted_cake):
                 continue
             out.append(s)
     return out
@@ -107,10 +116,52 @@ def _is_quiet_stretch(read: dict) -> bool:
     return bool((read.get("posting_pulse") or {}).get("is_quiet_stretch"))
 
 
+def _cake_day_already_posted(read: dict, cake: dict) -> bool:
+    """True if this cake day's member has already been named in a fulfilled
+    awareness post on its own date. Anniversaries sit in ``cake_days_today`` for
+    the whole UTC day, so once posted they keep re-triggering the gate — a cheap
+    triage that then over-escalates to a full Sonnet run just to re-decide "no,
+    already posted" (the cake-day over-escalation leak). Detect it deterministically
+    from channel_memory instead of trusting the triage model to remember."""
+    name = (cake.get("name") or "").strip().lower()
+    key = cake.get("signal_key") or ""
+    # the anniversary date is the last colon-field of the signal_key (tags carry
+    # no colon), e.g. join_anniversary:#TAG:2026-07-14 -> 2026-07-14.
+    date = key.rsplit(":", 1)[-1] if ":" in key else None
+    if not name:
+        return False
+    for lane in (read.get("channel_memory") or {}).values():
+        for intent in (lane.get("recent_intents") or []) if isinstance(lane, dict) else []:
+            if intent.get("intent_type") != "awareness:post":
+                continue
+            if not (intent.get("posted") or intent.get("status") == "fulfilled"):
+                continue
+            created = intent.get("created_at") or ""
+            if date and not created.startswith(date):
+                continue
+            if name in (intent.get("preview") or "").lower():
+                return True
+    return False
+
+
+def _posted_cake_tags(read: dict) -> set:
+    """Subject tags whose cake day has already been celebrated in a post today."""
+    return {c.get("subject_tag") for c in (read.get("cake_days_today") or [])
+            if c and c.get("subject_tag") and _cake_day_already_posted(read, c)}
+
+
+def _fresh_cake_days(read: dict) -> list:
+    """Cake days that have NOT already been celebrated in a post today — the only
+    ones that should still nudge the gate toward a look."""
+    posted = _posted_cake_tags(read)
+    return [c for c in (read.get("cake_days_today") or [])
+            if c and c.get("subject_tag") not in posted]
+
+
 def _soft_context(read: dict) -> dict:
     """Standing, non-mandatory context that can justify a triage look but never
     an unconditional Sonnet run (each is populated on ~every tick)."""
-    cake = [c for c in (read.get("cake_days_today") or []) if c]
+    cake = _fresh_cake_days(read)
     cases = ((read.get("decision_cases") or {}).get("due")) or []
     mgmt = (read.get("management") or {}).get("actionable") or {}
     mgmt_n = sum(len(mgmt.get(k) or []) for k in ("kick", "promote", "demote"))
@@ -215,7 +266,9 @@ def _compact_read_for_triage(read: dict) -> str:
         "war_phase": (time_block.get("war_day_label") or time_block.get("phase") or None),
         "posting_pulse": read.get("posting_pulse") or {},
         "soft_signals": [_slim_sig(s) for s in _soft_lane_signals(read)],
-        "cake_days_today": read.get("cake_days_today") or [],
+        # only cake days not yet celebrated today — an already-posted anniversary
+        # must not tempt the triage into a re-post/escalation (over-escalation leak).
+        "cake_days_today": _fresh_cake_days(read),
         "due_decision_cases": [
             {k: c.get(k) for k in ("case_id", "kind", "subject", "member_ref") if isinstance(c, dict) and c.get(k)}
             for c in ((read.get("decision_cases") or {}).get("due") or [])
