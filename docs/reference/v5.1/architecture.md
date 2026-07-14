@@ -576,6 +576,15 @@ practice: a true record of what the API said, which the data analyst mines to de
 new signals and new game modes. We keep it — but in **one place**, not denormalized
 into ~15 derived tables (Part I §2).
 
+Raw capture and state admission are deliberately different guarantees. The client
+records every decoded response under its true endpoint and subject, including a
+payload the engine later rejects. `engine/observations.py` then validates the stable
+endpoint shape and requested-entity identity before the response may reach ingest,
+baseline diffing, or projections. Rejection preserves the prior known-good state and
+last-success poll time; contract failures are counted and recorded in the incident
+ledger. In particular, an empty battlelog is valid evidence of no recent battles,
+while a missing battlelog is not evidence at all.
+
 Crucially, the raw log is **not** the system of record. It is a **14-day rolling
 buffer** (`RAW_PAYLOAD_RETENTION_DAYS = 14`, purged every maintenance cycle), and
 historical API state cannot be re-fetched (the CR API only returns *current* state). So

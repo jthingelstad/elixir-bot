@@ -103,12 +103,19 @@ def seed_new_members(conn, roster_tags, now=None) -> int:
     return seeded
 
 
-def note_polled(conn, player_tag, endpoint: str, now=None) -> None:
+def note_poll_succeeded(conn, player_tag, endpoint: str, now=None) -> None:
+    """Advance endpoint freshness only after its observation is admitted."""
     col = _LAST_COL[endpoint]
+    at = now or utcnow()
     conn.execute(
         f"UPDATE poll_state SET {col} = ?, updated_at = ? WHERE player_tag = ?",
-        (now or utcnow(), now or utcnow(), canon_tag(player_tag)),
+        (at, at, canon_tag(player_tag)),
     )
+
+
+# Compatibility for callers outside the engine package.  The semantic name
+# above is the one new code should use.
+note_polled = note_poll_succeeded
 
 
 def plan(conn, now=None, budget: int = POLL_BUDGET_PER_TICK) -> list[tuple[str, str]]:

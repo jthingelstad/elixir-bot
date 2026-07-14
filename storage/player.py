@@ -226,18 +226,37 @@ def _normalize_cards_for_storage(cards: list[dict] | None) -> list[dict]:
 
 
 @managed_connection
-def snapshot_player_profile(player_data: dict, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def snapshot_player_profile(
+    player_data: dict,
+    *,
+    expected_tag: str | None = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> list[dict]:
     """v5.1: deep-poll persistence is the engine's job — delegate to its
     emitters (baseline diff → player_events) and projections. Returns [] (the
     old signal list is retired; recognition consumes the event streams)."""
+    from engine import observations
     from engine.db import ensure_player
     from engine.emitters import emit
     from engine.emitters.player import project_player_aspects
     from engine import projections as _projections
+    from storage.incidents import record_incident
+
+    requested_tag = expected_tag or (
+        player_data.get("tag") if isinstance(player_data, dict) else ""
+    )
+    admission = observations.admit("player", requested_tag, player_data)
+    if not admission.accepted:
+        record_incident(
+            "storage.snapshot_player_profile",
+            "CR observation rejected by admission boundary",
+            context={"entity_key": admission.entity_key, "errors": admission.errors},
+            severity="error",
+            conn=conn,
+        )
+        return []
 
     tag = _canon_tag(player_data.get("tag"))
-    if not tag:
-        return []
     now = _utcnow()
     ensure_player(conn, tag, player_data.get("name"), now)
     for aspect, aspect_payload in project_player_aspects(player_data).items():
@@ -898,16 +917,27 @@ def snapshot_player_battlelog(player_tag: str, battle_log: list[dict], conn: Opt
     engine.ingest + form/rollup projections. Returns [] (signals retired)."""
     from datetime import datetime as _dt, timezone as _tz
 
+    from engine import ingest as _ingest, observations, projections as _projections
     from engine.db import ensure_player
-    from engine import ingest as _ingest, projections as _projections
+    from storage.incidents import record_incident
 
     tag = _canon_tag(player_tag)
     if not tag:
         return []
+    admission = observations.admit("player_battlelog", tag, battle_log)
+    if not admission.accepted:
+        record_incident(
+            "storage.snapshot_player_battlelog",
+            "CR observation rejected by admission boundary",
+            context={"entity_key": admission.entity_key, "errors": admission.errors},
+            severity="error",
+            conn=conn,
+        )
+        return []
     now_dt = _dt.now(_tz.utc)
     now = _utcnow()
     ensure_player(conn, tag, None, now)
-    inserted = _ingest.mirror_battles(conn, tag, battle_log or [], now, None, now=now_dt)
+    inserted = _ingest.mirror_battles(conn, tag, battle_log, now, None, now=now_dt)
     if inserted:
         _projections.refresh_form(conn, tag, now=now)
         _projections.refresh_rollups(conn, tag, chicago_today())

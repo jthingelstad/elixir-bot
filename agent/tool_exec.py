@@ -263,13 +263,13 @@ def _enrich_war_player_types(members):
 def _refresh_member_cache(member_tag, include_battles=False):
     """Refresh stored player profile and optionally battle log for a member."""
     player = cr_api.get_player(member_tag)
-    if player:
-        db.snapshot_player_profile(player)
+    if player is not None:
+        db.snapshot_player_profile(player, expected_tag=member_tag)
     else:
         log.warning("player_profile_refresh_skipped tag=%s reason=cr_api_returned_none", member_tag)
     if include_battles:
         battles = cr_api.get_player_battle_log(member_tag)
-        if battles:
+        if battles is not None:
             db.snapshot_player_battlelog(member_tag, battles)
         else:
             log.warning("player_battlelog_refresh_skipped tag=%s reason=cr_api_returned_none", member_tag)

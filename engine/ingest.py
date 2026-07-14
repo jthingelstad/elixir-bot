@@ -62,7 +62,19 @@ def extract_battles(player_tag: str, battle_log: list[dict]) -> list[dict]:
     for b in battle_log or []:
         team = b.get("team") or [{}]
         opp = b.get("opponent") or [{}]
-        t0 = team[0] if team else {}
+        # Admission guarantees the subject is present.  Keep a first-player
+        # fallback for direct/unit callers, but attribute crowns, trophy delta,
+        # outcome, and deck to the polled player even when CR orders a 2v2 team
+        # with that player second.
+        t0 = next(
+            (
+                member
+                for member in team
+                if isinstance(member, dict)
+                and canon_tag(member.get("tag")) == tag
+            ),
+            team[0] if team else {},
+        )
         o0 = opp[0] if opp else {}
         # D3 (ranked-and-profiles.md): 2v2 carries the duo partner in the team
         # array — but CR does NOT guarantee the polled player is team[0]; the

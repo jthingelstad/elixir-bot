@@ -175,8 +175,12 @@ class SimWorld:
                 ],
             },
             "clans": [
-                {"tag": HOME, "fame": sum(map(self.fame, FIGHTERS)), "clanScore": 620},
-                {"tag": "#SIMRIVAL", "fame": 500 * max(0, d - 2), "clanScore": 610},
+                {"tag": HOME, "name": "SIM KINGS",
+                 "fame": sum(map(self.fame, FIGHTERS)), "periodPoints": 0,
+                 "clanScore": 620},
+                {"tag": "#SIMRIVAL", "name": "SIM RIVAL",
+                 "fame": 500 * max(0, d - 2), "periodPoints": 0,
+                 "clanScore": 610},
             ],
         }
 

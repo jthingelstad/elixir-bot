@@ -25,7 +25,13 @@
    functions (`engine/ingest.extract_battles`,
    `engine/emitters/*.project_*_aspects`) are the seam — this consolidates
    them, it does not add a pipeline stage.
-3. **Annotate, don't mutate, at the tool boundary.** The direct `cr_api` tool
+3. **Admit before normalizing.** `engine/observations.py` owns the separate
+   trust decision: endpoint-specific stable shape plus requested-entity
+   identity. Missing, malformed, or cross-entity payloads remain available in
+   L1 for diagnosis but cannot become a baseline, event, projection, or
+   successful poll timestamp. This is validation, not representational
+   normalization; keeping the seams separate makes both policies explicit.
+4. **Annotate, don't mutate, at the tool boundary.** The direct `cr_api` tool
    keeps returning true API responses, with derived fields attached alongside
    raw ones (`display_level` next to `level`, `day_human` next to
    `periodIndex`). Elixir sees both; nothing is hidden or rewritten.

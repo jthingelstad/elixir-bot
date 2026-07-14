@@ -14,10 +14,12 @@ from typing import Optional
 import cr_api
 import db
 import elixir_agent
+from engine import observations
 from runtime.helpers import _channel_msg_kwargs, _channel_scope, _get_singleton_channel_id
 from runtime import status as runtime_status
 from runtime.helpers._common import _post_to_elixir
 from runtime.discord_posting import compose_and_post
+from storage.incidents import record_incident
 
 
 TOURNAMENT_POLL_MINUTES = int(os.getenv("TOURNAMENT_POLL_MINUTES", "5"))
@@ -209,7 +211,25 @@ async def _tournament_watch_tick():
                 p_tag = p["player_tag"]
                 try:
                     battle_log = await asyncio.to_thread(cr_api.get_player_battle_log, p_tag)
-                    if battle_log:
+                    admission = observations.admit("player_battlelog", p_tag, battle_log)
+                    if not admission.accepted:
+                        if not admission.transport_failure:
+                            await asyncio.to_thread(
+                                record_incident,
+                                "runtime.tournament_battlelog",
+                                "CR observation rejected by admission boundary",
+                                context={
+                                    "entity_key": admission.entity_key,
+                                    "errors": admission.errors,
+                                },
+                                severity="error",
+                            )
+                        log.warning(
+                            "Tournament watch: rejected battle log for %s: %s",
+                            p_tag,
+                            admission.errors,
+                        )
+                    elif battle_log:
                         # Store tournament battles in dedicated table
                         for battle in battle_log:
                             if battle.get("tournamentTag") == tournament_tag_with_hash:

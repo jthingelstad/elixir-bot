@@ -42,12 +42,19 @@ class _ColdApi:
             "periodType": "training",
             "clan": {"tag": HOME_CLAN, "name": "COLD KINGS", "fame": 0,
                      "participants": []},
-            "clans": [{"tag": HOME_CLAN, "fame": 0, "clanScore": 600}],
+            "clans": [{"tag": HOME_CLAN, "name": "COLD KINGS", "fame": 0,
+                       "periodPoints": 0, "clanScore": 600}],
         }
 
     def get_player(self, tag):
         return {"tag": tag, "name": tag.strip("#"), "expLevel": 42, "trophies": 5100,
-                "bestTrophies": 5300, "wins": 800, "losses": 400, "cards": []}
+                "bestTrophies": 5300, "wins": 800, "losses": 400,
+                "cards": [{"id": 26000000, "name": "Knight", "rarity": "common",
+                           "level": 14, "maxLevel": 16}],
+                "badges": [], "arena": {"id": 54000012, "name": "Spooky Town"},
+                "currentPathOfLegendSeasonResult": {},
+                "lastPathOfLegendSeasonResult": {},
+                "bestPathOfLegendSeasonResult": {}}
 
     def get_player_battle_log(self, tag):
         return []

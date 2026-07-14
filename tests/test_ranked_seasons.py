@@ -262,6 +262,26 @@ def test_teammate_extracted_from_2v2():
     }]
     rows = extract_battles("#ME", log)
     assert rows[0]["teammate_tag"] == "#BUDDY"
+    # CR is allowed to place the polled player second.  Every subject-specific
+    # field must still come from #ME rather than the first teammate.
+    reversed_team = [{
+        "type": "clanMate2v2",
+        "battleTime": "20260704T120050.000Z",
+        "gameMode": {"id": 72000006, "name": "TeamVsTeam"},
+        "team": [
+            {"tag": "#BUDDY", "crowns": 1, "trophyChange": -9,
+             "cards": [{"id": 1, "name": "Buddy Card", "level": 1}]},
+            {"tag": "#ME", "crowns": 3, "trophyChange": 17,
+             "cards": [{"id": 2, "name": "My Card", "level": 2}]},
+        ],
+        "opponent": [{"tag": "#OPP1", "crowns": 1}],
+    }]
+    own = extract_battles("#ME", reversed_team)[0]
+    assert own["teammate_tag"] == "#BUDDY"
+    assert own["crowns_for"] == 3
+    assert own["trophy_change"] == 17
+    assert own["outcome"] == "W"
+    assert json.loads(own["deck_json"])[0]["name"] == "My Card"
     solo = [{"type": "PvP", "battleTime": "20260704T120100.000Z",
              "gameMode": {"id": 72000000, "name": "Ladder"},
              "team": [{"tag": "#ME", "crowns": 3, "trophyChange": 30}],
